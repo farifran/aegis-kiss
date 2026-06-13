@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
 )"
 
 cd "${AEGIS_TEST_ROOT}"
@@ -344,7 +344,7 @@ assert_payloads_are_execution_scoped() {
     --argjson expected_payloads '[
       "filesystem_list_tree.json",
       "filesystem_read_epistemic_handover.json",
-      "filesystem_search_symbol.json"
+      "structural_builder.json"
     ]' \
     '
       $actual_payloads == $expected_payloads
@@ -514,11 +514,13 @@ assert_discovery_resets_prior_handover_state() {
   assert_runtime_read_handover_payload_is_empty
   assert_handover_file_matches_promoted_artifact "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${artifact_payload}"
 
-  grep -q 'old issue' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-    && fail "stale_epistemic_state_survived_discovery_reset"
+  if grep -q 'old issue' "${AEGIS_EPISTEMIC_HANDOVER_FILE}"; then
+    fail "stale_epistemic_state_survived_discovery_reset"
+  fi
 
-  grep -q '"mode": "fake"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-    && fail "stale_artifact_snapshot_survived_discovery_reset"
+  if grep -q '"mode": "fake"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}"; then
+    fail "stale_artifact_snapshot_survived_discovery_reset"
+  fi
 }
 
 assert_discovery_starts_fresh_each_execution() {
@@ -558,8 +560,9 @@ assert_discovery_starts_fresh_each_execution() {
   assert_runtime_read_handover_payload_is_empty
   assert_handover_file_matches_promoted_artifact "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${second_artifact_payload}"
 
-  grep -q 'issue-a' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-    && fail "second_discovery_inherited_prior_investigation_state"
+  if grep -q 'issue-a' "${AEGIS_EPISTEMIC_HANDOVER_FILE}"; then
+    fail "second_discovery_inherited_prior_investigation_state"
+  fi
 }
 
 assert_forensics_consumes_current_investigation_handover() {
@@ -628,9 +631,9 @@ main() {
   assert_constitutional_state_registry
   assert_executor_subprocess_isolation_contract
   assert_raw_substrate_isolation_contract
-  bash scripts/test_runtime_contract.sh
+  bash scripts/substrates/test/test_runtime_contract.sh
   assert_evidence_profiles_are_subset_of_envelopes
-  bash scripts/test_readonly_modes.sh
+  bash scripts/substrates/test/test_readonly_modes.sh
 
   start_mock_provider
 

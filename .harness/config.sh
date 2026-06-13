@@ -188,6 +188,24 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
   "${AEGIS_MUTATION_EXTRA_CAPABILITIES[@]}"
 )
 
+# Structural extraction capabilities — readonly, discovery-only
+declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
+  "filesystem.extract_import_graph"
+  "filesystem.extract_reference_graph"
+  "filesystem.extract_symbols"
+  "filesystem.extract_entrypoints"
+  "filesystem.extract_test_relationships"
+  "filesystem.extract_configuration_structure"
+  "filesystem.extract_references"
+  "structural.builder"
+)
+
+# Discovery envelope = base + structural extraction
+declare -ar AEGIS_DISCOVERY_CAPABILITIES=(
+  "${AEGIS_BASE_CAPABILITIES[@]}"
+  "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"
+)
+
 # =========================================================
 # RUNTIME-OWNED FILESYSTEM READ TARGETS
 # =========================================================
@@ -201,7 +219,7 @@ declare -Ar AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS=(
 # =========================================================
 
 declare -Ar AEGIS_MODE_CAPABILITY_MAP=(
-  ["discovery"]="AEGIS_BASE_CAPABILITIES"
+  ["discovery"]="AEGIS_DISCOVERY_CAPABILITIES"
   ["forensics"]="AEGIS_BASE_CAPABILITIES"
   ["validation"]="AEGIS_BASE_CAPABILITIES"
   ["adversarial"]="AEGIS_BASE_CAPABILITIES"
@@ -219,6 +237,14 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.search_symbol"]="scripts/capabilities/filesystem/search_symbol.sh"
   ["git.diff"]="scripts/capabilities/git/git_diff.sh"
   ["git.status"]="scripts/capabilities/git/git_status.sh"
+  ["filesystem.extract_import_graph"]="scripts/capabilities/filesystem/extract_import_graph.sh"
+  ["filesystem.extract_reference_graph"]="scripts/capabilities/filesystem/extract_reference_graph.sh"
+  ["filesystem.extract_symbols"]="scripts/capabilities/filesystem/extract_symbols.sh"
+  ["filesystem.extract_entrypoints"]="scripts/capabilities/filesystem/extract_entrypoints.sh"
+  ["filesystem.extract_test_relationships"]="scripts/capabilities/filesystem/extract_test_relationships.sh"
+  ["filesystem.extract_configuration_structure"]="scripts/capabilities/filesystem/extract_configuration_structure.sh"
+  ["filesystem.extract_references"]="scripts/capabilities/filesystem/extract_references.sh"
+  ["structural.builder"]="scripts/capabilities/structural/builder.sh"
 )
 
 # =========================================================
@@ -231,6 +257,14 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.search_symbol"]="readonly"
   ["git.diff"]="readonly"
   ["git.status"]="readonly"
+  ["filesystem.extract_import_graph"]="readonly"
+  ["filesystem.extract_reference_graph"]="readonly"
+  ["filesystem.extract_symbols"]="readonly"
+  ["filesystem.extract_entrypoints"]="readonly"
+  ["filesystem.extract_test_relationships"]="readonly"
+  ["filesystem.extract_configuration_structure"]="readonly"
+  ["filesystem.extract_references"]="readonly"
+  ["structural.builder"]="readonly"
 )
 
 # =========================================================
@@ -243,6 +277,14 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.search_symbol"]="AEGIS"
   ["git.diff"]="HEAD~1"
   ["git.status"]="."
+  ["filesystem.extract_import_graph"]="."
+  ["filesystem.extract_reference_graph"]="."
+  ["filesystem.extract_symbols"]="."
+  ["filesystem.extract_entrypoints"]="."
+  ["filesystem.extract_test_relationships"]="."
+  ["filesystem.extract_configuration_structure"]="."
+  ["filesystem.extract_references"]="."
+  ["structural.builder"]="."
 )
 
 # =========================================================
@@ -251,8 +293,8 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 
 declare -ar AEGIS_DISCOVERY_EVIDENCE=(
   "filesystem.list_tree"
-  "filesystem.search_symbol"
   "filesystem.read:epistemic_handover"
+  "structural.builder"
 )
 
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
@@ -347,7 +389,8 @@ validate_capability_registry() {
 
   for capability in \
     "${AEGIS_BASE_CAPABILITIES[@]}" \
-    "${AEGIS_MUTATION_CAPABILITIES[@]}"; do
+    "${AEGIS_MUTATION_CAPABILITIES[@]}" \
+    "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"; do
 
     [[ -n "${seen[$capability]:-}" ]] && continue
     seen["$capability"]=1
@@ -437,6 +480,24 @@ validate_aegis_configuration() {
   validate_evidence_profiles || return 1
   validate_filesystem_prune_policy || return 1
 }
+
+# =========================================================
+# CONSTITUTIONAL STATE REGISTRY
+# =========================================================
+
+declare -ar AEGIS_PROVEN_SURFACES=(
+  "payload_provenance_tracking"
+  "readonly_execution_surface_elision"
+  "runtime_owned_artifact_snapshot_handover"
+)
+
+declare -ar AEGIS_INTENDED_SURFACES=(
+  "bounded_mutation_hardening"
+)
+
+declare -ar AEGIS_DEFERRED_SURFACES=(
+  "advanced_capability_sandboxing"
+)
 
 # =========================================================
 # VALIDATE IMMEDIATELY

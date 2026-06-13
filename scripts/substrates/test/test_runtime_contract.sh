@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
 )"
 
 cd "${AEGIS_TEST_ROOT}"
@@ -21,12 +21,12 @@ assert_runtime_specific_handlers_are_removed() {
 assert_manifest_uses_filesystem_read_only() {
   local manifest
 
-  manifest="$(bash scripts/capabilities/generate_manifest.sh)"
+  manifest="$("${BASH}" scripts/capabilities/generate_manifest.sh)"
 
   printf '%s\n' "${manifest}" | jq -e '
     ([.modes[].capabilities[].capability] | index("runtime.read_epistemic_handover") == null)
     and ([.modes[].evidence_capabilities[]] | index("runtime.read_epistemic_handover") == null)
-    and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.search_symbol", "filesystem.read"])
+    and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.read", "structural.builder"])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
   ' >/dev/null || fail "manifest_still_references_runtime_specific_reads"
 }
@@ -36,7 +36,7 @@ assert_runtime_owned_files_are_readable_via_filesystem_read() {
   local jq_filter="$2"
   local output
 
-  output="$(bash scripts/capabilities/filesystem/read_file.sh "${target_path}")" \
+  output="$("${BASH}" scripts/capabilities/filesystem/read_file.sh "${target_path}")" \
     || fail "filesystem_read_failed_for_runtime_owned_file: ${target_path}"
 
   printf '%s\n' "${output}" | jq -e \

@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
 )"
 
 cd "${AEGIS_TEST_ROOT}"
@@ -30,7 +30,7 @@ assert_manifest_contract() {
     and ([.modes[].capabilities[].capability] | index("topology.read_graph") == null)
     and ([.modes[].evidence_capabilities[]] | index("topology.read_graph") == null)
     and ([.modes[].capabilities[].handler] | index("scripts/capabilities/topology/read_graph.sh") == null)
-    and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.search_symbol", "filesystem.read"])
+    and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.read", "structural.builder"])
     and (.modes.forensics.evidence_capabilities == ["filesystem.search_symbol", "git.status", "filesystem.read"])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
     and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol"])
@@ -363,14 +363,14 @@ main() {
   assert_discovery_accepts_informal_cli_investigation_input
   assert_discovery_accepts_issue_cli_investigation_input
 
-  assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json"]'
+  assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "structural_builder.json"]'
   assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
   assert_mode_output "adversarial" '["filesystem_search_symbol.json"]'
 
   assert_materialized_runtime_state \
     "discovery" \
-    '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json"]'
+    '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "structural_builder.json"]'
 
   assert_materialized_runtime_state \
     "forensics" \

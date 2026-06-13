@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
 )"
 
 cd "${AEGIS_TEST_ROOT}"
@@ -44,7 +44,7 @@ assert_capability_success() {
   shift 2
 
   local output
-  output="$(bash "$@")" || fail "capability_execution_failed: ${capability}"
+  output="$("${BASH}" "$@")" || fail "capability_execution_failed: ${capability}"
 
   printf '%s\n' "${output}" | jq -e "${filter}" >/dev/null \
     || fail "unexpected_capability_output: ${capability}"
@@ -78,7 +78,7 @@ assert_capability_success \
   '.success == true and .capability == "git.diff" and .error == null' \
   scripts/capabilities/git/git_diff.sh
 
-handover_output="$(bash scripts/capabilities/filesystem/read_file.sh "${AEGIS_EPISTEMIC_HANDOVER_FILE}")" \
+handover_output="$("${BASH}" scripts/capabilities/filesystem/read_file.sh "${AEGIS_EPISTEMIC_HANDOVER_FILE}")" \
   || fail "capability_execution_failed: filesystem.read epistemic_handover"
 
 printf '%s\n' "${handover_output}" | jq -e \

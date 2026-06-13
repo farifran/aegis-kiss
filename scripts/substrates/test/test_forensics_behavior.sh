@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly AEGIS_TEST_ROOT="$({
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
 })"
 
 cd "${AEGIS_TEST_ROOT}"
@@ -329,8 +329,9 @@ main() {
   assert_runtime_read_handover_is_empty
   assert_handover_snapshot_matches_artifact "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${discovery_artifact_payload}"
 
-  grep -q 'old issue' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-    && fail "stale_handover_state_survived_discovery"
+  if grep -q 'old issue' "${AEGIS_EPISTEMIC_HANDOVER_FILE}"; then
+    fail "stale_handover_state_survived_discovery"
+  fi
 
   forensics_output="$({
     AEGIS_INVESTIGATION_INPUT="${TEST_INVESTIGATION_INPUT}" \
