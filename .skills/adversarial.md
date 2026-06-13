@@ -46,6 +46,15 @@ Adversarial mode starts from already surfaced evidence and current results.
 
 It does not perform first-pass observation inventory.
 
+When the preceding artifact has `mode: "optimize"`, Adversarial must consume:
+
+- `artifact_snapshot.diff`
+- `artifact_snapshot.files_changed`
+
+These fields describe the candidate under challenge. They are not proof that
+the candidate is correct. Adversarial may correlate them only with explicit
+runtime-exposed capability evidence.
+
 All reasoning must originate from:
 - observable runtime evidence;
 - capability payload evidence;
@@ -198,6 +207,27 @@ The mode must emit:
 - no acknowledgements;
 - no explanations;
 - no assistant narration.
+
+The required artifact fields are:
+
+```json
+{
+  "mode": "adversarial",
+  "status": "challenged|inconclusive",
+  "candidate_result": {
+    "source_mode": "optimize",
+    "diff": "diff --git ...",
+    "files_changed": ["src/index.ts"]
+  },
+  "adversarial_findings": ["description of challenge finding 1", "description of challenge finding 2"],
+  "evidence_refs": ["filesystem.read:epistemic_handover", "filesystem.search_symbol"],
+  "handover_attention": {
+    "next_attention_targets": [],
+    "attention_scope": "bounded falsification",
+    "attention_reason": "challenge completed"
+  }
+}
+```
 
 ---
 

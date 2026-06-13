@@ -41,6 +41,18 @@ Optimize consumes:
 - bounded mutation surfaces;
 - runtime-owned epistemic handover guidance when exposed.
 
+When the preceding artifact has `mode: "repair"`, the runtime must reconstruct
+the Repair candidate in the disposable Optimize execution surface by applying:
+
+- `artifact_snapshot.diff`
+- `artifact_snapshot.files_changed`
+
+Optimize must operate on that reconstructed candidate. It must not start from
+an unmodified `HEAD`, recover the repaired state from prose, or reinterpret the
+original investigation input as a replacement for the Repair artifact.
+
+`files_changed` is the complete authorized target set for Optimize.
+
 Optimize must NOT assume:
 - implicit repository awareness;
 - assistant-style repository inheritance;

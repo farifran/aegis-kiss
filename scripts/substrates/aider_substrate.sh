@@ -94,8 +94,8 @@ validate_aider_substrate_inputs() {
   [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
     || aider_fatal "missing_execution_id"
 
-  [[ -n "${AEGIS_MUTATION_MODEL:-}" ]] \
-    || aider_fatal "missing_mutation_model"
+  [[ -n "${AEGIS_AIDER_MODEL:-}" ]] \
+    || aider_fatal "missing_aider_model"
 
   [[ -f "${AIDER_SKILL_FILE}" ]] \
     || aider_fatal "missing_skill_file"
@@ -106,8 +106,11 @@ validate_aider_substrate_inputs() {
   command -v git >/dev/null 2>&1 \
     || aider_fatal "missing_dependency_git"
 
-  [[ -f ".venv/bin/aider" ]] \
+  [[ -x "${AEGIS_AIDER_BIN:-}" ]] \
     || aider_fatal "missing_aider_binary"
+
+  [[ -d "${AEGIS_MUTATION_GIT_DIR:-}" ]] \
+    || aider_fatal "missing_mutation_git_directory"
 }
 
 # =========================================================
@@ -123,10 +126,52 @@ resolve_mutation_targets() {
 
   local targets=()
 
-  # Source 1: structural.builder payload → observed_request_alignment
+  # Source 1: Forensics artifact → explicit repair candidates
+  if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+    local handover_mode
+    handover_mode="$(
+      jq -r '.artifact_snapshot.mode // empty' \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
+    )"
+
+    if [[ "${handover_mode}" == "forensics" ]]; then
+      local repair_candidate_ids
+      repair_candidate_ids="$(
+        jq -r '
+          .artifact_snapshot.repair_candidates[]?.id // empty
+        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
+      )"
+
+      while IFS= read -r path; do
+        [[ -z "${path}" ]] && continue
+        targets+=("${path}")
+      done <<< "${repair_candidate_ids}"
+
+      [[ "${#targets[@]}" -gt 0 ]] \
+        || aider_fatal "missing_forensics_repair_candidates"
+    elif [[ "${handover_mode}" == "repair" ]] \
+      && [[ "${AEGIS_MODE}" == "optimize" ]]; then
+      local repaired_files
+      repaired_files="$(
+        jq -r '
+          .artifact_snapshot.files_changed[]? // empty
+        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
+      )"
+
+      while IFS= read -r path; do
+        [[ -z "${path}" ]] && continue
+        targets+=("${path}")
+      done <<< "${repaired_files}"
+
+      [[ "${#targets[@]}" -gt 0 ]] \
+        || aider_fatal "missing_repair_files_changed"
+    fi
+  fi
+
+  # Source 2: structural.builder payload → observed_request_alignment
   # (Available only if capability payloads were NOT cleaned up between modes)
   local builder_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
-  if [[ -f "${builder_payload}" ]]; then
+  if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${builder_payload}" ]]; then
     local resolved_paths
     resolved_paths="$(
       jq -r '
@@ -139,7 +184,7 @@ resolve_mutation_targets() {
     done <<< "${resolved_paths}"
   fi
 
-  # Source 2: epistemic handover → artifact_snapshot.observed_request_alignment
+  # Source 3: epistemic handover → artifact_snapshot.observed_request_alignment
   # (The discovery artifact is stored here in full; resolved_paths survives cleanup)
   if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
     local snapshot_paths
@@ -154,7 +199,7 @@ resolve_mutation_targets() {
     done <<< "${snapshot_paths}"
   fi
 
-  # Source 3: epistemic handover → artifact_snapshot.ranked_targets (explicit_request)
+  # Source 4: epistemic handover → artifact_snapshot.ranked_targets (explicit_request)
   if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
     local ranked_files
     ranked_files="$(
@@ -170,7 +215,7 @@ resolve_mutation_targets() {
     done <<< "${ranked_files}"
   fi
 
-  # Source 4: epistemic handover → epistemic_state.next_attention_targets
+  # Source 5: epistemic handover → epistemic_state.next_attention_targets
   if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
     local handover_targets
     handover_targets="$(
@@ -187,7 +232,7 @@ resolve_mutation_targets() {
     done <<< "${handover_targets}"
   fi
 
-  # Source 5: search_symbol payload — extract file paths from matches
+  # Source 6: search_symbol payload — extract file paths from matches
   if [[ "${#targets[@]}" -eq 0 ]]; then
     local search_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/filesystem_search_symbol.json"
     if [[ -f "${search_payload}" ]]; then
@@ -246,12 +291,70 @@ trap cleanup_aider_substrate EXIT
 trap 'aider_warn "Interrupted"; exit 130' INT TERM
 
 # =========================================================
+# CAPABILITY EVIDENCE INJECTION
+# =========================================================
+
+# Renders capability payload content into the mutation prompt.
+# AEGIS_SELECTED_CAPABILITY_PAYLOADS is a JSON array of payload file paths.
+# Each payload is a capability evidence document (git.diff, git.status,
+# epistemic_handover, search_symbol, etc.) that the raw substrate sees.
+# Without this, Aider only gets the investigation input string but not the
+# structured evidence that defines what and why to mutate.
+
+inject_capability_evidence() {
+
+  local selected_payloads="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}"
+
+  if [[ -z "${selected_payloads}" ]]; then
+    return 0
+  fi
+
+  local payload_count
+  payload_count="$(
+    printf '%s' "${selected_payloads}" \
+      | jq -r 'length' 2>/dev/null || echo 0
+  )"
+
+  if [[ "${payload_count:-0}" -eq 0 ]]; then
+    return 0
+  fi
+
+  printf '\n---\n\nCapability evidence payloads:\n'
+
+  local i=0
+  while [[ "${i}" -lt "${payload_count}" ]]; do
+    local payload_path
+    payload_path="$(
+      printf '%s' "${selected_payloads}" \
+        | jq -r ".[${i}]" 2>/dev/null || true
+    )"
+
+    if [[ -z "${payload_path}" ]] || [[ ! -f "${payload_path}" ]]; then
+      i=$(( i + 1 ))
+      continue
+    fi
+
+    local capability_label
+    capability_label="$(basename "${payload_path}" .json)"
+
+    printf '\n### %s\n\n' "${capability_label}"
+    cat "${payload_path}"
+    printf '\n'
+
+    i=$(( i + 1 ))
+  done
+}
+
+# =========================================================
 # MUTATION PROMPT ASSEMBLY
 # =========================================================
 
 assemble_mutation_prompt() {
 
   local prompt_file="$1"
+
+  local capability_evidence
+  capability_evidence="$(inject_capability_evidence)"
 
   cat > "${prompt_file}" << EOF
 You are executing inside Aegis Harness in bounded mutation mode.
@@ -266,7 +369,7 @@ $(cat "${AIDER_SKILL_FILE}")
 
 Investigation input (operator mutation demand):
 ${AEGIS_INVESTIGATION_INPUT}
-
+${capability_evidence}
 ---
 
 Apply the minimal sufficient mutation described in the investigation input.
@@ -287,13 +390,14 @@ invoke_aider() {
   shift
   local file_args=("$@")
 
-  local aider_bin="${AEGIS_AIDER_SUBSTRATE_ROOT}/.venv/bin/aider"
   local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
+  local aider_output
+  local aider_status
 
   local aider_cmd=(
-    "${aider_bin}"
+    "${AEGIS_AIDER_BIN}"
     "--config" "${mutation_conf}"
-    "--model" "${AEGIS_MUTATION_MODEL}"
+    "--model" "${AEGIS_AIDER_MODEL}"
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
     "--yes-always"
@@ -301,25 +405,39 @@ invoke_aider() {
     "--no-git"
     "--no-stream"
     "--no-pretty"
+    "--no-show-model-warnings"
+    "--exit"
   )
 
-  # Add mutation target files
-  for f in "${file_args[@]:-}"; do
-    aider_cmd+=("--file" "${f}")
-  done
+  # Add mutation target files (guard against empty expansion)
+  if [[ "${#file_args[@]}" -gt 0 ]]; then
+    for f in "${file_args[@]}"; do
+      [[ -z "${f}" ]] && continue
+      aider_cmd+=("--file" "${f}")
+    done
+  fi
 
   aider_log "Invoking aider mutation substrate..."
-  aider_log "Model: ${AEGIS_MUTATION_MODEL}"
+  aider_log "Model: ${AEGIS_AIDER_MODEL}"
   aider_log "Targets: ${file_args[*]:-<none>}"
 
-  # Run aider inside the worktree
+  aider_output="$(aider_mktemp)"
+
+  set +e
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
 
-    # Pass API key through env; aider reads OPENAI_API_KEY
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-      "${aider_cmd[@]}" >/dev/null 2>&1 || true
+      "${aider_cmd[@]}" >"${aider_output}" 2>&1
   )
+  aider_status=$?
+  set -e
+
+  if [[ "${aider_status}" -ne 0 ]]; then
+    aider_warn "aider invocation failed with exit status ${aider_status}"
+    sed -n '1,120p' "${aider_output}" >&2
+    aider_fatal "aider_execution_failed"
+  fi
 }
 
 # =========================================================
@@ -332,7 +450,7 @@ capture_worktree_diff() {
 
   diff_output="$(
     git \
-      --git-dir="${AEGIS_AIDER_SUBSTRATE_ROOT}/.git" \
+      --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
       --work-tree="${AEGIS_EXECUTION_SURFACE_PATH}" \
       diff \
       HEAD \
@@ -434,7 +552,11 @@ main() {
   prompt_file="$(aider_mktemp)"
   assemble_mutation_prompt "${prompt_file}"
 
-  invoke_aider "${prompt_file}" "${mutation_targets[@]:-}"
+  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
+    invoke_aider "${prompt_file}" "${mutation_targets[@]}"
+  else
+    invoke_aider "${prompt_file}"
+  fi
 
   aider_log "Capturing worktree diff..."
 
@@ -442,13 +564,16 @@ main() {
   diff_content="$(capture_worktree_diff)"
 
   if [[ -z "${diff_content}" ]]; then
-    aider_warn "empty_diff — aider produced no changes"
-    diff_content="(no changes)"
+    aider_fatal "empty_diff: aider produced no changes"
   fi
 
   aider_log "Emitting mutation artifact..."
 
-  emit_mutation_artifact "${diff_content}" "${mutation_targets[@]:-}"
+  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
+    emit_mutation_artifact "${diff_content}" "${mutation_targets[@]}"
+  else
+    emit_mutation_artifact "${diff_content}"
+  fi
 
   aider_log "Aider mutation substrate completed"
 }

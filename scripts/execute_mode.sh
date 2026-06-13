@@ -93,6 +93,17 @@ executor_fatal() {
   exit 1
 }
 
+measure() {
+  local label="$1"
+  local start
+  start=$(date +%s)
+  shift
+  "$@"
+  local end
+  end=$(date +%s)
+  echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
+}
+
 # =========================================================
 # CLEANUP
 # =========================================================
@@ -415,7 +426,11 @@ invoke_aider_substrate() {
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
     AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_PATH}" \
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
+    AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" \
     AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}" \
+    AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \
+    AEGIS_AIDER_BIN="${AEGIS_AIDER_BIN:-}" \
+    AEGIS_MUTATION_GIT_DIR="${AEGIS_MUTATION_GIT_DIR:-}" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" \
     AEGIS_ARTIFACT_BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
     AEGIS_ARTIFACT_END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
@@ -704,6 +719,184 @@ validate_artifact() {
   [[ "${artifact_mode}" == "${AEGIS_MODE}" ]] \
     || executor_fatal "artifact_mode_mismatch"
 
+  if [[ "${AEGIS_MODE}" == "forensics" ]]; then
+    echo "${artifact}" \
+      | jq -e '
+          (.status == "interpreted" or .status == "inconclusive")
+          and (.summary | type == "string")
+          and (.evidence | type == "array")
+          and (.interpretations | type == "array")
+          and (.observations | type == "array")
+          and (.unresolved_questions | type == "array")
+          and (.confidence == "low" or .confidence == "medium" or .confidence == "high")
+          and (
+            .repair_candidates
+            | type == "array"
+            and all(
+              type == "object"
+              and ((keys | sort) == ["evidence_refs", "id", "reason"])
+              and (.id | type == "string" and length > 0)
+              and (.reason | type == "string" and length > 0)
+              and (.evidence_refs | type == "array" and length > 0)
+              and all(.evidence_refs[]; type == "string" and length > 0)
+            )
+          )
+          and (
+            .handover_attention
+            | type == "object"
+            and (.next_attention_targets | type == "array")
+            and (.attention_scope | type == "string" and length > 0)
+            and (.attention_reason | type == "string" and length > 0)
+          )
+          and (
+            [.repair_candidates[].id]
+            == .handover_attention.next_attention_targets
+          )
+        ' >/dev/null 2>&1 \
+      || executor_fatal "invalid_forensics_artifact_contract"
+
+    previous_discovery="$(
+      jq -c '.' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    )"
+
+    echo "${artifact}" \
+      | jq -e \
+        --argjson previous_discovery "${previous_discovery}" '
+        ($previous_discovery.artifact_snapshot.mode == "discovery")
+        and (
+          [
+            $previous_discovery.artifact_snapshot
+              .observed_request_alignment.resolved_paths[]?,
+            ($previous_discovery.artifact_snapshot.ranked_targets[]?
+              | select(.type == "explicit_request")
+              | .file),
+            $previous_discovery.epistemic_state.next_attention_targets[]?
+          ]
+          | unique
+        ) as $authorized_targets
+        | all(
+            .repair_candidates[];
+            . as $candidate
+            | $authorized_targets
+            | index($candidate.id) != null
+          )
+      ' >/dev/null 2>&1 \
+      || executor_fatal "forensics_repair_candidate_outside_discovery_scope"
+  fi
+
+  if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
+    echo "${artifact}" \
+      | jq -e '
+          (.status == "challenged" or .status == "inconclusive")
+          and (
+            .candidate_result
+            | type == "object"
+            and .source_mode == "optimize"
+            and (.diff | type == "string" and length > 0)
+            and (.files_changed | type == "array" and length > 0)
+            and all(.files_changed[]; type == "string" and length > 0)
+          )
+          and (.adversarial_findings | type == "array")
+          and (.evidence_refs | type == "array")
+          and (
+            .handover_attention
+            | type == "object"
+            and (.next_attention_targets | type == "array")
+            and (.attention_scope | type == "string" and length > 0)
+            and (.attention_reason | type == "string" and length > 0)
+          )
+        ' >/dev/null 2>&1 \
+      || executor_fatal "invalid_adversarial_artifact_contract"
+
+    previous_optimized_candidate="$(
+      jq -c '
+        .artifact_snapshot
+        | {
+            source_mode: .mode,
+            diff: .diff,
+            files_changed: .files_changed
+          }
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    )"
+
+    if ! echo "${artifact}" \
+      | jq -e \
+        --argjson previous_candidate "${previous_optimized_candidate}" '
+          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "");
+          (.candidate_result.source_mode == $previous_candidate.source_mode)
+          and (.candidate_result.files_changed == $previous_candidate.files_changed)
+          and (norm(.candidate_result.diff) == norm($previous_candidate.diff))
+        ' >/dev/null 2>&1; then
+      echo "[DEBUG] adversarial_candidate_mismatch details:" >&2
+      echo "[DEBUG] Expected candidate:" >&2
+      echo "${previous_optimized_candidate}" | jq -c '.' >&2
+      echo "[DEBUG] Actual candidate received:" >&2
+      echo "${artifact}" | jq -c '.candidate_result' >&2
+      executor_fatal "adversarial_candidate_mismatch"
+    fi
+  fi
+
+  if [[ "${AEGIS_MODE}" == "validation" ]]; then
+    echo "${artifact}" \
+      | jq -e '
+          (.verdict == "accepted"
+            or .verdict == "rejected"
+            or .verdict == "insufficient")
+          and (.adversarial_findings | type == "array")
+          and (.basis | type == "array")
+          and (
+            .validated_candidate
+            | type == "object"
+            and .source_mode == "optimize"
+            and (.diff | type == "string" and length > 0)
+            and (.files_changed | type == "array" and length > 0)
+            and all(.files_changed[]; type == "string" and length > 0)
+          )
+          and (
+            .handover_attention
+            | type == "object"
+            and (.next_attention_targets | type == "array")
+            and (.attention_scope | type == "string" and length > 0)
+            and (.attention_reason | type == "string" and length > 0)
+          )
+        ' >/dev/null 2>&1 \
+      || executor_fatal "invalid_validation_artifact_contract"
+
+    previous_candidate="$(
+      jq -c '.artifact_snapshot.candidate_result // empty' \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    )"
+
+    [[ -n "${previous_candidate}" ]] \
+      || executor_fatal "missing_adversarial_candidate_result"
+
+    if ! echo "${artifact}" \
+      | jq -e \
+        --argjson previous_candidate "${previous_candidate}" '
+          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "");
+          (.validated_candidate.source_mode == $previous_candidate.source_mode)
+          and (.validated_candidate.files_changed == $previous_candidate.files_changed)
+          and (norm(.validated_candidate.diff) == norm($previous_candidate.diff))
+        ' >/dev/null 2>&1; then
+      executor_fatal "validation_candidate_mismatch"
+    fi
+
+    previous_findings="$(
+      jq -c '.artifact_snapshot.adversarial_findings // empty' \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    )"
+
+    [[ -n "${previous_findings}" ]] \
+      || executor_fatal "missing_adversarial_findings"
+
+    echo "${artifact}" \
+      | jq -e \
+        --argjson previous_findings "${previous_findings}" \
+        '.adversarial_findings == $previous_findings' \
+        >/dev/null 2>&1 \
+      || executor_fatal "validation_findings_mismatch"
+  fi
+
   executor_log "Payload validated successfully"
 }
 
@@ -734,11 +927,16 @@ validate_mutation_artifact() {
     || executor_fatal "mutation_artifact_mode_mismatch"
 
   echo "${artifact}" \
-    | jq -e 'has("diff")' >/dev/null 2>&1 \
+    | jq -e '
+        (.diff | type == "string" and length > 0)
+        and (.diff != "(no changes)")
+      ' >/dev/null 2>&1 \
     || executor_fatal "mutation_artifact_missing_diff"
 
   echo "${artifact}" \
-    | jq -e 'has("files_changed")' >/dev/null 2>&1 \
+    | jq -e '
+        (.files_changed | type == "array" and length > 0)
+      ' >/dev/null 2>&1 \
     || executor_fatal "mutation_artifact_missing_files_changed"
 
   executor_log "Mutation artifact validated successfully"
@@ -764,15 +962,15 @@ main() {
   resolve_evidence_profile
   prepare_execution_state
   materialize_capability_environment
-  materialize_capability_payloads
+  measure "executor_capability_payloads" materialize_capability_payloads
   consume_runtime_owned_capability_manifest
   select_evidence_payloads
   materialize_selected_manifest
-  execute_substrate
+  measure "executor_execute_substrate" execute_substrate
 
   case "${AEGIS_EXECUTION_ENGINE}" in
-    aider) validate_mutation_artifact ;;
-    *)     validate_artifact           ;;
+    aider) measure "executor_artifact_validation" validate_mutation_artifact ;;
+    *)     measure "executor_artifact_validation" validate_artifact           ;;
   esac
 
   emit_output

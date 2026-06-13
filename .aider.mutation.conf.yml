@@ -81,3 +81,15 @@ line-endings: lf
 # ---------------------------------------------------------
 
 cache-prompts: false
+
+# ---------------------------------------------------------
+# NON-INTERACTIVE EXIT GUARANTEE
+# ---------------------------------------------------------
+
+# Exit after processing --message-file without entering interactive REPL.
+# Critical: without this, Aider hangs indefinitely on API errors or when
+# stdin is not a terminal.
+
+exit: true
+
+show-model-warnings: false

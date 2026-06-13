@@ -65,6 +65,18 @@ Validation must NOT treat epistemic handover as:
 - conclusions;
 - authority.
 
+When the preceding artifact has `mode: "adversarial"`, Validation must consume
+the explicit assessment contract:
+
+- `artifact_snapshot.candidate_result`
+- `artifact_snapshot.adversarial_findings`
+- `artifact_snapshot.evidence_refs`
+
+The candidate is the object under judgment, not evidence of its own
+correctness. Validation must preserve `candidate_result.diff` and
+`candidate_result.files_changed` verbatim in `validated_candidate`; it must not
+generate, repair, or rewrite the candidate.
+
 Validation must NOT:
 - fabricate evidence;
 - infer hidden state;
@@ -184,6 +196,27 @@ Validation must emit:
 - no acknowledgements;
 - no conversational commentary;
 - no assistant narration.
+
+The required artifact shape is:
+
+```json
+{
+  "mode": "validation",
+  "verdict": "accepted|rejected|insufficient",
+  "adversarial_findings": ["description of adversarial finding 1", "description of adversarial finding 2"],
+  "validated_candidate": {
+    "source_mode": "optimize",
+    "diff": "diff --git ...",
+    "files_changed": ["src/index.ts"]
+  },
+  "basis": ["basis justification description 1", "basis justification description 2"],
+  "handover_attention": {
+    "next_attention_targets": [],
+    "attention_scope": "none",
+    "attention_reason": "validation completed"
+  }
+}
+```
 
 The runtime owns framing.
 

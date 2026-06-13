@@ -92,6 +92,17 @@ runtime_fatal() {
   exit 1
 }
 
+measure() {
+  local label="$1"
+  local start
+  start=$(date +%s)
+  shift
+  "$@"
+  local end
+  end=$(date +%s)
+  echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
+}
+
 # =========================================================
 # CLI
 # =========================================================
@@ -624,6 +635,20 @@ prepare_execution_surface() {
   AEGIS_EXECUTION_SURFACE_ACTIVE="true"
 }
 
+materialize_preceding_mutation_candidate() {
+
+  if [[ "${AEGIS_MODE}" != "optimize" ]]; then
+    return
+  fi
+
+  runtime_log "Materializing Repair candidate for Optimize..."
+
+  bash scripts/runtime/apply_candidate_diff.sh \
+    "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
+    "${AEGIS_EXECUTION_SURFACE_PATH}" \
+    || runtime_fatal "failed_to_materialize_repair_candidate"
+}
+
 # =========================================================
 # CAPABILITY SURFACES
 # =========================================================
@@ -722,6 +747,39 @@ execute_mode() {
   runtime_log "Execution completed successfully"
 }
 
+promote_validated_candidate() {
+
+  if [[ "${AEGIS_MODE}" != "validation" ]]; then
+    return
+  fi
+
+  local verdict
+  verdict="$(
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" \
+      | jq -r '.verdict // empty'
+  )"
+
+  if [[ "${verdict}" != "accepted" ]]; then
+    runtime_log "Validation verdict does not authorize mutation promotion: ${verdict}"
+    return
+  fi
+
+  local validation_artifact_file
+  validation_artifact_file="$(mktemp)"
+  printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" \
+    > "${validation_artifact_file}"
+
+  bash scripts/runtime/promote_validated_candidate.sh \
+    "${validation_artifact_file}" \
+    "${AEGIS_RUNTIME_ROOT}" \
+    || {
+      rm -f "${validation_artifact_file}"
+      runtime_fatal "validated_candidate_promotion_failed"
+    }
+
+  rm -f "${validation_artifact_file}"
+}
+
 # =========================================================
 # EPISTEMIC HANDOVER
 # =========================================================
@@ -783,10 +841,12 @@ main() {
   bootstrap_runtime_state
   reset_runtime_owned_epistemic_handover_for_new_investigation
   remove_stale_runtime_residue
-  prepare_execution_surface
+  measure "runtime_prepare_execution_surface" prepare_execution_surface
+  measure "runtime_materialize_preceding_mutation_candidate" materialize_preceding_mutation_candidate
   prepare_runtime_owned_capability_surfaces
-  materialize_runtime_owned_capability_manifest
-  execute_mode
+  measure "runtime_materialize_manifest" materialize_runtime_owned_capability_manifest
+  measure "runtime_execute_mode" execute_mode
+  measure "runtime_promote_validated_candidate" promote_validated_candidate
   promote_epistemic_handover
 }
 

@@ -27,6 +27,22 @@ if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
 fi
 
 start_mock_provider() {
+  MOCK_CURL_DIR="$(mktemp -d)"
+  ln -s \
+    "${AEGIS_TEST_ROOT}/scripts/substrates/test/mock_openai_curl.sh" \
+    "${MOCK_CURL_DIR}/curl"
+
+  export PATH="${MOCK_CURL_DIR}:${PATH}"
+  export OPENAI_API_KEY="aegis-test-key"
+  export OPENAI_API_BASE="local-process://mock-openai"
+  export OPENAI_MODEL_READONLY_COGNITION="aegis-test-model"
+  export AEGIS_PROVIDER_CONNECT_TIMEOUT=3
+  export AEGIS_PROVIDER_RESPONSE_TIMEOUT=5
+  export AEGIS_PROVIDER_MAX_RETRIES=1
+  export AEGIS_PROVIDER_RETRY_DELAY=0
+
+  return 0
+
   MOCK_PROVIDER_PORT_FILE="$(mktemp)"
   MOCK_PROVIDER_LOG_FILE="$(mktemp)"
 
@@ -101,6 +117,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
           "handover_attention": build_handover_attention(mode),
         }
 
+        if mode == "forensics":
+            artifact.update({
+                "status": "inconclusive",
+                "evidence": [],
+                "interpretations": [],
+                "observations": [],
+                "unresolved_questions": [],
+                "confidence": "low",
+                "repair_candidates": [],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "evidence-backed interpretation",
+                    "attention_reason": "no evidence-backed repair candidate",
+                },
+            })
+
+        if mode == "adversarial":
+            artifact.update({
+                "status": "challenged",
+                "candidate_result": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "adversarial_findings": [],
+                "evidence_refs": ["filesystem.read:epistemic_handover"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "bounded falsification",
+                    "attention_reason": "challenge completed",
+                },
+            })
+
+        if mode == "validation":
+            artifact.update({
+                "verdict": "rejected",
+                "adversarial_findings": [],
+                "validated_candidate": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "basis": ["mock validation basis"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "none",
+                    "attention_reason": "validation completed",
+                },
+            })
+
         response = {
             "choices": [
                 {
@@ -159,6 +225,8 @@ cleanup() {
     "${MOCK_PROVIDER_PORT_FILE:-}" \
     "${MOCK_PROVIDER_LOG_FILE:-}" \
     >/dev/null 2>&1 || true
+
+  rm -rf "${MOCK_CURL_DIR:-}" >/dev/null 2>&1 || true
 
   mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
 

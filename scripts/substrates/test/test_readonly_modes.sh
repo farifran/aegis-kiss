@@ -33,7 +33,7 @@ assert_manifest_contract() {
     and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.read", "structural.builder"])
     and (.modes.forensics.evidence_capabilities == ["filesystem.search_symbol", "git.status", "filesystem.read"])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
-    and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol"])
+    and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol", "filesystem.read"])
   ' >/dev/null || fail "invalid_manifest_contract"
 }
 
@@ -85,6 +85,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "summary": f"mock {mode} artifact",
             "observed_payloads": payload_names,
         }
+
+        if mode == "forensics":
+            artifact.update({
+                "status": "inconclusive",
+                "evidence": [],
+                "interpretations": [],
+                "observations": [],
+                "unresolved_questions": [],
+                "confidence": "low",
+                "repair_candidates": [],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "evidence-backed interpretation",
+                    "attention_reason": "no evidence-backed repair candidate",
+                },
+            })
+
+        if mode == "adversarial":
+            artifact.update({
+                "status": "challenged",
+                "candidate_result": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "adversarial_findings": [],
+                "evidence_refs": ["filesystem.read:epistemic_handover"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "bounded falsification",
+                    "attention_reason": "challenge completed",
+                },
+            })
+
+        if mode == "validation":
+            artifact.update({
+                "verdict": "rejected",
+                "adversarial_findings": [],
+                "validated_candidate": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "basis": ["mock validation basis"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "none",
+                    "attention_reason": "validation completed",
+                },
+            })
 
         response = {
             "choices": [
@@ -262,6 +312,57 @@ list_directory_files_json() {
     | jq -s '.'
 }
 
+seed_required_predecessor() {
+  local mode="$1"
+  local handover_file=".harness/runtime/epistemic_handover.json"
+
+  mkdir -p "$(dirname "${handover_file}")"
+
+  case "${mode}" in
+    adversarial)
+      jq -n \
+        --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
+        {
+          artifact_snapshot: {
+            mode: "optimize",
+            diff: "diff --git a/src/index.ts b/src/index.ts",
+            files_changed: ["src/index.ts"],
+            investigation_input: $investigation_input
+          },
+          epistemic_state: {
+            next_attention_targets: ["src/index.ts"],
+            attention_scope: "mutation_applied",
+            attention_reason: "optimized candidate"
+          }
+        }
+      ' > "${handover_file}"
+      ;;
+    validation)
+      jq -n \
+        --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
+        {
+          artifact_snapshot: {
+            mode: "adversarial",
+            candidate_result: {
+              source_mode: "optimize",
+              diff: "diff --git a/src/index.ts b/src/index.ts",
+              files_changed: ["src/index.ts"]
+            },
+            adversarial_findings: [],
+            evidence_refs: ["filesystem.read:epistemic_handover"],
+            investigation_input: $investigation_input
+          },
+          epistemic_state: {
+            next_attention_targets: [],
+            attention_scope: "bounded falsification",
+            attention_reason: "challenge completed"
+          }
+        }
+      ' > "${handover_file}"
+      ;;
+  esac
+}
+
 assert_no_execution_surface_for_mode() {
   local mode="$1"
   local runtime_log_file
@@ -270,6 +371,7 @@ assert_no_execution_surface_for_mode() {
   runtime_log_file="$(mktemp)"
 
   rm -rf "${execution_surface_path}"
+  seed_required_predecessor "${mode}"
 
   AEGIS_INVESTIGATION_INPUT="${TEST_INVESTIGATION_INPUT}" \
   AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE=false \
@@ -292,6 +394,8 @@ assert_mode_output() {
   local expected_payloads_json="$2"
   local output
   local artifact
+
+  seed_required_predecessor "${mode}"
 
   output="$(
     AEGIS_INVESTIGATION_INPUT="${TEST_INVESTIGATION_INPUT}" \
@@ -366,7 +470,7 @@ main() {
   assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "structural_builder.json"]'
   assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
-  assert_mode_output "adversarial" '["filesystem_search_symbol.json"]'
+  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json"]'
 
   assert_materialized_runtime_state \
     "discovery" \

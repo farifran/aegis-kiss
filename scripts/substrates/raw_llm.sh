@@ -651,6 +651,9 @@ extract_artifact_payload() {
   [[ -n "${provider_content}" ]] \
     || raw_fatal "empty_provider_response"
 
+  # Debug: Always save the raw response content to /tmp/raw_response.json for diagnostics
+  echo "${provider_content}" > /tmp/raw_response.json
+
   local artifact
   artifact="$(
     echo "${provider_content}" \
@@ -659,7 +662,11 @@ extract_artifact_payload() {
   )"
 
   [[ -n "${artifact}" ]] \
-    || raw_fatal "missing_artifact_markers"
+    || {
+      echo "[DEBUG] Raw LLM content (markers missing):" >&2
+      echo "${provider_content}" >&2
+      raw_fatal "missing_artifact_markers"
+    }
 
   local artifact_payload
   artifact_payload="$(
@@ -670,10 +677,11 @@ extract_artifact_payload() {
   [[ -n "${artifact_payload}" ]] \
     || raw_fatal "empty_artifact_payload"
 
-  echo "${artifact_payload}" \
-    | jq empty \
-      >/dev/null 2>&1 \
-      || raw_fatal "artifact_not_json"
+  if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
+    echo "[DEBUG] Failed to parse artifact JSON. Raw payload:" >&2
+    echo "${artifact_payload}" >&2
+    raw_fatal "artifact_not_json"
+  fi
 
   echo "${AEGIS_ARTIFACT_BEGIN_MARKER}"
   echo "${artifact_payload}"

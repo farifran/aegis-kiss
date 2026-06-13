@@ -72,9 +72,22 @@ export AEGIS_ARTIFACT_END_MARKER="AEGIS_ARTIFACT_END"
 : "${OPENAI_MODEL_READONLY_COGNITION:=meta/llama-3.3-70b-instruct}"
 : "${AEGIS_MUTATION_MODEL:=${OPENAI_MODEL_READONLY_COGNITION}}"
 
+if [[ "${AEGIS_MUTATION_MODEL}" == */* ]] \
+  && [[ "${AEGIS_MUTATION_MODEL}" != openai/* ]]; then
+  : "${AEGIS_AIDER_MODEL:=openai/${AEGIS_MUTATION_MODEL}}"
+else
+  : "${AEGIS_AIDER_MODEL:=${AEGIS_MUTATION_MODEL}}"
+fi
+
+: "${AEGIS_AIDER_BIN:=${AEGIS_ROOT_DIR}/.venv/bin/aider}"
+: "${AEGIS_MUTATION_GIT_DIR:=${AEGIS_ROOT_DIR}/.git}"
+
 export OPENAI_API_BASE
 export OPENAI_MODEL_READONLY_COGNITION
 export AEGIS_MUTATION_MODEL
+export AEGIS_AIDER_MODEL
+export AEGIS_AIDER_BIN
+export AEGIS_MUTATION_GIT_DIR
 
 # =========================================================
 # RAW SUBSTRATE POLICY
@@ -311,6 +324,7 @@ declare -ar AEGIS_VALIDATION_EVIDENCE=(
 
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
   "filesystem.search_symbol"
+  "filesystem.read:epistemic_handover"
 )
 
 declare -ar AEGIS_MUTATION_EVIDENCE=(

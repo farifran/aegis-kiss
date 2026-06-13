@@ -109,6 +109,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
           "handover_attention": build_handover_attention(mode),
         }
 
+        if mode == "forensics":
+            artifact.update({
+                "status": "inconclusive",
+                "evidence": [],
+                "interpretations": [],
+                "observations": [],
+                "unresolved_questions": [],
+                "confidence": "low",
+                "repair_candidates": [],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "evidence-backed interpretation",
+                    "attention_reason": "no evidence-backed repair candidate",
+                },
+            })
+
+        if mode == "adversarial":
+            artifact.update({
+                "status": "challenged",
+                "candidate_result": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "adversarial_findings": [],
+                "evidence_refs": ["filesystem.read:epistemic_handover"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "bounded falsification",
+                    "attention_reason": "challenge completed",
+                },
+            })
+
+        if mode == "validation":
+            artifact.update({
+                "verdict": "rejected",
+                "adversarial_findings": [],
+                "validated_candidate": {
+                    "source_mode": "optimize",
+                    "diff": "diff --git a/src/index.ts b/src/index.ts",
+                    "files_changed": ["src/index.ts"],
+                },
+                "basis": ["mock validation basis"],
+                "handover_attention": {
+                    "next_attention_targets": [],
+                    "attention_scope": "none",
+                    "attention_reason": "validation completed",
+                },
+            })
+
         response = {
             "choices": [
                 {
@@ -277,6 +327,56 @@ assert_evidence_profiles_are_subset_of_envelopes() {
   ' >/dev/null || fail "evidence_profile_outside_envelope"
 }
 
+seed_required_predecessor() {
+  local mode="$1"
+
+  mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
+
+  case "${mode}" in
+    adversarial)
+      jq -n \
+        --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
+        {
+          artifact_snapshot: {
+            mode: "optimize",
+            diff: "diff --git a/src/index.ts b/src/index.ts",
+            files_changed: ["src/index.ts"],
+            investigation_input: $investigation_input
+          },
+          epistemic_state: {
+            next_attention_targets: ["src/index.ts"],
+            attention_scope: "mutation_applied",
+            attention_reason: "optimized candidate"
+          }
+        }
+      ' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+      ;;
+    validation)
+      jq -n \
+        --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
+        {
+          artifact_snapshot: {
+            mode: "adversarial",
+            candidate_result: {
+              source_mode: "optimize",
+              diff: "diff --git a/src/index.ts b/src/index.ts",
+              files_changed: ["src/index.ts"]
+            },
+            adversarial_findings: [],
+            evidence_refs: ["filesystem.read:epistemic_handover"],
+            investigation_input: $investigation_input
+          },
+          epistemic_state: {
+            next_attention_targets: [],
+            attention_scope: "bounded falsification",
+            attention_reason: "challenge completed"
+          }
+        }
+      ' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+      ;;
+  esac
+}
+
 assert_readonly_mode_has_no_execution_surface() {
   local mode="$1"
   local runtime_log_file
@@ -285,6 +385,7 @@ assert_readonly_mode_has_no_execution_surface() {
   runtime_log_file="$(mktemp)"
 
   rm -rf "${execution_surface_path}"
+  seed_required_predecessor "${mode}"
 
   AEGIS_INVESTIGATION_INPUT="${TEST_INVESTIGATION_INPUT}" \
   AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE=false \

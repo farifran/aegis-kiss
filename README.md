@@ -16,7 +16,7 @@ cat >> ~/.bashrc <<'EOF'
 
 export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
 
-export OPENAI_API_KEY="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"
+export OPENAI_API_KEY="..."
 
 EOF
 

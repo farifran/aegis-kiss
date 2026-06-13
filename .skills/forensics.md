@@ -60,6 +60,25 @@ Forensics may inspect `artifact_snapshot.investigation_input` only as transient 
 
 Forensics must not reinterpret that field as a new demand or a new investigation boundary.
 
+When the preceding artifact snapshot has `mode: "discovery"`, Forensics must
+consume these fields as an explicit routing contract:
+
+- `artifact_snapshot.observed_request_alignment.resolved_paths` — **file paths only**
+- `artifact_snapshot.ranked_targets` — only entries where `type == "explicit_request"`, using the `.file` field
+- `epistemic_state.next_attention_targets`
+
+These fields route inspection. They are not evidence and must not be copied
+into findings as proof. Evidence for interpretations must still come from
+runtime-exposed capability payloads.
+
+**Critical constraint**: `repair_candidate.id` must be a repository-relative
+file path (`src/index.ts`, not `boundary_001`, `hotspot_001`, or any structural
+cluster identifier). Only paths present in `resolved_paths` or
+`ranked_targets[].file` where `type == "explicit_request"` are valid candidate
+IDs. Structural topology identifiers (boundary, hotspot, entrypoint, surface
+cluster IDs) are NOT valid repair candidate IDs and must never appear as `.id`
+values.
+
 If the runtime-owned epistemic handover file is exposed through `filesystem.read`, Forensics may use it only as guidance about:
 - `next_attention_targets`;
 - `attention_scope`;
@@ -169,6 +188,19 @@ The JSON payload must remain:
 
 Forensics must include a minimal `handover_attention` object that narrows the routed attention for the next mode.
 
+Forensics must include `repair_candidates`.
+
+Each repair candidate must:
+
+- contain exactly `id`, `reason`, and `evidence_refs`;
+- use a repository-relative file path as `id`;
+- be supported by at least one runtime-exposed evidence reference;
+- remain within Discovery-routed targets;
+- be omitted when no evidence-backed correction target exists.
+
+`repair_candidates` is the complete mutation-target contract for Repair.
+Repair must not reconstruct missing candidates from prose or implicit context.
+
 ---
 
 # Required JSON Shape
@@ -183,8 +215,15 @@ Forensics must include a minimal `handover_attention` object that narrows the ro
   "observations": [],
   "unresolved_questions": [],
   "confidence": "low|medium|high",
+  "repair_candidates": [
+    {
+      "id": "src/index.ts",
+      "reason": "bounded evidence-backed correction target",
+      "evidence_refs": ["filesystem.search_symbol"]
+    }
+  ],
   "handover_attention": {
-    "next_attention_targets": [],
+    "next_attention_targets": ["src/index.ts"],
     "attention_scope": "evidence-backed interpretation",
     "attention_reason": "narrowed from discovery observations"
   }
