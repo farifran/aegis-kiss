@@ -522,6 +522,61 @@ reset_runtime_owned_epistemic_handover_for_new_investigation() {
   write_empty_epistemic_handover "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
 }
 
+validate_mode_preconditions() {
+
+  if [[ "${AEGIS_MODE}" == "discovery" ]]; then
+    return 0
+  fi
+
+  [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
+    || runtime_fatal "missing_epistemic_handover_for_mode: ${AEGIS_MODE}"
+
+  local handover_content
+  handover_content="$(cat "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
+
+  case "${AEGIS_MODE}" in
+    forensics)
+      echo "${handover_content}" | jq -e '
+        .artifact_snapshot != null
+        and .artifact_snapshot.mode == "discovery"
+      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
+      ;;
+    repair)
+      echo "${handover_content}" | jq -e '
+        .artifact_snapshot != null
+        and .artifact_snapshot.mode == "forensics"
+        and (.artifact_snapshot.repair_candidates | type == "array" and length > 0)
+      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
+      ;;
+    optimize)
+      echo "${handover_content}" | jq -e '
+        .artifact_snapshot != null
+        and .artifact_snapshot.mode == "repair"
+        and (.artifact_snapshot.diff | type == "string" and length > 0 and . != "(no changes)")
+        and (.artifact_snapshot.files_changed | type == "array" and length > 0)
+      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_repair_candidate_missing_or_invalid"
+      ;;
+    adversarial)
+      echo "${handover_content}" | jq -e '
+        .artifact_snapshot != null
+        and .artifact_snapshot.mode == "optimize"
+        and (.artifact_snapshot.diff | type == "string" and length > 0 and . != "(no changes)")
+        and (.artifact_snapshot.files_changed | type == "array" and length > 0)
+      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
+      ;;
+    validation)
+      echo "${handover_content}" | jq -e '
+        .artifact_snapshot != null
+        and .artifact_snapshot.mode == "adversarial"
+        and (.artifact_snapshot.candidate_result | type == "object")
+        and (.artifact_snapshot.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
+        and (.artifact_snapshot.candidate_result.files_changed | type == "array" and length > 0)
+        and (.artifact_snapshot.adversarial_findings | type == "array")
+      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_adversarial_findings_missing_or_invalid"
+      ;;
+  esac
+}
+
 # =========================================================
 # VALIDATION
 # =========================================================
@@ -840,6 +895,7 @@ main() {
   validate_runtime_environment
   bootstrap_runtime_state
   reset_runtime_owned_epistemic_handover_for_new_investigation
+  validate_mode_preconditions
   remove_stale_runtime_residue
   measure "runtime_prepare_execution_surface" prepare_execution_surface
   measure "runtime_materialize_preceding_mutation_candidate" materialize_preceding_mutation_candidate

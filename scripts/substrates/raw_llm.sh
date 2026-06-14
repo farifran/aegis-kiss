@@ -564,17 +564,21 @@ execute_provider_request() {
   local attempt=1
   local http_code
   local error_message
+  local curl_stats
+  local t_connect
+  local t_starttransfer
+  local t_total
 
   while [[ "${attempt}" -le "${AEGIS_PROVIDER_MAX_RETRIES}" ]]; do
 
-    http_code="$(
+    curl_stats="$(
       curl \
         --silent \
         --show-error \
         --connect-timeout "${AEGIS_PROVIDER_CONNECT_TIMEOUT}" \
         --max-time "${AEGIS_PROVIDER_RESPONSE_TIMEOUT}" \
         --output "${TMP_RESPONSE_FILE}" \
-        --write-out "%{http_code}" \
+        --write-out "%{http_code} %{time_connect} %{time_starttransfer} %{time_total}" \
         -X POST \
         "${OPENAI_API_BASE}/chat/completions" \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
@@ -582,9 +586,18 @@ execute_provider_request() {
         --data @"${TMP_REQUEST_FILE}"
     )"
 
+    read -r http_code t_connect t_starttransfer t_total <<< "${curl_stats}"
+
+    t_connect="${t_connect:-0.000000}"
+    t_starttransfer="${t_starttransfer:-0.000000}"
+    t_total="${t_total:-0.000000}"
+
     case "${http_code}" in
 
       200)
+        echo "[AEGIS][TIMING] curl_connect: ${t_connect}s" >&2
+        echo "[AEGIS][TIMING] first_token: ${t_starttransfer}s" >&2
+        echo "[AEGIS][TIMING] response_complete: ${t_total}s" >&2
         return 0
         ;;
 
@@ -696,12 +709,25 @@ main() {
 
   validate_raw_substrate_inputs
   prepare_isolated_substrate_workspace
+
+  local start_assembly
+  start_assembly=$(date +%s)
   assemble_system_prompt
   assemble_bounded_manifest
   assemble_bounded_capability_context
   assemble_provider_request
+  local end_assembly
+  end_assembly=$(date +%s)
+  echo "[AEGIS][TIMING] prompt_assembly: $((end_assembly - start_assembly))s" >&2
+
   execute_provider_request
+
+  local start_extract
+  start_extract=$(date +%s)
   extract_artifact_payload
+  local end_extract
+  end_extract=$(date +%s)
+  echo "[AEGIS][TIMING] artifact_extract: $((end_extract - start_extract))s" >&2
 }
 
 main "$@"

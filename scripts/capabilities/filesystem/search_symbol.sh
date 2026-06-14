@@ -133,8 +133,10 @@ grep -Rni \
   -C "${CONTEXT_LINES}" \
   --exclude-dir=node_modules \
   --exclude-dir=.git \
-  --exclude-dir=.harness/runtime \
-  --exclude-dir=.harness/execution_surfaces \
+  --exclude-dir=.harness \
+  --exclude-dir=.skills \
+  --exclude-dir=scripts \
+  --exclude-dir=.venv \
   --exclude='*.lock' \
   --exclude='*.log' \
   "${QUERY}" \

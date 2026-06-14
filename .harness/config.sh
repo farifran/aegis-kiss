@@ -164,8 +164,11 @@ export AEGIS_SEARCH_SYMBOL_CONTEXT_LINES
 declare -ar AEGIS_FILESYSTEM_PRUNE_PATHS=(
   "node_modules"
   ".git"
-  ".harness/execution_surfaces"
-  ".harness/runtime"
+  ".harness"
+  ".skills"
+  "scripts"
+  ".venv"
+  ".aider.tags.cache.v4"
 )
 
 export AEGIS_FILESYSTEM_PRUNE_PATHS

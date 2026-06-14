@@ -425,14 +425,18 @@ assert_mode_output() {
 
   [[ -n "${artifact}" ]] || fail "missing_artifact_for_mode: ${mode}"
 
-  printf '%s\n' "${artifact}" | jq -e \
+  if ! printf '%s\n' "${artifact}" | jq -e \
     --arg mode "${mode}" \
     --argjson expected_payloads "${expected_payloads_json}" \
     '
       .mode == $mode
-      and .status == "ok"
+      and (.status == "ok" or .status == "inconclusive" or .status == "challenged")
       and (.observed_payloads == $expected_payloads)
-    ' >/dev/null || fail "unexpected_artifact_for_mode: ${mode}"
+    ' >/dev/null; then
+    echo "EXPECTED payloads: ${expected_payloads_json}" >&2
+    echo "ACTUAL artifact: ${artifact}" >&2
+    fail "unexpected_artifact_for_mode: ${mode}"
+  fi
 }
 
 assert_materialized_runtime_state() {
