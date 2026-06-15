@@ -469,6 +469,7 @@ remove_runtime_owned_execution_surface_if_present() {
       --force \
       "${AEGIS_EXECUTION_SURFACE_PATH}" \
       >/dev/null 2>&1 || true
+    rm -rf "${AEGIS_EXECUTION_SURFACE_PATH}"
   fi
 
   git worktree prune \
