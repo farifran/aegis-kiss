@@ -314,7 +314,7 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.extract_references"]="."
   ["structural.builder"]="."
   ["typescript.check"]="."
-  ["eslint.check"]="."
+  ["eslint.check"]="src"
   ["test.run"]="."
 )
 

@@ -56,6 +56,8 @@ source ".harness/config.sh"
 readonly AIDER_SKILL_FILE="${1:-}"
 readonly AIDER_CAPABILITY_PAYLOAD_DIR="${2:-}"
 
+AEGIS_AIDER_OUTPUT_LOG=""
+
 # =========================================================
 # LOGGING
 # =========================================================
@@ -356,7 +358,34 @@ assemble_mutation_prompt() {
   local capability_evidence
   capability_evidence="$(inject_capability_evidence)"
 
-  cat > "${prompt_file}" << EOF
+  if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    cat > "${prompt_file}" << EOF
+You are executing inside Aegis Harness in bounded mutation mode.
+
+Mode: ${AEGIS_MODE}
+Execution ID: ${AEGIS_EXECUTION_ID}
+
+Skill contract:
+$(cat "${AIDER_SKILL_FILE}")
+
+---
+
+Original investigation input (already applied by Repair):
+${AEGIS_INVESTIGATION_INPUT}
+${capability_evidence}
+---
+
+CRITICAL INSTRUCTION FOR OPTIMIZE MODE:
+The requested mutation (investigation input) has ALREADY been implemented and applied to the workspace by the preceding Repair step.
+Your task is ONLY to simplify the implementation, remove complexity, remove redundancy, and clean up formatting inside the files that were modified by the Repair step.
+Do NOT re-apply or re-implement the change.
+Do NOT remove or delete the new functionality added by Repair.
+Do NOT introduce any speculative changes or new unsolicited logic/functions.
+Do NOT add explanations or narration.
+Simplify/optimize the existing code and stop.
+EOF
+  else
+    cat > "${prompt_file}" << EOF
 You are executing inside Aegis Harness in bounded mutation mode.
 
 Mode: ${AEGIS_MODE}
@@ -378,6 +407,7 @@ Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
 Apply the change and stop.
 EOF
+  fi
 }
 
 # =========================================================
@@ -446,21 +476,21 @@ invoke_aider() {
   aider_log "Model: ${AEGIS_AIDER_MODEL}"
   aider_log "Targets: ${file_args[*]:-<none>}"
 
-  aider_output="$(aider_mktemp)"
+  AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
   set +e
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
 
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-      "${aider_cmd[@]}" >"${aider_output}" 2>&1
+      "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1
   )
   aider_status=$?
   set -e
 
   if [[ "${aider_status}" -ne 0 ]]; then
     aider_warn "aider invocation failed with exit status ${aider_status}"
-    sed -n '1,120p' "${aider_output}" >&2
+    sed -n '1,120p' "${AEGIS_AIDER_OUTPUT_LOG}" >&2
     aider_fatal "aider_execution_failed"
   fi
 }
@@ -589,6 +619,10 @@ main() {
   diff_content="$(capture_worktree_diff)"
 
   if [[ -z "${diff_content}" ]]; then
+    if [[ -n "${AEGIS_AIDER_OUTPUT_LOG:-}" && -f "${AEGIS_AIDER_OUTPUT_LOG}" ]]; then
+      echo "[DEBUG] Aider output log:" >&2
+      cat "${AEGIS_AIDER_OUTPUT_LOG}" >&2
+    fi
     aider_fatal "empty_diff: aider produced no changes"
   fi
 

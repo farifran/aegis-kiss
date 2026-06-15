@@ -38,12 +38,8 @@ run_eslint_check() {
       targets=("$@")
     fi
     
-    eslint_output="$(${ESLINT_BIN} "${targets[@]}" --format json 2>/dev/null || true)"
-    
-    if [[ -z "${eslint_output}" || "${eslint_output}" == "[]" ]]; then
-      emit_aegis_json "passed" "[]"
-      exit 0
-    fi
+    local ignore_opts=(--ignore-pattern "node_modules" --ignore-pattern ".venv" --ignore-pattern ".harness")
+    eslint_output="$(${ESLINT_BIN} "${targets[@]}" "${ignore_opts[@]}" --format json 2>/dev/null || true)"
     
     # Parse using jq, translating absolute paths to relative paths
     local parsed_errors
@@ -60,8 +56,15 @@ run_eslint_check() {
             message: ((if .ruleId then (.ruleId + ": ") else "" end) + .message)
           }
       ]')"
+      
+    local error_count
+    error_count="$(echo "${parsed_errors}" | jq 'length')"
     
-    emit_aegis_json "failed" "${parsed_errors}"
+    if [[ "${error_count}" -eq 0 ]]; then
+      emit_aegis_json "passed" "[]"
+    else
+      emit_aegis_json "failed" "${parsed_errors}"
+    fi
     exit 0
   else
     # Direct mode for Aider or manual CLI run
