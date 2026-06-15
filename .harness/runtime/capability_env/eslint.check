@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec bash "/Users/rafaelfarias/Documents/IDE/aegis kiss/scripts/capabilities/eslint_check.sh" "$@"

@@ -141,6 +141,12 @@ Repair MUST NOT under any circumstance:
 * add extra features, functions, placeholders, or speculative implementation details.
 * modify files or code regions not directly target by the requested fix.
 * expand the scope of the request (e.g. if asked to "add a subtraction function", you must NOT add a multiplication function or any other extra elements). Any unsolicited logic addition will trigger a validation rejection.
+* Mutation is not complete after code generation. You must inspect the resulting repository state. When validation capabilities are available:
+  - run applicable validation mechanisms (such as typescript check, eslint check, and test suite);
+  - inspect failures and identify compilation/lint/test errors;
+  - repair failures and correct any inconsistencies;
+  - re-run validation checks;
+  - repeat this validation-repair cycle until the requested change exists, all validation checks pass cleanly, and no new defects or formatting/lint errors (such as trailing whitespace, indentation inconsistencies, or missing EOF newlines) are introduced. Only then emit the final candidate.
 
 ⸻
 

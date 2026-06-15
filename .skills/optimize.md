@@ -18,7 +18,8 @@ Optimize is NOT:
 - governance authority;
 - architectural sovereignty;
 - unrestricted refactoring;
-- primary defect-repair cognition;
+- primary defect-repair cognition (correctness, lint rules, and type safety are already fully guaranteed by the preceding Repair step);
+- a late formatter or warning fixer;
 - semantic ownership of the repository.
 
 The runtime governs authority.

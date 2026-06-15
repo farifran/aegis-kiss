@@ -37,6 +37,7 @@ readonly AEGIS_ROOT_DIR="$(
 # SYSTEM METADATA
 # =========================================================
 
+export PATH="/Users/rafaelfarias/.gemini/antigravity/bin:$PATH"
 export AEGIS_SYSTEM_VERSION="2.9"
 
 # =========================================================
@@ -195,6 +196,9 @@ declare -ar AEGIS_BASE_CAPABILITIES=(
   "filesystem.read"
   "filesystem.search_symbol"
   "git.status"
+  "typescript.check"
+  "eslint.check"
+  "test.run"
 )
 
 declare -ar AEGIS_MUTATION_EXTRA_CAPABILITIES=(
@@ -263,6 +267,9 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.extract_configuration_structure"]="scripts/capabilities/filesystem/extract_configuration_structure.sh"
   ["filesystem.extract_references"]="scripts/capabilities/filesystem/extract_references.sh"
   ["structural.builder"]="scripts/capabilities/structural/builder.sh"
+  ["typescript.check"]="scripts/capabilities/typescript_check.sh"
+  ["eslint.check"]="scripts/capabilities/eslint_check.sh"
+  ["test.run"]="scripts/capabilities/test_runner.sh"
 )
 
 # =========================================================
@@ -283,6 +290,9 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.extract_configuration_structure"]="readonly"
   ["filesystem.extract_references"]="readonly"
   ["structural.builder"]="readonly"
+  ["typescript.check"]="readonly"
+  ["eslint.check"]="readonly"
+  ["test.run"]="readonly"
 )
 
 # =========================================================
@@ -303,6 +313,9 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.extract_configuration_structure"]="."
   ["filesystem.extract_references"]="."
   ["structural.builder"]="."
+  ["typescript.check"]="."
+  ["eslint.check"]="."
+  ["test.run"]="."
 )
 
 # =========================================================
@@ -335,6 +348,9 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
   "git.diff"
   "git.status"
+  "typescript.check"
+  "eslint.check"
+  "test.run"
 )
 
 declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(

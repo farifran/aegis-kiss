@@ -408,6 +408,31 @@ invoke_aider() {
     "--no-show-model-warnings"
     "--exit"
   )
+  
+  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *typescript_check* ]]; then
+    aider_cmd+=(
+      "--lint-cmd" "ts:bash scripts/capabilities/typescript_check.sh"
+      "--lint-cmd" "tsx:bash scripts/capabilities/typescript_check.sh"
+      "--auto-lint"
+    )
+  fi
+
+  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *eslint_check* ]]; then
+    aider_cmd+=(
+      "--lint-cmd" "js:bash scripts/capabilities/eslint_check.sh"
+      "--lint-cmd" "jsx:bash scripts/capabilities/eslint_check.sh"
+      "--lint-cmd" "ts:bash scripts/capabilities/eslint_check.sh"
+      "--lint-cmd" "tsx:bash scripts/capabilities/eslint_check.sh"
+      "--auto-lint"
+    )
+  fi
+
+  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *test_runner* ]]; then
+    aider_cmd+=(
+      "--test-cmd" "bash scripts/capabilities/test_runner.sh"
+      "--auto-test"
+    )
+  fi
 
   # Add mutation target files (guard against empty expansion)
   if [[ "${#file_args[@]}" -gt 0 ]]; then
