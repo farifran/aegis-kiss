@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec bash "/Users/rafaelfarias/Documents/IDE/aegis kiss/scripts/capabilities/test_runner.sh" "$@"
