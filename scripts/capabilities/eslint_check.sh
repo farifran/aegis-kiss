@@ -46,21 +46,32 @@ run_eslint_check() {
     )
 
     # -----------------------------------------------------
-    # Execute ESLint and capture both output and exit code
+    # Execute ESLint and capture stdout and stderr separately
     # -----------------------------------------------------
+
+    local eslint_stdout_file
+    local eslint_stderr_file
+    eslint_stdout_file="$(mktemp)"
+    eslint_stderr_file="$(mktemp)"
+    trap 'rm -f "${eslint_stdout_file}" "${eslint_stderr_file}"' EXIT
 
     set +e
 
-    eslint_output="$(
-      ${ESLINT_BIN} \
-        "${targets[@]}" \
-        "${ignore_opts[@]}" \
-        --format json 2>&1
-    )"
+    ${ESLINT_BIN} \
+      "${targets[@]}" \
+      "${ignore_opts[@]}" \
+      --format json \
+      > "${eslint_stdout_file}" \
+      2> "${eslint_stderr_file}"
 
     eslint_exit=$?
 
     set -e
+
+    # Read output and error message files
+    eslint_output="$(cat "${eslint_stdout_file}")"
+    local eslint_err_msg
+    eslint_err_msg="$(cat "${eslint_stderr_file}")"
 
     # -----------------------------------------------------
     # Detect ESLint infrastructure failures
@@ -70,27 +81,32 @@ run_eslint_check() {
     # - plugin load failure
     # -----------------------------------------------------
 
-    if [[ ${eslint_exit} -ne 0 ]]; then
-      if ! echo "${eslint_output}" | jq empty >/dev/null 2>&1; then
-
-        jq -n \
-          --arg capability "eslint.check" \
-          --arg classification "readonly" \
-          --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-          --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-          --arg message "${eslint_output}" \
-          '{
-            success: false,
-            capability: $capability,
-            classification: $classification,
-            execution_id: $execution_id,
-            generated_at: $generated_at,
-            payload: null,
-            error: $message
-          }'
-
-        exit 1
+    if [[ -z "${eslint_output}" ]] || ! echo "${eslint_output}" | jq empty >/dev/null 2>&1; then
+      local err_detail="${eslint_err_msg}"
+      if [[ -z "${err_detail}" ]]; then
+        err_detail="${eslint_output}"
       fi
+      if [[ -z "${err_detail}" ]]; then
+        err_detail="ESLint execution failed with exit code ${eslint_exit} and no output"
+      fi
+
+      jq -n \
+        --arg capability "eslint.check" \
+        --arg classification "readonly" \
+        --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
+        --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        --arg message "${err_detail}" \
+        '{
+          success: false,
+          capability: $capability,
+          classification: $classification,
+          execution_id: $execution_id,
+          generated_at: $generated_at,
+          payload: null,
+          error: $message
+        }'
+
+      exit 1
     fi
 
     # -----------------------------------------------------

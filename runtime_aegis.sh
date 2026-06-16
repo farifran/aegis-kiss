@@ -39,7 +39,9 @@
 # - mutate implicitly
 #
 # =========================================================
-
+if [[ -f ".harness/local.env" ]]; then
+    source ".harness/local.env"
+fi
 set -Eeuo pipefail
 
 # =========================================================

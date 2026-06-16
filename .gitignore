@@ -17,6 +17,9 @@
 .harness/runtime/*.bak
 .harness/runtime/*.snapshot
 
+# Local machine secrets/config
+.harness/local.env
+
 # =========================================================
 # AIDER EPHEMERAL STATE
 # =========================================================
