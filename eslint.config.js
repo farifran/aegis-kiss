@@ -24,25 +24,17 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import boundaries from "eslint-plugin-boundaries";
 
-export default [ 
+export default [
 
   // =======================================================
   // GLOBAL IGNORE
   // =======================================================
 
- {
+  {
     ignores: [
-      ".venv/**",
-      "**/.venv/**",
-
       "node_modules/**",
-
       ".next/**",
-      "**/.next/**",
-
       "_next/**",
-      "**/_next/**",
-
       "dist/**",
       "coverage/**",
       "build/**",
@@ -198,7 +190,7 @@ export default [
 
       "@typescript-eslint/no-explicit-any": "warn",
 
-      "@typescript-eslint/consistent-type-imports": "warn",
+      "@typescript-eslint/consistent-type-imports": "warn"
 
       // ---------------------------------------------------
       // EPISTEMIC NOTES
