@@ -210,15 +210,29 @@ bash .harness/runtime/capability_env/filesystem.read AGENTS.md
 Run isolated capability harnesses:
 
 ```bash
-bash scripts/test_capabilities.sh
-bash scripts/test_runtime_contract.sh
-bash scripts/test_constitutional_invariants.sh
+bash scripts/substrates/test/test_capabilities.sh
+bash scripts/substrates/test/test_runtime_contract.sh
+bash scripts/substrates/test/test_constitutional_invariants.sh
 ```
 
 Run the readonly runtime smoke suite:
 
 ```bash
-bash scripts/test_readonly_modes.sh
+bash scripts/substrates/test/test_readonly_modes.sh
+```
+
+Run the mutation and promotion suites:
+
+```bash
+bash scripts/substrates/test/test_aider_substrate.sh
+bash scripts/substrates/test/test_validation_and_promotion.sh
+bash scripts/substrates/test/test_candidate_continuity.sh
+```
+
+Run the full test suite through npm:
+
+```bash
+npm run aegis:test
 ```
 
 ## Repository Structure
