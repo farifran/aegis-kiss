@@ -1,0 +1,278 @@
+{
+  "mode": "forensics",
+  "status": "ok",
+  "summary": "Forensic analysis of Bash script structure completed.",
+  "derived_metrics": {
+    "structural_fingerprint": {
+      "surface_count": 2,
+      "boundary_count": 1,
+      "absence_count": 1,
+      "entrypoint_count": 1,
+      "test_relationship_count": 0,
+      "import_edge_count": 0,
+      "reference_edge_count": 1,
+      "orphan_count": 0,
+      "hotspot_count": 1,
+      "density_score": 0.5,
+      "fragmentation_score": 0.0,
+      "centralization_score": 0.5,
+      "bridge_count": 0,
+      "topology_class": "script_library"
+    },
+    "structural_gravity": [
+      {
+        "file": "bin/deploy.sh",
+        "gravity": {
+          "score": 50.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 1.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 10.0
+            }
+          }
+        }
+      },
+      {
+        "file": "lib/utils.sh",
+        "gravity": {
+          "score": 35.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 1.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 20.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 20.0
+            }
+          }
+        }
+      }
+    ],
+    "metric_definitions": {
+      "edge_density": {
+        "formula": "edge_count / possible_edges",
+        "substitution": "1 / 2",
+        "result": 0.5
+      },
+      "density_score": {
+        "formula": "reference_edge_count / possible_edges",
+        "substitution": "1 / 2",
+        "result": 0.5
+      },
+      "fragmentation_score": {
+        "formula": "orphan_count / total_files",
+        "substitution": "0 / 2",
+        "result": 0.0
+      },
+      "centralization_score": {
+        "formula": "sum(max_degree - node_degree) / ((N-1)(N-2))",
+        "substitution": "1 / 2",
+        "result": 0.5
+      }
+    },
+    "surface_metrics": [
+      {
+        "surface_id": "surface_cluster_001",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 1,
+        "edge_density": 1.0
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 0,
+        "edge_density": 1.0
+      }
+    ],
+    "reachability": [
+      {
+        "file": "bin/deploy.sh",
+        "reachability_radius": {
+          "reachable_nodes": 1,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 1
+        }
+      },
+      {
+        "file": "lib/utils.sh",
+        "reachability_radius": {
+          "reachable_nodes": 0,
+          "reachable_surfaces": 0,
+          "reachable_boundaries": 0
+        }
+      }
+    ]
+  },
+  "interpretations": [
+    {
+      "target": "surface_cluster_001",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes Bash script file (bin/deploy.sh).",
+      "risk": null,
+      "hypothesis": null,
+      "risk_basis": [],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "surface_cluster_002",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes utility bash library (lib/utils.sh).",
+      "risk": null,
+      "hypothesis": null,
+      "risk_basis": [],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "boundary_cluster_001",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Separates main scripts from library utilities.",
+      "risk": "No risks identified for this boundary.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "expected_shellcheck_config_absent",
+      "derived_from": [
+        "observed_absences.expected_shellcheck_config_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "No shellcheck configuration file is present. Translates to missing linting validation gap.",
+      "risk": "Potential shellcheck issues or syntax errors undetected.",
+      "hypothesis": "Assumes simple script without active linting.",
+      "risk_basis": [
+        "observed_absences.expected_shellcheck_config_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.expected_shellcheck_config_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_relationships.entrypoints",
+      "derived_from": [
+        "observed_relationships.entrypoints"
+      ],
+      "evidence_count": 1,
+      "implication": "bin/deploy.sh is the main entry point script.",
+      "risk": null,
+      "hypothesis": null,
+      "risk_basis": [],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_relationships.reference_graph",
+      "derived_from": [
+        "observed_relationships.reference_graph"
+      ],
+      "evidence_count": 1,
+      "implication": "bin/deploy.sh references lib/utils.sh.",
+      "risk": "Missing helper module will cause bin/deploy.sh to fail.",
+      "hypothesis": "Modular shell scripting.",
+      "risk_basis": [
+        "observed_relationships.reference_graph"
+      ],
+      "evidence_chain": [
+        "observed_relationships.reference_graph"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_hotspots",
+      "derived_from": [
+        "observed_hotspots"
+      ],
+      "evidence_count": 1,
+      "implication": "lib/utils.sh is referenced by deploy.sh.",
+      "risk": null,
+      "hypothesis": null,
+      "risk_basis": [],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_gravity.bin/deploy.sh",
+      "derived_from": [
+        "structural_gravity"
+      ],
+      "evidence_count": 1,
+      "implication": "High structural gravity representing key orchestrating script.",
+      "risk": null,
+      "hypothesis": null,
+      "risk_basis": [],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "reachability_raw.bin/deploy.sh",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "bin/deploy.sh has reachability of 1 node downstream.",
+      "risk": "Failure in deploy.sh could affect downstream steps.",
+      "hypothesis": "Pipeline driver.",
+      "risk_basis": [
+        "reachability_raw"
+      ],
+      "evidence_chain": [
+        "reachability_raw"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "structural_fingerprint",
+      "derived_from": [
+        "structural_fingerprint"
+      ],
+      "evidence_count": 1,
+      "implication": "Standard script library layout. Classified as a script_library topology class.",
+      "risk": null,
+      "hypothesis": "script_library",
+      "risk_basis": [],
+      "evidence_chain": [
+        "structural_fingerprint"
+      ],
+      "interpretation_class": "INFERRED"
+    }
+  ],
+  "handover_attention": {
+    "next_attention_targets": [
+      "expected_shellcheck_config_absent"
+    ],
+    "attention_scope": "linter checks",
+    "attention_reason": "check shellcheck configuration presence"
+  }
+}

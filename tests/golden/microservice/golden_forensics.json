@@ -1,0 +1,357 @@
+{
+  "mode": "forensics",
+  "status": "ok",
+  "summary": "Forensic mapping of Microservice service mesh completed.",
+  "derived_metrics": {
+    "structural_fingerprint": {
+      "surface_count": 3,
+      "boundary_count": 3,
+      "absence_count": 1,
+      "entrypoint_count": 1,
+      "test_relationship_count": 0,
+      "import_edge_count": 0,
+      "reference_edge_count": 1,
+      "orphan_count": 1,
+      "hotspot_count": 1,
+      "density_score": 0.17,
+      "fragmentation_score": 0.33,
+      "centralization_score": 0.5,
+      "bridge_count": 1,
+      "topology_class": "microservice"
+    },
+    "structural_gravity": [
+      {
+        "file": "gateway/main.go",
+        "gravity": {
+          "score": 60.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 1.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 20.0
+            }
+          }
+        }
+      },
+      {
+        "file": "service_auth/auth.go",
+        "gravity": {
+          "score": 85.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 1.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 2.0,
+              "weight": 20.0
+            }
+          }
+        }
+      },
+      {
+        "file": "service_billing/billing.go",
+        "gravity": {
+          "score": 40.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 2.0,
+              "weight": 20.0
+            }
+          }
+        }
+      }
+    ],
+    "metric_definitions": {
+      "edge_density": {
+        "formula": "edge_count / possible_edges",
+        "substitution": "1 / 6",
+        "result": 0.17
+      },
+      "density_score": {
+        "formula": "import_edge_count / possible_edges",
+        "substitution": "0 / 3",
+        "result": 0.0
+      },
+      "fragmentation_score": {
+        "formula": "orphan_count / total_files",
+        "substitution": "1 / 3",
+        "result": 0.33
+      },
+      "centralization_score": {
+        "formula": "sum(max_degree - node_degree) / ((N-1)(N-2))",
+        "substitution": "1 / 2",
+        "result": 0.5
+      }
+    },
+    "surface_metrics": [
+      {
+        "surface_id": "surface_cluster_001",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 1,
+        "edge_density": 1.0
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 1,
+        "edge_density": 1.0
+      },
+      {
+        "surface_id": "surface_cluster_003",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 0,
+        "edge_density": 1.0
+      }
+    ],
+    "reachability": [
+      {
+        "file": "gateway/main.go",
+        "reachability_radius": {
+          "reachable_nodes": 1,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 1
+        }
+      },
+      {
+        "file": "service_auth/auth.go",
+        "reachability_radius": {
+          "reachable_nodes": 0,
+          "reachable_surfaces": 0,
+          "reachable_boundaries": 0
+        }
+      }
+    ]
+  },
+  "interpretations": [
+    {
+      "target": "surface_cluster_001",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes API Gateway routing traffic to internal services.",
+      "risk": "Gateway compromise exposes internal routing details.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "surface_cluster_002",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes the Authentication Service serving as the centralized identity provider.",
+      "risk": "Single point of failure (SPOF) for all service requests if authentication fails.",
+      "hypothesis": "Token-based stateless authentication service.",
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_chain": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "surface_cluster_003",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_003"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes the Billing Service processing financial charges.",
+      "risk": "Service cannot process bills if auth or endpoint config is wrong.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_003"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "boundary_cluster_003",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_003"
+      ],
+      "evidence_count": 1,
+      "implication": "Network boundary between authorization controls and billing calculations.",
+      "risk": "Latency overhead due to HTTP/gRPC round-trips for authorization check.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_003"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "expected_endpoint_file_absent",
+      "derived_from": [
+        "observed_absences.expected_endpoint_file_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "No endpoint config present in billing, potentially relying on dynamic environment config. Translates to missing route declaration gap.",
+      "risk": "Billing service unable to serve HTTP requests due to missing endpoint route declarations.",
+      "hypothesis": "Relies on external service mesh routes.",
+      "risk_basis": [
+        "observed_absences.expected_endpoint_file_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.expected_endpoint_file_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_relationships.reference_graph",
+      "derived_from": [
+        "observed_relationships.reference_graph"
+      ],
+      "evidence_count": 1,
+      "implication": "API gateway routes directly to the authentication service for credentials validation.",
+      "risk": "Network issues between gateway and auth services block all system access.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_relationships.reference_graph"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_orphans",
+      "derived_from": [
+        "observed_orphans"
+      ],
+      "evidence_count": 1,
+      "implication": "Billing service lacks incoming code references in repository scope.",
+      "risk": "Orphaned service must be invoked over network protocols.",
+      "hypothesis": "Service mesh isolation.",
+      "risk_basis": [
+        "observed_orphans"
+      ],
+      "evidence_chain": [
+        "observed_orphans"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_hotspots",
+      "derived_from": [
+        "observed_hotspots"
+      ],
+      "evidence_count": 1,
+      "implication": "Auth.go is the key target of gateway references.",
+      "risk": "High load on auth service during peak API gateway usage.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_hotspots"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_bridges.bridge_001",
+      "derived_from": [
+        "observed_bridges"
+      ],
+      "evidence_count": 1,
+      "implication": "The API gateway acts as a bridge directing public traffic into the auth surface.",
+      "risk": "Single path ingress point makes gateway security critical.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_bridges"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_gravity.service_auth/auth.go",
+      "derived_from": [
+        "structural_gravity"
+      ],
+      "evidence_count": 1,
+      "implication": "High structural gravity of 85.0 (driven by incoming edges contribution: 15.0, crosses boundary: 40.0, and being a core auth module: 30.0) represents a critical system SPOF.",
+      "risk": null,
+      "hypothesis": "Centralized authority subsystem.",
+      "risk_basis": [],
+      "interpretation_class": "SPECULATIVE"
+    },
+    {
+      "target": "reachability_raw.gateway/main.go",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes a structural reachability of 1 reachable node downstream when gateway/main.go is modified.",
+      "risk": "Minimal down-stream structural blast radius.",
+      "hypothesis": null,
+      "risk_basis": [
+        "reachability_raw"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "reachability_raw.service_auth/auth.go",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes a structural reachability of 0 reachable nodes downstream. However, its operational criticality is extremely high due to high incoming centrality.",
+      "risk": null,
+      "hypothesis": "Central Auth Service.",
+      "risk_basis": [],
+      "interpretation_class": "SPECULATIVE"
+    },
+    {
+      "target": "structural_fingerprint",
+      "derived_from": [
+        "structural_fingerprint"
+      ],
+      "evidence_count": 1,
+      "implication": "Decoupled microservice topology with 3 separate boundaries and fragmentation score of 0.33. Classified as a microservice topology class.",
+      "risk": null,
+      "hypothesis": "microservice",
+      "risk_basis": [],
+      "evidence_chain": [
+        "structural_fingerprint"
+      ],
+      "interpretation_class": "INFERRED"
+    }
+  ],
+  "handover_attention": {
+    "next_attention_targets": [
+      "database_config_property_absent"
+    ],
+    "attention_scope": "credential isolation",
+    "attention_reason": "prevent check-in of physical credentials"
+  }
+}

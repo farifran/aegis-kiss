@@ -1,0 +1,393 @@
+{
+  "mode": "forensics",
+  "status": "ok",
+  "summary": "Forensic mapping of Monolith architecture completed.",
+  "derived_metrics": {
+    "structural_fingerprint": {
+      "surface_count": 3,
+      "boundary_count": 2,
+      "absence_count": 2,
+      "entrypoint_count": 1,
+      "test_relationship_count": 1,
+      "import_edge_count": 1,
+      "reference_edge_count": 1,
+      "orphan_count": 1,
+      "hotspot_count": 1,
+      "density_score": 0.33,
+      "fragmentation_score": 0.0,
+      "centralization_score": 0.5,
+      "bridge_count": 1,
+      "topology_class": "monolith"
+    },
+    "structural_gravity": [
+      {
+        "file": "app/controllers/users_controller.py",
+        "gravity": {
+          "score": 75.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 1.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 35.0
+            }
+          }
+        }
+      },
+      {
+        "file": "app/models/user.py",
+        "gravity": {
+          "score": 85.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 1.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 2.0,
+              "weight": 35.0
+            }
+          }
+        }
+      },
+      {
+        "file": "tests/test_users.py",
+        "gravity": {
+          "score": 30.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 30.0
+            }
+          }
+        }
+      }
+    ],
+    "metric_definitions": {
+      "edge_density": {
+        "formula": "edge_count / possible_edges",
+        "substitution": "2 / 6",
+        "result": 0.33
+      },
+      "density_score": {
+        "formula": "import_edge_count / possible_edges",
+        "substitution": "1 / 3",
+        "result": 0.33
+      },
+      "fragmentation_score": {
+        "formula": "orphan_count / total_files",
+        "substitution": "0 / 5",
+        "result": 0.0
+      },
+      "centralization_score": {
+        "formula": "sum(max_degree - node_degree) / ((N-1)(N-2))",
+        "substitution": "1 / 2",
+        "result": 0.5
+      }
+    },
+    "surface_metrics": [
+      {
+        "surface_id": "surface_cluster_001",
+        "member_count": 2,
+        "import_degree": 0,
+        "reference_degree": 1,
+        "edge_density": 0.5
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "member_count": 1,
+        "import_degree": 1,
+        "reference_degree": 1,
+        "edge_density": 1.0
+      },
+      {
+        "surface_id": "surface_cluster_003",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 0,
+        "edge_density": 1.0
+      }
+    ],
+    "reachability": [
+      {
+        "file": "app/controllers/users_controller.py",
+        "reachability_radius": {
+          "reachable_nodes": 2,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 2
+        }
+      },
+      {
+        "file": "app/models/user.py",
+        "reachability_radius": {
+          "reachable_nodes": 1,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 1
+        }
+      }
+    ]
+  },
+  "interpretations": [
+    {
+      "target": "surface_cluster_001",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes the main controller/view layer (Users Controller), managing presentation logic and user interface interaction.",
+      "risk": "Lack of separation between controller actions and template rendering can lead to high resource consumption on page generation.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "surface_cluster_002",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes the data access/model layer (User Model) containing database entity mappings.",
+      "risk": "Lack of automated unit testing for User model verification increases risk of schema-related runtime exceptions.",
+      "hypothesis": "Active Record design pattern where models manage both domain logic and physical persistence.",
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_chain": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "surface_cluster_003",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_003"
+      ],
+      "evidence_count": 1,
+      "implication": "Defines the test suite targeting controller actions.",
+      "risk": "Testing verifies controllers but bypasses unit tests for raw models.",
+      "hypothesis": "Integration-first test design pattern.",
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_003"
+      ],
+      "evidence_chain": [
+        "observed_surfaces.surface_cluster_003"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "boundary_cluster_001",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Tight coupling exists between the controller layer and model layer via direct dependencies.",
+      "risk": "Bypassing domain services layer introduces tight coupling, complicating future service extraction.",
+      "hypothesis": "Simple MVC dependency graph with direct data access from controllers.",
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_chain": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "boundary_cluster_002",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Isolation boundary separating controller implementation details from regression verification logic.",
+      "risk": "Test suite bypasses models to focus on request flow validation.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_002"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "database_config_property_absent",
+      "derived_from": [
+        "observed_absences.database_config_property_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "Database connection parameters are hardcoded or credentials missing in the configuration file. Translates to missing database config gap.",
+      "risk": "Application failure during database connection initialization due to missing config properties.",
+      "hypothesis": "Declarative environment setup relying on local configurations.",
+      "risk_basis": [
+        "observed_absences.database_config_property_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.database_config_property_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "expected_test_file_absent",
+      "derived_from": [
+        "observed_absences.expected_test_file_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "No unit test verification for app/models/user.py. Translates to missing unit test coverage gap.",
+      "risk": "Internal data validation failures might slip to production.",
+      "hypothesis": "Coverage gap in verification layer.",
+      "risk_basis": [
+        "observed_absences.expected_test_file_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.expected_test_file_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_relationships.imports",
+      "derived_from": [
+        "observed_relationships.imports"
+      ],
+      "evidence_count": 1,
+      "implication": "Users controller directly depends on User database models for data retrieval.",
+      "risk": "Persistence exceptions bubble directly into the HTTP handler layer without interception.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_relationships.imports"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_orphans",
+      "derived_from": [
+        "observed_orphans"
+      ],
+      "evidence_count": 1,
+      "implication": "The index.html view file is an orphan with no static imports detected.",
+      "risk": "Template rendering relies on dynamic evaluation, making static analysis incomplete.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_orphans"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_hotspots",
+      "derived_from": [
+        "observed_hotspots"
+      ],
+      "evidence_count": 1,
+      "implication": "User.py is the primary domain data entity hub.",
+      "risk": "Highly coupled model file increases change blast radius.",
+      "hypothesis": "Central database model active record design.",
+      "risk_basis": [
+        "observed_hotspots"
+      ],
+      "evidence_chain": [
+        "observed_hotspots"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_bridges.bridge_001",
+      "derived_from": [
+        "observed_bridges"
+      ],
+      "evidence_count": 1,
+      "implication": "The users_controller acts as a bridge coupling user presentation views with model databases.",
+      "risk": "High direct coupling increases complexity of modularizing users controller.",
+      "hypothesis": "Transit controller pattern.",
+      "risk_basis": [
+        "observed_bridges"
+      ],
+      "evidence_chain": [
+        "observed_bridges"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "structural_gravity.app/models/user.py",
+      "derived_from": [
+        "structural_gravity"
+      ],
+      "evidence_count": 1,
+      "implication": "High structural gravity of 85.0 (driven by incoming edges contribution: 15.0 and boundary crossing: 70.0) marks app/models/user.py as a central structural hub.",
+      "risk": "Regression errors in user.py will affect importing controller components.",
+      "hypothesis": "Core business model entity.",
+      "risk_basis": [
+        "structural_gravity"
+      ],
+      "evidence_chain": [
+        "structural_gravity"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "reachability_raw.app/models/user.py",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes a structural reachability of 1 reachable node downstream when user.py is modified.",
+      "risk": "Downstream imports in users_controller.py will fail if user.py is broken.",
+      "hypothesis": "Core business model entity.",
+      "risk_basis": [
+        "reachability_raw"
+      ],
+      "evidence_chain": [
+        "reachability_raw"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "structural_fingerprint",
+      "derived_from": [
+        "structural_fingerprint"
+      ],
+      "evidence_count": 1,
+      "implication": "Clean MVC structure with 3 surfaces, 2 boundaries, and centralization score of 0.5. Classified as a monolith topology class.",
+      "risk": null,
+      "hypothesis": "monolith",
+      "risk_basis": [],
+      "evidence_chain": [
+        "structural_fingerprint"
+      ],
+      "interpretation_class": "INFERRED"
+    }
+  ],
+  "handover_attention": {
+    "next_attention_targets": [
+      "database_config_property_absent"
+    ],
+    "attention_scope": "credential isolation",
+    "attention_reason": "prevent check-in of physical credentials"
+  }
+}

@@ -1,0 +1,312 @@
+{
+  "mode": "forensics",
+  "status": "ok",
+  "summary": "Forensic analysis of Node dependency structure completed.",
+  "derived_metrics": {
+    "structural_fingerprint": {
+      "surface_count": 2,
+      "boundary_count": 1,
+      "absence_count": 1,
+      "entrypoint_count": 1,
+      "test_relationship_count": 0,
+      "import_edge_count": 1,
+      "reference_edge_count": 0,
+      "orphan_count": 2,
+      "hotspot_count": 1,
+      "density_score": 0.5,
+      "fragmentation_score": 0.0,
+      "centralization_score": 0.0,
+      "bridge_count": 0,
+      "topology_class": "script_library"
+    },
+    "structural_gravity": [
+      {
+        "file": "src/index.ts",
+        "gravity": {
+          "score": 60.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 1.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 20.0
+            }
+          }
+        }
+      },
+      {
+        "file": "src/db.ts",
+        "gravity": {
+          "score": 75.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 1.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 20.0
+            },
+            "boundary_crossing": {
+              "count": 2.0,
+              "weight": 20.0
+            }
+          }
+        }
+      },
+      {
+        "file": "package.json",
+        "gravity": {
+          "score": 30.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 30.0
+            }
+          }
+        }
+      }
+    ],
+    "metric_definitions": {
+      "edge_density": {
+        "formula": "edge_count / possible_edges",
+        "substitution": "1 / 2",
+        "result": 0.5
+      },
+      "density_score": {
+        "formula": "import_edge_count / possible_edges",
+        "substitution": "1 / 2",
+        "result": 0.5
+      },
+      "fragmentation_score": {
+        "formula": "orphan_count / total_files",
+        "substitution": "0 / 4",
+        "result": 0.0
+      },
+      "centralization_score": {
+        "formula": "sum(max_degree - node_degree) / ((N-1)(N-2))",
+        "substitution": "0 / 2",
+        "result": 0.0
+      }
+    },
+    "surface_metrics": [
+      {
+        "surface_id": "surface_cluster_001",
+        "member_count": 2,
+        "import_degree": 1,
+        "reference_degree": 0,
+        "edge_density": 0.5
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "member_count": 2,
+        "import_degree": 0,
+        "reference_degree": 0,
+        "edge_density": 0.0
+      }
+    ],
+    "reachability": [
+      {
+        "file": "src/index.ts",
+        "reachability_radius": {
+          "reachable_nodes": 1,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 1
+        }
+      },
+      {
+        "file": "src/db.ts",
+        "reachability_radius": {
+          "reachable_nodes": 0,
+          "reachable_surfaces": 0,
+          "reachable_boundaries": 0
+        }
+      }
+    ]
+  },
+  "interpretations": [
+    {
+      "target": "surface_cluster_001",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes core TypeScript implementation logic.",
+      "risk": "Errors in src/index.ts directly interrupt process startup.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "surface_cluster_002",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes Node project and compiler configuration layers.",
+      "risk": "Invalid TS config breaks compilation.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "boundary_cluster_001",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Separates compiler configurations and metadata from source implementation.",
+      "risk": "Trivial, low boundary constraint.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "expected_lockfile_absent",
+      "derived_from": [
+        "observed_absences.expected_lockfile_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "No lockfile exists to pin npm dependency trees. Translates to missing lockfile gap.",
+      "risk": "Nondeterministic production builds.",
+      "hypothesis": "Ad-hoc or newly initialized node project without package-lock.json.",
+      "risk_basis": [
+        "observed_absences.expected_lockfile_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.expected_lockfile_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_relationships.imports",
+      "derived_from": [
+        "observed_relationships.imports"
+      ],
+      "evidence_count": 1,
+      "implication": "The TypeScript source entrypoint imports database connectivity directly.",
+      "risk": "Database init failure blocks web application startup.",
+      "hypothesis": "Standard single-entry Node service design.",
+      "risk_basis": [
+        "observed_relationships.imports"
+      ],
+      "evidence_chain": [
+        "observed_relationships.imports"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_orphans",
+      "derived_from": [
+        "observed_orphans"
+      ],
+      "evidence_count": 1,
+      "implication": "Configurations package.json and tsconfig.json do not import source files.",
+      "risk": "Unlinked configurations.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_orphans"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_hotspots",
+      "derived_from": [
+        "observed_hotspots"
+      ],
+      "evidence_count": 1,
+      "implication": "db.ts is the main resource imported by the main entrypoint.",
+      "risk": "Tight coupling on database client instance.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_hotspots"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_gravity.src/db.ts",
+      "derived_from": [
+        "structural_gravity"
+      ],
+      "evidence_count": 1,
+      "implication": "High structural gravity of 75.0 (driven by incoming edges contribution: 15.0, entrypoint proximity: 20.0, and boundary crossing: 40.0) highlights the database module dependency centrality.",
+      "risk": "Bugs in db.ts directly break index.ts startup sequences.",
+      "hypothesis": "Core persistence database adapter singleton.",
+      "risk_basis": [
+        "structural_gravity"
+      ],
+      "evidence_chain": [
+        "structural_gravity"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "reachability_raw.src/index.ts",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes a structural reachability of 1 reachable node downstream when src/index.ts is modified.",
+      "risk": "Low downstream changes propagation risk.",
+      "hypothesis": null,
+      "risk_basis": [
+        "reachability_raw"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_fingerprint",
+      "derived_from": [
+        "structural_fingerprint"
+      ],
+      "evidence_count": 1,
+      "implication": "Minimal script library layout with a centralization score of 0.0. Classified as a script_library topology class.",
+      "risk": null,
+      "hypothesis": "script_library",
+      "risk_basis": [],
+      "evidence_chain": [
+        "structural_fingerprint"
+      ],
+      "interpretation_class": "INFERRED"
+    }
+  ],
+  "handover_attention": {
+    "next_attention_targets": [
+      "expected_lockfile_absent"
+    ],
+    "attention_scope": "package-lock generation",
+    "attention_reason": "observed missing package lockfiles for installation verification"
+  }
+}

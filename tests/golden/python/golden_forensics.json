@@ -1,0 +1,315 @@
+{
+  "mode": "forensics",
+  "status": "ok",
+  "summary": "Forensic analysis of Python module dependencies completed.",
+  "derived_metrics": {
+    "structural_fingerprint": {
+      "surface_count": 2,
+      "boundary_count": 1,
+      "absence_count": 1,
+      "entrypoint_count": 1,
+      "test_relationship_count": 1,
+      "import_edge_count": 2,
+      "reference_edge_count": 0,
+      "orphan_count": 1,
+      "hotspot_count": 1,
+      "density_score": 0.5,
+      "fragmentation_score": 0.0,
+      "centralization_score": 0.5,
+      "bridge_count": 0,
+      "topology_class": "monolith"
+    },
+    "structural_gravity": [
+      {
+        "file": "src/main.py",
+        "gravity": {
+          "score": 60.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 2.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 10.0
+            }
+          }
+        }
+      },
+      {
+        "file": "src/auth.py",
+        "gravity": {
+          "score": 75.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 1.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 1.0,
+              "weight": 20.0
+            },
+            "boundary_crossing": {
+              "count": 2.0,
+              "weight": 20.0
+            }
+          }
+        }
+      },
+      {
+        "file": "src/billing.py",
+        "gravity": {
+          "score": 30.0,
+          "formula": {
+            "incoming_edges": {
+              "count": 0.0,
+              "weight": 15.0
+            },
+            "outgoing_edges": {
+              "count": 0.0,
+              "weight": 10.0
+            },
+            "entrypoint_proximity": {
+              "count": 0.0,
+              "weight": 30.0
+            },
+            "boundary_crossing": {
+              "count": 1.0,
+              "weight": 30.0
+            }
+          }
+        }
+      }
+    ],
+    "metric_definitions": {
+      "edge_density": {
+        "formula": "edge_count / possible_edges",
+        "substitution": "2 / 4",
+        "result": 0.5
+      },
+      "density_score": {
+        "formula": "import_edge_count / possible_edges",
+        "substitution": "2 / 4",
+        "result": 0.5
+      },
+      "fragmentation_score": {
+        "formula": "orphan_count / total_files",
+        "substitution": "0 / 5",
+        "result": 0.0
+      },
+      "centralization_score": {
+        "formula": "sum(max_degree - node_degree) / ((N-1)(N-2))",
+        "substitution": "1 / 2",
+        "result": 0.5
+      }
+    },
+    "surface_metrics": [
+      {
+        "surface_id": "surface_cluster_001",
+        "member_count": 3,
+        "import_degree": 2,
+        "reference_degree": 0,
+        "edge_density": 0.33
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "member_count": 1,
+        "import_degree": 0,
+        "reference_degree": 0,
+        "edge_density": 1.0
+      }
+    ],
+    "reachability": [
+      {
+        "file": "src/main.py",
+        "reachability_radius": {
+          "reachable_nodes": 2,
+          "reachable_surfaces": 1,
+          "reachable_boundaries": 0
+        }
+      },
+      {
+        "file": "src/auth.py",
+        "reachability_radius": {
+          "reachable_nodes": 0,
+          "reachable_surfaces": 0,
+          "reachable_boundaries": 0
+        }
+      }
+    ]
+  },
+  "interpretations": [
+    {
+      "target": "surface_cluster_001",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes Python module files (main, auth, billing).",
+      "risk": "Lack of dependency verification might break imports on system environment.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_001"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "surface_cluster_002",
+      "derived_from": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes testing modules validating system auth behavior.",
+      "risk": "No tests exist for the billing service.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_surfaces.surface_cluster_002"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "boundary_cluster_001",
+      "derived_from": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_count": 1,
+      "implication": "Enforces separation between test suites and application code.",
+      "risk": "No risks identified for this boundary.",
+      "hypothesis": "Test suite directory isolation.",
+      "risk_basis": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "evidence_chain": [
+        "observed_boundaries.boundary_cluster_001"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "expected_venv_directory_absent",
+      "derived_from": [
+        "observed_absences.expected_venv_directory_absent"
+      ],
+      "evidence_count": 1,
+      "implication": "Python execution depends on system-level site-packages. Translates to missing virtual environment gap.",
+      "risk": "Potential dependency version mismatches if executing in a shared global environment without active isolation.",
+      "hypothesis": "Assumes dockerized containerization or global installation strategy.",
+      "risk_basis": [
+        "observed_absences.expected_venv_directory_absent"
+      ],
+      "evidence_chain": [
+        "observed_absences.expected_venv_directory_absent"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_relationships.test_relationships",
+      "derived_from": [
+        "observed_relationships.test_relationships"
+      ],
+      "evidence_count": 1,
+      "implication": "The auth module is explicitly verified by a test module in tests directory.",
+      "risk": "Billing module has no corresponding test mapping, risking unverified billing changes.",
+      "hypothesis": "Standard pytest layout checking identity logic.",
+      "risk_basis": [
+        "observed_relationships.test_relationships"
+      ],
+      "evidence_chain": [
+        "observed_relationships.test_relationships"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "observed_orphans",
+      "derived_from": [
+        "observed_orphans"
+      ],
+      "evidence_count": 1,
+      "implication": "Billing module has no incoming test relationships or reference graph links.",
+      "risk": "No unit tests cover the billing functionality.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_orphans"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "observed_hotspots",
+      "derived_from": [
+        "observed_hotspots"
+      ],
+      "evidence_count": 1,
+      "implication": "Auth module is targeted by tests/test_auth.py.",
+      "risk": "Coupling on auth module interface.",
+      "hypothesis": null,
+      "risk_basis": [
+        "observed_hotspots"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_gravity.src/auth.py",
+      "derived_from": [
+        "structural_gravity"
+      ],
+      "evidence_count": 1,
+      "implication": "High structural gravity of 75.0 (driven by incoming edges contribution: 15.0, entrypoint proximity: 20.0, and boundary crossing: 40.0) of auth.py represents the main logical block for verification flow.",
+      "risk": "Auth logic is a focal module for identity mapping and test verification.",
+      "hypothesis": "Central domain logic module.",
+      "risk_basis": [
+        "structural_gravity"
+      ],
+      "evidence_chain": [
+        "structural_gravity"
+      ],
+      "interpretation_class": "INFERRED"
+    },
+    {
+      "target": "reachability_raw.src/main.py",
+      "derived_from": [
+        "reachability_raw"
+      ],
+      "evidence_count": 1,
+      "implication": "Exposes a structural reachability of 2 reachable nodes downstream when main.py is modified.",
+      "risk": "Direct startup issues propagation risk.",
+      "hypothesis": null,
+      "risk_basis": [
+        "reachability_raw"
+      ],
+      "interpretation_class": "DESCRIPTIVE"
+    },
+    {
+      "target": "structural_fingerprint",
+      "derived_from": [
+        "structural_fingerprint"
+      ],
+      "evidence_count": 1,
+      "implication": "Standard modular monolith python codebase structure. Classified as a monolith topology class.",
+      "risk": null,
+      "hypothesis": "monolith",
+      "risk_basis": [],
+      "evidence_chain": [
+        "structural_fingerprint"
+      ],
+      "interpretation_class": "INFERRED"
+    }
+  ],
+  "handover_attention": {
+    "next_attention_targets": [
+      "expected_venv_directory_absent"
+    ],
+    "attention_scope": "environment validation",
+    "attention_reason": "check virtual environment activation in execution tasks"
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "mode": "discovery",
+  "observed_payloads": [],
+  "observed_files": [
+    "src/main.py",
+    "src/auth.py",
+    "src/billing.py",
+    "tests/test_auth.py",
+    "requirements.txt"
+  ],
+  "observed_entities": [],
+  "observed_capabilities": [],
+  "observations": {
+    "observed_surfaces": [
+      {
+        "surface_id": "surface_cluster_001",
+        "members": [
+          "src/main.py",
+          "src/auth.py",
+          "src/billing.py"
+        ],
+        "evidence_signature": [
+          "SHARED_DIRECTORY"
+        ],
+        "surface_role": "cluster",
+        "formation_signals": [
+          "DIRECTORY_CONVERGENCE",
+          "IMPORT_MATCH"
+        ],
+        "confidence": "high",
+        "evidence_basis": {
+          "directory_convergence": true,
+          "co_occurrence": false,
+          "runtime_exposure": false
+        }
+      },
+      {
+        "surface_id": "surface_cluster_002",
+        "members": [
+          "tests/test_auth.py"
+        ],
+        "evidence_signature": [
+          "SHARED_DIRECTORY"
+        ],
+        "surface_role": "cluster",
+        "formation_signals": [
+          "DIRECTORY_CONVERGENCE",
+          "TEST_RELATIONSHIP"
+        ],
+        "confidence": "high",
+        "evidence_basis": {
+          "directory_convergence": true,
+          "co_occurrence": false,
+          "runtime_exposure": false
+        }
+      }
+    ],
+    "observed_boundaries": [
+      {
+        "boundary_id": "boundary_cluster_001",
+        "boundary_path": "tests",
+        "members": [
+          "tests/test_auth.py"
+        ],
+        "separates": [
+          "surface_cluster_001",
+          "surface_cluster_002"
+        ],
+        "cross_boundary_edges": 1,
+        "confidence": "high",
+        "evidence_basis": {
+          "shared_context": false,
+          "dependency_isolation": true,
+          "namespace_separation": true
+        }
+      }
+    ],
+    "observed_absences": [
+      {
+        "absence_id": "expected_venv_directory_absent",
+        "absence_class": "missing_file",
+        "evidence": [
+          "no venv or .venv directory found"
+        ],
+        "expected_property": null,
+        "observed_property": null,
+        "affected_surfaces": [
+          "surface_cluster_001"
+        ],
+        "confidence": "high",
+        "evidence_basis": {
+          "presence_absence": true,
+          "declaration_divergence": false
+        }
+      }
+    ],
+    "observed_relationships": {
+      "imports": [
+        {
+          "file": "src/main.py",
+          "imports": [
+            "src/auth.py",
+            "src/billing.py"
+          ]
+        }
+      ],
+      "test_relationships": [
+        {
+          "file": "src/auth.py",
+          "tests": [
+            "tests/test_auth.py"
+          ]
+        }
+      ],
+      "entrypoints": [
+        {
+          "entrypoint": "src/main.py",
+          "type": "python_script"
+        }
+      ],
+      "configuration_structures": [],
+      "reference_graph": []
+    },
+    "observed_orphans": [
+      "src/billing.py"
+    ],
+    "observed_hotspots": [
+      {
+        "file": "src/auth.py",
+        "incoming_edges": 1,
+        "outgoing_edges": 0
+      }
+    ],
+    "observed_bridges": [],
+    "structural_graph": {
+      "nodes": [
+        {
+          "id": "src/main.py",
+          "type": "file"
+        },
+        {
+          "id": "src/auth.py",
+          "type": "file"
+        },
+        {
+          "id": "src/billing.py",
+          "type": "file"
+        }
+      ],
+      "edges": [
+        {
+          "source": "src/main.py",
+          "target": "src/auth.py",
+          "type": "import"
+        },
+        {
+          "source": "src/main.py",
+          "target": "src/billing.py",
+          "type": "import"
+        }
+      ]
+    },
+    "structural_delta": {
+      "added_files": [],
+      "removed_files": [],
+      "modified_files": [],
+      "metrics_delta": {
+        "surface_count": 0,
+        "boundary_count": 0,
+        "absence_count": 0
+      }
+    },
+    "topology_history": [
+      {
+        "step": 1,
+        "timestamp": "2026-06-12T02:00:00Z",
+        "fingerprint": {
+          "surface_count": 2,
+          "boundary_count": 1,
+          "absence_count": 1
+        }
+      }
+    ]
+  },
+  "handover_attention": {
+    "next_attention_targets": [
+      "expected_venv_directory_absent"
+    ],
+    "selection_basis": [
+      "absence_density"
+    ],
+    "attention_scope": "virtualenv check",
+    "attention_reason": "check if dependencies are isolated properly in a virtual environment"
+  }
+}
