@@ -187,7 +187,9 @@ for f in all_files:
     elif ext in ['.sh', '.bash', ''] and os.path.isfile(f_abs):
         raw_sources = re.findall(r'^\s*source\s+([^\s\n#]+)', content, re.MULTILINE)
         raw_sources += re.findall(r'^\s*\.\s+([^\s\n#]+)', content, re.MULTILINE)
-        for t in [m.strip('\'"') for m in raw_sources]:
+        raw_sources += re.findall(r'^\s*(?:bash|sh)\s+([^\s\n#]+)', content, re.MULTILINE)
+        for t in [m.strip('\'"').rstrip('\\') for m in raw_sources
+                  if '$' not in m and not m.startswith('-')]:
             f_dir = os.path.dirname(f)
             cand = resolve_existing([
                 t,

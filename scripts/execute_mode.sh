@@ -776,7 +776,13 @@ validate_artifact() {
             ($previous_discovery.artifact_snapshot.ranked_targets[]?
               | select(.type == "explicit_request")
               | .file),
-            $previous_discovery.epistemic_state.next_attention_targets[]?
+            $previous_discovery.epistemic_state.next_attention_targets[]?,
+            ($previous_discovery.artifact_snapshot.topology_index.boundaries[]?.file),
+            ($previous_discovery.artifact_snapshot.topology_index.hotspots[]?.file),
+            ($previous_discovery.artifact_snapshot.topology_index.entrypoints[]?.file),
+            ($previous_discovery.artifact_snapshot.topology_index.bridges[]?.from),
+            ($previous_discovery.artifact_snapshot.topology_index.bridges[]?.to),
+            ($previous_discovery.artifact_snapshot.topology_index.surfaces[]?.members[]?)
           ]
           | unique
         ) as $authorized_targets

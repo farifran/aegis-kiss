@@ -429,6 +429,62 @@ entrypoints_out = [
 ]
 
 # =========================================================
+# NODE INDEX — reverse lookup (file -> topology facts)
+# Forward lookup (id -> file) lives in the per-type lists above.
+# Reverse lookup (file -> {surface_ref, is_entrypoint, is_hotspot,
+# is_boundary, degrees, test_covered, ids}) lives here.
+# Forensics uses this to answer "given a file, what is it?"
+# without scanning every per-type list.
+# =========================================================
+
+# Unresolved references observed by the extractor: references found
+# in source (source/import/require/bash) whose target could not be
+# resolved to a node (e.g. pruned path, non-existent, out of scope).
+# Used to classify relation_visibility below. This is evidence
+# collected by the extractor, not inference by the builder.
+unresolved_refs_raw = (ref_graph_payload or {}).get('unresolved_references', [])
+_nodes_with_unresolved = set()
+for _ur in unresolved_refs_raw:
+    _nodes_with_unresolved.add(_ur.get('from', ''))
+
+node_index = {}
+for _n in nodes:
+    _has_surface = surface_of.get(_n) is not None
+    if _has_surface:
+        _rv = 'has_observed_relationships'
+    elif _n in _nodes_with_unresolved:
+        _rv = 'observation_limited'
+    else:
+        _rv = 'none_observed'
+    node_index[_n] = {
+        'surface_ref':         surface_of.get(_n, None),
+        'relation_visibility': _rv,
+        'is_entrypoint':       False,
+        'is_hotspot':          False,
+        'is_boundary':         False,
+        'in_degree':           in_degree.get(_n, 0),
+        'out_degree':          out_degree.get(_n, 0),
+        'total_degree':        in_degree.get(_n, 0) + out_degree.get(_n, 0),
+        'test_covered':        _n in covered_files,
+    }
+
+for _e in entrypoints_out:
+    _f = _e['file']
+    if _f in node_index:
+        node_index[_f]['is_entrypoint']  = True
+        node_index[_f]['entrypoint_id']  = _e['id']
+for _h in hotspots_out:
+    _f = _h['file']
+    if _f in node_index:
+        node_index[_f]['is_hotspot'] = True
+        node_index[_f]['hotspot_id'] = _h['id']
+for _b in boundaries_out:
+    _f = _b['file']
+    if _f in node_index:
+        node_index[_f]['is_boundary'] = True
+        node_index[_f]['boundary_id'] = _b['id']
+
+# =========================================================
 # SELECTION & RANKING
 # Deterministic prioritization based on graph topology.
 # =========================================================
@@ -436,6 +492,7 @@ entrypoints_out = [
 investigation_input = os.environ.get('AEGIS_INVESTIGATION_INPUT', '')
 
 import re
+
 matched_surface_id = None
 terms = re.findall(r'\b[a-zA-Z0-9_-]+\b', investigation_input)
 for term in terms:
@@ -615,6 +672,11 @@ ranked_targets   = _explicit_targets[:_explicit_count] + ranked_targets[:_topolo
 total_undirected_edges = sum(len(v) for v in adj_und.values()) // 2 if adj_und else 0
 connected_node_count   = sum(s['member_count'] for s in surfaces_out)
 
+# topology_summary — graph-derived topology ONLY.
+# Counts of nodes, edges, and derived structural features.
+# Coverage and payload-health live in `evidence` below so that
+# topology (what the graph IS) is not conflated with evidence
+# (what was observed about coverage and payload success).
 topology_summary = {
     'total_nodes':             len(nodes),
     'total_edges':             total_undirected_edges,
@@ -627,15 +689,26 @@ topology_summary = {
     'bridge_truncated':        len(bridges_raw) > BRIDGE_EMIT_LIMIT,
     'hotspot_count':           len(hotspots_out),
     'entrypoint_count':        len(entrypoints_out),
-    'uncovered_hotspot_count': sum(1 for h in hotspots_out if not h['test_covered']),
-    'test_covered_file_count': len(covered_files),
-    'config_file_count':       len((config_struct_payload or {}).get('config_structures', [])),
-    'consumed_payload_ok_count':
-        sum(1 for p in consumed_payloads if p['status'] == 'ok'),
-    'consumed_payload_missing_count':
-        sum(1 for p in consumed_payloads if p['status'] == 'missing'),
-    'consumed_payload_failed_count':
-        sum(1 for p in consumed_payloads if p['status'] not in ('ok', 'missing')),
+}
+
+# evidence — observed coverage and payload health.
+# Distinct from topology: these describe what was observed about
+# test coverage and whether upstream payloads materialized, not the
+# shape of the graph itself.
+evidence = {
+    'coverage': {
+        'test_covered_file_count': len(covered_files),
+        'config_file_count':       len((config_struct_payload or {}).get('config_structures', [])),
+        'uncovered_hotspot_count': sum(1 for h in hotspots_out if not h['test_covered']),
+    },
+    'payload_status': {
+        'consumed_payload_ok_count':
+            sum(1 for p in consumed_payloads if p['status'] == 'ok'),
+        'consumed_payload_missing_count':
+            sum(1 for p in consumed_payloads if p['status'] == 'missing'),
+        'consumed_payload_failed_count':
+            sum(1 for p in consumed_payloads if p['status'] not in ('ok', 'missing')),
+    },
 }
 
 visibility_gap_count = sum(1 for p in consumed_payloads if p['status'] != 'ok')
@@ -665,6 +738,7 @@ gap_counts = {
 
 result = {
     'topology_summary':          topology_summary,
+    'evidence':                  evidence,
     'ranked_targets':            ranked_targets,
     'gap_counts':                gap_counts,
     'topology_index': {
@@ -673,7 +747,9 @@ result = {
         'boundaries':            boundaries_out,
         'hotspots':              hotspots_out,
         'entrypoints':           entrypoints_out,
+        'node_index':            node_index,
     },
+    'unresolved_references':     unresolved_refs_raw,
     'consumed_payloads':         consumed_payloads,
     'observed_request_alignment': observed_request_alignment,
 }
@@ -705,9 +781,11 @@ jq -n \
     payload: {
       target: $target,
       topology_summary:            $result[0].topology_summary,
+      evidence:                    $result[0].evidence,
       ranked_targets:              $result[0].ranked_targets,
       gap_counts:                  $result[0].gap_counts,
       topology_index:              $result[0].topology_index,
+      unresolved_references:       $result[0].unresolved_references,
       consumed_payloads:           $result[0].consumed_payloads,
       observed_request_alignment:  $result[0].observed_request_alignment
     },

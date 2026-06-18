@@ -126,6 +126,7 @@ for dirpath, dirnames, filenames in os.walk(root):
 
 nodes = sorted(all_files)
 edges = []
+unresolved_refs = []
 
 for f in nodes:
     f_abs = os.path.join(root, f)
@@ -147,36 +148,56 @@ for f in nodes:
                 part = part.strip().split()[0] if part.strip() else ''
                 if part:
                     targets.append(part)
+        seen_targets = set()
         for t in targets:
+            if t in seen_targets:
+                continue
+            seen_targets.add(t)
             t_path = t.replace('.', '/')
+            found = False
             for cand in [t_path + '.py', t_path + '/__init__.py']:
                 if cand in nodes:
                     resolved.append(cand)
+                    found = True
                     break
-            else:
+            if not found:
                 f_dir = os.path.dirname(f)
                 cand = os.path.normpath(os.path.join(f_dir, t_path + '.py')).replace('\\', '/')
                 if cand in nodes:
                     resolved.append(cand)
+                else:
+                    unresolved_refs.append({"from": f, "target": t, "type": "import"})
 
     elif ext in ['.js', '.jsx', '.ts', '.tsx']:
         targets = re.findall(r'import\s+.*?\s+from\s+[\'"]([^\'"]+)[\'"]', content)
         targets += re.findall(r'require\([\'"]([^\'"]+)[\'"]\)', content)
+        seen_targets = set()
         for t in targets:
+            if t in seen_targets:
+                continue
+            seen_targets.add(t)
             if t.startswith('.'):
                 f_dir = os.path.dirname(f)
                 base = os.path.normpath(os.path.join(f_dir, t)).replace('\\', '/')
+                found = False
                 for cand in [base + ext2 for ext2 in ['.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.ts']]:
                     if cand in nodes:
                         resolved.append(cand)
+                        found = True
                         break
+                if not found:
+                    unresolved_refs.append({"from": f, "target": t, "type": "import"})
             elif t in nodes:
                 resolved.append(t)
+            else:
+                unresolved_refs.append({"from": f, "target": t, "type": "import"})
 
     elif ext in ['.sh', '.bash', ''] and os.path.isfile(f_abs):
         raw = re.findall(r'^\s*source\s+([^\s\n#]+)', content, re.MULTILINE)
         raw += re.findall(r'^\s*\.\s+([^\s\n#]+)', content, re.MULTILINE)
-        for t in [m.strip('\'"') for m in raw]:
+        raw += re.findall(r'^\s*(?:bash|sh)\s+([^\s\n#]+)', content, re.MULTILINE)
+        for t in [m.strip('\'"').rstrip('\\') for m in raw
+                  if '$' not in m and not m.startswith('-')]:
             if t in nodes:
                 resolved.append(t)
             else:
@@ -184,6 +205,8 @@ for f in nodes:
                 cand = os.path.normpath(os.path.join(f_dir, t)).replace('\\', '/')
                 if cand in nodes:
                     resolved.append(cand)
+                else:
+                    unresolved_refs.append({"from": f, "target": t, "type": "source"})
 
     seen = set()
     for tgt in sorted(set(resolved)):
@@ -193,7 +216,8 @@ for f in nodes:
             edges.append({"from": f, "to": tgt, "type": "import"})
 
 edges = sorted(edges, key=lambda x: (x['from'], x['to']))
-print(json.dumps({"nodes": nodes, "edges": edges}))
+unresolved_refs = sorted(unresolved_refs, key=lambda x: (x['from'], x['target']))
+print(json.dumps({"nodes": nodes, "edges": edges, "unresolved_references": unresolved_refs}))
 PY
 )"
 

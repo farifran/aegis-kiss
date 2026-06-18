@@ -169,7 +169,7 @@ declare -ar AEGIS_FILESYSTEM_PRUNE_PATHS=(
   ".git"
   ".harness"
   ".skills"
-  "scripts"
+  "scripts/substrates/test"
   ".venv"
   ".aider.tags.cache.v4"
 )

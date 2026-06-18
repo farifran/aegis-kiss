@@ -71,11 +71,47 @@ These fields route inspection. They are not evidence and must not be copied
 into findings as proof. Evidence for interpretations must still come from
 runtime-exposed capability payloads.
 
+### Topology ID Resolution
+
+When `artifact_snapshot.topology_index` is present, Forensics may resolve
+topology IDs from `artifact_snapshot.ranked_targets` (entries with type
+`bridge`, `boundary`, `hotspot`, `entrypoint`) against `topology_index` to
+determine which files to inspect.
+
+This is resolution, not interpretation. Two lookup directions are available:
+
+**Forward lookup (id -> file):** map topology IDs to file paths.
+- `bridge_001` → `{ from, to }` file paths (via `topology_index.bridges`)
+- `boundary_001` → `file` path (via `topology_index.boundaries`)
+- `hotspot_001` → `file` path (via `topology_index.hotspots`)
+- `entrypoint_001` → `file` path (via `topology_index.entrypoints`)
+- `surface_cluster_001` → `members` file paths (via `topology_index.surfaces`)
+
+**Reverse lookup (file -> topology facts):** given a file path, query
+`topology_index.node_index[file]` to recover all topology facts for that
+file in one access:
+- `surface_ref` — which surface cluster the file belongs to
+- `is_entrypoint` / `entrypoint_id` — whether the file is an entrypoint
+- `is_hotspot` / `hotspot_id` — whether the file is a hotspot
+- `is_boundary` / `boundary_id` — whether the file is a boundary
+- `in_degree`, `out_degree`, `total_degree` — graph degrees
+- `test_covered` — whether tests cover this file
+
+Resolved file paths route inspection only. They are not evidence by themselves.
+Evidence for interpretations must still come from runtime-exposed capability payloads.
+
+The resolved file paths become valid targets for `repair_candidate.id`.
+
 **Critical constraint**: `repair_candidate.id` must be a repository-relative
 file path (`src/index.ts`, not `boundary_001`, `hotspot_001`, or any structural
-cluster identifier). Only paths present in `resolved_paths` or
-`ranked_targets[].file` where `type == "explicit_request"` are valid candidate
-IDs. Structural topology identifiers (boundary, hotspot, entrypoint, surface
+cluster identifier). Valid candidate IDs are paths present in:
+
+- `resolved_paths`
+- `ranked_targets[].file` where `type == "explicit_request"`
+- `next_attention_targets`
+- file paths resolved from `topology_index` (bridges → `from`/`to`, boundaries → `file`, hotspots → `file`, entrypoints → `file`, surfaces → `members`)
+
+Structural topology identifiers (boundary, hotspot, entrypoint, surface
 cluster IDs) are NOT valid repair candidate IDs and must never appear as `.id`
 values.
 
