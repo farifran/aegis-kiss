@@ -345,6 +345,9 @@ resolve_capability_argument() {
 
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
       ;;
+    filesystem.list_tree|filesystem.extract_import_graph|filesystem.extract_reference_graph|filesystem.extract_symbols|filesystem.extract_entrypoints|filesystem.extract_test_relationships|filesystem.extract_configuration_structure|filesystem.extract_references|structural.builder)
+      printf '%s' "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
+      ;;
     *)
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
       ;;
@@ -367,6 +370,7 @@ invoke_capability_handler() {
     AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_PATH}" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" \
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
+    AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     bash "${handler}" "${capability_argument}"
 }
 
@@ -389,6 +393,7 @@ invoke_raw_substrate() {
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
+    AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
     AEGIS_EVIDENCE_MAX_TOTAL_BYTES="${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" \
     AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES}" \
@@ -426,6 +431,7 @@ invoke_aider_substrate() {
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
     AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_PATH}" \
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
+    AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" \
     AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}" \
     AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \

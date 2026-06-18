@@ -54,9 +54,11 @@ export AEGIS_EPISTEMIC_HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
 
 : "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Enumerate runtime-exposed evidence and observable system structure.}"
 : "${AEGIS_INVESTIGATION_INPUT:=}"
+: "${AEGIS_EVIDENCE_TARGET_PATH:=.}"
 
 export AEGIS_DEFAULT_INVESTIGATION_INPUT
 export AEGIS_INVESTIGATION_INPUT
+export AEGIS_EVIDENCE_TARGET_PATH
 
 # =========================================================
 # ARTIFACT PROTOCOL
@@ -325,6 +327,12 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 declare -ar AEGIS_DISCOVERY_EVIDENCE=(
   "filesystem.list_tree"
   "filesystem.read:epistemic_handover"
+  "filesystem.extract_import_graph"
+  "filesystem.extract_reference_graph"
+  "filesystem.extract_symbols"
+  "filesystem.extract_entrypoints"
+  "filesystem.extract_test_relationships"
+  "filesystem.extract_configuration_structure"
   "structural.builder"
 )
 

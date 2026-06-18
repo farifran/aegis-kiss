@@ -129,6 +129,7 @@ parse_runtime_cli() {
 
   local cli_mode="discovery"
   local cli_issue_number=""
+  local cli_target_path=""
   local cli_investigation_input=""
   local positional_args=()
 
@@ -155,6 +156,23 @@ parse_runtime_cli() {
           || runtime_fatal "duplicate_issue_argument"
 
         cli_issue_number="${1#--issue=}"
+        ;;
+      --target)
+        shift
+
+        [[ "$#" -gt 0 ]] \
+          || runtime_fatal "missing_target_path"
+
+        [[ -z "${cli_target_path}" ]] \
+          || runtime_fatal "duplicate_target_argument"
+
+        cli_target_path="$1"
+        ;;
+      --target=*)
+        [[ -z "${cli_target_path}" ]] \
+          || runtime_fatal "duplicate_target_argument"
+
+        cli_target_path="${1#--target=}"
         ;;
       --)
         shift
@@ -186,6 +204,11 @@ parse_runtime_cli() {
 
     cli_investigation_input="issue #${cli_issue_number}"
   elif [[ "${#positional_args[@]}" -gt 0 ]]; then
+    if [[ -z "${cli_target_path}" ]] && [[ -d "${positional_args[0]}" ]]; then
+      cli_target_path="${positional_args[0]}"
+      positional_args=("${positional_args[@]:1}")
+    fi
+
     cli_investigation_input="$(
       join_cli_positional_arguments "${positional_args[@]}"
     )"
@@ -201,6 +224,13 @@ parse_runtime_cli() {
 
   if [[ -n "${cli_investigation_input}" ]]; then
     export AEGIS_INVESTIGATION_INPUT="${cli_investigation_input}"
+  fi
+
+  if [[ -n "${cli_target_path}" ]]; then
+    [[ -d "${cli_target_path}" ]] \
+      || runtime_fatal "target_path_not_directory"
+
+    export AEGIS_EVIDENCE_TARGET_PATH="${cli_target_path}"
   fi
 }
 

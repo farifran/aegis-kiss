@@ -26,7 +26,17 @@ assert_manifest_uses_filesystem_read_only() {
   printf '%s\n' "${manifest}" | jq -e '
     ([.modes[].capabilities[].capability] | index("runtime.read_epistemic_handover") == null)
     and ([.modes[].evidence_capabilities[]] | index("runtime.read_epistemic_handover") == null)
-    and (.modes.discovery.evidence_capabilities == ["filesystem.list_tree", "filesystem.read", "structural.builder"])
+    and (.modes.discovery.evidence_capabilities == [
+      "filesystem.list_tree",
+      "filesystem.read",
+      "filesystem.extract_import_graph",
+      "filesystem.extract_reference_graph",
+      "filesystem.extract_symbols",
+      "filesystem.extract_entrypoints",
+      "filesystem.extract_test_relationships",
+      "filesystem.extract_configuration_structure",
+      "structural.builder"
+    ])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
   ' >/dev/null || fail "manifest_still_references_runtime_specific_reads"
 }

@@ -127,6 +127,18 @@ for dirpath, dirnames, filenames in os.walk(root):
 
 import_graph = []
 
+def resolve_existing(candidates):
+    for cand in candidates:
+        if cand in all_files:
+            return cand
+
+    for cand in candidates:
+        matches = [f for f in all_files if f.endswith('/' + cand)]
+        if len(matches) == 1:
+            return matches[0]
+
+    return None
+
 for f in all_files:
     f_abs = os.path.join(root, f)
     if not os.path.isfile(f_abs):
@@ -149,27 +161,26 @@ for f in all_files:
                     targets.append(part)
         for t in targets:
             t_path = t.replace('.', '/')
-            for cand in [t_path + '.py', t_path + '/__init__.py']:
-                if cand in all_files:
-                    resolved.append(cand)
-                    break
-            else:
-                f_dir = os.path.dirname(f)
-                cand = os.path.normpath(os.path.join(f_dir, t_path + '.py')).replace('\\', '/')
-                if cand in all_files:
-                    resolved.append(cand)
+            f_dir = os.path.dirname(f)
+            cand = resolve_existing([
+                t_path + '.py',
+                t_path + '/__init__.py',
+                os.path.normpath(os.path.join(f_dir, t_path + '.py')).replace('\\', '/'),
+            ])
+            if cand:
+                resolved.append(cand)
 
     elif ext in ['.js', '.jsx', '.ts', '.tsx']:
         targets = re.findall(r'import\s+.*?\s+from\s+[\'"]([^\'"]+)[\'"]', content)
+        targets += re.findall(r'^\s*import\s+[\'"]([^\'"]+)[\'"]', content, re.MULTILINE)
         targets += re.findall(r'require\([\'"]([^\'"]+)[\'"]\)', content)
         for t in targets:
             if t.startswith('.'):
                 f_dir = os.path.dirname(f)
                 base = os.path.normpath(os.path.join(f_dir, t)).replace('\\', '/')
-                for cand in [base + ext2 for ext2 in ['.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.ts']]:
-                    if cand in all_files:
-                        resolved.append(cand)
-                        break
+                cand = resolve_existing([base + ext2 for ext2 in ['.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.ts']])
+                if cand:
+                    resolved.append(cand)
             elif t in all_files:
                 resolved.append(t)
 
@@ -177,13 +188,13 @@ for f in all_files:
         raw_sources = re.findall(r'^\s*source\s+([^\s\n#]+)', content, re.MULTILINE)
         raw_sources += re.findall(r'^\s*\.\s+([^\s\n#]+)', content, re.MULTILINE)
         for t in [m.strip('\'"') for m in raw_sources]:
-            if t in all_files:
-                resolved.append(t)
-            else:
-                f_dir = os.path.dirname(f)
-                cand = os.path.normpath(os.path.join(f_dir, t)).replace('\\', '/')
-                if cand in all_files:
-                    resolved.append(cand)
+            f_dir = os.path.dirname(f)
+            cand = resolve_existing([
+                t,
+                os.path.normpath(os.path.join(f_dir, t)).replace('\\', '/'),
+            ])
+            if cand:
+                resolved.append(cand)
 
     unique = sorted(set(resolved))
     if unique:

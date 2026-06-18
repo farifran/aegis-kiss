@@ -108,11 +108,19 @@ command -v python3 >/dev/null 2>&1 || {
 # MATERIALIZE GRAPH DEPENDENCIES
 # =========================================================
 
-for cap in "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"; do
-  [[ "${cap}" == "structural.builder" ]] && continue
+required_dependency_capabilities=(
+  "filesystem.extract_import_graph"
+  "filesystem.extract_reference_graph"
+  "filesystem.extract_symbols"
+  "filesystem.extract_entrypoints"
+  "filesystem.extract_test_relationships"
+  "filesystem.extract_configuration_structure"
+)
+
+for cap in "${required_dependency_capabilities[@]}"; do
 
   handler="${AEGIS_CAPABILITY_HANDLERS[$cap]:-}"
-  arg="${AEGIS_CAPABILITY_ARGUMENTS[$cap]:-.}"
+  arg="${TARGET_PATH}"
   payload_file="$(echo "${cap}" | tr '.' '_').json"
   payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
 
@@ -351,6 +359,7 @@ for i, members in enumerate(surfaces_raw, 1):
     surfaces_out.append({
         'id':               sid,
         'member_count':     len(members),
+        'members':          sorted(members),
         'dominant_node':    dominant,
         'bridge_count':     len(s_bridges),
         'boundary_count':   len(s_boundaries),
@@ -514,6 +523,13 @@ else:
             'surface_ref': h['surface_ref'],
             'reason': 'no_selected_surface:hotspot'
         })
+    for e in sorted(entrypoints_out, key=lambda x: x['id']):
+        ranked_targets.append({
+            'id': e['id'],
+            'type': 'entrypoint',
+            'surface_ref': e['surface_ref'],
+            'reason': 'no_selected_surface:entrypoint'
+        })
 
 # =========================================================
 # OBSERVED REQUEST ALIGNMENT
@@ -651,6 +667,13 @@ result = {
     'topology_summary':          topology_summary,
     'ranked_targets':            ranked_targets,
     'gap_counts':                gap_counts,
+    'topology_index': {
+        'surfaces':              surfaces_out,
+        'bridges':               bridges_out,
+        'boundaries':            boundaries_out,
+        'hotspots':              hotspots_out,
+        'entrypoints':           entrypoints_out,
+    },
     'consumed_payloads':         consumed_payloads,
     'observed_request_alignment': observed_request_alignment,
 }
@@ -684,6 +707,7 @@ jq -n \
       topology_summary:            $result[0].topology_summary,
       ranked_targets:              $result[0].ranked_targets,
       gap_counts:                  $result[0].gap_counts,
+      topology_index:              $result[0].topology_index,
       consumed_payloads:           $result[0].consumed_payloads,
       observed_request_alignment:  $result[0].observed_request_alignment
     },
