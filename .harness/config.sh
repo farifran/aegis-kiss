@@ -135,12 +135,19 @@ export AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS
 # =========================================================
 
 : "${AEGIS_EVIDENCE_MAX_FILES:=25}"
-: "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:=200000}"
-: "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:=1500000}"
+: "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:=45000}"
+: "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:=150000}"
 : "${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:=100}"
 : "${AEGIS_FILE_CONTENT_MAX_BYTES:=50000}"
 : "${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:=100000}"
 : "${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES:=75000}"
+
+# Per-mode evidence budgets — constitutional guard against prompt explosion.
+# Discovery is bounded to 50KB of evidence (topology snapshot + attention seed).
+# Forensics gets 80KB (needs more context for interpretation).
+# These are enforced by the substrate before the prompt is assembled.
+: "${AEGIS_MAX_DISCOVERY_BYTES:=50000}"
+: "${AEGIS_MAX_FORENSICS_BYTES:=80000}"
 
 export AEGIS_EVIDENCE_MAX_FILES
 export AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES
@@ -149,6 +156,8 @@ export AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES
 export AEGIS_FILE_CONTENT_MAX_BYTES
 export AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES
 export AEGIS_CAPABILITY_MANIFEST_MAX_BYTES
+export AEGIS_MAX_DISCOVERY_BYTES
+export AEGIS_MAX_FORENSICS_BYTES
 
 # =========================================================
 # CAPABILITY DEFAULTS
@@ -222,6 +231,7 @@ declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_configuration_structure"
   "filesystem.extract_references"
   "structural.builder"
+  "runtime.attention_seed"
 )
 
 # Discovery envelope = base + structural extraction
@@ -269,6 +279,7 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.extract_configuration_structure"]="scripts/capabilities/filesystem/extract_configuration_structure.sh"
   ["filesystem.extract_references"]="scripts/capabilities/filesystem/extract_references.sh"
   ["structural.builder"]="scripts/capabilities/structural/builder.sh"
+  ["runtime.attention_seed"]="scripts/capabilities/runtime/attention_seed.sh"
   ["typescript.check"]="scripts/capabilities/typescript_check.sh"
   ["eslint.check"]="scripts/capabilities/eslint_check.sh"
   ["test.run"]="scripts/capabilities/test_runner.sh"
@@ -292,6 +303,7 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.extract_configuration_structure"]="readonly"
   ["filesystem.extract_references"]="readonly"
   ["structural.builder"]="readonly"
+  ["runtime.attention_seed"]="readonly"
   ["typescript.check"]="readonly"
   ["eslint.check"]="readonly"
   ["test.run"]="readonly"
@@ -315,6 +327,7 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.extract_configuration_structure"]="."
   ["filesystem.extract_references"]="."
   ["structural.builder"]="."
+  ["runtime.attention_seed"]="."
   ["typescript.check"]="."
   ["eslint.check"]="src"
   ["test.run"]="."
@@ -334,6 +347,7 @@ declare -ar AEGIS_DISCOVERY_EVIDENCE=(
   "filesystem.extract_test_relationships"
   "filesystem.extract_configuration_structure"
   "structural.builder"
+  "runtime.attention_seed"
 )
 
 declare -ar AEGIS_FORENSICS_EVIDENCE=(

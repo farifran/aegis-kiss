@@ -513,6 +513,22 @@ assemble_bounded_capability_context() {
       wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}"
     )"
 
+    # Per-mode evidence budget — constitutional guard against prompt explosion.
+    # Falls back to AEGIS_EVIDENCE_MAX_TOTAL_BYTES if no mode-specific budget.
+    case "${AEGIS_MODE}" in
+      discovery)  mode_budget="${AEGIS_MAX_DISCOVERY_BYTES:-${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}}" ;;
+      forensics)  mode_budget="${AEGIS_MAX_FORENSICS_BYTES:-${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}}" ;;
+      *)          mode_budget="${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" ;;
+    esac
+
+    if [[ "${total_bytes}" -ge "${mode_budget}" ]]; then
+      {
+        echo
+        echo "[AEGIS][MODE_EVIDENCE_BUDGET_REACHED:${AEGIS_MODE}:${mode_budget}]"
+      } >> "${TMP_CAPABILITY_CONTEXT_FILE}"
+      break
+    fi
+
     if [[ "${total_bytes}" -ge "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" ]]; then
       {
         echo

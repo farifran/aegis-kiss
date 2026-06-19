@@ -242,16 +242,31 @@ def find_wcc(all_nodes, adj_undirected):
 surfaces_raw = find_wcc(nodes, adj_und)
 
 # =========================================================
-# BOUNDARIES
+# BOUNDARIES — entry/exit points between surfaces
+# =========================================================
+# A boundary is a node that is referenced externally (has incoming
+# edges) but has few outgoing edges — it is a point of arrival, not
+# an orchestrator. Boundaries mark where a surface interfaces with
+# the rest of the graph.
+#
+# Heuristic:
+#   in_degree >= 1  (at least one external reference — not isolated)
+#   out_degree <= 1 (few outgoing deps — not an orchestrator)
+#   must belong to a cluster surface (standalone nodes are not
+#   boundaries — they have no surface to be a boundary OF)
+#
+# The previous threshold (in_degree >= 2) was too restrictive for
+# small graphs where files are rarely imported by 2+ others.
 # =========================================================
 
-BOUNDARY_IN_MIN  = 2
+BOUNDARY_IN_MIN  = 1
 BOUNDARY_OUT_MAX = 1
 
 boundaries_raw = sorted(
     [n for n in nodes
      if in_degree.get(n, 0) >= BOUNDARY_IN_MIN
-     and out_degree.get(n, 0) <= BOUNDARY_OUT_MAX],
+     and out_degree.get(n, 0) <= BOUNDARY_OUT_MAX
+     and n in {m for s in surfaces_raw for m in s}],
     key=lambda n: (-in_degree.get(n, 0), n)
 )
 
@@ -302,19 +317,6 @@ def find_bridges(all_nodes, adj_undirected):
 bridges_raw = find_bridges(nodes, adj_und)
 
 # =========================================================
-# HOTSPOTS
-# =========================================================
-
-HOTSPOT_MIN_DEGREE = 2
-HOTSPOT_TOP_N      = 15
-
-degree_total  = {n: in_degree.get(n, 0) + out_degree.get(n, 0) for n in nodes}
-hotspots_raw  = sorted(
-    [n for n in nodes if degree_total[n] >= HOTSPOT_MIN_DEGREE],
-    key=lambda n: (-degree_total[n], -in_degree.get(n, 0), n)
-)[:HOTSPOT_TOP_N]
-
-# =========================================================
 # TEST COVERAGE
 # =========================================================
 
@@ -331,6 +333,68 @@ for rel in test_relationships:
 entrypoints_list = (entrypoints_payload or {}).get('entrypoints', [])
 
 # =========================================================
+# HOTSPOTS — structural anomaly, not mere existence
+# =========================================================
+# A hotspot identifies concentration, orchestration, coupling,
+# or risk — NOT simply being a file in the repository.
+#
+# Formula (purely topological, no coverage):
+#   hotspot_score = (degree * 2)
+#                 + bridge_participation
+#                 + boundary_participation
+#                 + entrypoint_with_dependencies
+#
+# Rules:
+#   - degree is the dominant signal (multiplied by 2)
+#   - bridge participation: node connects two surfaces
+#   - boundary participation: node is a boundary (external entry)
+#   - entrypoint_with_dependencies: node is an entrypoint AND has
+#     degree > 0 (entrypoint with no dependencies is NOT a hotspot)
+#   - isolated nodes (degree 0) are NEVER hotspots
+#   - coverage_gap is a SEPARATE metric, not part of hotspot
+#   - HOTSPOT_THRESHOLD=4 ensures hotspots are rare exceptions
+# =========================================================
+
+HOTSPOT_TOP_N = 15
+HOTSPOT_THRESHOLD = 6
+BRIDGE_BONUS = 2
+BOUNDARY_BONUS = 1
+ENTRYPOINT_WITH_DEPS_BONUS = 1
+
+degree_total = {n: in_degree.get(n, 0) + out_degree.get(n, 0) for n in nodes}
+
+# Build lookup sets for structural participation
+_entrypoint_files = set(e['file'] for e in entrypoints_list)
+_bridge_files = set()
+for u, v in bridges_raw:
+    _bridge_files.add(u)
+    _bridge_files.add(v)
+_boundary_files = set(boundaries_raw) if boundaries_raw else set()
+
+# Compute hotspot score per node — purely topological
+hotspot_scores = {}
+for n in nodes:
+    deg = degree_total[n]
+    # Isolated nodes are never hotspots
+    if deg == 0:
+        hotspot_scores[n] = 0
+        continue
+    score = deg * 2
+    if n in _bridge_files:
+        score += BRIDGE_BONUS
+    if n in _boundary_files:
+        score += BOUNDARY_BONUS
+    # entrypoint_with_dependencies: entrypoint AND has degree > 0
+    if n in _entrypoint_files and deg > 0:
+        score += ENTRYPOINT_WITH_DEPS_BONUS
+    hotspot_scores[n] = score
+
+hotspots_raw = sorted(
+    [n for n in nodes if hotspot_scores[n] >= HOTSPOT_THRESHOLD],
+    key=lambda n: (-hotspot_scores[n], -degree_total[n], n)
+)[:HOTSPOT_TOP_N]
+
+# =========================================================
 # SURFACE MEMBERSHIP INDEX
 # Members are computed internally; member lists are NOT emitted.
 # =========================================================
@@ -340,6 +404,17 @@ for s in surfaces_raw:
     sid = f'surface_cluster_{surfaces_raw.index(s)+1:03d}'
     for m in s:
         surface_of[m] = sid
+
+# Standalone surfaces — every node that does not belong to a cluster
+# gets its own standalone surface. This eliminates surface_ref: null
+# and ensures every node belongs to exactly one surface.
+# Standalone surfaces are typed as 'standalone' (isolated node, no edges).
+_standalone_counter = 0
+for _n in nodes:
+    if _n not in surface_of:
+        _standalone_counter += 1
+        _sid = f'surface_standalone_{_standalone_counter:03d}'
+        surface_of[_n] = _sid
 
 # =========================================================
 # PER-SURFACE AGGREGATES
@@ -358,6 +433,7 @@ for i, members in enumerate(surfaces_raw, 1):
 
     surfaces_out.append({
         'id':               sid,
+        'surface_kind':     'cluster',
         'member_count':     len(members),
         'members':          sorted(members),
         'dominant_node':    dominant,
@@ -365,6 +441,24 @@ for i, members in enumerate(surfaces_raw, 1):
         'boundary_count':   len(s_boundaries),
         'hotspot_count':    len(s_hotspots),
         'entrypoint_count': len(s_entries),
+    })
+
+# Add standalone surfaces to surfaces_out — but condensed to avoid
+# payload explosion. Each standalone surface is a single isolated node.
+# Instead of emitting 65 individual entries, we emit a summary count
+# and let node_index carry the surface_ref per node.
+_standalone_nodes = [n for n in nodes if surface_of.get(n, '').startswith('surface_standalone_')]
+if _standalone_nodes:
+    surfaces_out.append({
+        'id':               'surface_standalone_summary',
+        'surface_kind':     'standalone',
+        'member_count':     len(_standalone_nodes),
+        'members':          [],  # omitted — see node_index for per-node surface_ref
+        'dominant_node':    None,
+        'bridge_count':     0,
+        'boundary_count':   0,
+        'hotspot_count':    0,
+        'entrypoint_count': sum(1 for n in _standalone_nodes if any(e['file'] == n for e in entrypoints_list)),
     })
 
 # =========================================================
@@ -406,9 +500,12 @@ hotspots_out = [
     {
         'id':           f'hotspot_{i:03d}',
         'file':         f,
+        'hotspot_score': hotspot_scores[f],
         'in_degree':    in_degree.get(f, 0),
         'out_degree':   out_degree.get(f, 0),
         'total_degree': degree_total[f],
+        'is_bridge_endpoint': f in _bridge_files,
+        'is_boundary': f in _boundary_files,
         'test_covered': f in covered_files,
         'surface_ref':  surface_of.get(f, None),
     }
@@ -442,22 +539,39 @@ entrypoints_out = [
 # resolved to a node (e.g. pruned path, non-existent, out of scope).
 # Used to classify relation_visibility below. This is evidence
 # collected by the extractor, not inference by the builder.
-unresolved_refs_raw = (ref_graph_payload or {}).get('unresolved_references', [])
+unresolved_refs_raw = ref_graph.get('unresolved_references', [])
 _nodes_with_unresolved = set()
 for _ur in unresolved_refs_raw:
     _nodes_with_unresolved.add(_ur.get('from', ''))
 
+# Extensions that the extractors support for reference extraction.
+# Files with these extensions were analyzed by the extractor.
+# If such a file has no edges and no unresolved references, the
+# extractor looked and found nothing — that is evidence of absence,
+# not absence of evidence. Files with unsupported extensions were
+# not analyzed, so their isolation is none_observed.
+_EXTRACTOR_SUPPORTED_EXTS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.sh', '.bash'}
+
 node_index = {}
 for _n in nodes:
-    _has_surface = surface_of.get(_n) is not None
-    if _has_surface:
+    _surf = surface_of.get(_n)
+    _is_cluster = _surf is not None and not _surf.startswith('surface_standalone_')
+    if _is_cluster:
         _rv = 'has_observed_relationships'
     elif _n in _nodes_with_unresolved:
         _rv = 'observation_limited'
     else:
-        _rv = 'none_observed'
+        _ext = os.path.splitext(_n)[1].lower()
+        if _ext in _EXTRACTOR_SUPPORTED_EXTS:
+            # Extractor analyzed this file and found no references.
+            # This is evidence of absence, not absence of evidence.
+            _rv = 'structurally_confirmed_isolated'
+        else:
+            # Unsupported extension — extractor did not analyze.
+            _rv = 'none_observed'
     node_index[_n] = {
-        'surface_ref':         surface_of.get(_n, None),
+        'surface_ref':         _surf,
+        'surface_kind':        'cluster' if _is_cluster else 'standalone',
         'relation_visibility': _rv,
         'is_entrypoint':       False,
         'is_hotspot':          False,
@@ -473,6 +587,20 @@ for _e in entrypoints_out:
     if _f in node_index:
         node_index[_f]['is_entrypoint']  = True
         node_index[_f]['entrypoint_id']  = _e['id']
+        # Classify entrypoint surface status:
+        #   surface_member      — belongs to a surface (has observed relationships)
+        #   standalone          — no surface, no observed relationships, no unresolved refs
+        #                         (legitimate isolated utility)
+        #   relationship_missing — no surface BUT has degree > 0 or observation_limited
+        #                          (entrypoint should be in a surface but isn't — possible
+        #                          extractor gap or orphaned structural element)
+        _ni = node_index[_f]
+        if _ni['surface_ref'] is not None:
+            _ni['surface_status'] = 'surface_member'
+        elif _ni['total_degree'] > 0 or _ni['relation_visibility'] == 'observation_limited':
+            _ni['surface_status'] = 'relationship_missing'
+        else:
+            _ni['surface_status'] = 'standalone'
 for _h in hotspots_out:
     _f = _h['file']
     if _f in node_index:
@@ -519,22 +647,37 @@ elif surfaces_out:
         selection_rule = "largest_surface"
 
 ranked_targets = []
+
+# Deterministic scoring weights — runtime-owned, not model judgment.
+# score = type_weight + degree_bonus
+# bridge:    4  (connects surfaces, removal disconnects)
+# hotspot:   3  + total_degree (concentration of dependencies)
+# boundary:  2  + in_degree    (external entry, high fan-in)
+# entrypoint: 1  (starting point, low risk)
+# explicit_request targets get score 100 (injected after, below).
+BRIDGE_WEIGHT = 4
+HOTSPOT_WEIGHT = 3
+BOUNDARY_WEIGHT = 2
+ENTRYPOINT_WEIGHT = 1
+
 if selected_surface_id:
     s_bridges = [b for b in bridges_out if b['surface_ref'] == selected_surface_id]
     s_boundaries = [b for b in boundaries_out if b['surface_ref'] == selected_surface_id]
     s_hotspots = [h for h in hotspots_out if h['surface_ref'] == selected_surface_id]
     s_entries = [e for e in entrypoints_out if e['surface_ref'] == selected_surface_id]
-    
+
     s_bridges.sort(key=lambda x: x['id'])
     s_boundaries.sort(key=lambda x: (-x['in_degree'], x['id']))
     s_hotspots.sort(key=lambda x: (-x['total_degree'], x['id']))
     s_entries.sort(key=lambda x: x['id'])
-    
+
     for b in s_bridges:
         ranked_targets.append({
             'id': b['id'],
             'type': 'bridge',
             'surface_ref': selected_surface_id,
+            'score': BRIDGE_WEIGHT,
+            'ranking_reason': f'bridge_weight({BRIDGE_WEIGHT})',
             'reason': f'{selection_rule}:bridge'
         })
     for b in s_boundaries:
@@ -542,6 +685,8 @@ if selected_surface_id:
             'id': b['id'],
             'type': 'boundary',
             'surface_ref': selected_surface_id,
+            'score': BOUNDARY_WEIGHT + b['in_degree'],
+            'ranking_reason': f'boundary_weight({BOUNDARY_WEIGHT})+in_degree({b["in_degree"]})',
             'reason': f'{selection_rule}:boundary'
         })
     for h in s_hotspots:
@@ -549,6 +694,8 @@ if selected_surface_id:
             'id': h['id'],
             'type': 'hotspot',
             'surface_ref': selected_surface_id,
+            'score': HOTSPOT_WEIGHT + h['total_degree'],
+            'ranking_reason': f'hotspot_weight({HOTSPOT_WEIGHT})+total_degree({h["total_degree"]})',
             'reason': f'{selection_rule}:hotspot'
         })
     for e in s_entries:
@@ -556,6 +703,8 @@ if selected_surface_id:
             'id': e['id'],
             'type': 'entrypoint',
             'surface_ref': selected_surface_id,
+            'score': ENTRYPOINT_WEIGHT,
+            'ranking_reason': f'entrypoint_weight({ENTRYPOINT_WEIGHT})',
             'reason': f'{selection_rule}:entrypoint'
         })
 else:
@@ -564,6 +713,8 @@ else:
             'id': b['id'],
             'type': 'bridge',
             'surface_ref': b['surface_ref'],
+            'score': BRIDGE_WEIGHT,
+            'ranking_reason': f'bridge_weight({BRIDGE_WEIGHT})',
             'reason': 'no_selected_surface:bridge'
         })
     for b in sorted(boundaries_out, key=lambda x: (-x['in_degree'], x['id'])):
@@ -571,6 +722,8 @@ else:
             'id': b['id'],
             'type': 'boundary',
             'surface_ref': b['surface_ref'],
+            'score': BOUNDARY_WEIGHT + b['in_degree'],
+            'ranking_reason': f'boundary_weight({BOUNDARY_WEIGHT})+in_degree({b["in_degree"]})',
             'reason': 'no_selected_surface:boundary'
         })
     for h in sorted(hotspots_out, key=lambda x: (-x['total_degree'], x['id'])):
@@ -578,6 +731,8 @@ else:
             'id': h['id'],
             'type': 'hotspot',
             'surface_ref': h['surface_ref'],
+            'score': HOTSPOT_WEIGHT + h['total_degree'],
+            'ranking_reason': f'hotspot_weight({HOTSPOT_WEIGHT})+total_degree({h["total_degree"]})',
             'reason': 'no_selected_surface:hotspot'
         })
     for e in sorted(entrypoints_out, key=lambda x: x['id']):
@@ -585,8 +740,13 @@ else:
             'id': e['id'],
             'type': 'entrypoint',
             'surface_ref': e['surface_ref'],
+            'score': ENTRYPOINT_WEIGHT,
+            'ranking_reason': f'entrypoint_weight({ENTRYPOINT_WEIGHT})',
             'reason': 'no_selected_surface:entrypoint'
         })
+
+# Sort by score descending, then by id for determinism
+ranked_targets.sort(key=lambda x: (-x['score'], x['id']))
 
 # =========================================================
 # OBSERVED REQUEST ALIGNMENT
@@ -617,45 +777,135 @@ for _m in _path_re.finditer(investigation_input):
     if _cand not in _requested_paths:
         _requested_paths.append(_cand)
 
+# Canonical path resolution — deterministic scoring algorithm.
+# Each requested path is matched against the node set with a score:
+#   exact     (100) — requested path exists literally in the node set
+#   prefix    (80)  — requested path is a prefix of a node path
+#   relative  (60)  — node path ends with the requested path
+#   basename  (40)  — basename of requested matches basename of a node
+#   stem      (20)  — stem (without extension) matches a node stem
+# The highest-scoring candidate is the canonical match.
+# This prevents downstream modes from treating ambiguous matches as
+# confirmed identities. Reality first, interpretation later.
+EXACT_SCORE = 100
+PREFIX_SCORE = 80
+RELATIVE_SCORE = 60
+BASENAME_SCORE = 40
+STEM_SCORE = 20
+
 _resolved_paths = []
+_path_resolutions = []  # per-requested-path resolution records
 for _req in _requested_paths:
+    _candidates = []  # list of (path, score, match_type)
+
+    # exact
     if _req in _node_set:
-        if _req not in _resolved_paths:
-            _resolved_paths.append(_req)
-    else:
-        _bn = os.path.basename(_req)
-        if _bn in _node_by_basename:
-            for _cand in _node_by_basename[_bn]:
-                if _cand not in _resolved_paths:
-                    _resolved_paths.append(_cand)
+        _candidates.append((_req, EXACT_SCORE, 'exact'))
+
+    # prefix and relative — scan node set
+    _req_norm = _req.replace('\\', '/').lstrip('./')
+    for _n in nodes:
+        if _n == _req:
+            continue  # already handled by exact
+        if _n.startswith(_req_norm + '/') or _n.startswith(_req + '/'):
+            _candidates.append((_n, PREFIX_SCORE, 'prefix'))
+        elif _n.endswith('/' + _req_norm) or _n.endswith('/' + _req):
+            _candidates.append((_n, RELATIVE_SCORE, 'relative'))
+
+    # basename
+    _bn = os.path.basename(_req)
+    for _c in _node_by_basename.get(_bn, []):
+        if _c not in [x[0] for x in _candidates]:
+            _candidates.append((_c, BASENAME_SCORE, 'basename'))
+
+    # stem
+    _stem_key = os.path.splitext(_bn)[0]
+    for _c in _node_by_stem.get(_stem_key, []):
+        if _c not in [x[0] for x in _candidates]:
+            _candidates.append((_c, STEM_SCORE, 'stem'))
+
+    if _candidates:
+        # Sort by score descending, then by path for determinism
+        _candidates.sort(key=lambda x: (-x[1], x[0]))
+
+        # Determine canonical winner: only if the top candidate has a
+        # strictly higher score than the second. If two or more candidates
+        # share the top score, the resolution is ambiguous — the runtime
+        # does NOT pick one arbitrarily. resolved stays null.
+        _best = _candidates[0]
+        _best_score = _best[1]
+        _best_type = _best[2]
+        _has_tie = len(_candidates) > 1 and _candidates[1][1] == _best_score
+
+        if _has_tie:
+            _canonical_path = None
+            _match_type = 'ambiguous'
+        elif _best_type == 'exact':
+            _canonical_path = _best[0]
+            _match_type = 'exact'
         else:
-            _stem_key = os.path.splitext(_bn)[0]
-            for _cand in _node_by_stem.get(_stem_key, []):
-                if _cand not in _resolved_paths:
-                    _resolved_paths.append(_cand)
+            _canonical_path = _best[0]
+            _match_type = _best_type
+
+        # Only add canonical to resolved_paths if unambiguous
+        if _canonical_path is not None and _canonical_path not in _resolved_paths:
+            _resolved_paths.append(_canonical_path)
+
+        # For ambiguous: add all tied candidates so attention_seed can
+        # see them, but mark them as ambiguous (not canonical)
+        if _has_tie:
+            _seen = set(_resolved_paths)
+            for _cand_path, _cand_score, _cand_type in _candidates:
+                if _cand_score == _best_score and _cand_path not in _seen:
+                    _resolved_paths.append(_cand_path)
+                    _seen.add(_cand_path)
+
+        _path_resolutions.append({
+            'requested': _req,
+            'resolved': _canonical_path,
+            'match_type': _match_type,
+            'canonical_score': _best_score if not _has_tie else None,
+            'candidates': [
+                {'path': p, 'score': s, 'match_type': t}
+                for p, s, t in _candidates
+            ],
+        })
+    else:
+        _path_resolutions.append({
+            'requested': _req,
+            'resolved': None,
+            'match_type': 'unresolved',
+        })
 
 if _resolved_paths:
-    _direct = [p for p in _resolved_paths if p in _requested_paths]
-    _alignment_confidence = 'high' if _direct else 'partial'
+    _exact = [r for r in _path_resolutions if r['match_type'] == 'exact']
+    _ambiguous = [r for r in _path_resolutions if r['match_type'] == 'ambiguous']
+    _alignment_confidence = 'high' if _exact and not _ambiguous else ('partial' if _resolved_paths else 'none')
 else:
     _alignment_confidence = 'none'
 
 observed_request_alignment = {
     'requested_paths':       _requested_paths,
     'resolved_paths':        _resolved_paths,
+    'path_resolutions':      _path_resolutions,
     'resolution_confidence': _alignment_confidence,
 }
 
 # Inject explicit targets at the front; topology fills remaining slots
+# Explicit request targets get the highest score (100) — runtime-owned
+# priority, not model judgment.
+EXPLICIT_REQUEST_WEIGHT = 100
 _explicit_targets = [
     {
-        'id':          f'explicit_target_{_i:03d}',
-        'type':        'explicit_request',
-        'file':        _rp,
-        'surface_ref': surface_of.get(_rp, None),
-        'reason':      'observed_request_alignment:direct_match'
-                       if _rp in _requested_paths
-                       else 'observed_request_alignment:basename_match',
+        'id':            f'explicit_target_{_i:03d}',
+        'type':          'explicit_request',
+        'file':          _rp,
+        'surface_ref':   surface_of.get(_rp, None),
+        'score':         EXPLICIT_REQUEST_WEIGHT,
+        'ranking_reason': f'explicit_request_weight({EXPLICIT_REQUEST_WEIGHT})',
+        'reason':        'observed_request_alignment:direct_match'
+                         if _rp in _requested_paths
+                         else 'observed_request_alignment:basename_match',
     }
     for _i, _rp in enumerate(_resolved_paths, 1)
 ]
@@ -670,19 +920,27 @@ ranked_targets   = _explicit_targets[:_explicit_count] + ranked_targets[:_topolo
 # =========================================================
 
 total_undirected_edges = sum(len(v) for v in adj_und.values()) // 2 if adj_und else 0
-connected_node_count   = sum(s['member_count'] for s in surfaces_out)
+# connected_node_count = nodes in cluster surfaces (have edges).
+# Standalone surfaces are isolated nodes — they belong to a surface
+# but are NOT connected by edges.
+connected_node_count   = sum(s['member_count'] for s in surfaces_out if s.get('surface_kind') == 'cluster')
 
 # topology_summary — graph-derived topology ONLY.
 # Counts of nodes, edges, and derived structural features.
 # Coverage and payload-health live in `evidence` below so that
 # topology (what the graph IS) is not conflated with evidence
 # (what was observed about coverage and payload success).
+_cluster_surface_count = sum(1 for s in surfaces_out if s.get('surface_kind') == 'cluster')
+_standalone_surface_count = sum(1 for s in surfaces_out if s.get('surface_kind') == 'standalone')
+
 topology_summary = {
     'total_nodes':             len(nodes),
     'total_edges':             total_undirected_edges,
     'connected_node_count':    connected_node_count,
     'isolated_node_count':     len(nodes) - connected_node_count,
-    'surface_count':           len(surfaces_out),
+    'cluster_surface_count':   _cluster_surface_count,
+    'standalone_surface_count': _standalone_surface_count,
+    'total_surface_count':     len(surfaces_out),
     'boundary_count':          len(boundaries_out),
     'bridge_count':            len(bridges_raw),
     'bridge_emit_count':       len(bridges_out),
@@ -715,6 +973,19 @@ visibility_gap_count = sum(1 for p in consumed_payloads if p['status'] != 'ok')
 coverage_gap_count = sum(1 for h in hotspots_out if not h['test_covered'])
 relationship_gap_count = len(nodes) - connected_node_count
 
+# Unresolved references as operational signal — references the extractor
+# found but could not resolve to a node. High counts indicate the graph
+# may be missing edges (pruned targets, unsupported patterns, broken refs).
+unresolved_reference_count = len(unresolved_refs_raw)
+observation_limited_node_count = sum(
+    1 for _n in nodes
+    if node_index.get(_n, {}).get('relation_visibility') == 'observation_limited'
+)
+ambiguous_path_count = sum(
+    1 for _pr in (observed_request_alignment.get('path_resolutions') or [])
+    if _pr.get('match_type') == 'ambiguous'
+)
+
 topology_ids = set()
 for s in surfaces_out: topology_ids.add(s['id'])
 for b in boundaries_out: topology_ids.add(b['id'])
@@ -726,11 +997,72 @@ potential_ids = [t for t in terms if re.match(r'^(surface_cluster_\d+|boundary_\
 scope_gap_count = sum(1 for pid in potential_ids if pid not in topology_ids)
 
 gap_counts = {
-    'visibility_gap_count': visibility_gap_count,
-    'coverage_gap_count': coverage_gap_count,
-    'relationship_gap_count': relationship_gap_count,
-    'scope_gap_count': scope_gap_count,
+    'visibility_gap_count':          visibility_gap_count,
+    'coverage_gap_count':            coverage_gap_count,
+    'relationship_gap_count':        relationship_gap_count,
+    'scope_gap_count':               scope_gap_count,
+    'unresolved_reference_count':    unresolved_reference_count,
+    'observation_limited_node_count': observation_limited_node_count,
+    'ambiguous_path_count':          ambiguous_path_count,
 }
+
+# =========================================================
+# RUNTIME SUMMARY & FINDINGS — deterministic, no model judgment
+# These are derived from topology data only. Discovery copies
+# them verbatim instead of generating its own. This reduces
+# the model's cognitive responsibility to near zero.
+# =========================================================
+
+runtime_summary = (
+    f"{topology_summary['total_nodes']} nodes, {topology_summary['total_edges']} edges, "
+    f"{topology_summary['cluster_surface_count']} cluster surfaces, "
+    f"{topology_summary['standalone_surface_count']} standalone surfaces. "
+    f"{topology_summary['connected_node_count']} connected, "
+    f"{topology_summary['isolated_node_count']} isolated. "
+    f"{topology_summary['bridge_count']} bridges, "
+    f"{topology_summary['hotspot_count']} hotspots, "
+    f"{topology_summary['entrypoint_count']} entrypoints."
+)
+
+runtime_findings = []
+
+# Finding: high isolation ratio
+if topology_summary['total_nodes'] > 0:
+    _iso_ratio = topology_summary['isolated_node_count'] / topology_summary['total_nodes']
+    if _iso_ratio > 0.5:
+        runtime_findings.append({
+            'finding': f"{topology_summary['isolated_node_count']} of {topology_summary['total_nodes']} nodes are isolated ({int(_iso_ratio * 100)}%)",
+            'topology_refs': [f"isolated_node_count: {topology_summary['isolated_node_count']}"],
+        })
+
+# Finding: unresolved references
+if unresolved_reference_count > 0:
+    runtime_findings.append({
+        'finding': f"{unresolved_reference_count} unresolved references detected — extractor found references it could not resolve",
+        'topology_refs': [f"unresolved_reference_count: {unresolved_reference_count}"],
+    })
+
+# Finding: observation limited nodes
+if observation_limited_node_count > 0:
+    runtime_findings.append({
+        'finding': f"{observation_limited_node_count} nodes have relation_visibility: observation_limited — references exist but targets are pruned or out of scope",
+        'topology_refs': [f"observation_limited_node_count: {observation_limited_node_count}"],
+    })
+
+# Finding: uncovered hotspots
+_coverage_gap = sum(1 for h in hotspots_out if not h['test_covered'])
+if _coverage_gap > 0:
+    runtime_findings.append({
+        'finding': f"{_coverage_gap} hotspots are not covered by tests",
+        'topology_refs': [f"coverage_gap_count: {_coverage_gap}"],
+    })
+
+# Finding: ambiguous path resolution
+if ambiguous_path_count > 0:
+    runtime_findings.append({
+        'finding': f"{ambiguous_path_count} requested path(s) resolved ambiguously — no canonical winner",
+        'topology_refs': [f"ambiguous_path_count: {ambiguous_path_count}"],
+    })
 
 # =========================================================
 # OUTPUT — condensed topology artifact
@@ -739,6 +1071,8 @@ gap_counts = {
 result = {
     'topology_summary':          topology_summary,
     'evidence':                  evidence,
+    'runtime_summary':           runtime_summary,
+    'runtime_findings':          runtime_findings,
     'ranked_targets':            ranked_targets,
     'gap_counts':                gap_counts,
     'topology_index': {
@@ -782,6 +1116,8 @@ jq -n \
       target: $target,
       topology_summary:            $result[0].topology_summary,
       evidence:                    $result[0].evidence,
+      runtime_summary:             $result[0].runtime_summary,
+      runtime_findings:            $result[0].runtime_findings,
       ranked_targets:              $result[0].ranked_targets,
       gap_counts:                  $result[0].gap_counts,
       topology_index:              $result[0].topology_index,

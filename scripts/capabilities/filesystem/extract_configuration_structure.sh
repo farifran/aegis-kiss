@@ -125,16 +125,28 @@ for dirpath, dirnames, filenames in os.walk(root):
         if not is_pruned:
             all_files.append(f_rel_norm)
 
-def get_dict_keys(d, prefix=''):
+def get_dict_keys(d, prefix='', depth=0, max_depth=2):
+    """Extract config keys up to max_depth to keep payload bounded.
+    Deeper nesting is collapsed into a count marker instead of
+    expanding every leaf key path."""
     keys = []
+    if depth >= max_depth:
+        if isinstance(d, dict) and d:
+            keys.append(f"{prefix}.*({len(d)} keys)")
+        elif isinstance(d, list) and d:
+            keys.append(f"{prefix}[]({len(d)} items)")
+        return keys
     if isinstance(d, dict):
         for k, v in d.items():
             curr = f"{prefix}.{k}" if prefix else str(k)
-            keys.append(curr)
-            keys.extend(get_dict_keys(v, curr))
+            if isinstance(v, (dict, list)) and v:
+                keys.append(curr)
+                keys.extend(get_dict_keys(v, curr, depth + 1, max_depth))
+            else:
+                keys.append(curr)
     elif isinstance(d, list):
         for item in d:
-            keys.extend(get_dict_keys(item, f"{prefix}[]"))
+            keys.extend(get_dict_keys(item, f"{prefix}[]", depth + 1, max_depth))
     return keys
 
 config_structures = []
@@ -205,6 +217,13 @@ for f in all_files:
 
     unique_keys = sorted(set(keys))
     if unique_keys:
+        # Cap keys per file to keep payload bounded. Large config files
+        # (e.g. package-lock.json) can have thousands of keys.
+        MAX_KEYS_PER_FILE = 50
+        if len(unique_keys) > MAX_KEYS_PER_FILE:
+            truncated_count = len(unique_keys) - MAX_KEYS_PER_FILE
+            unique_keys = unique_keys[:MAX_KEYS_PER_FILE]
+            unique_keys.append(f"...({truncated_count} more keys truncated)")
         config_structures.append({"config": f, "keys": unique_keys})
 
 config_structures = sorted(config_structures, key=lambda x: x['config'])
