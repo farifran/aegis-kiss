@@ -3,7 +3,7 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_python_run2",
-  "generated_at": "2026-06-21T13:27:22Z",
+  "generated_at": "2026-06-21T14:21:01Z",
   "payload": {
     "target": "tests/scenarios/python/input",
     "selection_rule": "hotspot",

@@ -3,7 +3,7 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_cycle_run4",
-  "generated_at": "2026-06-21T13:27:32Z",
+  "generated_at": "2026-06-21T14:21:11Z",
   "payload": {
     "target": "tests/scenarios/cycle/input",
     "selection_rule": "none",

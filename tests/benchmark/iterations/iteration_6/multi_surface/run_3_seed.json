@@ -3,25 +3,29 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_multi_surface_run3",
-  "generated_at": "2026-06-21T13:27:35Z",
+  "generated_at": "2026-06-21T14:21:14Z",
   "payload": {
     "target": "tests/scenarios/multi_surface/input",
-    "selection_rule": "hotspot",
+    "selection_rule": "bridge",
     "attention_state": "topology",
-    "attention_source": "topology_index.hotspots",
+    "attention_source": "topology_index.bridges",
     "attention_confidence": "medium",
     "ambiguous_candidates": [],
     "handover_attention": {
       "next_attention_targets": [
         "src/api.py",
+        "src/auth.py",
+        "src/db.py",
         "src/ui.py"
       ],
-      "attention_scope": "topology:hotspot",
-      "attention_reason": "highest degree nodes selected as attention seed"
+      "attention_scope": "topology:bridge",
+      "attention_reason": "bridge endpoints selected as attention seed"
     },
     "investigation_plan": {
       "primary_targets": [
         "src/api.py",
+        "src/auth.py",
+        "src/db.py",
         "src/ui.py"
       ],
       "secondary_targets": [],
@@ -31,15 +35,14 @@
       "scope_type": "topology",
       "scope_targets": [
         "src/api.py",
+        "src/auth.py",
+        "src/db.py",
         "src/ui.py"
       ],
       "scope_confidence": "medium"
     },
     "blocking_conditions": [],
-    "attention_targets": [
-      "src/api.py",
-      "src/ui.py"
-    ],
+    "attention_targets": [],
     "relevant_surfaces": [
       "surface_cluster_001",
       "surface_cluster_002"

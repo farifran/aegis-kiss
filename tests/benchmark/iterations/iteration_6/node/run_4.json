@@ -3,7 +3,7 @@
   "capability": "structural.builder",
   "classification": "readonly",
   "execution_id": "bench_node_run4",
-  "generated_at": "2026-06-21T13:27:28Z",
+  "generated_at": "2026-06-21T14:21:07Z",
   "payload": {
     "target": "tests/scenarios/node/input",
     "topology_summary": {
@@ -20,33 +20,27 @@
       "bridge_count": 1,
       "bridge_emit_count": 1,
       "bridge_truncated": false,
-      "hotspot_count": 1,
+      "hotspot_count": 0,
       "entrypoint_count": 1
     },
     "evidence": {
       "coverage": {
         "test_covered_file_count": 0,
         "config_file_count": 3,
-        "uncovered_hotspot_count": 1
+        "uncovered_hotspot_count": 0
       },
       "payload_status": {
-        "consumed_payload_ok_count": 6,
+        "consumed_payload_ok_count": 7,
         "consumed_payload_missing_count": 0,
         "consumed_payload_failed_count": 0
       }
     },
-    "runtime_summary": "5 nodes, 1 edges, 1 cluster surfaces, 1 standalone surfaces. 2 connected, 3 isolated. 1 bridges, 1 hotspots, 1 entrypoints.",
+    "runtime_summary": "5 nodes, 1 edges, 1 cluster surfaces, 1 standalone surfaces. 2 connected, 3 isolated. 1 bridges, 0 hotspots, 1 entrypoints.",
     "runtime_findings": [
       {
         "finding": "3 of 5 nodes are isolated (60%)",
         "topology_refs": [
           "isolated_node_count: 3"
-        ]
-      },
-      {
-        "finding": "1 hotspots are not covered by tests",
-        "topology_refs": [
-          "coverage_gap_count: 1"
         ]
       }
     ],
@@ -58,14 +52,6 @@
         "score": 4,
         "ranking_reason": "bridge_weight(4)",
         "reason": "highest_bridge_count_surface:bridge"
-      },
-      {
-        "id": "hotspot_001",
-        "type": "hotspot",
-        "surface_ref": "surface_cluster_001",
-        "score": 4,
-        "ranking_reason": "hotspot_weight(3)+total_degree(1)",
-        "reason": "highest_bridge_count_surface:hotspot"
       },
       {
         "id": "boundary_001",
@@ -86,7 +72,7 @@
     ],
     "gap_counts": {
       "visibility_gap_count": 0,
-      "coverage_gap_count": 1,
+      "coverage_gap_count": 0,
       "relationship_gap_count": 3,
       "scope_gap_count": 0,
       "unresolved_reference_count": 0,
@@ -106,7 +92,7 @@
           "dominant_node": "src/db.ts",
           "bridge_count": 1,
           "boundary_count": 1,
-          "hotspot_count": 1,
+          "hotspot_count": 0,
           "entrypoint_count": 1
         },
         {
@@ -138,20 +124,7 @@
           "surface_ref": "surface_cluster_001"
         }
       ],
-      "hotspots": [
-        {
-          "id": "hotspot_001",
-          "file": "src/index.ts",
-          "hotspot_score": 5,
-          "in_degree": 0,
-          "out_degree": 1,
-          "total_degree": 1,
-          "is_bridge_endpoint": true,
-          "is_boundary": false,
-          "test_covered": false,
-          "surface_ref": "surface_cluster_001"
-        }
-      ],
+      "hotspots": [],
       "entrypoints": [
         {
           "id": "entrypoint_001",
@@ -202,7 +175,7 @@
           "surface_kind": "cluster",
           "relation_visibility": "has_observed_relationships",
           "is_entrypoint": true,
-          "is_hotspot": true,
+          "is_hotspot": false,
           "is_boundary": false,
           "in_degree": 0,
           "out_degree": 1,
@@ -215,8 +188,7 @@
           ],
           "responsibility_confidence": "high",
           "entrypoint_id": "entrypoint_001",
-          "surface_status": "surface_member",
-          "hotspot_id": "hotspot_001"
+          "surface_status": "surface_member"
         },
         "target_system_profile.yml": {
           "surface_ref": "surface_standalone_002",
@@ -280,6 +252,10 @@
       },
       {
         "file": "filesystem_extract_configuration_structure.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_responsibilities.json",
         "status": "ok"
       }
     ],

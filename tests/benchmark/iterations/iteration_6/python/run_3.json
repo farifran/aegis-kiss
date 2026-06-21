@@ -3,7 +3,7 @@
   "capability": "structural.builder",
   "classification": "readonly",
   "execution_id": "bench_python_run3",
-  "generated_at": "2026-06-21T13:27:23Z",
+  "generated_at": "2026-06-21T14:21:01Z",
   "payload": {
     "target": "tests/scenarios/python/input",
     "topology_summary": {
@@ -30,7 +30,7 @@
         "uncovered_hotspot_count": 1
       },
       "payload_status": {
-        "consumed_payload_ok_count": 6,
+        "consumed_payload_ok_count": 7,
         "consumed_payload_missing_count": 0,
         "consumed_payload_failed_count": 0
       }
@@ -321,6 +321,10 @@
       },
       {
         "file": "filesystem_extract_configuration_structure.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_responsibilities.json",
         "status": "ok"
       }
     ],

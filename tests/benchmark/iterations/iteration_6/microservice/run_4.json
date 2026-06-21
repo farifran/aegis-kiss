@@ -3,7 +3,7 @@
   "capability": "structural.builder",
   "classification": "readonly",
   "execution_id": "bench_microservice_run4",
-  "generated_at": "2026-06-21T13:27:30Z",
+  "generated_at": "2026-06-21T14:21:09Z",
   "payload": {
     "target": "tests/scenarios/microservice/input",
     "topology_summary": {
@@ -30,7 +30,7 @@
         "uncovered_hotspot_count": 0
       },
       "payload_status": {
-        "consumed_payload_ok_count": 6,
+        "consumed_payload_ok_count": 7,
         "consumed_payload_missing_count": 0,
         "consumed_payload_failed_count": 0
       }
@@ -179,6 +179,10 @@
       },
       {
         "file": "filesystem_extract_configuration_structure.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_responsibilities.json",
         "status": "ok"
       }
     ],

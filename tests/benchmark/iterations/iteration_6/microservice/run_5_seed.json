@@ -3,7 +3,7 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_microservice_run5",
-  "generated_at": "2026-06-21T13:27:30Z",
+  "generated_at": "2026-06-21T14:21:10Z",
   "payload": {
     "target": "tests/scenarios/microservice/input",
     "selection_rule": "entrypoint",

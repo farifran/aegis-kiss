@@ -3,7 +3,7 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_hub_run3",
-  "generated_at": "2026-06-21T13:27:33Z",
+  "generated_at": "2026-06-21T14:21:13Z",
   "payload": {
     "target": "tests/scenarios/hub/input",
     "selection_rule": "hotspot",
@@ -13,16 +13,14 @@
     "ambiguous_candidates": [],
     "handover_attention": {
       "next_attention_targets": [
-        "src/core.py",
-        "src/main.py"
+        "src/core.py"
       ],
       "attention_scope": "topology:hotspot",
       "attention_reason": "highest degree nodes selected as attention seed"
     },
     "investigation_plan": {
       "primary_targets": [
-        "src/core.py",
-        "src/main.py"
+        "src/core.py"
       ],
       "secondary_targets": [],
       "excluded_targets": []
@@ -30,15 +28,13 @@
     "investigation_scope": {
       "scope_type": "topology",
       "scope_targets": [
-        "src/core.py",
-        "src/main.py"
+        "src/core.py"
       ],
       "scope_confidence": "medium"
     },
     "blocking_conditions": [],
     "attention_targets": [
-      "src/core.py",
-      "src/main.py"
+      "src/core.py"
     ],
     "relevant_surfaces": [
       "surface_cluster_001"

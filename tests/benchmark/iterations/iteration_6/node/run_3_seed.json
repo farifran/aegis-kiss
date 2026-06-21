@@ -3,23 +3,25 @@
   "capability": "runtime.attention_seed",
   "classification": "readonly",
   "execution_id": "bench_node_run3",
-  "generated_at": "2026-06-21T13:27:28Z",
+  "generated_at": "2026-06-21T14:21:07Z",
   "payload": {
     "target": "tests/scenarios/node/input",
-    "selection_rule": "hotspot",
+    "selection_rule": "bridge",
     "attention_state": "topology",
-    "attention_source": "topology_index.hotspots",
+    "attention_source": "topology_index.bridges",
     "attention_confidence": "medium",
     "ambiguous_candidates": [],
     "handover_attention": {
       "next_attention_targets": [
+        "src/db.ts",
         "src/index.ts"
       ],
-      "attention_scope": "topology:hotspot",
-      "attention_reason": "highest degree nodes selected as attention seed"
+      "attention_scope": "topology:bridge",
+      "attention_reason": "bridge endpoints selected as attention seed"
     },
     "investigation_plan": {
       "primary_targets": [
+        "src/db.ts",
         "src/index.ts"
       ],
       "secondary_targets": [],
@@ -28,14 +30,13 @@
     "investigation_scope": {
       "scope_type": "topology",
       "scope_targets": [
+        "src/db.ts",
         "src/index.ts"
       ],
       "scope_confidence": "medium"
     },
     "blocking_conditions": [],
-    "attention_targets": [
-      "src/index.ts"
-    ],
+    "attention_targets": [],
     "relevant_surfaces": [
       "surface_cluster_001"
     ],

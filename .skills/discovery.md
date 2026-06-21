@@ -36,7 +36,6 @@ Discovery exists to:
 Discovery must produce ONLY:
 - investigative focus (foco investigativo)
 - gaps (lacunas)
-- hypotheses (hipóteses)
 - prioritization (priorização)
 - next steps (próximos passos)
 - operational interpretation (interpretação operacional)
@@ -279,7 +278,6 @@ If absent, set to `[]`.
 - Does NOT generate `summary` — copies from runtime
 - Does NOT generate `findings` — copies from runtime
 - Does NOT emit detailed defect root-cause interpretations — belongs to Forensics
-- Does NOT emit detailed defect root-cause hypotheses — belongs to Forensics (Discovery only emits top-level structural investigation hypotheses)
 
 ---
 
@@ -343,7 +341,7 @@ Structure, selection, counts, and attention routing are computed by runtime capa
 (`structural.builder`, `runtime.attention_seed`).
 Discovery reads and copies them.
 
-Operational interpretation of topology, investigative focus, gaps, hypotheses, prioritization, and next steps belong to Discovery.
+Operational interpretation of topology, investigative focus, gaps, prioritization, and next steps belong to Discovery.
 Detailed root-cause analysis, defect causality, and structural repair proposal belong to Forensics.
 Correction belongs to Repair.
 Simplification belongs to Optimize.

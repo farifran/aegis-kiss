@@ -18,7 +18,7 @@
     "bash": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -27,14 +27,15 @@
           "in_scope": true,
           "out_of_scope": [],
           "scope_targets": [
-            "bin/deploy.sh"
+            "bin/deploy.sh",
+            "lib/utils.sh"
           ],
           "score": 1.0
         },
         "signal_to_noise": {
-          "ranked_count": 4,
-          "score": 0.25,
-          "selected_count": 1
+          "ranked_count": 2,
+          "score": 1.0,
+          "selected_count": 2
         },
         "structural_consistency": {
           "consistent": true,
@@ -74,20 +75,20 @@
           "true_positives": 1
         },
         "entrypoints": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.0,
+          "false_negatives": 1,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 1
+          "recall": 0.0,
+          "true_positives": 0
         },
         "hotspots": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.0,
+          "false_negatives": 1,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 1
+          "recall": 0.0,
+          "true_positives": 0
         },
         "surfaces": {
           "f1": 1.0,
@@ -104,7 +105,7 @@
     "cycle": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -116,8 +117,7 @@
           "score": 1.0
         },
         "signal_to_noise": {
-          "note": "no ranked targets \u2014 ratio undefined",
-          "ranked_count": 0,
+          "ranked_count": 3,
           "score": 0.0,
           "selected_count": 0
         },
@@ -143,10 +143,10 @@
       },
       "oracle_accuracy": {
         "boundaries": {
-          "f1": 1.0,
+          "f1": 0.0,
           "false_negatives": 0,
-          "false_positives": 0,
-          "precision": 1.0,
+          "false_positives": 3,
+          "precision": 0.0,
           "recall": 1.0,
           "true_positives": 0
         },
@@ -189,7 +189,7 @@
     "hub": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -198,15 +198,14 @@
           "in_scope": true,
           "out_of_scope": [],
           "scope_targets": [
-            "src/core.py",
-            "src/main.py"
+            "src/core.py"
           ],
           "score": 1.0
         },
         "signal_to_noise": {
-          "ranked_count": 10,
-          "score": 0.2,
-          "selected_count": 2
+          "ranked_count": 9,
+          "score": 0.1111,
+          "selected_count": 1
         },
         "structural_consistency": {
           "consistent": true,
@@ -254,12 +253,12 @@
           "true_positives": 1
         },
         "hotspots": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.6667,
+          "false_negatives": 1,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 2
+          "recall": 0.5,
+          "true_positives": 1
         },
         "surfaces": {
           "f1": 1.0,
@@ -276,7 +275,7 @@
     "microservice": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -363,7 +362,7 @@
     "monolith": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -372,14 +371,15 @@
           "in_scope": true,
           "out_of_scope": [],
           "scope_targets": [
-            "app/controllers/users_controller.py"
+            "app/controllers/users_controller.py",
+            "app/models/user.py"
           ],
           "score": 1.0
         },
         "signal_to_noise": {
-          "ranked_count": 3,
-          "score": 0.3333,
-          "selected_count": 1
+          "ranked_count": 2,
+          "score": 1.0,
+          "selected_count": 2
         },
         "structural_consistency": {
           "consistent": true,
@@ -427,12 +427,12 @@
           "true_positives": 0
         },
         "hotspots": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.0,
+          "false_negatives": 1,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 1
+          "recall": 0.0,
+          "true_positives": 0
         },
         "surfaces": {
           "f1": 1.0,
@@ -449,7 +449,7 @@
     "multi_surface": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -459,14 +459,16 @@
           "out_of_scope": [],
           "scope_targets": [
             "src/api.py",
+            "src/auth.py",
+            "src/db.py",
             "src/ui.py"
           ],
           "score": 1.0
         },
         "signal_to_noise": {
-          "ranked_count": 3,
-          "score": 0.6667,
-          "selected_count": 2
+          "ranked_count": 2,
+          "score": 2.0,
+          "selected_count": 4
         },
         "structural_consistency": {
           "consistent": true,
@@ -514,12 +516,12 @@
           "true_positives": 0
         },
         "hotspots": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.0,
+          "false_negatives": 2,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 2
+          "recall": 0.0,
+          "true_positives": 0
         },
         "surfaces": {
           "f1": 1.0,
@@ -536,7 +538,7 @@
     "node": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -545,14 +547,15 @@
           "in_scope": true,
           "out_of_scope": [],
           "scope_targets": [
+            "src/db.ts",
             "src/index.ts"
           ],
           "score": 1.0
         },
         "signal_to_noise": {
-          "ranked_count": 4,
-          "score": 0.25,
-          "selected_count": 1
+          "ranked_count": 3,
+          "score": 0.6667,
+          "selected_count": 2
         },
         "structural_consistency": {
           "consistent": true,
@@ -600,12 +603,12 @@
           "true_positives": 1
         },
         "hotspots": {
-          "f1": 1.0,
-          "false_negatives": 0,
+          "f1": 0.0,
+          "false_negatives": 1,
           "false_positives": 0,
           "precision": 1.0,
-          "recall": 1.0,
-          "true_positives": 1
+          "recall": 0.0,
+          "true_positives": 0
         },
         "surfaces": {
           "f1": 1.0,
@@ -622,7 +625,7 @@
     "python": {
       "metrics": {
         "capability_utilization": {
-          "consumed_ok": 6,
+          "consumed_ok": 7,
           "failed": 0,
           "missing": 0,
           "score": 1.0
@@ -709,18 +712,18 @@
   "summary": {
     "capability_utilization": 1.0,
     "oracle_f1_average": {
-      "boundaries": 1.0,
+      "boundaries": 0.875,
       "bridges": 1.0,
-      "entrypoints": 1.0,
-      "hotspots": 1.0,
+      "entrypoints": 0.875,
+      "hotspots": 0.4583,
       "surfaces": 1.0
     },
     "scenarios_evaluated": 8,
     "scope_accuracy": 1.0,
-    "signal_to_noise": 0.2333,
+    "signal_to_noise": 0.6181,
     "structural_consistency": 1.0,
     "topology_coverage": 1.0,
     "uncertainty_correctness": 1.0
   },
-  "timestamp": "2026-06-21T10:27:38.852844Z"
+  "timestamp": "2026-06-21T11:21:24.034633Z"
 }

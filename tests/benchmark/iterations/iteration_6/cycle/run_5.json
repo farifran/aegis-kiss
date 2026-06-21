@@ -3,7 +3,7 @@
   "capability": "structural.builder",
   "classification": "readonly",
   "execution_id": "bench_cycle_run5",
-  "generated_at": "2026-06-21T13:27:32Z",
+  "generated_at": "2026-06-21T14:21:11Z",
   "payload": {
     "target": "tests/scenarios/cycle/input",
     "topology_summary": {
@@ -16,7 +16,7 @@
       "cluster_surface_count": 1,
       "standalone_surface_count": 1,
       "total_surface_count": 2,
-      "boundary_count": 0,
+      "boundary_count": 3,
       "bridge_count": 0,
       "bridge_emit_count": 0,
       "bridge_truncated": false,
@@ -30,14 +30,39 @@
         "uncovered_hotspot_count": 0
       },
       "payload_status": {
-        "consumed_payload_ok_count": 6,
+        "consumed_payload_ok_count": 7,
         "consumed_payload_missing_count": 0,
         "consumed_payload_failed_count": 0
       }
     },
     "runtime_summary": "4 nodes, 3 edges, 1 cluster surfaces, 1 standalone surfaces. 3 connected, 1 isolated. 0 bridges, 0 hotspots, 0 entrypoints.",
     "runtime_findings": [],
-    "ranked_targets": [],
+    "ranked_targets": [
+      {
+        "id": "boundary_001",
+        "type": "boundary",
+        "surface_ref": "surface_cluster_001",
+        "score": 3,
+        "ranking_reason": "boundary_weight(2)+in_degree(1)",
+        "reason": "largest_surface:boundary"
+      },
+      {
+        "id": "boundary_002",
+        "type": "boundary",
+        "surface_ref": "surface_cluster_001",
+        "score": 3,
+        "ranking_reason": "boundary_weight(2)+in_degree(1)",
+        "reason": "largest_surface:boundary"
+      },
+      {
+        "id": "boundary_003",
+        "type": "boundary",
+        "surface_ref": "surface_cluster_001",
+        "score": 3,
+        "ranking_reason": "boundary_weight(2)+in_degree(1)",
+        "reason": "largest_surface:boundary"
+      }
+    ],
     "gap_counts": {
       "visibility_gap_count": 0,
       "coverage_gap_count": 0,
@@ -60,7 +85,7 @@
           ],
           "dominant_node": "src/a.py",
           "bridge_count": 0,
-          "boundary_count": 0,
+          "boundary_count": 3,
           "hotspot_count": 0,
           "entrypoint_count": 0
         },
@@ -77,7 +102,29 @@
         }
       ],
       "bridges": [],
-      "boundaries": [],
+      "boundaries": [
+        {
+          "id": "boundary_001",
+          "file": "src/a.py",
+          "in_degree": 1,
+          "out_degree": 1,
+          "surface_ref": "surface_cluster_001"
+        },
+        {
+          "id": "boundary_002",
+          "file": "src/b.py",
+          "in_degree": 1,
+          "out_degree": 1,
+          "surface_ref": "surface_cluster_001"
+        },
+        {
+          "id": "boundary_003",
+          "file": "src/c.py",
+          "in_degree": 1,
+          "out_degree": 1,
+          "surface_ref": "surface_cluster_001"
+        }
+      ],
       "hotspots": [],
       "entrypoints": [],
       "node_index": {
@@ -87,7 +134,7 @@
           "relation_visibility": "has_observed_relationships",
           "is_entrypoint": false,
           "is_hotspot": false,
-          "is_boundary": false,
+          "is_boundary": true,
           "in_degree": 1,
           "out_degree": 1,
           "total_degree": 2,
@@ -95,7 +142,8 @@
           "test_covered": false,
           "responsibility": "module",
           "responsibility_signals": [],
-          "responsibility_confidence": "low"
+          "responsibility_confidence": "low",
+          "boundary_id": "boundary_001"
         },
         "src/b.py": {
           "surface_ref": "surface_cluster_001",
@@ -103,7 +151,7 @@
           "relation_visibility": "has_observed_relationships",
           "is_entrypoint": false,
           "is_hotspot": false,
-          "is_boundary": false,
+          "is_boundary": true,
           "in_degree": 1,
           "out_degree": 1,
           "total_degree": 2,
@@ -111,7 +159,8 @@
           "test_covered": false,
           "responsibility": "module",
           "responsibility_signals": [],
-          "responsibility_confidence": "low"
+          "responsibility_confidence": "low",
+          "boundary_id": "boundary_002"
         },
         "src/c.py": {
           "surface_ref": "surface_cluster_001",
@@ -119,7 +168,7 @@
           "relation_visibility": "has_observed_relationships",
           "is_entrypoint": false,
           "is_hotspot": false,
-          "is_boundary": false,
+          "is_boundary": true,
           "in_degree": 1,
           "out_degree": 1,
           "total_degree": 2,
@@ -127,7 +176,8 @@
           "test_covered": false,
           "responsibility": "module",
           "responsibility_signals": [],
-          "responsibility_confidence": "low"
+          "responsibility_confidence": "low",
+          "boundary_id": "boundary_003"
         },
         "target_system_profile.yml": {
           "surface_ref": "surface_standalone_001",
@@ -173,6 +223,10 @@
       },
       {
         "file": "filesystem_extract_configuration_structure.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_responsibilities.json",
         "status": "ok"
       }
     ],
