@@ -234,10 +234,56 @@ parse_runtime_cli() {
   fi
 }
 
+get_next_mode() {
+  case "$1" in
+    discovery)   echo "forensics" ;;
+    forensics)   echo "repair" ;;
+    repair)      echo "optimize" ;;
+    optimize)    echo "adversarial" ;;
+    adversarial) echo "validation" ;;
+    *)           echo "null" ;;
+  esac
+}
+
+print_status_json() {
+  local last_mode="null"
+  if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" ]]; then
+    last_mode="$(jq -r '.artifact_snapshot.mode // "null"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "null")"
+  fi
+
+  local next_mode="discovery"
+  if [[ "${last_mode}" != "null" ]]; then
+    next_mode="$(get_next_mode "${last_mode}")"
+  fi
+
+  jq -n \
+    --arg last_mode "${last_mode}" \
+    --arg next_mode "${next_mode}" \
+    '{
+      last_mode: (if $last_mode == "null" then null else $last_mode end),
+      next_mode: (if $next_mode == "null" then null else $next_mode end)
+    }'
+}
+
+print_modes_json() {
+  jq -n \
+    --argjson readonly '["discovery", "forensics"]' \
+    --argjson mutation '["discovery", "forensics", "repair", "optimize", "adversarial", "validation"]' \
+    '{readonly: $readonly, mutation: $mutation}'
+}
+
 AEGIS_MODE=""
 AEGIS_SKILL_FILE=""
 
 parse_runtime_cli "$@"
+
+if [[ "${AEGIS_MODE}" == "status" ]]; then
+  print_status_json
+  exit 0
+elif [[ "${AEGIS_MODE}" == "modes" ]]; then
+  print_modes_json
+  exit 0
+fi
 
 readonly AEGIS_MODE
 readonly AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
@@ -614,6 +660,17 @@ validate_mode_preconditions() {
 # VALIDATION
 # =========================================================
 
+validate_execution_engine_requirements() {
+  local engine
+  engine="${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}"
+  case "$engine" in
+    aider)
+      command -v aider >/dev/null 2>&1 \
+        || runtime_fatal "missing_aider_binary"
+      ;;
+  esac
+}
+
 validate_runtime_environment() {
 
   runtime_log "Initializing runtime..."
@@ -663,6 +720,8 @@ validate_runtime_environment() {
 
   [[ -n "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}" ]] \
     || runtime_fatal "missing_mode_evidence_profile"
+
+  validate_execution_engine_requirements
 }
 
 # =========================================================

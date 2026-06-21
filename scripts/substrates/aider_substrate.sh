@@ -108,8 +108,13 @@ validate_aider_substrate_inputs() {
   command -v git >/dev/null 2>&1 \
     || aider_fatal "missing_dependency_git"
 
-  [[ -x "${AEGIS_AIDER_BIN:-}" ]] \
-    || aider_fatal "missing_aider_binary"
+  if [[ ! -x "${AEGIS_AIDER_BIN:-}" ]]; then
+    if command -v aider >/dev/null 2>&1; then
+      export AEGIS_AIDER_BIN="$(command -v aider)"
+    else
+      aider_fatal "missing_aider_binary"
+    fi
+  fi
 
   [[ -d "${AEGIS_MUTATION_GIT_DIR:-}" ]] \
     || aider_fatal "missing_mutation_git_directory"
