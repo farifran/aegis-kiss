@@ -337,7 +337,7 @@ render_bounded_payload_section() {
   if [[ "${payload_name}" == "structural_builder.json" ]]; then
     local stripped_file
     stripped_file="$(mktemp)"
-    if jq -c '.payload = { topology_summary: .payload.topology_summary }' \
+    if jq -c '.payload = { topology_summary: .payload.topology_summary, suggested_evidence_priorities: .payload.suggested_evidence_priorities, ranked_targets: .payload.ranked_targets, observed_request_alignment: .payload.observed_request_alignment, gap_counts: .payload.gap_counts }' \
         "${compact_file}" > "${stripped_file}" 2>/dev/null; then
       mv "${stripped_file}" "${compact_file}"
     else
@@ -382,7 +382,7 @@ assemble_system_prompt() {
 - 'investigation_risks': qualitative risks in the current topology/scope (e.g. untested boundaries, hidden coupling, single points of failure)."
   elif [[ "${AEGIS_MODE}" == "discovery" ]]; then
     mode_specific_instructions="CRITICAL DISCOVERY CONTEXT CONSTRAINTS: You must stop describing or narrating the topology structure verbatim (never repeat counts, metrics, or raw facts such as node/edge/bridge/boundary counts). Instead, you must exclusively produce operational context: priorities, gaps, next steps, and investigative strategy (what to do with what exists, not what exists). Populate the following fields inside 'operational_context':
-- 'evidence_priorities': specific capabilities and targets to prioritize for collection.
+- 'evidence_priorities': COPY suggested_evidence_priorities from the structural_builder payload VERBATIM. Do NOT generate this list — it is deterministically pre-computed by the runtime from ranked_targets.
 - 'confidence_drivers': factors driving structural/operational confidence (e.g. 'Bridge observed mechanically').
 
 FUNDAMENTAL RULE: The subject of every operational_observations entry is the INVESTIGATION, not the system under investigation. Ask yourself: am I describing what the investigation must do, or am I describing what the system does? Only the former is permitted.

@@ -102,7 +102,7 @@ All fields generated or copied by Discovery are placed under the `operational_co
 | `rationale` | Cognitive | Explains the reasoning behind the investigation priority and why certain attention targets were selected. |
 | `escalation_reason` | Cognitive | Null, or a string explaining why the investigation is blocked or requires escalation. |
 | `recommended_next_actions` | Cognitive | Specific, actionable recommended next steps (e.g. invoke forensics on target X). |
-| `evidence_priorities` | Cognitive | List of specific capabilities and targets to prioritize for collection. |
+| `evidence_priorities` | `structural.builder` | Copy `structural_context.suggested_evidence_priorities` verbatim. Do NOT generate this list — it is deterministically computed from `ranked_targets`. |
 | `confidence_drivers` | Cognitive | List of factors driving structural or operational confidence (e.g., "Bridge observed mechanically"). |
 
 ### Provenance declaration

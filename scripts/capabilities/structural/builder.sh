@@ -970,6 +970,38 @@ _topology_slots  = _total_slots - _explicit_count
 ranked_targets   = _explicit_targets[:_explicit_count] + ranked_targets[:_topology_slots]
 
 # =========================================================
+# SUGGESTED EVIDENCE PRIORITIES — deterministic evidence
+# priorities derived from ranked_targets.
+# =========================================================
+_ep_seen = set()
+suggested_evidence_priorities = []
+for _t in ranked_targets:
+    _ttype = _t['type']
+    _file = None
+    if _ttype == 'explicit_request':
+        _file = _t.get('file')
+    elif _ttype == 'hotspot':
+        _match = next((h for h in hotspots_out if h['id'] == _t['id']), None)
+        if _match:
+            _file = _match.get('file')
+    elif _ttype == 'boundary':
+        _match = next((b for b in boundaries_out if b['id'] == _t['id']), None)
+        if _match:
+            _file = _match.get('file')
+    elif _ttype == 'entrypoint':
+        _match = next((e for e in entrypoints_out if e['id'] == _t['id']), None)
+        if _match:
+            _file = _match.get('file')
+    elif _ttype == 'bridge':
+        # bridge has from/to — prioritize 'from' (source of dependency)
+        _bridge = next((b for b in bridges_out if b['id'] == _t['id']), None)
+        if _bridge:
+            _file = _bridge['from']
+    if _file and _file not in _ep_seen:
+        suggested_evidence_priorities.append(f'filesystem.read:{_file}')
+        _ep_seen.add(_file)
+
+# =========================================================
 # TOPOLOGY SUMMARY & GAP COUNTS — deterministic counts
 # =========================================================
 
@@ -1140,6 +1172,7 @@ result = {
     'runtime_summary':           runtime_summary,
     'runtime_findings':          runtime_findings,
     'ranked_targets':            ranked_targets,
+    'suggested_evidence_priorities': suggested_evidence_priorities,
     'gap_counts':                gap_counts,
     'topology_index': {
         'surfaces':              surfaces_out,
@@ -1185,6 +1218,7 @@ jq -n \
       runtime_summary:             $result[0].runtime_summary,
       runtime_findings:            $result[0].runtime_findings,
       ranked_targets:              $result[0].ranked_targets,
+      suggested_evidence_priorities: $result[0].suggested_evidence_priorities,
       gap_counts:                  $result[0].gap_counts,
       topology_index:              $result[0].topology_index,
       unresolved_references:       $result[0].unresolved_references,

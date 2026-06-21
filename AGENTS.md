@@ -58,6 +58,29 @@ The system must separate observation, interpretation, falsification, correction,
 
 Not all responsibilities belong to the same mode.
 
+### Epistemological Layer Model
+
+The system operates on a strict three-tier epistemological separation:
+
+| Layer | Runtime Component | Epistemic Role |
+|---|---|---|
+| Perception | Structural Builder | O que existe — what exists |
+| Attention | Discovery | O que investigar — what to investigate |
+| Interpretation | Forensics | O que significa — what it means |
+
+**Corollary: information can only flow downward.**
+- Structural Builder reads the filesystem. It produces structural facts.
+- Discovery reads structural facts. It does not read file content.
+  Therefore Discovery cannot speak about what code does.
+- Forensics reads file content AND structural facts. It interprets meaning.
+
+**The boundary rule:**
+Topology position does not reveal function.
+Only file content reveals function.
+File content reading belongs to Forensics.
+Discovery therefore speaks only about what the investigation must do —
+never about what the system does.
+
 ---
 
 ## Constitutional Model
@@ -218,9 +241,7 @@ If a lower layer conflicts with this constitution, this constitution wins.
 - No validation masquerading as discovery.
 - No epistemic handover masquerading as truth.
 - Discovery must never repeat metrics, counts, or structural facts (e.g. node counts, edge counts, bridge counts) already present in the structural_context.
-- Discovery must stop describing/narrating the topology structure and exclusively produce: hypotheses, priorities, risks, gaps, next steps, and investigative strategy (what to do with what exists, rather than what exists).
-
-
+- Discovery must stop describing/narrating the topology structure and exclusively produce: attention priorities, gaps, recommended next actions, and investigative strategy (what to do with what exists, rather than what exists). Qualitative interpretation (hypotheses and risks) belongs exclusively to Forensics.
 
 ---
 
@@ -233,7 +254,7 @@ The model consumes only runtime-exposed evidence.
 
 Git is the only persistent memory.
 
-Discovery observes.
+Discovery directs attention.
 Forensics interprets.
 Repair corrects.
 Optimize simplifies.

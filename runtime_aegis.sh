@@ -915,8 +915,9 @@ promote_epistemic_handover() {
                   entrypoints:                $bp.topology_index.entrypoints,
                   evidence_summary:           $bp.evidence,
                   unresolved_references:      $bp.unresolved_references,
-                  observed_request_alignment: $bp.observed_request_alignment,
-                  gap_counts:                 $bp.gap_counts
+                  observed_request_alignment:    $bp.observed_request_alignment,
+                  suggested_evidence_priorities: $bp.suggested_evidence_priorities,
+                  gap_counts:                    $bp.gap_counts
                 },
                 operational_context: (
                   (if ($orig | has("operational_context")) then
