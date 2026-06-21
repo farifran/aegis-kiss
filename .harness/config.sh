@@ -52,7 +52,7 @@ export AEGIS_CAPABILITY_PAYLOAD_DIR=".harness/runtime/capability_payloads"
 
 export AEGIS_EPISTEMIC_HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
 
-: "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Enumerate runtime-exposed evidence and observable system structure.}"
+: "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Analyze repository structure and identify highest-value investigation targets}"
 : "${AEGIS_INVESTIGATION_INPUT:=}"
 : "${AEGIS_EVIDENCE_TARGET_PATH:=.}"
 

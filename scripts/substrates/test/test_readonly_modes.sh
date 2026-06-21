@@ -14,7 +14,7 @@ fail() {
 }
 
 readonly TEST_INVESTIGATION_INPUT="readonly smoke investigation"
-readonly DEFAULT_INVESTIGATION_INPUT="Enumerate runtime-exposed evidence and observable system structure."
+readonly DEFAULT_INVESTIGATION_INPUT="Analyze repository structure and identify highest-value investigation targets"
 
 assert_manifest_contract() {
   local manifest
