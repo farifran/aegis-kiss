@@ -33,6 +33,7 @@ assert_manifest_contract() {
     and (.modes.discovery.evidence_capabilities == [
       "filesystem.list_tree",
       "filesystem.read",
+      "filesystem.extract_responsibilities",
       "structural.builder",
       "runtime.attention_seed"
     ])
@@ -519,14 +520,14 @@ main() {
   assert_discovery_accepts_informal_cli_investigation_input
   assert_discovery_accepts_issue_cli_investigation_input
 
-  assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "structural_builder.json", "runtime_attention_seed.json"]'
+  assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "filesystem_extract_responsibilities.json", "structural_builder.json", "runtime_attention_seed.json"]'
   assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
   assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json"]'
 
   assert_materialized_runtime_state \
     "discovery" \
-    '["filesystem_extract_configuration_structure.json", "filesystem_extract_entrypoints.json", "filesystem_extract_import_graph.json", "filesystem_extract_reference_graph.json", "filesystem_extract_symbols.json", "filesystem_extract_test_relationships.json", "filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "structural_builder.json"]'
+    '["filesystem_extract_configuration_structure.json", "filesystem_extract_entrypoints.json", "filesystem_extract_import_graph.json", "filesystem_extract_reference_graph.json", "filesystem_extract_responsibilities.json", "filesystem_extract_symbols.json", "filesystem_extract_test_relationships.json", "filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "structural_builder.json"]'
 
   assert_materialized_runtime_state \
     "forensics" \
