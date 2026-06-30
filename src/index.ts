@@ -10,3 +10,6 @@ export function multiplicacao(a: number, b: number): number {
 export function quadratica(a: number, b: number, c: number, x: number): number {
     return a * x ** 2 + b * x + c;
 }
+export function logaritmica(a: number, b: number): number {
+    return Math.log(a) / Math.log(b);
+}

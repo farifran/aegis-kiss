@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EngineeringPlanContract",
+  "description": "Schema definition of the parsed Engineering Plan structure used to guide execution.",
+  "x-contract-metadata": {
+    "semantics": "Define a lista de tarefas e metadados que orientam a execução da investigação do início ao fim (Engineering Plan).",
+    "producer": "O Operador (humano) ou um Tradutor de Planejamento (AI).",
+    "consumers": ["Bootstrap (run_aegis.sh)"],
+    "immutability": "Mutável. O Bootstrap atualiza o status de cada tarefa (de [ ] para [x]) durante a execução, e o operador pode editar o plano para adicionar ou alterar tarefas.",
+    "lifecycle": "Criado antes de iniciar a execução (Fase de Planejamento); persiste permanentemente no repositório (Git) como histórico de engenharia."
+  },
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "completed"]
+          }
+        },
+        "required": ["description", "status"]
+      }
+    }
+  },
+  "required": ["title", "tasks"]
+}

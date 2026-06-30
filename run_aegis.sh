@@ -1,115 +1,51 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# AEGIS RUN ORCHESTRATOR (KISS)
+# AEGIS BOOTSTRAP (KISS)
 # =========================================================
 #
 # OPERATOR GUIDE
 #
 # ---------------------------------------------------------
-# FULL MUTATION PIPELINE
+# ENGINEERING PLAN EXECUTION
 # ---------------------------------------------------------
 #
-# ./run_aegis.sh
+# ./run_aegis.sh --plan <EngineeringPlan.md>
 #
-# Executes:
-#
-# discovery
-# -> forensics
-# -> repair
-# -> optimize
-# -> adversarial
-# -> validation
-#
-#
-# ---------------------------------------------------------
-# READONLY PIPELINE
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh readonly
-#
-# Executes:
-#
-# discovery
-# -> forensics
-#
-#
-# ---------------------------------------------------------
-# RESUME PIPELINE
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh --resume
-#
-# Reads:
-#
-# .harness/runtime/epistemic_handover.json
-#
-# Continues from next mode.
-#
-#
-# ---------------------------------------------------------
-# TARGET REPOSITORY
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh \
-#   --target tests/scenarios/python
-#
+# Executes the tasks listed in the plan sequentially:
+#   parse_cli
+#   -> prepare workspace
+#   -> run Runtime for each task
+#   -> read validated_result
+#   -> persist and promote changes to main repository
 #
 # ---------------------------------------------------------
 # FAIL FAST
 # ---------------------------------------------------------
 #
-# Any failure immediately aborts execution.
-#
-#
-# ---------------------------------------------------------
-# REPORT
-# ---------------------------------------------------------
-#
-# Shows:
-#
-# - mode timings
-# - total duration
-# - final mode
-# - final attention targets
-# - status
+# Any task failure immediately aborts execution.
 #
 # =========================================================
 
 set -Eeuo pipefail
 
-readonly HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
+
 
 # Tracks whether the Isolated Workspace was successfully initialized.
 # Used by the cleanup trap to avoid removing a workspace that was never created.
 WORKSPACE_INITIALIZED=false
 
-declare -A PIPELINES=(
-  [readonly]="discovery forensics"
-  [mutation]="discovery forensics repair optimize adversarial validation"
-)
 
-PIPELINE="mutation"
-TARGET=""
-RESUME=false
-UNTIL=""
-ISSUE_NUMBER=""
+
+
 ISSUE_PATH=""
-INVESTIGATION_INPUT=""
-declare -a POSITIONAL=()
 
-declare -A MODE_TIMINGS
-declare -a EXECUTION_MODES
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "[RUN][FATAL] missing dependency: $1" >&2
     exit 1
   }
-}
-
-pipeline_contains_mutation() {
-  [[ "${PIPELINE}" == "mutation" ]]
 }
 
 check_dependencies() {
@@ -124,235 +60,19 @@ check_dependencies() {
   require git
   echo "git          ✓"
 
-  if pipeline_contains_mutation; then
-    require aider
-    echo "aider        ✓"
-  fi
-
   echo
-}
-
-next_mode() {
-
-  case "$1" in
-    discovery)   echo forensics ;;
-    forensics)   echo repair ;;
-    repair)      echo optimize ;;
-    optimize)    echo adversarial ;;
-    adversarial) echo validation ;;
-    *)           echo "" ;;
-  esac
-
-}
-
-resolve_resume() {
-
-  [[ -f "${HANDOVER_FILE}" ]] || {
-    echo "[RUN][FATAL] handover not found"
-    exit 1
-  }
-
-  local last_mode
-
-  last_mode="$(
-    jq -r '.artifact_snapshot.mode // empty' \
-      "${HANDOVER_FILE}"
-  )"
-
-  local resume_from
-
-  resume_from="$(next_mode "${last_mode}")"
-
-  [[ -n "${resume_from}" ]] || {
-    echo "[RUN] nothing to resume"
-    exit 0
-  }
-
-  local found=false
-  local mode
-
-  for mode in ${PIPELINES[$PIPELINE]}; do
-
-    if [[ "${mode}" == "${resume_from}" ]]; then
-      found=true
-    fi
-
-    $found && EXECUTION_MODES+=("${mode}")
-  done
-
-}
-
-build_mode_list() {
-
-  local mode
-
-  for mode in ${PIPELINES[$PIPELINE]}; do
-    EXECUTION_MODES+=("${mode}")
-  done
-
-}
-
-run_mode() {
-
-  local mode="$1"
-
-  echo
-  echo "================================================="
-  echo "MODE: ${mode}"
-  echo "================================================="
-
-  local start
-  local end
-  local duration
-
-  start=$(date +%s)
-
-  local cmd=(bash runtime_aegis.sh "${mode}")
-  if [[ -n "${TARGET}" ]]; then
-    cmd+=("--target" "${TARGET}")
-  fi
-  if [[ -n "${ISSUE_NUMBER}" ]]; then
-    cmd+=("--issue" "${ISSUE_NUMBER}")
-  fi
-  if [[ -n "${INVESTIGATION_INPUT}" ]]; then
-    cmd+=("${INVESTIGATION_INPUT}")
-  fi
-
-  "${cmd[@]}"
-
-  end=$(date +%s)
-
-  duration=$((end-start))
-
-  MODE_TIMINGS["${mode}"]="${duration}"
-
 }
 
 show_final_report() {
-
-  local total=0
-  local mode
-
   echo
   echo "══════════════════════════════"
   echo "AEGIS RUN REPORT"
   echo "══════════════════════════════"
   echo
-
-  for mode in "${EXECUTION_MODES[@]}"; do
-
-    local timing="${MODE_TIMINGS[$mode]:-0}"
-
-    printf "%-12s ✓ %ss\n" \
-      "${mode^}" \
-      "${timing}"
-
-    total=$((total + timing))
-  done
-
-  echo
-  echo "Total: ${total}s"
-  echo
-
-  if [[ -f "${HANDOVER_FILE}" ]]; then
-
-    echo "Final Mode:"
-    jq -r '.artifact_snapshot.mode // "unknown"' \
-      "${HANDOVER_FILE}"
-
-    echo
-
-    echo "Final Attention:"
-
-    jq -r '
-      .epistemic_state.next_attention_targets[]?
-    ' "${HANDOVER_FILE}"
-
-    echo
-
-    if jq -e '
-      .artifact_snapshot.operational_context.verdict?
-    ' "${HANDOVER_FILE}" >/dev/null 2>&1; then
-
-      echo "Verdict:"
-
-      jq -r '
-        .artifact_snapshot.operational_context.verdict
-      ' "${HANDOVER_FILE}"
-
-      echo
-    fi
-
-  fi
-
-  echo "Pipeline Status:"
+  echo "Plan Status:"
   echo "SUCCESS"
-
   echo
   echo "══════════════════════════════"
-
-}
-
-resolve_default_target() {
-
-  [[ -n "${TARGET:-}" ]] && return
-
-  if [[ -d "src" ]]; then
-    TARGET="src"
-  else
-    TARGET="."
-  fi
-}
-
-# =========================================================
-# PHASE 0.1 — EXECUTION BOUNDARY
-# =========================================================
-#
-# Invokes runtime_aegis.sh inside a clean environment containing
-# only the constitutionally authorized variables. No Bootstrap-layer
-# state (PIPELINE, RESUME, UNTIL, TARGET, ISSUE_PATH, etc.) passes
-# through. The Runtime sources everything else from .harness/config.sh
-# and .harness/local.env at startup.
-#
-# The authorized boundary is:
-#   PATH, HOME, TERM, USER        — system requirements
-#   AEGIS_INVESTIGATION_INPUT     — active task text
-#   AEGIS_EVIDENCE_TARGET_PATH    — workspace path (Phase 0.2)
-#   OPENAI_API_KEY, OPENAI_API_BASE — provider credentials (if set)
-#
-# The exit code of runtime_aegis.sh is the Validated Result signal
-# consumed by execute_issue() (Phase 0.3).
-
-run_bounded_mode() {
-
-  local mode="$1"
-  local task="$2"
-  local workspace="$3"
-
-  echo
-  echo "================================================="
-  echo "MODE: ${mode}"
-  echo "================================================="
-
-  local start end duration
-  start=$(date +%s)
-
-  # Build the boundary environment: only authorized variables cross.
-  # Runtime sources .harness/config.sh and .harness/local.env itself.
-  env -i \
-    PATH="${PATH}" \
-    HOME="${HOME}" \
-    TERM="${TERM:-xterm}" \
-    USER="${USER:-}" \
-    AEGIS_INVESTIGATION_INPUT="${task}" \
-    AEGIS_EVIDENCE_TARGET_PATH="${workspace}" \
-    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-    OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
-    bash runtime_aegis.sh "${mode}"
-
-  end=$(date +%s)
-  duration=$((end - start))
-  MODE_TIMINGS["${mode}"]="${duration}"
 }
 
 # =========================================================
@@ -584,27 +304,38 @@ _promote_workspace() {
 # PHASE 0.3 — VALIDATED RESULT
 # =========================================================
 #
-# execute_issue() no longer inspects the handover file or
-# iterates over pipeline modes. Bootstrap's role is:
-#   1. Select next Task.
-#   2. Build Execution Context.
-#   3. Invoke the Runtime pipeline via run_bounded_mode() per mode.
-#   4. Receive the Validated Result (exit code).
-#   5. On success: mark task. On failure: halt.
-#
-# The repair-candidate precondition is enforced by runtime_aegis.sh
-# validate_mode_preconditions() — not by Bootstrap.
+# execute_issue() selects and runs each task from the plan,
+# verifying the validation verdict of the task.
+
+run_bounded_task() {
+  local task="$1"
+  local workspace="$2"
+
+  echo
+  echo "================================================="
+  echo "EXECUTE TASK VIA RUNTIME"
+  echo "================================================="
+
+  env -i \
+    PATH="${PATH}" \
+    HOME="${HOME}" \
+    TERM="${TERM:-xterm}" \
+    USER="${USER:-}" \
+    AEGIS_INVESTIGATION_INPUT="${task}" \
+    AEGIS_EXECUTION_TARGET_PATH="${workspace}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+    OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
+    bash runtime_aegis.sh --execute-task
+}
 
 execute_issue() {
   local plan="$1"
 
   while true; do
-
     local active_task
     active_task="$(resolve_next_task "${plan}")"
 
     if [[ -z "${active_task}" ]]; then
-      # All tasks complete — delegate finalization to Bootstrap.
       finalize_workspace "${plan}" && break || continue
     fi
 
@@ -615,43 +346,37 @@ execute_issue() {
     echo "════════════════════════════════════════"
     echo
 
-    # Build Execution Context: Bootstrap constructs, Runtime consumes.
     local workspace="${AEGIS_WORKSPACE_PATH}"
+    local task_success=false
+    local result_file=".harness/runtime/validated_result.json"
 
-    build_mode_list
-    EXECUTION_MODES=()
-    build_mode_list
+    rm -f "${result_file}"
 
-    # PHASE 0.3: Run each mode via the Execution Boundary.
-    # Exit code from run_bounded_mode() is the Validated Result signal.
-    local validated_result=0
-    local mode
-    for mode in "${EXECUTION_MODES[@]}"; do
-
-      run_bounded_mode "${mode}" "${active_task}" "${workspace}" || {
-        validated_result=$?
-        echo "[BOOTSTRAP] Runtime returned non-zero exit (${validated_result}). Halting task."
-        break
-      }
-
-      if [[ -n "${UNTIL:-}" ]] && [[ "${mode}" == "${UNTIL}" ]]; then
-        echo "[BOOTSTRAP] Stopped at mode ${mode} due to --until limit."
-        break
+    if run_bounded_task "${active_task}" "${workspace}"; then
+      if [[ -f "${result_file}" ]]; then
+        local status
+        status="$(jq -r '.status // "rejected"' "${result_file}" 2>/dev/null || echo "rejected")"
+        if [[ "${status}" == "accepted" ]]; then
+          task_success=true
+        else
+          echo "[BOOTSTRAP] Validated Result: rejected. Halting execution."
+        fi
+      else
+        echo "[BOOTSTRAP][WARN] Runtime exited successfully but no validated_result.json was found. Treating as rejected."
       fi
-    done
+    else
+      echo "[BOOTSTRAP] Runtime execution failed. Halting task."
+    fi
 
-    # PHASE 0.3: Bootstrap receives Validated Result and decides.
-    if [[ "${validated_result}" -eq 0 ]]; then
+    if $task_success; then
       check_next_task "${plan}"
       echo "[BOOTSTRAP] Task completed and marked."
     else
-      echo "[BOOTSTRAP] Task failed (Validated Result: ${validated_result}). Halting issue execution."
+      echo "[BOOTSTRAP] Task execution was unsuccessful. Halting issue execution."
       break
     fi
 
     show_final_report
-    EXECUTION_MODES=()
-
   done
 }
 
@@ -664,38 +389,6 @@ parse_cli() {
   while [[ $# -gt 0 ]]; do
 
     case "$1" in
-
-      readonly)
-        PIPELINE="readonly"
-        ;;
-
-      --pipeline)
-        shift
-        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing pipeline value" >&2; exit 1; }
-        PIPELINE="$1"
-        ;;
-
-      --until)
-        shift
-        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing until value" >&2; exit 1; }
-        UNTIL="$1"
-        ;;
-
-      --resume)
-        RESUME=true
-        ;;
-
-      --target)
-        shift
-        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing target value" >&2; exit 1; }
-        TARGET="$1"
-        ;;
-
-      --issue)
-        shift
-        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing issue value" >&2; exit 1; }
-        ISSUE_NUMBER="$1"
-        ;;
 
       --plan)
         shift
@@ -713,7 +406,8 @@ parse_cli() {
         if [[ -f "$1" ]] && [[ "$1" == *.md ]]; then
           ISSUE_PATH="$1"
         else
-          POSITIONAL+=("$1")
+          echo "[RUN][FATAL] unknown argument: $1" >&2
+          exit 1
         fi
         ;;
 
@@ -725,32 +419,35 @@ parse_cli() {
 }
 
 main() {
-
   parse_cli "$@"
-
-  resolve_default_target
-
-  [[ -n "${PIPELINES[$PIPELINE]:-}" ]] || {
-    echo "[RUN][FATAL] unknown pipeline: ${PIPELINE}" >&2
-    exit 1
-  }
-
   check_dependencies
 
-  # -------------------------------------------------------
-  # PLANNING-CENTRIC PATH: Engineering Plan provided
-  # -------------------------------------------------------
-  if [[ -n "${ISSUE_PATH}" ]]; then
+  # Fallback logic: check for local Issue.md or template if no path is provided
+  if [[ -z "${ISSUE_PATH}" ]]; then
+    if [[ -f "Issue.md" ]]; then
+      echo "[BOOTSTRAP] Auto-detected local plan: Issue.md"
+      ISSUE_PATH="Issue.md"
+    elif [[ -f ".templates/default_issue.md" ]]; then
+      echo "[BOOTSTRAP] No Engineering Plan provided and 'Issue.md' not found."
+      echo -n "[BOOTSTRAP] Would you like to create a default 'Issue.md' from template? (y/N): "
+      local response
+      read -r response
+      if [[ "${response}" =~ ^[Yy]$ ]]; then
+        cp ".templates/default_issue.md" "Issue.md"
+        echo "[BOOTSTRAP] Created 'Issue.md' in the current directory."
+        echo -n "[BOOTSTRAP] Edit 'Issue.md' to describe your tasks, then press Enter to execute it: "
+        read -r _
+        ISSUE_PATH="Issue.md"
+      fi
+    fi
+  fi
 
+  if [[ -n "${ISSUE_PATH}" ]]; then
     [[ -f "${ISSUE_PATH}" ]] || {
       echo "[RUN][FATAL] Engineering Plan not found: ${ISSUE_PATH}" >&2
       exit 1
     }
 
-    # PHASE 0.5 — CLEANUP TRAP
-    # Registered only for the issue-centric path.
-    # WORKSPACE_INITIALIZED guards against removing a workspace
-    # that was never created (e.g. crash before initialize_workspace).
     _cleanup_workspace() {
       if [[ "${WORKSPACE_INITIALIZED}" == "true" ]]; then
         echo "[BOOTSTRAP] Cleaning up Isolated Workspace..." >&2
@@ -765,51 +462,11 @@ main() {
     WORKSPACE_INITIALIZED=true
     execute_issue "${ISSUE_PATH}"
     return 0
-  fi
-
-  # -------------------------------------------------------
-  # LEGACY PATH: single-run prompt execution (unchanged)
-  # -------------------------------------------------------
-
-  # Resolve investigation input priority
-  if [[ -n "${ISSUE_NUMBER}" ]]; then
-    INVESTIGATION_INPUT=""
-  elif [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
-    INVESTIGATION_INPUT="${POSITIONAL[*]}"
   else
-    INVESTIGATION_INPUT="Analyze repository"
+    echo "[RUN][FATAL] No Engineering Plan provided. Aegis now operates exclusively in planning-centric execution." >&2
+    echo "Usage: ./run_aegis.sh --plan <EngineeringPlan.md>" >&2
+    exit 1
   fi
-
-  if $RESUME; then
-    resolve_resume
-  else
-    build_mode_list
-  fi
-
-  local mode
-
-  for mode in "${EXECUTION_MODES[@]}"; do
-    if [[ "${mode}" == "repair" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
-      local candidate_count
-      candidate_count="$(
-        jq -r '.artifact_snapshot.operational_context.repair_candidates | length // 0' \
-          "${HANDOVER_FILE}" 2>/dev/null || echo 0
-      )"
-      if [[ "${candidate_count}" -eq 0 ]]; then
-        echo
-        echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
-        break
-      fi
-    fi
-
-    run_mode "${mode}"
-    if [[ -n "${UNTIL:-}" ]] && [[ "${mode}" == "${UNTIL}" ]]; then
-      echo "[RUN] Stopped at mode ${mode} due to --until limit."
-      break
-    fi
-  done
-
-  show_final_report
 }
 
 main "$@"

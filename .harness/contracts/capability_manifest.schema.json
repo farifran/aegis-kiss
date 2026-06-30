@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CapabilityManifestContract",
+  "description": "Schema definition of the capability manifest declaring authorized capabilities and evidence profile for cognition modes.",
+  "x-contract-metadata": {
+    "semantics": "Declara as capacidades e perfil de evidência autorizados para cada modo de cognição do Runtime.",
+    "producer": "Runtime (runtime_aegis.sh) com base em .harness/config.sh.",
+    "consumers": ["Virtual Machine de capacidades/Substratos (scripts/execute_mode.sh)"],
+    "immutability": "Imutável após materializado no diretório temporário da execução.",
+    "lifecycle": "Materializado no início da execução de cada modo; limpo no encerramento da execução do modo."
+  },
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "runtime_model": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "execution_id": {
+      "type": "string"
+    },
+    "manifest_hash": {
+      "type": "string"
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "execution_engine": {
+            "type": "string"
+          },
+          "capability_envelope": {
+            "type": "string"
+          },
+          "evidence_profile": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "capability": {
+                  "type": "string"
+                },
+                "handler": {
+                  "type": "string"
+                }
+              },
+              "required": ["capability", "handler"]
+            }
+          },
+          "evidence_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["mode", "execution_engine", "capability_envelope", "evidence_profile", "capabilities", "evidence_capabilities"]
+      }
+    }
+  },
+  "required": ["schema_version", "runtime_model", "generated_at", "execution_id", "modes", "manifest_hash"]
+}

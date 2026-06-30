@@ -4,7 +4,7 @@
 #
 # Purpose:
 #   Proves that:
-#   (A) run_bounded_mode() routes AEGIS_EVIDENCE_TARGET_PATH to the workspace,
+#   (A) run_bounded_task() routes AEGIS_EXECUTION_TARGET_PATH to the workspace,
 #       not to the main repository root.
 #   (B) The main repository working tree is clean during execution (no mutations
 #       escape the workspace boundary into the main repo's git index).
@@ -31,40 +31,40 @@ pass() {
 }
 
 # =========================================================================
-# PROOF A — Static: run_bounded_mode() passes workspace as AEGIS_EVIDENCE_TARGET_PATH
+# PROOF A — Static: run_bounded_task() passes workspace as AEGIS_EXECUTION_TARGET_PATH
 # =========================================================================
 
-# Verify that within run_bounded_mode, AEGIS_EVIDENCE_TARGET_PATH is set to
+# Verify that within run_bounded_task, AEGIS_EXECUTION_TARGET_PATH is set to
 # the workspace argument (not a hardcoded path or the default '.').
 awk '
-  /^run_bounded_mode\(\)/ { in_fn=1; depth=0 }
+  /^run_bounded_task\(\)/ { in_fn=1; depth=0 }
   in_fn {
     depth += gsub(/{/, "{")
     depth -= gsub(/}/, "}")
-    if (/AEGIS_EVIDENCE_TARGET_PATH=/) found=1
+    if (/AEGIS_EXECUTION_TARGET_PATH=/) found=1
     if (depth <= 0 && in_fn > 0 && NR > 1) in_fn=0
   }
   END { exit (found ? 0 : 1) }
 ' run_aegis.sh \
-  || fail "workspace_isolation: AEGIS_EVIDENCE_TARGET_PATH not set inside run_bounded_mode()"
+  || fail "workspace_isolation: AEGIS_EXECUTION_TARGET_PATH not set inside run_bounded_task()"
 
-pass "workspace_isolation: static proof — run_bounded_mode() routes AEGIS_EVIDENCE_TARGET_PATH"
+pass "workspace_isolation: static proof — run_bounded_task() routes AEGIS_EXECUTION_TARGET_PATH"
 
 # Verify the workspace is NOT hardcoded to '.' or the repo root
 awk '
-  /^run_bounded_mode\(\)/ { in_fn=1; depth=0 }
+  /^run_bounded_task\(\)/ { in_fn=1; depth=0 }
   in_fn {
     depth += gsub(/{/, "{")
     depth -= gsub(/}/, "}")
-    # Fail if AEGIS_EVIDENCE_TARGET_PATH is set to the literal string "."
-    if (/AEGIS_EVIDENCE_TARGET_PATH=\x27\.\x27/ || /AEGIS_EVIDENCE_TARGET_PATH="\."/) bad=1
+    # Fail if AEGIS_EXECUTION_TARGET_PATH is set to the literal string "."
+    if (/AEGIS_EXECUTION_TARGET_PATH=\x27\.\x27/ || /AEGIS_EXECUTION_TARGET_PATH="\."/) bad=1
     if (depth <= 0 && in_fn > 0 && NR > 1) in_fn=0
   }
   END { exit (bad ? 1 : 0) }
 ' run_aegis.sh \
-  || fail "workspace_isolation: AEGIS_EVIDENCE_TARGET_PATH hardcoded to repo root '.'"
+  || fail "workspace_isolation: AEGIS_EXECUTION_TARGET_PATH hardcoded to repo root '.'"
 
-pass "workspace_isolation: static proof — AEGIS_EVIDENCE_TARGET_PATH is not hardcoded to '.'"
+pass "workspace_isolation: static proof — AEGIS_EXECUTION_TARGET_PATH is not hardcoded to '.'"
 
 # =========================================================================
 # PROOF B — Dynamic: Runtime subprocess receives workspace path, not repo root
@@ -78,19 +78,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Create a mock runtime that captures AEGIS_EVIDENCE_TARGET_PATH.
+# Create a mock runtime that captures AEGIS_EXECUTION_TARGET_PATH.
 mock_runtime="${test_tmp}/runtime_aegis.sh"
 cat > "${mock_runtime}" << 'MOCK'
 #!/usr/bin/env bash
-echo "AEGIS_EVIDENCE_TARGET_PATH=${AEGIS_EVIDENCE_TARGET_PATH:-UNSET}" > runtime_env.txt
+echo "AEGIS_EXECUTION_TARGET_PATH=${AEGIS_EXECUTION_TARGET_PATH:-UNSET}" > runtime_env.txt
 exit 0
 MOCK
 chmod +x "${mock_runtime}"
 
-# Extract run_bounded_mode().
-helper_file="${test_tmp}/bounded_mode_fn.sh"
+# Extract run_bounded_task().
+helper_file="${test_tmp}/bounded_task_fn.sh"
 awk '
-  /^run_bounded_mode\(\)/ { in_fn=1; depth=0 }
+  /^run_bounded_task\(\)/ { in_fn=1; depth=0 }
   in_fn {
     print
     depth += gsub(/{/, "{")
@@ -100,26 +100,24 @@ awk '
 ' run_aegis.sh > "${helper_file}"
 
 [[ -s "${helper_file}" ]] \
-  || fail "workspace_isolation: failed to extract run_bounded_mode()"
+  || fail "workspace_isolation: failed to extract run_bounded_task()"
 
 export AEGIS_TEST_ENV_DUMP="${env_dump}"
 export AEGIS_WORKSPACE_PATH="${test_tmp}/the_workspace"
-
-declare -A MODE_TIMINGS
 
 # shellcheck disable=SC1090
 source "${helper_file}"
 
 (
   cd "${test_tmp}"
-  run_bounded_mode "discovery" "test task" "${test_tmp}/the_workspace"
-) || fail "workspace_isolation: run_bounded_mode() exited non-zero"
+  run_bounded_task "test task" "${test_tmp}/the_workspace"
+) || fail "workspace_isolation: run_bounded_task() exited non-zero"
 
 [[ -f "${env_dump}" ]] \
   || fail "workspace_isolation: mock runtime did not produce env dump"
 
 # The Runtime must have received the workspace path, NOT '.' or the repo root.
-received_path="$(grep '^AEGIS_EVIDENCE_TARGET_PATH=' "${env_dump}" | cut -d= -f2-)"
+received_path="$(grep '^AEGIS_EXECUTION_TARGET_PATH=' "${env_dump}" | cut -d= -f2-)"
 
 [[ "${received_path}" != "." ]] \
   || fail "workspace_isolation: Runtime received repo root '.' instead of workspace"
@@ -136,9 +134,9 @@ pass "workspace_isolation: dynamic proof — Runtime received workspace path, no
 # PROOF C — Static: Runtime does not hardcode CWD over the workspace
 # =========================================================================
 # runtime_aegis.sh CDs to AEGIS_RUNTIME_ROOT for config loading (acceptable).
-# Verify it does NOT override AEGIS_EVIDENCE_TARGET_PATH to '.'.
-grep -n 'AEGIS_EVIDENCE_TARGET_PATH=\.' runtime_aegis.sh \
-  && fail "workspace_isolation: runtime_aegis.sh hardcodes AEGIS_EVIDENCE_TARGET_PATH to '.'" \
+# Verify it does NOT override AEGIS_EXECUTION_TARGET_PATH to '.'.
+grep -n 'AEGIS_EXECUTION_TARGET_PATH=\.' runtime_aegis.sh \
+  && fail "workspace_isolation: runtime_aegis.sh hardcodes AEGIS_EXECUTION_TARGET_PATH to '.'" \
   || true
 
-pass "workspace_isolation: static proof — runtime_aegis.sh does not override AEGIS_EVIDENCE_TARGET_PATH"
+pass "workspace_isolation: static proof — runtime_aegis.sh does not override AEGIS_EXECUTION_TARGET_PATH"

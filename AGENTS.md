@@ -1,5 +1,8 @@
 # AGENTS.md — Aegis Harness Constitutional Foundation
 
+> [!WARNING]
+> The prompt-based execution path is deprecated and will be removed in the next architectural revision. The canonical execution interface is an Engineering Plan.
+
 ## Purpose
 
 Aegis Harness is a runtime-sovereign architecture for bounded cognition and controlled mutation.

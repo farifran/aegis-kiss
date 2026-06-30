@@ -230,23 +230,28 @@ parse_runtime_cli() {
     [[ -d "${cli_target_path}" ]] \
       || runtime_fatal "target_path_not_directory"
 
-    export AEGIS_EVIDENCE_TARGET_PATH="${cli_target_path}"
+    export AEGIS_EXECUTION_TARGET_PATH="${cli_target_path}"
   fi
 }
 
 AEGIS_MODE=""
 AEGIS_SKILL_FILE=""
+AEGIS_RUN_TASK_PIPELINE="false"
+
+if [[ "$#" -gt 0 ]] && [[ "$1" == "--execute-task" ]]; then
+  AEGIS_RUN_TASK_PIPELINE="true"
+  shift
+fi
 
 parse_runtime_cli "$@"
 
-readonly AEGIS_MODE
-readonly AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
-
-# =========================================================
-# EXECUTION SURFACE PATH
-# =========================================================
-
-export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
+# If we are running the task pipeline, the modes will be set sequentially inside the main loop.
+# Otherwise, we freeze the single mode passed via CLI.
+if [[ "${AEGIS_RUN_TASK_PIPELINE}" == "false" ]]; then
+  readonly AEGIS_MODE
+  readonly AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
+  export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
+fi
 
 AEGIS_EXECUTION_SURFACE_ACTIVE="false"
 
@@ -1025,14 +1030,7 @@ promote_epistemic_handover() {
     "epistemic_handover_after_mode_execution_exceeds_max_bytes"
 }
 
-# =========================================================
-# MAIN
-# =========================================================
-
-main() {
-  validate_runtime_environment
-  bootstrap_runtime_state
-  reset_runtime_owned_epistemic_handover_for_new_investigation
+execute_single_mode() {
   validate_mode_preconditions
   remove_stale_runtime_residue
   measure "runtime_prepare_execution_surface" prepare_execution_surface
@@ -1042,6 +1040,59 @@ main() {
   measure "runtime_execute_mode" execute_mode
   measure "runtime_promote_validated_candidate" promote_validated_candidate
   promote_epistemic_handover
+}
+
+main() {
+  validate_runtime_environment
+
+  if [[ "${AEGIS_RUN_TASK_PIPELINE}" == "true" ]]; then
+    # Full cognitive pipeline: discovery -> forensics -> repair -> optimize -> adversarial -> validation
+    local pipeline_modes=(discovery forensics repair optimize adversarial validation)
+    
+    # Initialize state
+    bootstrap_runtime_state
+    reset_runtime_owned_epistemic_handover_for_new_investigation
+
+    for mode in "${pipeline_modes[@]}"; do
+      # Dynamically set active mode environment for the loop step
+      AEGIS_MODE="${mode}"
+      AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
+      export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
+      
+      # Enforce validation requirements for the mode
+      validate_execution_engine_requirements
+      
+      # Execute the mode
+      execute_single_mode
+    done
+
+    # Generate the Validated Result Contract artifact
+    local result_file="${AEGIS_RUNTIME_DIR}/validated_result.json"
+    local verdict="rejected"
+    if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+      verdict="$(jq -r '.artifact_snapshot.operational_context.candidate_result.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+      if [[ "${verdict}" == "null" || -z "${verdict}" ]]; then
+        # Check validation verdict
+        verdict="$(jq -r '.artifact_snapshot.operational_context.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+      fi
+    fi
+
+    # Formalized contract for the Bootstrap
+    jq -n \
+      --arg verdict "${verdict}" \
+      --arg diff_path "${AEGIS_RUNTIME_DIR}/validated_candidate.diff" \
+      '{
+        status: (if $verdict == "accepted" then "accepted" else "rejected" end),
+        candidate_diff_path: $diff_path
+      }' > "${result_file}"
+      
+    runtime_log "Validated Result generated: ${verdict}"
+  else
+    # Legacy / Single mode invocation
+    bootstrap_runtime_state
+    reset_runtime_owned_epistemic_handover_for_new_investigation
+    execute_single_mode
+  fi
 }
 
 main "$@"

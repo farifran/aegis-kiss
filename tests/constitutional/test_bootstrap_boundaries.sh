@@ -3,17 +3,10 @@
 # test_bootstrap_boundaries.sh — Constitutional proof: Bootstrap respects its own limits.
 #
 # Purpose:
-#   Proves that run_aegis.sh (Bootstrap) never:
-#   - Inspects the epistemic handover to make pipeline decisions
-#     (repair_candidates check was removed in Phase 0.3)
-#   - Invokes cognition directly (discovery, forensics, repair scripts)
-#   - Performs validation logic
-#   - Interprets code
-#
-#   And proves that Bootstrap DOES:
-#   - Construct the Execution Context before calling the Runtime
-#   - Use exit code as the Validated Result signal (not jq inspection)
-#   - Delegate all mode execution to run_bounded_mode()
+#   Proves that run_aegis.sh (Bootstrap) behaviorally adheres to the separation of concerns:
+#   (A) Bootstrap invoca o Runtime uma única vez por Task (invokes runtime exactly once per loop step).
+#   (B) Bootstrap não interpreta handovers (does not read, parse, or reference handover files/keys).
+#   (C) Bootstrap não decide a ordem de execução (does not sequence, list, or transition between execution modes).
 #
 # Constitutional reference: RFC §5 Bootstrap Contract.
 #
@@ -36,7 +29,7 @@ pass() {
 }
 
 # =========================================================================
-# Phase 0.3 regression: repair_candidates inspection removed from Bootstrap
+# Preparation: extract function bodies and strip comments
 # =========================================================================
 
 # Extract execute_issue() function body.
@@ -55,50 +48,73 @@ execute_issue_body="$(
 [[ -n "${execute_issue_body}" ]] \
   || fail "bootstrap_boundaries: could not extract execute_issue() from run_aegis.sh"
 
-# Bootstrap must not inspect repair_candidates from the handover
-if echo "${execute_issue_body}" | grep -q 'repair_candidates'; then
-  fail "bootstrap_boundaries: execute_issue() inspects repair_candidates (Runtime responsibility)"
-fi
-
-pass "bootstrap_boundaries: execute_issue() does not inspect repair_candidates"
-
-# Bootstrap must not directly read the epistemic handover file
-if echo "${execute_issue_body}" | grep -q 'HANDOVER_FILE\|epistemic_handover'; then
-  fail "bootstrap_boundaries: execute_issue() reads epistemic handover (Runtime responsibility)"
-fi
-
-pass "bootstrap_boundaries: execute_issue() does not read epistemic handover"
+code_without_comments="$(sed 's/#.*//' run_aegis.sh)"
+execute_issue_code_without_comments="$(echo "${execute_issue_body}" | sed 's/#.*//')"
 
 # =========================================================================
-# Bootstrap uses exit code as Validated Result (not jq parsing)
+# Verification: "Bootstrap invoca o Runtime uma única vez por Task"
 # =========================================================================
 
-# execute_issue() must contain `validated_result` pattern
-if ! echo "${execute_issue_body}" | grep -q 'validated_result'; then
-  fail "bootstrap_boundaries: execute_issue() missing Validated Result signal"
+# The entire run_aegis.sh script must invoke runtime_aegis.sh at exactly ONE point (inside run_bounded_task).
+runtime_calls="$(echo "${code_without_comments}" | grep -o 'runtime_aegis\.sh' | wc -l | tr -d ' ')"
+if [[ "${runtime_calls}" -ne 1 ]]; then
+  fail "bootstrap_boundaries: run_aegis.sh invokes runtime_aegis.sh ${runtime_calls} times (must be exactly 1)"
 fi
 
-pass "bootstrap_boundaries: execute_issue() uses validated_result exit-code pattern"
-
-# Bootstrap must delegate to run_bounded_mode, not run_mode or direct scripts
-if echo "${execute_issue_body}" | grep -q '\brun_mode\b'; then
-  fail "bootstrap_boundaries: execute_issue() calls run_mode() directly (must use run_bounded_mode)"
+# The task loop body (execute_issue) must call run_bounded_task exactly once per task iteration.
+loop_invocations="$(echo "${execute_issue_code_without_comments}" | grep -o '\brun_bounded_task\b' | wc -l | tr -d ' ')"
+if [[ "${loop_invocations}" -ne 1 ]]; then
+  fail "bootstrap_boundaries: execute_issue() calls run_bounded_task ${loop_invocations} times (must be exactly 1)"
 fi
 
-if ! echo "${execute_issue_body}" | grep -q 'run_bounded_mode'; then
-  fail "bootstrap_boundaries: execute_issue() does not call run_bounded_mode()"
-fi
-
-pass "bootstrap_boundaries: execute_issue() delegates exclusively to run_bounded_mode()"
+pass "bootstrap_boundaries: Bootstrap invoca o Runtime uma única vez por Task"
 
 # =========================================================================
-# Bootstrap must not invoke cognition scripts directly
+# Verification: "Bootstrap não interpreta handovers"
 # =========================================================================
 
-# Bootstrap should never directly call discovery, forensics, repair, optimize,
-# adversarial, or validation scripts. These are Runtime domain.
+# The Bootstrap code must not reference handover files, keys, or parse handover JSON.
+if echo "${code_without_comments}" | grep -q -i 'handover'; then
+  fail "bootstrap_boundaries: Bootstrap contains references to handover in code"
+fi
+
+# The task loop must not inspect repair candidates (part of handover logic).
+if echo "${execute_issue_code_without_comments}" | grep -q 'repair_candidates'; then
+  fail "bootstrap_boundaries: execute_issue() references repair_candidates"
+fi
+
+pass "bootstrap_boundaries: Bootstrap não interpreta handovers"
+
+# =========================================================================
+# Verification: "Bootstrap não decide a ordem de execução"
+# =========================================================================
+
+# The Bootstrap code must not contain references to the runtime execution modes, sequencing, or loops.
+for mode in 'discovery' 'forensics' 'repair' 'optimize' 'adversarial' 'validation'; do
+  if echo "${code_without_comments}" | grep -q "\b${mode}\b"; then
+    fail "bootstrap_boundaries: Bootstrap contains references to execution mode '${mode}' in code"
+  fi
+done
+
+pass "bootstrap_boundaries: Bootstrap não decide a ordem de execução"
+
+# =========================================================================
+# Validation Verdict / Result pattern
+# =========================================================================
+
+# execute_issue() must check for validated_result.json or result_file
+if ! echo "${execute_issue_code_without_comments}" | grep -q 'result_file\|validated_result'; then
+  fail "bootstrap_boundaries: execute_issue() missing Validated Result target"
+fi
+
+pass "bootstrap_boundaries: execute_issue() uses Validated Result Contract pattern"
+
+# =========================================================================
+# Bootstrap does not invoke cognition scripts directly
+# =========================================================================
+
 for script in 'execute_mode.sh' 'scripts/substrates/aider' 'apply_candidate_diff'; do
-  if grep -q "${script}" run_aegis.sh; then
+  if echo "${code_without_comments}" | grep -q "${script}"; then
     fail "bootstrap_boundaries: run_aegis.sh calls Runtime-domain script '${script}'"
   fi
 done
@@ -106,11 +122,10 @@ done
 pass "bootstrap_boundaries: Bootstrap does not invoke Runtime-domain scripts"
 
 # =========================================================================
-# Bootstrap interaction boundary: only Bootstrap touches the user
+# Interaction Boundary
 # =========================================================================
 
-# All user-facing read calls must be in run_aegis.sh, not runtime_aegis.sh.
-bootstrap_reads="$(grep -c '\bread\b' run_aegis.sh || true)"
+bootstrap_reads="$(echo "${code_without_comments}" | grep -c '\bread\b' || true)"
 set +e
 runtime_reads="$(grep -v '^\s*#' runtime_aegis.sh | grep -v 'readlink\|read_\|_read' | grep -c '\bread\b')"
 set -e
@@ -120,31 +135,6 @@ runtime_reads="${runtime_reads:-0}"
   || fail "bootstrap_boundaries: runtime_aegis.sh has ${runtime_reads} read call(s) (must be 0)"
 
 [[ "${bootstrap_reads}" -gt 0 ]] \
-  || fail "bootstrap_boundaries: run_aegis.sh has no read calls (UI must be in Bootstrap)"
+  || fail "bootstrap_boundaries: run_aegis.sh has no read calls in code"
 
 pass "bootstrap_boundaries: all user interaction in Bootstrap, none in Runtime"
-
-# =========================================================================
-# Bootstrap must construct Execution Context (AEGIS_INVESTIGATION_INPUT in boundary)
-# =========================================================================
-
-# run_bounded_mode() must pass AEGIS_INVESTIGATION_INPUT explicitly
-run_bounded_mode_body="$(
-  awk '
-    /^run_bounded_mode\(\)/ { in_fn=1; depth=0 }
-    in_fn {
-      print
-      depth += gsub(/{/, "{")
-      depth -= gsub(/}/, "}")
-      if (depth <= 0 && in_fn > 0 && NR > 1) in_fn=0
-    }
-  ' run_aegis.sh
-)"
-
-echo "${run_bounded_mode_body}" | grep -q 'AEGIS_INVESTIGATION_INPUT' \
-  || fail "bootstrap_boundaries: run_bounded_mode() does not pass AEGIS_INVESTIGATION_INPUT"
-
-echo "${run_bounded_mode_body}" | grep -q 'AEGIS_EVIDENCE_TARGET_PATH' \
-  || fail "bootstrap_boundaries: run_bounded_mode() does not pass AEGIS_EVIDENCE_TARGET_PATH"
-
-pass "bootstrap_boundaries: run_bounded_mode() constructs Execution Context correctly"

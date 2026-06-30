@@ -51,6 +51,9 @@ timeout 20 aider \
 
 # Aegis Harness
 
+> [!WARNING]
+> The prompt-based execution path is deprecated and will be removed in the next architectural revision. The canonical execution interface is an Engineering Plan.
+
 Aegis Harness is a bounded, deterministic AI execution runtime designed to separate cognition, orchestration, evidence, operational memory, persistence, and mutation authority. The system is built around explicit authority boundaries, disposable execution environments, capability exposure, runtime-exposed evidence, and protocol-enforced artifacts.
 
 ## What Aegis Is
@@ -183,16 +186,16 @@ The current runtime has been validated with NVIDIAâs OpenAI-compatible endp
 
 ## Quick Start
 
-Run the full runtime:
+Execute Aegis using an Engineering Plan:
 
 ```bash
-bash runtime_aegis.sh discovery "inspect runtime handover boundary"
+./run_aegis.sh --plan Issue.md
 ```
 
-Use formal issue input through the same runtime entrypoint:
+Or simply:
 
 ```bash
-bash runtime_aegis.sh discovery --issue 123
+./run_aegis.sh Issue.md
 ```
 
 Run a specific mode directly:
