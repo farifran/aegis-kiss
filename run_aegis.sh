@@ -91,8 +91,15 @@ resolve_next_task() {
 check_next_task() {
   local plan="$1"
   # Portable: replace first occurrence of '- [ ]' with '- [x]'
-  sed -i.bak -e '0,/^[[:space:]]*- \[ \]/s/^\([[:space:]]*\)- \[ \]/\1- [x]/' "${plan}"
-  rm -f "${plan}.bak"
+  python3 -c '
+import sys
+plan = sys.argv[1]
+with open(plan, "r") as f:
+    content = f.read()
+new_content = content.replace("- [ ]", "- [x]", 1)
+with open(plan, "w") as f:
+    f.write(new_content)
+' "${plan}"
 }
 
 # Extract the plan title (first # heading) for display.
@@ -264,6 +271,32 @@ _promote_workspace() {
 
   echo "[BOOTSTRAP] Committing workspace changes..."
 
+  local commit_msg="${title}"
+  local summary_file=".harness/runtime/commit_summary.json"
+  if [[ -f "${summary_file}" ]]; then
+    local type scope subject
+    type="$(jq -r '.type // empty' "${summary_file}" 2>/dev/null || echo "")"
+    scope="$(jq -r '.scope // empty' "${summary_file}" 2>/dev/null || echo "")"
+    subject="$(jq -r '.subject // empty' "${summary_file}" 2>/dev/null || echo "")"
+    
+    if [[ -n "${type}" && -n "${subject}" ]]; then
+      if [[ -n "${scope}" ]]; then
+        commit_msg="${type}(${scope}): ${subject}"
+      else
+        commit_msg="${type}: ${subject}"
+      fi
+      
+      local num_points
+      num_points="$(jq '.summary | length' "${summary_file}" 2>/dev/null || echo "0")"
+      if [[ "${num_points}" -gt 0 ]]; then
+        commit_msg+=$'\n\n'
+        while IFS= read -r point; do
+          commit_msg+=$'- '"${point}"$'\n'
+        done < <(jq -r '.summary[]' "${summary_file}" 2>/dev/null)
+      fi
+    fi
+  fi
+
   local commit_sha
   commit_sha="$(
     cd "${ISSUE_WORKSPACE_PATH}" &&
@@ -272,7 +305,7 @@ _promote_workspace() {
       echo "[BOOTSTRAP] No changes to commit." >&2
       echo ""
     } || {
-      git commit -m "${title}" --quiet &&
+      git commit -m "${commit_msg}" --quiet &&
       git rev-parse HEAD
     }
   )" || {
@@ -369,14 +402,28 @@ execute_issue() {
     fi
 
     if $task_success; then
+      _promote_workspace "${plan}"
       check_next_task "${plan}"
       echo "[BOOTSTRAP] Task completed and marked."
+      
+      show_final_report
+
+      local next_task
+      next_task="$(resolve_next_task "${plan}")"
+      if [[ -n "${next_task}" ]]; then
+        echo
+        echo -n "[BOOTSTRAP] Proceed to next task: '${next_task}'? (Y/n): "
+        local proceed_choice
+        read -r proceed_choice
+        if [[ "${proceed_choice}" == "n" || "${proceed_choice}" == "N" ]]; then
+          echo "[BOOTSTRAP] Execution paused by user."
+          break
+        fi
+      fi
     else
       echo "[BOOTSTRAP] Task execution was unsuccessful. Halting issue execution."
       break
     fi
-
-    show_final_report
   done
 }
 

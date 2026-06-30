@@ -671,16 +671,18 @@ validate_runtime_environment() {
   declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
     || runtime_fatal "missing_evidence_profile_registry"
 
-  [[ -f "${AEGIS_SKILL_FILE}" ]] \
-    || runtime_fatal "missing_skill_contract"
+  if [[ "${AEGIS_RUN_TASK_PIPELINE}" == "false" ]]; then
+    [[ -f "${AEGIS_SKILL_FILE}" ]] \
+      || runtime_fatal "missing_skill_contract"
 
-  [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
-    || runtime_fatal "unknown_mode"
+    [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
+      || runtime_fatal "unknown_mode"
 
-  [[ -n "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}" ]] \
-    || runtime_fatal "missing_mode_evidence_profile"
+    [[ -n "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}" ]] \
+      || runtime_fatal "missing_mode_evidence_profile"
 
-  validate_execution_engine_requirements
+    validate_execution_engine_requirements
+  fi
 }
 
 # =========================================================
@@ -1054,11 +1056,40 @@ main() {
     reset_runtime_owned_epistemic_handover_for_new_investigation
 
     for mode in "${pipeline_modes[@]}"; do
+      # Dynamically check if we should terminate early based on preceding handover state
+      if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+        if [[ "${mode}" == "repair" ]]; then
+          local num_candidates
+          num_candidates="$(jq '.artifact_snapshot.operational_context.repair_candidates | length' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "0")"
+          if [[ "${num_candidates}" -eq 0 ]]; then
+            runtime_log "No repair candidates found. Pipeline execution completed early."
+            break
+          fi
+        elif [[ "${mode}" == "optimize" || "${mode}" == "adversarial" || "${mode}" == "validation" ]]; then
+          local has_diff
+          has_diff="$(jq -e '.artifact_snapshot.operational_context.diff | type == "string" and length > 0 and . != "(no changes)"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "false")"
+          if [[ "${has_diff}" != "true" ]]; then
+            runtime_log "No changes/diff to process. Pipeline execution completed early."
+            break
+          fi
+        fi
+      fi
+
       # Dynamically set active mode environment for the loop step
       AEGIS_MODE="${mode}"
       AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
       export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
       
+      # Validate mode requirements dynamically
+      [[ -f "${AEGIS_SKILL_FILE}" ]] \
+        || runtime_fatal "missing_skill_contract"
+
+      [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
+        || runtime_fatal "unknown_mode"
+
+      [[ -n "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}" ]] \
+        || runtime_fatal "missing_mode_evidence_profile"
+
       # Enforce validation requirements for the mode
       validate_execution_engine_requirements
       
@@ -1070,23 +1101,44 @@ main() {
     local result_file="${AEGIS_RUNTIME_DIR}/validated_result.json"
     local verdict="rejected"
     if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-      verdict="$(jq -r '.artifact_snapshot.operational_context.candidate_result.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
-      if [[ "${verdict}" == "null" || -z "${verdict}" ]]; then
-        # Check validation verdict
-        verdict="$(jq -r '.artifact_snapshot.operational_context.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+      local handover_status
+      handover_status="$(jq -r '.artifact_snapshot.operational_context.status // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+      
+      local total_candidates
+      total_candidates="$(jq '.artifact_snapshot.operational_context.repair_candidates | length' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "0")"
+
+      if [[ "${handover_status}" == "inconclusive" && "${total_candidates}" -eq 0 ]]; then
+        # Forensics finished with inconclusive and zero candidates -> no repair needed
+        verdict="accepted"
+      else
+        verdict="$(jq -r '.artifact_snapshot.operational_context.candidate_result.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+        if [[ "${verdict}" == "null" || -z "${verdict}" ]]; then
+          # Check validation verdict
+          verdict="$(jq -r '.artifact_snapshot.operational_context.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
+        fi
       fi
     fi
 
-    # Formalized contract for the Bootstrap
-    jq -n \
-      --arg verdict "${verdict}" \
-      --arg diff_path "${AEGIS_RUNTIME_DIR}/validated_candidate.diff" \
-      '{
-        status: (if $verdict == "accepted" then "accepted" else "rejected" end),
-        candidate_diff_path: $diff_path
-      }' > "${result_file}"
-      
-    runtime_log "Validated Result generated: ${verdict}"
+     # Formalized contract for the Bootstrap
+     jq -n \
+       --arg verdict "${verdict}" \
+       --arg diff_path "${AEGIS_RUNTIME_DIR}/validated_candidate.diff" \
+       '{
+         status: (if $verdict == "accepted" then "accepted" else "rejected" end),
+         candidate_diff_path: $diff_path
+       }' > "${result_file}"
+       
+     local commit_summary_file="${AEGIS_RUNTIME_DIR}/commit_summary.json"
+     rm -f "${commit_summary_file}"
+     if [[ "${verdict}" == "accepted" && -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+       local has_summary
+       has_summary="$(jq -e '.artifact_snapshot.commit_summary != null' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "false")"
+       if [[ "${has_summary}" == "true" ]]; then
+         jq '.artifact_snapshot.commit_summary' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" > "${commit_summary_file}"
+       fi
+     fi
+       
+     runtime_log "Validated Result generated: ${verdict}"
   else
     # Legacy / Single mode invocation
     bootstrap_runtime_state

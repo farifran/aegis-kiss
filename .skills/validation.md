@@ -217,6 +217,13 @@ The required artifact shape is:
     "diff": "diff --git ...",
     "files_changed": ["src/index.ts"]
   },
+  "commit_summary": {
+    "type": "feat|fix|refactor|docs|test|chore|style|perf",
+    "scope": "optional-scope-name",
+    "subject": "commit subject description in imperative mood",
+    "summary": ["description of change 1", "description of change 2"],
+    "breaking_change": false
+  },
   "basis": ["basis justification description 1", "basis justification description 2"],
   "handover_attention": {
     "next_attention_targets": [],
