@@ -1070,7 +1070,9 @@ main() {
           has_diff="$(jq -e '(
             .artifact_snapshot.operational_context?.diff //
             .artifact_snapshot.candidate_result?.diff //
-            .artifact_snapshot.validated_candidate?.diff
+            .artifact_snapshot.validated_candidate?.diff //
+            .artifact_snapshot.operational_context?.candidate_result?.diff //
+            .artifact_snapshot.validated_candidate?.candidate_result?.diff
           ) | type == "string" and length > 0 and . != "(no changes)"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "false")"
           if [[ "${has_diff}" != "true" ]]; then
             runtime_log "No changes/diff to process. Pipeline execution completed early."
@@ -1120,6 +1122,16 @@ main() {
           # Check validation verdict
           verdict="$(jq -r '.artifact_snapshot.operational_context.verdict // "rejected"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || echo "rejected")"
         fi
+      fi
+      if [[ "${verdict}" == "accepted" && -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+        jq -r '(
+          .artifact_snapshot.validated_candidate?.diff //
+          .artifact_snapshot.candidate_result?.diff //
+          .artifact_snapshot.operational_context?.diff //
+          .artifact_snapshot.operational_context?.candidate_result?.diff //
+          .artifact_snapshot.validated_candidate?.candidate_result?.diff //
+          empty
+        )' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" > "${AEGIS_RUNTIME_DIR}/validated_candidate.diff" 2>/dev/null || true
       fi
     fi
 
