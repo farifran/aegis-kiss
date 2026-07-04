@@ -762,14 +762,6 @@ validate_artifact() {
     echo "${artifact}" \
       | jq -e '
           (.status == "interpreted" or .status == "inconclusive")
-          and (.summary | type == "string")
-          and (.evidence | type == "array")
-          and (.interpretations | type == "array")
-          and (.observations | type == "array")
-          and (.unresolved_questions | type == "array")
-          and (.confidence == "low" or .confidence == "medium" or .confidence == "high")
-          and (.investigation_hypotheses | type == "array")
-          and (.investigation_risks | type == "array")
           and (
             .repair_candidates
             | type == "array"

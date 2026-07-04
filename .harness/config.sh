@@ -54,7 +54,11 @@ export AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_ROOT_DIR}/.harness/runtime/epistem
 
 : "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Analyze repository structure and identify highest-value investigation targets}"
 : "${AEGIS_INVESTIGATION_INPUT:=}"
-: "${AEGIS_EVIDENCE_TARGET_PATH:=.}"
+if [[ -d "${AEGIS_ROOT_DIR}/src" ]]; then
+  : "${AEGIS_EVIDENCE_TARGET_PATH:=src}"
+else
+  : "${AEGIS_EVIDENCE_TARGET_PATH:=.}"
+fi
 
 export AEGIS_DEFAULT_INVESTIGATION_INPUT
 export AEGIS_INVESTIGATION_INPUT
@@ -197,7 +201,7 @@ declare -Ar AEGIS_EXECUTION_ENGINES=(
   ["validation"]="raw"
   ["adversarial"]="raw"
   ["repair"]="aider"
-  ["optimize"]="aider"
+  ["optimize"]="raw"
 )
 
 # =========================================================

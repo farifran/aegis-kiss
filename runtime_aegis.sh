@@ -738,7 +738,7 @@ prepare_execution_surface() {
 
 materialize_preceding_mutation_candidate() {
 
-  if [[ "${AEGIS_MODE}" != "optimize" ]]; then
+  if [[ "${AEGIS_MODE}" != "optimize" ]] || ! mode_requires_execution_surface; then
     return
   fi
 

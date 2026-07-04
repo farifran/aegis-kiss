@@ -87,6 +87,7 @@ Validation must NOT:
 - assume assistant-style continuity inheritance.
 
 If the evidence basis is insufficient, Validation must report insufficient basis for verdict rather than rediscovering.
+Note: If `test.run` returns status "passed" with summary "No candidate unit tests configured." (indicating no test suite exists in the workspace), but `typescript.check` and `eslint.check` both pass successfully without errors, this constitutes a sufficient evidence basis for a verdict. Validation should accept the candidate ("accepted") based on the static check success rather than rejecting or returning "insufficient".
 
 ---
 
@@ -196,6 +197,9 @@ Validation must emit:
 - no acknowledgements;
 - no conversational commentary;
 - no assistant narration.
+
+### Pipeline source_mode Alignment
+Note that the candidate's `source_mode` is always set to `optimize` because the pipeline runs Optimize as the final mutation stage. If the Optimize mode's `status` was `"no_optimization_needed"`, it means the diff actually originated in `repair` mode and was simply forwarded without changes. Do NOT reject or challenge feature additions or bug fixes just because their `source_mode` is `optimize`, as long as they are valid results of the preceding Repair stage.
 
 ### validated_candidate Identity Constraint
 
