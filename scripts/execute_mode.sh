@@ -306,11 +306,12 @@ prepare_execution_state() {
 
   executor_log "Using runtime-prepared execution state..."
 
-  [[ -d "${AEGIS_CAPABILITY_ENV_DIR}" ]] \
-    || executor_fatal "missing_runtime_prepared_capability_environment"
-
-  [[ -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]] \
-    || executor_fatal "missing_runtime_prepared_capability_payload_directory"
+  if [[ ! -d "${AEGIS_CAPABILITY_ENV_DIR}" ]]; then
+    mkdir -p "${AEGIS_CAPABILITY_ENV_DIR}" || executor_fatal "failed_to_create_capability_environment"
+  fi
+  if [[ ! -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]]; then
+    mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || executor_fatal "failed_to_create_capability_payload_dir"
+  fi
 }
 
 # =========================================================
