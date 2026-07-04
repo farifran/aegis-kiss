@@ -225,7 +225,7 @@ The `validated_candidate` object (containing `source_mode`, `diff`, and `files_c
 - Copy all fields exactly as they are provided in the capability payload evidence.
 - Any mismatch, even by a single character or line ending, will trigger a `validation_candidate_mismatch` error and fail the execution.
 
-- **`findings`**: Copy the typed findings array verbatim from the preceding Adversarial mode's output. You can find this inside the `epistemic_handover.json` payload under `payload.content.artifact_snapshot.operational_context.findings`.
+- **`findings`**: Copy the typed findings array verbatim from the preceding Adversarial mode's output. You can find this inside the `epistemic_handover.json` payload under `payload.content.artifact_snapshot.operational_context.findings`. **CRITICAL**: Serialize the entire `findings` array as a compact single-line JSON array — no line breaks inside the array, no indentation inside the array objects. Every string value inside the findings objects MUST have both an opening and a closing double quote.
 
 The required artifact shape must be STRICT, VALID JSON. All object keys MUST be enclosed in double quotes:
 

@@ -605,7 +605,7 @@ validate_mode_preconditions() {
         and (.artifact_snapshot.operational_context.candidate_result | type == "object")
         and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
-        and (.artifact_snapshot.operational_context.adversarial_findings | type == "array")
+        and (.artifact_snapshot.operational_context.findings | type == "array")
       ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_adversarial_findings_missing_or_invalid"
       ;;
   esac
