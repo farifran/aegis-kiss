@@ -1,17 +1,17 @@
 # MODE 0 — DISCOVERY
 
 ## PURPOSE
-Discovery acts as a mechanical scanner. It maps files, entrypoints, and required evidence based strictly on topology facts.
-Discovery must NOT interpret, justify, or explain *why* facts matter. It must never output narrative reasoning or justification. Rationale and interpretations belong exclusively to Forensics.
+Discovery extracts and compresses operational focus from runtime-produced structural facts into the minimal context for downstream modes (Forensics, Repair).
+- Runtime produces facts (topology, ranking, attention, summary, findings).
+- Discovery reformulates facts into operational context without concluding or interpreting meaning (Forensics territory).
 
-## CONSTRAINTS
-1. **Strictly factual, no narrative**: All observations, rationale, and next steps must be short, factual key-value style declarations (e.g. "Entrypoints: src/index.ts, src/ui/index.ts", "Topology: 0 edges observed").
-2. **No interpretations or justifications**: Do NOT explain why entrypoints are the focus, or why a function cannot be placed. Simply state the raw facts.
-3. **No structural/metric repetition**: Do NOT repeat raw counts (e.g., node/edge/bridge/boundary counts) present in `structural_context`.
-4. **No architectural role labels**: Do NOT use words like "orchestrator", "controller", "gateway", "facade", "central hub".
-5. **No semantic domain inferences**: Do NOT use terms like "authentication domain", "billing service", "payment module".
-6. **No risk assessment**: Risk analysis belongs exclusively to Forensics.
-7. **No functional inference**: Do NOT infer module function from topology position (e.g., "it mediates connectivity"). Describe topological facts only: "entrypoint node connects to boundary".
+## CONSTRAINTS & PROHIBITED PATTERNS
+1. **No system/code descriptions**: Observations must focus strictly on the *investigation state* (what the investigation needs to do next, gaps, priorities), NOT on what the system/code does.
+2. **No structural/metric repetition**: Do NOT repeat raw counts, metrics, or structural facts (e.g., node/edge/bridge/boundary counts) already present in `structural_context`.
+3. **No architectural role labels**: Do NOT use words like "orchestrator", "controller", "gateway", "facade", "central hub". Reference mechanical responsibility from `node_index` instead (e.g., "entrypoint node").
+4. **No semantic domain inferences**: Do NOT use terms like "authentication domain", "billing service", "payment module" based on file content/names. Reference mechanical classification only.
+5. **No risk assessment**: Risk analysis ("coupling risk", "failure risk") is prohibited. It belongs exclusively to Forensics.
+6. **No functional inference**: Do NOT infer module function from topology position (e.g., "it mediates connectivity"). Describe topological facts only: "entrypoint node connects to two boundary nodes".
 
 ## JSON SCHEMA CONTRACT
 Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers, without markdown block wrappers or extra prose.
@@ -35,20 +35,17 @@ Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AE
     "blocking_conditions": [],
     "required_evidence": ["filesystem.read:src/index.ts"],
     "operational_observations": [
-      "Entrypoints: src/index.ts",
-      "Edges: 0 observed.",
-      "Scope confidence: low."
+      "Evidence collection at entrypoint node is required before forensics can interpret boundary relationships."
     ],
     "rationale": [
-      "Request: add power function.",
-      "Seed: entrypoints."
+      "User requested analysis of repository topology, starting with the main entrypoint."
     ],
     "escalation_reason": null,
     "recommended_next_actions": [
       "Invoke forensics mode on src/index.ts"
     ],
     "evidence_priorities": ["filesystem.read:src/index.ts"],
-    "confidence_drivers": ["Entrypoints observed mechanically"]
+    "confidence_drivers": ["Bridge observed mechanically"]
   }
 }
 ```
@@ -57,14 +54,14 @@ Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AE
 - **`evidence_refs`**: List capability names read.
 - **`handover_attention`**: Copy verbatim from `runtime.attention_seed` payload (if missing, set `[]`, `"none"`, `"runtime.attention_seed payload unavailable"`).
 - **`operational_context`**:
-  - **`investigation_scope`**, **`attention_targets`**, **`blocking_conditions`**: Copy verbatim from `runtime.attention_seed` payload.
+  - **`investigation_scope`**, **`attention_targets`**, **`blocking_conditions`**: Copy verbatim from `runtime.attention_seed` payload. If missing, set defaults (`{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}`, `[]`, `[]`).
   - **`required_evidence`**: Capabilities or files to collect next.
-  - **`operational_observations`**: List of short, factual statements (3-5 words). No prose, no justifications.
-  - **`rationale`**: List of short, factual reasons (e.g. "Request: add function", "Target: entrypoint"). No paragraphs or explaining "why".
+  - **`operational_observations`**: Qualitative/interpretive observations about the *investigation state* and structural gaps.
+  - **`rationale`**: Rationale for the prioritization.
   - **`escalation_reason`**: Null, or string if blocked.
-  - **`recommended_next_actions`**: Concise next steps (e.g. "Invoke forensics").
+  - **`recommended_next_actions`**: Specific workflow next steps.
   - **`evidence_priorities`**: Copy `suggested_evidence_priorities` from `structural.builder` payload VERBATIM. Do NOT generate or filter.
-  - **`confidence_drivers`**: Factors driving operational confidence.
+  - **`confidence_drivers`**: Factors driving operational confidence (e.g., "Entrypoint observed mechanically").
 
 ## FAILURE POLICY
 If `structural.builder` payload is unavailable or failed:
