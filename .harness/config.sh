@@ -44,13 +44,13 @@ export AEGIS_SYSTEM_VERSION="2.9"
 # RUNTIME TOPOLOGY
 # =========================================================
 
-export AEGIS_RUNTIME_DIR=".harness/runtime"
-export AEGIS_EXECUTION_SURFACE_ROOT=".harness/execution_surfaces"
+export AEGIS_RUNTIME_DIR="${AEGIS_ROOT_DIR}/.harness/runtime"
+export AEGIS_EXECUTION_SURFACE_ROOT="${AEGIS_ROOT_DIR}/.harness/execution_surfaces"
 
-export AEGIS_CAPABILITY_ENV_DIR=".harness/runtime/capability_env"
-export AEGIS_CAPABILITY_PAYLOAD_DIR=".harness/runtime/capability_payloads"
+export AEGIS_CAPABILITY_ENV_DIR="${AEGIS_ROOT_DIR}/.harness/runtime/capability_env"
+export AEGIS_CAPABILITY_PAYLOAD_DIR="${AEGIS_ROOT_DIR}/.harness/runtime/capability_payloads"
 
-export AEGIS_EPISTEMIC_HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
+export AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_ROOT_DIR}/.harness/runtime/epistemic_handover.json"
 
 : "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Analyze repository structure and identify highest-value investigation targets}"
 : "${AEGIS_INVESTIGATION_INPUT:=}"
@@ -354,7 +354,7 @@ declare -ar AEGIS_DISCOVERY_EVIDENCE=(
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "filesystem.search_symbol"
   "git.status"
-  "filesystem.read:epistemic_handover"
+  "filesystem.read:epistemic_handover"  # Forensics must only interpret evidence provided by Discovery
 )
 
 declare -ar AEGIS_VALIDATION_EVIDENCE=(
