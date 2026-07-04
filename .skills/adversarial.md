@@ -2,19 +2,20 @@
 
 ## Purpose
 
-Adversarial mode is a bounded challenge cognition topology.
+Adversarial mode is a bounded **falsification** cognition topology.
 
-Its purpose is to challenge the current result or candidate end state by attempting to expose weaknesses through observable evidence.
+Its sole mission is to attempt to falsify the candidate mutation using observable evidence:
+- Is the logic incorrect for known inputs (x=0, overflow, boundary values)?
+- Does the candidate introduce a function signature that conflicts with existing code in the exposed diff?
+- Does the candidate duplicate behavior already present in the exposed file?
+- Does the candidate violate a structural pattern observable in the exposed evidence?
+- Does the candidate introduce an authority escalation, containment breach, or protocol violation?
 
-Adversarial mode exists to identify:
-- containment weaknesses;
-- authority escalation risks;
-- persistence leakage risks;
-- orchestration weaknesses;
-- mutation boundary weaknesses;
-- runtime inconsistencies;
-- protocol enforcement weaknesses;
-- capability exposure inconsistencies.
+Adversarial mode is NOT:
+- a QA layer;
+- a test coverage checker;
+- a code review tool;
+- a style enforcer.
 
 Adversarial mode is NOT:
 - unrestricted offensive execution;
@@ -48,8 +49,8 @@ It does not perform first-pass observation inventory.
 
 When the preceding artifact has `mode: "optimize"`, Adversarial must consume:
 
-- `artifact_snapshot.diff`
-- `artifact_snapshot.files_changed`
+- `artifact_snapshot.candidate_result.diff`
+- `artifact_snapshot.candidate_result.files_changed`
 
 These fields describe the candidate under challenge. They are not proof that
 the candidate is correct. Adversarial may correlate them only with explicit
@@ -191,6 +192,24 @@ The mode must avoid:
 
 ---
 
+### Falsification vs. QA — Critical Distinction
+
+Adversarial must ONLY report findings that attempt to falsify the candidate using observable evidence.
+
+**NOT allowed** (QA-style, not falsification):
+- "There are no unit tests for this function."
+- "No test suite was found."
+- "The function is not covered by tests."
+
+**Allowed** (falsification attempts):
+- "When x=0, the expression `a * x + b` reduces to `b`, which is the expected intercept — no logic error detected."
+- "Function `primeiro_grau` signature `(a, b, x)` does not conflict with any function signature visible in the diff."
+- "No duplicate behavior for a linear function exists in the exposed file content."
+
+If a finding cannot be supported by payload evidence exposed by the runtime, it MUST be emitted as `supported_by_evidence: false` and `severity: "info"`. It must NOT be used to block the candidate.
+
+---
+
 # Output Contract
 
 Adversarial mode must emit:
@@ -220,7 +239,21 @@ The `candidate_result` object (containing `source_mode`, `diff`, and `files_chan
 - Any mismatch, even by a single character or line ending, will trigger an `adversarial_candidate_mismatch` error and fail the execution.
 - **CRITICAL WARNING**: Do NOT include the closing double quote (`"`) of the input JSON `diff` string inside the value of your output `diff` string (do not end the diff value with `\"`). The diff text ends at the final bracket `}`. Ensure the output diff value does not contain a trailing escaped quote.
 
-The required artifact fields are:
+### Findings Schema
+
+The `findings` field MUST be an array of objects. Each finding object has:
+
+| Field | Type | Values | Required |
+|---|---|---|---|
+| `type` | string | `logic_bug`, `duplicate_behavior`, `contract_violation`, `boundary_violation`, `missing_evidence`, `style_issue` | yes |
+| `severity` | string | `high`, `medium`, `low`, `info` | yes |
+| `description` | string | brief falsification statement | yes |
+| `supported_by_evidence` | boolean | true if grounded in exposed payload; false if not observable | yes |
+| `evidence_refs` | array of strings | capability names used as evidence | yes |
+
+**CRITICAL RULE**: `missing_evidence` findings MUST always have `supported_by_evidence: false` and `severity: "info"`. They describe absence of observation — not a flaw in the candidate. Validation will not use them to block promotion.
+
+The required artifact fields must be STRICT, VALID JSON. All object keys MUST be enclosed in double quotes (e.g., `"mode"` not `mode`, `"findings"` not `findings`, `"type"` not `type`):
 
 ```json
 {
@@ -231,8 +264,16 @@ The required artifact fields are:
     "diff": "diff --git ...",
     "files_changed": ["src/index.ts"]
   },
-  "adversarial_findings": ["description of challenge finding 1", "description of challenge finding 2"],
-  "evidence_refs": ["filesystem.read:epistemic_handover", "filesystem.search_symbol"],
+  "findings": [
+    {
+      "type": "logic_bug",
+      "severity": "high",
+      "description": "description of the falsification attempt",
+      "supported_by_evidence": true,
+      "evidence_refs": ["filesystem.read:epistemic_handover"]
+    }
+  ],
+  "evidence_refs": ["filesystem.read:epistemic_handover"],
   "handover_attention": {
     "next_attention_targets": [],
     "attention_scope": "bounded falsification",
@@ -246,10 +287,11 @@ The required artifact fields are:
 # Final Principle
 
 Adversarial mode is:
-- bounded challenge cognition.
+- bounded falsification cognition.
 
 The runtime governs execution.
 
 Capabilities bound authority.
 
-The mode challenges current results using observable evidence only.
+The mode attempts to falsify the candidate using observable evidence only.
+If falsification fails, the candidate survives the challenge.

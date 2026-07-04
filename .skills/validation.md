@@ -68,9 +68,9 @@ Validation must NOT treat epistemic handover as:
 When the preceding artifact has `mode: "adversarial"`, Validation must consume
 the explicit assessment contract:
 
-- `artifact_snapshot.candidate_result`
-- `artifact_snapshot.adversarial_findings`
-- `artifact_snapshot.evidence_refs`
+- `artifact_snapshot.operational_context.candidate_result`
+- `artifact_snapshot.operational_context.findings`
+- `artifact_snapshot.operational_context.evidence_refs`
 
 The candidate is the object under judgment, not evidence of its own
 correctness. Validation must preserve `candidate_result.diff` and
@@ -86,8 +86,24 @@ Validation must NOT:
 - rediscover the system from scratch;
 - assume assistant-style continuity inheritance.
 
-If the evidence basis is insufficient, Validation must report insufficient basis for verdict rather than rediscovering.
-Note: If `test.run` returns status "passed" with summary "No candidate unit tests configured." (indicating no test suite exists in the workspace), but `typescript.check` and `eslint.check` both pass successfully without errors, this constitutes a sufficient evidence basis for a verdict. Validation should accept the candidate ("accepted") based on the static check success rather than rejecting or returning "insufficient".
+### Verdict Policy (Deterministic)
+
+Validation applies a deterministic policy over the typed findings from Adversarial:
+
+| Finding `type` | Finding `severity` | `supported_by_evidence` | Verdict action |
+|---|---|---|---|
+| `logic_bug` | `high` | `true` | `rejected` |
+| `logic_bug` | `medium` or `low` | `true` | evaluate against evidence; likely `rejected` |
+| `contract_violation` | any | `true` | `rejected` |
+| `boundary_violation` | any | `true` | `rejected` |
+| `duplicate_behavior` | `high` | `true` | `rejected` |
+| `missing_evidence` | any | `false` | **IGNORE** — not a candidate defect |
+| `style_issue` | any | any | **IGNORE** — not a candidate defect |
+| no findings with severity ≥ `medium` and `supported_by_evidence: true` | — | — | `accepted` |
+
+**Critical Rule**: If the only findings have `type: "missing_evidence"` or `supported_by_evidence: false`, the verdict MUST be `accepted` — not `insufficient`. The absence of a capability payload (e.g., `test.run` not exposed) means the runtime did not provide that evidence. This is a pipeline configuration decision, not a candidate defect. Validation has no authority to demand evidence the runtime chose not to expose.
+
+`insufficient` is reserved for cases where Validation genuinely cannot determine correctness from the exposed evidence — for example, when the diff or candidate_result is malformed or missing.
 
 ---
 
@@ -209,13 +225,23 @@ The `validated_candidate` object (containing `source_mode`, `diff`, and `files_c
 - Copy all fields exactly as they are provided in the capability payload evidence.
 - Any mismatch, even by a single character or line ending, will trigger a `validation_candidate_mismatch` error and fail the execution.
 
-The required artifact shape is:
+- **`findings`**: Copy the typed findings array verbatim from the preceding Adversarial mode's output. You can find this inside the `epistemic_handover.json` payload under `payload.content.artifact_snapshot.operational_context.findings`.
+
+The required artifact shape must be STRICT, VALID JSON. All object keys MUST be enclosed in double quotes:
 
 ```json
 {
   "mode": "validation",
   "verdict": "accepted|rejected|insufficient",
-  "adversarial_findings": ["description of adversarial finding 1", "description of adversarial finding 2"],
+  "findings": [
+    {
+      "type": "logic_bug",
+      "severity": "high",
+      "description": "...",
+      "supported_by_evidence": true,
+      "evidence_refs": ["filesystem.read:epistemic_handover"]
+    }
+  ],
   "validated_candidate": {
     "source_mode": "optimize",
     "diff": "diff --git ...",

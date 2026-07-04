@@ -838,7 +838,7 @@ validate_artifact() {
             and (.files_changed | type == "array" and length > 0)
             and all(.files_changed[]; type == "string" and length > 0)
           )
-          and (.adversarial_findings | type == "array")
+          and (.findings | type == "array")
           and (.evidence_refs | type == "array")
           and (
             .handover_attention
@@ -855,8 +855,8 @@ validate_artifact() {
         .artifact_snapshot
         | {
             source_mode: .mode,
-            diff: .operational_context.diff,
-            files_changed: .operational_context.files_changed
+            diff: .operational_context.candidate_result.diff,
+            files_changed: .operational_context.candidate_result.files_changed
           }
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
     )"
@@ -864,7 +864,7 @@ validate_artifact() {
     if ! echo "${artifact}" \
       | jq -e \
         --argjson previous_candidate "${previous_optimized_candidate}" '
-          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "");
+          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "") | gsub("@@[^@]+@@[^\n]*"; "@@");
           (.candidate_result.source_mode == $previous_candidate.source_mode)
           and (.candidate_result.files_changed == $previous_candidate.files_changed)
           and (norm(.candidate_result.diff) == norm($previous_candidate.diff))
@@ -884,7 +884,7 @@ validate_artifact() {
           (.verdict == "accepted"
             or .verdict == "rejected"
             or .verdict == "insufficient")
-          and (.adversarial_findings | type == "array")
+          and (.findings | type == "array")
           and (.basis | type == "array")
           and (
             .validated_candidate
@@ -915,7 +915,7 @@ validate_artifact() {
     if ! echo "${artifact}" \
       | jq -e \
         --argjson previous_candidate "${previous_candidate}" '
-          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "");
+          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "") | gsub("@@[^@]+@@[^\n]*"; "@@");
           (.validated_candidate.source_mode == $previous_candidate.source_mode)
           and (.validated_candidate.files_changed == $previous_candidate.files_changed)
           and (norm(.validated_candidate.diff) == norm($previous_candidate.diff))
@@ -924,19 +924,25 @@ validate_artifact() {
     fi
 
     previous_findings="$(
-      jq -c '.artifact_snapshot.operational_context.adversarial_findings // empty' \
+      jq -c '.artifact_snapshot.operational_context.findings // empty' \
         "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
     )"
 
     [[ -n "${previous_findings}" ]] \
       || executor_fatal "missing_adversarial_findings"
 
-    echo "${artifact}" \
+    if ! echo "${artifact}" \
       | jq -e \
         --argjson previous_findings "${previous_findings}" \
-        '.adversarial_findings == $previous_findings' \
-        >/dev/null 2>&1 \
-      || executor_fatal "validation_findings_mismatch"
+        '.findings == $previous_findings' \
+        >/dev/null 2>&1; then
+      echo "[DEBUG] validation_findings_mismatch details:" >&2
+      echo "[DEBUG] Expected findings:" >&2
+      echo "${previous_findings}" | jq -c '.' >&2
+      echo "[DEBUG] Actual findings received:" >&2
+      echo "${artifact}" | jq -c '.findings' >&2
+      executor_fatal "validation_findings_mismatch"
+    fi
   fi
 
   executor_log "Payload validated successfully"

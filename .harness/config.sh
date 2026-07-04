@@ -380,13 +380,17 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "test.run"
 )
 
+declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
+  "filesystem.read:epistemic_handover"
+)
+
 declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(
   ["discovery"]="AEGIS_DISCOVERY_EVIDENCE"
   ["forensics"]="AEGIS_FORENSICS_EVIDENCE"
   ["validation"]="AEGIS_VALIDATION_EVIDENCE"
   ["adversarial"]="AEGIS_ADVERSARIAL_EVIDENCE"
   ["repair"]="AEGIS_MUTATION_EVIDENCE"
-  ["optimize"]="AEGIS_MUTATION_EVIDENCE"
+  ["optimize"]="AEGIS_OPTIMIZE_EVIDENCE"
 )
 
 # =========================================================

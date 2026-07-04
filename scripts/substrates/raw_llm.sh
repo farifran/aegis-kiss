@@ -345,6 +345,21 @@ render_bounded_payload_section() {
     fi
   fi
 
+  if [[ "${payload_name}" == *"epistemic_handover.json" ]]; then
+    local stripped_file
+    stripped_file="$(mktemp)"
+    if jq -c '
+        if (.payload.content | type == "string") then
+          .payload.content |= (fromjson | del(.artifact_snapshot.structural_context))
+        else
+          .payload.content.artifact_snapshot |= del(.structural_context)
+        end' "${compact_file}" > "${stripped_file}" 2>/dev/null; then
+      mv "${stripped_file}" "${compact_file}"
+    else
+      rm -f "${stripped_file}" >/dev/null 2>&1 || true
+    fi
+  fi
+
   local payload_size
   payload_size="$(
     wc -c < "${compact_file}"

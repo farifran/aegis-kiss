@@ -487,6 +487,9 @@ invoke_aider() {
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
+  local aider_start_time
+  aider_start_time=$(date +%s)
+
   set +e
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
@@ -496,6 +499,11 @@ invoke_aider() {
   )
   aider_status=$?
   set -e
+
+  local aider_end_time
+  aider_end_time=$(date +%s)
+  local aider_elapsed=$((aider_end_time - aider_start_time))
+  echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
   if [[ "${aider_status}" -ne 0 ]]; then
     aider_warn "aider invocation failed with exit status ${aider_status}"

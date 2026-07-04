@@ -593,8 +593,9 @@ validate_mode_preconditions() {
       echo "${handover_content}" | jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "optimize"
-        and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0 and . != "(no changes)")
-        and (.artifact_snapshot.operational_context.files_changed | type == "array" and length > 0)
+        and (.artifact_snapshot.operational_context.candidate_result | type == "object")
+        and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
+        and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
       ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
       ;;
     validation)
