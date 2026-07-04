@@ -795,7 +795,7 @@ validate_artifact() {
       jq -c '.' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
     )"
 
-    echo "${artifact}" \
+    if ! echo "${artifact}" \
       | jq -e \
         --argjson previous_discovery "${previous_discovery}" '
         ($previous_discovery.artifact_snapshot.mode == "discovery")
@@ -822,8 +822,26 @@ validate_artifact() {
             | $authorized_targets
             | index($candidate.id) != null
           )
-      ' >/dev/null 2>&1 \
-      || executor_fatal "forensics_repair_candidate_outside_discovery_scope"
+      ' >/dev/null 2>&1; then
+      echo "[DEBUG] forensics_repair_candidate_outside_discovery_scope details:" >&2
+      echo "[DEBUG] Authorized targets:" >&2
+      echo "${previous_discovery}" | jq -c '
+        [
+          .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
+          (.artifact_snapshot.structural_context.ranked_targets[]? | select(.type == "explicit_request") | .file),
+          .epistemic_state.next_attention_targets[]?,
+          (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
+          (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
+          (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
+          (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
+          (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
+          (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
+        ] | unique
+      ' >&2
+      echo "[DEBUG] Forensics repair candidates:" >&2
+      echo "${artifact}" | jq -c '.repair_candidates' >&2
+      executor_fatal "forensics_repair_candidate_outside_discovery_scope"
+    fi
   fi
 
   if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
