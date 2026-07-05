@@ -606,15 +606,21 @@ assemble_bounded_capability_context() {
 
 assemble_provider_request() {
 
+  # AEGIS_RAW_SUBSTRATE_MAX_TOKENS controls the output budget.
+  # Default: 4096 — enough for any structured JSON artifact without truncation.
+  : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
+
   jq -n \
     --arg model "${MODEL}" \
     --rawfile system_prompt "${TMP_SYSTEM_PROMPT_FILE}" \
     --rawfile capability_context "${TMP_CAPABILITY_CONTEXT_FILE}" \
     --argjson temperature "${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
+    --argjson max_tokens "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS}" \
     '
     {
       model: $model,
       temperature: $temperature,
+      max_tokens: $max_tokens,
       messages: [
         {
           role: "system",
@@ -769,9 +775,11 @@ extract_artifact_payload() {
     || raw_fatal "empty_artifact_payload"
 
   if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
-    # Try a quick Python-based JSON repair for tiny slips (e.g., missing closing quotes on keys)
+    # Try a Python-based JSON repair for two classes of LLM slip:
+    #   1. Missing closing quote on property keys.
+    #   2. Truncated JSON (model stopped before closing all arrays/objects).
     local repaired_payload
-    repaired_payload="$(python3 - "${artifact_payload}" <<'PY'
+    repaired_payload="$(python3 - <<'PY' "${artifact_payload}"
 import sys
 import json
 import re
@@ -785,9 +793,49 @@ fixed = re.sub(r'\"([a-zA-Z0-9_]+)\s*:\s*\"', r'"\1": "', fixed)
 try:
     parsed = json.loads(fixed)
     print(json.dumps(parsed))
+    sys.exit(0)
 except Exception:
-    # If python JSON parser still fails, print raw so jq check triggers the fatal error
-    print(raw)
+    pass
+
+# Attempt to close a truncated JSON object by appending missing brackets.
+# Count unmatched open brackets (arrays and objects) and close them.
+stack = []
+in_str = False
+escape_next = False
+for ch in fixed:
+    if escape_next:
+        escape_next = False
+        continue
+    if ch == '\\':
+        escape_next = True
+        continue
+    if ch == '"':
+        in_str = not in_str
+        continue
+    if in_str:
+        continue
+    if ch in ('{', '['):
+        stack.append(ch)
+    elif ch == '}':
+        if stack and stack[-1] == '{':
+            stack.pop()
+    elif ch == ']':
+        if stack and stack[-1] == '[':
+            stack.pop()
+
+closers = {'[': ']', '{': '}'}
+truncation_suffix = ''.join(closers[c] for c in reversed(stack))
+if truncation_suffix:
+    candidate = fixed.rstrip().rstrip(',') + '\n' + truncation_suffix
+    try:
+        parsed = json.loads(candidate)
+        print(json.dumps(parsed))
+        sys.exit(0)
+    except Exception:
+        pass
+
+# Give up — return raw so jq check triggers the fatal error
+print(raw)
 PY
 )"
     if echo "${repaired_payload}" | jq empty >/dev/null 2>&1; then
