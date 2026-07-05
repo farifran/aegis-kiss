@@ -22,3 +22,9 @@ export function celsiusParaFahrenheit(celsius: number): number {
 export function fahrenheitParaCelsius(fahrenheit: number): number {
     return ((fahrenheit - 32) * 5) / 9;
 }
+export function metrosParaCentimetros(metros: number): number {
+    return metros * 100;
+}
+export function centimetrosParaMetros(centimetros: number): number {
+    return centimetros / 100;
+}
