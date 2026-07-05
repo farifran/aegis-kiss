@@ -231,7 +231,6 @@ The required artifact shape must be STRICT, VALID JSON. All object keys MUST be 
 
 ```json
 {
-  "mode": "validation",
   "verdict": "accepted|rejected|insufficient",
   "findings": [
     {
@@ -247,12 +246,7 @@ The required artifact shape must be STRICT, VALID JSON. All object keys MUST be 
     "diff": "diff --git ...",
     "files_changed": ["src/index.ts"]
   },
-  "basis": ["basis justification description 1", "basis justification description 2"],
-  "handover_attention": {
-    "next_attention_targets": [],
-    "attention_scope": "none",
-    "attention_reason": "validation completed"
-  }
+  "basis": ["basis justification description 1", "basis justification description 2"]
 }
 ```
 

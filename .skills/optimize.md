@@ -11,20 +11,15 @@ If no optimization is needed, Optimize must explicitly declare `status: "no_opti
 3. **No conversational prose**: Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers, without markdown block wrappers or extra prose.
 
 ## JSON SCHEMA CONTRACT
+The runtime automatically populates the `mode`, `handover_attention` and standard metadata.
 ```json
 {
-  "mode": "optimize",
   "status": "no_optimization_needed|optimized",
   "candidate_result": {
     "diff": "<verbatim copy of the repair diff OR the new optimized diff string>",
     "files_changed": ["src/index.ts"]
   },
-  "evidence_refs": ["filesystem.read:epistemic_handover"],
-  "handover_attention": {
-    "next_attention_targets": ["src/index.ts"],
-    "attention_scope": "mutation_applied",
-    "attention_reason": "no optimization needed OR optimized diff"
-  }
+  "evidence_refs": ["filesystem.read:epistemic_handover"]
 }
 ```
 
@@ -36,10 +31,6 @@ If no optimization is needed, Optimize must explicitly declare `status: "no_opti
     - If `status` is `"optimized"`: Output a valid unified diff representing the simplified version of the files.
   - **`files_changed`**: Copy the `artifact_snapshot.operational_context.files_changed` array verbatim from the epistemic handover.
 - **`evidence_refs`**: List capability names read (e.g. `["filesystem.read:epistemic_handover"]`).
-- **`handover_attention`**:
-  - `next_attention_targets`: Copy `files_changed` target files.
-  - `attention_scope`: Set to `"mutation_applied"`.
-  - `attention_reason`: Factual statement (e.g., `"no optimization needed"`).
 
 ## FAILURE POLICY
 If the previous Repair diff is missing from the epistemic handover:

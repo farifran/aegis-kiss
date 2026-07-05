@@ -12,9 +12,9 @@ Forensics does NOT write summaries of files, explain code flow, or construct qua
 4. **No conversational prose**: Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers.
 
 ## JSON SCHEMA CONTRACT
+The runtime automatically populates the `mode`, `handover_attention` and standard metadata.
 ```json
 {
-  "mode": "forensics",
   "status": "interpreted|inconclusive",
   "repair_candidates": [
     {
@@ -23,11 +23,6 @@ Forensics does NOT write summaries of files, explain code flow, or construct qua
       "evidence_refs": ["filesystem.read:src/index.ts"]
     }
   ],
-  "handover_attention": {
-    "next_attention_targets": ["src/index.ts"],
-    "attention_scope": "mutation_targets",
-    "attention_reason": "selected targets for mutation"
-  },
   "evidence_refs": ["filesystem.read:src/index.ts"]
 }
 ```
@@ -38,8 +33,4 @@ Forensics does NOT write summaries of files, explain code flow, or construct qua
   - `id`: Repository-relative path to the file to mutate.
   - `reason`: Extremely short reason (3-6 words) for the mutation.
   - `evidence_refs`: Capability reference showing where the defect or target was observed.
-- **`handover_attention`**:
-  - `next_attention_targets`: Must be identical to the list of `id`s in `repair_candidates` (if empty, set to `[]`).
-  - `attention_scope`: `"mutation_targets"`.
-  - `attention_reason`: Short fact-based reason.
 - **`evidence_refs`**: List capability names consumed.

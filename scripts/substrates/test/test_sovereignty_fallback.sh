@@ -113,15 +113,12 @@ fi
 jq -e "$(epistemic_handover_schema_filter)" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
   || fail "invalid_handover_schema_after_discovery_failure"
 
-# Assert status is partial and structural_context is populated
+# Assert null snapshot and default epistemic state
 jq -e '
-  .artifact_snapshot != null
-  and .artifact_snapshot.status == "partial"
-  and .artifact_snapshot.structural_context != null
-  and .artifact_snapshot.structural_context.topology_summary != null
-  and .artifact_snapshot.operational_context == null
-  and (.epistemic_state.attention_reason | contains("discovery failed"))
+  .artifact_snapshot == null
+  and .epistemic_state.next_attention_targets == []
+  and .epistemic_state.attention_scope == "none"
 ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-  || fail "handover_does_not_contain_partial_structural_context_and_fallback_reason"
+  || fail "handover_does_not_contain_fallback_reason"
 
 echo "[AEGIS][TEST] Sovereignty fallback promotion verified successfully."

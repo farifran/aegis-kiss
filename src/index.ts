@@ -16,3 +16,9 @@ export function quadratica(a: number, b: number, c: number, x: number): number {
 export function primeiro_grau(a: number, b: number, x: number): number {
     return a * x + b;
 }
+export function celsiusParaFahrenheit(celsius: number): number {
+    return (celsius * 9) / 5 + 32;
+}
+export function fahrenheitParaCelsius(fahrenheit: number): number {
+    return ((fahrenheit - 32) * 5) / 9;
+}

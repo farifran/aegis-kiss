@@ -97,7 +97,7 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ "${model}" == "openai/meta/llama-3.3-70b-instruct" ]]
+[[ "${model}" == "openai/google/gemma-4-31b-it" ]]
 grep -q "adicione uma funcao soma" "${message_file}"
 [[ "${target}" == "src/index.ts" ]]
 
@@ -114,7 +114,7 @@ output="$(
     AEGIS_EXECUTION_ID="test-execution" \
     AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
     AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-    AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct" \
+    AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
     AEGIS_AIDER_BIN="${fake_aider}" \
     AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
@@ -151,7 +151,7 @@ if env \
   AEGIS_EXECUTION_ID="test-execution" \
   AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
   AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct" \
+  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
   AEGIS_AIDER_BIN="${fake_aider}" \
   AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
   AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
@@ -176,7 +176,7 @@ if env \
   AEGIS_EXECUTION_ID="test-execution" \
   AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
   AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct" \
+  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
   AEGIS_AIDER_BIN="${fake_aider}" \
   AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
   AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
@@ -196,7 +196,7 @@ if env \
   AEGIS_EXECUTION_ID="test-execution" \
   AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
   AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct" \
+  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
   AEGIS_AIDER_BIN="${fake_aider}" \
   AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
   AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \

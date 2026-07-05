@@ -1,0 +1,37 @@
+{
+  "success": true,
+  "capability": "runtime.attention_seed",
+  "classification": "readonly",
+  "execution_id": "bench_cycle_run1",
+  "generated_at": "2026-07-05T16:58:00Z",
+  "payload": {
+    "target": "tests/scenarios/cycle/input",
+    "selection_rule": "none",
+    "attention_state": "none",
+    "attention_source": "none",
+    "attention_confidence": "none",
+    "ambiguous_candidates": [],
+    "handover_attention": {
+      "next_attention_targets": [],
+      "attention_scope": "none",
+      "attention_reason": "no explicit or topology targets available"
+    },
+    "investigation_plan": {
+      "primary_targets": [],
+      "secondary_targets": [],
+      "excluded_targets": []
+    },
+    "investigation_scope": {
+      "scope_type": "none",
+      "scope_targets": [],
+      "scope_confidence": "none"
+    },
+    "blocking_conditions": [
+      "no topology targets available"
+    ],
+    "attention_targets": [],
+    "relevant_surfaces": [],
+    "critical_relationships": []
+  },
+  "error": null
+}

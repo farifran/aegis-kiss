@@ -1,0 +1,198 @@
+{
+  "success": true,
+  "capability": "structural.builder",
+  "classification": "readonly",
+  "execution_id": "bench_microservice_run5",
+  "generated_at": "2026-07-05T16:58:00Z",
+  "payload": {
+    "target": "tests/scenarios/microservice/input",
+    "topology_summary": {
+      "total_nodes": 4,
+      "total_edges": 0,
+      "resolved_edge_count": 0,
+      "unresolved_edge_count": 0,
+      "connected_node_count": 0,
+      "isolated_node_count": 4,
+      "cluster_surface_count": 0,
+      "standalone_surface_count": 1,
+      "total_surface_count": 1,
+      "boundary_count": 0,
+      "bridge_count": 0,
+      "bridge_emit_count": 0,
+      "bridge_truncated": false,
+      "hotspot_count": 0,
+      "entrypoint_count": 1
+    },
+    "evidence": {
+      "coverage": {
+        "test_covered_file_count": 0,
+        "config_file_count": 1,
+        "uncovered_hotspot_count": 0
+      },
+      "payload_status": {
+        "consumed_payload_ok_count": 7,
+        "consumed_payload_missing_count": 0,
+        "consumed_payload_failed_count": 0
+      }
+    },
+    "runtime_summary": "4 nodes, 0 edges, 0 cluster surfaces, 1 standalone surfaces. 0 connected, 4 isolated. 0 bridges, 0 hotspots, 1 entrypoints.",
+    "runtime_findings": [
+      {
+        "finding": "4 of 4 nodes are isolated (100%)",
+        "topology_refs": [
+          "isolated_node_count: 4"
+        ]
+      }
+    ],
+    "ranked_targets": [],
+    "suggested_evidence_priorities": [],
+    "gap_counts": {
+      "visibility_gap_count": 0,
+      "coverage_gap_count": 0,
+      "relationship_gap_count": 4,
+      "scope_gap_count": 0,
+      "unresolved_reference_count": 0,
+      "observation_limited_node_count": 0,
+      "ambiguous_path_count": 0
+    },
+    "topology_index": {
+      "surfaces": [
+        {
+          "id": "surface_standalone_summary",
+          "surface_kind": "standalone",
+          "member_count": 4,
+          "members": [],
+          "dominant_node": null,
+          "bridge_count": 0,
+          "boundary_count": 0,
+          "hotspot_count": 0,
+          "entrypoint_count": 1
+        }
+      ],
+      "bridges": [],
+      "boundaries": [],
+      "hotspots": [],
+      "entrypoints": [
+        {
+          "id": "entrypoint_001",
+          "file": "tests/scenarios/microservice/input/gateway/main.go",
+          "surface_ref": "surface_standalone_001"
+        }
+      ],
+      "node_index": {
+        "tests/scenarios/microservice/input/gateway/main.go": {
+          "surface_ref": "surface_standalone_001",
+          "surface_kind": "standalone",
+          "relation_visibility": "none_observed",
+          "is_entrypoint": true,
+          "is_hotspot": false,
+          "is_boundary": false,
+          "in_degree": 0,
+          "out_degree": 0,
+          "total_degree": 0,
+          "unresolved_dependency_count": 0,
+          "test_covered": false,
+          "responsibility": "test",
+          "responsibility_signals": [
+            "path_or_name:test_pattern"
+          ],
+          "responsibility_confidence": "high",
+          "entrypoint_id": "entrypoint_001",
+          "surface_status": "surface_member"
+        },
+        "tests/scenarios/microservice/input/service_auth/auth.go": {
+          "surface_ref": "surface_standalone_002",
+          "surface_kind": "standalone",
+          "relation_visibility": "none_observed",
+          "is_entrypoint": false,
+          "is_hotspot": false,
+          "is_boundary": false,
+          "in_degree": 0,
+          "out_degree": 0,
+          "total_degree": 0,
+          "unresolved_dependency_count": 0,
+          "test_covered": false,
+          "responsibility": "test",
+          "responsibility_signals": [
+            "path_or_name:test_pattern"
+          ],
+          "responsibility_confidence": "high"
+        },
+        "tests/scenarios/microservice/input/service_billing/billing.go": {
+          "surface_ref": "surface_standalone_003",
+          "surface_kind": "standalone",
+          "relation_visibility": "none_observed",
+          "is_entrypoint": false,
+          "is_hotspot": false,
+          "is_boundary": false,
+          "in_degree": 0,
+          "out_degree": 0,
+          "total_degree": 0,
+          "unresolved_dependency_count": 0,
+          "test_covered": false,
+          "responsibility": "test",
+          "responsibility_signals": [
+            "path_or_name:test_pattern"
+          ],
+          "responsibility_confidence": "high"
+        },
+        "tests/scenarios/microservice/input/target_system_profile.yml": {
+          "surface_ref": "surface_standalone_004",
+          "surface_kind": "standalone",
+          "relation_visibility": "none_observed",
+          "is_entrypoint": false,
+          "is_hotspot": false,
+          "is_boundary": false,
+          "in_degree": 0,
+          "out_degree": 0,
+          "total_degree": 0,
+          "unresolved_dependency_count": 0,
+          "test_covered": false,
+          "responsibility": "test",
+          "responsibility_signals": [
+            "path_or_name:test_pattern"
+          ],
+          "responsibility_confidence": "high"
+        }
+      }
+    },
+    "unresolved_references": [],
+    "consumed_payloads": [
+      {
+        "file": "filesystem_extract_import_graph.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_reference_graph.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_symbols.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_entrypoints.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_test_relationships.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_configuration_structure.json",
+        "status": "ok"
+      },
+      {
+        "file": "filesystem_extract_responsibilities.json",
+        "status": "ok"
+      }
+    ],
+    "observed_request_alignment": {
+      "requested_paths": [],
+      "resolved_paths": [],
+      "path_resolutions": [],
+      "resolution_confidence": "none"
+    }
+  },
+  "error": null
+}

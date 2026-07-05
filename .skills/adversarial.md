@@ -257,7 +257,6 @@ The required artifact fields must be STRICT, VALID JSON. All object keys MUST be
 
 ```json
 {
-  "mode": "adversarial",
   "status": "challenged|inconclusive",
   "candidate_result": {
     "source_mode": "optimize",
@@ -273,12 +272,7 @@ The required artifact fields must be STRICT, VALID JSON. All object keys MUST be
       "evidence_refs": ["filesystem.read:epistemic_handover"]
     }
   ],
-  "evidence_refs": ["filesystem.read:epistemic_handover"],
-  "handover_attention": {
-    "next_attention_targets": [],
-    "attention_scope": "bounded falsification",
-    "attention_reason": "challenge completed"
-  }
+  "evidence_refs": ["filesystem.read:epistemic_handover"]
 }
 ```
 

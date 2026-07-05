@@ -14,17 +14,11 @@ Discovery extracts and compresses operational focus from runtime-produced struct
 6. **No functional inference**: Do NOT infer module function from topology position (e.g., "it mediates connectivity"). Describe topological facts only: "entrypoint node connects to two boundary nodes".
 
 ## JSON SCHEMA CONTRACT
-Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers, without markdown block wrappers or extra prose.
+Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers. The runtime automatically populates the `mode`, `handover_attention` and standard metadata.
 
 ```json
 {
-  "mode": "discovery",
   "evidence_refs": ["structural.builder", "runtime.attention_seed", "filesystem.read:epistemic_handover"],
-  "handover_attention": {
-    "next_attention_targets": ["src/index.ts"],
-    "attention_scope": "explicit_request",
-    "attention_reason": "observed_request_alignment direct match"
-  },
   "operational_context": {
     "investigation_scope": {
       "scope_type": "explicit_request",
@@ -52,7 +46,6 @@ Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AE
 
 ## DETAILED FIELD INSTRUCTIONS
 - **`evidence_refs`**: List capability names read.
-- **`handover_attention`**: Copy verbatim from `runtime.attention_seed` payload (if missing, set `[]`, `"none"`, `"runtime.attention_seed payload unavailable"`).
 - **`operational_context`**:
   - **`investigation_scope`**, **`attention_targets`**, **`blocking_conditions`**: Copy verbatim from `runtime.attention_seed` payload. If missing, set defaults (`{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}`, `[]`, `[]`).
   - **`required_evidence`**: Capabilities or files to collect next.

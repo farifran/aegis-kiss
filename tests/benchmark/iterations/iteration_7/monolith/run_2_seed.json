@@ -1,0 +1,53 @@
+{
+  "success": true,
+  "capability": "runtime.attention_seed",
+  "classification": "readonly",
+  "execution_id": "bench_monolith_run2",
+  "generated_at": "2026-07-05T16:57:53Z",
+  "payload": {
+    "target": "tests/scenarios/monolith/input",
+    "selection_rule": "bridge",
+    "attention_state": "topology",
+    "attention_source": "topology_index.bridges",
+    "attention_confidence": "medium",
+    "ambiguous_candidates": [],
+    "handover_attention": {
+      "next_attention_targets": [
+        "tests/scenarios/monolith/input/app/controllers/users_controller.py",
+        "tests/scenarios/monolith/input/app/models/user.py"
+      ],
+      "attention_scope": "topology:bridge",
+      "attention_reason": "bridge endpoints selected as attention seed"
+    },
+    "investigation_plan": {
+      "primary_targets": [
+        "tests/scenarios/monolith/input/app/controllers/users_controller.py",
+        "tests/scenarios/monolith/input/app/models/user.py"
+      ],
+      "secondary_targets": [],
+      "excluded_targets": []
+    },
+    "investigation_scope": {
+      "scope_type": "topology",
+      "scope_targets": [
+        "tests/scenarios/monolith/input/app/controllers/users_controller.py",
+        "tests/scenarios/monolith/input/app/models/user.py"
+      ],
+      "scope_confidence": "medium"
+    },
+    "blocking_conditions": [],
+    "attention_targets": [],
+    "relevant_surfaces": [
+      "surface_cluster_001"
+    ],
+    "critical_relationships": [
+      {
+        "type": "bridge",
+        "id": "bridge_001",
+        "from": "tests/scenarios/monolith/input/app/controllers/users_controller.py",
+        "to": "tests/scenarios/monolith/input/app/models/user.py"
+      }
+    ]
+  },
+  "error": null
+}

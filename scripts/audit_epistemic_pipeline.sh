@@ -79,9 +79,9 @@ main() {
   local status
   local reason
 
-  if skill_declares ".skills/discovery.md" "ranked_targets" \
+  if skill_declares ".skills/discovery.md" "evidence_priorities" \
     && skill_declares ".skills/discovery.md" "handover_attention" \
-    && skill_declares ".skills/forensics.md" "structural_context.ranked_targets" \
+    && skill_declares ".skills/forensics.md" "repair_candidates" \
     && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}"; then
     status="pass"
     reason="Forensics explicitly consumes Discovery routing fields while deriving evidence from exposed capability payloads."

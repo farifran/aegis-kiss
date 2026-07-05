@@ -76,14 +76,23 @@ export AEGIS_ARTIFACT_END_MARKER="AEGIS_ARTIFACT_END"
 # =========================================================
 
 : "${OPENAI_API_BASE:=https://integrate.api.nvidia.com/v1}"
-: "${OPENAI_MODEL_READONLY_COGNITION:=meta/llama-3.3-70b-instruct}"
-: "${AEGIS_MUTATION_MODEL:=${OPENAI_MODEL_READONLY_COGNITION}}"
+export OPENAI_API_BASE
+
+# =========================================================
+# MODEL CONFIGURATION (KISS UNIFIED MODEL)
+# =========================================================
+# All modes utilize the unified frontier model.
+
+: "${OPENAI_MODEL_READONLY_COGNITION:=${OPENAI_MODEL_ANALYSIS:-google/gemma-4-31b-it}}"
+export OPENAI_MODEL_READONLY_COGNITION
+
+export AEGIS_MUTATION_MODEL="${OPENAI_MODEL_READONLY_COGNITION}"
 
 if [[ "${AEGIS_MUTATION_MODEL}" == */* ]] \
   && [[ "${AEGIS_MUTATION_MODEL}" != openai/* ]]; then
-  : "${AEGIS_AIDER_MODEL:=openai/${AEGIS_MUTATION_MODEL}}"
+  export AEGIS_AIDER_MODEL="openai/${AEGIS_MUTATION_MODEL}"
 else
-  : "${AEGIS_AIDER_MODEL:=${AEGIS_MUTATION_MODEL}}"
+  export AEGIS_AIDER_MODEL="${AEGIS_MUTATION_MODEL}"
 fi
 
 : "${AEGIS_AIDER_BIN:=${AEGIS_ROOT_DIR}/.venv/bin/aider}"
@@ -100,7 +109,7 @@ export AEGIS_MUTATION_GIT_DIR
 # RAW SUBSTRATE POLICY
 # =========================================================
 
-: "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0}"
+: "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0.1}"
 : "${AEGIS_RAW_SUBSTRATE_TIMEOUT_SECONDS:=120}"
 : "${AEGIS_RAW_SUBSTRATE_MAX_RETRIES:=1}"
 
@@ -235,7 +244,6 @@ declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_entrypoints"
   "filesystem.extract_test_relationships"
   "filesystem.extract_configuration_structure"
-  "filesystem.extract_references"
   "filesystem.extract_responsibilities"
   "structural.builder"
   "runtime.attention_seed"
@@ -284,7 +292,6 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.extract_entrypoints"]="scripts/capabilities/filesystem/extract_entrypoints.sh"
   ["filesystem.extract_test_relationships"]="scripts/capabilities/filesystem/extract_test_relationships.sh"
   ["filesystem.extract_configuration_structure"]="scripts/capabilities/filesystem/extract_configuration_structure.sh"
-  ["filesystem.extract_references"]="scripts/capabilities/filesystem/extract_references.sh"
   ["filesystem.extract_responsibilities"]="scripts/capabilities/filesystem/extract_responsibilities.sh"
   ["structural.builder"]="scripts/capabilities/structural/builder.sh"
   ["runtime.attention_seed"]="scripts/capabilities/runtime/attention_seed.sh"
@@ -309,7 +316,6 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.extract_entrypoints"]="readonly"
   ["filesystem.extract_test_relationships"]="readonly"
   ["filesystem.extract_configuration_structure"]="readonly"
-  ["filesystem.extract_references"]="readonly"
   ["filesystem.extract_responsibilities"]="readonly"
   ["structural.builder"]="readonly"
   ["runtime.attention_seed"]="readonly"
@@ -334,7 +340,6 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.extract_entrypoints"]="."
   ["filesystem.extract_test_relationships"]="."
   ["filesystem.extract_configuration_structure"]="."
-  ["filesystem.extract_references"]="."
   ["filesystem.extract_responsibilities"]="."
   ["structural.builder"]="."
   ["runtime.attention_seed"]="."

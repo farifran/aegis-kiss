@@ -48,6 +48,10 @@ cd "${AEGIS_SUBSTRATE_ROOT}"
 # CONFIGURATION
 # =========================================================
 
+if [[ -f ".harness/local.env" ]] && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
+    source ".harness/local.env"
+fi
+
 [[ -f ".harness/config.sh" ]] || {
   echo "[AEGIS][RAW][FATAL] missing_config" >&2
   exit 1
@@ -765,9 +769,34 @@ extract_artifact_payload() {
     || raw_fatal "empty_artifact_payload"
 
   if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
-    echo "[DEBUG] Failed to parse artifact JSON. Raw payload:" >&2
-    echo "${artifact_payload}" >&2
-    raw_fatal "artifact_not_json"
+    # Try a quick Python-based JSON repair for tiny slips (e.g., missing closing quotes on keys)
+    local repaired_payload
+    repaired_payload="$(python3 - "${artifact_payload}" <<'PY'
+import sys
+import json
+import re
+
+raw = sys.argv[1]
+# Fix common LLM syntax slip: "property: "value" (missing closing quote on key)
+fixed = re.sub(r'\"([a-zA-Z0-9_]+)(?<!\"):\s*\"', r'"\1": "', raw)
+# Fix missing quote on property keys like "scope_confidence: "low"
+fixed = re.sub(r'\"([a-zA-Z0-9_]+)\s*:\s*\"', r'"\1": "', fixed)
+
+try:
+    parsed = json.loads(fixed)
+    print(json.dumps(parsed))
+except Exception:
+    # If python JSON parser still fails, print raw so jq check triggers the fatal error
+    print(raw)
+PY
+)"
+    if echo "${repaired_payload}" | jq empty >/dev/null 2>&1; then
+      artifact_payload="${repaired_payload}"
+    else
+      echo "[DEBUG] Failed to parse artifact JSON. Raw payload:" >&2
+      echo "${artifact_payload}" >&2
+      raw_fatal "artifact_not_json"
+    fi
   fi
 
   echo "${AEGIS_ARTIFACT_BEGIN_MARKER}"

@@ -1,0 +1,82 @@
+{
+  "success": true,
+  "capability": "runtime.attention_seed",
+  "classification": "readonly",
+  "execution_id": "bench_hub_run3",
+  "generated_at": "2026-07-05T16:58:03Z",
+  "payload": {
+    "target": "tests/scenarios/hub/input",
+    "selection_rule": "hotspot",
+    "attention_state": "topology",
+    "attention_source": "topology_index.hotspots",
+    "attention_confidence": "medium",
+    "ambiguous_candidates": [],
+    "handover_attention": {
+      "next_attention_targets": [
+        "tests/scenarios/hub/input/src/core.py"
+      ],
+      "attention_scope": "topology:hotspot",
+      "attention_reason": "highest degree nodes selected as attention seed"
+    },
+    "investigation_plan": {
+      "primary_targets": [
+        "tests/scenarios/hub/input/src/core.py"
+      ],
+      "secondary_targets": [],
+      "excluded_targets": []
+    },
+    "investigation_scope": {
+      "scope_type": "topology",
+      "scope_targets": [
+        "tests/scenarios/hub/input/src/core.py"
+      ],
+      "scope_confidence": "medium"
+    },
+    "blocking_conditions": [],
+    "attention_targets": [
+      "tests/scenarios/hub/input/src/core.py"
+    ],
+    "relevant_surfaces": [
+      "surface_cluster_001"
+    ],
+    "critical_relationships": [
+      {
+        "type": "bridge",
+        "id": "bridge_001",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/main.py"
+      },
+      {
+        "type": "bridge",
+        "id": "bridge_002",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/mod_1.py"
+      },
+      {
+        "type": "bridge",
+        "id": "bridge_003",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/mod_2.py"
+      },
+      {
+        "type": "bridge",
+        "id": "bridge_004",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/mod_3.py"
+      },
+      {
+        "type": "bridge",
+        "id": "bridge_005",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/mod_4.py"
+      },
+      {
+        "type": "bridge",
+        "id": "bridge_006",
+        "from": "tests/scenarios/hub/input/src/core.py",
+        "to": "tests/scenarios/hub/input/src/mod_5.py"
+      }
+    ]
+  },
+  "error": null
+}
