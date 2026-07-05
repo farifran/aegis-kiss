@@ -164,22 +164,22 @@ main() {
   )")
 
   if array_contains "filesystem.read:epistemic_handover" "${AEGIS_VALIDATION_EVIDENCE[@]}" \
-    && skill_declares ".skills/adversarial.md" "adversarial_findings" \
-    && skill_declares ".skills/validation.md" "adversarial_findings" \
+    && skill_declares ".skills/adversarial.md" "findings" \
+    && skill_declares ".skills/validation.md" "findings" \
     && skill_declares ".skills/validation.md" "verdict"; then
     status="pass"
     reason="Validation consumes an explicit adversarial findings contract and emits a verdict."
   else
     status="fail"
-    reason="Validation can read the handover, but no adversarial_findings schema is required and the contract forbids treating handover as validation evidence."
+    reason="Validation can read the handover, but no findings schema is required and the contract forbids treating handover as validation evidence."
   fi
 
   results+=("$(
     emit_boundary \
       "Adversarial -> Validation" \
-      '["candidate_result","adversarial_findings","evidence_refs"]' \
+      '["candidate_result","findings","evidence_refs"]' \
       '["filesystem.read:epistemic_handover"]' \
-      '["adversarial_findings","candidate_result"]' \
+      '["findings","candidate_result"]' \
       "$([[ "${status}" == "pass" ]] && printf true || printf false)" \
       "${status}" \
       "${reason}"
@@ -196,7 +196,7 @@ main() {
   results+=("$(
     emit_boundary \
       "Validation -> Promote" \
-      '["verdict","validated_candidate","adversarial_findings","basis"]' \
+      '["verdict","validated_candidate","findings","basis"]' \
       '["runtime.promote_validated_candidate"]' \
       '["verdict","validated diff","files_changed"]' \
       "$([[ "${status}" == "pass" ]] && printf true || printf false)" \

@@ -948,7 +948,7 @@ validate_artifact() {
     )"
 
     [[ -n "${previous_findings}" ]] \
-      || executor_fatal "missing_adversarial_findings"
+      || executor_fatal "missing_findings"
 
     if ! echo "${artifact}" \
       | jq -e \
