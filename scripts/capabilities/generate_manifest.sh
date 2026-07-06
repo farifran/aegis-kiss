@@ -117,6 +117,9 @@ validate_handler_registry() {
     [[ -f "${handler}" ]] \
       || manifest_fatal "missing_handler_file: ${handler}"
   done
+
+  [[ -f "${AEGIS_SHARED_CAPABILITY_UTILS}" ]] \
+    || manifest_fatal "missing_shared_capability_utils: ${AEGIS_SHARED_CAPABILITY_UTILS}"
 }
 
 validate_evidence_profiles() {
@@ -288,11 +291,17 @@ build_modes_object() {
   printf '%s\n' "${modes_json}"
 }
 
+# Shared helper sourced by every filesystem capability surface. It carries
+# behavior for all of them, so its content participates in manifest integrity.
+readonly AEGIS_SHARED_CAPABILITY_UTILS="scripts/capabilities/filesystem/_shared_utils.sh"
+
 compute_manifest_hash() {
 
   local manifest_body_file="$1"
 
-  sha256sum "${manifest_body_file}" | awk '{print $1}'
+  cat "${manifest_body_file}" "${AEGIS_SHARED_CAPABILITY_UTILS}" \
+    | sha256sum \
+    | awk '{print $1}'
 }
 
 # =========================================================

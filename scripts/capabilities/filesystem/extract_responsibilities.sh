@@ -20,12 +20,13 @@ set -euo pipefail
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${REPOSITORY_ROOT}"
 
-# shellcheck source=/dev/null
-source ".harness/config.sh"
+# shellcheck disable=SC1091
+source "${REPOSITORY_ROOT}/scripts/capabilities/filesystem/_shared_utils.sh"
+aegis_capability_init "filesystem.extract_responsibilities"
 
 TARGET_PATH="${1:-.}"
 EXECUTION_ID="${AEGIS_EXECUTION_ID:-unknown}"
-GENERATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+GENERATED_AT="$(aegis_now)"
 
 emit_failure() {
   local err="$1"

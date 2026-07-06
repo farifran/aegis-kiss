@@ -22,66 +22,16 @@ set -Eeuo pipefail
 
 readonly TARGET_PATH="${1:-.}"
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
-
-[[ -f ".harness/config.sh" ]] || {
-  echo "[AEGIS][CAPABILITY][FATAL] missing_config" >&2
-  exit 1
-}
-
 # shellcheck disable=SC1091
-source ".harness/config.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/_shared_utils.sh"
+aegis_capability_init "filesystem.extract_reference_graph"
 
-# =========================================================
-# HELPERS
-# =========================================================
-
-fail() {
-  local error_type="$1"
-  local target="${2:-}"
-
-  jq -n \
-    --arg capability "filesystem.extract_reference_graph" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg error_type "${error_type}" \
-    --arg target "${target}" \
-    '{
-      success: false,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: null,
-      error: {
-        type: $error_type,
-        target: $target
-      }
-    }'
-}
-
-# =========================================================
-# VALIDATION
-# =========================================================
-
-if [[ ! -d "${TARGET_PATH}" ]]; then
-  fail "missing_directory" "${TARGET_PATH}"
-  exit 1
-fi
-
-declare -p AEGIS_FILESYSTEM_PRUNE_PATHS >/dev/null 2>&1 || {
-  fail "missing_prune_policy"
-  exit 1
-}
+require_directory_target "${TARGET_PATH}"
+require_prune_policy
 
 # =========================================================
 # EXTRACTION
 # =========================================================
-
-export PRUNE_PATHS="${AEGIS_FILESYSTEM_PRUNE_PATHS[*]}"
 
 REF_GRAPH_JSON="$(python3 - "${TARGET_PATH}" <<'PY'
 import os
@@ -225,27 +175,4 @@ PY
 # JSON EMISSION
 # =========================================================
 
-_TMPFILE="$(mktemp)"
-printf '%s' "${REF_GRAPH_JSON}" > "${_TMPFILE}"
-
-jq -n \
-  --arg capability "filesystem.extract_reference_graph" \
-  --arg classification "readonly" \
-  --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-  --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-  --arg target "${TARGET_PATH}" \
-  --slurpfile ref_graph "${_TMPFILE}" \
-  '{
-    success: true,
-    capability: $capability,
-    classification: $classification,
-    execution_id: $execution_id,
-    generated_at: $generated_at,
-    payload: {
-      target: $target,
-      ref_graph: $ref_graph[0]
-    },
-    error: null
-  }'
-
-rm -f "${_TMPFILE}"
+emit_extraction_result "ref_graph" "${TARGET_PATH}" "${REF_GRAPH_JSON}"

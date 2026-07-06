@@ -11,38 +11,25 @@
 #
 # - bounded repository symbol inspection
 # - deterministic search evidence generation
-# - payload provenance emission
 # - bounded evidence exposure
-# - evidence-safe payload generation
-#
-# This capability intentionally:
-#
-# - limits exposed matches;
-# - limits payload size;
-# - limits contextual evidence;
-# - avoids unbounded repository dumping;
-# - emits deterministic JSON payloads.
 #
 # =========================================================
 
 set -Eeuo pipefail
 
-# =========================================================
-# INPUTS
-# =========================================================
-
 readonly QUERY="${1:-}"
-
 readonly SEARCH_ROOT="${2:-.}"
+
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_shared_utils.sh"
+aegis_capability_init "filesystem.search_symbol"
 
 # =========================================================
 # EVIDENCE LIMITS
 # =========================================================
 
 readonly MAX_MATCH_LINES="${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:-100}"
-
 readonly MAX_PAYLOAD_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-200000}"
-
 readonly CONTEXT_LINES="${AEGIS_SEARCH_SYMBOL_CONTEXT_LINES:-2}"
 
 # =========================================================
@@ -50,84 +37,21 @@ readonly CONTEXT_LINES="${AEGIS_SEARCH_SYMBOL_CONTEXT_LINES:-2}"
 # =========================================================
 
 [[ -n "${QUERY}" ]] || {
-
-  jq -n \
-    --arg capability "filesystem.search_symbol" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(
-      date -u +"%Y-%m-%dT%H:%M:%SZ"
-    )" \
-    '
-    {
-      success: false,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: null,
-      error: {
-        type: "missing_query"
-      }
-    }
-    '
-
+  fail_without_target "missing_query"
   exit 1
 }
 
 [[ -d "${SEARCH_ROOT}" ]] || {
-
-  jq -n \
-    --arg capability "filesystem.search_symbol" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(
-      date -u +"%Y-%m-%dT%H:%M:%SZ"
-    )" \
-    --arg search_root "${SEARCH_ROOT}" \
-    '
-    {
-      success: false,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: null,
-      error: {
-        type: "missing_search_root",
-        target: $search_root
-      }
-    }
-    '
-
+  fail "missing_search_root" "${SEARCH_ROOT}"
   exit 1
 }
 
 # =========================================================
-# TEMP FILES
-# =========================================================
-
-TMP_MATCH_FILE="$(
-  mktemp
-)"
-
-TMP_BOUNDED_FILE="$(
-  mktemp
-)"
-
-cleanup() {
-
-  rm -f \
-    "${TMP_MATCH_FILE}" \
-    "${TMP_BOUNDED_FILE}" \
-    >/dev/null 2>&1 || true
-}
-
-trap cleanup EXIT
-
-# =========================================================
 # SEARCH EXECUTION
 # =========================================================
+
+TMP_MATCH_FILE="$(aegis_mktemp)"
+TMP_BOUNDED_FILE="$(aegis_mktemp)"
 
 grep -Rni \
   -C "${CONTEXT_LINES}" \
@@ -144,36 +68,14 @@ grep -Rni \
   > "${TMP_MATCH_FILE}" || true
 
 # =========================================================
-# MATCH LIMITING
+# MATCH AND PAYLOAD SIZE LIMITING
 # =========================================================
 
 head -n "${MAX_MATCH_LINES}" \
   "${TMP_MATCH_FILE}" \
   > "${TMP_BOUNDED_FILE}"
 
-# =========================================================
-# PAYLOAD SIZE LIMITING
-# =========================================================
-
-CURRENT_SIZE="$(
-  wc -c < "${TMP_BOUNDED_FILE}"
-)"
-
-if [[ "${CURRENT_SIZE}" -gt "${MAX_PAYLOAD_BYTES}" ]]; then
-
-  head -c "${MAX_PAYLOAD_BYTES}" \
-    "${TMP_BOUNDED_FILE}" \
-    > "${TMP_BOUNDED_FILE}.truncated"
-
-  echo >> "${TMP_BOUNDED_FILE}.truncated"
-
-  echo "[AEGIS][TRUNCATED_PAYLOAD]" \
-    >> "${TMP_BOUNDED_FILE}.truncated"
-
-  mv \
-    "${TMP_BOUNDED_FILE}.truncated" \
-    "${TMP_BOUNDED_FILE}"
-fi
+bound_file_bytes "${TMP_BOUNDED_FILE}" "${MAX_PAYLOAD_BYTES}" "[AEGIS][TRUNCATED_PAYLOAD]"
 
 # =========================================================
 # MATCH METADATA
@@ -196,13 +98,9 @@ FINAL_SIZE_BYTES="$(
 # JSON EMISSION
 # =========================================================
 
+TMP_PAYLOAD_FILE="$(aegis_mktemp)"
+
 jq -n \
-  --arg capability "filesystem.search_symbol" \
-  --arg classification "readonly" \
-  --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-  --arg generated_at "$(
-    date -u +"%Y-%m-%dT%H:%M:%SZ"
-  )" \
   --arg query "${QUERY}" \
   --arg search_root "${SEARCH_ROOT}" \
   --argjson max_match_lines "${MAX_MATCH_LINES}" \
@@ -211,23 +109,15 @@ jq -n \
   --argjson exposed_lines "${BOUNDED_LINE_COUNT}" \
   --argjson payload_size_bytes "${FINAL_SIZE_BYTES}" \
   --rawfile matches "${TMP_BOUNDED_FILE}" \
-  '
-  {
-    success: true,
-    capability: $capability,
-    classification: $classification,
-    execution_id: $execution_id,
-    generated_at: $generated_at,
-    payload: {
-      query: $query,
-      search_root: $search_root,
-      total_matches: $total_matches,
-      exposed_lines: $exposed_lines,
-      context_lines: $context_lines,
-      payload_size_bytes: $payload_size_bytes,
-      max_match_lines: $max_match_lines,
-      matches: $matches
-    },
-    error: null
-  }
-  '
+  '{
+    query: $query,
+    search_root: $search_root,
+    total_matches: $total_matches,
+    exposed_lines: $exposed_lines,
+    context_lines: $context_lines,
+    payload_size_bytes: $payload_size_bytes,
+    max_match_lines: $max_match_lines,
+    matches: $matches
+  }' > "${TMP_PAYLOAD_FILE}"
+
+emit_success_payload_file "${TMP_PAYLOAD_FILE}"

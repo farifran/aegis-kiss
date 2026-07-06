@@ -28,3 +28,6 @@ export function metrosParaCentimetros(metros: number): number {
 export function centimetrosParaMetros(centimetros: number): number {
     return centimetros / 100;
 }
+export function minutosParaSegundos(minutos: number): number {
+    return minutos * 60;
+}

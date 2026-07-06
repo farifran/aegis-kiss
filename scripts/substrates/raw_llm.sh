@@ -100,29 +100,18 @@ resolve_absolute_input_path() {
 }
 
 normalize_selected_payload_paths() {
-  local normalized_payloads='[]'
+  local normalized_paths=()
   local payload_path
-  local absolute_payload_path
 
   for payload_path in "${SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}"; do
-
-    absolute_payload_path="$(
-      resolve_absolute_input_path "${payload_path}"
-    )"
-
-    normalized_payloads="$(
-      printf '%s' "${normalized_payloads}" \
-        | jq --arg payload_path "${absolute_payload_path}" '. + [$payload_path]'
-    )"
-
+    normalized_paths+=("$(resolve_absolute_input_path "${payload_path}")")
   done
 
-  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="${normalized_payloads}"
+  SELECTED_CAPABILITY_PAYLOAD_PATHS=("${normalized_paths[@]}")
 
-  mapfile -t SELECTED_CAPABILITY_PAYLOAD_PATHS < <(
-    echo "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
-      | jq -r '.[]'
-  )
+  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
+    jq -cn '$ARGS.positional' --args "${SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}"
+  )"
 }
 
 prepare_isolated_substrate_workspace() {
@@ -244,10 +233,6 @@ TMP_SYSTEM_PROMPT_FILE="$(
   mktemp
 )"
 
-TMP_MANIFEST_RAW_FILE="$(
-  mktemp
-)"
-
 TMP_MANIFEST_FILE="$(
   mktemp
 )"
@@ -270,7 +255,6 @@ cleanup_raw_substrate() {
 
   rm -f \
     "${TMP_SYSTEM_PROMPT_FILE}" \
-    "${TMP_MANIFEST_RAW_FILE}" \
     "${TMP_MANIFEST_FILE}" \
     "${TMP_CAPABILITY_CONTEXT_FILE}" \
     "${TMP_REQUEST_FILE}" \
@@ -383,7 +367,7 @@ render_bounded_payload_section() {
     echo
     cat "${compact_file}"
     echo
-  } > "${section_file}"
+  } >> "${section_file}"
 
   rm -f "${compact_file}" >/dev/null 2>&1 || true
 }
@@ -475,11 +459,8 @@ EOF
 
 assemble_bounded_manifest() {
 
-  printf '%s\n' \
-    "${CAPABILITY_MANIFEST}" \
-    > "${TMP_MANIFEST_RAW_FILE}"
-
-  jq -c \
+  printf '%s\n' "${CAPABILITY_MANIFEST}" \
+    | jq -c \
     '{
       schema_version: .schema_version,
       runtime_model: .runtime_model,
@@ -493,7 +474,6 @@ assemble_bounded_manifest() {
       evidence_capabilities: .evidence_capabilities,
       capabilities: .capabilities
     }' \
-    "${TMP_MANIFEST_RAW_FILE}" \
     > "${TMP_MANIFEST_FILE}"
 
   truncate_file_bytes \
@@ -534,7 +514,6 @@ assemble_bounded_capability_context() {
 
   local payload_count=0
   local payload_path
-  local section_file
   local total_bytes
 
   for payload_path in "${SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}"; do
@@ -555,18 +534,11 @@ assemble_bounded_capability_context() {
       break
     fi
 
-    section_file="$(
-      mktemp
-    )"
-
     render_bounded_payload_section \
       "${payload_path}" \
-      "${section_file}"
+      "${TMP_CAPABILITY_CONTEXT_FILE}"
 
-    cat "${section_file}" >> "${TMP_CAPABILITY_CONTEXT_FILE}"
     echo >> "${TMP_CAPABILITY_CONTEXT_FILE}"
-
-    rm -f "${section_file}" >/dev/null 2>&1 || true
 
     total_bytes="$(
       wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}"
@@ -748,30 +720,17 @@ extract_artifact_payload() {
   [[ -n "${provider_content}" ]] \
     || raw_fatal "empty_provider_response"
 
-  # Debug: Always save the raw response content to /tmp/raw_response.json for diagnostics
-  echo "${provider_content}" > /tmp/raw_response.json
+  if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
+    || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
+    echo "[DEBUG] Raw LLM content (markers missing):" >&2
+    echo "${provider_content}" >&2
+    raw_fatal "missing_artifact_markers"
+  fi
 
-  local artifact
-  artifact="$(
-    echo "${provider_content}" \
-      | sed -n \
-          "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p"
-  )"
+  local artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
+  artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
 
-  [[ -n "${artifact}" ]] \
-    || {
-      echo "[DEBUG] Raw LLM content (markers missing):" >&2
-      echo "${provider_content}" >&2
-      raw_fatal "missing_artifact_markers"
-    }
-
-  local artifact_payload
-  artifact_payload="$(
-    echo "${artifact}" \
-      | sed '1d;$d'
-  )"
-
-  [[ -n "${artifact_payload}" ]] \
+  [[ -n "${artifact_payload//[[:space:]]/}" ]] \
     || raw_fatal "empty_artifact_payload"
 
   if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then

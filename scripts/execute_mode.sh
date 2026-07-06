@@ -186,10 +186,7 @@ validate_executor_inputs() {
 
 resolve_execution_engine() {
 
-  export AEGIS_EXECUTION_ENGINE="$(
-    printf '%s' \
-      "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]}"
-  )"
+  export AEGIS_EXECUTION_ENGINE="${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]}"
 
   [[ -n "${AEGIS_EXECUTION_ENGINE}" ]] \
     || executor_fatal "missing_execution_engine"
@@ -203,12 +200,7 @@ resolve_execution_engine() {
 
 resolve_capability_envelope() {
 
-  local envelope_name
-
-  envelope_name="$(
-    printf '%s' \
-      "${AEGIS_MODE_CAPABILITY_MAP[$AEGIS_MODE]:-}"
-  )"
+  local envelope_name="${AEGIS_MODE_CAPABILITY_MAP[$AEGIS_MODE]:-}"
 
   [[ -n "${envelope_name}" ]] \
     || executor_fatal "missing_capability_envelope"
@@ -227,12 +219,7 @@ resolve_capability_envelope() {
 
 resolve_evidence_profile() {
 
-  local profile_name
-
-  profile_name="$(
-    printf '%s' \
-      "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}"
-  )"
+  local profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}"
 
   [[ -n "${profile_name}" ]] \
     || executor_fatal "missing_evidence_profile"
@@ -299,7 +286,8 @@ resolve_evidence_payload_file() {
     payload_key+="_${evidence_alias}"
   fi
 
-  printf '%s.json' "$(printf '%s' "${payload_key}" | tr '.' '_' | tr '/' '_')"
+  payload_key="${payload_key//./_}"
+  printf '%s.json' "${payload_key//\//_}"
 }
 
 # =========================================================
@@ -498,10 +486,7 @@ materialize_capability_environment() {
 
   for capability in "${AEGIS_ACTIVE_CAPABILITIES[@]}"; do
 
-    handler="$(
-      printf '%s' \
-        "${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
-    )"
+    handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
 
     [[ -n "${handler}" ]] \
       || executor_fatal "missing_handler_for_capability"
@@ -529,10 +514,6 @@ materialize_capability_payloads() {
 
   executor_log "Materializing capability payloads..."
 
-  export AEGIS_CAPABILITY_PAYLOAD_INDEX="$(
-    jq -n '{}'
-  )"
-
   local evidence_entry
   local capability
   local evidence_alias
@@ -552,10 +533,7 @@ materialize_capability_payloads() {
       resolve_evidence_entry_alias "${evidence_entry}"
     )"
 
-    handler="$(
-      printf '%s' \
-        "${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
-    )"
+    handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
 
     [[ -f "${handler}" ]] \
       || executor_fatal "missing_capability_handler"
@@ -576,7 +554,7 @@ materialize_capability_payloads() {
         "${capability_argument}"
     )"
 
-    echo "${payload_output}" > "${payload_path}"
+    printf '%s\n' "${payload_output}" > "${payload_path}"
 
     jq empty "${payload_path}" \
       >/dev/null 2>&1 \
@@ -585,14 +563,6 @@ materialize_capability_payloads() {
     validate_materialized_payload \
       "${capability}" \
       "${payload_path}"
-
-    AEGIS_CAPABILITY_PAYLOAD_INDEX="$(
-      echo "${AEGIS_CAPABILITY_PAYLOAD_INDEX}" \
-        | jq \
-            --arg capability "${evidence_entry}" \
-            --arg path "${payload_path}" \
-            '.[$capability] = $path'
-    )"
 
   done
 }
@@ -625,10 +595,7 @@ select_evidence_payloads() {
   local evidence_alias
   local payload_file
   local payload_path
-
-  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
-    jq -n '[]'
-  )"
+  local payload_paths=()
 
   for evidence_entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
 
@@ -649,13 +616,12 @@ select_evidence_payloads() {
     [[ -f "${payload_path}" ]] \
       || executor_fatal "missing_evidence_payload: ${payload_path}"
 
-    AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
-      echo "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
-        | jq --arg payload "${payload_path}" '. + [$payload]'
-    )"
+    payload_paths+=("${payload_path}")
   done
 
-  export AEGIS_SELECTED_CAPABILITY_PAYLOADS
+  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
+    jq -cn '$ARGS.positional' --args "${payload_paths[@]}"
+  )"
 }
 
 # =========================================================
@@ -696,10 +662,6 @@ materialize_selected_manifest() {
 
 execute_substrate() {
 
-  export AEGIS_MODE
-  export AEGIS_SELECTED_CAPABILITY_PAYLOADS
-  export AEGIS_SELECTED_MANIFEST
-
   local substrate_output
 
   case "${AEGIS_EXECUTION_ENGINE}" in
@@ -735,15 +697,22 @@ execute_substrate() {
 # ARTIFACT VALIDATION
 # =========================================================
 
+extract_substrate_artifact() {
+
+  local output="${AEGIS_SUBSTRATE_OUTPUT}"
+
+  [[ "${output}" == *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] || return 0
+  [[ "${output}" == *"${AEGIS_ARTIFACT_END_MARKER}"* ]] || return 0
+
+  output="${output#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
+  printf '%s' "${output%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
+}
+
 validate_artifact() {
 
   local artifact
 
-  artifact="$(
-    echo "${AEGIS_SUBSTRATE_OUTPUT}" \
-      | sed -n '/AEGIS_ARTIFACT_BEGIN/,/AEGIS_ARTIFACT_END/p' \
-      | sed '1d;$d'
-  )"
+  artifact="$(extract_substrate_artifact)"
 
   [[ -n "${artifact}" ]] \
     || executor_fatal "missing_artifact_payload"
@@ -975,11 +944,7 @@ validate_mutation_artifact() {
 
   local artifact
 
-  artifact="$(
-    echo "${AEGIS_SUBSTRATE_OUTPUT}" \
-      | sed -n '/AEGIS_ARTIFACT_BEGIN/,/AEGIS_ARTIFACT_END/p' \
-      | sed '1d;$d'
-  )"
+  artifact="$(extract_substrate_artifact)"
 
   [[ -n "${artifact}" ]] \
     || executor_fatal "missing_mutation_artifact_payload"
@@ -1019,16 +984,12 @@ validate_mutation_artifact() {
 
 normalize_substrate_output() {
   local raw_artifact
-  raw_artifact="$(
-    echo "${AEGIS_SUBSTRATE_OUTPUT}" \
-      | awk '/AEGIS_ARTIFACT_BEGIN/{flag=1;next}/AEGIS_ARTIFACT_END/{flag=0}flag'
-  )"
-  echo "[DEBUG] raw_artifact parsed: '${raw_artifact}'" >&2
+  raw_artifact="$(extract_substrate_artifact)"
   # If it is valid JSON, normalize/ensure the structural fields exist
-  if echo "${raw_artifact}" | jq empty >/dev/null 2>&1; then
+  if printf '%s\n' "${raw_artifact}" | jq empty >/dev/null 2>&1; then
     local updated_artifact
     updated_artifact="$(
-      echo "${raw_artifact}" | jq \
+      printf '%s\n' "${raw_artifact}" | jq \
         --arg mode "${AEGIS_MODE}" \
         '
         .mode = $mode
@@ -1053,20 +1014,19 @@ normalize_substrate_output() {
         '
     )"
     
-    # Reconstruct output reliably without using sed 'r' inside subshell
-    local prefix suffix
-    prefix="$(echo "${AEGIS_SUBSTRATE_OUTPUT}" | sed '/AEGIS_ARTIFACT_BEGIN/,$d')"
-    suffix="$(echo "${AEGIS_SUBSTRATE_OUTPUT}" | sed '1,/AEGIS_ARTIFACT_END/d')"
-    
+    # Reconstruct output around the normalized artifact using parameter expansion
+    local prefix="${AEGIS_SUBSTRATE_OUTPUT%%"${AEGIS_ARTIFACT_BEGIN_MARKER}"*}"
+    local suffix="${AEGIS_SUBSTRATE_OUTPUT#*"${AEGIS_ARTIFACT_END_MARKER}"}"
+
     export AEGIS_SUBSTRATE_OUTPUT="$(
       printf '%s\n' "${prefix}"
-      printf 'AEGIS_ARTIFACT_BEGIN\n'
+      printf '%s\n' "${AEGIS_ARTIFACT_BEGIN_MARKER}"
       printf '%s\n' "${updated_artifact}"
-      printf 'AEGIS_ARTIFACT_END\n'
+      printf '%s\n' "${AEGIS_ARTIFACT_END_MARKER}"
       printf '%s\n' "${suffix}"
     )"
   else
-    echo "[DEBUG] raw_artifact is not valid JSON or empty" >&2
+    executor_warn "substrate_artifact_not_normalizable"
   fi
 }
 
