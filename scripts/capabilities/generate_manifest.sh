@@ -65,18 +65,9 @@ readonly AEGIS_MANIFEST_EXECUTION_ID="${AEGIS_EXECUTION_ID:-manifest-standalone}
 # LOGGING
 # =========================================================
 
-manifest_log() {
-  echo "[AEGIS][MANIFEST] $*" >&2
-}
-
-manifest_warn() {
-  echo "[AEGIS][MANIFEST][WARN] $*" >&2
-}
-
-manifest_fatal() {
-  echo "[AEGIS][MANIFEST][FATAL] $*" >&2
-  exit 1
-}
+# shellcheck disable=SC1091
+source "scripts/lib/common.sh"
+AEGIS_LOG_TAG="MANIFEST"
 
 # =========================================================
 # VALIDATION
@@ -85,25 +76,25 @@ manifest_fatal() {
 validate_environment() {
 
   command -v jq >/dev/null 2>&1 \
-    || manifest_fatal "missing_jq"
+    || aegis_fatal "missing_jq"
 
   command -v sha256sum >/dev/null 2>&1 \
-    || manifest_fatal "missing_sha256sum"
+    || aegis_fatal "missing_sha256sum"
 
   declare -p AEGIS_EXECUTION_ENGINES >/dev/null 2>&1 \
-    || manifest_fatal "missing_execution_engines"
+    || aegis_fatal "missing_execution_engines"
 
   declare -p AEGIS_MODE_CAPABILITY_MAP >/dev/null 2>&1 \
-    || manifest_fatal "missing_mode_capability_map"
+    || aegis_fatal "missing_mode_capability_map"
 
   declare -p AEGIS_CAPABILITY_HANDLERS >/dev/null 2>&1 \
-    || manifest_fatal "missing_capability_registry"
+    || aegis_fatal "missing_capability_registry"
 
   declare -p AEGIS_CAPABILITY_CLASSIFICATION >/dev/null 2>&1 \
-    || manifest_fatal "missing_capability_classification_registry"
+    || aegis_fatal "missing_capability_classification_registry"
 
   declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
-    || manifest_fatal "missing_evidence_profile_registry"
+    || aegis_fatal "missing_evidence_profile_registry"
 }
 
 validate_handler_registry() {
@@ -115,14 +106,14 @@ validate_handler_registry() {
     handler="${AEGIS_CAPABILITY_HANDLERS[$capability]}"
 
     [[ -f "${handler}" ]] \
-      || manifest_fatal "missing_handler_file: ${handler}"
+      || aegis_fatal "missing_handler_file: ${handler}"
   done
 
   [[ -f "${AEGIS_SHARED_CAPABILITY_UTILS}" ]] \
-    || manifest_fatal "missing_shared_capability_utils: ${AEGIS_SHARED_CAPABILITY_UTILS}"
+    || aegis_fatal "missing_shared_capability_utils: ${AEGIS_SHARED_CAPABILITY_UTILS}"
 
   [[ -f "${AEGIS_SHARED_WALK_SNIPPET}" ]] \
-    || manifest_fatal "missing_shared_walk_snippet: ${AEGIS_SHARED_WALK_SNIPPET}"
+    || aegis_fatal "missing_shared_walk_snippet: ${AEGIS_SHARED_WALK_SNIPPET}"
 }
 
 validate_evidence_profiles() {
@@ -135,13 +126,13 @@ validate_evidence_profiles() {
     profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$mode]}"
 
     declare -p "${profile_name}" >/dev/null 2>&1 || {
-      manifest_fatal "missing_evidence_profile_array: ${profile_name}"
+      aegis_fatal "missing_evidence_profile_array: ${profile_name}"
     }
 
     declare -n profile_ref="${profile_name}"
 
     [[ "${#profile_ref[@]}" -gt 0 ]] || {
-      manifest_fatal "empty_evidence_profile_array: ${profile_name}"
+      aegis_fatal "empty_evidence_profile_array: ${profile_name}"
     }
   done
 }
@@ -175,7 +166,7 @@ build_capabilities_json() {
     argument_contract="${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
 
     [[ -n "${handler}" ]] \
-      || manifest_fatal "missing_handler_for_capability: ${capability}"
+      || aegis_fatal "missing_handler_for_capability: ${capability}"
 
     jq -n \
       --arg capability "${capability}" \
@@ -234,15 +225,15 @@ build_mode_object() {
 
   engine="${AEGIS_EXECUTION_ENGINES[$mode]:-}"
   [[ -n "${engine}" ]] \
-    || manifest_fatal "missing_execution_engine: ${mode}"
+    || aegis_fatal "missing_execution_engine: ${mode}"
 
   envelope_name="${AEGIS_MODE_CAPABILITY_MAP[$mode]:-}"
   [[ -n "${envelope_name}" ]] \
-    || manifest_fatal "missing_capability_envelope: ${mode}"
+    || aegis_fatal "missing_capability_envelope: ${mode}"
 
   evidence_profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$mode]:-}"
   [[ -n "${evidence_profile_name}" ]] \
-    || manifest_fatal "missing_evidence_profile: ${mode}"
+    || aegis_fatal "missing_evidence_profile: ${mode}"
 
   capabilities_json="$(
     build_capabilities_json "${envelope_name}"
@@ -340,7 +331,7 @@ generate_manifest() {
     }' > "${manifest_body_file}"
 
   jq empty "${manifest_body_file}" >/dev/null 2>&1 \
-    || manifest_fatal "invalid_manifest_structure"
+    || aegis_fatal "invalid_manifest_structure"
 
   local manifest_hash
   manifest_hash="$(
@@ -359,7 +350,7 @@ generate_manifest() {
 
 main() {
 
-  manifest_log "Generating capability manifest..."
+  aegis_log "Generating capability manifest..."
 
   validate_environment
   validate_handler_registry

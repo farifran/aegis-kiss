@@ -192,8 +192,6 @@ declare -ar AEGIS_FILESYSTEM_PRUNE_PATHS=(
   "scripts/substrates/test"
   ".venv"
   ".aider.tags.cache.v4"
-  "tests/benchmark"
-  "tests/golden"
 )
 
 export AEGIS_FILESYSTEM_PRUNE_PATHS

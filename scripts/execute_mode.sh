@@ -84,29 +84,10 @@ readonly AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT="${3:-}"
 # LOGGING
 # =========================================================
 
-executor_log() {
-  echo "[AEGIS][EXECUTOR] $*" >&2
-}
+# shellcheck disable=SC1091
+source "scripts/lib/common.sh"
+AEGIS_LOG_TAG="EXECUTOR"
 
-executor_warn() {
-  echo "[AEGIS][EXECUTOR][WARN] $*" >&2
-}
-
-executor_fatal() {
-  echo "[AEGIS][EXECUTOR][FATAL] $*" >&2
-  exit 1
-}
-
-measure() {
-  local label="$1"
-  local start
-  start=$(date +%s)
-  shift
-  "$@"
-  local end
-  end=$(date +%s)
-  echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
-}
 
 # =========================================================
 # CLEANUP
@@ -116,7 +97,7 @@ cleanup_executor() {
 
   set +e
 
-  executor_log "Starting executor cleanup..."
+  aegis_log "Starting executor cleanup..."
 
   #
   # Runtime remains sovereign over:
@@ -129,13 +110,13 @@ cleanup_executor() {
   # Executor intentionally does NOT remove runtime-owned state.
   #
 
-  executor_log "Executor cleanup completed"
+  aegis_log "Executor cleanup completed"
 
   set -e
 }
 
 trap cleanup_executor EXIT
-trap 'executor_warn "Interrupted"; exit 130' INT TERM
+trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 
 # =========================================================
 # VALIDATION
@@ -144,40 +125,40 @@ trap 'executor_warn "Interrupted"; exit 130' INT TERM
 validate_executor_inputs() {
 
   [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] \
-    || executor_fatal "missing_execution_surface_path"
+    || aegis_fatal "missing_execution_surface_path"
 
   [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
-    || executor_fatal "missing_execution_id"
+    || aegis_fatal "missing_execution_id"
 
   [[ -n "${AEGIS_EXECUTION_TIMESTAMP:-}" ]] \
-    || executor_fatal "missing_execution_timestamp"
+    || aegis_fatal "missing_execution_timestamp"
 
   [[ -f "${AEGIS_SKILL_FILE}" ]] \
-    || executor_fatal "missing_skill_contract"
+    || aegis_fatal "missing_skill_contract"
 
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" ]] \
-    || executor_fatal "missing_epistemic_handover"
+    || aegis_fatal "missing_epistemic_handover"
 
   [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] \
-    || executor_fatal "missing_runtime_owned_capability_manifest"
+    || aegis_fatal "missing_runtime_owned_capability_manifest"
 
   declare -p AEGIS_EXECUTION_ENGINES >/dev/null 2>&1 \
-    || executor_fatal "missing_execution_engine_registry"
+    || aegis_fatal "missing_execution_engine_registry"
 
   declare -p AEGIS_MODE_CAPABILITY_MAP >/dev/null 2>&1 \
-    || executor_fatal "missing_mode_capability_map"
+    || aegis_fatal "missing_mode_capability_map"
 
   declare -p AEGIS_CAPABILITY_HANDLERS >/dev/null 2>&1 \
-    || executor_fatal "missing_capability_handler_registry"
+    || aegis_fatal "missing_capability_handler_registry"
 
   declare -p AEGIS_CAPABILITY_ARGUMENTS >/dev/null 2>&1 \
-    || executor_fatal "missing_capability_argument_registry"
+    || aegis_fatal "missing_capability_argument_registry"
 
   declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
-    || executor_fatal "missing_evidence_profile_registry"
+    || aegis_fatal "missing_evidence_profile_registry"
 
   [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
-    || executor_fatal "unknown_execution_mode"
+    || aegis_fatal "unknown_execution_mode"
 }
 
 # =========================================================
@@ -189,9 +170,9 @@ resolve_execution_engine() {
   export AEGIS_EXECUTION_ENGINE="${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]}"
 
   [[ -n "${AEGIS_EXECUTION_ENGINE}" ]] \
-    || executor_fatal "missing_execution_engine"
+    || aegis_fatal "missing_execution_engine"
 
-  executor_log "Execution engine: ${AEGIS_EXECUTION_ENGINE}"
+  aegis_log "Execution engine: ${AEGIS_EXECUTION_ENGINE}"
 }
 
 # =========================================================
@@ -203,12 +184,12 @@ resolve_capability_envelope() {
   local envelope_name="${AEGIS_MODE_CAPABILITY_MAP[$AEGIS_MODE]:-}"
 
   [[ -n "${envelope_name}" ]] \
-    || executor_fatal "missing_capability_envelope"
+    || aegis_fatal "missing_capability_envelope"
 
   declare -n envelope_ref="${envelope_name}"
 
   [[ "${#envelope_ref[@]}" -gt 0 ]] \
-    || executor_fatal "empty_capability_envelope"
+    || aegis_fatal "empty_capability_envelope"
 
   AEGIS_ACTIVE_CAPABILITIES=("${envelope_ref[@]}")
 }
@@ -222,12 +203,12 @@ resolve_evidence_profile() {
   local profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}"
 
   [[ -n "${profile_name}" ]] \
-    || executor_fatal "missing_evidence_profile"
+    || aegis_fatal "missing_evidence_profile"
 
   declare -n evidence_ref="${profile_name}"
 
   [[ "${#evidence_ref[@]}" -gt 0 ]] \
-    || executor_fatal "empty_evidence_profile"
+    || aegis_fatal "empty_evidence_profile"
 
   AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${evidence_ref[@]}")
 }
@@ -296,13 +277,13 @@ resolve_evidence_payload_file() {
 
 prepare_execution_state() {
 
-  executor_log "Using runtime-prepared execution state..."
+  aegis_log "Using runtime-prepared execution state..."
 
   if [[ ! -d "${AEGIS_CAPABILITY_ENV_DIR}" ]]; then
-    mkdir -p "${AEGIS_CAPABILITY_ENV_DIR}" || executor_fatal "failed_to_create_capability_environment"
+    mkdir -p "${AEGIS_CAPABILITY_ENV_DIR}" || aegis_fatal "failed_to_create_capability_environment"
   fi
   if [[ ! -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]]; then
-    mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || executor_fatal "failed_to_create_capability_payload_dir"
+    mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || aegis_fatal "failed_to_create_capability_payload_dir"
   fi
 }
 
@@ -319,7 +300,7 @@ validate_materialized_payload() {
   expected_classification="${AEGIS_CAPABILITY_CLASSIFICATION[$capability]:-}"
 
   [[ -n "${expected_classification}" ]] \
-    || executor_fatal "missing_capability_classification"
+    || aegis_fatal "missing_capability_classification"
 
   jq -e \
     --arg capability "${capability}" \
@@ -334,7 +315,7 @@ validate_materialized_payload() {
       and .execution_id == $execution_id
       and (.generated_at | type == "string" and length > 0)
     ' "${payload_path}" >/dev/null 2>&1 \
-    || executor_fatal "invalid_capability_payload_contract: ${capability}"
+    || aegis_fatal "invalid_capability_payload_contract: ${capability}"
 }
 
 # =========================================================
@@ -350,7 +331,7 @@ resolve_capability_argument() {
     filesystem.read)
       if [[ -n "${evidence_alias}" ]]; then
         declare -p AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS >/dev/null 2>&1 \
-          || executor_fatal "missing_runtime_filesystem_read_target_registry"
+          || aegis_fatal "missing_runtime_filesystem_read_target_registry"
 
         # Case A: Runtime-owned internal target
         if [[ -n "${AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS[$evidence_alias]:-}" ]]; then
@@ -478,7 +459,7 @@ invoke_aider_substrate() {
 
 materialize_capability_environment() {
 
-  executor_log "Materializing capability environment..."
+  aegis_log "Materializing capability environment..."
 
   local capability
   local handler
@@ -489,10 +470,10 @@ materialize_capability_environment() {
     handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
 
     [[ -n "${handler}" ]] \
-      || executor_fatal "missing_handler_for_capability"
+      || aegis_fatal "missing_handler_for_capability"
 
     [[ -f "${handler}" ]] \
-      || executor_fatal "missing_capability_handler_file"
+      || aegis_fatal "missing_capability_handler_file"
 
     capability_path="${AEGIS_CAPABILITY_ENV_DIR}/${capability}"
 
@@ -512,7 +493,7 @@ EOF
 
 materialize_capability_payloads() {
 
-  executor_log "Materializing capability payloads..."
+  aegis_log "Materializing capability payloads..."
 
   local evidence_entry
   local capability
@@ -536,7 +517,7 @@ materialize_capability_payloads() {
     handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
 
     [[ -f "${handler}" ]] \
-      || executor_fatal "missing_capability_handler"
+      || aegis_fatal "missing_capability_handler"
 
     capability_argument="$(
       resolve_capability_argument "${capability}" "${evidence_alias}"
@@ -558,7 +539,7 @@ materialize_capability_payloads() {
 
     jq empty "${payload_path}" \
       >/dev/null 2>&1 \
-      || executor_fatal "invalid_capability_payload_json"
+      || aegis_fatal "invalid_capability_payload_json"
 
     validate_materialized_payload \
       "${capability}" \
@@ -573,15 +554,15 @@ materialize_capability_payloads() {
 
 consume_runtime_owned_capability_manifest() {
 
-  executor_log "Consuming runtime-owned capability manifest..."
+  aegis_log "Consuming runtime-owned capability manifest..."
 
   [[ -n "${AEGIS_CAPABILITY_MANIFEST}" ]] \
-    || executor_fatal "missing_capability_manifest"
+    || aegis_fatal "missing_capability_manifest"
 
   printf '%s\n' "${AEGIS_CAPABILITY_MANIFEST}" \
     | jq empty \
       >/dev/null 2>&1 \
-    || executor_fatal "invalid_runtime_owned_capability_manifest"
+    || aegis_fatal "invalid_runtime_owned_capability_manifest"
 }
 
 # =========================================================
@@ -614,7 +595,7 @@ select_evidence_payloads() {
     payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
 
     [[ -f "${payload_path}" ]] \
-      || executor_fatal "missing_evidence_payload: ${payload_path}"
+      || aegis_fatal "missing_evidence_payload: ${payload_path}"
 
     payload_paths+=("${payload_path}")
   done
@@ -631,9 +612,11 @@ select_evidence_payloads() {
 materialize_selected_manifest() {
 
   [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] \
-    || executor_fatal "missing_capability_manifest"
+    || aegis_fatal "missing_capability_manifest"
 
-  export AEGIS_SELECTED_MANIFEST="$(
+  # Shell variable only — consumed in-process and passed to substrates
+  # as an explicit argument, never via the environment.
+  AEGIS_SELECTED_MANIFEST="$(
     echo "${AEGIS_CAPABILITY_MANIFEST}" \
       | jq -c \
           --arg mode "${AEGIS_MODE}" \
@@ -653,7 +636,7 @@ materialize_selected_manifest() {
   )"
 
   [[ -n "${AEGIS_SELECTED_MANIFEST}" ]] \
-    || executor_fatal "missing_selected_manifest"
+    || aegis_fatal "missing_selected_manifest"
 }
 
 # =========================================================
@@ -685,17 +668,41 @@ execute_substrate() {
       ;;
 
     *)
-      executor_fatal "unknown_execution_engine"
+      aegis_fatal "unknown_execution_engine"
       ;;
 
   esac
 
-  export AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+  # Shell variable only — exporting this multi-hundred-KB blob into the
+  # environment makes every subsequent fork/exec fail with E2BIG.
+  AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
 }
 
 # =========================================================
 # ARTIFACT VALIDATION
 # =========================================================
+
+# Shared jq diff normalizer — tolerates escaping/whitespace/hunk-header
+# drift when comparing candidate diffs across mode boundaries.
+readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "") | gsub("@@[^@]+@@[^\n]*"; "@@");'
+
+# Shared jq projection of the topology targets a Discovery handover
+# authorizes for Forensics repair candidates.
+readonly AEGIS_JQ_AUTHORIZED_TARGETS='def authorized_targets:
+  [
+    .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
+    (.artifact_snapshot.structural_context.ranked_targets[]?
+      | select(.type == "explicit_request")
+      | .file),
+    .epistemic_state.next_attention_targets[]?,
+    (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
+    (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
+    (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
+    (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
+    (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
+    (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
+  ]
+  | unique;'
 
 extract_substrate_artifact() {
 
@@ -728,12 +735,12 @@ validate_artifact() {
   artifact="$(extract_substrate_artifact)"
 
   [[ -n "${artifact}" ]] \
-    || executor_fatal "missing_artifact_payload"
+    || aegis_fatal "missing_artifact_payload"
 
   echo "${artifact}" \
     | jq empty \
       >/dev/null 2>&1 \
-      || executor_fatal "invalid_artifact_json"
+      || aegis_fatal "invalid_artifact_json"
 
   local artifact_mode
 
@@ -743,7 +750,7 @@ validate_artifact() {
   )"
 
   [[ "${artifact_mode}" == "${AEGIS_MODE}" ]] \
-    || executor_fatal "artifact_mode_mismatch"
+    || aegis_fatal "artifact_mode_mismatch"
 
   if [[ "${AEGIS_MODE}" == "forensics" ]]; then
     if ! echo "${artifact}" \
@@ -777,7 +784,7 @@ validate_artifact() {
           )
         ' >/dev/null 2>&1; then
       dump_mismatch "invalid_forensics_artifact_contract" "Artifact" "${artifact}"
-      executor_fatal "invalid_forensics_artifact_contract"
+      aegis_fatal "invalid_forensics_artifact_contract"
     fi
 
     previous_discovery="$(
@@ -786,24 +793,11 @@ validate_artifact() {
 
     if ! echo "${artifact}" \
       | jq -e \
-        --argjson previous_discovery "${previous_discovery}" '
+        --argjson previous_discovery "${previous_discovery}" \
+        "${AEGIS_JQ_AUTHORIZED_TARGETS}"'
         ($previous_discovery.artifact_snapshot.mode == "discovery")
         and (
-          [
-            $previous_discovery.artifact_snapshot
-              .structural_context.observed_request_alignment.resolved_paths[]?,
-            ($previous_discovery.artifact_snapshot.structural_context.ranked_targets[]?
-              | select(.type == "explicit_request")
-              | .file),
-            $previous_discovery.epistemic_state.next_attention_targets[]?,
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
-            ($previous_discovery.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
-          ]
-          | unique
+          $previous_discovery | authorized_targets
         ) as $authorized_targets
         | all(
             .repair_candidates[];
@@ -812,24 +806,12 @@ validate_artifact() {
             | index($candidate.id) != null
           )
       ' >/dev/null 2>&1; then
-      echo "[DEBUG] forensics_repair_candidate_outside_discovery_scope details:" >&2
-      echo "[DEBUG] Authorized targets:" >&2
-      echo "${previous_discovery}" | jq -c '
-        [
-          .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
-          (.artifact_snapshot.structural_context.ranked_targets[]? | select(.type == "explicit_request") | .file),
-          .epistemic_state.next_attention_targets[]?,
-          (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
-          (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
-          (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
-          (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
-          (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
-          (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
-        ] | unique
-      ' >&2
-      echo "[DEBUG] Forensics repair candidates:" >&2
-      echo "${artifact}" | jq -c '.repair_candidates' >&2
-      executor_fatal "forensics_repair_candidate_outside_discovery_scope"
+      dump_mismatch "forensics_repair_candidate_outside_discovery_scope" \
+        "Authorized targets" \
+        "$(echo "${previous_discovery}" | jq -c "${AEGIS_JQ_AUTHORIZED_TARGETS} authorized_targets")" \
+        "Forensics repair candidates" \
+        "$(echo "${artifact}" | jq -c '.repair_candidates')"
+      aegis_fatal "forensics_repair_candidate_outside_discovery_scope"
     fi
   fi
 
@@ -856,7 +838,7 @@ validate_artifact() {
           )
         ' >/dev/null 2>&1; then
       dump_mismatch "invalid_adversarial_artifact_contract" "Artifact" "${artifact}"
-      executor_fatal "invalid_adversarial_artifact_contract"
+      aegis_fatal "invalid_adversarial_artifact_contract"
     fi
 
     previous_optimized_candidate="$(
@@ -872,8 +854,8 @@ validate_artifact() {
 
     if ! echo "${artifact}" \
       | jq -e \
-        --argjson previous_candidate "${previous_optimized_candidate}" '
-          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "") | gsub("@@[^@]+@@[^\n]*"; "@@");
+        --argjson previous_candidate "${previous_optimized_candidate}" \
+        "${AEGIS_JQ_DIFF_NORM}"'
           (.candidate_result.source_mode == $previous_candidate.source_mode)
           and (.candidate_result.files_changed == $previous_candidate.files_changed)
           and (norm(.candidate_result.diff) == norm($previous_candidate.diff))
@@ -883,7 +865,7 @@ validate_artifact() {
       echo "${previous_optimized_candidate}" | jq -c '.' >&2
       echo "[DEBUG] Actual candidate received:" >&2
       echo "${artifact}" | jq -c '.candidate_result' >&2
-      executor_fatal "adversarial_candidate_mismatch"
+      aegis_fatal "adversarial_candidate_mismatch"
     fi
   fi
 
@@ -912,7 +894,7 @@ validate_artifact() {
           )
         ' >/dev/null 2>&1; then
       dump_mismatch "invalid_validation_artifact_contract" "Artifact" "${artifact}"
-      executor_fatal "invalid_validation_artifact_contract"
+      aegis_fatal "invalid_validation_artifact_contract"
     fi
 
     previous_candidate="$(
@@ -921,17 +903,17 @@ validate_artifact() {
     )"
 
     [[ -n "${previous_candidate}" ]] \
-      || executor_fatal "missing_adversarial_candidate_result"
+      || aegis_fatal "missing_adversarial_candidate_result"
 
     if ! echo "${artifact}" \
       | jq -e \
-        --argjson previous_candidate "${previous_candidate}" '
-          def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; "") | gsub("\\\\n"; "") | gsub("\\n"; "") | gsub("\\\\\\\\"; "") | gsub("\\\\"; "") | gsub("[[:space:]]+"; "") | gsub("Nonewlineatendoffile"; "") | gsub("@@[^@]+@@[^\n]*"; "@@");
+        --argjson previous_candidate "${previous_candidate}" \
+        "${AEGIS_JQ_DIFF_NORM}"'
           (.validated_candidate.source_mode == $previous_candidate.source_mode)
           and (.validated_candidate.files_changed == $previous_candidate.files_changed)
           and (norm(.validated_candidate.diff) == norm($previous_candidate.diff))
         ' >/dev/null 2>&1; then
-      executor_fatal "validation_candidate_mismatch"
+      aegis_fatal "validation_candidate_mismatch"
     fi
 
     previous_findings="$(
@@ -940,7 +922,7 @@ validate_artifact() {
     )"
 
     [[ -n "${previous_findings}" ]] \
-      || executor_fatal "missing_findings"
+      || aegis_fatal "missing_findings"
 
     if ! echo "${artifact}" \
       | jq -e \
@@ -952,11 +934,11 @@ validate_artifact() {
       echo "${previous_findings}" | jq -c '.' >&2
       echo "[DEBUG] Actual findings received:" >&2
       echo "${artifact}" | jq -c '.findings' >&2
-      executor_fatal "validation_findings_mismatch"
+      aegis_fatal "validation_findings_mismatch"
     fi
   fi
 
-  executor_log "Payload validated successfully"
+  aegis_log "Payload validated successfully"
 }
 
 validate_mutation_artifact() {
@@ -966,12 +948,12 @@ validate_mutation_artifact() {
   artifact="$(extract_substrate_artifact)"
 
   [[ -n "${artifact}" ]] \
-    || executor_fatal "missing_mutation_artifact_payload"
+    || aegis_fatal "missing_mutation_artifact_payload"
 
   echo "${artifact}" \
     | jq empty \
       >/dev/null 2>&1 \
-      || executor_fatal "invalid_mutation_artifact_json"
+      || aegis_fatal "invalid_mutation_artifact_json"
 
   local artifact_mode
   artifact_mode="$(
@@ -979,22 +961,22 @@ validate_mutation_artifact() {
   )"
 
   [[ "${artifact_mode}" == "${AEGIS_MODE}" ]] \
-    || executor_fatal "mutation_artifact_mode_mismatch"
+    || aegis_fatal "mutation_artifact_mode_mismatch"
 
   echo "${artifact}" \
     | jq -e '
         (.diff | type == "string" and length > 0)
         and (.diff != "(no changes)")
       ' >/dev/null 2>&1 \
-    || executor_fatal "mutation_artifact_missing_diff"
+    || aegis_fatal "mutation_artifact_missing_diff"
 
   echo "${artifact}" \
     | jq -e '
         (.files_changed | type == "array" and length > 0)
       ' >/dev/null 2>&1 \
-    || executor_fatal "mutation_artifact_missing_files_changed"
+    || aegis_fatal "mutation_artifact_missing_files_changed"
 
-  executor_log "Mutation artifact validated successfully"
+  aegis_log "Mutation artifact validated successfully"
 }
 
 # =========================================================
@@ -1071,7 +1053,7 @@ normalize_substrate_output() {
     local prefix="${AEGIS_SUBSTRATE_OUTPUT%%"${AEGIS_ARTIFACT_BEGIN_MARKER}"*}"
     local suffix="${AEGIS_SUBSTRATE_OUTPUT#*"${AEGIS_ARTIFACT_END_MARKER}"}"
 
-    export AEGIS_SUBSTRATE_OUTPUT="$(
+    AEGIS_SUBSTRATE_OUTPUT="$(
       printf '%s\n' "${prefix}"
       printf '%s\n' "${AEGIS_ARTIFACT_BEGIN_MARKER}"
       printf '%s\n' "${updated_artifact}"
@@ -1079,7 +1061,7 @@ normalize_substrate_output() {
       printf '%s\n' "${suffix}"
     )"
   else
-    executor_warn "substrate_artifact_not_normalizable"
+    aegis_warn "substrate_artifact_not_normalizable"
   fi
 }
 

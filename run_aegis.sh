@@ -4,81 +4,37 @@
 # AEGIS RUN ORCHESTRATOR (KISS)
 # =========================================================
 #
-# OPERATOR GUIDE
-#
-# ---------------------------------------------------------
-# FULL MUTATION PIPELINE
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh
-#
-# Executes:
-#
-# discovery
-# -> forensics
-# -> repair
-# -> optimize
-# -> adversarial
-# -> validation
-#
-#
-# ---------------------------------------------------------
-# READONLY PIPELINE
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh readonly
-#
-# Executes:
-#
-# discovery
-# -> forensics
-#
-#
-# ---------------------------------------------------------
-# RESUME PIPELINE
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh --resume
-#
-# Reads:
-#
-# .harness/runtime/epistemic_handover.json
-#
-# Continues from next mode.
-#
-#
-# ---------------------------------------------------------
-# TARGET REPOSITORY
-# ---------------------------------------------------------
-#
-# ./run_aegis.sh \
-#   --target tests/scenarios/python
-#
-#
-# ---------------------------------------------------------
-# FAIL FAST
-# ---------------------------------------------------------
-#
-# Any failure immediately aborts execution.
-#
-#
-# ---------------------------------------------------------
-# REPORT
-# ---------------------------------------------------------
-#
-# Shows:
-#
-# - mode timings
-# - total duration
-# - final mode
-# - final attention targets
-# - status
+# Fail-fast pipeline driver over runtime_aegis.sh; run with
+# --help for operator usage. Ends with a timing/verdict report.
 #
 # =========================================================
 
 set -Eeuo pipefail
 
 readonly HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
+
+usage() {
+  cat <<'EOF'
+Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
+
+Pipelines:
+  (default)            mutation: discovery -> forensics -> repair
+                       -> optimize -> adversarial -> validation
+  readonly             discovery -> forensics
+
+Options:
+  --pipeline NAME      Select pipeline by name (mutation|readonly)
+  --resume             Continue from the mode after the last
+                       .harness/runtime/epistemic_handover.json snapshot
+  --until MODE         Stop after MODE completes
+  --target PATH        Evidence target directory (default: src or .)
+  --issue N            Investigate GitHub issue #N
+  --help               Show this help
+
+Any failure aborts immediately. A final report shows per-mode
+timings, total duration, final mode, attention targets, and verdict.
+EOF
+}
 
 declare -A PIPELINES=(
   [readonly]="discovery forensics"
@@ -323,6 +279,11 @@ parse_cli() {
 
       --resume)
         RESUME=true
+        ;;
+
+      --help|-h)
+        usage
+        exit 0
         ;;
 
       --target)

@@ -76,18 +76,9 @@ AEGIS_SUBSTRATE_WORKSPACE=""
 # LOGGING
 # =========================================================
 
-raw_log() {
-  echo "[AEGIS][RAW] $*" >&2
-}
-
-raw_warn() {
-  echo "[AEGIS][RAW][WARN] $*" >&2
-}
-
-raw_fatal() {
-  echo "[AEGIS][RAW][FATAL] $*" >&2
-  exit 1
-}
+# shellcheck disable=SC1091
+source "scripts/lib/common.sh"
+AEGIS_LOG_TAG="RAW"
 
 resolve_absolute_input_path() {
   local input_path="$1"
@@ -119,7 +110,7 @@ prepare_isolated_substrate_workspace() {
   AEGIS_SUBSTRATE_WORKSPACE="$(mktemp -d)"
 
   [[ -d "${AEGIS_SUBSTRATE_WORKSPACE}" ]] \
-    || raw_fatal "failed_to_prepare_isolated_substrate_workspace"
+    || aegis_fatal "failed_to_prepare_isolated_substrate_workspace"
 
   cd "${AEGIS_SUBSTRATE_WORKSPACE}"
 }
@@ -131,7 +122,7 @@ prepare_isolated_substrate_workspace() {
 validate_raw_substrate_inputs() {
 
   [[ -n "${MODEL}" ]] \
-    || raw_fatal "missing_model"
+    || aegis_fatal "missing_model"
 
   SKILL_FILE="$(
     resolve_absolute_input_path "${SKILL_FILE_INPUT}"
@@ -142,77 +133,77 @@ validate_raw_substrate_inputs() {
   )"
 
   [[ -f "${SKILL_FILE}" ]] \
-    || raw_fatal "missing_skill_file"
+    || aegis_fatal "missing_skill_file"
 
   [[ -n "${CAPABILITY_MANIFEST}" ]] \
-    || raw_fatal "missing_capability_manifest"
+    || aegis_fatal "missing_capability_manifest"
 
   printf '%s\n' "${CAPABILITY_MANIFEST}" \
     | jq empty \
       >/dev/null 2>&1 \
-    || raw_fatal "invalid_capability_manifest_json"
+    || aegis_fatal "invalid_capability_manifest_json"
 
   printf '%s\n' "${CAPABILITY_MANIFEST}" \
     | jq -e --arg mode "${AEGIS_MODE}" '.mode == $mode' \
       >/dev/null 2>&1 \
-    || raw_fatal "manifest_mode_mismatch"
+    || aegis_fatal "manifest_mode_mismatch"
 
   printf '%s\n' "${CAPABILITY_MANIFEST}" \
     | jq -e '.execution_engine == "raw"' \
       >/dev/null 2>&1 \
-    || raw_fatal "manifest_not_readonly_engine"
+    || aegis_fatal "manifest_not_readonly_engine"
 
   printf '%s\n' "${CAPABILITY_MANIFEST}" \
     | jq -e '(.capabilities | type == "array") and ([.capabilities[]?.classification == "readonly"] | all)' \
       >/dev/null 2>&1 \
-    || raw_fatal "manifest_contains_non_readonly_capabilities"
+    || aegis_fatal "manifest_contains_non_readonly_capabilities"
 
   [[ -d "${CAPABILITY_PAYLOAD_DIR}" ]] \
-    || raw_fatal "missing_capability_payload_directory"
+    || aegis_fatal "missing_capability_payload_directory"
 
   [[ -n "${OPENAI_API_KEY:-}" ]] \
-    || raw_fatal "missing_provider_api_key"
+    || aegis_fatal "missing_provider_api_key"
 
   [[ -n "${OPENAI_API_BASE:-}" ]] \
-    || raw_fatal "missing_provider_api_base"
+    || aegis_fatal "missing_provider_api_base"
 
   [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
-    || raw_fatal "missing_execution_id"
+    || aegis_fatal "missing_execution_id"
 
   [[ -n "${AEGIS_EXECUTION_TIMESTAMP:-}" ]] \
-    || raw_fatal "missing_execution_timestamp"
+    || aegis_fatal "missing_execution_timestamp"
 
   [[ -n "${AEGIS_MODE:-}" ]] \
-    || raw_fatal "missing_execution_mode"
+    || aegis_fatal "missing_execution_mode"
 
   [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
-    || raw_fatal "missing_investigation_input"
+    || aegis_fatal "missing_investigation_input"
 
   [[ -n "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:-}" ]] \
-    || raw_fatal "missing_evidence_budget"
+    || aegis_fatal "missing_evidence_budget"
 
   [[ -n "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-}" ]] \
-    || raw_fatal "missing_capability_payload_budget"
+    || aegis_fatal "missing_capability_payload_budget"
 
   [[ -n "${AEGIS_PROVIDER_RESPONSE_TIMEOUT:-}" ]] \
-    || raw_fatal "missing_response_timeout"
+    || aegis_fatal "missing_response_timeout"
 
   [[ -n "${AEGIS_PROVIDER_CONNECT_TIMEOUT:-}" ]] \
-    || raw_fatal "missing_connect_timeout"
+    || aegis_fatal "missing_connect_timeout"
 
   [[ -n "${AEGIS_PROVIDER_MAX_RETRIES:-}" ]] \
-    || raw_fatal "missing_retry_configuration"
+    || aegis_fatal "missing_retry_configuration"
 
   [[ -n "${AEGIS_PROVIDER_RETRY_DELAY:-}" ]] \
-    || raw_fatal "missing_retry_delay"
+    || aegis_fatal "missing_retry_delay"
 
   [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]] \
-    || raw_fatal "missing_selected_capability_payloads"
+    || aegis_fatal "missing_selected_capability_payloads"
 
   echo "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
     | jq -e 'type == "array"' \
       >/dev/null 2>&1 \
-    || raw_fatal "invalid_selected_capability_payloads"
+    || aegis_fatal "invalid_selected_capability_payloads"
 
   mapfile -t SELECTED_CAPABILITY_PAYLOAD_PATHS < <(
     echo "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
@@ -220,7 +211,7 @@ validate_raw_substrate_inputs() {
   )
 
   [[ "${#SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}" -gt 0 ]] \
-    || raw_fatal "empty_selected_capability_payloads"
+    || aegis_fatal "empty_selected_capability_payloads"
 
   normalize_selected_payload_paths
 }
@@ -270,7 +261,7 @@ cleanup_raw_substrate() {
 }
 
 trap cleanup_raw_substrate EXIT
-trap 'raw_warn "Interrupted"; exit 130' INT TERM
+trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 
 # =========================================================
 # UTILITY HELPERS
@@ -519,10 +510,10 @@ assemble_bounded_capability_context() {
   for payload_path in "${SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}"; do
 
     [[ -f "${payload_path}" ]] \
-      || raw_fatal "missing_exposed_capability_payload: ${payload_path}"
+      || aegis_fatal "missing_exposed_capability_payload: ${payload_path}"
 
     [[ "${payload_path}" == "${CAPABILITY_PAYLOAD_DIR}/"* ]] \
-      || raw_fatal "exposed_capability_payload_out_of_scope: ${payload_path}"
+      || aegis_fatal "exposed_capability_payload_out_of_scope: ${payload_path}"
 
     payload_count=$((payload_count + 1))
 
@@ -569,7 +560,7 @@ assemble_bounded_capability_context() {
     fi
   done
 
-  raw_log "Capability payload evidence size bytes: $(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}")"
+  aegis_log "Capability payload evidence size bytes: $(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}")"
 }
 
 # =========================================================
@@ -606,7 +597,7 @@ assemble_provider_request() {
     }
     ' > "${TMP_REQUEST_FILE}"
 
-  raw_log "Request size bytes: $(wc -c < "${TMP_REQUEST_FILE}")"
+  aegis_log "Request size bytes: $(wc -c < "${TMP_REQUEST_FILE}")"
 }
 
 # =========================================================
@@ -615,7 +606,7 @@ assemble_provider_request() {
 
 execute_provider_request() {
 
-  raw_log "Executing raw cognition substrate..."
+  aegis_log "Executing raw cognition substrate..."
 
   local attempt=1
   local http_code
@@ -659,7 +650,7 @@ execute_provider_request() {
 
       401|403)
         cat "${TMP_RESPONSE_FILE}" >&2 || true
-        raw_fatal "provider_authentication_failure"
+        aegis_fatal "provider_authentication_failure"
         ;;
 
       400)
@@ -669,15 +660,15 @@ execute_provider_request() {
 
         if [[ "${error_message}" == *"maximum context length"* ]]; then
           cat "${TMP_RESPONSE_FILE}" >&2 || true
-          raw_fatal "provider_context_length_exceeded"
+          aegis_fatal "provider_context_length_exceeded"
         fi
 
         cat "${TMP_RESPONSE_FILE}" >&2 || true
-        raw_fatal "provider_http_failure"
+        aegis_fatal "provider_http_failure"
         ;;
 
       429|500|502|503|504)
-        raw_warn "provider_transient_failure"
+        aegis_warn "provider_transient_failure"
 
         attempt=$((attempt + 1))
 
@@ -686,13 +677,13 @@ execute_provider_request() {
 
       *)
         cat "${TMP_RESPONSE_FILE}" >&2 || true
-        raw_fatal "provider_http_failure"
+        aegis_fatal "provider_http_failure"
         ;;
 
     esac
   done
 
-  raw_fatal "provider_retry_limit_exceeded"
+  aegis_fatal "provider_retry_limit_exceeded"
 }
 
 # =========================================================
@@ -718,20 +709,20 @@ extract_artifact_payload() {
   )"
 
   [[ -n "${provider_content}" ]] \
-    || raw_fatal "empty_provider_response"
+    || aegis_fatal "empty_provider_response"
 
   if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
     || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
     echo "[DEBUG] Raw LLM content (markers missing):" >&2
     echo "${provider_content}" >&2
-    raw_fatal "missing_artifact_markers"
+    aegis_fatal "missing_artifact_markers"
   fi
 
   local artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
   artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
 
   [[ -n "${artifact_payload//[[:space:]]/}" ]] \
-    || raw_fatal "empty_artifact_payload"
+    || aegis_fatal "empty_artifact_payload"
 
   if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
     # Try a Python-based JSON repair for two classes of LLM slip:
@@ -802,7 +793,7 @@ PY
     else
       echo "[DEBUG] Failed to parse artifact JSON. Raw payload:" >&2
       echo "${artifact_payload}" >&2
-      raw_fatal "artifact_not_json"
+      aegis_fatal "artifact_not_json"
     fi
   fi
 

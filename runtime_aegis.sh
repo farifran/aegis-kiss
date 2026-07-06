@@ -52,29 +52,10 @@ export AEGIS_EXECUTION_TIMESTAMP="$(
 # LOGGING
 # =========================================================
 
-runtime_log() {
-  echo "[AEGIS][RUNTIME] $*" >&2
-}
+# shellcheck disable=SC1091
+source "scripts/lib/common.sh"
+AEGIS_LOG_TAG="RUNTIME"
 
-runtime_warn() {
-  echo "[AEGIS][RUNTIME][WARN] $*" >&2
-}
-
-runtime_fatal() {
-  echo "[AEGIS][RUNTIME][FATAL] $*" >&2
-  exit 1
-}
-
-measure() {
-  local label="$1"
-  local start
-  start=$(date +%s)
-  shift
-  "$@"
-  local end
-  end=$(date +%s)
-  echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
-}
 
 # =========================================================
 # CLI
@@ -99,16 +80,16 @@ parse_runtime_cli() {
         shift
 
         [[ "$#" -gt 0 ]] \
-          || runtime_fatal "missing_issue_number"
+          || aegis_fatal "missing_issue_number"
 
         [[ -z "${cli_issue_number}" ]] \
-          || runtime_fatal "duplicate_issue_argument"
+          || aegis_fatal "duplicate_issue_argument"
 
         cli_issue_number="$1"
         ;;
       --issue=*)
         [[ -z "${cli_issue_number}" ]] \
-          || runtime_fatal "duplicate_issue_argument"
+          || aegis_fatal "duplicate_issue_argument"
 
         cli_issue_number="${1#--issue=}"
         ;;
@@ -116,16 +97,16 @@ parse_runtime_cli() {
         shift
 
         [[ "$#" -gt 0 ]] \
-          || runtime_fatal "missing_target_path"
+          || aegis_fatal "missing_target_path"
 
         [[ -z "${cli_target_path}" ]] \
-          || runtime_fatal "duplicate_target_argument"
+          || aegis_fatal "duplicate_target_argument"
 
         cli_target_path="$1"
         ;;
       --target=*)
         [[ -z "${cli_target_path}" ]] \
-          || runtime_fatal "duplicate_target_argument"
+          || aegis_fatal "duplicate_target_argument"
 
         cli_target_path="${1#--target=}"
         ;;
@@ -140,7 +121,7 @@ parse_runtime_cli() {
         break
         ;;
       -*)
-        runtime_fatal "unknown_argument: $1"
+        aegis_fatal "unknown_argument: $1"
         ;;
       *)
         positional_args+=("$1")
@@ -152,10 +133,10 @@ parse_runtime_cli() {
 
   if [[ -n "${cli_issue_number}" ]]; then
     [[ "${cli_issue_number}" =~ ^[0-9]+$ ]] \
-      || runtime_fatal "invalid_issue_number"
+      || aegis_fatal "invalid_issue_number"
 
     [[ "${#positional_args[@]}" -eq 0 ]] \
-      || runtime_fatal "mixed_investigation_input_forms"
+      || aegis_fatal "mixed_investigation_input_forms"
 
     cli_investigation_input="issue #${cli_issue_number}"
   elif [[ "${#positional_args[@]}" -gt 0 ]]; then
@@ -170,7 +151,7 @@ parse_runtime_cli() {
   if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
     && [[ -n "${cli_investigation_input}" ]] \
     && [[ "${AEGIS_INVESTIGATION_INPUT}" != "${cli_investigation_input}" ]]; then
-    runtime_fatal "investigation_input_conflict"
+    aegis_fatal "investigation_input_conflict"
   fi
 
   AEGIS_MODE="${cli_mode}"
@@ -181,7 +162,7 @@ parse_runtime_cli() {
 
   if [[ -n "${cli_target_path}" ]]; then
     [[ -d "${cli_target_path}" ]] \
-      || runtime_fatal "target_path_not_directory"
+      || aegis_fatal "target_path_not_directory"
 
     export AEGIS_EVIDENCE_TARGET_PATH="${cli_target_path}"
   fi
@@ -263,7 +244,7 @@ resolve_runtime_investigation_input() {
   if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
     && [[ -n "${current_investigation_input}" ]] \
     && [[ "${AEGIS_INVESTIGATION_INPUT}" != "${current_investigation_input}" ]]; then
-    runtime_fatal "investigation_input_mismatch"
+    aegis_fatal "investigation_input_mismatch"
   fi
 
   if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
@@ -287,7 +268,7 @@ cleanup_runtime() {
 
   set +e
 
-  runtime_log "Starting runtime-owned cleanup..."
+  aegis_log "Starting runtime-owned cleanup..."
 
   if [[ "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE}" == "true" ]] \
     && [[ "${AEGIS_EXECUTION_SURFACE_ACTIVE}" == "true" ]]; then
@@ -296,13 +277,13 @@ cleanup_runtime() {
 
   remove_runtime_owned_capability_surfaces
 
-  runtime_log "Runtime cleanup completed"
+  aegis_log "Runtime cleanup completed"
 
   set -e
 }
 
 trap cleanup_runtime EXIT
-trap 'runtime_warn "Interrupted"; exit 130' INT TERM
+trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 
 # =========================================================
 # EPISTEMIC HANDOVER
@@ -394,10 +375,10 @@ assert_valid_runtime_owned_epistemic_handover() {
   local size_error="$3"
 
   handover_schema_is_valid "${handover_file}" \
-    || runtime_fatal "${invalid_error}"
+    || aegis_fatal "${invalid_error}"
 
   handover_size_is_valid "${handover_file}" \
-    || runtime_fatal "${size_error}"
+    || aegis_fatal "${size_error}"
 }
 
 write_empty_epistemic_handover() {
@@ -426,13 +407,13 @@ write_runtime_owned_epistemic_handover() {
       artifact_snapshot: $artifact_snapshot,
       epistemic_state: $epistemic_state
     }' > "${tmp_handover_file}" \
-    || runtime_fatal "failed_to_materialize_epistemic_handover"
+    || aegis_fatal "failed_to_materialize_epistemic_handover"
 
   handover_size_is_valid "${tmp_handover_file}" \
-    || runtime_fatal "epistemic_handover_runtime_state_exceeds_max_bytes"
+    || aegis_fatal "epistemic_handover_runtime_state_exceeds_max_bytes"
 
   mv "${tmp_handover_file}" "${handover_file}" \
-    || runtime_fatal "failed_to_commit_epistemic_handover"
+    || aegis_fatal "failed_to_commit_epistemic_handover"
 }
 
 remove_runtime_owned_execution_surface_if_present() {
@@ -472,7 +453,7 @@ prepare_runtime_owned_epistemic_handover() {
   local handover_file="$1"
 
   if ! runtime_owned_epistemic_handover_is_valid "${handover_file}"; then
-    runtime_warn "invalid_epistemic_handover_detected_reinitializing"
+    aegis_warn "invalid_epistemic_handover_detected_reinitializing"
     write_empty_epistemic_handover "${handover_file}"
   fi
 
@@ -488,7 +469,7 @@ reset_runtime_owned_epistemic_handover_for_new_investigation() {
     return
   fi
 
-  runtime_log "Resetting runtime-owned epistemic handover for new investigation boundary..."
+  aegis_log "Resetting runtime-owned epistemic handover for new investigation boundary..."
 
   write_empty_epistemic_handover "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
 }
@@ -500,7 +481,7 @@ validate_mode_preconditions() {
   fi
 
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
-    || runtime_fatal "missing_epistemic_handover_for_mode: ${AEGIS_MODE}"
+    || aegis_fatal "missing_epistemic_handover_for_mode: ${AEGIS_MODE}"
 
   case "${AEGIS_MODE}" in
     forensics)
@@ -508,7 +489,7 @@ validate_mode_preconditions() {
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "discovery"
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || runtime_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
+        || aegis_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
       ;;
     repair)
       jq -e '
@@ -516,7 +497,7 @@ validate_mode_preconditions() {
         and .artifact_snapshot.mode == "forensics"
         and (.artifact_snapshot.operational_context.repair_candidates | type == "array" and length > 0)
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || runtime_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
+        || aegis_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
       ;;
     optimize)
       jq -e '
@@ -525,7 +506,7 @@ validate_mode_preconditions() {
         and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.files_changed | type == "array" and length > 0)
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || runtime_fatal "precondition_failed_repair_candidate_missing_or_invalid"
+        || aegis_fatal "precondition_failed_repair_candidate_missing_or_invalid"
       ;;
     adversarial)
       jq -e '
@@ -535,7 +516,7 @@ validate_mode_preconditions() {
         and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || runtime_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
+        || aegis_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
       ;;
     validation)
       jq -e '
@@ -546,7 +527,7 @@ validate_mode_preconditions() {
         and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
         and (.artifact_snapshot.operational_context.findings | type == "array")
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || runtime_fatal "precondition_failed_findings_missing_or_invalid"
+        || aegis_fatal "precondition_failed_findings_missing_or_invalid"
       ;;
   esac
 }
@@ -561,14 +542,14 @@ validate_execution_engine_requirements() {
   case "$engine" in
     aider)
       command -v aider >/dev/null 2>&1 \
-        || runtime_fatal "missing_aider_binary"
+        || aegis_fatal "missing_aider_binary"
       ;;
   esac
 }
 
 validate_runtime_environment() {
 
-  runtime_log "Initializing runtime..."
+  aegis_log "Initializing runtime..."
 
   local required_commands=(
     git
@@ -578,7 +559,7 @@ validate_runtime_environment() {
   local command_name
   for command_name in "${required_commands[@]}"; do
     command -v "${command_name}" >/dev/null 2>&1 \
-      || runtime_fatal "missing_dependency: ${command_name}"
+      || aegis_fatal "missing_dependency: ${command_name}"
   done
 
   local required_runtime_vars=(
@@ -595,26 +576,26 @@ validate_runtime_environment() {
   local runtime_var
   for runtime_var in "${required_runtime_vars[@]}"; do
     [[ -n "${!runtime_var:-}" ]] \
-      || runtime_fatal "missing_runtime_variable: ${runtime_var}"
+      || aegis_fatal "missing_runtime_variable: ${runtime_var}"
   done
 
   declare -p AEGIS_EXECUTION_ENGINES >/dev/null 2>&1 \
-    || runtime_fatal "missing_execution_engine_registry"
+    || aegis_fatal "missing_execution_engine_registry"
 
   declare -p AEGIS_MODE_CAPABILITY_MAP >/dev/null 2>&1 \
-    || runtime_fatal "missing_capability_envelope_registry"
+    || aegis_fatal "missing_capability_envelope_registry"
 
   declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
-    || runtime_fatal "missing_evidence_profile_registry"
+    || aegis_fatal "missing_evidence_profile_registry"
 
   [[ -f "${AEGIS_SKILL_FILE}" ]] \
-    || runtime_fatal "missing_skill_contract"
+    || aegis_fatal "missing_skill_contract"
 
   [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
-    || runtime_fatal "unknown_mode"
+    || aegis_fatal "unknown_mode"
 
   [[ -n "${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}" ]] \
-    || runtime_fatal "missing_mode_evidence_profile"
+    || aegis_fatal "missing_mode_evidence_profile"
 
   validate_execution_engine_requirements
 }
@@ -639,7 +620,7 @@ bootstrap_runtime_state() {
 
 remove_stale_runtime_residue() {
 
-  runtime_log "Removing stale execution-surface residue..."
+  aegis_log "Removing stale execution-surface residue..."
 
   if [[ "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE}" == "true" ]] \
     && mode_requires_execution_surface; then
@@ -656,11 +637,11 @@ remove_stale_runtime_residue() {
 prepare_execution_surface() {
 
   if ! mode_requires_execution_surface; then
-    runtime_log "Skipping disposable execution surface for mode without execution-surface requirements..."
+    aegis_log "Skipping disposable execution surface for mode without execution-surface requirements..."
     return
   fi
 
-  runtime_log "Preparing disposable execution surface..."
+  aegis_log "Preparing disposable execution surface..."
 
   mkdir -p "${AEGIS_EXECUTION_SURFACE_ROOT}"
 
@@ -672,7 +653,7 @@ prepare_execution_surface() {
     >/dev/null
 
   [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
-    || runtime_fatal "failed_to_materialize_execution_surface"
+    || aegis_fatal "failed_to_materialize_execution_surface"
 
   AEGIS_EXECUTION_SURFACE_ACTIVE="true"
 }
@@ -683,12 +664,12 @@ materialize_preceding_mutation_candidate() {
     return
   fi
 
-  runtime_log "Materializing Repair candidate for Optimize..."
+  aegis_log "Materializing Repair candidate for Optimize..."
 
   bash scripts/runtime/apply_candidate_diff.sh \
     "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
     "${AEGIS_EXECUTION_SURFACE_PATH}" \
-    || runtime_fatal "failed_to_materialize_repair_candidate"
+    || aegis_fatal "failed_to_materialize_repair_candidate"
 }
 
 # =========================================================
@@ -697,7 +678,7 @@ materialize_preceding_mutation_candidate() {
 
 prepare_runtime_owned_capability_surfaces() {
 
-  runtime_log "Preparing runtime-owned capability surfaces..."
+  aegis_log "Preparing runtime-owned capability surfaces..."
 
   remove_runtime_owned_capability_surfaces false
 
@@ -705,10 +686,10 @@ prepare_runtime_owned_capability_surfaces() {
   mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}"
 
   [[ -d "${AEGIS_CAPABILITY_ENV_DIR}" ]] \
-    || runtime_fatal "failed_to_prepare_capability_environment"
+    || aegis_fatal "failed_to_prepare_capability_environment"
 
   [[ -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]] \
-    || runtime_fatal "failed_to_prepare_capability_payload_directory"
+    || aegis_fatal "failed_to_prepare_capability_payload_directory"
 }
 
 # =========================================================
@@ -717,19 +698,19 @@ prepare_runtime_owned_capability_surfaces() {
 
 materialize_runtime_owned_capability_manifest() {
 
-  runtime_log "Generating runtime-owned capability manifest..."
+  aegis_log "Generating runtime-owned capability manifest..."
 
   export AEGIS_CAPABILITY_MANIFEST="$(
     bash scripts/capabilities/generate_manifest.sh
   )"
 
   [[ -n "${AEGIS_CAPABILITY_MANIFEST}" ]] \
-    || runtime_fatal "missing_runtime_owned_capability_manifest"
+    || aegis_fatal "missing_runtime_owned_capability_manifest"
 
   printf '%s\n' "${AEGIS_CAPABILITY_MANIFEST}" \
     | jq empty \
       >/dev/null 2>&1 \
-    || runtime_fatal "invalid_runtime_owned_capability_manifest"
+    || aegis_fatal "invalid_runtime_owned_capability_manifest"
 }
 
 # =========================================================
@@ -738,7 +719,7 @@ materialize_runtime_owned_capability_manifest() {
 
 execute_mode() {
 
-  runtime_log "Executing mode: ${AEGIS_MODE}"
+  aegis_log "Executing mode: ${AEGIS_MODE}"
 
   local execution_output
   local artifact_payload
@@ -754,29 +735,31 @@ execute_mode() {
 
   [[ "${execution_output}" == *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
     && [[ "${execution_output}" == *"${AEGIS_ARTIFACT_END_MARKER}"* ]] \
-    || runtime_fatal "missing_artifact"
+    || aegis_fatal "missing_artifact"
 
   artifact_payload="${execution_output#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
   artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
 
   [[ -n "${artifact_payload//[[:space:]]/}" ]] \
-    || runtime_fatal "empty_artifact_payload"
+    || aegis_fatal "empty_artifact_payload"
 
   printf '%s\n' "${artifact_payload}" \
     | jq empty \
       >/dev/null 2>&1 \
-    || runtime_fatal "invalid_promoted_artifact_json"
+    || aegis_fatal "invalid_promoted_artifact_json"
 
-  export AEGIS_PROMOTED_ARTIFACT_PAYLOAD="$(
+  # Shell variable only — large validated diffs must not enter the
+  # environment or later fork/exec calls fail with E2BIG.
+  AEGIS_PROMOTED_ARTIFACT_PAYLOAD="$(
     printf '%s\n' "${artifact_payload}" | jq -c 'select(type == "object")'
   )"
 
   [[ -n "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" ]] \
-    || runtime_fatal "invalid_promoted_artifact_shape"
+    || aegis_fatal "invalid_promoted_artifact_shape"
 
-  runtime_log "Promoting validated artifact..."
+  aegis_log "Promoting validated artifact..."
 
-  runtime_log "Execution completed successfully"
+  aegis_log "Execution completed successfully"
 }
 
 promote_validated_candidate() {
@@ -792,7 +775,7 @@ promote_validated_candidate() {
   )"
 
   if [[ "${verdict}" != "accepted" ]]; then
-    runtime_log "Validation verdict does not authorize mutation promotion: ${verdict}"
+    aegis_log "Validation verdict does not authorize mutation promotion: ${verdict}"
     return
   fi
 
@@ -806,7 +789,7 @@ promote_validated_candidate() {
     "${AEGIS_RUNTIME_ROOT}" \
     || {
       rm -f "${validation_artifact_file}"
-      runtime_fatal "validated_candidate_promotion_failed"
+      aegis_fatal "validated_candidate_promotion_failed"
     }
 
   rm -f "${validation_artifact_file}"
@@ -818,10 +801,10 @@ promote_validated_candidate() {
 
 promote_epistemic_handover() {
 
-  runtime_log "Updating epistemic handover..."
+  aegis_log "Updating epistemic handover..."
 
   [[ -n "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" ]] \
-    || runtime_fatal "missing_promoted_artifact_for_handover"
+    || aegis_fatal "missing_promoted_artifact_for_handover"
 
   local handover_json
   local builder_payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
@@ -850,14 +833,14 @@ promote_epistemic_handover() {
             gap_counts:                    $bp.gap_counts
           }
       ' "${builder_payload_path}"
-    )" || runtime_fatal "failed_to_materialize_handover"
+    )" || aegis_fatal "failed_to_materialize_handover"
   elif [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
     # Builder payload missing — carry structural context forward from
     # the preceding handover.
     structural_context_json="$(
       jq -c '.artifact_snapshot.structural_context // {}' \
         "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-    )" || runtime_fatal "failed_to_materialize_handover"
+    )" || aegis_fatal "failed_to_materialize_handover"
   fi
 
   handover_json="$(
@@ -895,7 +878,7 @@ promote_epistemic_handover() {
             )
           }
       '
-  )" || runtime_fatal "failed_to_materialize_handover"
+  )" || aegis_fatal "failed_to_materialize_handover"
 
   local handover_parts
   mapfile -t handover_parts < <(

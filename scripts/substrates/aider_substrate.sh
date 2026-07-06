@@ -67,18 +67,9 @@ AEGIS_AIDER_OUTPUT_LOG=""
 # LOGGING
 # =========================================================
 
-aider_log() {
-  echo "[AEGIS][AIDER] $*" >&2
-}
-
-aider_warn() {
-  echo "[AEGIS][AIDER][WARN] $*" >&2
-}
-
-aider_fatal() {
-  echo "[AEGIS][AIDER][FATAL] $*" >&2
-  exit 1
-}
+# shellcheck disable=SC1091
+source "scripts/lib/common.sh"
+AEGIS_LOG_TAG="AIDER"
 
 # =========================================================
 # VALIDATION
@@ -87,42 +78,42 @@ aider_fatal() {
 validate_aider_substrate_inputs() {
 
   [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] \
-    || aider_fatal "missing_execution_surface_path"
+    || aegis_fatal "missing_execution_surface_path"
 
   [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
-    || aider_fatal "execution_surface_not_materialized"
+    || aegis_fatal "execution_surface_not_materialized"
 
   [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
-    || aider_fatal "missing_investigation_input"
+    || aegis_fatal "missing_investigation_input"
 
   [[ -n "${AEGIS_MODE:-}" ]] \
-    || aider_fatal "missing_execution_mode"
+    || aegis_fatal "missing_execution_mode"
 
   [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
-    || aider_fatal "missing_execution_id"
+    || aegis_fatal "missing_execution_id"
 
   [[ -n "${AEGIS_AIDER_MODEL:-}" ]] \
-    || aider_fatal "missing_aider_model"
+    || aegis_fatal "missing_aider_model"
 
   [[ -f "${AIDER_SKILL_FILE}" ]] \
-    || aider_fatal "missing_skill_file"
+    || aegis_fatal "missing_skill_file"
 
   [[ -d "${AIDER_CAPABILITY_PAYLOAD_DIR}" ]] \
-    || aider_fatal "missing_capability_payload_directory"
+    || aegis_fatal "missing_capability_payload_directory"
 
   command -v git >/dev/null 2>&1 \
-    || aider_fatal "missing_dependency_git"
+    || aegis_fatal "missing_dependency_git"
 
   if [[ ! -x "${AEGIS_AIDER_BIN:-}" ]]; then
     if command -v aider >/dev/null 2>&1; then
       export AEGIS_AIDER_BIN="$(command -v aider)"
     else
-      aider_fatal "missing_aider_binary"
+      aegis_fatal "missing_aider_binary"
     fi
   fi
 
   [[ -d "${AEGIS_MUTATION_GIT_DIR:-}" ]] \
-    || aider_fatal "missing_mutation_git_directory"
+    || aegis_fatal "missing_mutation_git_directory"
 }
 
 # =========================================================
@@ -161,12 +152,12 @@ resolve_mutation_targets() {
     collect < <(jq_lines "${handover}" \
       '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty')
     [[ "${#targets[@]}" -gt 0 ]] \
-      || aider_fatal "missing_forensics_repair_candidates"
+      || aegis_fatal "missing_forensics_repair_candidates"
   elif [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
     collect < <(jq_lines "${handover}" \
       '.artifact_snapshot.operational_context.files_changed[]? // empty')
     [[ "${#targets[@]}" -gt 0 ]] \
-      || aider_fatal "missing_repair_files_changed"
+      || aegis_fatal "missing_repair_files_changed"
   fi
 
   # Fallback chain — first source yielding targets wins.
@@ -239,7 +230,7 @@ cleanup_aider_substrate() {
 }
 
 trap cleanup_aider_substrate EXIT
-trap 'aider_warn "Interrupted"; exit 130' INT TERM
+trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 
 # =========================================================
 # CAPABILITY EVIDENCE INJECTION
@@ -333,7 +324,7 @@ EOF
 # no transient residue: tracked files reset, untracked leftovers removed.
 rollback_execution_surface() {
 
-  aider_warn "Rolling back execution surface mutations..."
+  aegis_warn "Rolling back execution surface mutations..."
 
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}" || exit 0
@@ -388,9 +379,9 @@ invoke_aider() {
     done
   fi
 
-  aider_log "Invoking aider mutation substrate..."
-  aider_log "Model: ${AEGIS_AIDER_MODEL}"
-  aider_log "Targets: ${file_args[*]:-<none>}"
+  aegis_log "Invoking aider mutation substrate..."
+  aegis_log "Model: ${AEGIS_AIDER_MODEL}"
+  aegis_log "Targets: ${file_args[*]:-<none>}"
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
@@ -428,13 +419,13 @@ invoke_aider() {
 
   if [[ "${aider_status}" -ne 0 ]]; then
     if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]]; then
-      aider_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
+      aegis_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
     else
-      aider_warn "aider invocation failed with exit status ${aider_status}"
+      aegis_warn "aider invocation failed with exit status ${aider_status}"
     fi
     tail -n 60 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
     rollback_execution_surface
-    aider_fatal "aider_execution_failed"
+    aegis_fatal "aider_execution_failed"
   fi
 }
 
@@ -524,7 +515,7 @@ main() {
 
   validate_aider_substrate_inputs
 
-  aider_log "Resolving mutation targets..."
+  aegis_log "Resolving mutation targets..."
 
   local mutation_targets=()
   while IFS= read -r target; do
@@ -533,9 +524,9 @@ main() {
   done < <(resolve_mutation_targets)
 
   if [[ "${#mutation_targets[@]}" -eq 0 ]]; then
-    aider_warn "no_mutation_targets_resolved — using investigation input only"
+    aegis_warn "no_mutation_targets_resolved — using investigation input only"
   else
-    aider_log "Mutation targets: ${mutation_targets[*]}"
+    aegis_log "Mutation targets: ${mutation_targets[*]}"
   fi
 
   local prompt_file
@@ -548,7 +539,7 @@ main() {
     invoke_aider "${prompt_file}"
   fi
 
-  aider_log "Capturing worktree diff..."
+  aegis_log "Capturing worktree diff..."
 
   local diff_content
   diff_content="$(capture_worktree_diff)"
@@ -560,10 +551,10 @@ main() {
     fi
     # No tracked changes, but aider may still have left untracked residue.
     rollback_execution_surface
-    aider_fatal "empty_diff: aider produced no changes"
+    aegis_fatal "empty_diff: aider produced no changes"
   fi
 
-  aider_log "Emitting mutation artifact..."
+  aegis_log "Emitting mutation artifact..."
 
   if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
     emit_mutation_artifact "${diff_content}" "${mutation_targets[@]}"
@@ -571,7 +562,7 @@ main() {
     emit_mutation_artifact "${diff_content}"
   fi
 
-  aider_log "Aider mutation substrate completed"
+  aegis_log "Aider mutation substrate completed"
 }
 
 main "$@"
