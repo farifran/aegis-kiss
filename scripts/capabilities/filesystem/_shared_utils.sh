@@ -130,6 +130,18 @@ require_prune_policy() {
 }
 
 # ---------------------------------------------------------
+# Python extraction
+# ---------------------------------------------------------
+
+readonly AEGIS_FS_WALK_SNIPPET="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_walk.py"
+
+# Run a Python extractor body (stdin) prefixed with the shared file-walk
+# prologue (_walk.py). Positional args are forwarded to the program.
+run_python_extractor() {
+  cat "${AEGIS_FS_WALK_SNIPPET}" - | python3 - "$@"
+}
+
+# ---------------------------------------------------------
 # Temp file lifecycle
 # ---------------------------------------------------------
 

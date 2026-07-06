@@ -52,42 +52,11 @@ fi
 
 export PRUNE_PATHS="${AEGIS_FILESYSTEM_PRUNE_PATHS[*]}"
 
-python3 - "$TARGET_PATH" "${GENERATED_AT}" "${EXECUTION_ID}" <<'PY'
-import json
-import os
-import re
-import sys
+run_python_extractor "$TARGET_PATH" "${GENERATED_AT}" "${EXECUTION_ID}" <<'PY'
 from collections import Counter
 
-root = sys.argv[1]
 generated_at = sys.argv[2]
 execution_id = sys.argv[3]
-prune_paths = os.environ.get('PRUNE_PATHS', '').split()
-
-# =========================================================
-# FILE WALK (same prune logic as other extractors)
-# =========================================================
-
-all_files = []
-for dirpath, dirnames, filenames in os.walk(root):
-    rel_dir = os.path.relpath(dirpath, '.')
-    if rel_dir == '.':
-        rel_dir = ''
-    i = len(dirnames) - 1
-    while i >= 0:
-        d = dirnames[i]
-        d_rel = os.path.join(rel_dir, d) if rel_dir else d
-        d_rel_norm = d_rel.replace('\\', '/')
-        is_pruned = any(d_rel_norm == p or d_rel_norm.startswith(p + '/') for p in prune_paths)
-        if is_pruned:
-            del dirnames[i]
-        i -= 1
-    for f in filenames:
-        f_rel = os.path.join(rel_dir, f) if rel_dir else f
-        f_rel_norm = f_rel.replace('\\', '/')
-        is_pruned = any(f_rel_norm == p or f_rel_norm.startswith(p + '/') for p in prune_paths)
-        if not is_pruned:
-            all_files.append(f_rel_norm)
 
 # =========================================================
 # RESPONSIBILITY DETECTION

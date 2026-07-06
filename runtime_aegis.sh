@@ -4,39 +4,10 @@
 # AEGIS HARNESS — RUNTIME AUTHORITY
 # =========================================================
 #
-# Version: 2.5
-# Layer: Runtime Sovereignty
-# Status: Operational Memory Hardened
-#
-# Responsibilities:
-#
-# - sovereign orchestration
-# - disposable execution surface lifecycle
-# - execution identity propagation
-# - artifact promotion
-# - runtime-owned epistemic handover lifecycle
-# - runtime cleanup
-# - capability environment cleanup
-# - capability payload cleanup
-# - runtime contract validation
-# - policy enforcement
-#
-# The runtime intentionally owns:
-#
-# - orchestration
-# - artifact promotion
-# - epistemic handover lifecycle
-# - persistence decisions
-# - cleanup
-# - execution sequencing
-# - execution surface lifecycle
-#
-# The runtime intentionally does NOT:
-#
-# - reason semantically
-# - interpret cognition
-# - redesign architecture
-# - mutate implicitly
+# Sovereign orchestrator: mode sequencing, disposable execution
+# surfaces, artifact promotion, and the runtime-owned epistemic
+# handover lifecycle. It never reasons semantically or mutates
+# implicitly — cognition belongs to the substrates.
 #
 # =========================================================
 if [[ -f ".harness/local.env" ]] && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
@@ -108,22 +79,6 @@ measure() {
 # =========================================================
 # CLI
 # =========================================================
-
-join_cli_positional_arguments() {
-  local positional_args=("$@")
-  local joined_input=""
-  local positional_arg
-
-  for positional_arg in "${positional_args[@]}"; do
-    if [[ -n "${joined_input}" ]]; then
-      joined_input+=" "
-    fi
-
-    joined_input+="${positional_arg}"
-  done
-
-  printf '%s' "${joined_input}"
-}
 
 parse_runtime_cli() {
 
@@ -209,9 +164,7 @@ parse_runtime_cli() {
       positional_args=("${positional_args[@]:1}")
     fi
 
-    cli_investigation_input="$(
-      join_cli_positional_arguments "${positional_args[@]}"
-    )"
+    cli_investigation_input="${positional_args[*]}"
   fi
 
   if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
@@ -373,7 +326,7 @@ EOF
 }
 
 epistemic_handover_schema_filter() {
-  cat <<'EOF'
+  cat <<EOF
 type == "object"
 and ((keys | sort) == [
   "artifact_snapshot",
@@ -386,18 +339,7 @@ and (
 and (
   .epistemic_state
   | (
-      type == "object"
-      and ((keys | sort) == [
-        "attention_reason",
-        "attention_scope",
-        "next_attention_targets"
-      ])
-      and (.next_attention_targets | type == "array")
-      and (.attention_scope | type == "string" and length > 0)
-      and (.attention_reason | type == "string" and length > 0)
-      and (
-        [.next_attention_targets[]] | all(type == "string")
-      )
+$(epistemic_state_schema_filter)
     )
 )
 EOF
@@ -512,18 +454,14 @@ remove_runtime_owned_capability_surfaces() {
 
   local respect_cleanup_policy="${1:-true}"
 
-  if [[ "${respect_cleanup_policy}" != "false" ]] \
-    && [[ "${AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV}" != "true" ]]; then
-    :
-  else
+  if [[ "${respect_cleanup_policy}" == "false" ]] \
+    || [[ "${AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV}" == "true" ]]; then
     rm -rf "${AEGIS_CAPABILITY_ENV_DIR}" \
       >/dev/null 2>&1 || true
   fi
 
-  if [[ "${respect_cleanup_policy}" != "false" ]] \
-    && [[ "${AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS}" != "true" ]]; then
-    :
-  else
+  if [[ "${respect_cleanup_policy}" == "false" ]] \
+    || [[ "${AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS}" == "true" ]]; then
     rm -rf "${AEGIS_CAPABILITY_PAYLOAD_DIR}" \
       >/dev/null 2>&1 || true
   fi
@@ -564,49 +502,51 @@ validate_mode_preconditions() {
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
     || runtime_fatal "missing_epistemic_handover_for_mode: ${AEGIS_MODE}"
 
-  local handover_content
-  handover_content="$(cat "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
-
   case "${AEGIS_MODE}" in
     forensics)
-      echo "${handover_content}" | jq -e '
+      jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "discovery"
-      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+        || runtime_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
       ;;
     repair)
-      echo "${handover_content}" | jq -e '
+      jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "forensics"
         and (.artifact_snapshot.operational_context.repair_candidates | type == "array" and length > 0)
-      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+        || runtime_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
       ;;
     optimize)
-      echo "${handover_content}" | jq -e '
+      jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "repair"
         and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.files_changed | type == "array" and length > 0)
-      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_repair_candidate_missing_or_invalid"
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+        || runtime_fatal "precondition_failed_repair_candidate_missing_or_invalid"
       ;;
     adversarial)
-      echo "${handover_content}" | jq -e '
+      jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "optimize"
         and (.artifact_snapshot.operational_context.candidate_result | type == "object")
         and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
-      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+        || runtime_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
       ;;
     validation)
-      echo "${handover_content}" | jq -e '
+      jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "adversarial"
         and (.artifact_snapshot.operational_context.candidate_result | type == "object")
         and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
         and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
         and (.artifact_snapshot.operational_context.findings | type == "array")
-      ' >/dev/null 2>&1 || runtime_fatal "precondition_failed_findings_missing_or_invalid"
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+        || runtime_fatal "precondition_failed_findings_missing_or_invalid"
       ;;
   esac
 }
@@ -812,37 +752,27 @@ execute_mode() {
 
   echo "${execution_output}"
 
-  echo "${execution_output}" | grep -q "${AEGIS_ARTIFACT_BEGIN_MARKER}" \
+  [[ "${execution_output}" == *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
+    && [[ "${execution_output}" == *"${AEGIS_ARTIFACT_END_MARKER}"* ]] \
     || runtime_fatal "missing_artifact"
 
-  echo "${execution_output}" | grep -q "${AEGIS_ARTIFACT_END_MARKER}" \
-    || runtime_fatal "missing_artifact"
+  artifact_payload="${execution_output#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
+  artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
 
-  artifact_payload="$(
-    echo "${execution_output}" \
-      | sed -n '/AEGIS_ARTIFACT_BEGIN/,/AEGIS_ARTIFACT_END/p' \
-      | sed '1d;$d'
-  )"
-
-  [[ -n "${artifact_payload}" ]] \
+  [[ -n "${artifact_payload//[[:space:]]/}" ]] \
     || runtime_fatal "empty_artifact_payload"
 
-  echo "${artifact_payload}" \
+  printf '%s\n' "${artifact_payload}" \
     | jq empty \
       >/dev/null 2>&1 \
     || runtime_fatal "invalid_promoted_artifact_json"
 
-  echo "${artifact_payload}" \
-    | jq -e 'type == "object"' \
-      >/dev/null 2>&1 \
-    || runtime_fatal "invalid_promoted_artifact_shape"
-
-  export AEGIS_PROMOTED_ARTIFACT_PAYLOAD="$({
-    printf '%s\n' "${artifact_payload}" | jq -c '.'
-  })"
+  export AEGIS_PROMOTED_ARTIFACT_PAYLOAD="$(
+    printf '%s\n' "${artifact_payload}" | jq -c 'select(type == "object")'
+  )"
 
   [[ -n "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" ]] \
-    || runtime_fatal "failed_to_compact_promoted_artifact"
+    || runtime_fatal "invalid_promoted_artifact_shape"
 
   runtime_log "Promoting validated artifact..."
 
@@ -896,129 +826,86 @@ promote_epistemic_handover() {
   local handover_json
   local builder_payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
 
-  # --- runtime-owned structural injection with epistemic separation ---
-  # artifact_snapshot is split into two explicit areas:
-  #   structural_context — runtime-owned facts (from structural.builder)
-  #   operational_context — discovery-owned interpretation/focus
-  # This makes the origin of truth explicit: structural data is produced
-  # mechanically by the runtime, operational data is produced cognitively
-  # by the Discovery mode. The LLM cannot corrupt structural data.
-  # mode, investigation_input, and generated_at stay at the top level
-  # of artifact_snapshot (they are metadata, not structural or operational).
+  # artifact_snapshot separates structural_context (runtime-owned facts
+  # from structural.builder — the LLM cannot corrupt them) from
+  # operational_context (mode-owned interpretation). mode,
+  # investigation_input, and generated_at stay top-level as metadata.
+  local structural_context_json='{}'
   if [[ -f "${builder_payload_path}" ]]; then
-    handover_json="$({
-      printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
-        jq -c \
-          --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
-          --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" \
-          --slurpfile builder "${builder_payload_path}" '
-          . as $orig
-          | ($builder[0].payload // {}) as $bp
-          | {
-              artifact_snapshot: {
-                mode: $orig.mode,
-                investigation_input: $investigation_input,
-                generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
-                structural_context: {
-                  topology_index:             $bp.topology_index,
-                  topology_summary:           $bp.topology_summary,
-                  ranked_targets:             $bp.ranked_targets,
-                  bridge_data:                $bp.topology_index.bridges,
-                  boundary_data:              $bp.topology_index.boundaries,
-                  hotspot_data:               $bp.topology_index.hotspots,
-                  entrypoints:                $bp.topology_index.entrypoints,
-                  evidence_summary:           $bp.evidence,
-                  unresolved_references:      $bp.unresolved_references,
-                  observed_request_alignment:    $bp.observed_request_alignment,
-                  suggested_evidence_priorities: $bp.suggested_evidence_priorities,
-                  gap_counts:                    $bp.gap_counts
-                },
-                operational_context: (
-                  (if ($orig | has("operational_context")) then
-                    $orig.operational_context
-                  else
-                    ($orig
-                     | del(.handover_attention, .mode, .investigation_input,
-                           .topology_summary, .topology_index, .ranked_targets,
-                           .observed_request_alignment, .gap_counts, .evidence,
-                           .unresolved_references, .generated_at,
-                           .boundary_count, .bridge_count, .hotspot_count,
-                           .entrypoint_count, .unresolved_reference_count)
-                    )
-                  end)
-                  | del(.topology_summary, .topology_index, .ranked_targets,
-                        .observed_request_alignment, .gap_counts, .evidence,
-                        .unresolved_references, .boundary_count, .bridge_count,
-                        .hotspot_count, .entrypoint_count, .unresolved_reference_count)
-                )
-              },
-              epistemic_state: (
-                $orig.handover_attention //
-                {
-                  next_attention_targets: [],
-                  attention_scope: "none",
-                  attention_reason: "no active attention"
-                }
-              )
-            }
-        '
-    })" || runtime_fatal "failed_to_materialize_handover"
-  else
-    # Builder payload missing — promote without structural injection.
-    # Preserve structural_context and flat topology keys from preceding handover if it exists.
-    local prev_arg=()
-    if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-      prev_arg=(--slurpfile prev "${AEGIS_EPISTEMIC_HANDOVER_FILE}")
-    fi
-
-    handover_json="$({
-      printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
-        jq -c "${prev_arg[@]}" \
-          --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
-          --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" '
-          . as $orig
-          | ($prev[0].artifact_snapshot // {}) as $pr
-          | {
-              artifact_snapshot: {
-                mode: $orig.mode,
-                investigation_input: $investigation_input,
-                generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
-                structural_context:         ($pr.structural_context // {}),
-                operational_context: (
-                  (if ($orig | has("operational_context")) then
-                    $orig.operational_context
-                  else
-                    ($orig
-                     | del(.handover_attention, .mode, .investigation_input,
-                           .topology_summary, .topology_index, .ranked_targets,
-                           .observed_request_alignment, .gap_counts, .evidence,
-                           .unresolved_references, .generated_at,
-                           .boundary_count, .bridge_count, .hotspot_count,
-                           .entrypoint_count, .unresolved_reference_count)
-                    )
-                  end)
-                  | del(.topology_summary, .topology_index, .ranked_targets,
-                        .observed_request_alignment, .gap_counts, .evidence,
-                        .unresolved_references, .boundary_count, .bridge_count,
-                        .hotspot_count, .entrypoint_count, .unresolved_reference_count)
-                )
-              },
-              epistemic_state: (
-                $orig.handover_attention //
-                {
-                  next_attention_targets: [],
-                  attention_scope: "none",
-                  attention_reason: "no active attention"
-                }
-              )
-            }
-        '
-    })" || runtime_fatal "failed_to_materialize_handover"
+    structural_context_json="$(
+      jq -c '
+        (.payload // {}) as $bp
+        | {
+            topology_index:             $bp.topology_index,
+            topology_summary:           $bp.topology_summary,
+            ranked_targets:             $bp.ranked_targets,
+            bridge_data:                $bp.topology_index.bridges,
+            boundary_data:              $bp.topology_index.boundaries,
+            hotspot_data:               $bp.topology_index.hotspots,
+            entrypoints:                $bp.topology_index.entrypoints,
+            evidence_summary:           $bp.evidence,
+            unresolved_references:      $bp.unresolved_references,
+            observed_request_alignment:    $bp.observed_request_alignment,
+            suggested_evidence_priorities: $bp.suggested_evidence_priorities,
+            gap_counts:                    $bp.gap_counts
+          }
+      ' "${builder_payload_path}"
+    )" || runtime_fatal "failed_to_materialize_handover"
+  elif [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
+    # Builder payload missing — carry structural context forward from
+    # the preceding handover.
+    structural_context_json="$(
+      jq -c '.artifact_snapshot.structural_context // {}' \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+    )" || runtime_fatal "failed_to_materialize_handover"
   fi
+
+  handover_json="$(
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
+      jq -c \
+        --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
+        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" \
+        --argjson structural_context "${structural_context_json}" '
+        . as $orig
+        | {
+            artifact_snapshot: {
+              mode: $orig.mode,
+              investigation_input: $investigation_input,
+              generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
+              structural_context: $structural_context,
+              operational_context: (
+                (if ($orig | has("operational_context")) then
+                  $orig.operational_context
+                else
+                  ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at))
+                end)
+                | del(.topology_summary, .topology_index, .ranked_targets,
+                      .observed_request_alignment, .gap_counts, .evidence,
+                      .unresolved_references, .boundary_count, .bridge_count,
+                      .hotspot_count, .entrypoint_count, .unresolved_reference_count)
+              )
+            },
+            epistemic_state: (
+              $orig.handover_attention //
+              {
+                next_attention_targets: [],
+                attention_scope: "none",
+                attention_reason: "no active attention"
+              }
+            )
+          }
+      '
+  )" || runtime_fatal "failed_to_materialize_handover"
+
+  local handover_parts
+  mapfile -t handover_parts < <(
+    printf '%s' "${handover_json}" | jq -c '.artifact_snapshot, .epistemic_state'
+  )
+
   write_runtime_owned_epistemic_handover \
-  "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-  "$(printf '%s' "${handover_json}" | jq -c '.artifact_snapshot')" \
-  "$(printf '%s' "${handover_json}" | jq -c '.epistemic_state')"
+    "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
+    "${handover_parts[0]}" \
+    "${handover_parts[1]}"
 
   assert_valid_runtime_owned_epistemic_handover \
     "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \

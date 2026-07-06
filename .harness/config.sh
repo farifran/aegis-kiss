@@ -38,7 +38,6 @@ readonly AEGIS_ROOT_DIR="$(
 # =========================================================
 
 export PATH="/Users/rafaelfarias/.gemini/antigravity/bin:$PATH"
-export AEGIS_SYSTEM_VERSION="2.9"
 
 # =========================================================
 # RUNTIME TOPOLOGY
@@ -110,14 +109,10 @@ export AEGIS_MUTATION_GIT_DIR
 # =========================================================
 
 : "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0.1}"
-: "${AEGIS_RAW_SUBSTRATE_TIMEOUT_SECONDS:=120}"
-: "${AEGIS_RAW_SUBSTRATE_MAX_RETRIES:=1}"
 # Output token budget — prevents model truncation of structured JSON artifacts.
 : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
 
 export AEGIS_RAW_SUBSTRATE_TEMPERATURE
-export AEGIS_RAW_SUBSTRATE_TIMEOUT_SECONDS
-export AEGIS_RAW_SUBSTRATE_MAX_RETRIES
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS
 
 # =========================================================

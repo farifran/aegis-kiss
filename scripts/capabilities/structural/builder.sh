@@ -1,89 +1,23 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# AEGIS CAPABILITY — structural.builder
+# AEGIS CAPABILITY — structural.builder (readonly)
 # =========================================================
 #
-# Classification:
-# readonly
-#
-# Layer: Second-order composition
-#
-# Responsibilities:
-#
-# - consume first-order graph payloads already materialized
-#   by extract_import_graph, extract_reference_graph,
-#   extract_symbols, extract_entrypoints,
-#   extract_test_relationships, extract_configuration_structure
-# - derive structural topology deterministically:
-#     surfaces   — weakly connected components (clusters)
-#     boundaries — high in-degree, low out-degree nodes
-#     bridges    — edges whose removal disconnects the graph
-#     hotspots   — nodes with highest total degree
-# - precompute selection_candidates for deterministic handover
-#   (removes model judgment from downstream Discovery mode)
-# - emit condensed topology artifact — no member lists,
-#   no raw graph echoes, bridges capped at BRIDGE_EMIT_LIMIT
-#
-# This capability intentionally:
-#
-# - performs no filesystem reads of source code
-# - performs no LLM calls or semantic inference
-# - derives topology from graph mathematics only
-# - emits condensed payloads (target: <40 KB)
-# - is invoked last in the Discovery evidence profile
-#   so all predecessor payloads are already materialized
+# Second-order composition: derives topology (surfaces, boundaries,
+# bridges, hotspots, ranked targets) deterministically from the
+# first-order extractor payloads. No source reads, no LLM calls —
+# graph mathematics only, emitted as a condensed artifact.
 #
 # =========================================================
 
 set -Eeuo pipefail
 
-# =========================================================
-# INPUTS
-# =========================================================
-
 readonly TARGET_PATH="${1:-.}"
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
-
-[[ -f ".harness/config.sh" ]] || {
-  echo "[AEGIS][CAPABILITY][FATAL] missing_config" >&2
-  exit 1
-}
-
 # shellcheck disable=SC1091
-source ".harness/config.sh"
-
-# =========================================================
-# HELPERS
-# =========================================================
-
-fail() {
-  local error_type="$1"
-  local target="${2:-}"
-
-  jq -n \
-    --arg capability "structural.builder" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg error_type "${error_type}" \
-    --arg target "${target}" \
-    '{
-      success: false,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: null,
-      error: {
-        type: $error_type,
-        target: $target
-      }
-    }'
-}
+source "$(dirname "${BASH_SOURCE[0]}")/../filesystem/_shared_utils.sh"
+aegis_capability_init "structural.builder"
 
 # =========================================================
 # VALIDATION
@@ -121,12 +55,10 @@ required_dependency_capabilities=(
 for cap in "${required_dependency_capabilities[@]}"; do
 
   handler="${AEGIS_CAPABILITY_HANDLERS[$cap]:-}"
-  arg="${TARGET_PATH}"
-  payload_file="$(echo "${cap}" | tr '.' '_').json"
-  payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
+  payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${cap//./_}.json"
 
   if [[ ! -f "${payload_path}" ]]; then
-    bash "${handler}" "${arg}" > "${payload_path}"
+    bash "${handler}" "${TARGET_PATH}" > "${payload_path}"
   fi
 done
 
@@ -198,13 +130,9 @@ if not nodes:
 # Establish the node set from ref_graph nodes (authoritative) or fallback.
 node_set = set(nodes)
 
-# Two edge layers:
-#   adj_out / adj_in           — ALL observed edges (resolved + unresolved).
-#                                Feeds degree, fanout, hotspot, boundary.
-#   adj_out_resolved / adj_in_resolved — RESOLVED edges only (target is a
-#                                real node). Feeds surfaces, bridges, WCC.
-# Unresolved targets are tracked as edge endpoints for degree but are
-# NEVER added to `nodes` — no synthetic nodes.
+# Two edge layers: adj_out/adj_in hold ALL observed edges (feed
+# degree/hotspot/boundary); *_resolved hold real-node targets only
+# (feed surfaces/bridges/WCC). Unresolved targets never become nodes.
 adj_out          = {n: set() for n in nodes}
 adj_in           = {n: set() for n in nodes}
 adj_out_resolved = {n: set() for n in nodes}
@@ -228,9 +156,6 @@ for entry in import_graph:
             tgt = imp
             is_resolved = True
 
-        # All edges feed degree/fanout. The target may not be a node
-        # (unresolved) — that's fine, we record the edge direction
-        # without materializing the target as a graph entity.
         adj_out[src].add(tgt)
         adj_in.setdefault(tgt, set()).add(src)
 
@@ -243,9 +168,8 @@ for entry in import_graph:
 in_degree  = {n: len(adj_in.get(n, set()))  for n in nodes}
 out_degree = {n: len(adj_out.get(n, set())) for n in nodes}
 
-# Undirected adjacency for WCC/bridges uses RESOLVED edges only.
-# Unresolved edges do not form clusters — a pruned target common to
-# many files must NOT merge them into an artificial surface.
+# WCC/bridges use RESOLVED edges only — a pruned target shared by many
+# files must not merge them into an artificial surface.
 adj_und = {}
 for src, targets in adj_out_resolved.items():
     adj_und.setdefault(src, set())
@@ -284,21 +208,9 @@ def find_wcc(all_nodes, adj_undirected):
 surfaces_raw = find_wcc(nodes, adj_und)
 
 # =========================================================
-# BOUNDARIES — entry/exit points between surfaces
-# =========================================================
-# A boundary is a node that is referenced externally (has incoming
-# edges) but has few outgoing edges — it is a point of arrival, not
-# an orchestrator. Boundaries mark where a surface interfaces with
-# the rest of the graph.
-#
-# Heuristic:
-#   in_degree >= 1  (at least one external reference — not isolated)
-#   out_degree <= 1 (few outgoing deps — not an orchestrator)
-#   must belong to a cluster surface (standalone nodes are not
-#   boundaries — they have no surface to be a boundary OF)
-#
-# The previous threshold (in_degree >= 2) was too restrictive for
-# small graphs where files are rarely imported by 2+ others.
+# BOUNDARIES — externally referenced (in>=1), few outgoing deps
+# (out<=1), and cluster members only. in_degree >= 2 proved too
+# restrictive for small graphs.
 # =========================================================
 
 BOUNDARY_IN_MIN  = 1
@@ -375,26 +287,9 @@ for rel in test_relationships:
 entrypoints_list = (entrypoints_payload or {}).get('entrypoints', [])
 
 # =========================================================
-# HOTSPOTS — structural anomaly, not mere existence
-# =========================================================
-# A hotspot identifies concentration, orchestration, coupling,
-# or risk — NOT simply being a file in the repository.
-#
-# Formula (purely topological, no coverage):
-#   hotspot_score = (degree * 2)
-#                 + bridge_participation
-#                 + boundary_participation
-#                 + entrypoint_with_dependencies
-#
-# Rules:
-#   - degree is the dominant signal (multiplied by 2)
-#   - bridge participation: node connects two surfaces
-#   - boundary participation: node is a boundary (external entry)
-#   - entrypoint_with_dependencies: node is an entrypoint AND has
-#     degree > 0 (entrypoint with no dependencies is NOT a hotspot)
-#   - isolated nodes (degree 0) are NEVER hotspots
-#   - coverage_gap is a SEPARATE metric, not part of hotspot
-#   - HOTSPOT_THRESHOLD=4 ensures hotspots are rare exceptions
+# HOTSPOTS — score = degree*2 + bridge/boundary/entrypoint bonuses.
+# Purely topological: isolated nodes never qualify, coverage is a
+# separate metric, and the threshold keeps hotspots rare.
 # =========================================================
 
 HOTSPOT_TOP_N = 15
@@ -447,10 +342,8 @@ for s in surfaces_raw:
     for m in s:
         surface_of[m] = sid
 
-# Standalone surfaces — every node that does not belong to a cluster
-# gets its own standalone surface. This eliminates surface_ref: null
-# and ensures every node belongs to exactly one surface.
-# Standalone surfaces are typed as 'standalone' (isolated node, no edges).
+# Every non-cluster node gets its own standalone surface so surface_ref
+# is never null.
 _standalone_counter = 0
 for _n in nodes:
     if _n not in surface_of:
@@ -485,10 +378,8 @@ for i, members in enumerate(surfaces_raw, 1):
         'entrypoint_count': len(s_entries),
     })
 
-# Add standalone surfaces to surfaces_out — but condensed to avoid
-# payload explosion. Each standalone surface is a single isolated node.
-# Instead of emitting 65 individual entries, we emit a summary count
-# and let node_index carry the surface_ref per node.
+# Standalone surfaces are emitted as one summary entry (node_index
+# carries per-node surface_ref) to avoid payload explosion.
 _standalone_nodes = [n for n in nodes if surface_of.get(n, '').startswith('surface_standalone_')]
 if _standalone_nodes:
     surfaces_out.append({
@@ -568,30 +459,20 @@ entrypoints_out = [
 ]
 
 # =========================================================
-# NODE INDEX — reverse lookup (file -> topology facts)
-# Forward lookup (id -> file) lives in the per-type lists above.
-# Reverse lookup (file -> {surface_ref, is_entrypoint, is_hotspot,
-# is_boundary, degrees, test_covered, ids}) lives here.
-# Forensics uses this to answer "given a file, what is it?"
-# without scanning every per-type list.
+# NODE INDEX — reverse lookup (file -> topology facts), used by
+# Forensics to answer "given a file, what is it?".
 # =========================================================
 
-# Unresolved references observed by the extractor: references found
-# in source (source/import/require/bash) whose target could not be
-# resolved to a node (e.g. pruned path, non-existent, out of scope).
-# Used to classify relation_visibility below. This is evidence
-# collected by the extractor, not inference by the builder.
+# Extractor-observed references whose target could not be resolved to
+# a node — classifies relation_visibility below.
 unresolved_refs_raw = ref_graph.get('unresolved_references', [])
 _nodes_with_unresolved = set()
 for _ur in unresolved_refs_raw:
     _nodes_with_unresolved.add(_ur.get('from', ''))
 
-# Extensions that the extractors support for reference extraction.
-# Files with these extensions were analyzed by the extractor.
-# If such a file has no edges and no unresolved references, the
-# extractor looked and found nothing — that is evidence of absence,
-# not absence of evidence. Files with unsupported extensions were
-# not analyzed, so their isolation is none_observed.
+# Supported extensions were analyzed: no edges there is evidence of
+# absence (structurally_confirmed_isolated). Unsupported extensions
+# were never analyzed (none_observed).
 _EXTRACTOR_SUPPORTED_EXTS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.sh', '.bash'}
 
 resp_map = {}
@@ -702,13 +583,8 @@ elif surfaces_out:
 
 ranked_targets = []
 
-# Deterministic scoring weights — runtime-owned, not model judgment.
-# score = type_weight + degree_bonus
-# bridge:    4  (connects surfaces, removal disconnects)
-# hotspot:   3  + total_degree (concentration of dependencies)
-# boundary:  2  + in_degree    (external entry, high fan-in)
-# entrypoint: 1  (starting point, low risk)
-# explicit_request targets get score 100 (injected after, below).
+# Deterministic scoring: type weight + degree bonus; explicit_request
+# targets get 100 (injected below).
 BRIDGE_WEIGHT = 4
 HOTSPOT_WEIGHT = 3
 BOUNDARY_WEIGHT = 2
@@ -831,16 +707,8 @@ for _m in _path_re.finditer(investigation_input):
     if _cand not in _requested_paths:
         _requested_paths.append(_cand)
 
-# Canonical path resolution — deterministic scoring algorithm.
-# Each requested path is matched against the node set with a score:
-#   exact     (100) — requested path exists literally in the node set
-#   prefix    (80)  — requested path is a prefix of a node path
-#   relative  (60)  — node path ends with the requested path
-#   basename  (40)  — basename of requested matches basename of a node
-#   stem      (20)  — stem (without extension) matches a node stem
-# The highest-scoring candidate is the canonical match.
-# This prevents downstream modes from treating ambiguous matches as
-# confirmed identities. Reality first, interpretation later.
+# Canonical path resolution scores: exact > prefix > relative >
+# basename > stem. Ties are reported as ambiguous, never picked.
 EXACT_SCORE = 100
 PREFIX_SCORE = 80
 RELATIVE_SCORE = 60
@@ -1011,21 +879,11 @@ total_undirected_edges = sum(len(v) for v in adj_und.values()) // 2 if adj_und e
 # but are NOT connected by edges.
 connected_node_count   = sum(s['member_count'] for s in surfaces_out if s.get('surface_kind') == 'cluster')
 
-# Edge counts by resolution status.
-#   resolved_edge_count   — edges where the target is a real node
-#                           (feeds surfaces, bridges, WCC)
-#   unresolved_edge_count — edges observed in source but whose target
-#                           is pruned/missing/out-of-scope. These feed
-#                           degree/fanout/hotspot/boundary but do NOT
-#                           form clusters. No synthetic nodes are created.
 resolved_edge_count   = sum(len(v) for v in adj_out_resolved.values())
 unresolved_edge_count = sum(unresolved_dep_count.values())
 
-# topology_summary — graph-derived topology ONLY.
-# Counts of nodes, edges, and derived structural features.
-# Coverage and payload-health live in `evidence` below so that
-# topology (what the graph IS) is not conflated with evidence
-# (what was observed about coverage and payload success).
+# topology_summary is graph shape only; coverage/payload health live
+# in `evidence` below.
 _cluster_surface_count = sum(1 for s in surfaces_out if s.get('surface_kind') == 'cluster')
 _standalone_surface_count = sum(1 for s in surfaces_out if s.get('surface_kind') == 'standalone')
 
@@ -1047,10 +905,6 @@ topology_summary = {
     'entrypoint_count':        len(entrypoints_out),
 }
 
-# evidence — observed coverage and payload health.
-# Distinct from topology: these describe what was observed about
-# test coverage and whether upstream payloads materialized, not the
-# shape of the graph itself.
 evidence = {
     'coverage': {
         'test_covered_file_count': len(covered_files),
@@ -1105,10 +959,8 @@ gap_counts = {
 }
 
 # =========================================================
-# RUNTIME SUMMARY & FINDINGS — deterministic, no model judgment
-# These are derived from topology data only. Discovery copies
-# them verbatim instead of generating its own. This reduces
-# the model's cognitive responsibility to near zero.
+# RUNTIME SUMMARY & FINDINGS — deterministic; Discovery copies them
+# verbatim instead of generating its own.
 # =========================================================
 
 runtime_summary = (
@@ -1195,37 +1047,14 @@ PY
 # JSON EMISSION
 # =========================================================
 
-_TMPFILE="$(mktemp)"
-printf '%s' "${TOPOLOGY_JSON}" > "${_TMPFILE}"
+TMP_RESULT_FILE="$(aegis_mktemp)"
+printf '%s' "${TOPOLOGY_JSON}" > "${TMP_RESULT_FILE}"
 
-jq -n \
-  --arg capability "structural.builder" \
-  --arg classification "readonly" \
-  --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-  --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-  --arg target "${TARGET_PATH}" \
-  --slurpfile result "${_TMPFILE}" \
-  '{
-    success: true,
-    capability: $capability,
-    classification: $classification,
-    execution_id: $execution_id,
-    generated_at: $generated_at,
-    payload: {
-      target: $target,
-      topology_summary:            $result[0].topology_summary,
-      evidence:                    $result[0].evidence,
-      runtime_summary:             $result[0].runtime_summary,
-      runtime_findings:            $result[0].runtime_findings,
-      ranked_targets:              $result[0].ranked_targets,
-      suggested_evidence_priorities: $result[0].suggested_evidence_priorities,
-      gap_counts:                  $result[0].gap_counts,
-      topology_index:              $result[0].topology_index,
-      unresolved_references:       $result[0].unresolved_references,
-      consumed_payloads:           $result[0].consumed_payloads,
-      observed_request_alignment:  $result[0].observed_request_alignment
-    },
-    error: null
-  }'
+TMP_PAYLOAD_FILE="$(aegis_mktemp)"
 
-rm -f "${_TMPFILE}"
+# The Python result already carries the payload keys in emission order;
+# only the target is prepended.
+jq -c --arg target "${TARGET_PATH}" '{target: $target} + .' \
+  "${TMP_RESULT_FILE}" > "${TMP_PAYLOAD_FILE}"
+
+emit_success_payload_file "${TMP_PAYLOAD_FILE}"

@@ -34,47 +34,7 @@ require_prune_policy
 # EXTRACTION
 # =========================================================
 
-IMPORT_GRAPH_JSON="$(python3 - "${TARGET_PATH}" <<'PY'
-import os
-import re
-import sys
-import json
-
-root = sys.argv[1] if len(sys.argv) > 1 else '.'
-prune_paths = os.environ.get('PRUNE_PATHS', '').split()
-
-all_files = []
-for dirpath, dirnames, filenames in os.walk(root):
-    try:
-        rel_dir = os.path.relpath(dirpath, '.')
-    except ValueError:
-        rel_dir = ''
-    if rel_dir == '.':
-        rel_dir = ''
-
-    i = len(dirnames) - 1
-    while i >= 0:
-        d = dirnames[i]
-        d_rel = os.path.join(rel_dir, d) if rel_dir else d
-        d_rel_norm = d_rel.replace('\\', '/')
-        is_pruned = any(
-            d_rel_norm == p or d_rel_norm.startswith(p + '/')
-            for p in prune_paths
-        )
-        if is_pruned:
-            del dirnames[i]
-        i -= 1
-
-    for f in filenames:
-        f_rel = os.path.join(rel_dir, f) if rel_dir else f
-        f_rel_norm = f_rel.replace('\\', '/')
-        is_pruned = any(
-            f_rel_norm == p or f_rel_norm.startswith(p + '/')
-            for p in prune_paths
-        )
-        if not is_pruned:
-            all_files.append(f_rel_norm)
-
+IMPORT_GRAPH_JSON="$(run_python_extractor "${TARGET_PATH}" <<'PY'
 import_graph = []
 
 def resolve_existing(candidates):
