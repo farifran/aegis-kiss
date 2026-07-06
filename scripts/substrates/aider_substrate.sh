@@ -49,6 +49,11 @@ cd "${AEGIS_AIDER_SUBSTRATE_ROOT}"
 
 source ".harness/config.sh"
 
+# Mutation timeouts: per-request (aider --timeout) and total wall clock
+# (watchdog kill). Both operator-overridable.
+: "${AEGIS_AIDER_TIMEOUT:=${AEGIS_PROVIDER_RESPONSE_TIMEOUT:-120}}"
+: "${AEGIS_AIDER_MAX_SECONDS:=300}"
+
 # =========================================================
 # INPUTS
 # =========================================================
@@ -359,39 +364,21 @@ invoke_aider() {
     "--model" "${AEGIS_AIDER_MODEL}"
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
+    "--timeout" "${AEGIS_AIDER_TIMEOUT}"
     "--yes-always"
     "--no-auto-commits"
     "--no-git"
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
+    "--no-auto-lint"
+    "--no-auto-test"
     "--exit"
   )
-  
-  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *typescript_check* ]]; then
-    aider_cmd+=(
-      "--lint-cmd" "ts:bash scripts/capabilities/typescript_check.sh"
-      "--lint-cmd" "tsx:bash scripts/capabilities/typescript_check.sh"
-      "--auto-lint"
-    )
-  fi
 
-  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *eslint_check* ]]; then
-    aider_cmd+=(
-      "--lint-cmd" "js:bash scripts/capabilities/eslint_check.sh"
-      "--lint-cmd" "jsx:bash scripts/capabilities/eslint_check.sh"
-      "--lint-cmd" "ts:bash scripts/capabilities/eslint_check.sh"
-      "--lint-cmd" "tsx:bash scripts/capabilities/eslint_check.sh"
-      "--auto-lint"
-    )
-  fi
-
-  if [[ "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" == *test_runner* ]]; then
-    aider_cmd+=(
-      "--test-cmd" "bash scripts/capabilities/test_runner.sh"
-      "--auto-test"
-    )
-  fi
+  # Bounded mutation is single-shot by design: no lint/test fix loops here.
+  # Each auto-lint retry is another slow model round-trip with no upper
+  # bound, and verification is owned by the adversarial/validation modes.
 
   # Add mutation target files (guard against empty expansion)
   if [[ "${#file_args[@]}" -gt 0 ]]; then
@@ -404,23 +391,34 @@ invoke_aider() {
   aider_log "Invoking aider mutation substrate..."
   aider_log "Model: ${AEGIS_AIDER_MODEL}"
   aider_log "Targets: ${file_args[*]:-<none>}"
-  aider_log "Actual aider command to be executed:"
-  printf '%q ' "${aider_cmd[@]}" >&2
-  echo >&2
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
   local aider_start_time
   aider_start_time=$(date +%s)
 
+  # Wall-clock watchdog: --timeout only bounds individual API requests,
+  # so retry loops can still hang the pipeline. The watchdog kills the
+  # whole aider process after AEGIS_AIDER_MAX_SECONDS.
   set +e
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
 
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
       "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1
-  )
+  ) &
+  local aider_pid=$!
+
+  # stdout/stderr detached so the lingering sleep cannot hold the caller's
+  # command-substitution pipe open after the watchdog is killed.
+  ( sleep "${AEGIS_AIDER_MAX_SECONDS}" && kill "${aider_pid}" ) >/dev/null 2>&1 &
+  local watchdog_pid=$!
+
+  wait "${aider_pid}"
   aider_status=$?
+
+  kill "${watchdog_pid}" 2>/dev/null
+  wait "${watchdog_pid}" 2>/dev/null
   set -e
 
   local aider_end_time
@@ -429,8 +427,12 @@ invoke_aider() {
   echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
   if [[ "${aider_status}" -ne 0 ]]; then
-    aider_warn "aider invocation failed with exit status ${aider_status}"
-    head -n 120 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
+    if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]]; then
+      aider_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
+    else
+      aider_warn "aider invocation failed with exit status ${aider_status}"
+    fi
+    tail -n 60 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
     rollback_execution_surface
     aider_fatal "aider_execution_failed"
   fi

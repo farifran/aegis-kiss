@@ -708,6 +708,19 @@ extract_substrate_artifact() {
   printf '%s' "${output%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
 }
 
+# Print a labelled mismatch dump: alternating description/JSON pairs.
+dump_mismatch() {
+  local label="$1"
+  shift
+
+  echo "[DEBUG] ${label} details:" >&2
+  while [[ "$#" -gt 1 ]]; do
+    echo "[DEBUG] $1:" >&2
+    printf '%s\n' "$2" | jq -c '.' >&2 || printf '%s\n' "$2" >&2
+    shift 2
+  done
+}
+
 validate_artifact() {
 
   local artifact
@@ -733,7 +746,7 @@ validate_artifact() {
     || executor_fatal "artifact_mode_mismatch"
 
   if [[ "${AEGIS_MODE}" == "forensics" ]]; then
-    echo "${artifact}" \
+    if ! echo "${artifact}" \
       | jq -e '
           (.status == "interpreted" or .status == "inconclusive")
           and (
@@ -762,8 +775,10 @@ validate_artifact() {
               == .handover_attention.next_attention_targets
             )
           )
-        ' >/dev/null 2>&1 \
-      || executor_fatal "invalid_forensics_artifact_contract"
+        ' >/dev/null 2>&1; then
+      dump_mismatch "invalid_forensics_artifact_contract" "Artifact" "${artifact}"
+      executor_fatal "invalid_forensics_artifact_contract"
+    fi
 
     previous_discovery="$(
       jq -c '.' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
@@ -819,7 +834,7 @@ validate_artifact() {
   fi
 
   if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
-    echo "${artifact}" \
+    if ! echo "${artifact}" \
       | jq -e '
           (.status == "challenged" or .status == "inconclusive")
           and (
@@ -839,8 +854,10 @@ validate_artifact() {
             and (.attention_scope | type == "string" and length > 0)
             and (.attention_reason | type == "string" and length > 0)
           )
-        ' >/dev/null 2>&1 \
-      || executor_fatal "invalid_adversarial_artifact_contract"
+        ' >/dev/null 2>&1; then
+      dump_mismatch "invalid_adversarial_artifact_contract" "Artifact" "${artifact}"
+      executor_fatal "invalid_adversarial_artifact_contract"
+    fi
 
     previous_optimized_candidate="$(
       jq -c '
@@ -871,7 +888,7 @@ validate_artifact() {
   fi
 
   if [[ "${AEGIS_MODE}" == "validation" ]]; then
-    echo "${artifact}" \
+    if ! echo "${artifact}" \
       | jq -e '
           (.verdict == "accepted"
             or .verdict == "rejected"
@@ -893,8 +910,10 @@ validate_artifact() {
             and (.attention_scope | type == "string" and length > 0)
             and (.attention_reason | type == "string" and length > 0)
           )
-        ' >/dev/null 2>&1 \
-      || executor_fatal "invalid_validation_artifact_contract"
+        ' >/dev/null 2>&1; then
+      dump_mismatch "invalid_validation_artifact_contract" "Artifact" "${artifact}"
+      executor_fatal "invalid_validation_artifact_contract"
+    fi
 
     previous_candidate="$(
       jq -c '.artifact_snapshot.operational_context.candidate_result // empty' \
@@ -987,10 +1006,17 @@ normalize_substrate_output() {
   raw_artifact="$(extract_substrate_artifact)"
   # If it is valid JSON, normalize/ensure the structural fields exist
   if printf '%s\n' "${raw_artifact}" | jq empty >/dev/null 2>&1; then
+    # Contract fallback when a candidate omits its own evidence_refs.
+    local evidence_refs_json
+    evidence_refs_json="$(
+      jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
+    )"
+
     local updated_artifact
     updated_artifact="$(
       printf '%s\n' "${raw_artifact}" | jq \
         --arg mode "${AEGIS_MODE}" \
+        --argjson evidence_refs "${evidence_refs_json}" \
         '
         .mode = $mode
         | .handover_attention = (
@@ -1008,6 +1034,33 @@ normalize_substrate_output() {
             else
               .status = "interpreted"
             end
+          else
+            .
+          end
+        | if $mode == "forensics" then
+            # Deterministic protocol coercion: project candidates onto the
+            # exact contract shape (extra model keys dropped, defaults
+            # filled) and keep attention targets in lockstep with them.
+            .repair_candidates = (.repair_candidates // [] | map({
+              id,
+              reason: (.reason // "unspecified"),
+              evidence_refs: (
+                if (.evidence_refs | type == "array" and length > 0)
+                then .evidence_refs
+                else $evidence_refs
+                end
+              )
+            }))
+            | .handover_attention = {
+                next_attention_targets: (
+                  if .status == "interpreted"
+                  then [.repair_candidates[].id]
+                  else (.handover_attention.next_attention_targets // [])
+                  end
+                ),
+                attention_scope: "evidence-backed interpretation",
+                attention_reason: (.handover_attention.attention_reason // "runtime auto-populated attention")
+              }
           else
             .
           end

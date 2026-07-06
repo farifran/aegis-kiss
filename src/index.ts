@@ -43,3 +43,9 @@ export function kilosParaGramas(kilos: number): number {
 export function kilosParaToneladas(kilos: number): number {
     return kilos / 1000;
 }
+export function kilobyteParaMegabyte(kb: number): number {
+    return kb / 1024;
+}
+export function megabyteParaKilobyte(mb: number): number {
+    return mb * 1024;
+}
