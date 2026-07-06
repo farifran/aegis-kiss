@@ -40,3 +40,6 @@ export function librasParaKilos(libras: number): number {
 export function kilosParaGramas(kilos: number): number {
     return kilos * 1000;
 }
+export function kilosParaToneladas(kilos: number): number {
+    return kilos / 1000;
+}
