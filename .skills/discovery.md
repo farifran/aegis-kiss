@@ -13,53 +13,23 @@ Discovery extracts and compresses operational focus from runtime-produced struct
 5. **No risk assessment**: Risk analysis ("coupling risk", "failure risk") is prohibited. It belongs exclusively to Forensics.
 6. **No functional inference**: Do NOT infer module function from topology position (e.g., "it mediates connectivity"). Describe topological facts only: "entrypoint node connects to two boundary nodes".
 
-## JSON SCHEMA CONTRACT
-Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers. The runtime automatically populates the `mode`, `handover_attention` and standard metadata.
+## JSON SCHEMA CONTRACT — MINIMAL COGNITIVE ARTIFACT
+Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers, containing EXCLUSIVELY the properties below. The runtime is the sole owner of all state and metadata: it injects `mode`, `evidence_refs`, `investigation_scope`, `attention_targets`, `blocking_conditions`, `evidence_priorities`, and `handover_attention`. Emitting any of those is a contract violation.
 
 ```json
 {
-  "evidence_refs": ["structural.builder", "runtime.attention_seed", "filesystem.read:epistemic_handover"],
-  "operational_context": {
-    "investigation_scope": {
-      "scope_type": "explicit_request",
-      "scope_targets": ["src/index.ts"],
-      "scope_confidence": "high"
-    },
-    "attention_targets": ["src/index.ts"],
-    "blocking_conditions": [],
-    "required_evidence": ["filesystem.read:src/index.ts"],
-    "operational_observations": [
-      "Evidence collection at entrypoint node is required before forensics can interpret boundary relationships."
-    ],
-    "rationale": [
-      "User requested analysis of repository topology, starting with the main entrypoint."
-    ],
-    "escalation_reason": null,
-    "recommended_next_actions": [
-      "Invoke forensics mode on src/index.ts"
-    ],
-    "evidence_priorities": ["filesystem.read:src/index.ts"],
-    "confidence_drivers": ["Bridge observed mechanically"]
-  }
+  "observations": [
+    "Evidence collection at entrypoint node is required before forensics can interpret boundary relationships."
+  ],
+  "rationale": "User requested analysis of repository topology, starting with the main entrypoint.",
+  "required_evidence": ["filesystem.read:src/index.ts"]
 }
 ```
 
 ## DETAILED FIELD INSTRUCTIONS
-- **`evidence_refs`**: List capability names read.
-- **`operational_context`**:
-  - **`investigation_scope`**, **`attention_targets`**, **`blocking_conditions`**: Copy verbatim from `runtime.attention_seed` payload. If missing, set defaults (`{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}`, `[]`, `[]`).
-  - **`required_evidence`**: Capabilities or files to collect next.
-  - **`operational_observations`**: Qualitative/interpretive observations about the *investigation state* and structural gaps.
-  - **`rationale`**: Rationale for the prioritization.
-  - **`escalation_reason`**: Null, or string if blocked.
-  - **`recommended_next_actions`**: Specific workflow next steps.
-  - **`evidence_priorities`**: Copy `suggested_evidence_priorities` from `structural.builder` payload VERBATIM. Do NOT generate or filter.
-  - **`confidence_drivers`**: Factors driving operational confidence (e.g., "Entrypoint observed mechanically").
+- **`observations`**: Qualitative observations about the *investigation state* (gaps, priorities), never the system.
+- **`rationale`**: One string with the prioritization rationale.
+- **`required_evidence`**: Capabilities or files to collect next (`filesystem.read:<path>` entries).
 
 ## FAILURE POLICY
-If `structural.builder` payload is unavailable or failed:
-- Set `evidence_refs` to capabilities read.
-- Set `investigation_scope` to `{"scope_type": "none", "scope_targets": [], "scope_confidence": "none"}`.
-- Set `blocking_conditions` to `["required evidence payload missing"]`.
-- Set `escalation_reason` to `"required evidence payload missing"`.
-- Set `attention_targets`, `operational_observations`, `required_evidence`, `rationale`, `recommended_next_actions`, `evidence_priorities`, and `confidence_drivers` to empty arrays (`[]`).
+If `structural.builder` payload is unavailable or failed, state the gap in `observations`, keep `required_evidence` at `[]`, and explain in `rationale` why evidence collection is blocked.

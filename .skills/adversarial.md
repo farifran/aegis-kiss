@@ -230,14 +230,9 @@ The mode must emit:
 ### Pipeline source_mode Alignment
 Note that the candidate's `source_mode` is always set to `optimize` because the pipeline runs Optimize as the final mutation stage. If the Optimize mode's `status` was `"no_optimization_needed"`, it means the diff actually originated in `repair` mode and was simply forwarded without changes. Do NOT reject or challenge feature additions or bug fixes just because their `source_mode` is `optimize`, as long as they are valid results of the preceding Repair stage.
 
-### candidate_result Identity Constraint
+### candidate_result Ownership
 
-The `candidate_result` object (containing `source_mode`, `diff`, and `files_changed`) MUST be copied byte-for-byte, literally and verbatim, from the input/evidence snapshot of the candidate being challenged.
-- Do NOT reformat, re-indent, normalize, or rewrite the `diff` text.
-- Do NOT modify line endings, whitespace, or empty lines in the `diff`.
-- Copy all fields exactly as they are provided in the capability payload evidence.
-- Any mismatch, even by a single character or line ending, will trigger an `adversarial_candidate_mismatch` error and fail the execution.
-- **CRITICAL WARNING**: Do NOT include the closing double quote (`"`) of the input JSON `diff` string inside the value of your output `diff` string (do not end the diff value with `\"`). The diff text ends at the final bracket `}`. Ensure the output diff value does not contain a trailing escaped quote.
+The runtime carries the candidate under challenge itself: `candidate_result` is injected verbatim from the epistemic handover. Do NOT emit it — reason over the candidate diff exposed in the evidence payloads only.
 
 ### Findings Schema
 
@@ -253,16 +248,11 @@ The `findings` field MUST be an array of objects. Each finding object has:
 
 **CRITICAL RULE**: `missing_evidence` findings MUST always have `supported_by_evidence: false` and `severity: "info"`. They describe absence of observation — not a flaw in the candidate. Validation will not use them to block promotion.
 
-The required artifact fields must be STRICT, VALID JSON. All object keys MUST be enclosed in double quotes (e.g., `"mode"` not `mode`, `"findings"` not `findings`, `"type"` not `type`):
+The required artifact is a MINIMAL COGNITIVE ARTIFACT containing EXCLUSIVELY the properties below, in STRICT, VALID JSON (all keys double-quoted). The runtime injects `mode`, `candidate_result`, top-level `evidence_refs`, and `handover_attention` — emitting them is a contract violation.
 
 ```json
 {
-  "status": "challenged|inconclusive",
-  "candidate_result": {
-    "source_mode": "optimize",
-    "diff": "diff --git ...",
-    "files_changed": ["src/index.ts"]
-  },
+  "status": "challenged|verified",
   "findings": [
     {
       "type": "logic_bug",
@@ -271,10 +261,11 @@ The required artifact fields must be STRICT, VALID JSON. All object keys MUST be
       "supported_by_evidence": true,
       "evidence_refs": ["filesystem.read:epistemic_handover"]
     }
-  ],
-  "evidence_refs": ["filesystem.read:epistemic_handover"]
+  ]
 }
 ```
+
+- **`status`**: `"challenged"` when at least one evidence-supported finding falsifies the candidate; `"verified"` when the candidate survives all falsification attempts.
 
 ---
 

@@ -286,3 +286,8 @@ The operational objective of repair is:
 apply the smallest correct mutation necessary to restore bounded operational correctness while preserving runtime sovereignty, capability boundaries, and deterministic execution topology.
 
 Validation judges the repaired state after the correction. Repair does not own the verdict.
+⸻
+
+Output Contract — Zero JSON
+
+Repair emits NO JSON artifact and NO structured metadata. It only applies file edits inside the execution surface. The runtime derives the mutation artifact deterministically: `diff` and `files_changed` are parsed from the real worktree diff, and all state (`mode`, attention routing, handover) is constructed by the runtime. Do not emit `status`, `files_changed`, `mutation_target`, or any other declaration — only the edits themselves.

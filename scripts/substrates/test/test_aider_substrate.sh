@@ -117,8 +117,9 @@ artifact="$(extract_first_artifact_payload "${output}")"
 printf '%s\n' "${artifact}" \
   | jq -e '
       .mode == "repair"
-      and .mutation_target == "src/index.ts"
       and .files_changed == ["src/index.ts"]
+      and .handover_attention.next_attention_targets == ["src/index.ts"]
+      and .handover_attention.attention_reason == "ATTENTION_REASON_REPAIR"
       and (.diff | contains("export const soma"))
     ' >/dev/null \
   || fail "invalid_mutation_artifact"

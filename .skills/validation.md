@@ -217,38 +217,21 @@ Validation must emit:
 ### Pipeline source_mode Alignment
 Note that the candidate's `source_mode` is always set to `optimize` because the pipeline runs Optimize as the final mutation stage. If the Optimize mode's `status` was `"no_optimization_needed"`, it means the diff actually originated in `repair` mode and was simply forwarded without changes. Do NOT reject or challenge feature additions or bug fixes just because their `source_mode` is `optimize`, as long as they are valid results of the preceding Repair stage.
 
-### validated_candidate Identity Constraint
+### validated_candidate and findings Ownership
 
-The `validated_candidate` object (containing `source_mode`, `diff`, and `files_changed`) MUST be copied byte-for-byte, literally and verbatim, from the input/evidence candidate under judgment (`candidate_result` under `artifact_snapshot`).
-- Do NOT reformat, re-indent, normalize, or rewrite the `diff` text.
-- Do NOT modify line endings, whitespace, or empty lines in the `diff`.
-- Copy all fields exactly as they are provided in the capability payload evidence.
-- Any mismatch, even by a single character or line ending, will trigger a `validation_candidate_mismatch` error and fail the execution.
+The runtime carries both the candidate under judgment and the adversarial findings itself: `validated_candidate` and `findings` are injected verbatim from the epistemic handover. Do NOT emit them — judge the candidate using the evidence payloads only.
 
-- **`findings`**: Copy the typed findings array verbatim from the preceding Adversarial mode's output. You can find this inside the `epistemic_handover.json` payload under `payload.content.artifact_snapshot.operational_context.findings`. **CRITICAL**: Serialize the entire `findings` array as a compact single-line JSON array — no line breaks inside the array, no indentation inside the array objects. Every string value inside the findings objects MUST have both an opening and a closing double quote.
-
-The required artifact shape must be STRICT, VALID JSON. All object keys MUST be enclosed in double quotes:
+The required artifact is a MINIMAL COGNITIVE ARTIFACT containing EXCLUSIVELY the properties below, in STRICT, VALID JSON (all keys double-quoted). The runtime injects `mode`, `validated_candidate`, `findings`, `evidence_refs`, and `handover_attention` — emitting any of those is a contract violation.
 
 ```json
 {
-  "verdict": "accepted|rejected|insufficient",
-  "findings": [
-    {
-      "type": "logic_bug",
-      "severity": "high",
-      "description": "...",
-      "supported_by_evidence": true,
-      "evidence_refs": ["filesystem.read:epistemic_handover"]
-    }
-  ],
-  "validated_candidate": {
-    "source_mode": "optimize",
-    "diff": "diff --git ...",
-    "files_changed": ["src/index.ts"]
-  },
-  "basis": ["basis justification description 1", "basis justification description 2"]
+  "verdict": "accepted|rejected",
+  "basis": "one short justification of the verdict grounded in the exposed evidence"
 }
 ```
+
+- **`verdict`**: `"accepted"` only when no evidence-supported finding blocks the candidate; `"rejected"` otherwise.
+- **`basis`**: One string justifying the verdict.
 
 The runtime owns framing.
 

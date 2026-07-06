@@ -31,6 +31,9 @@ export function centimetrosParaMetros(centimetros: number): number {
 export function minutosParaSegundos(minutos: number): number {
     return minutos * 60;
 }
+export function horasParaMinutos(horas: number): number {
+    return horas * 60;
+}
 export function kilosParaLibras(kilos: number): number {
     return kilos * 2.20462;
 }

@@ -818,7 +818,7 @@ validate_artifact() {
   if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
     if ! echo "${artifact}" \
       | jq -e '
-          (.status == "challenged" or .status == "inconclusive")
+          (.status == "challenged" or .status == "verified" or .status == "inconclusive")
           and (
             .candidate_result
             | type == "object"
@@ -983,68 +983,201 @@ validate_mutation_artifact() {
 # OUTPUT
 # =========================================================
 
+# =========================================================
+# MINIMAL COGNITIVE ARTIFACT ENRICHMENT
+#
+# Models emit only their minimal cognitive payload; the runtime is the
+# sole constructor of state: mode, evidence_refs, observed_payloads,
+# candidates carried from the handover, attention routing and the
+# ATTENTION_REASON_* enum are all injected deterministically here.
+# =========================================================
+
 normalize_substrate_output() {
   local raw_artifact
   raw_artifact="$(extract_substrate_artifact)"
   # If it is valid JSON, normalize/ensure the structural fields exist
   if printf '%s\n' "${raw_artifact}" | jq empty >/dev/null 2>&1; then
-    # Contract fallback when a candidate omits its own evidence_refs.
+    # Runtime-owned evidence identity: refs from the active envelope,
+    # observed payload filenames derived from the evidence entries.
     local evidence_refs_json
     evidence_refs_json="$(
       jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
     )"
 
+    local -a observed_payloads_arr=()
+    local entry
+    for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+      [[ -n "${entry}" ]] || continue
+      observed_payloads_arr+=("$(
+        resolve_evidence_payload_file \
+          "$(resolve_evidence_entry_capability "${entry}")" \
+          "$(resolve_evidence_entry_alias "${entry}")"
+      )")
+    done
+    local observed_payloads_json
+    observed_payloads_json="$(jq -cn '$ARGS.positional' --args "${observed_payloads_arr[@]}")"
+
+    # One pass over the handover: previous candidate (source_mode coerced)
+    # and previous findings — the runtime, not the model, carries them.
+    local prev_candidate_json="null"
+    local prev_findings_json="null"
+    if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
+      local handover_ctx=()
+      mapfile -t handover_ctx < <(
+        jq -c '
+          .artifact_snapshot as $snap
+          | ((
+              $snap.operational_context.candidate_result
+              // $snap.candidate_result
+              // (if ($snap.operational_context.diff | type == "string") then
+                   {
+                     diff: $snap.operational_context.diff,
+                     files_changed: ($snap.operational_context.files_changed // [])
+                   }
+                 else null end)
+             )
+             | if . != null then .source_mode = "optimize" else . end),
+            ($snap.operational_context.findings // $snap.findings // null)
+        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
+      )
+      prev_candidate_json="${handover_ctx[0]:-null}"
+      prev_findings_json="${handover_ctx[1]:-null}"
+    fi
+
+    # Attention-seed scope/targets/conditions and builder priorities for
+    # discovery enrichment.
+    local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
+    local seed_targets_json="[]"
+    local seed_conditions_json="[]"
+    local seed_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/runtime_attention_seed.json"
+    if [[ -f "${seed_path}" ]]; then
+      local seed_ctx=()
+      mapfile -t seed_ctx < <(
+        jq -c '
+          (.payload.investigation_scope
+            // {"scope_type":"none","scope_targets":[],"scope_confidence":"none"}),
+          (.payload.attention_targets // []),
+          (.payload.blocking_conditions // [])
+        ' "${seed_path}" 2>/dev/null
+      )
+      seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
+      seed_targets_json="${seed_ctx[1]:-[]}"
+      seed_conditions_json="${seed_ctx[2]:-[]}"
+    fi
+
+    local builder_priorities_json="[]"
+    local builder_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
+    if [[ -f "${builder_path}" ]]; then
+      builder_priorities_json="$(jq -c '.payload.suggested_evidence_priorities // []' "${builder_path}" 2>/dev/null || echo '[]')"
+    fi
+
     local updated_artifact
     updated_artifact="$(
       printf '%s\n' "${raw_artifact}" | jq \
         --arg mode "${AEGIS_MODE}" \
+        --arg attention_reason "ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')" \
         --argjson evidence_refs "${evidence_refs_json}" \
+        --argjson observed_payloads "${observed_payloads_json}" \
+        --argjson prev_candidate "${prev_candidate_json}" \
+        --argjson prev_findings "${prev_findings_json}" \
+        --argjson seed_scope "${seed_scope_json}" \
+        --argjson seed_targets "${seed_targets_json}" \
+        --argjson seed_conditions "${seed_conditions_json}" \
+        --argjson builder_priorities "${builder_priorities_json}" \
         '
+        def drop_empty:
+          with_entries(select(
+            (.value != null)
+            and ((.value | type) != "array" or (.value | length) > 0)
+          ));
+
         .mode = $mode
-        | .handover_attention = (
-            .handover_attention // {
-              next_attention_targets: (.repair_candidates // [] | map(.id)? // .validated_candidate.files_changed // []),
-              attention_scope: (if .verdict? then "validation_result" elif .verdict? == null and .diff? then "mutation_result" else "exploratory" end),
-              attention_reason: "runtime auto-populated attention"
-            }
-          )
+        | .evidence_refs = $evidence_refs
+        | .observed_payloads = (.observed_payloads // $observed_payloads)
         | if .status? == null then
-            if .verdict? then
-              .
-            elif .diff? then
-              .status = "optimized"
-            else
-              .status = "interpreted"
-            end
-          else
-            .
-          end
-        | if $mode == "forensics" then
-            # Deterministic protocol coercion: project candidates onto the
-            # exact contract shape (extra model keys dropped, defaults
-            # filled) and keep attention targets in lockstep with them.
+            if .verdict? then . else .status = "interpreted" end
+          else . end
+        | if $mode == "discovery" then
+            (.operational_context // {}) as $oc
+            | .operational_context = ({
+                status: ($oc.status // "interpreted"),
+                summary: ($oc.summary // "discovery operational context"),
+                observed_payloads: ($oc.observed_payloads // $observed_payloads),
+                investigation_scope: $seed_scope,
+                attention_targets: $seed_targets,
+                blocking_conditions: $seed_conditions,
+                required_evidence: (.required_evidence // $oc.required_evidence // []),
+                operational_observations: (.observations // $oc.operational_observations // []),
+                rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
+                evidence_priorities: (
+                  if ($builder_priorities | length) > 0 then $builder_priorities
+                  else ($oc.evidence_priorities // []) end
+                )
+              } | drop_empty)
+            | del(.observations, .rationale, .required_evidence)
+            | .handover_attention = {
+                next_attention_targets: $seed_targets,
+                attention_scope: ($seed_scope.scope_type // "exploratory"),
+                attention_reason: $attention_reason
+              }
+          elif $mode == "forensics" then
+            # Project candidates onto the exact contract shape: the model
+            # supplies id+reason only; the runtime owns evidence identity.
             .repair_candidates = (.repair_candidates // [] | map({
               id,
               reason: (.reason // "unspecified"),
-              evidence_refs: (
-                if (.evidence_refs | type == "array" and length > 0)
-                then .evidence_refs
-                else $evidence_refs
-                end
-              )
+              evidence_refs: $evidence_refs
             }))
             | .handover_attention = {
                 next_attention_targets: (
                   if .status == "interpreted"
                   then [.repair_candidates[].id]
-                  else (.handover_attention.next_attention_targets // [])
+                  else []
                   end
                 ),
                 attention_scope: "evidence-backed interpretation",
-                attention_reason: (.handover_attention.attention_reason // "runtime auto-populated attention")
+                attention_reason: $attention_reason
+              }
+          elif $mode == "optimize" then
+            .status = (if .status == "optimized" then "optimized" else "no_optimization_needed" end)
+            | .candidate_result = (
+                $prev_candidate // {diff: "(no changes)", files_changed: []}
+              )
+            | del(.diff, .files_changed)
+            | .handover_attention = {
+                next_attention_targets: (.candidate_result.files_changed // []),
+                attention_scope: "mutation_applied",
+                attention_reason: $attention_reason
+              }
+          elif $mode == "adversarial" then
+            .status = (.status // "challenged")
+            | .candidate_result = ($prev_candidate // .candidate_result)
+            | .findings = (.findings // [] | map(
+                .supported_by_evidence = (.supported_by_evidence // true)
+                | .evidence_refs = (.evidence_refs // $evidence_refs)
+              ))
+            | .handover_attention = {
+                next_attention_targets: (.candidate_result.files_changed // []),
+                attention_scope: "bounded falsification",
+                attention_reason: $attention_reason
+              }
+          elif $mode == "validation" then
+            .validated_candidate = ($prev_candidate // .validated_candidate)
+            | .findings = ($prev_findings // .findings // [])
+            | .basis = (.basis // [] | if type == "string" then [.] else . end)
+            | .handover_attention = {
+                next_attention_targets: (.validated_candidate.files_changed // []),
+                attention_scope: "validation_result",
+                attention_reason: $attention_reason
               }
           else
-            .
+            .handover_attention = (
+              .handover_attention // {
+                next_attention_targets: [],
+                attention_scope: "exploratory",
+                attention_reason: $attention_reason
+              }
+            )
           end
         '
     )"

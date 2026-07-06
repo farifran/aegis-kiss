@@ -11,19 +11,17 @@ Forensics does NOT write summaries of files, explain code flow, or construct qua
 3. **No qualitative fields**: Do NOT output `summary`, `observations`, `interpretations`, `hypotheses`, `risks`, or `confidence` fields, as they are not consumed by any downstream mode.
 4. **No conversational prose**: Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AEGIS_ARTIFACT_END` markers.
 
-## JSON SCHEMA CONTRACT
-The runtime automatically populates the `mode`, `handover_attention` and standard metadata.
+## JSON SCHEMA CONTRACT — MINIMAL COGNITIVE ARTIFACT
+Output MUST contain EXCLUSIVELY the properties below. The runtime injects `mode`, all `evidence_refs`, and `handover_attention` — emitting them is a contract violation.
 ```json
 {
   "status": "interpreted|inconclusive",
   "repair_candidates": [
     {
       "id": "src/index.ts",
-      "reason": "Request: add power function.",
-      "evidence_refs": ["filesystem.read:src/index.ts"]
+      "reason": "Request: add power function."
     }
-  ],
-  "evidence_refs": ["filesystem.read:src/index.ts"]
+  ]
 }
 ```
 
@@ -32,5 +30,3 @@ The runtime automatically populates the `mode`, `handover_attention` and standar
 - **`repair_candidates`**: Array of objects. If `status` is `"inconclusive"`, this must be `[]`. If `status` is `"interpreted"`, you MUST propose exactly ONE single target file (the array length must be exactly 1) to act as the single mutation target (Alvo Único) for the subsequent Repair stage. Resolve any target ambiguity using the logical hierarchy or entrypoint type (e.g., choose `src/index.ts` over `src/ui/index.ts` for arithmetic helpers).
   - `id`: Repository-relative path to the file to mutate.
   - `reason`: Extremely short reason (3-6 words) for the mutation.
-  - `evidence_refs`: Capability reference showing where the defect or target was observed.
-- **`evidence_refs`**: List capability names consumed.

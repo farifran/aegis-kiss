@@ -465,26 +465,17 @@ capture_worktree_diff() {
 # ARTIFACT EMISSION
 # =========================================================
 
+# The model declares nothing: files_changed and attention routing are
+# parsed from the real worktree diff (Minimal Cognitive Artifacts).
 emit_mutation_artifact() {
 
   local diff_content="$1"
-  shift
-  local mutation_targets=("$@")
 
   local files_changed
   files_changed="$(
     printf '%s\n' "${diff_content}" \
       | jq -cRn '[inputs | select(startswith("+++ b/")) | ltrimstr("+++ b/")]'
   )"
-
-  local primary_target="${mutation_targets[0]:-unknown}"
-
-  local attention_targets_json='[]'
-  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    attention_targets_json="$(
-      jq -cn '$ARGS.positional' --args "${mutation_targets[@]}"
-    )"
-  fi
 
   local artifact_tmp
   artifact_tmp="$(aider_mktemp)"
@@ -496,20 +487,17 @@ emit_mutation_artifact() {
   jq -n \
     --arg mode "${AEGIS_MODE}" \
     --arg execution_id "${AEGIS_EXECUTION_ID}" \
-    --arg mutation_target "${primary_target}" \
     --rawfile diff "${diff_tmp}" \
     --argjson files_changed "${files_changed}" \
-    --argjson next_attention_targets "${attention_targets_json}" \
     '{
       mode: $mode,
       execution_id: $execution_id,
-      mutation_target: $mutation_target,
       diff: $diff,
       files_changed: $files_changed,
       handover_attention: {
-        next_attention_targets: $next_attention_targets,
+        next_attention_targets: $files_changed,
         attention_scope: "mutation_applied",
-        attention_reason: ("repair applied mutation to: " + $mutation_target)
+        attention_reason: "ATTENTION_REASON_REPAIR"
       }
     }' > "${artifact_tmp}"
 
@@ -567,11 +555,7 @@ main() {
 
   aegis_log "Emitting mutation artifact..."
 
-  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    emit_mutation_artifact "${diff_content}" "${mutation_targets[@]}"
-  else
-    emit_mutation_artifact "${diff_content}"
-  fi
+  emit_mutation_artifact "${diff_content}"
 
   aegis_log "Aider mutation substrate completed"
 }
