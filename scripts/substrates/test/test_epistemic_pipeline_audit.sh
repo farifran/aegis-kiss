@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 if grep -Eq '(^|[[:space:]])rg([[:space:]]|$)' \
   scripts/audit_epistemic_pipeline.sh; then

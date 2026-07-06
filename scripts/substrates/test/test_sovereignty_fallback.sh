@@ -1,53 +1,8 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
-readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${AEGIS_TEST_ROOT}"
-
-source ".harness/config.sh"
-
-fail() {
-  echo "[AEGIS][TEST][FATAL] $*" >&2
-  exit 1
-}
-
-readonly HANDOOVER_BACKUP_FILE="$(mktemp)"
-HAD_EPISTEMIC_HANDOVER_FILE="false"
-
-if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-  cp "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${HANDOOVER_BACKUP_FILE}"
-  HAD_EPISTEMIC_HANDOVER_FILE="true"
-fi
-
-cleanup() {
-  set +e
-
-  mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
-
-  if [[ "${HAD_EPISTEMIC_HANDOVER_FILE}" == "true" ]]; then
-    cp "${HANDOOVER_BACKUP_FILE}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-      >/dev/null 2>&1 || true
-  else
-    rm -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-      >/dev/null 2>&1 || true
-  fi
-
-  rm -f \
-    "${HANDOOVER_BACKUP_FILE:-}" \
-    >/dev/null 2>&1 || true
-
-  rm -rf \
-    "${AEGIS_CAPABILITY_ENV_DIR}" \
-    "${AEGIS_CAPABILITY_PAYLOAD_DIR}" \
-    ".harness/execution_surfaces/discovery" \
-    >/dev/null 2>&1 || true
-}
-
-trap cleanup EXIT
+backup_epistemic_handover
 
 # We set up an invalid API base so that raw_llm.sh fails to connect and raises provider_retry_limit_exceeded.
 export OPENAI_API_BASE="http://127.0.0.1:54321"

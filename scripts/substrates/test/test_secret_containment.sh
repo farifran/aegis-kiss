@@ -20,18 +20,7 @@
 #     (B) "the variable reaches the process"   — covered HERE, by execution
 #
 
-set -Eeuo pipefail
-
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 readonly PROBE_HANDLER="scripts/substrates/test/probes/leak_probe.sh"
 readonly SENTINEL_KEY="SECRET-containment-probe-key-do-not-use"
@@ -40,10 +29,9 @@ readonly SENTINEL_BASE="https://containment-probe.example.invalid/v1"
 test_tmp="$(mktemp -d)"
 probe_output="${test_tmp}/probe_output.json"
 
-cleanup() {
+test_cleanup_extra() {
   rm -rf "${test_tmp}"
 }
-trap cleanup EXIT
 
 # Sanity: probe handler must exist before we reason about its output.
 [[ -f "${PROBE_HANDLER}" ]] \
@@ -61,14 +49,6 @@ export AEGIS_EXECUTION_ID="secret-containment-probe"
 export AEGIS_EXECUTION_TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 export AEGIS_EXECUTION_SURFACE_PATH="${test_tmp}"
 export AEGIS_INVESTIGATION_INPUT="secret containment probe"
-
-# Source the executor without executing its main path.
-# The executor script uses `main "$@" || ...` style only if invoked directly;
-# being sourced here just defines the functions we need.
-# We guard against the executor running main on source by checking its tail.
-
-# shellcheck disable=SC1091
-source ".harness/config.sh"
 
 # The executor defines invoke_capability_handler inline. To exercise the REAL
 # function (not a copy), we extract it from the executor source at runtime so

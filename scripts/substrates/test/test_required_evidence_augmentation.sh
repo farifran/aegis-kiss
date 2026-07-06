@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly AEGIS_TEST_ROOT="$({
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-})"
-
-cd "${AEGIS_TEST_ROOT}"
-
-source ".harness/config.sh"
-
-fail() {
-  echo "[AEGIS][TEST][FATAL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 executor_fatal() {
   fail "$*"
 }
 
 readonly TMP_HANDOVER_FILE="$(mktemp)"
-cleanup() {
+
+test_cleanup_extra() {
   rm -f "${TMP_HANDOVER_FILE}" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
 
 jq -n '{
   artifact_snapshot: {

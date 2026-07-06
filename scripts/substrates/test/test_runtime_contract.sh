@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly AEGIS_TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${AEGIS_TEST_ROOT}"
-
-fail() {
-  echo "[AEGIS][TEST][FATAL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 assert_runtime_specific_handlers_are_removed() {
   [[ ! -e scripts/capabilities/runtime/read_epistemic_handover.sh ]] \
@@ -53,13 +42,9 @@ assert_runtime_owned_files_are_readable_via_filesystem_read() {
 
 TMP_TEST_DIR="$(mktemp -d)"
 
-cleanup() {
+test_cleanup_extra() {
   rm -rf "${TMP_TEST_DIR}" >/dev/null 2>&1 || true
 }
-
-trap cleanup EXIT
-
-source ".harness/config.sh"
 
 export AEGIS_EXECUTION_ID="runtime-contract-harness"
 export AEGIS_EXECUTION_TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

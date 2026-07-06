@@ -1,48 +1,19 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-source ".harness/config.sh"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 test_tmp="$(mktemp -d)"
 repo="${test_tmp}/repo"
 artifact_file="${test_tmp}/validation.json"
-handover_backup="${test_tmp}/handover.backup"
-mock_curl_dir="${test_tmp}/bin"
-had_handover="false"
 
-if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-  cp "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${handover_backup}"
-  had_handover="true"
-fi
-
-cleanup() {
-  set +e
-
-  if [[ "${had_handover}" == "true" ]]; then
-    cp "${handover_backup}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-  else
-    rm -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-  fi
-
+test_cleanup_extra() {
   rm -rf "${test_tmp}"
-  rm -rf "${AEGIS_CAPABILITY_ENV_DIR}" "${AEGIS_CAPABILITY_PAYLOAD_DIR}"
 }
 
-trap cleanup EXIT
+backup_epistemic_handover
+start_mock_curl_provider
 
-mkdir -p "${repo}/src" "${mock_curl_dir}"
+mkdir -p "${repo}/src"
 printf 'export {};\n' > "${repo}/src/index.ts"
 
 git -C "${repo}" init -q
@@ -83,17 +54,7 @@ jq -n \
   }
 ' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
 
-ln -s \
-  "${TEST_ROOT}/scripts/substrates/test/mock_openai_curl.sh" \
-  "${mock_curl_dir}/curl"
-
 set +e
-PATH="${mock_curl_dir}:${PATH}" \
-OPENAI_API_KEY="aegis-test-key" \
-OPENAI_API_BASE="local-process://mock-openai" \
-OPENAI_MODEL_READONLY_COGNITION="aegis-test-model" \
-AEGIS_PROVIDER_MAX_RETRIES=1 \
-AEGIS_PROVIDER_RETRY_DELAY=0 \
 bash runtime_aegis.sh validation >/dev/null
 validation_status=$?
 set -e

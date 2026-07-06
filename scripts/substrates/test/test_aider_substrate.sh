@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 test_tmp="$(mktemp -d)"
 execution_surface="${test_tmp}/worktree"
@@ -19,11 +8,9 @@ payload_dir="${test_tmp}/payloads"
 fake_aider="${test_tmp}/fake-aider"
 handover_file="${test_tmp}/epistemic_handover.json"
 
-cleanup() {
+test_cleanup_extra() {
   rm -rf "${test_tmp}"
 }
-
-trap cleanup EXIT
 
 mkdir -p "${payload_dir}"
 mkdir -p "${execution_surface}/src"
@@ -68,6 +55,22 @@ jq -n '
   }
 ' > "${handover_file}"
 
+run_aider_substrate() {
+  env \
+    OPENAI_API_KEY="test-key" \
+    AEGIS_MODE="repair" \
+    AEGIS_EXECUTION_ID="test-execution" \
+    AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
+    AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
+    AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
+    AEGIS_AIDER_BIN="${fake_aider}" \
+    AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
+    AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
+    bash scripts/substrates/aider_substrate.sh \
+      ".skills/repair.md" \
+      "${payload_dir}"
+}
+
 cat > "${fake_aider}" <<'SH'
 #!/usr/bin/env bash
 
@@ -107,27 +110,9 @@ SH
 
 chmod +x "${fake_aider}"
 
-output="$(
-  env \
-    OPENAI_API_KEY="test-key" \
-    AEGIS_MODE="repair" \
-    AEGIS_EXECUTION_ID="test-execution" \
-    AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
-    AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-    AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
-    AEGIS_AIDER_BIN="${fake_aider}" \
-    AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
-    AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
-    bash scripts/substrates/aider_substrate.sh \
-      ".skills/repair.md" \
-      "${payload_dir}"
-)"
+output="$(run_aider_substrate)"
 
-artifact="$(
-  printf '%s\n' "${output}" \
-    | sed -n '/AEGIS_ARTIFACT_BEGIN/,/AEGIS_ARTIFACT_END/p' \
-    | sed '1d;$d'
-)"
+artifact="$(extract_first_artifact_payload "${output}")"
 
 printf '%s\n' "${artifact}" \
   | jq -e '
@@ -145,19 +130,7 @@ SH
 
 chmod +x "${fake_aider}"
 
-if env \
-  OPENAI_API_KEY="test-key" \
-  AEGIS_MODE="repair" \
-  AEGIS_EXECUTION_ID="test-execution" \
-  AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
-  AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
-  AEGIS_AIDER_BIN="${fake_aider}" \
-  AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
-  AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
-  bash scripts/substrates/aider_substrate.sh \
-    ".skills/repair.md" \
-    "${payload_dir}" >/dev/null 2>&1; then
+if run_aider_substrate >/dev/null 2>&1; then
   fail "aider_failure_was_accepted"
 fi
 
@@ -170,19 +143,7 @@ SH
 
 chmod +x "${fake_aider}"
 
-if env \
-  OPENAI_API_KEY="test-key" \
-  AEGIS_MODE="repair" \
-  AEGIS_EXECUTION_ID="test-execution" \
-  AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
-  AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
-  AEGIS_AIDER_BIN="${fake_aider}" \
-  AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
-  AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
-  bash scripts/substrates/aider_substrate.sh \
-    ".skills/repair.md" \
-    "${payload_dir}" >/dev/null 2>&1; then
+if run_aider_substrate >/dev/null 2>&1; then
   fail "empty_diff_was_accepted"
 fi
 
@@ -190,19 +151,7 @@ jq '.artifact_snapshot.operational_context.repair_candidates = []' \
   "${handover_file}" > "${handover_file}.tmp"
 mv "${handover_file}.tmp" "${handover_file}"
 
-if env \
-  OPENAI_API_KEY="test-key" \
-  AEGIS_MODE="repair" \
-  AEGIS_EXECUTION_ID="test-execution" \
-  AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
-  AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-  AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
-  AEGIS_AIDER_BIN="${fake_aider}" \
-  AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
-  AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
-  bash scripts/substrates/aider_substrate.sh \
-    ".skills/repair.md" \
-    "${payload_dir}" >/dev/null 2>&1; then
+if run_aider_substrate >/dev/null 2>&1; then
   fail "missing_forensics_repair_candidates_was_accepted"
 fi
 

@@ -37,3 +37,6 @@ export function kilosParaLibras(kilos: number): number {
 export function librasParaKilos(libras: number): number {
     return libras / 2.20462;
 }
+export function kilosParaGramas(kilos: number): number {
+    return kilos * 1000;
+}

@@ -1,27 +1,14 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
-
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 test_tmp="$(mktemp -d)"
 repo="${test_tmp}/repo"
 handover="${test_tmp}/handover.json"
 
-cleanup() {
+test_cleanup_extra() {
   rm -rf "${test_tmp}"
 }
-
-trap cleanup EXIT
 
 mkdir -p "${repo}/src"
 printf 'export {};\n' > "${repo}/src/index.ts"

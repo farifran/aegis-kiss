@@ -1,48 +1,9 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
-readonly TEST_ROOT="$(
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd
-)"
-
-cd "${TEST_ROOT}"
-
-source ".harness/config.sh"
-
-fail() {
-  echo "[FAIL] $*" >&2
-  exit 1
-}
-
-handover_backup="$(mktemp)"
-had_handover="false"
-mock_curl_dir="$(mktemp -d)"
-
-if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-  cp "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${handover_backup}"
-  had_handover="true"
-fi
-
-cleanup() {
-  set +e
-
-  if [[ "${had_handover}" == "true" ]]; then
-    cp "${handover_backup}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-  else
-    rm -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-  fi
-
-  rm -f "${handover_backup}"
-  rm -rf "${mock_curl_dir}"
-  rm -rf "${AEGIS_CAPABILITY_ENV_DIR}" "${AEGIS_CAPABILITY_PAYLOAD_DIR}"
-}
-
-trap cleanup EXIT
-
-ln -s \
-  "${TEST_ROOT}/scripts/substrates/test/mock_openai_curl.sh" \
-  "${mock_curl_dir}/curl"
+backup_epistemic_handover
+start_mock_curl_provider
 
 mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
 
@@ -69,21 +30,11 @@ jq -n '
 ' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
 
 output="$(
-  PATH="${mock_curl_dir}:${PATH}" \
-  OPENAI_API_KEY="aegis-test-key" \
-  OPENAI_API_BASE="local-process://mock-openai" \
-  OPENAI_MODEL_READONLY_COGNITION="aegis-test-model" \
-  AEGIS_PROVIDER_MAX_RETRIES=1 \
-  AEGIS_PROVIDER_RETRY_DELAY=0 \
   AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS=false \
   bash runtime_aegis.sh adversarial
 )"
 
-artifact="$(
-  printf '%s\n' "${output}" \
-    | sed -n '/AEGIS_ARTIFACT_BEGIN/,/AEGIS_ARTIFACT_END/p' \
-    | sed '1d;$d'
-)"
+artifact="$(extract_first_artifact_payload "${output}")"
 
 printf '%s\n' "${artifact}" \
   | jq -e '
