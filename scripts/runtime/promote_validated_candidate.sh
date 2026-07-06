@@ -49,12 +49,11 @@ cleanup() {
 }
 
 trap cleanup EXIT
-handover_file="${REPOSITORY_ROOT}/.harness/runtime/epistemic_handover.json"
-if [[ -f "${handover_file}" ]] && jq -e '.artifact_snapshot.operational_context.candidate_result.diff' "${handover_file}" >/dev/null 2>&1; then
-  jq -r '.artifact_snapshot.operational_context.candidate_result.diff | gsub("\\\\n"; "\n") | gsub("\\\\\\\\"; "\\")' "${handover_file}" > "${diff_file}"
-else
-  jq -r '.validated_candidate.diff' "${ARTIFACT_FILE}" > "${diff_file}"
-fi
+
+# The validation artifact is the single source of truth for the promoted
+# diff. The executor has already enforced that it matches the epistemic
+# handover candidate, so no secondary state file is consulted here.
+jq -r '.validated_candidate.diff' "${ARTIFACT_FILE}" > "${diff_file}"
 
 jq -r '.validated_candidate.files_changed[]' "${ARTIFACT_FILE}" \
   | sort -u > "${files_file}"
@@ -72,9 +71,9 @@ while IFS= read -r changed_file; do
     || promotion_fatal "promotion_target_is_dirty: ${changed_file}"
 done < "${files_file}"
 
-git -C "${REPOSITORY_ROOT}" apply --check "${diff_file}" \
-  || promotion_fatal "validated_candidate_check_failed"
-
+# git apply is all-or-nothing: it verifies every hunk before touching the
+# worktree, so a failure here leaves the repository untouched. A separate
+# --check pass would be a redundant stage, not extra safety.
 git -C "${REPOSITORY_ROOT}" apply "${diff_file}" \
   || promotion_fatal "validated_candidate_apply_failed"
 

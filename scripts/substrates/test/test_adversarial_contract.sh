@@ -51,8 +51,11 @@ jq -n '
     artifact_snapshot: {
       mode: "optimize",
       operational_context: {
-        diff: "diff --git a/src/index.ts b/src/index.ts",
-        files_changed: ["src/index.ts"]
+        candidate_result: {
+          source_mode: "optimize",
+          diff: "diff --git a/src/index.ts b/src/index.ts",
+          files_changed: ["src/index.ts"]
+        }
       },
       investigation_input: "adicione uma funcao soma",
       generated_at: "2026-06-13T00:00:00Z"
@@ -103,7 +106,7 @@ jq -e '
     == "optimize"
   )
   and (
-    (.payload.content | fromjson).artifact_snapshot.operational_context.files_changed
+    (.payload.content | fromjson).artifact_snapshot.operational_context.candidate_result.files_changed
     == ["src/index.ts"]
   )
 ' "${AEGIS_CAPABILITY_PAYLOAD_DIR}/filesystem_read_epistemic_handover.json" \

@@ -147,7 +147,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "diff": "diff --git a/src/index.ts b/src/index.ts",
                     "files_changed": ["src/index.ts"],
                 },
-                "adversarial_findings": [],
+                "findings": [],
                 "evidence_refs": ["filesystem.read:epistemic_handover"],
                 "handover_attention": {
                     "next_attention_targets": [],
@@ -159,7 +159,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if mode == "validation":
             artifact.update({
                 "verdict": "rejected",
-                "adversarial_findings": [],
+                "findings": [],
                 "validated_candidate": {
                     "source_mode": "optimize",
                     "diff": "diff --git a/src/index.ts b/src/index.ts",
@@ -367,8 +367,11 @@ seed_required_predecessor() {
             mode: "optimize",
             investigation_input: $investigation_input,
             operational_context: {
-              diff: "diff --git a/src/index.ts b/src/index.ts",
-              files_changed: ["src/index.ts"]
+              candidate_result: {
+                source_mode: "optimize",
+                diff: "diff --git a/src/index.ts b/src/index.ts",
+                files_changed: ["src/index.ts"]
+              }
             }
           },
           epistemic_state: {
@@ -392,7 +395,7 @@ seed_required_predecessor() {
                 diff: "diff --git a/src/index.ts b/src/index.ts",
                 files_changed: ["src/index.ts"]
               },
-              adversarial_findings: [],
+              findings: [],
               evidence_refs: ["filesystem.read:epistemic_handover"]
             }
           },

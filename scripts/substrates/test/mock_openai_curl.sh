@@ -125,7 +125,7 @@ case "${mode}" in
             diff: "diff --git a/src/index.ts b/src/index.ts",
             files_changed: ["src/index.ts"]
           },
-          adversarial_findings: [],
+          findings: [],
           evidence_refs: ["filesystem.read:epistemic_handover"],
           handover_attention: {
             next_attention_targets: [],
@@ -144,7 +144,7 @@ case "${mode}" in
           mode: $mode,
           verdict: "rejected",
           observed_payloads: $observed_payloads,
-          adversarial_findings: [],
+          findings: [],
           validated_candidate: {
             source_mode: "optimize",
             diff: "diff --git a/src/index.ts b/src/index.ts",

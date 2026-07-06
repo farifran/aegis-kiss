@@ -18,12 +18,12 @@ fail() {
 readonly TEST_INVESTIGATION_INPUT="constitutional investigation"
 readonly MISMATCHED_INVESTIGATION_INPUT="mismatched investigation"
 
-readonly HANDOOVER_BACKUP_FILE="$(mktemp)"
+readonly HANDOVER_BACKUP_FILE="$(mktemp)"
 
 HAD_EPISTEMIC_HANDOVER_FILE="false"
 
 if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-  cp "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${HANDOOVER_BACKUP_FILE}"
+  cp "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${HANDOVER_BACKUP_FILE}"
   HAD_EPISTEMIC_HANDOVER_FILE="true"
 fi
 
@@ -160,7 +160,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "diff": "diff --git a/src/index.ts b/src/index.ts",
                     "files_changed": ["src/index.ts"],
                 },
-                "adversarial_findings": [],
+                "findings": [],
                 "evidence_refs": ["filesystem.read:epistemic_handover"],
                 "handover_attention": {
                     "next_attention_targets": [],
@@ -172,7 +172,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if mode == "validation":
             artifact.update({
                 "verdict": "rejected",
-                "adversarial_findings": [],
+                "findings": [],
                 "validated_candidate": {
                     "source_mode": "optimize",
                     "diff": "diff --git a/src/index.ts b/src/index.ts",
@@ -248,7 +248,7 @@ cleanup() {
   mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
 
   if [[ "${HAD_EPISTEMIC_HANDOVER_FILE}" == "true" ]]; then
-    cp "${HANDOOVER_BACKUP_FILE}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
+    cp "${HANDOVER_BACKUP_FILE}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
       >/dev/null 2>&1 || true
   else
     rm -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
@@ -256,7 +256,7 @@ cleanup() {
   fi
 
   rm -f \
-    "${HANDOOVER_BACKUP_FILE:-}" \
+    "${HANDOVER_BACKUP_FILE:-}" \
     >/dev/null 2>&1 || true
 
   rm -rf \
@@ -368,8 +368,11 @@ seed_required_predecessor() {
             mode: "optimize",
             investigation_input: $investigation_input,
             operational_context: {
-              diff: "diff --git a/src/index.ts b/src/index.ts",
-              files_changed: ["src/index.ts"]
+              candidate_result: {
+                source_mode: "optimize",
+                diff: "diff --git a/src/index.ts b/src/index.ts",
+                files_changed: ["src/index.ts"]
+              }
             }
           },
           epistemic_state: {
@@ -393,7 +396,7 @@ seed_required_predecessor() {
                 diff: "diff --git a/src/index.ts b/src/index.ts",
                 files_changed: ["src/index.ts"]
               },
-              adversarial_findings: [],
+              findings: [],
               evidence_refs: ["filesystem.read:epistemic_handover"]
             }
           },
@@ -437,8 +440,6 @@ assert_readonly_mode_has_no_execution_surface() {
 assert_payloads_are_execution_scoped() {
   local payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR}"
   local payload_file
-  local current_execution_id=""
-  local payload_execution_id
   local actual_payloads_json
 
   rm -rf "${payload_dir}"
@@ -463,13 +464,17 @@ assert_payloads_are_execution_scoped() {
   [[ ! -f "${payload_dir}/stale_payload.json" ]] \
     || fail "stale_payload_survived_runtime_refresh"
 
-  actual_payloads_json="$({
-    find "${payload_dir}" -maxdepth 1 -type f \
-      | sed 's#.*/##' \
-      | sort \
-      | jq -R . \
-      | jq -s '.'
-  })"
+  local payload_files=()
+  while IFS= read -r payload_file; do
+    payload_files+=("${payload_file}")
+  done < <(find "${payload_dir}" -maxdepth 1 -type f | sort)
+
+  [[ "${#payload_files[@]}" -gt 0 ]] \
+    || fail "missing_discovery_payloads"
+
+  actual_payloads_json="$(
+    jq -cn '[$ARGS.positional[] | sub(".*/"; "")]' --args "${payload_files[@]}"
+  )"
 
   jq -n \
     --argjson actual_payloads "${actual_payloads_json}" \
@@ -490,12 +495,10 @@ assert_payloads_are_execution_scoped() {
       $actual_payloads == $expected_payloads
     ' >/dev/null || fail "unexpected_discovery_payload_set"
 
-  while IFS= read -r payload_file; do
-
-    printf '%s\n' "${payload_file}" | grep -q '.' \
-      || continue
-
-    jq -e '
+  # One jq pass proves every payload contract and that all payloads share
+  # a single (non-"unknown") execution id.
+  jq -s '
+    all(
       .success == true
       and .error == null
       and (.capability | type == "string" and length > 0)
@@ -503,19 +506,11 @@ assert_payloads_are_execution_scoped() {
       and (.execution_id | type == "string" and length > 0 and . != "unknown")
       and (.generated_at | type == "string" and length > 0)
       and .payload != null
-    ' "${payload_file}" >/dev/null \
-      || fail "invalid_payload_contract: ${payload_file}"
-
-    payload_execution_id="$(jq -r '.execution_id' "${payload_file}")"
-
-    if [[ -z "${current_execution_id}" ]]; then
-      current_execution_id="${payload_execution_id}"
-    else
-      [[ "${payload_execution_id}" == "${current_execution_id}" ]] \
-        || fail "payload_execution_id_mismatch"
-    fi
-
-  done < <(find "${payload_dir}" -maxdepth 1 -type f | sort)
+    )
+    and ([.[].execution_id] | unique | length == 1)
+  ' "${payload_files[@]}" \
+    | grep -qx 'true' \
+    || fail "invalid_or_mismatched_payload_contracts"
 
   rm -rf "${payload_dir}"
 }
@@ -575,10 +570,14 @@ assert_runtime_read_handover_payload_is_empty() {
   jq -e '
     .success == true
     and .error == null
-    and ((.payload.content | fromjson).artifact_snapshot == null)
-    and ((.payload.content | fromjson).epistemic_state.next_attention_targets == [])
-    and ((.payload.content | fromjson).epistemic_state.attention_scope == "none")
-    and ((.payload.content | fromjson).epistemic_state.attention_reason == "no active attention")
+    and ((.payload.content | fromjson) as $handover |
+      $handover.artifact_snapshot == null
+      and $handover.epistemic_state == {
+        next_attention_targets: [],
+        attention_scope: "none",
+        attention_reason: "no active attention"
+      }
+    )
   ' "${payload_file}" >/dev/null \
     || fail "discovery_observed_stale_handover_state"
 }
@@ -595,16 +594,12 @@ assert_handover_file_matches_promoted_artifact() {
       and ((keys | sort) == ["artifact_snapshot", "epistemic_state"])
       and (.artifact_snapshot | type == "object")
       and (.artifact_snapshot.mode == $expected_artifact_payload.mode)
-      and (
-        if $expected_artifact_payload.mode == "discovery" then
-          (.artifact_snapshot.operational_context.status == $expected_artifact_payload.operational_context.status)
-          and (.artifact_snapshot.operational_context.summary == $expected_artifact_payload.operational_context.summary)
-          and (.artifact_snapshot.operational_context.observed_payloads == $expected_artifact_payload.operational_context.observed_payloads)
-        else
-          (.artifact_snapshot.operational_context.status == $expected_artifact_payload.status)
-          and (.artifact_snapshot.operational_context.summary == $expected_artifact_payload.summary)
-          and (.artifact_snapshot.operational_context.observed_payloads == $expected_artifact_payload.observed_payloads)
-        end
+      and (($expected_artifact_payload
+        | if .mode == "discovery" then .operational_context else . end
+      ) as $expected_context |
+        (.artifact_snapshot.operational_context.status == $expected_context.status)
+        and (.artifact_snapshot.operational_context.summary == $expected_context.summary)
+        and (.artifact_snapshot.operational_context.observed_payloads == $expected_context.observed_payloads)
       )
       and (.artifact_snapshot.investigation_input == $expected_investigation_input)
       and (.artifact_snapshot.generated_at | type == "string" and length > 0)
@@ -625,25 +620,22 @@ assert_runtime_read_handover_payload_matches_promoted_artifact() {
     --argjson expected_artifact_payload "${artifact_payload}" \
     --arg expected_investigation_input "${TEST_INVESTIGATION_INPUT}" \
     '
-      .success == true
+      ($expected_artifact_payload
+        | if .mode == "discovery" then .operational_context else . end
+      ) as $expected_context
+      | .success == true
       and .error == null
-      and (((.payload.content | fromjson).artifact_snapshot) | type == "object")
-      and (((.payload.content | fromjson).artifact_snapshot).mode == $expected_artifact_payload.mode)
-      and (
-        if $expected_artifact_payload.mode == "discovery" then
-          (((.payload.content | fromjson).artifact_snapshot).operational_context.status == $expected_artifact_payload.operational_context.status)
-          and (((.payload.content | fromjson).artifact_snapshot).operational_context.summary == $expected_artifact_payload.operational_context.summary)
-          and (((.payload.content | fromjson).artifact_snapshot).operational_context.observed_payloads == $expected_artifact_payload.operational_context.observed_payloads)
-        else
-          (((.payload.content | fromjson).artifact_snapshot).operational_context.status == $expected_artifact_payload.status)
-          and (((.payload.content | fromjson).artifact_snapshot).operational_context.summary == $expected_artifact_payload.summary)
-          and (((.payload.content | fromjson).artifact_snapshot).operational_context.observed_payloads == $expected_artifact_payload.observed_payloads)
-        end
+      and ((.payload.content | fromjson) as $handover |
+        ($handover.artifact_snapshot | type == "object")
+        and ($handover.artifact_snapshot.mode == $expected_artifact_payload.mode)
+        and ($handover.artifact_snapshot.operational_context.status == $expected_context.status)
+        and ($handover.artifact_snapshot.operational_context.summary == $expected_context.summary)
+        and ($handover.artifact_snapshot.operational_context.observed_payloads == $expected_context.observed_payloads)
+        and ($handover.artifact_snapshot.investigation_input == $expected_investigation_input)
+        and ($handover.artifact_snapshot.generated_at | type == "string" and length > 0)
+        and (($handover.artifact_snapshot | has("handover_attention")) == false)
+        and ($handover.epistemic_state == $expected_artifact_payload.handover_attention)
       )
-      and (((.payload.content | fromjson).artifact_snapshot).investigation_input == $expected_investigation_input)
-      and (((.payload.content | fromjson).artifact_snapshot).generated_at | type == "string" and length > 0)
-      and ((((.payload.content | fromjson).artifact_snapshot) | has("handover_attention")) == false)
-      and (((.payload.content | fromjson).epistemic_state) == $expected_artifact_payload.handover_attention)
     ' "${payload_file}" >/dev/null \
     || fail "forensics_did_not_receive_current_investigation_handover"
 }
@@ -783,6 +775,23 @@ assert_forensics_rejects_mismatched_investigation_input() {
   rm -f "${mismatch_log_file}"
 }
 
+# The mock provider key value must never persist into runtime-owned state.
+# (Capability payloads legitimately embed repository source that names the
+# OPENAI_API_KEY variable, so only the secret value counts as a leak.)
+assert_provider_credentials_contained() {
+
+  local surface
+
+  for surface in "${AEGIS_EPISTEMIC_HANDOVER_FILE}" "${AEGIS_CAPABILITY_PAYLOAD_DIR}"; do
+    [[ -e "${surface}" ]] || continue
+
+    grep -Frq "${OPENAI_API_KEY}" "${surface}" \
+      && fail "provider_credential_leaked_into_runtime_state: ${surface}"
+  done
+
+  return 0
+}
+
 main() {
   assert_constitutional_state_registry
   assert_executor_subprocess_isolation_contract
@@ -793,14 +802,16 @@ main() {
 
   start_mock_provider
 
-  assert_readonly_mode_has_no_execution_surface "discovery"
-  assert_readonly_mode_has_no_execution_surface "forensics"
-  assert_readonly_mode_has_no_execution_surface "validation"
-  assert_readonly_mode_has_no_execution_surface "adversarial"
+  local mode
+  for mode in discovery forensics validation adversarial; do
+    assert_readonly_mode_has_no_execution_surface "${mode}"
+  done
+
   assert_payloads_are_execution_scoped
   assert_discovery_resets_prior_handover_state
   assert_discovery_starts_fresh_each_execution
   assert_forensics_consumes_current_investigation_handover
+  assert_provider_credentials_contained
   assert_forensics_rejects_mismatched_investigation_input
 
   echo "[AEGIS][TEST] constitutional invariants passed"

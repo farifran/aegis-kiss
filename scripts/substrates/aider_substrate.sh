@@ -132,146 +132,84 @@ validate_aider_substrate_inputs() {
 resolve_mutation_targets() {
 
   local targets=()
+  local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+  local line
 
-  # Source 1: Forensics artifact → explicit repair candidates
-  if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    local handover_mode
-    handover_mode="$(
-      jq -r '.artifact_snapshot.mode // empty' \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-    )"
+  # jq over a file that may be absent or malformed; emits zero lines then.
+  jq_lines() {
+    [[ -f "$1" ]] || return 0
+    jq -r "$2" "$1" 2>/dev/null || true
+  }
 
-    if [[ "${handover_mode}" == "forensics" ]]; then
-      local repair_candidate_ids
-      repair_candidate_ids="$(
-        jq -r '
-          .artifact_snapshot.operational_context.repair_candidates[]?.id // empty
-        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-      )"
+  # Append every non-empty stdin line to targets.
+  collect() {
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] && targets+=("${line}")
+    done
+  }
 
-      while IFS= read -r path; do
-        [[ -z "${path}" ]] && continue
-        targets+=("${path}")
-      done <<< "${repair_candidate_ids}"
+  # Source 1: handover mode contracts (mandatory targets when present)
+  local handover_mode
+  handover_mode="$(jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
 
-      [[ "${#targets[@]}" -gt 0 ]] \
-        || aider_fatal "missing_forensics_repair_candidates"
-    elif [[ "${handover_mode}" == "repair" ]] \
-      && [[ "${AEGIS_MODE}" == "optimize" ]]; then
-      local repaired_files
-      repaired_files="$(
-        jq -r '
-          .artifact_snapshot.operational_context.files_changed[]? // empty
-        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-      )"
-
-      while IFS= read -r path; do
-        [[ -z "${path}" ]] && continue
-        targets+=("${path}")
-      done <<< "${repaired_files}"
-
-      [[ "${#targets[@]}" -gt 0 ]] \
-        || aider_fatal "missing_repair_files_changed"
-    fi
+  if [[ "${handover_mode}" == "forensics" ]]; then
+    collect < <(jq_lines "${handover}" \
+      '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty')
+    [[ "${#targets[@]}" -gt 0 ]] \
+      || aider_fatal "missing_forensics_repair_candidates"
+  elif [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    collect < <(jq_lines "${handover}" \
+      '.artifact_snapshot.operational_context.files_changed[]? // empty')
+    [[ "${#targets[@]}" -gt 0 ]] \
+      || aider_fatal "missing_repair_files_changed"
   fi
+
+  # Fallback chain — first source yielding targets wins.
 
   # Source 2: structural.builder payload → observed_request_alignment
-  # (Available only if capability payloads were NOT cleaned up between modes)
-  local builder_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
-  if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${builder_payload}" ]]; then
-    local resolved_paths
-    resolved_paths="$(
-      jq -r '
-        .payload.observed_request_alignment.resolved_paths[]? // empty
-      ' "${builder_payload}" 2>/dev/null || true
-    )"
-    while IFS= read -r path; do
-      [[ -z "${path}" ]] && continue
-      targets+=("${path}")
-    done <<< "${resolved_paths}"
-  fi
+  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
+    jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json" \
+      '.payload.observed_request_alignment.resolved_paths[]? // empty'
+  )
 
-  # Source 3: epistemic handover → artifact_snapshot.structural_context.observed_request_alignment
-  # (The discovery artifact's structural context is stored here; resolved_paths survives cleanup)
-  if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    local snapshot_paths
-    snapshot_paths="$(
-      jq -r '
-        .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]? // empty
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-    )"
-    while IFS= read -r path; do
-      [[ -z "${path}" ]] && continue
-      targets+=("${path}")
-    done <<< "${snapshot_paths}"
-  fi
+  # Source 3: handover → structural_context.observed_request_alignment
+  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
+    jq_lines "${handover}" \
+      '.artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]? // empty'
+  )
 
-  # Source 4: epistemic handover → artifact_snapshot.structural_context.ranked_targets (explicit_request)
-  if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    local ranked_files
-    ranked_files="$(
-      jq -r '
-        .artifact_snapshot.structural_context.ranked_targets[]?
-        | select(.type == "explicit_request")
-        | .file // empty
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-    )"
-    while IFS= read -r path; do
-      [[ -z "${path}" ]] && continue
-      targets+=("${path}")
-    done <<< "${ranked_files}"
-  fi
+  # Source 4: handover → ranked_targets (explicit_request)
+  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
+    jq_lines "${handover}" \
+      '.artifact_snapshot.structural_context.ranked_targets[]?
+       | select(.type == "explicit_request")
+       | .file // empty'
+  )
 
-  # Source 5: epistemic handover → epistemic_state.next_attention_targets
-  if [[ "${#targets[@]}" -eq 0 ]] && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    local handover_targets
-    handover_targets="$(
-      jq -r '
-        .epistemic_state.next_attention_targets[]? // empty
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
-    )"
-    while IFS= read -r path; do
-      [[ -z "${path}" ]] && continue
-      # Only include targets that look like file paths (contain a dot or slash)
-      if [[ "${path}" == *"."* ]] || [[ "${path}" == *"/"* ]]; then
-        targets+=("${path}")
-      fi
-    done <<< "${handover_targets}"
-  fi
-
-  # Source 6: search_symbol payload — extract file paths from matches
+  # Source 5: handover → next_attention_targets (path-shaped entries only)
   if [[ "${#targets[@]}" -eq 0 ]]; then
-    local search_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/filesystem_search_symbol.json"
-    if [[ -f "${search_payload}" ]]; then
-      local search_files
-      search_files="$(
-        jq -r '
-          .payload.matches[]?.file? // empty
-        ' "${search_payload}" 2>/dev/null | sort -u || true
-      )"
-      while IFS= read -r path; do
-        [[ -z "${path}" ]] && continue
-        targets+=("${path}")
-      done <<< "${search_files}"
-    fi
+    while IFS= read -r line; do
+      [[ -z "${line}" ]] && continue
+      if [[ "${line}" == *"."* ]] || [[ "${line}" == *"/"* ]]; then
+        targets+=("${line}")
+      fi
+    done < <(jq_lines "${handover}" '.epistemic_state.next_attention_targets[]? // empty')
   fi
 
-  # Deduplicate while preserving order, and resolve relative paths to repo-relative paths
-  local seen=()
-  local unique_targets=()
-  for t in "${targets[@]}"; do
-    local found=0
-    for s in "${seen[@]:-}"; do
-      [[ "${s}" == "${t}" ]] && found=1 && break
-    done
-    if [[ "${found}" -eq 0 ]]; then
-      seen+=("${t}")
+  # Source 6: search_symbol payload matches
+  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
+    jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/filesystem_search_symbol.json" \
+      '.payload.matches[]?.file? // empty' | sort -u
+  )
 
-      unique_targets+=("${t}")
-    fi
+  # Deduplicate while preserving order
+  local -A seen=()
+  local t
+  for t in "${targets[@]:-}"; do
+    [[ -n "${t}" && -z "${seen[$t]:-}" ]] || continue
+    seen["${t}"]=1
+    printf '%s\n' "${t}"
   done
-
-  printf '%s\n' "${unique_targets[@]:-}"
 }
 
 # =========================================================
@@ -311,45 +249,24 @@ trap 'aider_warn "Interrupted"; exit 130' INT TERM
 
 inject_capability_evidence() {
 
-  local selected_payloads="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}"
+  [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]] || return 0
 
-  if [[ -z "${selected_payloads}" ]]; then
-    return 0
-  fi
+  local payload_paths
+  mapfile -t payload_paths < <(
+    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
+      | jq -r '.[]?' 2>/dev/null || true
+  )
 
-  local payload_count
-  payload_count="$(
-    printf '%s' "${selected_payloads}" \
-      | jq -r 'length' 2>/dev/null || echo 0
-  )"
-
-  if [[ "${payload_count:-0}" -eq 0 ]]; then
-    return 0
-  fi
+  [[ "${#payload_paths[@]}" -gt 0 ]] || return 0
 
   printf '\n---\n\nCapability evidence payloads:\n'
 
-  local i=0
-  while [[ "${i}" -lt "${payload_count}" ]]; do
-    local payload_path
-    payload_path="$(
-      printf '%s' "${selected_payloads}" \
-        | jq -r ".[${i}]" 2>/dev/null || true
-    )"
-
-    if [[ -z "${payload_path}" ]] || [[ ! -f "${payload_path}" ]]; then
-      i=$(( i + 1 ))
-      continue
-    fi
-
-    local capability_label
-    capability_label="$(basename "${payload_path}" .json)"
-
-    printf '\n### %s\n\n' "${capability_label}"
+  local payload_path
+  for payload_path in "${payload_paths[@]}"; do
+    [[ -f "${payload_path}" ]] || continue
+    printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
     cat "${payload_path}"
     printf '\n'
-
-    i=$(( i + 1 ))
   done
 }
 
@@ -364,34 +281,26 @@ assemble_mutation_prompt() {
   local capability_evidence
   capability_evidence="$(inject_capability_evidence)"
 
+  local input_label="Investigation input (operator mutation demand):"
+  local mode_instructions="Apply the minimal sufficient mutation described in the investigation input.
+Preserve runtime sovereignty, protocol integrity, and containment integrity.
+Do not introduce speculative changes beyond what is explicitly requested.
+Do not add explanations or narration.
+Apply the change and stop."
+
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    cat > "${prompt_file}" << EOF
-You are executing inside Aegis Harness in bounded mutation mode.
-
-Mode: ${AEGIS_MODE}
-Execution ID: ${AEGIS_EXECUTION_ID}
-
-Skill contract:
-$(cat "${AIDER_SKILL_FILE}")
-
----
-
-Original investigation input (already applied by Repair):
-${AEGIS_INVESTIGATION_INPUT}
-${capability_evidence}
----
-
-CRITICAL INSTRUCTION FOR OPTIMIZE MODE:
+    input_label="Original investigation input (already applied by Repair):"
+    mode_instructions="CRITICAL INSTRUCTION FOR OPTIMIZE MODE:
 The requested mutation (investigation input) has ALREADY been implemented and applied to the workspace by the preceding Repair step.
 Your task is ONLY to simplify the implementation, remove complexity, remove redundancy, and clean up formatting inside the files that were modified by the Repair step.
 Do NOT re-apply or re-implement the change.
 Do NOT remove or delete the new functionality added by Repair.
 Do NOT introduce any speculative changes or new unsolicited logic/functions.
 Do NOT add explanations or narration.
-Simplify/optimize the existing code and stop.
-EOF
-  else
-    cat > "${prompt_file}" << EOF
+Simplify/optimize the existing code and stop."
+  fi
+
+  cat > "${prompt_file}" << EOF
 You are executing inside Aegis Harness in bounded mutation mode.
 
 Mode: ${AEGIS_MODE}
@@ -402,18 +311,32 @@ $(cat "${AIDER_SKILL_FILE}")
 
 ---
 
-Investigation input (operator mutation demand):
+${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---
 
-Apply the minimal sufficient mutation described in the investigation input.
-Preserve runtime sovereignty, protocol integrity, and containment integrity.
-Do not introduce speculative changes beyond what is explicitly requested.
-Do not add explanations or narration.
-Apply the change and stop.
+${mode_instructions}
 EOF
-  fi
+}
+
+# =========================================================
+# SURFACE ROLLBACK
+# =========================================================
+
+# On mutation failure the execution surface must be restored to HEAD with
+# no transient residue: tracked files reset, untracked leftovers removed.
+rollback_execution_surface() {
+
+  aider_warn "Rolling back execution surface mutations..."
+
+  (
+    cd "${AEGIS_EXECUTION_SURFACE_PATH}" || exit 0
+    git --git-dir="${AEGIS_MUTATION_GIT_DIR}" --work-tree=. \
+      checkout -- . >/dev/null 2>&1 || true
+    git --git-dir="${AEGIS_MUTATION_GIT_DIR}" --work-tree=. \
+      clean -fd >/dev/null 2>&1 || true
+  )
 }
 
 # =========================================================
@@ -507,7 +430,8 @@ invoke_aider() {
 
   if [[ "${aider_status}" -ne 0 ]]; then
     aider_warn "aider invocation failed with exit status ${aider_status}"
-    sed -n '1,120p' "${AEGIS_AIDER_OUTPUT_LOG}" >&2
+    head -n 120 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
+    rollback_execution_surface
     aider_fatal "aider_execution_failed"
   fi
 }
@@ -546,24 +470,16 @@ emit_mutation_artifact() {
   local files_changed
   files_changed="$(
     printf '%s\n' "${diff_content}" \
-      | grep '^+++ b/' \
-      | sed 's|^+++ b/||' \
-      | jq -R . \
-      | jq -sc '.'
+      | jq -cRn '[inputs | select(startswith("+++ b/")) | ltrimstr("+++ b/")]'
   )"
-
-  [[ -n "${files_changed}" ]] \
-    || files_changed='[]'
 
   local primary_target="${mutation_targets[0]:-unknown}"
 
-  local attention_targets_json
+  local attention_targets_json='[]'
   if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
     attention_targets_json="$(
-      printf '%s\n' "${mutation_targets[@]}" | jq -R . | jq -sc '.'
+      jq -cn '$ARGS.positional' --args "${mutation_targets[@]}"
     )"
-  else
-    attention_targets_json='[]'
   fi
 
   local artifact_tmp
@@ -630,29 +546,6 @@ main() {
     invoke_aider "${prompt_file}"
   fi
 
-  echo "=== WORKTREE STATUS ===" >&2
-  git \
-    --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
-    --work-tree="${AEGIS_EXECUTION_SURFACE_PATH}" \
-    status --short >&2
-
-  echo "=== WORKTREE HEAD ===" >&2
-  git \
-    --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
-    --work-tree="${AEGIS_EXECUTION_SURFACE_PATH}" \
-    rev-parse HEAD >&2
-
-  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    for f in "${mutation_targets[@]}"; do
-      echo "=== TARGET FILE: ${f} ===" >&2
-      if [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/${f}" ]]; then
-        cat "${AEGIS_EXECUTION_SURFACE_PATH}/${f}" >&2
-      else
-        echo "(file does not exist)" >&2
-      fi
-    done
-  fi
-
   aider_log "Capturing worktree diff..."
 
   local diff_content
@@ -663,6 +556,8 @@ main() {
       echo "[DEBUG] Aider output log:" >&2
       cat "${AEGIS_AIDER_OUTPUT_LOG}" >&2
     fi
+    # No tracked changes, but aider may still have left untracked residue.
+    rollback_execution_surface
     aider_fatal "empty_diff: aider produced no changes"
   fi
 
