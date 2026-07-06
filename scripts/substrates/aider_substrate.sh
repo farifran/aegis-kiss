@@ -396,7 +396,7 @@ invoke_aider() {
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
 
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-      "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1
+      "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
   ) &
   local aider_pid=$!
 
@@ -418,6 +418,17 @@ invoke_aider() {
   echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
   if [[ "${aider_status}" -ne 0 ]]; then
+    # aider sometimes hangs after successfully applying its edits instead
+    # of honoring --exit. The substrate's deliverable is the worktree diff,
+    # not aider's exit code: if the watchdog killed it AFTER an applied
+    # edit produced a diff, the mutation is usable — proceed.
+    if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]] \
+      && grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" \
+      && [[ -n "$(capture_worktree_diff)" ]]; then
+      aegis_warn "aider hung after applying edits — killed by watchdog, proceeding with captured diff"
+      return 0
+    fi
+
     if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]]; then
       aegis_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
     else

@@ -70,7 +70,7 @@ notifications: false
 # EDITING
 # ---------------------------------------------------------
 
-edit-format: whole
+edit-format: diff
 
 encoding: utf-8
 
