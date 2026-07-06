@@ -1,8 +1,0 @@
-{
-  "scenario": "bash",
-  "expected": [
-    {"file": "bin/deploy.sh", "responsibility": "entrypoint", "confidence": "high"},
-    {"file": "lib/utils.sh", "responsibility": "utility", "confidence": "high"},
-    {"file": "target_system_profile.yml", "responsibility": "config", "confidence": "high"}
-  ]
-}

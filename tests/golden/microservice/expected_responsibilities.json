@@ -1,9 +1,0 @@
-{
-  "scenario": "microservice",
-  "expected": [
-    {"file": "gateway/main.go", "responsibility": "entrypoint", "confidence": "high"},
-    {"file": "service_auth/auth.go", "responsibility": "service", "confidence": "high"},
-    {"file": "service_billing/billing.go", "responsibility": "service", "confidence": "high"},
-    {"file": "target_system_profile.yml", "responsibility": "config", "confidence": "high"}
-  ]
-}

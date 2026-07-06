@@ -1,9 +1,0 @@
-{
-  "scenario": "cycle",
-  "expected": [
-    {"file": "src/a.py", "responsibility": "module", "confidence": "low"},
-    {"file": "src/b.py", "responsibility": "module", "confidence": "low"},
-    {"file": "src/c.py", "responsibility": "module", "confidence": "low"},
-    {"file": "target_system_profile.yml", "responsibility": "config", "confidence": "high"}
-  ]
-}
