@@ -70,9 +70,35 @@ runtime_promotes_validated_diff() {
 # CONTAINMENT AUDITS (fatal — never reported as "pass" JSON)
 # =========================================================
 
-# The persisted handover must be structurally sane: valid JSON with
-# exactly the runtime-owned top-level keys. Anything else is an
-# unsanitized state transition.
+# The persisted handover must be structurally sane: a deep, type-strict
+# schema over the runtime-owned state, enforced in a single jq pass.
+#
+# Contract (mirrors write_runtime_owned_epistemic_handover /
+# promote_epistemic_handover in runtime_aegis.sh, but type-strict):
+#
+#   root                 exactly {artifact_snapshot, epistemic_state}
+#   artifact_snapshot    null (pre-investigation) OR an object with
+#                        exactly {mode, investigation_input, generated_at,
+#                        structural_context, operational_context}:
+#                          mode                 non-empty string
+#                          investigation_input  non-empty string
+#                          generated_at         non-empty string
+#                          structural_context   object
+#                          operational_context  object; when it carries
+#                                               status / summary they must
+#                                               be non-empty strings, and
+#                                               required_evidence /
+#                                               findings / repair_candidates
+#                                               must be arrays
+#   epistemic_state      exactly {next_attention_targets, attention_scope,
+#                        attention_reason}:
+#                          next_attention_targets  array of strings
+#                          attention_scope         non-empty string
+#                          attention_reason        non-empty string
+#
+# Rogue structural extensions (extra keys at any governed level) and
+# type-coercion bypasses (e.g. numeric mode, object-typed status,
+# stringified arrays) are unsanitized state transitions.
 audit_handover_state() {
 
   local handover_file="${AEGIS_EPISTEMIC_HANDOVER_FILE:-.harness/runtime/epistemic_handover.json}"
@@ -80,10 +106,49 @@ audit_handover_state() {
   [[ -f "${handover_file}" ]] || return 0
 
   jq -e '
+    def nonempty_string: type == "string" and length > 0;
+
+    def valid_operational_context:
+      type == "object"
+      and (if has("status")            then .status            | nonempty_string else true end)
+      and (if has("summary")           then .summary           | nonempty_string else true end)
+      and (if has("required_evidence") then .required_evidence | type == "array" else true end)
+      and (if has("findings")          then .findings          | type == "array" else true end)
+      and (if has("repair_candidates") then .repair_candidates | type == "array" else true end);
+
+    def valid_artifact_snapshot:
+      . == null
+      or (
+        type == "object"
+        and ((keys | sort) == [
+          "generated_at",
+          "investigation_input",
+          "mode",
+          "operational_context",
+          "structural_context"
+        ])
+        and (.mode                | nonempty_string)
+        and (.investigation_input | nonempty_string)
+        and (.generated_at        | nonempty_string)
+        and (.structural_context  | type == "object")
+        and (.operational_context | valid_operational_context)
+      );
+
+    def valid_epistemic_state:
+      type == "object"
+      and ((keys | sort) == [
+        "attention_reason",
+        "attention_scope",
+        "next_attention_targets"
+      ])
+      and (.next_attention_targets | type == "array" and all(.[]; type == "string"))
+      and (.attention_scope  | nonempty_string)
+      and (.attention_reason | nonempty_string);
+
     type == "object"
     and ((keys | sort) == ["artifact_snapshot", "epistemic_state"])
-    and (.artifact_snapshot | type == "object")
-    and (.epistemic_state | type == "object")
+    and (.artifact_snapshot | valid_artifact_snapshot)
+    and (.epistemic_state   | valid_epistemic_state)
   ' "${handover_file}" >/dev/null 2>&1 \
     || audit_fatal "unsanitized_handover_state: ${handover_file}"
 }

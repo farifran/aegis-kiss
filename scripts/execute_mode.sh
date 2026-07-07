@@ -133,7 +133,45 @@ cleanup_executor() {
 }
 
 trap cleanup_executor EXIT
-trap 'aegis_warn "Interrupted"; exit 130' INT TERM
+
+# ---------------------------------------------------------
+# Atomic signal guard (SIGINT / SIGTERM)
+# ---------------------------------------------------------
+#
+# The executor owns no runtime-persistent state (the runtime remains
+# sovereign over surfaces, payload retention and handover lifecycle),
+# so its signal duty is: run its own cleanup exactly once, disarm the
+# EXIT trap to prevent a duplicate pass, and propagate a deterministic
+# signal-based status code to the runtime.
+
+AEGIS_SIGNAL_GUARD_FIRED="false"
+
+handle_executor_termination_signal() {
+
+  local signal_name="$1"
+  local exit_code="$2"
+
+  # Re-entrancy latch: a second signal during cleanup must not restart
+  # the sequence or recurse through the traps.
+  if [[ "${AEGIS_SIGNAL_GUARD_FIRED}" == "true" ]]; then
+    exit "${exit_code}"
+  fi
+  AEGIS_SIGNAL_GUARD_FIRED="true"
+
+  trap '' INT TERM
+  trap - EXIT
+
+  set +e
+
+  aegis_warn "Interrupted by ${signal_name} — executing atomic signal cleanup"
+
+  cleanup_executor
+
+  exit "${exit_code}"
+}
+
+trap 'handle_executor_termination_signal SIGINT 130' INT
+trap 'handle_executor_termination_signal SIGTERM 143' TERM
 
 # =========================================================
 # VALIDATION

@@ -50,9 +50,15 @@ cd "${AEGIS_AIDER_SUBSTRATE_ROOT}"
 source ".harness/config.sh"
 
 # Mutation timeouts: per-request (aider --timeout) and total wall clock
-# (watchdog kill). Both operator-overridable.
+# (watchdog kill). Both operator-overridable. The wall clock defaults to
+# whichever is larger: 300s, or three per-request timeouts — so raising
+# AEGIS_AIDER_TIMEOUT can never make the watchdog clip a legitimate
+# request/retry sequence.
 : "${AEGIS_AIDER_TIMEOUT:=${AEGIS_PROVIDER_RESPONSE_TIMEOUT:-120}}"
-: "${AEGIS_AIDER_MAX_SECONDS:=300}"
+_aider_wallclock_floor=$(( AEGIS_AIDER_TIMEOUT * 3 ))
+[[ "${_aider_wallclock_floor}" -lt 300 ]] && _aider_wallclock_floor=300
+: "${AEGIS_AIDER_MAX_SECONDS:=${_aider_wallclock_floor}}"
+unset _aider_wallclock_floor
 
 # =========================================================
 # INPUTS
@@ -209,6 +215,62 @@ resolve_mutation_targets() {
 }
 
 # =========================================================
+# TARGET SANITIZATION
+# =========================================================
+
+# Resolved targets become aider --file arguments; anything that expands
+# beyond a single regular file floods the chat context with the whole
+# repository. Sanitization is therefore strict:
+#
+# - no glob metacharacters or whitespace (no wildcard expansion)
+# - no absolute paths or ../ traversal (surface-relative only)
+# - must be an existing REGULAR FILE inside the execution surface
+#   (directories would be added recursively)
+# - hard cap on target count (context and wall-clock budget)
+: "${AEGIS_AIDER_MAX_TARGET_FILES:=8}"
+
+sanitize_mutation_targets() {
+
+  local kept=0
+  local t
+
+  while IFS= read -r t; do
+    [[ -n "${t}" ]] || continue
+
+    case "${t}" in
+      *'*'* | *'?'* | *'['* | *']'* | *'{'* | *'}'* | *[[:space:]]*)
+        aegis_warn "target_rejected_glob_or_whitespace: ${t}"
+        continue
+        ;;
+      /* | *..*)
+        aegis_warn "target_rejected_out_of_surface: ${t}"
+        continue
+        ;;
+    esac
+
+    t="${t#./}"
+
+    if [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" ]]; then
+      aegis_warn "target_rejected_directory: ${t}"
+      continue
+    fi
+
+    if [[ ! -f "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" ]]; then
+      aegis_warn "target_rejected_not_a_file_in_surface: ${t}"
+      continue
+    fi
+
+    if [[ "${kept}" -ge "${AEGIS_AIDER_MAX_TARGET_FILES}" ]]; then
+      aegis_warn "target_dropped_over_cap(${AEGIS_AIDER_MAX_TARGET_FILES}): ${t}"
+      continue
+    fi
+
+    kept=$((kept + 1))
+    printf '%s\n' "${t}"
+  done
+}
+
+# =========================================================
 # TEMP FILE CLEANUP
 # =========================================================
 
@@ -273,9 +335,28 @@ inject_capability_evidence() {
 assemble_mutation_prompt() {
 
   local prompt_file="$1"
+  shift
+  local prompt_targets=("$@")
 
   local capability_evidence
   capability_evidence="$(inject_capability_evidence)"
+
+  # File jail: the model must operate exclusively on the pre-loaded
+  # targets. Evidence payloads mention many repository paths; without
+  # this prohibition the model asks for them and --yes-always floods
+  # the chat context with the whole repository.
+  local target_list="(none — mutate only what the investigation input names among the files already in the chat)"
+  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
+    target_list="$(printf -- '- %s\n' "${prompt_targets[@]}")"
+  fi
+
+  local file_jail_instructions="FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
+The ONLY files you may edit are the ones already loaded into this chat:
+${target_list}
+You are FORBIDDEN from adding files to the chat.
+Never ask for, request, suggest, or reference additional files to be added or edited.
+File paths that appear inside the capability evidence payloads are READ-ONLY CONTEXT, not an invitation to open or edit them.
+If the required change seems to involve a file that is not loaded, do NOT add it: apply the closest sufficient change within the loaded files only."
 
   local input_label="Investigation input (operator mutation demand):"
   local mode_instructions="Apply the minimal sufficient mutation described in the investigation input.
@@ -313,6 +394,8 @@ ${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---
+
+${file_jail_instructions}
 
 ${mode_instructions}
 EOF
@@ -360,12 +443,25 @@ invoke_aider() {
     "--timeout" "${AEGIS_AIDER_TIMEOUT}"
     "--yes-always"
     "--no-auto-commits"
-    "--no-git"
+    "--no-dirty-commits"
+    # Git stays ENABLED so aider recognizes the ephemeral worktree
+    # ("Git repo: none" otherwise). Repo-scanning costs are stripped
+    # instead: no sanity check, no repo map, subtree-only discovery.
+    "--git"
+    "--skip-sanity-check-repo"
+    "--subtree-only"
+    "--map-tokens" "0"
+    # Pin the edit format explicitly: diff keeps weak models from
+    # over-generating whole files and stalling the response.
+    "--edit-format" "diff"
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
     "--no-auto-lint"
     "--no-auto-test"
+    "--no-check-update"
+    "--no-detect-urls"
+    "--no-suggest-shell-commands"
     "--exit"
   )
 
@@ -373,12 +469,26 @@ invoke_aider() {
   # Each auto-lint retry is another slow model round-trip with no upper
   # bound, and verification is owned by the adversarial/validation modes.
 
-  # Add mutation target files (guard against empty expansion)
+  # Add mutation target files (guard against empty expansion), and jail
+  # aider to exactly those files with a deny-all aiderignore: every
+  # repository path is ignored except the explicit targets, so neither
+  # git auto-discovery nor LLM-induced /add requests can flood the chat
+  # context with tracked files.
   if [[ "${#file_args[@]}" -gt 0 ]]; then
+    local aiderignore_file
+    aiderignore_file="$(aider_mktemp)"
+    # gitignore semantics: "*" excludes everything, "!*/" re-includes
+    # directories so per-file negations below can take effect (a file
+    # cannot be re-included while its parent directory is excluded).
+    printf '*\n!*/\n' > "${aiderignore_file}"
+
     for f in "${file_args[@]}"; do
       [[ -z "${f}" ]] && continue
       aider_cmd+=("--file" "${f}")
+      printf '!%s\n' "${f}" >> "${aiderignore_file}"
     done
+
+    aider_cmd+=("--aiderignore" "${aiderignore_file}")
   fi
 
   aegis_log "Invoking aider mutation substrate..."
@@ -397,14 +507,22 @@ invoke_aider() {
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}"
 
+    # exec replaces the subshell with aider itself, so the watchdog's
+    # kill reaches the real process instead of a wrapper shell.
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-      "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
+      exec "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
   ) &
   local aider_pid=$!
 
   # stdout/stderr detached so the lingering sleep cannot hold the caller's
   # command-substitution pipe open after the watchdog is killed.
-  ( sleep "${AEGIS_AIDER_MAX_SECONDS}" && kill "${aider_pid}" ) >/dev/null 2>&1 &
+  # TERM first for a graceful stop, KILL escalation if aider ignores it.
+  (
+    sleep "${AEGIS_AIDER_MAX_SECONDS}"
+    kill "${aider_pid}" 2>/dev/null
+    sleep 5
+    kill -9 "${aider_pid}" 2>/dev/null
+  ) >/dev/null 2>&1 &
   local watchdog_pid=$!
 
   wait "${aider_pid}"
@@ -522,7 +640,7 @@ main() {
   while IFS= read -r target; do
     [[ -z "${target}" ]] && continue
     mutation_targets+=("${target}")
-  done < <(resolve_mutation_targets)
+  done < <(resolve_mutation_targets | sanitize_mutation_targets)
 
   if [[ "${#mutation_targets[@]}" -eq 0 ]]; then
     aegis_warn "no_mutation_targets_resolved — using investigation input only"
@@ -532,7 +650,11 @@ main() {
 
   local prompt_file
   prompt_file="$(aider_mktemp)"
-  assemble_mutation_prompt "${prompt_file}"
+  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
+    assemble_mutation_prompt "${prompt_file}" "${mutation_targets[@]}"
+  else
+    assemble_mutation_prompt "${prompt_file}"
+  fi
 
   if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
     invoke_aider "${prompt_file}" "${mutation_targets[@]}"

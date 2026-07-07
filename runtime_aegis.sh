@@ -283,7 +283,69 @@ cleanup_runtime() {
 }
 
 trap cleanup_runtime EXIT
-trap 'aegis_warn "Interrupted"; exit 130' INT TERM
+
+# ---------------------------------------------------------
+# Atomic signal guard (SIGINT / SIGTERM)
+# ---------------------------------------------------------
+
+AEGIS_SIGNAL_GUARD_FIRED="false"
+
+# Expurge every disposable execution surface under the surface root,
+# not only the current mode's — an interrupted earlier run may have
+# left siblings behind.
+expurge_disposable_execution_surfaces() {
+
+  local surface
+
+  for surface in "${AEGIS_EXECUTION_SURFACE_ROOT}"/*/; do
+    [[ -d "${surface}" ]] || continue
+
+    git worktree remove \
+      --force \
+      "${surface%/}" \
+      >/dev/null 2>&1 || true
+
+    rm -rf "${surface%/}" >/dev/null 2>&1 || true
+  done
+
+  git worktree prune \
+    >/dev/null 2>&1 || true
+}
+
+handle_runtime_termination_signal() {
+
+  local signal_name="$1"
+  local exit_code="$2"
+
+  # Re-entrancy latch: a second signal during cleanup must not restart
+  # the sequence or recurse through the traps.
+  if [[ "${AEGIS_SIGNAL_GUARD_FIRED}" == "true" ]]; then
+    exit "${exit_code}"
+  fi
+  AEGIS_SIGNAL_GUARD_FIRED="true"
+
+  # Atomic sequence: no further signal interleaving, and the EXIT trap
+  # is disarmed so cleanup cannot run twice with conflicting policies.
+  trap '' INT TERM
+  trap - EXIT
+
+  set +e
+
+  aegis_warn "Interrupted by ${signal_name} — executing atomic signal cleanup"
+
+  expurge_disposable_execution_surfaces
+
+  # Transient runtime residues are force-removed on interruption,
+  # regardless of the retention policy that governs normal exits.
+  remove_runtime_owned_capability_surfaces false
+
+  aegis_warn "Signal cleanup completed — exiting ${exit_code}"
+
+  exit "${exit_code}"
+}
+
+trap 'handle_runtime_termination_signal SIGINT 130' INT
+trap 'handle_runtime_termination_signal SIGTERM 143' TERM
 
 # =========================================================
 # EPISTEMIC HANDOVER
