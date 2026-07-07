@@ -318,21 +318,22 @@ inject_capability_evidence() {
   [[ "${#payload_paths[@]}" -gt 0 ]] || return 0
 
   printf '\n---\n\nCapability evidence payloads:\n'
-  printf '(note: file paths in this evidence are rendered with the "\342\210\225" separator instead of "/" — read them as normal repository paths; they are context only)\n'
 
   local payload_path
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
-    obfuscate_evidence_paths < "${payload_path}"
+    cat "${payload_path}"
     printf '\n'
   done
 }
 
 # Aider regex-sniffs prompt text for path-shaped strings and, under
-# --yes-always, force-adds every match to the chat. Evidence payloads are
-# full of repository paths, so the "/" delimiter is swapped for the
-# visually identical division slash (U+2215): no longer path-shaped to
+# --yes-always, force-adds every match to the chat. Repository paths
+# occur throughout the assembled prompt (evidence payloads, the skill
+# contract, the constitutional preamble, the investigation input), so
+# the "/" delimiter is swapped for the visually identical division
+# slash (U+2215) across the WHOLE prompt: no longer path-shaped to
 # aider's sniffer, still perfectly readable path context for the LLM.
 obfuscate_evidence_paths() {
   local division_slash
@@ -389,13 +390,18 @@ Do NOT add explanations or narration.
 Simplify/optimize the existing code and stop."
   fi
 
-  cat > "${prompt_file}" << EOF
+  local raw_prompt_file
+  raw_prompt_file="$(aider_mktemp)"
+
+  cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
 }You are executing inside Aegis Harness in bounded mutation mode.
 
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
+
+(note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
 
 Skill contract:
 $(cat "${AIDER_SKILL_FILE}")
@@ -411,6 +417,11 @@ ${file_jail_instructions}
 
 ${mode_instructions}
 EOF
+
+  # Whole-prompt path obfuscation: every source above (skill contract,
+  # preamble, evidence, investigation input) may carry real repository
+  # paths that aider's mention-sniffer would otherwise pick up.
+  obfuscate_evidence_paths < "${raw_prompt_file}" > "${prompt_file}"
 }
 
 # =========================================================
@@ -433,6 +444,45 @@ rollback_execution_surface() {
 }
 
 # =========================================================
+# EDIT FORMAT RESOLUTION
+# =========================================================
+
+# Non-frontier models (gemma-class) stall in algorithmic diff-calculation
+# loops under edit-format=diff. "whole" makes the model re-emit complete
+# file content — reliable, and cheap while the target surface is small.
+# "diff" is used only when re-emitting the targets would exceed the
+# whole-format byte budget. Operator-overridable via
+# AEGIS_AIDER_EDIT_FORMAT / AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES.
+: "${AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES:=49152}"
+
+resolve_aider_edit_format() {
+
+  local targets=("$@")
+
+  if [[ -n "${AEGIS_AIDER_EDIT_FORMAT:-}" ]]; then
+    printf '%s' "${AEGIS_AIDER_EDIT_FORMAT}"
+    return 0
+  fi
+
+  local total_bytes=0
+  local t
+  local size
+
+  for t in "${targets[@]:-}"; do
+    [[ -n "${t}" ]] || continue
+    [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" ]] || continue
+    size="$(wc -c < "${AEGIS_EXECUTION_SURFACE_PATH}/${t}")"
+    total_bytes=$((total_bytes + size))
+  done
+
+  if [[ "${total_bytes}" -le "${AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES}" ]]; then
+    printf 'whole'
+  else
+    printf 'diff'
+  fi
+}
+
+# =========================================================
 # AIDER INVOCATION
 # =========================================================
 
@@ -445,6 +495,9 @@ invoke_aider() {
   local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
   local aider_output
   local aider_status
+
+  local resolved_edit_format
+  resolved_edit_format="$(resolve_aider_edit_format "${file_args[@]:-}")"
 
   local aider_cmd=(
     "${AEGIS_AIDER_BIN}"
@@ -463,9 +516,11 @@ invoke_aider() {
     "--skip-sanity-check-repo"
     "--subtree-only"
     "--map-tokens" "0"
-    # Pin the edit format explicitly: diff keeps weak models from
-    # over-generating whole files and stalling the response.
-    "--edit-format" "diff"
+    # Edit format is resolved dynamically (see resolve_aider_edit_format):
+    # "whole" for small target surfaces so non-frontier models emit the
+    # complete file instead of stalling in a diff-calculation loop;
+    # "diff" only when the target surface is too large to re-emit.
+    "--edit-format" "${resolved_edit_format}"
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
@@ -506,6 +561,7 @@ invoke_aider() {
 
   aegis_log "Invoking aider mutation substrate..."
   aegis_log "Model: ${AEGIS_AIDER_MODEL}"
+  aegis_log "Edit format: ${resolved_edit_format}"
   aegis_log "Targets: ${file_args[*]:-<none>}"
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
