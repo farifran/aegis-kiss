@@ -44,6 +44,12 @@ AEGIS_TMP_FILES=()
   exit 1
 }
 
+# Runtime-owned handover location as delivered by the executor's env
+# whitelist — captured BEFORE config sourcing overwrites it, so the
+# path-containment jail can honor the runtime's explicit authority even
+# when the runtime relocates the handover (e.g. test surfaces).
+AEGIS_ENV_EPISTEMIC_HANDOVER_FILE="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+
 # shellcheck disable=SC1091
 source ".harness/config.sh"
 
@@ -113,10 +119,72 @@ fail_without_target() {
 require_directory_target() {
   local target="$1"
 
+  guard_path_containment "${target}"
+
   if [[ ! -d "${target}" ]]; then
     fail "missing_directory" "${target}"
     exit 1
   fi
+}
+
+# ---------------------------------------------------------
+# Path containment jail
+# ---------------------------------------------------------
+
+# Canonicalize a path that may not exist yet. Prefers `realpath -m`
+# (GNU/coreutils); falls back to python3 on platforms whose native
+# realpath lacks -m (macOS/BSD). Both resolve symlinks and ../ segments.
+aegis_canonicalize_path() {
+  local path="$1"
+
+  if realpath -m / >/dev/null 2>&1; then
+    realpath -m -- "${path}"
+  else
+    python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${path}"
+  fi
+}
+
+# guard_path_containment <target>
+#
+# Jail constraint: the resolved absolute target must live strictly under
+# AEGIS_ROOT_DIR. Any escape (absolute out-of-tree path, ../ traversal,
+# symlink hop) emits the standard failure envelope and exits fatally.
+guard_path_containment() {
+  local target="$1"
+
+  local resolved_root
+  local resolved_target
+
+  resolved_root="$(aegis_canonicalize_path "${AEGIS_ROOT_DIR}")" || {
+    fail "path_containment_resolution_failure" "${AEGIS_ROOT_DIR}"
+    exit 1
+  }
+
+  resolved_target="$(aegis_canonicalize_path "${target}")" || {
+    fail "path_containment_resolution_failure" "${target}"
+    exit 1
+  }
+
+  if [[ "${resolved_target}" == "${resolved_root}" ]] \
+    || [[ "${resolved_target}" == "${resolved_root}/"* ]]; then
+    return 0
+  fi
+
+  # Runtime-owned read targets are explicit authority registered in
+  # .harness/config.sh (plus the executor-delivered handover location);
+  # they are exempt from the workspace jail by exact canonical match.
+  local runtime_target
+  for runtime_target in \
+    "${AEGIS_ENV_EPISTEMIC_HANDOVER_FILE}" \
+    "${AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS[@]:-}"; do
+    [[ -n "${runtime_target}" ]] || continue
+    if [[ "${resolved_target}" == "$(aegis_canonicalize_path "${runtime_target}")" ]]; then
+      return 0
+    fi
+  done
+
+  fail "path_containment_violation" "${target}"
+  exit 1
 }
 
 require_prune_policy() {

@@ -41,6 +41,10 @@ if [[ -z "${TARGET_FILE}" ]]; then
   exit 1
 fi
 
+# Jail constraint: the target must resolve inside AEGIS_ROOT_DIR before
+# any raw content is emitted.
+guard_path_containment "${TARGET_FILE}"
+
 if [[ ! -f "${TARGET_FILE}" ]]; then
   fail "file_not_found" "${TARGET_FILE}"
   exit 1

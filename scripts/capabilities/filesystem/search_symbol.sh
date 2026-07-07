@@ -41,6 +41,8 @@ readonly CONTEXT_LINES="${AEGIS_SEARCH_SYMBOL_CONTEXT_LINES:-2}"
   exit 1
 }
 
+guard_path_containment "${SEARCH_ROOT}"
+
 [[ -d "${SEARCH_ROOT}" ]] || {
   fail "missing_search_root" "${SEARCH_ROOT}"
   exit 1
