@@ -199,7 +199,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 
 | Path | Function inside the project | Relationship to other files |
 | --- | --- | --- |
-| `AGENTS.md` | Constitutional foundation of Aegis. Defines authority boundaries, memory model, mode semantics, and precedence. It exists so the runtime never becomes the implicit source of truth. | Governs the meaning of `.harness/config.sh`, `runtime_aegis.sh`, `scripts/execute_mode.sh`, `.skills/*.md`, and the overall wording of `README.md` and this file. |
+| `AGENTS.md` | Aegis Cognition Contract. Guides how the model must interpret and reason within the authority defined by the runtime. It exists to enforce behavior discipline (Runtime Authority, Evidence Discipline, KISS, Ephemeral Cognition). | Loaded by `execute_mode.sh` to dynamically extract raw rules and set `AEGIS_CONSTITUTIONAL_PREAMBLE` before executing cognitive substrates. |
 | `README.md` | Public architecture and usage overview. Explains runtime, capabilities, modes, and common commands. It exists for operator orientation rather than normative control. | Summarizes the structure defined by `AGENTS.md`, `.harness/config.sh`, `runtime_aegis.sh`, `scripts/execute_mode.sh`, and the scripts under `scripts/`. |
 | `summary.md` | This repository map. Documents observed structure, file roles, current cross-file relationships, and known structural mismatches. | Secondary to `AGENTS.md` and `.harness/config.sh`; should stay aligned with `README.md`, runtime files, and the actual tree. |
 | `package.json` | Node package manifest for local tooling. Declares lint, typecheck, enforcement, and shell-based test scripts. It exists to make structural verification reproducible from one entrypoint. | Invokes `runtime_aegis.sh`, `scripts/test_environment.sh`, and the test harnesses under `scripts/substrates/test/`. Depends on `eslint.config.js` and `tsconfig.json` for JS/TS validation. |
@@ -236,7 +236,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 
 | Path | Function inside the project | Relationship to other files |
 | --- | --- | --- |
-| `scripts/execute_mode.sh` | Protocol VM. Resolves execution engine, capability envelope, evidence profile, capability arguments, payload generation, selected manifest, substrate call, and artifact validation. Normalizes and auto-populates structural envelope fields (`mode`, `status`, `handover_attention`) deterministically on cognitive outputs. | Called by `runtime_aegis.sh`; loads `.harness/config.sh`; materializes wrappers for handlers under `scripts/capabilities/`; calls `scripts/substrates/raw_llm.sh` for readonly modes and `scripts/substrates/aider_substrate.sh` for mutation modes. |
+| `scripts/execute_mode.sh` | Protocol VM. Resolves execution engine, capability envelope, evidence profile, capability arguments, payload generation, selected manifest, substrate call, and artifact validation. Dynamically extracts cognition contract rules from `AGENTS.md` to export `AEGIS_CONSTITUTIONAL_PREAMBLE`. Normalizes and auto-populates structural envelope fields (`mode`, `status`, `handover_attention`) deterministically on cognitive outputs. | Called by `runtime_aegis.sh`; loads `.harness/config.sh`; materializes wrappers for handlers under `scripts/capabilities/`; calls `scripts/substrates/raw_llm.sh` for readonly modes and `scripts/substrates/aider_substrate.sh` for mutation modes. |
 | `scripts/test_environment.sh` | Local environment smoke checker for Node, npm, TypeScript, ESLint, ast-grep, Python, and Git. Used as bootstrap check. | Supports manual setup and dev-tool scripts in `package.json`. |
 | `scripts/test_scenario.sh` | Scenario-driven runner exercising the readonly and mutation paths together. | Executable scenario test. |
 | `scripts/audit_epistemic_pipeline.sh` | Epistemic pipeline auditor. Checks all boundary transitions. | Backs `test_epistemic_pipeline_audit.sh`; verifies handover/payload provenance. |
@@ -256,10 +256,10 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/capabilities/eslint_check.sh` | Readonly capability that runs a bounded ESLint check and emits its result as evidence. | Mutation/repair evidence profiles; part of the build-feedback capability surface. |
 | `scripts/capabilities/test_runner.sh` | Readonly capability that runs the suite and emits pass/fail evidence. | Mutation/repair evidence profiles; provides test-feedback evidence to mutation modes. |
 | `scripts/capabilities/structural/builder.sh` | Readonly capability that synthesizes structural topology (boundaries, bridges, hotspots) from the import/reference graphs. | Consumes outputs of `extract_import_graph` and `extract_reference_graph`; feeds discovery/forensics profiles. |
-| `scripts/substrates/raw_llm.sh` | Readonly cognition substrate. Builds bounded prompt context from the selected skill, selected manifest, and selected payloads; then calls the provider and extracts one JSON artifact between markers. | Invoked by `scripts/execute_mode.sh` for `raw` modes; depends on `.harness/config.sh`, `.skills/*.md`, provider env vars, and the payloads created by capability scripts. |
-| `scripts/substrates/aider_substrate.sh` | Mutation cognition substrate. Runs aider against the mutation execution surface using the active skill and capability payloads; emits a mutation JSON artifact (diff, files_changed, rationale) between markers. | Invoked by `scripts/execute_mode.sh` for `aider` modes; receives `OPENAI_API_KEY`/`OPENAI_API_BASE` from the executor's mutation env whitelist. |
+| `scripts/substrates/raw_llm.sh` | Readonly cognition substrate. Builds bounded prompt context from the selected skill, selected manifest, and selected payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; then calls the provider and extracts one JSON artifact between markers. | Invoked by `scripts/execute_mode.sh` for `raw` modes; depends on `.harness/config.sh`, `.skills/*.md`, provider env vars, and the payloads created by capability scripts. |
+| `scripts/substrates/aider_substrate.sh` | Mutation cognition substrate. Runs aider against the mutation execution surface using the active skill and capability payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; emits a mutation JSON artifact (diff, files_changed, rationale) between markers. | Invoked by `scripts/execute_mode.sh` for `aider` modes; receives `OPENAI_API_KEY`/`OPENAI_API_BASE` from the executor's mutation env whitelist. |
 | `scripts/runtime/apply_candidate_diff.sh` | Applies a validated mutation candidate diff to the mutation execution surface. | Called during the promotion phase orchestrated by `runtime_aegis.sh` for mutation modes. |
-| `scripts/runtime/promote_validated_candidate.sh` | Promotes a validated, diff-bearing mutation candidate into runtime-owned handover state. | Final step of the mutation pipeline; called by `runtime_aegis.sh` after mutation artifact validation succeeds. |
+| `scripts/runtime/promote_validated_candidate.sh` | Promotes a validated, diff-bearing mutation candidate into runtime-owned handover state. | Final step of the mutation pipeline; called by `runtime_aegis.sh` after mutation artifact validation succeeds. Validates that the target files do not have uncommitted changes (`git diff --quiet HEAD`) before applying the patch. |
 
 ### Shell Test Harnesses
 
@@ -291,7 +291,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 
 ### 1. Governance and topology
 
-`AGENTS.md` defines the constitutional meaning of the system.
+`AGENTS.md` defines the runtime cognition contract of the model.
 
 `.harness/config.sh` turns that meaning into operational topology: paths, modes, engines, handler registry, evidence profiles, and limits.
 
@@ -301,9 +301,9 @@ Everything executable in the shell path takes its wiring from `.harness/config.s
 
 `runtime_aegis.sh` is the top-level orchestrator.
 
-It validates the environment, prepares or resets `.harness/runtime/epistemic_handover.json`, creates runtime-owned capability directories, generates the manifest via `scripts/capabilities/generate_manifest.sh`, and delegates mode execution to `scripts/execute_mode.sh`.
+It validates the environment, prepares or resets `.harness/runtime/epistemic_handover.json`, creates runtime-owned capability directories, generates the manifest via `scripts/capabilities/generate_manifest.sh`, dynamically extracts cognition contract rules from `AGENTS.md` as `AEGIS_CONSTITUTIONAL_PREAMBLE`, and delegates mode execution to `scripts/execute_mode.sh`.
 
-After the substrate returns an artifact, the runtime validates it and promotes the artifact snapshot plus routed attention back into the handover file. For mutation modes, a validated candidate is additionally promoted through `scripts/runtime/promote_validated_candidate.sh`.
+After the substrate returns an artifact, the runtime validates it and promotes the artifact snapshot plus routed attention into the handover file. For mutation modes, a validated candidate is additionally promoted through `scripts/runtime/promote_validated_candidate.sh`, which enforces that the target files remain clean before patch application.
 
 ### 3. Capability evidence path
 

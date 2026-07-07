@@ -377,7 +377,9 @@ assemble_system_prompt() {
   fi
 
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
-You are executing inside Aegis Harness.
+${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
+
+}You are executing inside Aegis Harness.
 
 Mode:
 ${AEGIS_MODE}

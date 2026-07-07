@@ -72,6 +72,23 @@ fi
 
 source ".harness/config.sh"
 
+extract_agents_constitution() {
+  local agents_file="${AEGIS_ROOT_DIR}/AGENTS.md"
+  [[ -f "${agents_file}" ]] || return 0
+
+  echo "### AEGIS CONSTITUTIONAL CONSTRAINTS (AGENTS.md) ###"
+  
+  # Extrai a seção de Princípios Constitucionais
+  awk '/## Constitutional Principles/{flag=1;next}/## Constitutional Model/{flag=0}flag' "${agents_file}"
+  
+  # Extrai a seção de Restrições Não-Negociáveis
+  awk '/## Non-Negotiable Constraints/{flag=1;next}/## Summary/{flag=0}flag' "${agents_file}"
+}
+
+export AEGIS_CONSTITUTIONAL_PREAMBLE
+AEGIS_CONSTITUTIONAL_PREAMBLE="$(extract_agents_constitution)"
+
+
 # =========================================================
 # INPUTS
 # =========================================================
@@ -402,6 +419,7 @@ invoke_raw_substrate() {
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
     AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
+    AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
     AEGIS_EVIDENCE_MAX_TOTAL_BYTES="${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" \
     AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES}" \
     AEGIS_PROVIDER_RESPONSE_TIMEOUT="${AEGIS_PROVIDER_RESPONSE_TIMEOUT}" \
@@ -440,6 +458,7 @@ invoke_aider_substrate() {
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
     AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" \
+    AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
     AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}" \
     AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \
     AEGIS_AIDER_BIN="${AEGIS_AIDER_BIN:-}" \

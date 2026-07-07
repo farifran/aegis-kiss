@@ -297,7 +297,9 @@ Simplify/optimize the existing code and stop."
   fi
 
   cat > "${prompt_file}" << EOF
-You are executing inside Aegis Harness in bounded mutation mode.
+${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
+
+}You are executing inside Aegis Harness in bounded mutation mode.
 
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
