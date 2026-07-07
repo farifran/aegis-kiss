@@ -371,6 +371,27 @@ Never ask for, request, suggest, or reference additional files to be added or ed
 File paths that appear inside the capability evidence payloads are READ-ONLY CONTEXT, not an invitation to open or edit them.
 If the required change seems to involve a file that is not loaded, do NOT add it: apply the closest sufficient change within the loaded files only."
 
+  # Anti-lazy-truncation constraint: under the whole edit format the
+  # model must re-emit complete files; placeholder elision makes aider's
+  # parser reject the reply and re-request it until the watchdog fires.
+  local resolved_edit_format
+  resolved_edit_format="$(resolve_aider_edit_format "${prompt_targets[@]:-}")"
+
+  local anti_truncation_instructions=""
+  if [[ "${resolved_edit_format}" == "whole" ]]; then
+    anti_truncation_instructions="ANTI-LAZY TRUNCATION CONSTRAINT (ABSOLUTE — WHOLE-FILE EDIT FORMAT):
+When you emit a file, you MUST re-emit EVERY SINGLE LINE of that file from the first line to the last, exactly as it exists, with your requested change integrated.
+You are FORBIDDEN from using placeholders, ellipses, or omission comments of any kind — including but not limited to:
+- // ... existing code ...
+- // rest of file stays the same
+- /* unchanged */
+- # ...
+- ...
+Every existing function, import, comment, and blank line MUST appear verbatim in your output alongside the new requested change.
+If you omit, summarize, or abbreviate ANY existing line, aider's parsing engine WILL REJECT your response and the mutation WILL FAIL.
+Do not shorten. Do not elide. Emit the complete file content, every time."
+  fi
+
   local input_label="Investigation input (operator mutation demand):"
   local mode_instructions="Apply the minimal sufficient mutation described in the investigation input.
 Preserve runtime sovereignty, protocol integrity, and containment integrity.
@@ -415,7 +436,9 @@ ${capability_evidence}
 
 ${file_jail_instructions}
 
-${mode_instructions}
+${anti_truncation_instructions:+${anti_truncation_instructions}
+
+}${mode_instructions}
 EOF
 
   # Whole-prompt path obfuscation: every source above (skill contract,
