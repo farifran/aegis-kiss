@@ -55,3 +55,6 @@ export function megabyteParaKilobyte(mb: number): number {
 export function kilobyteParaBits(kb: number): number {
     return kb * 1024 * 8;
 }
+export function gigabyteParaBits(gb: number): number {
+    return gb * 1024 * 1024 * 1024 * 8;
+}
