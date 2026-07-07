@@ -318,14 +318,26 @@ inject_capability_evidence() {
   [[ "${#payload_paths[@]}" -gt 0 ]] || return 0
 
   printf '\n---\n\nCapability evidence payloads:\n'
+  printf '(note: file paths in this evidence are rendered with the "\342\210\225" separator instead of "/" — read them as normal repository paths; they are context only)\n'
 
   local payload_path
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
-    cat "${payload_path}"
+    obfuscate_evidence_paths < "${payload_path}"
     printf '\n'
   done
+}
+
+# Aider regex-sniffs prompt text for path-shaped strings and, under
+# --yes-always, force-adds every match to the chat. Evidence payloads are
+# full of repository paths, so the "/" delimiter is swapped for the
+# visually identical division slash (U+2215): no longer path-shaped to
+# aider's sniffer, still perfectly readable path context for the LLM.
+obfuscate_evidence_paths() {
+  local division_slash
+  division_slash="$(printf '\342\210\225')"
+  sed "s|/|${division_slash}|g"
 }
 
 # =========================================================
@@ -469,26 +481,27 @@ invoke_aider() {
   # Each auto-lint retry is another slow model round-trip with no upper
   # bound, and verification is owned by the adversarial/validation modes.
 
-  # Add mutation target files (guard against empty expansion), and jail
-  # aider to exactly those files with a deny-all aiderignore: every
-  # repository path is ignored except the explicit targets, so neither
-  # git auto-discovery nor LLM-induced /add requests can flood the chat
-  # context with tracked files.
-  if [[ "${#file_args[@]}" -gt 0 ]]; then
-    local aiderignore_file
-    aiderignore_file="$(aider_mktemp)"
-    # gitignore semantics: "*" excludes everything, "!*/" re-includes
-    # directories so per-file negations below can take effect (a file
-    # cannot be re-included while its parent directory is excluded).
-    printf '*\n!*/\n' > "${aiderignore_file}"
+  # Jail aider to exactly the mutation targets with a PHYSICAL deny-all
+  # .aiderignore at the execution-surface root (aider's native discovery
+  # location — not a CLI argument): every repository path is ignored
+  # except the explicit targets, so neither git auto-discovery nor
+  # LLM-induced /add requests can flood the chat context with tracked
+  # files. The surface is ephemeral and the file is untracked, so it
+  # never reaches the captured diff.
+  local aiderignore_file="${AEGIS_EXECUTION_SURFACE_PATH}/.aiderignore"
 
+  # gitignore semantics: "*" excludes everything, "!*/" re-includes
+  # directories so per-file negations below can take effect (a file
+  # cannot be re-included while its parent directory is excluded).
+  printf '*\n!*/\n' > "${aiderignore_file}"
+
+  # Add mutation target files (guard against empty expansion)
+  if [[ "${#file_args[@]}" -gt 0 ]]; then
     for f in "${file_args[@]}"; do
       [[ -z "${f}" ]] && continue
       aider_cmd+=("--file" "${f}")
       printf '!%s\n' "${f}" >> "${aiderignore_file}"
     done
-
-    aider_cmd+=("--aiderignore" "${aiderignore_file}")
   fi
 
   aegis_log "Invoking aider mutation substrate..."
@@ -530,6 +543,9 @@ invoke_aider() {
 
   kill "${watchdog_pid}" 2>/dev/null
   wait "${watchdog_pid}" 2>/dev/null
+
+  # The jail file is invocation-scoped: never leave it on the surface.
+  rm -f "${aiderignore_file}" 2>/dev/null
   set -e
 
   local aider_end_time
