@@ -480,6 +480,13 @@ assemble_bounded_capability_context() {
     echo
     cat "${SKILL_FILE}"
 
+    if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+      echo
+      echo "=== REPOSITORY POCKET MAP (flat path census — baseline context) ==="
+      echo
+      cat "${AEGIS_POCKET_MAP_FILE}"
+    fi
+
     echo
     echo "=== SELECTED CAPABILITY MANIFEST ==="
     echo

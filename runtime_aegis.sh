@@ -173,16 +173,35 @@ AEGIS_SKILL_FILE=""
 
 parse_runtime_cli "$@"
 
-readonly AEGIS_MODE
-readonly AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
-
 # =========================================================
-# EXECUTION SURFACE PATH
+# ACTIVE MODE / EXECUTION SURFACE PATH
 # =========================================================
 
-export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
+# The epistemic feedback loop can re-enter the pipeline in repair mode,
+# so the active mode (and its derived skill/surface paths) is mutable
+# runtime state rather than a readonly constant.
+set_active_mode() {
 
-AEGIS_EXECUTION_SURFACE_ACTIVE="false"
+  AEGIS_MODE="$1"
+  AEGIS_SKILL_FILE=".skills/${AEGIS_MODE}.md"
+
+  export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_ROOT}/${AEGIS_MODE}"
+
+  AEGIS_EXECUTION_SURFACE_ACTIVE="false"
+}
+
+set_active_mode "${AEGIS_MODE}"
+
+# =========================================================
+# EPISTEMIC FEEDBACK LOOP STATE
+# =========================================================
+
+# Automated repair feedback: a rejected validation verdict loops the
+# pipeline back into repair mode (hard ceiling below). Operator gate
+# for environments that cannot run the mutation substrate.
+AEGIS_REPAIR_ATTEMPT_COUNT=0
+readonly AEGIS_MAX_REPAIR_ATTEMPTS=2
+: "${AEGIS_REPAIR_FEEDBACK_LOOP:=true}"
 
 apply_default_investigation_input() {
   export AEGIS_INVESTIGATION_INPUT="${AEGIS_DEFAULT_INVESTIGATION_INPUT}"
@@ -554,6 +573,19 @@ validate_mode_preconditions() {
         || aegis_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
       ;;
     repair)
+      # Feedback iterations re-enter repair from a rejected validation
+      # handover: the preserved findings context replaces the forensics
+      # repair-candidate contract for those iterations only.
+      if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -gt 0 ]]; then
+        jq -e '
+          .artifact_snapshot != null
+          and .artifact_snapshot.mode == "validation"
+          and .artifact_snapshot.operational_context.verdict == "rejected"
+        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+          || aegis_fatal "precondition_failed_rejected_validation_artifact_missing_or_invalid"
+        return 0
+      fi
+
       jq -e '
         .artifact_snapshot != null
         and .artifact_snapshot.mode == "forensics"
@@ -962,19 +994,97 @@ promote_epistemic_handover() {
 # MAIN
 # =========================================================
 
-main() {
+run_mode_pipeline() {
+  # Timing labels carry the active mode so feedback iterations report
+  # under their own mode metrics instead of contaminating the metrics
+  # of the mode the runtime was invoked with.
   validate_runtime_environment
   bootstrap_runtime_state
   reset_runtime_owned_epistemic_handover_for_new_investigation
   validate_mode_preconditions
   remove_stale_runtime_residue
-  measure "runtime_prepare_execution_surface" prepare_execution_surface
-  measure "runtime_materialize_preceding_mutation_candidate" materialize_preceding_mutation_candidate
+  measure "runtime_prepare_execution_surface:${AEGIS_MODE}" prepare_execution_surface
+  measure "runtime_materialize_preceding_mutation_candidate:${AEGIS_MODE}" materialize_preceding_mutation_candidate
   prepare_runtime_owned_capability_surfaces
-  measure "runtime_materialize_manifest" materialize_runtime_owned_capability_manifest
-  measure "runtime_execute_mode" execute_mode
-  measure "runtime_promote_validated_candidate" promote_validated_candidate
+  measure "runtime_materialize_manifest:${AEGIS_MODE}" materialize_runtime_owned_capability_manifest
+  measure "runtime_execute_mode:${AEGIS_MODE}" execute_mode
+  measure "runtime_promote_validated_candidate:${AEGIS_MODE}" promote_validated_candidate
   promote_epistemic_handover
+}
+
+# Returns 0 when the pipeline must loop back into repair mode. Enforces
+# the hard attempt ceiling fatally. The epistemic handover is NOT reset
+# on re-entry: the rejected validation findings stay in place so the
+# next repair iteration exposes the failure context to the substrate.
+repair_feedback_loop_should_fire() {
+
+  [[ "${AEGIS_REPAIR_FEEDBACK_LOOP}" == "true" ]] || return 1
+  [[ "${AEGIS_MODE}" == "validation" ]] || return 1
+
+  local verdict
+  verdict="$(
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
+      | jq -r '.verdict // empty' 2>/dev/null
+  )"
+
+  [[ "${verdict}" == "rejected" ]] || return 1
+
+  if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -ge "${AEGIS_MAX_REPAIR_ATTEMPTS}" ]]; then
+    aegis_fatal "max_repair_attempts_exceeded"
+  fi
+
+  AEGIS_REPAIR_ATTEMPT_COUNT=$((AEGIS_REPAIR_ATTEMPT_COUNT + 1))
+  aegis_warn "Validation rejected candidate — repair feedback iteration ${AEGIS_REPAIR_ATTEMPT_COUNT}/${AEGIS_MAX_REPAIR_ATTEMPTS}"
+
+  return 0
+}
+
+# Downstream progression for feedback iterations: a re-entered repair
+# must roll forward through the entire optimization and verification
+# stack. Terminal state is validation — success is only ever reached
+# through an explicit "accepted" verdict from a fresh validation pass.
+AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
+
+next_feedback_pipeline_mode() {
+  case "${AEGIS_MODE}" in
+    repair)      printf 'optimize'    ;;
+    optimize)    printf 'adversarial' ;;
+    adversarial) printf 'validation'  ;;
+    *)           printf ''            ;;
+  esac
+}
+
+main() {
+
+  local next_mode
+
+  while :; do
+    run_mode_pipeline
+
+    # A rejected fresh validation verdict re-enters the mutation stack
+    # (or aborts fatally at the attempt ceiling).
+    if repair_feedback_loop_should_fire; then
+      AEGIS_PROMOTED_ARTIFACT_PAYLOAD=""
+      AEGIS_FEEDBACK_PIPELINE_ACTIVE="true"
+      set_active_mode "repair"
+      continue
+    fi
+
+    # Inside a feedback iteration, roll forward through the mandatory
+    # downstream stages until the pipeline reaches validation again.
+    if [[ "${AEGIS_FEEDBACK_PIPELINE_ACTIVE}" == "true" ]]; then
+      next_mode="$(next_feedback_pipeline_mode)"
+
+      if [[ -n "${next_mode}" ]]; then
+        aegis_log "Feedback pipeline progression: ${AEGIS_MODE} -> ${next_mode}"
+        AEGIS_PROMOTED_ARTIFACT_PAYLOAD=""
+        set_active_mode "${next_mode}"
+        continue
+      fi
+    fi
+
+    break
+  done
 }
 
 main "$@"

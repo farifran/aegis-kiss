@@ -61,3 +61,6 @@ export function gigabyteParaBits(gb: number): number {
 export function bytesParaGigabits(bytes: number): number {
     return (bytes * 8) / (1024 * 1024 * 1024);
 }
+export function terabyteParaGigabits(tb: number): number {
+    return tb * 1024 * 8;
+}

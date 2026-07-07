@@ -2,6 +2,11 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
+# This suite drives single-mode runtime invocations against mock
+# providers whose validation verdict is "rejected"; the automated
+# repair feedback loop would otherwise re-enter the mutation pipeline.
+export AEGIS_REPAIR_FEEDBACK_LOOP="false"
+
 readonly TEST_INVESTIGATION_INPUT="readonly smoke investigation"
 readonly DEFAULT_INVESTIGATION_INPUT="Analyze repository structure and identify highest-value investigation targets"
 

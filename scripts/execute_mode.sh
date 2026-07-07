@@ -457,6 +457,7 @@ invoke_raw_substrate() {
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
     AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
+    AEGIS_POCKET_MAP_FILE="${AEGIS_POCKET_MAP_FILE:-}" \
     AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
     AEGIS_EVIDENCE_MAX_TOTAL_BYTES="${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" \
     AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES}" \
@@ -496,6 +497,7 @@ invoke_aider_substrate() {
     AEGIS_INVESTIGATION_INPUT="${AEGIS_INVESTIGATION_INPUT:-}" \
     AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" \
+    AEGIS_POCKET_MAP_FILE="${AEGIS_POCKET_MAP_FILE:-}" \
     AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
     AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}" \
     AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \
@@ -561,6 +563,12 @@ materialize_capability_payloads() {
   local payload_file
   local payload_path
 
+  # Dynamic Attention Zoom scope for this execution (advanced modes).
+  local attention_targets_json="[]"
+  if mode_uses_attention_zoom; then
+    attention_targets_json="$(resolve_attention_targets_json)"
+  fi
+
   for evidence_entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
 
     capability="$(
@@ -602,7 +610,122 @@ materialize_capability_payloads() {
       "${capability}" \
       "${payload_path}"
 
+    # Layer 2: advanced modes never carry unpruned deep payloads —
+    # deep metadata survives only for registered attention targets.
+    if mode_uses_attention_zoom && capability_is_deep_payload "${capability}"; then
+      apply_attention_zoom "${payload_path}" "${attention_targets_json}"
+    fi
+
   done
+}
+
+# =========================================================
+# TWO-LAYER CONTEXT FUSION
+# =========================================================
+#
+# Layer 1 — Global Path Census ("Pocket Map"): a lightweight flat list
+# of plain repository paths, globally available to every mode as
+# permanent baseline context, replacing heavy nested topology JSON as
+# the default global view.
+#
+# Layer 2 — Dynamic Attention Zoom: advanced downstream modes bypass
+# unpruned deep capability payloads (graphs, multi-file maps, trees);
+# deep entries survive only for files registered in the active
+# handover's epistemic_state.next_attention_targets.
+
+: "${AEGIS_POCKET_MAP_MAX_LINES:=400}"
+
+generate_pocket_map() {
+
+  local map_file="${AEGIS_CAPABILITY_ENV_DIR}/pocket_map.txt"
+
+  local prune_expr=""
+  local prune_path
+  for prune_path in "${AEGIS_FILESYSTEM_PRUNE_PATHS[@]:-}"; do
+    [[ -n "${prune_path}" ]] || continue
+    prune_expr+="^${prune_path}/|"
+  done
+  prune_expr="${prune_expr%|}"
+
+  git ls-files 2>/dev/null \
+    | { if [[ -n "${prune_expr}" ]]; then grep -Ev "${prune_expr}"; else cat; fi } \
+    | head -n "${AEGIS_POCKET_MAP_MAX_LINES}" \
+    > "${map_file}" || true
+
+  export AEGIS_POCKET_MAP_FILE="${map_file}"
+
+  aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths"
+}
+
+mode_uses_attention_zoom() {
+  case "${AEGIS_MODE}" in
+    forensics|repair|optimize|adversarial|validation) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+capability_is_deep_payload() {
+  case "$1" in
+    structural.builder|filesystem.list_tree|filesystem.extract_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+resolve_attention_targets_json() {
+
+  if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
+    jq -c '
+      [.epistemic_state.next_attention_targets[]?
+        | select(type == "string" and length > 0)]
+    ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null || printf '[]'
+    return 0
+  fi
+
+  printf '[]'
+}
+
+# Prune a deep payload in place: object arrays keep only entries that
+# reference an attention target; with no registered targets the deep
+# structure is bypassed entirely (emptied). The capability envelope
+# fields stay untouched.
+apply_attention_zoom() {
+
+  local payload_path="$1"
+  local targets_json="$2"
+
+  local zoomed_tmp
+  zoomed_tmp="$(mktemp)"
+
+  if jq \
+    --argjson targets "${targets_json}" \
+    '
+      def mentions_target:
+        tojson as $j
+        | any($targets[]; . as $t | $j | contains($t));
+
+      def zoom:
+        walk(
+          if type == "array"
+             and length > 0
+             and all(.[]?; type == "object")
+          then
+            if ($targets | length) == 0
+            then []
+            else [ .[] | select(mentions_target) ]
+            end
+          else .
+          end
+        );
+
+      .payload = ((.payload // {}) | zoom)
+      | .payload.attention_zoom_applied = true
+      | .payload.attention_zoom_targets = $targets
+    ' "${payload_path}" > "${zoomed_tmp}" 2>/dev/null; then
+    mv "${zoomed_tmp}" "${payload_path}"
+  else
+    rm -f "${zoomed_tmp}"
+    aegis_warn "attention_zoom_skipped_unparseable_payload: ${payload_path}"
+  fi
 }
 
 # =========================================================
@@ -663,6 +786,111 @@ select_evidence_payloads() {
 }
 
 # =========================================================
+# TOKEN BUDGETER
+# =========================================================
+#
+# Native size guard over the assembled prompt payload buffer: when the
+# selected evidence payloads exceed AEGIS_MAX_CONTEXT_BYTES, lower-
+# priority payloads are truncated (largest first; the epistemic
+# handover read — the failure/candidate context — is never pruned)
+# until the buffer fits. Pruned payloads and the selected manifest are
+# flagged with context_budget_pruned: true.
+
+: "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
+
+AEGIS_CONTEXT_BUDGET_PRUNED="false"
+
+measure_selected_payload_bytes() {
+
+  local total=0
+  local payload_path
+
+  while IFS= read -r payload_path; do
+    [[ -f "${payload_path}" ]] || continue
+    total=$((total + $(wc -c < "${payload_path}")))
+  done < <(
+    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" | jq -r '.[]?'
+  )
+
+  printf '%s' "${total}"
+}
+
+truncate_payload_for_budget() {
+
+  local payload_path="$1"
+
+  local pruned_tmp
+  pruned_tmp="$(mktemp)"
+
+  # Envelope fields survive; the payload body collapses to a bounded
+  # preview so verbose evidence blocks stop dominating the buffer.
+  if jq -c '
+      {
+        success,
+        capability,
+        classification,
+        execution_id,
+        generated_at,
+        error
+      }
+      + {
+        payload: {
+          context_budget_pruned: true,
+          truncated_preview: ((.payload | tojson)[0:1024])
+        }
+      }
+    ' "${payload_path}" > "${pruned_tmp}" 2>/dev/null; then
+    mv "${pruned_tmp}" "${payload_path}"
+  else
+    rm -f "${pruned_tmp}"
+    aegis_warn "context_budget_truncation_skipped: ${payload_path}"
+  fi
+}
+
+enforce_context_token_budget() {
+
+  local total_bytes
+  total_bytes="$(measure_selected_payload_bytes)"
+
+  if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — within ceiling"
+    return 0
+  fi
+
+  aegis_warn "Context budget exceeded: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — pruning lower-priority evidence"
+
+  # Prunable payloads, largest first. The epistemic handover read is
+  # priority context and exempt.
+  local payload_path
+  while IFS= read -r payload_path; do
+    [[ -f "${payload_path}" ]] || continue
+
+    truncate_payload_for_budget "${payload_path}"
+    AEGIS_CONTEXT_BUDGET_PRUNED="true"
+
+    total_bytes="$(measure_selected_payload_bytes)"
+    if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+      break
+    fi
+  done < <(
+    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" \
+      | jq -r '.[]?' \
+      | grep -v 'epistemic_handover' \
+      | while IFS= read -r p; do
+          [[ -f "${p}" ]] && printf '%s %s\n' "$(wc -c < "${p}" | tr -d ' ')" "${p}"
+        done \
+      | sort -rn \
+      | cut -d' ' -f2-
+  )
+
+  if [[ "${total_bytes}" -gt "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+    aegis_warn "Context budget still above ceiling after pruning: ${total_bytes} bytes (handover context preserved)"
+  else
+    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes after pruning"
+  fi
+}
+
+# =========================================================
 # SELECTED MANIFEST
 # =========================================================
 
@@ -677,6 +905,7 @@ materialize_selected_manifest() {
     echo "${AEGIS_CAPABILITY_MANIFEST}" \
       | jq -c \
           --arg mode "${AEGIS_MODE}" \
+          --argjson context_budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
           '{
             schema_version: .schema_version,
             runtime_model: .runtime_model,
@@ -688,7 +917,8 @@ materialize_selected_manifest() {
             capability_envelope: .modes[$mode].capability_envelope,
             evidence_profile: .modes[$mode].evidence_profile,
             evidence_capabilities: .modes[$mode].evidence_capabilities,
-            capabilities: .modes[$mode].capabilities
+            capabilities: .modes[$mode].capabilities,
+            context_budget_pruned: $context_budget_pruned
           }'
   )"
 
@@ -1271,10 +1501,12 @@ main() {
   resolve_evidence_profile
   augment_evidence_profile_from_handover
   prepare_execution_state
+  generate_pocket_map
   materialize_capability_environment
   measure "executor_capability_payloads" materialize_capability_payloads
   consume_runtime_owned_capability_manifest
   select_evidence_payloads
+  enforce_context_token_budget
   materialize_selected_manifest
   measure "executor_execute_substrate" execute_substrate
 

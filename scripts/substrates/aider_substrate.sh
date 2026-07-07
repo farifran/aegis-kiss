@@ -427,6 +427,13 @@ Execution ID: ${AEGIS_EXECUTION_ID}
 Skill contract:
 $(cat "${AIDER_SKILL_FILE}")
 
+$(
+  if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+    echo "Repository pocket map (flat path census — read-only baseline context):"
+    cat "${AEGIS_POCKET_MAP_FILE}"
+  fi
+)
+
 ---
 
 ${input_label}

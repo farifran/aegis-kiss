@@ -2,6 +2,11 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
+# Mock providers return a "rejected" validation verdict; disable the
+# automated repair feedback loop so single-mode assertions stay
+# single-mode (the mutation substrate cannot run against mocks).
+export AEGIS_REPAIR_FEEDBACK_LOOP="false"
+
 readonly TEST_INVESTIGATION_INPUT="constitutional investigation"
 readonly MISMATCHED_INVESTIGATION_INPUT="mismatched investigation"
 
