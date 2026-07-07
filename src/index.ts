@@ -58,3 +58,6 @@ export function kilobyteParaBits(kb: number): number {
 export function gigabyteParaBits(gb: number): number {
     return gb * 1024 * 1024 * 1024 * 8;
 }
+export function bytesParaGigabits(bytes: number): number {
+    return (bytes * 8) / (1024 * 1024 * 1024);
+}

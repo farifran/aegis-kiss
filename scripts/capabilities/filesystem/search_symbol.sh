@@ -28,8 +28,27 @@ aegis_capability_init "filesystem.search_symbol"
 # EVIDENCE LIMITS
 # =========================================================
 
-readonly MAX_MATCH_LINES="${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:-100}"
-readonly MAX_PAYLOAD_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-200000}"
+# Aggressive context budget ceiling: generic queries ("byte") can match
+# hundreds of lines repo-wide; evidence exposure is hard-capped at a
+# small number of match lines AND a tight byte budget, whichever bites
+# first. The operator line budget is honored only below the ceiling.
+readonly HARD_MAX_MATCH_LINES="${AEGIS_SEARCH_SYMBOL_HARD_MAX_MATCH_LINES:-30}"
+readonly HARD_MAX_MATCH_BYTES="${AEGIS_SEARCH_SYMBOL_HARD_MAX_MATCH_BYTES:-16384}"
+
+_operator_match_lines="${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:-100}"
+if [[ "${_operator_match_lines}" -gt "${HARD_MAX_MATCH_LINES}" ]]; then
+  _operator_match_lines="${HARD_MAX_MATCH_LINES}"
+fi
+readonly MAX_MATCH_LINES="${_operator_match_lines}"
+unset _operator_match_lines
+
+_operator_payload_bytes="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-200000}"
+if [[ "${_operator_payload_bytes}" -gt "${HARD_MAX_MATCH_BYTES}" ]]; then
+  _operator_payload_bytes="${HARD_MAX_MATCH_BYTES}"
+fi
+readonly MAX_PAYLOAD_BYTES="${_operator_payload_bytes}"
+unset _operator_payload_bytes
+
 readonly CONTEXT_LINES="${AEGIS_SEARCH_SYMBOL_CONTEXT_LINES:-2}"
 
 # =========================================================
@@ -77,7 +96,18 @@ head -n "${MAX_MATCH_LINES}" \
   "${TMP_MATCH_FILE}" \
   > "${TMP_BOUNDED_FILE}"
 
+TRUNCATED="false"
+
+TOTAL_MATCH_LINES="$(wc -l < "${TMP_MATCH_FILE}")"
+if [[ "${TOTAL_MATCH_LINES}" -gt "${MAX_MATCH_LINES}" ]]; then
+  TRUNCATED="true"
+fi
+
 bound_file_bytes "${TMP_BOUNDED_FILE}" "${MAX_PAYLOAD_BYTES}" "[AEGIS][TRUNCATED_PAYLOAD]"
+
+if [[ "${AEGIS_TRUNCATED}" == "true" ]]; then
+  TRUNCATED="true"
+fi
 
 # =========================================================
 # MATCH METADATA
@@ -110,6 +140,7 @@ jq -n \
   --argjson total_matches "${MATCH_COUNT}" \
   --argjson exposed_lines "${BOUNDED_LINE_COUNT}" \
   --argjson payload_size_bytes "${FINAL_SIZE_BYTES}" \
+  --argjson truncated "${TRUNCATED}" \
   --rawfile matches "${TMP_BOUNDED_FILE}" \
   '{
     query: $query,
@@ -119,6 +150,7 @@ jq -n \
     context_lines: $context_lines,
     payload_size_bytes: $payload_size_bytes,
     max_match_lines: $max_match_lines,
+    truncated: $truncated,
     matches: $matches
   }' > "${TMP_PAYLOAD_FILE}"
 
