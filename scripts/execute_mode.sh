@@ -539,11 +539,46 @@ materialize_capability_payloads() {
 
     payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
 
-    payload_output="$(
-      invoke_capability_handler \
-        "${handler}" \
-        "${capability_argument}"
-    )"
+    # Net-new evidence guard: Discovery may legitimately request a path
+    # that does not exist yet (net-new file creation intents). The
+    # filesystem.read capability correctly hard-fails on missing files,
+    # which under set -e would abort the whole pipeline here. Intercept
+    # ONLY in this aggregation loop: bypass the physical read and emit a
+    # contract-shaped placeholder payload so context gathering completes
+    # and downstream modes see the absence as evidence, not a crash.
+    if [[ "${capability}" == "filesystem.read" ]] \
+      && [[ -n "${capability_argument}" ]] \
+      && [[ ! -f "${capability_argument}" ]]; then
+      aegis_warn "evidence_target_missing_on_disk — emitting placeholder payload: ${capability_argument}"
+      payload_output="$(
+        jq -n \
+          --arg capability "${capability}" \
+          --arg classification "${AEGIS_CAPABILITY_CLASSIFICATION[$capability]:-readonly}" \
+          --arg execution_id "${AEGIS_EXECUTION_ID}" \
+          --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
+          --arg target "${capability_argument}" \
+          '{
+            success: true,
+            capability: $capability,
+            classification: $classification,
+            execution_id: $execution_id,
+            generated_at: $generated_at,
+            error: null,
+            payload: {
+              target: $target,
+              file_exists: false,
+              net_new_target: true,
+              content: "FILE_NOT_FOUND_IN_TOPOLOGY"
+            }
+          }'
+      )"
+    else
+      payload_output="$(
+        invoke_capability_handler \
+          "${handler}" \
+          "${capability_argument}"
+      )"
+    fi
 
     printf '%s\n' "${payload_output}" > "${payload_path}"
 
