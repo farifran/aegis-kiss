@@ -210,6 +210,74 @@ If a finding cannot be supported by payload evidence exposed by the runtime, it 
 
 ---
 
+# Semantic Fuzzing Protocol (MANDATORY)
+
+Adversarial mode must run a hyper-aggressive, repository-agnostic semantic
+fuzzing pass over the candidate diff. Every vector below MUST be explicitly
+challenged against the investigation input and the exposed evidence — a
+candidate is never `"verified"` until it survives all four.
+
+### Vector 1 — Logical and Mathematical Inversions
+
+Audit whether the mutation inverted an operation relative to the demanded
+semantics:
+- dividing where the demand implies multiplying (and vice versa);
+- adding where the demand implies subtracting (and vice versa);
+- inverted comparisons (`<` vs `>`, `<=` vs `>=`), negated predicates,
+  swapped operands, off-by-one shifts in indices or loop bounds.
+
+For each arithmetic or logical expression in the diff, derive the expected
+direction of the operation FROM THE INVESTIGATION INPUT WORDING and verify
+the implementation matches. An inversion is a `logic_bug` finding with
+`severity: "high"`.
+
+### Vector 2 — Scale and Magnitude Anomalies
+
+Cross-reference natural-language scale expectations against the constants in
+the diff:
+- unit-conversion demands imply exact conversion factors (kilo=10^3,
+  mega=10^6, giga=10^9, tera=10^12, peta=10^15; kibi=2^10 … pebi=2^50;
+  bytes↔bits = ×8 / ÷8). If the prompt implies large data scales (e.g.
+  Petabits) and the code applies a trivial reduction (e.g. dividing bits
+  by 5 because "peta" sounds like "penta"), that is a HIGH-SEVERITY
+  conceptual failure — flag it as `logic_bug`, `severity: "high"`;
+- verify order-of-magnitude coherence: compute the factor the demanded
+  conversion requires and compare it against the literal constants in the
+  diff. Any mismatch in exponent, base (10^n vs 2^n), or direction
+  (multiply vs divide) is a falsification;
+- percentages, rates, and time units (ms/s/min) obey the same rule: the
+  constant must equal the semantically demanded factor exactly.
+
+### Vector 3 — Extreme Boundary Violations
+
+Mentally stress-test the diff against hostile inputs:
+- zero (x=0, denominator 0, empty count), negative values, empty strings,
+  empty arrays, null/undefined states;
+- type overflows and precision loss (integer overflow, float rounding at
+  large magnitudes, truncation on conversion);
+- degenerate structures: single-element collections, missing keys,
+  boundary indices (first/last element).
+
+Each surviving boundary is stated as evidence-supported reasoning; each
+failing boundary is a `boundary_violation` finding with a concrete failing
+input.
+
+### Vector 4 — Strict Verification Verdict
+
+If ANY logical inversion or scale mismatch is detected:
+- emit a finding with a clear, actionable **counterexample** in the
+  `description` (concrete input → produced output → expected output), with
+  `supported_by_evidence: true` and the exact `evidence_refs` consulted;
+- set `status: "challenged"` so Validation is forced toward a `rejected`
+  verdict and the active Aegis repair feedback loop self-corrects the
+  candidate.
+
+Counterexamples must be mechanically checkable (numbers, not adjectives):
+"gigabyteParaBits(1) returns 5 but 1 gigabyte = 8×10^9 bits" is actionable;
+"the conversion looks wrong" is not.
+
+---
+
 # Output Contract
 
 Adversarial mode must emit:

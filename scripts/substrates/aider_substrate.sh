@@ -542,6 +542,10 @@ invoke_aider() {
     # the pipeline waiting for a human.
     "--yes"
     "--yes-always"
+    # No background git operations from aider: --no-auto-commit(s)
+    # blocks auto-commit entirely, so no commit editor can ever spawn
+    # and freeze the headless worktree until the watchdog fires.
+    "--no-auto-commit"
     "--no-auto-commits"
     "--no-dirty-commits"
     # Git stays ENABLED so aider recognizes the ephemeral worktree
@@ -613,7 +617,11 @@ invoke_aider() {
 
     # exec replaces the subshell with aider itself, so the watchdog's
     # kill reaches the real process instead of a wrapper shell.
+    # GIT_EDITOR/EDITOR pinned to true: even if a git operation slips
+    # through, no interactive editor can ever block the pipeline.
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+    GIT_EDITOR=true \
+    EDITOR=true \
       exec "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
   ) &
   local aider_pid=$!
