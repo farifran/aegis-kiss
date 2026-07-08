@@ -160,6 +160,7 @@ It is included to make the repository shape visible at a glance before the per-f
 │   │   ├── apply_candidate_diff.sh
 │   │   └── promote_validated_candidate.sh
 │   └── substrates/
+│       ├── aider_lint_gate.sh
 │       ├── aider_substrate.sh
 │       ├── raw_llm.sh
 │       └── test/
@@ -260,6 +261,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/capabilities/structural/builder.sh` | Readonly capability that synthesizes structural topology (boundaries, bridges, hotspots) from the import/reference graphs. | Consumes outputs of `extract_import_graph` and `extract_reference_graph`; feeds discovery/forensics profiles. |
 | `scripts/substrates/raw_llm.sh` | Readonly cognition substrate. Builds bounded prompt context from the selected skill, selected manifest, and selected payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; then calls the provider and extracts one JSON artifact between markers. | Invoked by `scripts/execute_mode.sh` for `raw` modes; depends on `.harness/config.sh`, `.skills/*.md`, provider env vars, and the payloads created by capability scripts. |
 | `scripts/substrates/aider_substrate.sh` | Mutation cognition substrate. Runs aider against the mutation execution surface using the active skill and capability payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; emits a mutation JSON artifact (diff, files_changed, rationale) between markers. | Invoked by `scripts/execute_mode.sh` for `aider` modes; receives `OPENAI_API_KEY`/`OPENAI_API_BASE` from the executor's mutation env whitelist. |
+| `scripts/substrates/aider_lint_gate.sh` | Autonomous linting gate. Captures syntax breaks in milliseconds (`bash -n`, `node --check`, single-file `tsc --noResolve --skipLibCheck`) after applied aider edits to trigger immediate reflection/correction at source before validation stages. | Invoked automatically by Aider via `--lint-cmd` during the mutation process. |
 | `scripts/runtime/apply_candidate_diff.sh` | Applies a validated mutation candidate diff to the mutation execution surface. | Called during the promotion phase orchestrated by `runtime_aegis.sh` for mutation modes. |
 | `scripts/runtime/promote_validated_candidate.sh` | Promotes a validated, diff-bearing mutation candidate into runtime-owned handover state. | Final step of the mutation pipeline; called by `runtime_aegis.sh` after mutation artifact validation succeeds. Validates that the target files do not have uncommitted changes (`git diff --quiet HEAD`) before applying the patch. |
 
@@ -464,10 +466,13 @@ The repository is fully operational across both primary runtime paths:
 
 ### Performance & Security Pillars (v1.0.0 Optimizations)
 
-- **Context Fusion Layer**: Global directory/relationship census is maintained using a flat plain-text file list (`flat paths census`) to reduce baseline overhead. High-fidelity symbol structure and AST graphs are loaded dynamically ("zoom-in") only for files that are currently targeted by the active attention scope (`next_attention_targets`), pruned using `jq walk`.
-- **Deterministic Token Ceiling**: Active token-budgeting is enforced in pure Bash inside `execute_mode.sh` (stripping BSD/macOS padding from `wc -c`), capping requests at a hard **32 KB** limit. Payloads are pruned largest-first while strictly keeping the critical epistemic handover history untouched, resulting in token usage reductions of up to **96%**.
-- **Aider Loop Mitigation & Format Selection**: Prevents model infinite-loop retries and prompt injection inside Aider via a dynamic `.aiderignore` mechanism, utilizing unique slash substitutions (`∕`), an automatic `whole`/`diff` formatting selector based on file sizes, and an *Anti-Lazy Truncation* prompt clause that prevents the model from dropping code lines.
-- **Search Symbol Tuning**: Hard ceilings applied on `search_symbol.sh` (max 30 lines / 16 KB) with metadata pruning triggers to abort overly-broad queries before API dispatch.
+Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aegis Harness atinge o seu ápice de maturidade:
+
+* **Startup Blindado**: Inicialização atômica e 100% offline. Sem pings ocultos para servidores externos ou perda de milissegundos com resoluções de pacotes.
+* **Contexto Enxuto**: Carregamento cirúrgico em memória. A árvore completa de caminhos (`flat paths census`) é omitida/barrada quando há alvos explícitos de atenção, e os dumps verbosos de capacidades sofrem decapitação estrita no teto de 8 KB.
+* **Reflexão Veloz**: O script [aider_lint_gate.sh](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/aider_lint_gate.sh) atua como um sistema nervoso autônomo. Captura quebras sintáticas em milissegundos (`bash -n`, `node --check`, `tsc --noResolve --skipLibCheck`) e força a auto-correção na origem antes mesmo do artefato chegar ao orquestrador central.
+* **Governança Intacta**: A inteligência probabilística fica concentrada na auditoria lógica profunda do modo `adversarial`, enquanto o tribunal da `validation` permanece livre de ruído, operando de forma rigidamente determinística.
+* **Token Budgeter & Loop Mitigation**: Limitação ativa de payload a um teto de **32 KB** (Bash puro com correções BSD/macOS `wc -c`), economizando até **96%** de tráfego redundante. Mitiga loops infinitos no Aider por meio de `.aiderignore` dinâmico, substituições de barras (`∕`), seletor `whole`/`diff` balanceado por tamanho, e diretivas de prompt contra omissão de linhas (*Anti-Lazy Truncation*).
 
 ### Proven architectural properties (verified, not asserted)
 

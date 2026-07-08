@@ -76,3 +76,6 @@ export function megabyteParaBits(mb: number): number {
 export function megabyteParaTerabits(mb: number): number {
     return (mb * 1024 * 1024 * 8) / (1024 * 1024 * 1024 * 1024);
 }
+export function megabitsParaTerabits(mbits: number): number {
+    return mbits / 1000000;
+}
