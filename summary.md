@@ -21,7 +21,7 @@ This document is not constitutional. If it conflicts with the authoritative cont
 
 ## One-Sentence System Summary
 
-**Aegis Harness v1.0.0 (Estável / Homologada)** is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
+**Aegis Harness v1.0.0 (Estável / Homologada)** — note: `package.json` still declares `"version": "0.3.0"`; the two version markers have not been reconciled — is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
 
 Current Suite Status: **all 13 npm-chained test suites passing green (Exit 0)** (`npm run aegis:test`), with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS). Two additional standalone harnesses (`test_required_evidence_augmentation.sh`, `test_sovereignty_fallback.sh`) exist under `scripts/substrates/test/` but are not wired into the npm chain.
 
@@ -496,10 +496,11 @@ Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aeg
   - *Evitação de Crash*: Se o arquivo for inédito, `execute_mode.sh` intercepta a ausência física e gera um payload virtual (`"FILE_NOT_FOUND_IN_TOPOLOGY"`, `net_new_target: true`) em vez de interromper o shell.
   - *Intent-to-Add*: No `aider_substrate.sh`, arquivos inexistentes são criados via `touch` e registrados com `git add -N`, contornando bloqueios do `.aiderignore` para aparecerem no `git diff HEAD`.
   - *Hardening do Rollback*: Adicionado `git reset -q` antes de limpezas de worktree para desfazer locks do index criados pela intenção de adição.
+  - *Autorização de Escopo*: A projeção `AEGIS_JQ_AUTHORIZED_TARGETS` (gate `forensics_repair_candidate_outside_discovery_scope` em `execute_mode.sh`) inclui os caminhos declarados pela Discovery em `operational_context.required_evidence` (prefixo `filesystem.read:` removido), autorizando candidatos net-new sem enfraquecer o gate — a autorização continua derivada exclusivamente do artefato promovido da Discovery.
 * **Resolução de Condições de Corrida**: Blindagem do executor com liveness guard de 3 segundos em `invoke_aider` antes de se mover para o diretório de trabalho. Se a montagem da worktree pelo Git atrasar, o sistema captura a exceção de forma limpa e emite o código de erro controlado `97` (evitando capotamentos com `No such file or directory`).
 * **Auditoria de Complexidade e Otimização Local**:
   - *Unificação de Modos*: Colapso de tabelas de busca em uma sequência de transição única (`PIPELINES` em `run_aegis.sh` e `AEGIS_FEEDBACK_MODE_SEQUENCE` em `runtime_aegis.sh`).
-  - *Forks e Builtins*: Remoção de forks externos de `date +%s` em favor do builtin `printf -v ... '%(%s)T' -1` do Bash. Consolidou validações do `jq` em `raw_llm.sh` em um único filtro combinado (economizando 3 forks por chamada).
+  - *Forks e Builtins*: Remoção de forks externos de `date +%s` em favor do builtin `printf -v ... '%(%s)T' -1` do Bash. Consolidou validações do `jq` em `raw_llm.sh` em um único filtro combinado (economizando 3 forks por chamada) e as duas passadas de `awk` de `extract_agents_constitution` em uma única passada com flags independentes (saída byte-idêntica). O wrapper de linha única `pipeline_contains_mutation` foi inlined em `run_aegis.sh`, e a entrada morta `aegis:bootstrap` foi aposentada do `package.json`.
   - *Simplificação de Executor*: Remoção completa da cerimônia de cleanup sem estado (`cleanup_executor`, trap de EXIT e latch de reentrância), substituída por dois traps de uma linha dedicados exclusivamente à propagação limpa de sinais (`130` para SIGINT, `143` para SIGTERM).
 * **Telemetria de Provedor & Fidelidade**:
   - *Desduplicação de Contexto*: Remoção de input redundante em `raw_llm.sh` referenciando diretamente a cópia na mensagem original do usuário.
