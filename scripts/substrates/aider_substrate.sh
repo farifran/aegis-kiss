@@ -560,6 +560,13 @@ invoke_aider() {
     # complete file instead of stalling in a diff-calculation loop;
     # "diff" only when the target surface is too large to re-emit.
     "--edit-format" "${resolved_edit_format}"
+    # Proxy/network hang containment:
+    # --no-stream forces atomic payload delivery — no infinite loops on
+    #   broken chunk streams or missing EOF markers from the API proxy;
+    # --no-check-update stops background internet pings in the headless
+    #   runner;
+    # --no-suggest-shell-commands disables interactive shell-command
+    #   reasoning that can block non-interactive execution threads.
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
