@@ -93,6 +93,12 @@ fi
 # Rule: explicit > hotspot > bridge > entrypoint > none
 # =========================================================
 
+# Layer 0 recognition priors (optional predecessor payload).
+LAYER0_PAYLOAD_JSON="$(
+  jq -c '.payload // {}' "${PAYLOAD_DIR}/runtime_layer0_facts.json" 2>/dev/null \
+    || printf '{}'
+)"
+
 jq -n \
   --arg capability "runtime.attention_seed" \
   --arg classification "readonly" \
@@ -101,6 +107,7 @@ jq -n \
   --arg target "${TARGET_PATH}" \
   --arg max_targets "${MAX_ATTENTION_TARGETS}" \
   --slurpfile builder "${BUILDER_PAYLOAD}" \
+  --argjson layer0 "${LAYER0_PAYLOAD_JSON}" \
   '
     ($builder[0].payload // {}) as $bp
     | ($bp.observed_request_alignment // {}) as $ora
@@ -110,6 +117,8 @@ jq -n \
     | ($ti.hotspots // []) as $hotspots
     | ($ti.bridges // []) as $bridges
     | ($ti.entrypoints // []) as $entrypoints
+    | ([($layer0.hot_files // [])[] | select(.resonance == 1)]) as $l0_resonant
+    | ($layer0.entrypoints // []) as $l0_declared
     | ($max_targets | tonumber) as $max
 
     # --- determine if explicit paths are exact or ambiguous ---
@@ -143,6 +152,16 @@ jq -n \
             confidence: "high",
             state: "resolved"
           }
+        elif ($l0_resonant | length) > 0 then
+          {
+            targets: ([$l0_resonant[] | .file] | unique),
+            scope: "layer0:hot_files",
+            reason: "git mutation sniffing: churn files resonant with investigation input",
+            rule: "layer0_hot_files",
+            source: "runtime.layer0_facts.hot_files",
+            confidence: "high",
+            state: "layer0"
+          }
         elif $path_analysis.has_ambiguous then
           # Ambiguous path requested but no exact winner.
           # Fall through to topology, but mark attention as ambiguous.
@@ -175,6 +194,16 @@ jq -n \
             source: "topology_index.bridges",
             confidence: "medium",
             state: "topology"
+          }
+        elif ($l0_declared | length) > 0 then
+          {
+            targets: ([$l0_declared[] | .file] | unique),
+            scope: "layer0:declared_entrypoint",
+            reason: "entrypoints declared by project manifests (package.json / tsconfig.json)",
+            rule: "declared_entrypoint",
+            source: "runtime.layer0_facts.entrypoints",
+            confidence: "high",
+            state: "layer0"
           }
         elif ($entrypoints | length) > 0 then
           {
@@ -233,6 +262,7 @@ jq -n \
     | ({
         scope_type: ($sel.state | if . == "resolved" then "explicit_request"
                       elif . == "ambiguous" then "ambiguous"
+                      elif . == "layer0" then "layer0"
                       elif . == "topology" then "topology"
                       else "none" end),
         scope_targets: $capped,

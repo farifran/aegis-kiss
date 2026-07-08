@@ -536,6 +536,11 @@ invoke_aider() {
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
     "--timeout" "${AEGIS_AIDER_TIMEOUT}"
+    # Full headless mode: --yes auto-accepts every interactive check
+    # (file-addition confirmations included) and --yes-always keeps the
+    # session non-interactive across retries — no prompt may ever block
+    # the pipeline waiting for a human.
+    "--yes"
     "--yes-always"
     "--no-auto-commits"
     "--no-dirty-commits"

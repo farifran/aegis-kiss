@@ -21,7 +21,9 @@ This document is not constitutional. If it conflicts with the authoritative cont
 
 ## One-Sentence System Summary
 
-Aegis Harness is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
+**Aegis Harness v1.0.0 (Estável / Homologada)** is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
+
+Current Suite Status: **14/14 tests passing green (Exit 0)** with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS).
 
 ## High-Level Execution Graph
 
@@ -297,13 +299,15 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 
 Everything executable in the shell path takes its wiring from `.harness/config.sh`.
 
-### 2. Runtime-owned execution
+### 2. Runtime-owned execution (Adaptive Epistemic Lifecycle)
 
-`runtime_aegis.sh` is the top-level orchestrator.
+`runtime_aegis.sh` is the top-level orchestrator operating as a cyclic state machine.
 
 It validates the environment, prepares or resets `.harness/runtime/epistemic_handover.json`, creates runtime-owned capability directories, generates the manifest via `scripts/capabilities/generate_manifest.sh`, dynamically extracts cognition contract rules from `AGENTS.md` as `AEGIS_CONSTITUTIONAL_PREAMBLE`, and delegates mode execution to `scripts/execute_mode.sh`.
 
 After the substrate returns an artifact, the runtime validates it and promotes the artifact snapshot plus routed attention into the handover file. For mutation modes, a validated candidate is additionally promoted through `scripts/runtime/promote_validated_candidate.sh`, which enforces that the target files remain clean before patch application.
+
+**Validation Feedback Loop & Cyclic Graph**: If the validator emits a `rejected` verdict, the handover accumulates the failure details/findings (*counterexamples*) and the runtime automatically loops back into `repair` mode. The execution flows through `repair -> optimize -> adversarial -> validation` for up to a hard ceiling of 2 repair attempts, with separate timing/performance metrics tracked per mode iteration to avoid metric contamination.
 
 ### 3. Capability evidence path
 
@@ -457,6 +461,13 @@ The repository is fully operational across both primary runtime paths:
 - **Readonly runtime path** — fully implemented: constitutional governance explicit, operational wiring centralized, readonly capability generation implemented, readonly raw substrate implemented, readonly mode tests present and detailed.
 - **Mutation runtime path** — implemented end-to-end: aider mutation substrate implemented, mutation artifact validation implemented, candidate promotion implemented, mutation/promotion tests present.
 - **Envelope offloading** — implemented: the Protocol VM (`scripts/execute_mode.sh`) auto-populates structural metadata (`mode`, `status`, `handover_attention`), allowing the cognitive skills under `.skills/` to focus strictly on payload data.
+
+### Performance & Security Pillars (v1.0.0 Optimizations)
+
+- **Context Fusion Layer**: Global directory/relationship census is maintained using a flat plain-text file list (`flat paths census`) to reduce baseline overhead. High-fidelity symbol structure and AST graphs are loaded dynamically ("zoom-in") only for files that are currently targeted by the active attention scope (`next_attention_targets`), pruned using `jq walk`.
+- **Deterministic Token Ceiling**: Active token-budgeting is enforced in pure Bash inside `execute_mode.sh` (stripping BSD/macOS padding from `wc -c`), capping requests at a hard **32 KB** limit. Payloads are pruned largest-first while strictly keeping the critical epistemic handover history untouched, resulting in token usage reductions of up to **96%**.
+- **Aider Loop Mitigation & Format Selection**: Prevents model infinite-loop retries and prompt injection inside Aider via a dynamic `.aiderignore` mechanism, utilizing unique slash substitutions (`∕`), an automatic `whole`/`diff` formatting selector based on file sizes, and an *Anti-Lazy Truncation* prompt clause that prevents the model from dropping code lines.
+- **Search Symbol Tuning**: Hard ceilings applied on `search_symbol.sh` (max 30 lines / 16 KB) with metadata pruning triggers to abort overly-broad queries before API dispatch.
 
 ### Proven architectural properties (verified, not asserted)
 

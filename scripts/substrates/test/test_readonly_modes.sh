@@ -309,7 +309,7 @@ main() {
 
   assert_materialized_runtime_state \
     "discovery" \
-    '["filesystem_extract_configuration_structure.json", "filesystem_extract_entrypoints.json", "filesystem_extract_import_graph.json", "filesystem_extract_reference_graph.json", "filesystem_extract_responsibilities.json", "filesystem_extract_symbols.json", "filesystem_extract_test_relationships.json", "filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "structural_builder.json"]'
+    '["filesystem_extract_configuration_structure.json", "filesystem_extract_entrypoints.json", "filesystem_extract_import_graph.json", "filesystem_extract_reference_graph.json", "filesystem_extract_responsibilities.json", "filesystem_extract_symbols.json", "filesystem_extract_test_relationships.json", "filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "runtime_layer0_facts.json", "structural_builder.json"]'
 
   assert_materialized_runtime_state \
     "forensics" \

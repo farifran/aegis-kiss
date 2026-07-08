@@ -243,6 +243,7 @@ declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_responsibilities"
   "structural.builder"
   "runtime.attention_seed"
+  "runtime.layer0_facts"
 )
 
 # Discovery envelope = base + structural extraction
@@ -291,6 +292,7 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.extract_responsibilities"]="scripts/capabilities/filesystem/extract_responsibilities.sh"
   ["structural.builder"]="scripts/capabilities/structural/builder.sh"
   ["runtime.attention_seed"]="scripts/capabilities/runtime/attention_seed.sh"
+  ["runtime.layer0_facts"]="scripts/capabilities/runtime/layer0_facts.sh"
   ["typescript.check"]="scripts/capabilities/typescript_check.sh"
   ["eslint.check"]="scripts/capabilities/eslint_check.sh"
   ["test.run"]="scripts/capabilities/test_runner.sh"
@@ -315,6 +317,7 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.extract_responsibilities"]="readonly"
   ["structural.builder"]="readonly"
   ["runtime.attention_seed"]="readonly"
+  ["runtime.layer0_facts"]="readonly"
   ["typescript.check"]="readonly"
   ["eslint.check"]="readonly"
   ["test.run"]="readonly"
@@ -339,6 +342,7 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.extract_responsibilities"]="."
   ["structural.builder"]="."
   ["runtime.attention_seed"]="."
+  ["runtime.layer0_facts"]="."
   ["typescript.check"]="."
   ["eslint.check"]="src"
   ["test.run"]="."

@@ -50,6 +50,7 @@ required_dependency_capabilities=(
   "filesystem.extract_test_relationships"
   "filesystem.extract_configuration_structure"
   "filesystem.extract_responsibilities"
+  "runtime.layer0_facts"
 )
 
 for cap in "${required_dependency_capabilities[@]}"; do
@@ -69,6 +70,7 @@ done
 TOPOLOGY_JSON="$(python3 - "${TARGET_PATH}" "${AEGIS_CAPABILITY_PAYLOAD_DIR}" <<'PY'
 import json
 import os
+import re
 import sys
 
 target_path  = sys.argv[1] if len(sys.argv) > 1 else '.'
@@ -98,6 +100,7 @@ entrypoints_payload,   st_ep = load_payload('filesystem_extract_entrypoints.json
 test_rel_payload,      st_tr = load_payload('filesystem_extract_test_relationships.json')
 config_struct_payload, st_cs = load_payload('filesystem_extract_configuration_structure.json')
 responsibilities_payload, st_rp = load_payload('filesystem_extract_responsibilities.json')
+layer0_payload,        st_l0 = load_payload('runtime_layer0_facts.json')
 
 consumed_payloads = [
     {'file': 'filesystem_extract_import_graph.json',           'status': st_ig},
@@ -107,6 +110,7 @@ consumed_payloads = [
     {'file': 'filesystem_extract_test_relationships.json',     'status': st_tr},
     {'file': 'filesystem_extract_configuration_structure.json','status': st_cs},
     {'file': 'filesystem_extract_responsibilities.json',       'status': st_rp},
+    {'file': 'runtime_layer0_facts.json',                       'status': st_l0},
 ]
 
 # =========================================================
@@ -308,7 +312,27 @@ for u, v in bridges_raw:
     _bridge_files.add(v)
 _boundary_files = set(boundaries_raw) if boundaries_raw else set()
 
-# Compute hotspot score per node — purely topological
+# Layer 0 priors: import-gravity in-degree map (extensionless keys)
+# claimed by runtime.layer0_facts. Gravity immunizes centrality against
+# regex-extractor omissions: a node earns the bonus when its path (or
+# its extension-stripped path) matches a gravity entry.
+GRAVITY_BONUS_CAP = 10
+_gravity_map = {}
+for _g in ((layer0_payload or {}).get('import_gravity') or []):
+    _gf = _g.get('file')
+    _gs = _g.get('gravity')
+    if isinstance(_gf, str) and isinstance(_gs, int):
+        _gravity_map[_gf] = _gs
+
+def _gravity_bonus(node):
+    if node in _gravity_map:
+        return min(_gravity_map[node], GRAVITY_BONUS_CAP)
+    stem = re.sub(r'\.(ts|js|tsx|jsx)$', '', node)
+    if stem in _gravity_map:
+        return min(_gravity_map[stem], GRAVITY_BONUS_CAP)
+    return 0
+
+# Compute hotspot score per node — topological + Layer 0 gravity prior
 hotspot_scores = {}
 for n in nodes:
     deg = degree_total[n]
@@ -324,6 +348,7 @@ for n in nodes:
     # entrypoint_with_dependencies: entrypoint AND has degree > 0
     if n in _entrypoint_files and deg > 0:
         score += ENTRYPOINT_WITH_DEPS_BONUS
+    score += _gravity_bonus(n)
     hotspot_scores[n] = score
 
 hotspots_raw = sorted(
