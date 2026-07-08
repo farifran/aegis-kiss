@@ -11,6 +11,13 @@ The runtime injects deterministic Layer 0 facts (`runtime_layer0_facts` payload:
 - Do NOT re-rank file importance where `import_gravity` already ranks it.
 - Semantic discipline is retained for TENSION ONLY: when the investigation input demands something the Layer 0 facts cannot anchor (an unmapped dependency, a declared-but-missing path in `gaps`, a hidden structural surface), report that specific gap in `observations` and request the exact evidence to close it.
 
+## NET-NEW FILE CREATION INTENTS (MANDATORY CAPTURE)
+If the investigation input explicitly mandates, implies, or requests the creation of a net-new file or module (e.g., "create `src/tokenBucket.ts`"), the requested path MUST be captured even though it is absent from the Layer 0 facts and the pocket map:
+- Include the exact repository-relative path as a `filesystem.read:<path>` entry in `required_evidence` — its absence on disk is expected and is itself evidence of the creation gap.
+- State the creation demand in `observations` (e.g., "Investigation demands net-new file `src/tokenBucket.ts`; path absent from Layer 0 facts — creation target, not a mapping gap.").
+- Absence from the static pocket map is NEVER a reason to drop, substitute, or remap an explicitly requested net-new path onto an existing file.
+- Runtime-owned fields (`investigation_scope`, `attention_targets`, `handover_attention`) remain runtime-injected — do NOT emit them; the runtime derives scope targets from `required_evidence` and `observations`.
+
 ## CONSTRAINTS & PROHIBITED PATTERNS
 1. **No system/code descriptions**: Observations must focus strictly on the *investigation state* (what the investigation needs to do next, gaps, priorities), NOT on what the system/code does.
 2. **No structural/metric repetition**: Do NOT repeat raw counts, metrics, or structural facts (e.g., node/edge/bridge/boundary counts) already present in `structural_context`.

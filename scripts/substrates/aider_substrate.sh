@@ -224,8 +224,10 @@ resolve_mutation_targets() {
 #
 # - no glob metacharacters or whitespace (no wildcard expansion)
 # - no absolute paths or ../ traversal (surface-relative only)
-# - must be an existing REGULAR FILE inside the execution surface
-#   (directories would be added recursively)
+# - must resolve to a REGULAR FILE inside the execution surface
+#   (directories would be added recursively); a path that does not
+#   exist yet is a NET-NEW target and is pre-materialized as an empty
+#   file so it passes the .aiderignore jail and aider can populate it
 # - hard cap on target count (context and wall-clock budget)
 : "${AEGIS_AIDER_MAX_TARGET_FILES:=8}"
 
@@ -256,8 +258,29 @@ sanitize_mutation_targets() {
     fi
 
     if [[ ! -f "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" ]]; then
-      aegis_warn "target_rejected_not_a_file_in_surface: ${t}"
-      continue
+      # Non-file, existing path (socket, symlink to dir, ...) stays rejected.
+      if [[ -e "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" ]]; then
+        aegis_warn "target_rejected_not_a_file_in_surface: ${t}"
+        continue
+      fi
+      # Net-new target: pre-materialize an empty regular file inside the
+      # surface so the .aiderignore jail and --file loading accept it,
+      # then register it with --intent-to-add so the content aider writes
+      # appears in `git diff HEAD` (untracked paths are diff-invisible).
+      # If aider writes nothing, the file stays empty (empty diff hunk)
+      # and the rollback `git clean -fd` sweeps it on failure — no
+      # residue can leak past the surface.
+      if ! mkdir -p "$(dirname "${AEGIS_EXECUTION_SURFACE_PATH}/${t}")" \
+        || ! : > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}"; then
+        aegis_warn "target_rejected_unmaterializable: ${t}"
+        continue
+      fi
+      git \
+        --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
+        --work-tree="${AEGIS_EXECUTION_SURFACE_PATH}" \
+        add --intent-to-add -- "${t}" >/dev/null 2>&1 \
+        || aegis_warn "net_new_target_intent_to_add_failed: ${t}"
+      aegis_warn "target_pre_materialized_net_new_file: ${t}"
     fi
 
     if [[ "${kept}" -ge "${AEGIS_AIDER_MAX_TARGET_FILES}" ]]; then
@@ -484,6 +507,11 @@ rollback_execution_surface() {
 
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}" || exit 0
+    # Clear intent-to-add index entries (net-new pre-materialized targets)
+    # first: they block git clean from sweeping the file and make
+    # checkout error on the blobless path.
+    git --git-dir="${AEGIS_MUTATION_GIT_DIR}" --work-tree=. \
+      reset -q >/dev/null 2>&1 || true
     git --git-dir="${AEGIS_MUTATION_GIT_DIR}" --work-tree=. \
       checkout -- . >/dev/null 2>&1 || true
     git --git-dir="${AEGIS_MUTATION_GIT_DIR}" --work-tree=. \
@@ -625,6 +653,23 @@ invoke_aider() {
   # LLM-induced /add requests can flood the chat context with tracked
   # files. The surface is ephemeral and the file is untracked, so it
   # never reaches the captured diff.
+  # Surface liveness guard: the runtime owns the worktree and rapid
+  # feedback loops can expunge/re-initialize it between input validation
+  # and this invocation. Re-verify NOW — immediately before the first
+  # write into the surface and the subshell cd — so a vanished surface
+  # produces one deterministic fatal instead of a subshell cd crash.
+  # A brief settle window absorbs an in-flight surface re-initialization.
+  if [[ ! -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]]; then
+    aegis_warn "execution_surface_missing_before_invocation — waiting for surface re-initialization"
+    local settle
+    for settle in 1 2 3; do
+      sleep 1
+      [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] && break
+    done
+    [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
+      || aegis_fatal "execution_surface_vanished: ${AEGIS_EXECUTION_SURFACE_PATH}"
+  fi
+
   local aiderignore_file="${AEGIS_EXECUTION_SURFACE_PATH}/.aiderignore"
 
   # gitignore semantics: "*" excludes everything, "!*/" re-includes
@@ -657,7 +702,10 @@ invoke_aider() {
   # whole aider process after AEGIS_AIDER_MAX_SECONDS.
   set +e
   (
-    cd "${AEGIS_EXECUTION_SURFACE_PATH}"
+    cd "${AEGIS_EXECUTION_SURFACE_PATH}" || {
+      echo "[AEGIS][AIDER][FATAL] execution_surface_unreachable: ${AEGIS_EXECUTION_SURFACE_PATH}" >&2
+      exit 97
+    }
 
     # exec replaces the subshell with aider itself, so the watchdog's
     # kill reaches the real process instead of a wrapper shell.
