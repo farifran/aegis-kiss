@@ -428,8 +428,7 @@ ${AEGIS_EXECUTION_ID}
 Execution timestamp:
 ${AEGIS_EXECUTION_TIMESTAMP}
 
-Investigation input:
-${AEGIS_INVESTIGATION_INPUT}
+The investigation input is provided under the "=== INVESTIGATION INPUT ===" header of the user message.
 EOF
 }
 
@@ -638,8 +637,11 @@ execute_provider_request() {
     case "${http_code}" in
 
       200)
+        # Non-streaming request: the provider sends the body only after
+        # generation finishes, so time_starttransfer ≈ time_total. This is
+        # server-side prefill + FULL decode, not true time-to-first-token.
         echo "[AEGIS][TIMING] curl_connect: ${t_connect}s" >&2
-        echo "[AEGIS][TIMING] first_token: ${t_starttransfer}s" >&2
+        echo "[AEGIS][TIMING] provider_generation (prefill+decode, non-streaming): ${t_starttransfer}s" >&2
         echo "[AEGIS][TIMING] response_complete: ${t_total}s" >&2
         return 0
         ;;
