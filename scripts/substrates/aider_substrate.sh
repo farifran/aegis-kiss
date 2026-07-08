@@ -305,6 +305,12 @@ trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 # Without this, Aider only gets the investigation input string but not the
 # structured evidence that defines what and why to mutate.
 
+# Per-payload byte ceiling: a single verbose evidence blob (search_symbol
+# match dumps, test.run stdout) can dwarf the small candidate/failure
+# context that actually drives the edit and blow up Time-To-First-Token.
+# Each payload is bounded independently; core context always survives.
+: "${AEGIS_AIDER_EVIDENCE_MAX_BYTES:=8192}"
+
 inject_capability_evidence() {
 
   [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]] || return 0
@@ -319,11 +325,18 @@ inject_capability_evidence() {
 
   printf '\n---\n\nCapability evidence payloads:\n'
 
-  local payload_path
+  local payload_path payload_bytes
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
-    cat "${payload_path}"
+    payload_bytes="$(wc -c < "${payload_path}")"
+    if [[ "${payload_bytes}" -le "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}" ]]; then
+      cat "${payload_path}"
+    else
+      head -c "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}" "${payload_path}"
+      printf '\n[AEGIS][EVIDENCE_TRUNCATED:%s->%s bytes]\n' \
+        "${payload_bytes}" "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}"
+    fi
     printf '\n'
   done
 }
@@ -428,7 +441,12 @@ Skill contract:
 $(cat "${AIDER_SKILL_FILE}")
 
 $(
-  if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+  # Context slimming: the pocket map is a flat census of every repo path.
+  # Once the exact mutation targets are loaded via --file, that census is
+  # pure redundant context that inflates Time-To-First-Token. Emit it ONLY
+  # in the no-targets fallback, where the model still needs a scope hint.
+  if [[ "${#prompt_targets[@]}" -eq 0 ]] \
+    && [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
     echo "Repository pocket map (flat path census — read-only baseline context):"
     cat "${AEGIS_POCKET_MAP_FILE}"
   fi
@@ -529,6 +547,16 @@ invoke_aider() {
   local resolved_edit_format
   resolved_edit_format="$(resolve_aider_edit_format "${file_args[@]:-}")"
 
+  # Accelerated local validation loop: after each applied edit, aider
+  # runs the per-file structural gate (bash -n / node --check / tsc
+  # --noResolve single-file) on ONLY the modified delta and self-corrects
+  # structural breakage in its bounded internal reflection step, before
+  # the artifact ever reaches the runtime state machine. Quoted so the
+  # absolute path survives shlex splitting.
+  local lint_gate_cmd
+  printf -v lint_gate_cmd 'bash "%s"' \
+    "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"
+
   local aider_cmd=(
     "${AEGIS_AIDER_BIN}"
     "--config" "${mutation_conf}"
@@ -570,7 +598,12 @@ invoke_aider() {
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
-    "--no-auto-lint"
+    # Ultra-fast internal validation loop: structural gate on the edited
+    # files only (no workspace-wide processes). Broad verification stays
+    # with the adversarial/validation stages; the wall-clock watchdog
+    # and aider's own reflection cap bound any correction loop.
+    "--auto-lint"
+    "--lint-cmd" "${lint_gate_cmd}"
     "--no-auto-test"
     "--no-check-update"
     "--no-detect-urls"
@@ -578,9 +611,10 @@ invoke_aider() {
     "--exit"
   )
 
-  # Bounded mutation is single-shot by design: no lint/test fix loops here.
-  # Each auto-lint retry is another slow model round-trip with no upper
-  # bound, and verification is owned by the adversarial/validation modes.
+  # Mutation runs one bounded internal reflection loop: the per-file
+  # structural lint gate above (milliseconds per check, capped by aider's
+  # reflection limit and the wall-clock watchdog). Test suites and
+  # workspace-wide verification remain owned by adversarial/validation.
 
   # Jail aider to exactly the mutation targets with a PHYSICAL deny-all
   # .aiderignore at the execution-surface root (aider's native discovery
