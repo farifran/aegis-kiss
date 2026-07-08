@@ -473,6 +473,18 @@ Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aeg
 * **Reflexão Veloz**: O script [aider_lint_gate.sh](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/aider_lint_gate.sh) atua como um sistema nervoso autônomo. Captura quebras sintáticas em milissegundos (`bash -n`, `node --check`, `tsc --noResolve --skipLibCheck`) e força a auto-correção na origem antes mesmo do artefato chegar ao orquestrador central.
 * **Governança Intacta**: A inteligência probabilística fica concentrada na auditoria lógica profunda do modo `adversarial`, enquanto o tribunal da `validation` permanece livre de ruído, operando de forma rigidamente determinística.
 * **Token Budgeter & Loop Mitigation**: Limitação ativa de payload a um teto de **32 KB** (Bash puro com correções BSD/macOS `wc -c`), economizando até **96%** de tráfego redundante. Mitiga loops infinitos no Aider por meio de `.aiderignore` dinâmico, substituições de barras (`∕`), seletor `whole`/`diff` balanceado por tamanho, e diretivas de prompt contra omissão de linhas (*Anti-Lazy Truncation*).
+* **Capacidade Generativa Expansiva (Criação de Arquivos *De Novo*)**: Mapeia intenção de criação diretamente em `.skills/discovery.md` e `.skills/forensics.md`.
+  - *Evitação de Crash*: Se o arquivo for inédito, `execute_mode.sh` intercepta a ausência física e gera um payload virtual (`"FILE_NOT_FOUND_IN_TOPOLOGY"`, `net_new_target: true`) em vez de interromper o shell.
+  - *Intent-to-Add*: No `aider_substrate.sh`, arquivos inexistentes são criados via `touch` e registrados com `git add -N`, contornando bloqueios do `.aiderignore` para aparecerem no `git diff HEAD`.
+  - *Hardening do Rollback*: Adicionado `git reset -q` antes de limpezas de worktree para desfazer locks do index criados pela intenção de adição.
+* **Resolução de Condições de Corrida**: Blindagem do executor com liveness guard de 3 segundos em `invoke_aider` antes de se mover para o diretório de trabalho. Se a montagem da worktree pelo Git atrasar, o sistema captura a exceção de forma limpa e emite o código de erro controlado `97` (evitando capotamentos com `No such file or directory`).
+* **Auditoria de Complexidade e Otimização Local**:
+  - *Unificação de Modos*: Colapso de tabelas de busca em uma sequência de transição única (`PIPELINES` em `run_aegis.sh` e `AEGIS_FEEDBACK_MODE_SEQUENCE` em `runtime_aegis.sh`).
+  - *Forks e Builtins*: Remoção de forks externos de `date +%s` em favor do builtin `printf -v ... '%(%s)T' -1` do Bash. Consolidou validações do `jq` em `raw_llm.sh` em um único filtro combinado (economizando 3 forks por chamada).
+  - *Simplificação de Executor*: Remoção de cerimônia desnecessária e simplificação de `cleanup_executor` para duas linhas voltadas à propagação limpa de sinais (`130` e `143`).
+* **Telemetria de Provedor & Fidelidade**:
+  - *Desduplicação de Contexto*: Remoção de input redundante em `raw_llm.sh` referenciando diretamente a cópia na mensagem original do usuário.
+  - *Precisão no Cronômetro*: Rótulo do tempo de resposta renomeado para `provider_generation (prefill+decode, non-streaming)` para refletir fielmente o tempo gasto pelo provedor para prefill e geração (ocultando delays locais).
 
 ### Proven architectural properties (verified, not asserted)
 
