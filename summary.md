@@ -23,12 +23,13 @@ This document is not constitutional. If it conflicts with the authoritative cont
 
 **Aegis Harness v1.0.0 (Estável / Homologada)** is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
 
-Current Suite Status: **14/14 tests passing green (Exit 0)** with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS).
+Current Suite Status: **all 13 npm-chained test suites passing green (Exit 0)** (`npm run aegis:test`), with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS). Two additional standalone harnesses (`test_required_evidence_augmentation.sh`, `test_sovereignty_fallback.sh`) exist under `scripts/substrates/test/` but are not wired into the npm chain.
 
 ## High-Level Execution Graph
 
 ```mermaid
 flowchart TD
+	R[run_aegis.sh] --> C
 	A[AGENTS.md] --> B[.harness/config.sh]
 	B --> C[runtime_aegis.sh]
 	B --> D[scripts/capabilities/generate_manifest.sh]
@@ -129,23 +130,27 @@ It is included to make the repository shape visible at a glance before the per-f
 ├── eslint.config.js
 ├── package-lock.json
 ├── package.json
+├── run_aegis.sh
 ├── runtime_aegis.sh
 ├── tsconfig.json
 ├── scripts/
 │   ├── audit_epistemic_pipeline.sh
 │   ├── execute_mode.sh
-│   ├── test_environment.sh
-│   ├── test_scenario.sh
+│   ├── lib/
+│   │   └── common.sh
 │   ├── capabilities/
 │   │   ├── eslint_check.sh
 │   │   ├── generate_manifest.sh
 │   │   ├── test_runner.sh
 │   │   ├── typescript_check.sh
 │   │   ├── filesystem/
+│   │   │   ├── _shared_utils.sh
+│   │   │   ├── _walk.py
 │   │   │   ├── extract_configuration_structure.sh
 │   │   │   ├── extract_entrypoints.sh
 │   │   │   ├── extract_import_graph.sh
 │   │   │   ├── extract_reference_graph.sh
+│   │   │   ├── extract_responsibilities.sh
 │   │   │   ├── extract_symbols.sh
 │   │   │   ├── extract_test_relationships.sh
 │   │   │   ├── list_tree.sh
@@ -154,6 +159,9 @@ It is included to make the repository shape visible at a glance before the per-f
 │   │   ├── git/
 │   │   │   ├── git_diff.sh
 │   │   │   └── git_status.sh
+│   │   ├── runtime/
+│   │   │   ├── attention_seed.sh
+│   │   │   └── layer0_facts.sh
 │   │   └── structural/
 │   │       └── builder.sh
 │   ├── runtime/
@@ -164,30 +172,33 @@ It is included to make the repository shape visible at a glance before the per-f
 │       ├── aider_substrate.sh
 │       ├── raw_llm.sh
 │       └── test/
+│           ├── _test_lib.sh
 │           ├── mock_openai_curl.sh
+│           ├── mock_provider.sh
 │           ├── probes/
 │           │   └── leak_probe.sh
 │           ├── test_adversarial_contract.sh
 │           ├── test_aider_substrate.sh
+│           ├── test_authority_isolation.sh
 │           ├── test_candidate_continuity.sh
 │           ├── test_capabilities.sh
 │           ├── test_constitutional_invariants.sh
 │           ├── test_epistemic_pipeline_audit.sh
 │           ├── test_forensics_behavior.sh
 │           ├── test_readonly_modes.sh
+│           ├── test_recognition_benchmarks.sh
+│           ├── test_required_evidence_augmentation.sh
 │           ├── test_runtime_contract.sh
 │           ├── test_secret_containment.sh
+│           ├── test_sovereignty_fallback.sh
 │           └── test_validation_and_promotion.sh
-│   └── benchmark/
-│       ├── diff_iterations.sh
-│       ├── run_benchmark.sh
-│       └── scorecard.py
 ├── src/
 │   ├── index.ts
 │   └── ui/
 │       ├── fake_import.ts
 │       └── index.ts
 └── tests/
+    └── scenarios/            (bash, cycle, hub, microservice, monolith, multi_surface, node, python fixtures)
 ```
 
 Directories intentionally excluded from the tree above: `.git/` and `node_modules/`, because they are repository metadata or installed dependencies rather than project source.
@@ -205,11 +216,12 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `AGENTS.md` | Aegis Cognition Contract. Guides how the model must interpret and reason within the authority defined by the runtime. It exists to enforce behavior discipline (Runtime Authority, Evidence Discipline, KISS, Ephemeral Cognition). | Loaded by `execute_mode.sh` to dynamically extract raw rules and set `AEGIS_CONSTITUTIONAL_PREAMBLE` before executing cognitive substrates. |
 | `README.md` | Public architecture and usage overview. Explains runtime, capabilities, modes, and common commands. It exists for operator orientation rather than normative control. | Summarizes the structure defined by `AGENTS.md`, `.harness/config.sh`, `runtime_aegis.sh`, `scripts/execute_mode.sh`, and the scripts under `scripts/`. |
 | `summary.md` | This repository map. Documents observed structure, file roles, current cross-file relationships, and known structural mismatches. | Secondary to `AGENTS.md` and `.harness/config.sh`; should stay aligned with `README.md`, runtime files, and the actual tree. |
-| `package.json` | Node package manifest for local tooling. Declares lint, typecheck, enforcement, and shell-based test scripts. It exists to make structural verification reproducible from one entrypoint. | Invokes `runtime_aegis.sh`, `scripts/test_environment.sh`, and the test harnesses under `scripts/substrates/test/`. Depends on `eslint.config.js` and `tsconfig.json` for JS/TS validation. |
+| `package.json` | Node package manifest for local tooling. Declares lint, typecheck, enforcement, and shell-based test scripts. It exists to make structural verification reproducible from one entrypoint. | Invokes `runtime_aegis.sh` and the test harnesses under `scripts/substrates/test/`. Depends on `eslint.config.js` and `tsconfig.json` for JS/TS validation. |
 | `package-lock.json` | NPM lockfile that pins exact dev dependency versions. | Freezes the toolchain used by `package.json`, especially TypeScript, ESLint, and ast-grep. |
 | `tsconfig.json` | TypeScript compiler policy for the small `src/` tree. It exists because the repository still wants typed structural discipline even though the main runtime is shell-based. | Used by `package.json` typecheck scripts and by `eslint.config.js` parser options. Covers `src/` and `.harness/`. |
 | `eslint.config.js` | ESLint flat config with structural dependency rules via `eslint-plugin-boundaries`. It exists to encode layering assumptions mechanically rather than leaving them as prose. | Enforces layering over `src/**/*.ts`; complements `tsconfig.json` and the scripts in `package.json`. |
 | `.gitignore` | Ignore policy for runtime residue, execution surfaces, aider artifacts, transient logs, and dependencies. | Describes which files created by `runtime_aegis.sh`, `scripts/execute_mode.sh`, and external tooling should not be committed. |
+| `run_aegis.sh` | Fail-fast pipeline driver over `runtime_aegis.sh`. Owns operator CLI (pipeline selection `mutation`/`readonly`, `--resume`, `--until`, `--target`, `--issue`), dependency checks, per-mode timing capture, and the final run report (timings, final mode, attention targets, verdict). Halts before `repair` when the handover carries zero repair candidates. Mode order is derived from its authoritative `PIPELINES` definition. | Invokes `runtime_aegis.sh` once per mode; reads `.harness/runtime/epistemic_handover.json` for resume/report data. |
 | `runtime_aegis.sh` | Sovereign runtime orchestrator. Validates environment, prepares runtime surfaces, resets or promotes handover, delegates mode execution, and cleans up. It exists to keep lifecycle authority in one place. | Loads `.harness/config.sh`, selects `.skills/<mode>.md`, generates manifests via `scripts/capabilities/generate_manifest.sh`, delegates to `scripts/execute_mode.sh`, writes `.harness/runtime/epistemic_handover.json`, and for mutation modes drives candidate promotion via `scripts/runtime/*`. |
 | `LICENSE.md` | Repository license file. | Legal metadata only; not part of execution flow. |
 
@@ -240,8 +252,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | Path | Function inside the project | Relationship to other files |
 | --- | --- | --- |
 | `scripts/execute_mode.sh` | Protocol VM. Resolves execution engine, capability envelope, evidence profile, capability arguments, payload generation, selected manifest, substrate call, and artifact validation. Dynamically extracts cognition contract rules from `AGENTS.md` to export `AEGIS_CONSTITUTIONAL_PREAMBLE`. Normalizes and auto-populates structural envelope fields (`mode`, `status`, `handover_attention`) deterministically on cognitive outputs. | Called by `runtime_aegis.sh`; loads `.harness/config.sh`; materializes wrappers for handlers under `scripts/capabilities/`; calls `scripts/substrates/raw_llm.sh` for readonly modes and `scripts/substrates/aider_substrate.sh` for mutation modes. |
-| `scripts/test_environment.sh` | Local environment smoke checker for Node, npm, TypeScript, ESLint, ast-grep, Python, and Git. Used as bootstrap check. | Supports manual setup and dev-tool scripts in `package.json`. |
-| `scripts/test_scenario.sh` | Scenario-driven runner exercising the readonly and mutation paths together. | Executable scenario test. |
+| `scripts/lib/common.sh` | Source-only shared library: tagged logging (`aegis_log`/`aegis_warn`/`aegis_fatal` via `AEGIS_LOG_TAG`) and the fork-free `measure` timing helper (`printf '%(%s)T'`). | Sourced by `runtime_aegis.sh`, `scripts/execute_mode.sh`, and both substrates. |
 | `scripts/audit_epistemic_pipeline.sh` | Epistemic pipeline auditor. Checks all boundary transitions. | Backs `test_epistemic_pipeline_audit.sh`; verifies handover/payload provenance. |
 | `scripts/capabilities/generate_manifest.sh` | Deterministic manifest generator for all modes, engines, envelopes, handler provenance, and evidence profiles. | Loads `.harness/config.sh`; is invoked by `runtime_aegis.sh`; its output is consumed and sliced per mode by `scripts/execute_mode.sh`. |
 | `scripts/capabilities/filesystem/list_tree.sh` | Readonly capability that emits a pruned, deterministic repository tree as JSON evidence. | Registered in `.harness/config.sh`; wrapped by `scripts/execute_mode.sh`; primarily used in discovery evidence profiles and validated by `test_capabilities.sh`. |
@@ -253,11 +264,14 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/capabilities/filesystem/extract_reference_graph.sh` | Readonly capability that emits the reverse reference graph as evidence. | Feeds structural analysis evidence profiles. |
 | `scripts/capabilities/filesystem/extract_test_relationships.sh` | Readonly capability that maps tests to the code they exercise. | Feeds validation and adversarial evidence profiles. |
 | `scripts/capabilities/filesystem/extract_configuration_structure.sh` | Readonly capability that emits structure/keys from config files without exposing values. | Evidence-only: returns keys, not values. Used in forensics profiles. |
+| `scripts/capabilities/filesystem/extract_responsibilities.sh` | Readonly capability that emits mechanical responsibility classification for files. | Part of the `filesystem.*` evidence family; supports discovery/forensics profiles. |
 | `scripts/capabilities/git/git_status.sh` | Readonly capability that emits `git status --short` as JSON evidence. | Registered in `.harness/config.sh`; used by forensics, repair, and optimize evidence profiles. |
 | `scripts/capabilities/git/git_diff.sh` | Readonly capability that emits the current uncommitted diff as JSON evidence. | Registered in `.harness/config.sh`; exposed only in mutation envelopes and related evidence profiles. |
 | `scripts/capabilities/typescript_check.sh` | Readonly capability that runs a bounded `tsc` check and emits its result as evidence. | Mutation/repair evidence profiles; part of the build-feedback capability surface. |
 | `scripts/capabilities/eslint_check.sh` | Readonly capability that runs a bounded ESLint check and emits its result as evidence. | Mutation/repair evidence profiles; part of the build-feedback capability surface. |
 | `scripts/capabilities/test_runner.sh` | Readonly capability that runs the suite and emits pass/fail evidence. | Mutation/repair evidence profiles; provides test-feedback evidence to mutation modes. |
+| `scripts/capabilities/runtime/attention_seed.sh` | Runtime-owned capability that emits the deterministic attention seed (investigation scope, attention targets, blocking conditions) consumed during artifact normalization. | Its payload (`runtime_attention_seed.json`) feeds the discovery-enrichment branch of `normalize_substrate_output` in `scripts/execute_mode.sh`. |
+| `scripts/capabilities/runtime/layer0_facts.sh` | Runtime-owned capability that emits deterministic Layer 0 facts (declared entrypoints, `import_gravity`, churn/resonance `hot_files`). | Anchors Discovery/Forensics target resolution per the Layer 0 baseline-trust sections of `.skills/discovery.md` and `.skills/forensics.md`. |
 | `scripts/capabilities/structural/builder.sh` | Readonly capability that synthesizes structural topology (boundaries, bridges, hotspots) from the import/reference graphs. | Consumes outputs of `extract_import_graph` and `extract_reference_graph`; feeds discovery/forensics profiles. |
 | `scripts/substrates/raw_llm.sh` | Readonly cognition substrate. Builds bounded prompt context from the selected skill, selected manifest, and selected payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; then calls the provider and extracts one JSON artifact between markers. | Invoked by `scripts/execute_mode.sh` for `raw` modes; depends on `.harness/config.sh`, `.skills/*.md`, provider env vars, and the payloads created by capability scripts. |
 | `scripts/substrates/aider_substrate.sh` | Mutation cognition substrate. Runs aider against the mutation execution surface using the active skill and capability payloads, prepending `AEGIS_CONSTITUTIONAL_PREAMBLE`; emits a mutation JSON artifact (diff, files_changed, rationale) between markers. | Invoked by `scripts/execute_mode.sh` for `aider` modes; receives `OPENAI_API_KEY`/`OPENAI_API_BASE` from the executor's mutation env whitelist. |
@@ -279,7 +293,13 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/substrates/test/test_validation_and_promotion.sh` | Validation + promotion pipeline test. Verifies that a validated mutation candidate is promoted into handover state. | Exercises `scripts/runtime/promote_validated_candidate.sh` and `scripts/execute_mode.sh` mutation artifact validation. |
 | `scripts/substrates/test/test_candidate_continuity.sh` | Candidate continuity test. Verifies that a promoted candidate survives across the lifecycle transitions the runtime owns. | Cross-checks `runtime_aegis.sh` promotion and `epistemic_handover.json` evolution for mutation modes. |
 | `scripts/substrates/test/test_epistemic_pipeline_audit.sh` | Epistemic pipeline audit test. Verifies payload provenance and handover integrity end-to-end. | Backed by `scripts/audit_epistemic_pipeline.sh`. |
+| `scripts/substrates/test/test_authority_isolation.sh` | Authority-isolation suite: envelope gate, deterministic fatal abort, env/fs containment, and path jail assertions. | Verifies capability handlers cannot exceed their declared envelope at runtime. |
+| `scripts/substrates/test/test_recognition_benchmarks.sh` | Layer 0 recognition benchmarks (precision/recall over entrypoints, gravity nodes, churn⊕resonance ranking across fixture scenarios). | Exercises the structural Layer 0 facts against `tests/scenarios/` fixtures. |
+| `scripts/substrates/test/test_required_evidence_augmentation.sh` | Standalone harness for handover-driven evidence augmentation (`required_evidence` folding into the next mode's evidence entries). Not in the npm chain. | Exercises `augment_evidence_profile_from_handover` in `scripts/execute_mode.sh`. |
+| `scripts/substrates/test/test_sovereignty_fallback.sh` | Standalone harness for runtime sovereignty fallback behavior. Not in the npm chain. | Exercises `runtime_aegis.sh` fallback paths. |
+| `scripts/substrates/test/_test_lib.sh` | Shared source-only helpers for the test harnesses. | Sourced by the `test_*.sh` suites. |
 | `scripts/substrates/test/mock_openai_curl.sh` | Mock OpenAI-compatible provider used by the readonly and mutation suites. | Replaces the real `curl` provider call so tests run without real credentials. |
+| `scripts/substrates/test/mock_provider.sh` | Alternate mock provider harness used by suites that need a running endpoint. | Complements `mock_openai_curl.sh` for provider-facing tests. |
 | `scripts/substrates/test/test_secret_containment.sh` | Formal proof-of-containment test. Invokes the executor's real `invoke_capability_handler` with a probe capability while credentials are present in the parent env, and asserts `OPENAI_API_KEY` / `OPENAI_API_BASE` are absent from the spawned capability process. Has verified negative power: fails when the executor is mutated to leak credentials. | Exercises the `env -i` isolation boundary of `scripts/execute_mode.sh` by execution (not code inspection). Closes the audit gap between "code does not reference the variable" and "the variable does not reach the process". |
 | `scripts/substrates/test/probes/leak_probe.sh` | Probe capability used only by `test_secret_containment.sh`. Emits the standard capability payload contract and reports (by set-ness, never by value) whether `OPENAI_*` variables are present in its environment, plus the env-var count. | Not a production capability; lives under `test/probes/` to keep it out of the registered capability surface. |
 
@@ -305,7 +325,7 @@ Everything executable in the shell path takes its wiring from `.harness/config.s
 
 `runtime_aegis.sh` is the top-level orchestrator operating as a cyclic state machine.
 
-It validates the environment, prepares or resets `.harness/runtime/epistemic_handover.json`, creates runtime-owned capability directories, generates the manifest via `scripts/capabilities/generate_manifest.sh`, dynamically extracts cognition contract rules from `AGENTS.md` as `AEGIS_CONSTITUTIONAL_PREAMBLE`, and delegates mode execution to `scripts/execute_mode.sh`.
+It validates the environment, prepares or resets `.harness/runtime/epistemic_handover.json`, creates runtime-owned capability directories, generates the manifest via `scripts/capabilities/generate_manifest.sh`, and delegates mode execution to `scripts/execute_mode.sh` (which is the layer that dynamically extracts cognition contract rules from `AGENTS.md` as `AEGIS_CONSTITUTIONAL_PREAMBLE`).
 
 After the substrate returns an artifact, the runtime validates it and promotes the artifact snapshot plus routed attention into the handover file. For mutation modes, a validated candidate is additionally promoted through `scripts/runtime/promote_validated_candidate.sh`, which enforces that the target files remain clean before patch application.
 
@@ -448,13 +468,12 @@ In concrete terms: **who observes ≠ who reasons ≠ who persists**, and that p
 
 ## Observed Structural Gaps and Stale References
 
-The current workspace is fully aligned, having resolved previous gaps:
+Current alignment state:
 
-1. `package.json` test commands now correctly point to `scripts/substrates/test/test_*.sh`.
-2. `README.md` correctly lists the actual script paths under `scripts/substrates/test/...`.
-3. `aegis:bootstrap` is correctly mapped to `scripts/test_environment.sh`.
-4. Previous placeholders and duplicate testing configurations have been cleaned up.
-5. All readonly and mutation test flows execute successfully via `npm run aegis:test`.
+1. `package.json` test commands correctly point to `scripts/substrates/test/test_*.sh`.
+2. All readonly and mutation test flows execute successfully via `npm run aegis:test`.
+3. The formerly stale `aegis:bootstrap` npm entry (which pointed to a non-existent `scripts/test_environment.sh`) has been retired from `package.json`.
+4. `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` exist on disk but are not wired into the `aegis:test` npm chain — they only run when invoked directly.
 
 ## Current Practical State
 
@@ -481,7 +500,7 @@ Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aeg
 * **Auditoria de Complexidade e Otimização Local**:
   - *Unificação de Modos*: Colapso de tabelas de busca em uma sequência de transição única (`PIPELINES` em `run_aegis.sh` e `AEGIS_FEEDBACK_MODE_SEQUENCE` em `runtime_aegis.sh`).
   - *Forks e Builtins*: Remoção de forks externos de `date +%s` em favor do builtin `printf -v ... '%(%s)T' -1` do Bash. Consolidou validações do `jq` em `raw_llm.sh` em um único filtro combinado (economizando 3 forks por chamada).
-  - *Simplificação de Executor*: Remoção de cerimônia desnecessária e simplificação de `cleanup_executor` para duas linhas voltadas à propagação limpa de sinais (`130` e `143`).
+  - *Simplificação de Executor*: Remoção completa da cerimônia de cleanup sem estado (`cleanup_executor`, trap de EXIT e latch de reentrância), substituída por dois traps de uma linha dedicados exclusivamente à propagação limpa de sinais (`130` para SIGINT, `143` para SIGTERM).
 * **Telemetria de Provedor & Fidelidade**:
   - *Desduplicação de Contexto*: Remoção de input redundante em `raw_llm.sh` referenciando diretamente a cópia na mensagem original do usuário.
   - *Precisão no Cronômetro*: Rótulo do tempo de resposta renomeado para `provider_generation (prefill+decode, non-streaming)` para refletir fielmente o tempo gasto pelo provedor para prefill e geração (ocultando delays locais).
@@ -499,7 +518,9 @@ Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aeg
 
 ### Remaining Hardening Work
 
-- Add a formal **authority-isolation test** that asserts capability handlers cannot exceed their declared envelope at runtime.
+- ~~Add a formal **authority-isolation test**~~ — **done**: `scripts/substrates/test/test_authority_isolation.sh` exists, runs in the npm chain, and passes (envelope gate, deterministic fatal abort, env/fs containment, path jail).
+- ~~Fix or retire the stale `aegis:bootstrap` npm entry~~ — **done**: the entry was retired from `package.json`.
+- Decide whether `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` should join the `aegis:test` npm chain.
 
-The system behaves as a hardened readonly **and** mutation evidence-and-promotion runtime, with the next frontier being formal verification tests for authority isolation rather than new architectural surfaces.
+The system behaves as a hardened readonly **and** mutation evidence-and-promotion runtime; the remaining work is housekeeping of the tooling surface rather than new architectural surfaces.
 

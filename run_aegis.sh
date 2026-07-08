@@ -59,10 +59,6 @@ require() {
   }
 }
 
-pipeline_contains_mutation() {
-  [[ "${PIPELINE}" == "mutation" ]]
-}
-
 check_dependencies() {
 
   echo
@@ -75,7 +71,7 @@ check_dependencies() {
   require git
   echo "git          ✓"
 
-  if pipeline_contains_mutation; then
+  if [[ "${PIPELINE}" == "mutation" ]]; then
     require aider
     echo "aider        ✓"
   fi

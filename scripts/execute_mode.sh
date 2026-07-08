@@ -77,12 +77,16 @@ extract_agents_constitution() {
   [[ -f "${agents_file}" ]] || return 0
 
   echo "### AEGIS CONSTITUTIONAL CONSTRAINTS (AGENTS.md) ###"
-  
-  # Extrai a seção de Princípios Constitucionais
-  awk '/## Constitutional Principles/{flag=1;next}/## Constitutional Model/{flag=0}flag' "${agents_file}"
-  
-  # Extrai a seção de Restrições Não-Negociáveis
-  awk '/## Non-Negotiable Constraints/{flag=1;next}/## Summary/{flag=0}flag' "${agents_file}"
+
+  # Extrai as seções de Princípios Constitucionais e de Restrições
+  # Não-Negociáveis em uma única passada (dois flags independentes;
+  # as regiões são disjuntas e ordenadas no documento).
+  awk '
+    /## Constitutional Principles/{principles=1;next}
+    /## Constitutional Model/{principles=0}
+    /## Non-Negotiable Constraints/{constraints=1;next}
+    /## Summary/{constraints=0}
+    principles||constraints' "${agents_file}"
 }
 
 export AEGIS_CONSTITUTIONAL_PREAMBLE
@@ -958,6 +962,9 @@ readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; ""
 readonly AEGIS_JQ_AUTHORIZED_TARGETS='def authorized_targets:
   [
     .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
+    (.artifact_snapshot.operational_context.required_evidence[]?
+      | select(type == "string" and startswith("filesystem.read:"))
+      | ltrimstr("filesystem.read:")),
     (.artifact_snapshot.structural_context.ranked_targets[]?
       | select(.type == "explicit_request")
       | .file),
