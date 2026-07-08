@@ -70,3 +70,6 @@ export function bitsParaPentabits(bits: number): number {
 export function gigabitsParaMegabytes(gbits: number): number {
     return (gbits * 1024 * 1024 * 1024) / (8 * 1024 * 1024);
 }
+export function megabyteParaBits(mb: number): number {
+    return mb * 1024 * 1024 * 8;
+}

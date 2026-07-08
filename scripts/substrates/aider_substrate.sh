@@ -608,6 +608,10 @@ invoke_aider() {
     "--no-check-update"
     "--no-detect-urls"
     "--no-suggest-shell-commands"
+    # aider's analytics default is "random": suppress the PostHog
+    # telemetry path entirely — no non-deterministic background network
+    # evaluation in the headless runner.
+    "--analytics-disable"
     "--exit"
   )
 
