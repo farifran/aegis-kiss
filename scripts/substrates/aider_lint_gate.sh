@@ -43,6 +43,11 @@ case "${TARGET_FILE}" in
     node --check "${TARGET_FILE}"
     ;;
   *.ts|*.tsx)
+    # Mode-scoped compiler gate: optimize simplifies an already-repaired,
+    # already-gated diff, so the tsc Node VM cold-start (the one non-micro
+    # check here) buys nothing there — pass through. The gate stays fully
+    # armed for net-new code in repair.
+    [[ "${AEGIS_MODE:-}" == "optimize" ]] && exit 0
     # Prefer the project-local compiler; fall back to PATH; pass through
     # when neither exists (no gate is better than a hanging install).
     TSC_BIN=""

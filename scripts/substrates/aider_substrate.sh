@@ -361,7 +361,8 @@ obfuscate_evidence_paths() {
 assemble_mutation_prompt() {
 
   local prompt_file="$1"
-  shift
+  local resolved_edit_format="$2"
+  shift 2
   local prompt_targets=("$@")
 
   local capability_evidence
@@ -387,9 +388,8 @@ If the required change seems to involve a file that is not loaded, do NOT add it
   # Anti-lazy-truncation constraint: under the whole edit format the
   # model must re-emit complete files; placeholder elision makes aider's
   # parser reject the reply and re-request it until the watchdog fires.
-  local resolved_edit_format
-  resolved_edit_format="$(resolve_aider_edit_format "${prompt_targets[@]:-}")"
-
+  # The format is resolved ONCE in main() and passed down, so prompt and
+  # invocation can never disagree and target files are sized only once.
   local anti_truncation_instructions=""
   if [[ "${resolved_edit_format}" == "whole" ]]; then
     anti_truncation_instructions="ANTI-LAZY TRUNCATION CONSTRAINT (ABSOLUTE — WHOLE-FILE EDIT FORMAT):
@@ -537,15 +537,13 @@ resolve_aider_edit_format() {
 invoke_aider() {
 
   local prompt_file="$1"
-  shift
+  local resolved_edit_format="$2"
+  shift 2
   local file_args=("$@")
 
   local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
   local aider_output
   local aider_status
-
-  local resolved_edit_format
-  resolved_edit_format="$(resolve_aider_edit_format "${file_args[@]:-}")"
 
   # Accelerated local validation loop: after each applied edit, aider
   # runs the per-file structural gate (bash -n / node --check / tsc
@@ -650,8 +648,9 @@ invoke_aider() {
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
+  # Fork-free timestamp via the printf builtin (matches common.sh).
   local aider_start_time
-  aider_start_time=$(date +%s)
+  printf -v aider_start_time '%(%s)T' -1
 
   # Wall-clock watchdog: --timeout only bounds individual API requests,
   # so retry loops can still hang the pipeline. The watchdog kills the
@@ -693,7 +692,7 @@ invoke_aider() {
   set -e
 
   local aider_end_time
-  aider_end_time=$(date +%s)
+  printf -v aider_end_time '%(%s)T' -1
   local aider_elapsed=$((aider_end_time - aider_start_time))
   echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
@@ -808,18 +807,23 @@ main() {
     aegis_log "Mutation targets: ${mutation_targets[*]}"
   fi
 
+  # Edit format resolved exactly once (one wc -c pass over the targets);
+  # prompt assembly and the invocation both consume the same value.
+  local resolved_edit_format
+  resolved_edit_format="$(resolve_aider_edit_format "${mutation_targets[@]:-}")"
+
   local prompt_file
   prompt_file="$(aider_mktemp)"
   if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    assemble_mutation_prompt "${prompt_file}" "${mutation_targets[@]}"
+    assemble_mutation_prompt "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]}"
   else
-    assemble_mutation_prompt "${prompt_file}"
+    assemble_mutation_prompt "${prompt_file}" "${resolved_edit_format}"
   fi
 
   if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    invoke_aider "${prompt_file}" "${mutation_targets[@]}"
+    invoke_aider "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]}"
   else
-    invoke_aider "${prompt_file}"
+    invoke_aider "${prompt_file}" "${resolved_edit_format}"
   fi
 
   aegis_log "Capturing worktree diff..."

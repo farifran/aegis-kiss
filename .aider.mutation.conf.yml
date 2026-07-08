@@ -70,7 +70,10 @@ notifications: false
 # EDITING
 # ---------------------------------------------------------
 
-edit-format: diff
+# edit-format is intentionally NOT set here: the substrate resolves it
+# dynamically per invocation (resolve_aider_edit_format in
+# scripts/substrates/aider_substrate.sh) and the CLI flag is
+# authoritative — a static value would be dead and misleading.
 
 encoding: utf-8
 
