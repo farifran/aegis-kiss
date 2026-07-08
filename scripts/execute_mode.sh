@@ -107,71 +107,16 @@ AEGIS_LOG_TAG="EXECUTOR"
 
 
 # =========================================================
-# CLEANUP
+# SIGNAL PROPAGATION
 # =========================================================
-
-cleanup_executor() {
-
-  set +e
-
-  aegis_log "Starting executor cleanup..."
-
-  #
-  # Runtime remains sovereign over:
-  #
-  # - execution surfaces
-  # - payload retention
-  # - capability environment retention
-  # - epistemic handover lifecycle
-  #
-  # Executor intentionally does NOT remove runtime-owned state.
-  #
-
-  aegis_log "Executor cleanup completed"
-
-  set -e
-}
-
-trap cleanup_executor EXIT
-
-# ---------------------------------------------------------
-# Atomic signal guard (SIGINT / SIGTERM)
-# ---------------------------------------------------------
 #
 # The executor owns no runtime-persistent state (the runtime remains
 # sovereign over surfaces, payload retention and handover lifecycle),
-# so its signal duty is: run its own cleanup exactly once, disarm the
-# EXIT trap to prevent a duplicate pass, and propagate a deterministic
-# signal-based status code to the runtime.
+# so there is nothing to clean up here: its only signal duty is to
+# propagate a deterministic signal-based status code to the runtime.
 
-AEGIS_SIGNAL_GUARD_FIRED="false"
-
-handle_executor_termination_signal() {
-
-  local signal_name="$1"
-  local exit_code="$2"
-
-  # Re-entrancy latch: a second signal during cleanup must not restart
-  # the sequence or recurse through the traps.
-  if [[ "${AEGIS_SIGNAL_GUARD_FIRED}" == "true" ]]; then
-    exit "${exit_code}"
-  fi
-  AEGIS_SIGNAL_GUARD_FIRED="true"
-
-  trap '' INT TERM
-  trap - EXIT
-
-  set +e
-
-  aegis_warn "Interrupted by ${signal_name} — executing atomic signal cleanup"
-
-  cleanup_executor
-
-  exit "${exit_code}"
-}
-
-trap 'handle_executor_termination_signal SIGINT 130' INT
-trap 'handle_executor_termination_signal SIGTERM 143' TERM
+trap 'aegis_warn "Interrupted by SIGINT"; trap - INT TERM; exit 130' INT
+trap 'aegis_warn "Interrupted by SIGTERM"; trap - INT TERM; exit 143' TERM
 
 # =========================================================
 # VALIDATION
@@ -500,7 +445,6 @@ invoke_aider_substrate() {
     AEGIS_SELECTED_CAPABILITY_PAYLOADS="${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" \
     AEGIS_POCKET_MAP_FILE="${AEGIS_POCKET_MAP_FILE:-}" \
     AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
-    AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}" \
     AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \
     AEGIS_AIDER_BIN="${AEGIS_AIDER_BIN:-}" \
     AEGIS_MUTATION_GIT_DIR="${AEGIS_MUTATION_GIT_DIR:-}" \

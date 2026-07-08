@@ -138,25 +138,24 @@ validate_raw_substrate_inputs() {
   [[ -n "${CAPABILITY_MANIFEST}" ]] \
     || aegis_fatal "missing_capability_manifest"
 
-  printf '%s\n' "${CAPABILITY_MANIFEST}" \
-    | jq empty \
-      >/dev/null 2>&1 \
-    || aegis_fatal "invalid_capability_manifest_json"
+  # Single-pass manifest validation: one jq fork evaluates every
+  # contract rule and names the first violation; a parse failure
+  # (non-JSON manifest) exits nonzero and hits the fatal fallback.
+  local manifest_violation
+  manifest_violation="$(
+    printf '%s\n' "${CAPABILITY_MANIFEST}" \
+      | jq -r --arg mode "${AEGIS_MODE}" '
+          if .mode != $mode then "manifest_mode_mismatch"
+          elif .execution_engine != "raw" then "manifest_not_readonly_engine"
+          elif ((.capabilities | type) != "array")
+            or (([.capabilities[]?.classification == "readonly"] | all) | not)
+          then "manifest_contains_non_readonly_capabilities"
+          else empty end
+        ' 2>/dev/null
+  )" || aegis_fatal "invalid_capability_manifest_json"
 
-  printf '%s\n' "${CAPABILITY_MANIFEST}" \
-    | jq -e --arg mode "${AEGIS_MODE}" '.mode == $mode' \
-      >/dev/null 2>&1 \
-    || aegis_fatal "manifest_mode_mismatch"
-
-  printf '%s\n' "${CAPABILITY_MANIFEST}" \
-    | jq -e '.execution_engine == "raw"' \
-      >/dev/null 2>&1 \
-    || aegis_fatal "manifest_not_readonly_engine"
-
-  printf '%s\n' "${CAPABILITY_MANIFEST}" \
-    | jq -e '(.capabilities | type == "array") and ([.capabilities[]?.classification == "readonly"] | all)' \
-      >/dev/null 2>&1 \
-    || aegis_fatal "manifest_contains_non_readonly_capabilities"
+  [[ -z "${manifest_violation}" ]] \
+    || aegis_fatal "${manifest_violation}"
 
   [[ -d "${CAPABILITY_PAYLOAD_DIR}" ]] \
     || aegis_fatal "missing_capability_payload_directory"

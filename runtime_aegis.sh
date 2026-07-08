@@ -40,9 +40,10 @@ source ".harness/config.sh"
 # EXECUTION IDENTITY
 # =========================================================
 
-export AEGIS_EXECUTION_ID="$(
-  date +%s
-)-$$"
+# Fork-free epoch via the printf builtin (matches common.sh idiom).
+printf -v _aegis_epoch_now '%(%s)T' -1
+export AEGIS_EXECUTION_ID="${_aegis_epoch_now}-$$"
+unset _aegis_epoch_now
 
 export AEGIS_EXECUTION_TIMESTAMP="$(
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -412,14 +413,6 @@ handover_schema_is_valid() {
   local handover_file="$1"
 
   jq -e "$(epistemic_handover_schema_filter)" "${handover_file}" >/dev/null 2>&1
-}
-
-validate_epistemic_state_json() {
-
-  local epistemic_state_json="$1"
-
-  printf '%s' "${epistemic_state_json}" \
-    | jq -e "$(epistemic_state_schema_filter)" >/dev/null 2>&1
 }
 
 write_empty_epistemic_handover_state_json() {
@@ -1045,13 +1038,25 @@ repair_feedback_loop_should_fire() {
 # through an explicit "accepted" verdict from a fresh validation pass.
 AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
 
+# Single authoritative mode-order string for feedback progression —
+# successor lookup replaces a hand-maintained case table so pipeline
+# drift cannot silently diverge from the sequence.
+readonly AEGIS_FEEDBACK_MODE_SEQUENCE="repair optimize adversarial validation"
+
 next_feedback_pipeline_mode() {
-  case "${AEGIS_MODE}" in
-    repair)      printf 'optimize'    ;;
-    optimize)    printf 'adversarial' ;;
-    adversarial) printf 'validation'  ;;
-    *)           printf ''            ;;
-  esac
+
+  local -a sequence
+  read -r -a sequence <<< "${AEGIS_FEEDBACK_MODE_SEQUENCE}"
+
+  local i
+  for i in "${!sequence[@]}"; do
+    if [[ "${sequence[$i]}" == "${AEGIS_MODE}" ]]; then
+      printf '%s' "${sequence[$((i + 1))]:-}"
+      return
+    fi
+  done
+
+  printf ''
 }
 
 main() {

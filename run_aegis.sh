@@ -83,17 +83,22 @@ check_dependencies() {
   echo
 }
 
+# Successor lookup derived from the authoritative PIPELINES definition —
+# the full mutation sequence is the single source of mode order.
 next_mode() {
 
-  case "$1" in
-    discovery)   echo forensics ;;
-    forensics)   echo repair ;;
-    repair)      echo optimize ;;
-    optimize)    echo adversarial ;;
-    adversarial) echo validation ;;
-    *)           echo "" ;;
-  esac
+  local -a sequence
+  read -r -a sequence <<< "${PIPELINES[mutation]}"
 
+  local i
+  for i in "${!sequence[@]}"; do
+    if [[ "${sequence[$i]}" == "$1" ]]; then
+      echo "${sequence[$((i + 1))]:-}"
+      return
+    fi
+  done
+
+  echo ""
 }
 
 resolve_resume() {
@@ -156,7 +161,8 @@ run_mode() {
   local end
   local duration
 
-  start=$(date +%s)
+  # Fork-free epoch via the printf builtin (matches common.sh idiom).
+  printf -v start '%(%s)T' -1
 
   local cmd=(bash runtime_aegis.sh "${mode}")
   if [[ -n "${TARGET}" ]]; then
@@ -171,7 +177,7 @@ run_mode() {
 
   "${cmd[@]}"
 
-  end=$(date +%s)
+  printf -v end '%(%s)T' -1
 
   duration=$((end-start))
 
