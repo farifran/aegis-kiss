@@ -88,6 +88,15 @@ Validation must NOT:
 
 ### Verdict Policy (Deterministic)
 
+## Deterministic Scope (KISS)
+
+Validation is a deterministic verifier, not a second auditor:
+- verify contract format: JSON structure, required keys, typed values, protocol envelope integrity;
+- verify hard engine outcomes: typescript/eslint/test capability payloads exposed by the runtime (pass/fail states as reported);
+- apply the verdict policy table below over the adversarial findings.
+
+Semantic and logical auditing (inversions, scale anomalies, boundary fuzzing, architectural side effects) belongs EXCLUSIVELY to Adversarial mode — do NOT re-derive, re-litigate, or invent logical findings here. Judge only what Adversarial reported and what deterministic payloads state.
+
 Validation applies a deterministic policy over the typed findings from Adversarial:
 
 | Finding `type` | Finding `severity` | `supported_by_evidence` | Verdict action |
@@ -231,7 +240,7 @@ The required artifact is a MINIMAL COGNITIVE ARTIFACT containing EXCLUSIVELY the
 ```
 
 - **`verdict`**: `"accepted"` only when no evidence-supported finding blocks the candidate; `"rejected"` otherwise.
-- **`basis`**: One string justifying the verdict.
+- **`basis`**: One dense, high-signal string: the deciding finding/payload fact only — preserve the exact failing detail (finding type, counterexample, or test outcome) so the repair loop inherits actionable failure context; no narrative filler.
 
 The runtime owns framing.
 

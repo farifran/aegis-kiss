@@ -217,6 +217,26 @@ fuzzing pass over the candidate diff. Every vector below MUST be explicitly
 challenged against the investigation input and the exposed evidence — a
 candidate is never `"verified"` until it survives all four.
 
+Adversarial is the SOLE logical auditor of the pipeline: Validation only
+verifies contract format and deterministic outcomes downstream, so any
+logical, mathematical, or architectural defect not falsified HERE ships.
+
+### Vector 0 — Structural Gravity Targeting
+
+Consume the `import_gravity` scores exposed in the runtime evidence
+(Layer 0 facts / handover structural context). Gravity ranks how many
+files depend on each node:
+- when the candidate diff touches a HIGH-GRAVITY node, escalate audit
+  aggression: predict architectural side effects on its dependents —
+  changed export names, altered signatures, reshaped return values,
+  removed symbols — and emit any observed break as `contract_violation`,
+  `severity: "high"`, naming the broken interface;
+- concentrate semantic testing effort (Vectors 1–3) on the high-gravity
+  portions of the diff first; low-gravity leaf files get proportionally
+  lighter scrutiny;
+- absence of gravity data is NOT a finding — fall back to uniform
+  scrutiny across the diff.
+
 ### Vector 1 — Logical and Mathematical Inversions
 
 Audit whether the mutation inverted an operation relative to the demanded
@@ -310,7 +330,7 @@ The `findings` field MUST be an array of objects. Each finding object has:
 |---|---|---|---|
 | `type` | string | `logic_bug`, `duplicate_behavior`, `contract_violation`, `boundary_violation`, `missing_evidence`, `style_issue` | yes |
 | `severity` | string | `high`, `medium`, `low`, `info` | yes |
-| `description` | string | brief falsification statement | yes |
+| `description` | string | dense falsification statement: concrete input → produced output → expected output; no narrative filler | yes |
 | `supported_by_evidence` | boolean | true if grounded in exposed payload; false if not observable | yes |
 | `evidence_refs` | array of strings | capability names used as evidence | yes |
 

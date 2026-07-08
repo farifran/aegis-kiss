@@ -56,6 +56,25 @@ Repair performs bounded corrective cognition.
 
 ⸻
 
+Layer 0 Structural Awareness
+
+The runtime resolves the mutation target deterministically (Layer 0 seed:
+resonant hot files, declared entrypoints, import gravity). Repair operates
+with laser precision on that seeded file scope:
+
+* mutate ONLY the seeded target files — no scope drift, no opportunistic
+  edits in neighboring files;
+* before changing any exported symbol, signature, or contract, cross-
+  reference the `import_gravity` map exposed in the evidence payloads:
+  a high-gravity target is depended upon by many files, so its existing
+  interfaces (names, parameters, return shapes) must be preserved exactly
+  unless the investigation input explicitly demands the interface change;
+* when the demanded change touches a high-gravity interface, apply the
+  minimal additive form (new symbol beside old) rather than a breaking
+  rewrite, preventing cascading side-effect breakage in dependent files.
+
+⸻
+
 Mutation Topology
 
 Repair is a mutation-authorized mode.
