@@ -474,6 +474,7 @@ Current alignment state:
 2. All readonly and mutation test flows execute successfully via `npm run aegis:test`.
 3. The formerly stale `aegis:bootstrap` npm entry (which pointed to a non-existent `scripts/test_environment.sh`) has been retired from `package.json`.
 4. `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` exist on disk but are not wired into the `aegis:test` npm chain — they only run when invoked directly.
+5. The temporary pipeline truncation at `optimize` (a one-cycle workaround for upstream gateway timeouts during the `src/tokenBucket.ts` creation cycle) has been closed out: `PIPELINES[mutation]` in `run_aegis.sh` is restored to the full contract-bearing sequence `discovery → forensics → repair → optimize → adversarial → validation`, and candidate promotion is again reachable only through an explicit `accepted` validation verdict.
 
 ## Current Practical State
 
