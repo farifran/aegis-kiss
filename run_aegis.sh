@@ -29,6 +29,12 @@ Options:
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Investigate GitHub issue #N
+  --force-apply        Operator override: on the FINAL executed mode of a
+                       partial run (e.g. with --until optimize), promote the
+                       candidate diff into the working directory even without
+                       an accepted validation verdict. All structural rails
+                       (path jail, files_changed cross-check, dirty-target
+                       refusal, atomic apply) still gate the promotion.
   --help               Show this help
 
 Any failure aborts immediately. A final report shows per-mode
@@ -45,6 +51,7 @@ PIPELINE="mutation"
 TARGET=""
 RESUME=false
 UNTIL=""
+FORCE_APPLY=false
 ISSUE_NUMBER=""
 INVESTIGATION_INPUT=""
 declare -a POSITIONAL=()
@@ -147,6 +154,7 @@ build_mode_list() {
 run_mode() {
 
   local mode="$1"
+  local is_final_mode="${2:-false}"
 
   echo
   echo "================================================="
@@ -163,6 +171,11 @@ run_mode() {
   local cmd=(bash runtime_aegis.sh "${mode}")
   if [[ -n "${TARGET}" ]]; then
     cmd+=("--target" "${TARGET}")
+  fi
+  # Force-apply is scoped to the FINAL executed mode only, so an operator
+  # override can never promote an intermediate candidate mid-pipeline.
+  if [[ "${FORCE_APPLY}" == "true" ]] && [[ "${is_final_mode}" == "true" ]]; then
+    cmd+=("--force-apply")
   fi
   if [[ -n "${ISSUE_NUMBER}" ]]; then
     cmd+=("--issue" "${ISSUE_NUMBER}")
@@ -283,6 +296,10 @@ parse_cli() {
         RESUME=true
         ;;
 
+      --force-apply)
+        FORCE_APPLY=true
+        ;;
+
       --help|-h)
         usage
         exit 0
@@ -345,6 +362,10 @@ main() {
   fi
 
   local mode
+  local final_mode="${EXECUTION_MODES[${#EXECUTION_MODES[@]}-1]}"
+  if [[ -n "${UNTIL:-}" ]]; then
+    final_mode="${UNTIL}"
+  fi
 
   for mode in "${EXECUTION_MODES[@]}"; do
     if [[ "${mode}" == "repair" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
@@ -360,7 +381,11 @@ main() {
       fi
     fi
 
-    run_mode "${mode}"
+    if [[ "${mode}" == "${final_mode}" ]]; then
+      run_mode "${mode}" true
+    else
+      run_mode "${mode}"
+    fi
     if [[ -n "${UNTIL:-}" ]] && [[ "${mode}" == "${UNTIL}" ]]; then
       echo "[RUN] Stopped at mode ${mode} due to --until limit."
       break

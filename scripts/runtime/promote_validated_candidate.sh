@@ -16,9 +16,17 @@ promotion_fatal() {
 [[ -d "${REPOSITORY_ROOT}/.git" ]] \
   || promotion_fatal "missing_repository_root"
 
+# Verdict envelope: "accepted" is the normal path. "operator_forced" is
+# accepted ONLY while the runtime's explicit --force-apply override is
+# active in the environment; every structural rail below (path jail,
+# files_changed cross-check, dirty-target refusal, atomic apply) applies
+# identically to both paths.
 jq -e '
   .mode == "validation"
-  and .verdict == "accepted"
+  and (
+    .verdict == "accepted"
+    or (env.AEGIS_FORCE_APPLY == "true" and .verdict == "operator_forced")
+  )
   and (
     .validated_candidate
     | type == "object"

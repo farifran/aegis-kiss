@@ -112,6 +112,9 @@ parse_runtime_cli() {
 
         cli_target_path="${1#--target=}"
         ;;
+      --force-apply)
+        export AEGIS_FORCE_APPLY="true"
+        ;;
       --)
         shift
 
@@ -852,24 +855,57 @@ execute_mode() {
 
 promote_validated_candidate() {
 
+  local promotion_payload="${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}"
+
   if [[ "${AEGIS_MODE}" != "validation" ]]; then
-    return
-  fi
 
-  local verdict
-  verdict="$(
-    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" \
-      | jq -r '.verdict // empty'
-  )"
+    # Operator override path: an explicit --force-apply on the final mode
+    # of a partial run promotes the candidate WITHOUT a validation
+    # verdict. Scope is deliberately narrow: the mode's artifact must
+    # carry a runtime-owned candidate_result, the synthesized envelope is
+    # tagged "operator_forced" (never "accepted"), and every structural
+    # rail in promote_validated_candidate.sh (path jail, files_changed
+    # cross-check, dirty-target refusal, atomic apply) still gates it.
+    # return 0 explicitly: a bare `return` here would propagate the failed
+    # test's status 1 and set -e would abort the runtime post-execution.
+    [[ "${AEGIS_FORCE_APPLY:-false}" == "true" ]] || return 0
 
-  if [[ "${verdict}" != "accepted" ]]; then
-    aegis_log "Validation verdict does not authorize mutation promotion: ${verdict}"
-    return
+    local forced_candidate
+    forced_candidate="$(
+      printf '%s' "${promotion_payload}" \
+        | jq -c '.candidate_result // empty' 2>/dev/null
+    )"
+
+    if [[ -z "${forced_candidate}" ]]; then
+      aegis_warn "force_apply_requested_but_no_candidate_result_in_mode: ${AEGIS_MODE}"
+      return
+    fi
+
+    aegis_warn "FORCE-APPLY: promoting UNVALIDATED candidate from mode '${AEGIS_MODE}' (explicit operator override — no validation verdict exists for this diff)"
+
+    promotion_payload="$(
+      jq -cn --argjson candidate "${forced_candidate}" \
+        '{mode: "validation", verdict: "operator_forced", validated_candidate: $candidate}'
+    )" || aegis_fatal "force_apply_envelope_synthesis_failed"
+
+  else
+
+    local verdict
+    verdict="$(
+      printf '%s' "${promotion_payload}" \
+        | jq -r '.verdict // empty'
+    )"
+
+    if [[ "${verdict}" != "accepted" ]]; then
+      aegis_log "Validation verdict does not authorize mutation promotion: ${verdict}"
+      return
+    fi
+
   fi
 
   local validation_artifact_file
   validation_artifact_file="$(mktemp)"
-  printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" \
+  printf '%s' "${promotion_payload}" \
     > "${validation_artifact_file}"
 
   bash scripts/runtime/promote_validated_candidate.sh \
