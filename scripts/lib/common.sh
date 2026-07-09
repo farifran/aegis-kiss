@@ -27,14 +27,15 @@ aegis_fatal() {
   exit 1
 }
 
-# Timestamps via the printf builtin — no fork, so timing keeps working
-# even when the shell carries very large variables.
+# Timestamps via portable date subshells: the printf '%(%s)T' builtin
+# token requires Bash >= 4.2 and evaluates empty on macOS stock Bash 3.2,
+# which would break the $((end-start)) arithmetic below.
 measure() {
   local label="$1"
   local start end
-  printf -v start '%(%s)T' -1
+  start=$(date +%s)
   shift
   "$@"
-  printf -v end '%(%s)T' -1
+  end=$(date +%s)
   echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
 }

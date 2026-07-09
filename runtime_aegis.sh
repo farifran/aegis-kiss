@@ -40,10 +40,11 @@ source ".harness/config.sh"
 # EXECUTION IDENTITY
 # =========================================================
 
-# Fork-free epoch via the printf builtin (matches common.sh idiom).
-printf -v _aegis_epoch_now '%(%s)T' -1
-export AEGIS_EXECUTION_ID="${_aegis_epoch_now}-$$"
-unset _aegis_epoch_now
+# Portable epoch via date subshell: the printf '%(%s)T' builtin token
+# requires Bash >= 4.2 and yields an empty string on macOS Bash 3.2.
+export AEGIS_EXECUTION_ID="$(
+  date +%s
+)-$$"
 
 export AEGIS_EXECUTION_TIMESTAMP="$(
   date -u +"%Y-%m-%dT%H:%M:%SZ"

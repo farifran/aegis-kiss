@@ -157,8 +157,8 @@ run_mode() {
   local end
   local duration
 
-  # Fork-free epoch via the printf builtin (matches common.sh idiom).
-  printf -v start '%(%s)T' -1
+  # Portable epoch via date subshell (macOS Bash 3.2 lacks printf %(...)T).
+  start=$(date +%s)
 
   local cmd=(bash runtime_aegis.sh "${mode}")
   if [[ -n "${TARGET}" ]]; then
@@ -173,7 +173,7 @@ run_mode() {
 
   "${cmd[@]}"
 
-  printf -v end '%(%s)T' -1
+  end=$(date +%s)
 
   duration=$((end-start))
 

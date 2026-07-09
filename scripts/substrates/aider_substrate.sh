@@ -693,9 +693,9 @@ invoke_aider() {
 
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
 
-  # Fork-free timestamp via the printf builtin (matches common.sh).
+  # Portable timestamp via date subshell (macOS Bash 3.2 lacks printf %(...)T).
   local aider_start_time
-  printf -v aider_start_time '%(%s)T' -1
+  aider_start_time=$(date +%s)
 
   # Wall-clock watchdog: --timeout only bounds individual API requests,
   # so retry loops can still hang the pipeline. The watchdog kills the
@@ -740,7 +740,7 @@ invoke_aider() {
   set -e
 
   local aider_end_time
-  printf -v aider_end_time '%(%s)T' -1
+  aider_end_time=$(date +%s)
   local aider_elapsed=$((aider_end_time - aider_start_time))
   echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
