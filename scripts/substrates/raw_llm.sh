@@ -610,6 +610,16 @@ execute_provider_request() {
   local t_starttransfer
   local t_total
 
+  # Empty-body retry state: long non-streaming generations (>70s) can be
+  # dropped or truncated by upstream gateways/proxies, yielding HTTP 200
+  # with an empty payload. That volatility is transient infrastructure
+  # noise, not a protocol failure — re-fire the exact same request up to
+  # 3 attempts with progressive backoff before the terminal
+  # empty_provider_response fatal is allowed to fire downstream.
+  local empty_response_attempt=1
+  local empty_response_max_attempts=3
+  local empty_response_backoff
+
   while [[ "${attempt}" -le "${AEGIS_PROVIDER_MAX_RETRIES}" ]]; do
 
     curl_stats="$(
@@ -642,6 +652,26 @@ execute_provider_request() {
         echo "[AEGIS][TIMING] curl_connect: ${t_connect}s" >&2
         echo "[AEGIS][TIMING] provider_generation (prefill+decode, non-streaming): ${t_starttransfer}s" >&2
         echo "[AEGIS][TIMING] response_complete: ${t_total}s" >&2
+
+        # Empty/whitespace-only body on HTTP 200: transient gateway drop.
+        # Re-fire the identical request payload with progressive backoff;
+        # after the final attempt, fall through so the deterministic
+        # empty_provider_response fatal fires in extract_artifact_payload.
+        if [[ -z "$(extract_provider_content | tr -d '[:space:]')" ]]; then
+          if [[ "${empty_response_attempt}" -lt "${empty_response_max_attempts}" ]]; then
+            if [[ "${empty_response_attempt}" -eq 1 ]]; then
+              empty_response_backoff=2
+            else
+              empty_response_backoff=5
+            fi
+            echo "[AEGIS][RAW][WARN] Empty provider response detected on attempt ${empty_response_attempt}/${empty_response_max_attempts} — retrying in ${empty_response_backoff}s..." >&2
+            empty_response_attempt=$((empty_response_attempt + 1))
+            sleep "${empty_response_backoff}"
+            continue
+          fi
+          echo "[AEGIS][RAW][WARN] Empty provider response persisted after ${empty_response_max_attempts}/${empty_response_max_attempts} attempts — surfacing terminal failure" >&2
+        fi
+
         return 0
         ;;
 
