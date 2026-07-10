@@ -21,9 +21,9 @@ This document is not constitutional. If it conflicts with the authoritative cont
 
 ## One-Sentence System Summary
 
-**Aegis Harness v1.0.0 (Estável / Homologada)** — note: `package.json` still declares `"version": "0.3.0"`; the two version markers have not been reconciled — is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
+**Aegis Harness v1.0.0 (Estável / Homologada)** is a runtime-sovereign execution harness that exposes bounded capability evidence to mode contracts, routes execution through a protocol VM, and promotes only validated JSON artifacts back into runtime-owned handover state.
 
-Current Suite Status: **all 13 npm-chained test suites passing green (Exit 0)** (`npm run aegis:test`), with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS). Two additional standalone harnesses (`test_required_evidence_augmentation.sh`, `test_sovereignty_fallback.sh`) exist under `scripts/substrates/test/` but are not wired into the npm chain.
+Current Suite Status: **all 15 npm-chained test suites passing green (Exit 0)** (`npm run aegis:test`), with static verification, eslint boundaries enforcement, type checking, and cross-platform verification (validated on Linux and macOS). `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` are now wired into the npm chain as `aegis:test:required-evidence-augmentation` and `aegis:test:sovereignty-fallback`.
 
 ## High-Level Execution Graph
 
@@ -295,8 +295,8 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/substrates/test/test_epistemic_pipeline_audit.sh` | Epistemic pipeline audit test. Verifies payload provenance and handover integrity end-to-end. | Backed by `scripts/audit_epistemic_pipeline.sh`. |
 | `scripts/substrates/test/test_authority_isolation.sh` | Authority-isolation suite: envelope gate, deterministic fatal abort, env/fs containment, and path jail assertions. | Verifies capability handlers cannot exceed their declared envelope at runtime. |
 | `scripts/substrates/test/test_recognition_benchmarks.sh` | Layer 0 recognition benchmarks (precision/recall over entrypoints, gravity nodes, churn⊕resonance ranking across fixture scenarios). | Exercises the structural Layer 0 facts against `tests/scenarios/` fixtures. |
-| `scripts/substrates/test/test_required_evidence_augmentation.sh` | Standalone harness for handover-driven evidence augmentation (`required_evidence` folding into the next mode's evidence entries). Not in the npm chain. | Exercises `augment_evidence_profile_from_handover` in `scripts/execute_mode.sh`. |
-| `scripts/substrates/test/test_sovereignty_fallback.sh` | Standalone harness for runtime sovereignty fallback behavior. Not in the npm chain. | Exercises `runtime_aegis.sh` fallback paths. |
+| `scripts/substrates/test/test_required_evidence_augmentation.sh` | Harness for handover-driven evidence augmentation (`required_evidence` folding into the next mode's evidence entries). Chained as `aegis:test:required-evidence-augmentation`. | Exercises `augment_evidence_profile_from_handover` in `scripts/execute_mode.sh`. |
+| `scripts/substrates/test/test_sovereignty_fallback.sh` | Harness for runtime sovereignty fallback behavior. Chained as `aegis:test:sovereignty-fallback`. | Exercises `runtime_aegis.sh` fallback paths. |
 | `scripts/substrates/test/_test_lib.sh` | Shared source-only helpers for the test harnesses. | Sourced by the `test_*.sh` suites. |
 | `scripts/substrates/test/mock_openai_curl.sh` | Mock OpenAI-compatible provider used by the readonly and mutation suites. | Replaces the real `curl` provider call so tests run without real credentials. |
 | `scripts/substrates/test/mock_provider.sh` | Alternate mock provider harness used by suites that need a running endpoint. | Complements `mock_openai_curl.sh` for provider-facing tests. |
@@ -473,7 +473,7 @@ Current alignment state:
 1. `package.json` test commands correctly point to `scripts/substrates/test/test_*.sh`.
 2. All readonly and mutation test flows execute successfully via `npm run aegis:test`.
 3. The formerly stale `aegis:bootstrap` npm entry (which pointed to a non-existent `scripts/test_environment.sh`) has been retired from `package.json`.
-4. `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` exist on disk but are not wired into the `aegis:test` npm chain — they only run when invoked directly.
+4. `test_required_evidence_augmentation.sh` and `test_sovereignty_fallback.sh` are wired into the `aegis:test` npm chain (as `aegis:test:required-evidence-augmentation` and `aegis:test:sovereignty-fallback`).
 5. The temporary pipeline truncation at `optimize` (a one-cycle workaround for upstream gateway timeouts during the `src/tokenBucket.ts` creation cycle) has been closed out: `PIPELINES[mutation]` in `run_aegis.sh` is restored to the full contract-bearing sequence `discovery → forensics → repair → optimize → adversarial → validation`, and candidate promotion is again reachable only through an explicit `accepted` validation verdict.
 
 ## Current Practical State

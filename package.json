@@ -1,6 +1,6 @@
 {
   "name": "aegis-harness",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
 
@@ -47,7 +47,11 @@
 
     "aegis:test:recognition-benchmarks": "bash scripts/substrates/test/test_recognition_benchmarks.sh",
 
-    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks",
+    "aegis:test:required-evidence-augmentation": "bash scripts/substrates/test/test_required_evidence_augmentation.sh",
+
+    "aegis:test:sovereignty-fallback": "bash scripts/substrates/test/test_sovereignty_fallback.sh",
+
+    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback",
 
     "aegis:sanity": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
 
