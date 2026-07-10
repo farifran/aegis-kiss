@@ -82,3 +82,6 @@ export function megabitsParaTerabits(mbits: number): number {
 export function megabitsParaKilobits(mbits: number): number {
     return mbits * 1000;
 }
+export function kilobitsParaMegabits(kbits: number): number {
+    return kbits / 1000;
+}
