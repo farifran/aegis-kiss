@@ -2,7 +2,7 @@
 # AEGIS HARNESS — HUMAN INTERACTIVE PROFILE
 # =========================================================
 
-model: openai/z-ai/glm-5.2
+model: openai/meta/llama-3.1-8b-instruct
 
 # ---------------------------------------------------------
 # HUMAN INTERACTION
