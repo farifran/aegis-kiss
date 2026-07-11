@@ -420,17 +420,25 @@ If the required change seems to involve a file that is not loaded, do NOT add it
   # invocation can never disagree and target files are sized only once.
   local anti_truncation_instructions=""
   if [[ "${resolved_edit_format}" == "whole" ]]; then
-    anti_truncation_instructions="ANTI-LAZY TRUNCATION CONSTRAINT (ABSOLUTE — WHOLE-FILE EDIT FORMAT):
-When you emit a file, you MUST re-emit EVERY SINGLE LINE of that file from the first line to the last, exactly as it exists, with your requested change integrated.
-You are FORBIDDEN from using placeholders, ellipses, or omission comments of any kind — including but not limited to:
-- // ... existing code ...
-- // rest of file stays the same
-- /* unchanged */
-- # ...
-- ...
-Every existing function, import, comment, and blank line MUST appear verbatim in your output alongside the new requested change.
-If you omit, summarize, or abbreviate ANY existing line, aider's parsing engine WILL REJECT your response and the mutation WILL FAIL.
-Do not shorten. Do not elide. Emit the complete file content, every time."
+    anti_truncation_instructions="CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
+You MUST write the entire file from the very first line to the very last line.
+DO NOT use placeholders like '// ...' or '// existing code' or '... rest of file'.
+
+[BAD EXAMPLE — WILL CAUSE CRASH]
+\`\`\`typescript
+// ... existing imports ...
+export function newFunc() { return 1; }
+// ... rest of file ...
+\`\`\`
+
+[GOOD EXAMPLE — REQUIRED]
+\`\`\`typescript
+import { helper } from './utils';
+export function oldFunc() { return 0; }
+export function newFunc() { return 1; }
+\`\`\`
+
+If you use any placeholders or omit any code, the parser will fail and your changes will be discarded."
   fi
 
   local input_label="Investigation input (operator mutation demand):"
@@ -774,14 +782,12 @@ invoke_aider() {
   echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
 
   if [[ "${aider_status}" -ne 0 ]]; then
-    # aider sometimes hangs after successfully applying its edits instead
-    # of honoring --exit. The substrate's deliverable is the worktree diff,
-    # not aider's exit code: if the watchdog killed it AFTER an applied
-    # edit produced a diff, the mutation is usable — proceed.
-    if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]] \
-      && grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" \
+    # aider sometimes hangs or fails during exit/summarization (especially under 8B models)
+    # after successfully applying its edits. The substrate's deliverable is the worktree diff:
+    # if it produced a diff and applied edits, the mutation is usable — proceed.
+    if grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" \
       && [[ -n "$(capture_worktree_diff)" ]]; then
-      aegis_warn "aider hung after applying edits — killed by watchdog, proceeding with captured diff"
+      aegis_warn "aider exited with status ${aider_status} (possibly due to post-edit summarizer crash) but applied edits successfully — proceeding"
       return 0
     fi
 

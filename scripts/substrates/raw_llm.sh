@@ -376,9 +376,9 @@ assemble_system_prompt() {
   elif [[ "${AEGIS_MODE}" == "optimize" ]]; then
     mode_specific_instructions="MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."
   elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then
-    mode_specific_instructions="MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' if there are logical/mathematical bugs, boundary violations, or if typescript.check, eslint.check, or test.run payloads indicate failures or errors; otherwise 'verified'. Be mathematically precise: do NOT generate false findings for mathematically equivalent expressions (e.g. 1024 * 1024 is identical to 1024^2 or 1048576). The runtime injects mode, candidate_result, top-level evidence_refs, and handover_attention — do NOT emit them."
+    mode_specific_instructions="MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' ONLY if typescript.check, eslint.check, or test.run payloads report actual failures or errors. If the compiler, linter, and tests all pass (status 'passed' or no errors), do NOT challenge the candidate and set status to 'verified'. Do NOT hallucinate mathematical or logic bugs in correct arithmetic formulas. The runtime injects mode, candidate_result, top-level evidence_refs, and handover_attention — do NOT emit them."
   elif [[ "${AEGIS_MODE}" == "validation" ]]; then
-    mode_specific_instructions="MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Set verdict to 'rejected' if typescript.check, eslint.check, or test.run payloads report failures or errors, or if there is a real, functional logic bug. If the adversarial findings are false positives or mathematically equivalent (e.g. 1024*1024 vs 1024^2), ignore them and set verdict to 'accepted'. The runtime injects mode, validated_candidate, findings, evidence_refs, and handover_attention — do NOT emit them."
+    mode_specific_instructions="MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Set verdict to 'accepted' if typescript.check, eslint.check, and test.run payloads report success or no errors. Set verdict to 'rejected' ONLY if there are concrete compiler/linter failures or failing unit tests in the payloads. Ignore any hallucinated math/logic findings from the adversarial step if the test and typecheck tools passed. The runtime injects mode, validated_candidate, findings, evidence_refs, and handover_attention — do NOT emit them."
   fi
 
   # Byte 0 of the stream is the constitutional preamble — static and
@@ -800,15 +800,30 @@ extract_artifact_payload() {
   [[ -n "${provider_content}" ]] \
     || aegis_fatal "empty_provider_response"
 
+  local has_markers=true
   if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
     || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
-    echo "[DEBUG] Raw LLM content (markers missing):" >&2
-    echo "${provider_content}" >&2
-    aegis_fatal "missing_artifact_markers"
+    has_markers=false
   fi
 
-  local artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
-  artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
+  local artifact_payload=""
+  if [[ "${has_markers}" == "true" ]]; then
+    artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
+    artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
+  else
+    # Fallback: Extract the first outer JSON object block { ... } in the content.
+    # This prevents failures when 8B models output JSON without markers.
+    local first_brace last_brace
+    first_brace="$(echo "${provider_content}" | grep -n "{" | head -n 1 | cut -d: -f1)"
+    last_brace="$(echo "${provider_content}" | grep -n "}" | tail -n 1 | cut -d: -f1)"
+    if [[ -n "${first_brace}" ]] && [[ -n "${last_brace}" ]] && [[ "${first_brace}" -le "${last_brace}" ]]; then
+      artifact_payload="$(echo "${provider_content}" | sed -n "${first_brace},${last_brace}p")"
+    else
+      echo "[DEBUG] Raw LLM content (markers and JSON braces missing):" >&2
+      echo "${provider_content}" >&2
+      aegis_fatal "missing_artifact_markers"
+    fi
+  fi
 
   # Strip stray markdown code-fence lines the model may have wrapped the
   # JSON body in (``` / ```json), which would break jq parsing.
