@@ -47,6 +47,11 @@ cd "${AEGIS_AIDER_SUBSTRATE_ROOT}"
   exit 1
 }
 
+# Cognition substrate: a model is mandatory here. Declare it before
+# sourcing config so a missing/unconfigured model fails loudly at the
+# config gate instead of silently downgrading to a stalling default.
+export AEGIS_REQUIRE_MODEL=1
+
 source ".harness/config.sh"
 
 # Mutation timeouts: per-request (aider --timeout) and total wall clock
@@ -572,6 +577,16 @@ invoke_aider() {
   local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
   local aider_output
   local aider_status
+
+  # Stalling-configuration precondition (was a passive comment): gemma-class
+  # non-frontier models loop indefinitely in whole-file emission and only
+  # ever surface as a 360s watchdog kill with an empty diff. Refuse the
+  # combination up front with a loud, deterministic fatal instead of
+  # burning the wall-clock budget on a known dead end.
+  if [[ "${AEGIS_AIDER_MODEL,,}" == *gemma* ]] \
+    && [[ "${resolved_edit_format}" == "whole" ]]; then
+    aegis_fatal "stalling_model_configuration: '${AEGIS_AIDER_MODEL}' (gemma-class) stalls under whole edit format — configure a frontier mutation model or force AEGIS_AIDER_EDIT_FORMAT=diff"
+  fi
 
   # Accelerated local validation loop: after each applied edit, aider
   # runs the per-file structural gate (bash -n / node --check / tsc

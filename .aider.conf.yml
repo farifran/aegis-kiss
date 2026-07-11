@@ -2,7 +2,7 @@
 # AEGIS HARNESS — HUMAN INTERACTIVE PROFILE
 # =========================================================
 
-model: openai/qwen/qwen3-next-80b-a3b-instruct
+model: openai/gemini-flash-latest
 
 # ---------------------------------------------------------
 # HUMAN INTERACTION

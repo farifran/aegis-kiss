@@ -77,22 +77,56 @@ export AEGIS_ARTIFACT_END_MARKER="AEGIS_ARTIFACT_END"
 : "${OPENAI_API_BASE:=https://integrate.api.nvidia.com/v1}"
 export OPENAI_API_BASE
 
+# Snapshot of the RAW operator-provided model, captured BEFORE any
+# derivation/defaulting so validate_provider_configuration can assert on
+# genuine operator intent instead of a post-default tautology.
+AEGIS_OPERATOR_MODEL_RAW="${OPENAI_MODEL_READONLY_COGNITION:-${OPENAI_MODEL_ANALYSIS:-${AEGIS_AIDER_MODEL:-${AEGIS_MUTATION_MODEL:-}}}}"
+export AEGIS_OPERATOR_MODEL_RAW
+
 # =========================================================
 # MODEL CONFIGURATION (KISS UNIFIED MODEL)
 # =========================================================
-# All modes utilize the unified frontier model.
+# Idempotent, clobber-safe resolution. Every assignment honors an
+# already-set/injected value, so a re-source inside a stripped env -i
+# substrate boundary can NEVER clobber an injected model back to a
+# default. There is NO non-frontier fallback: in a model-requiring
+# context (cognition substrates export AEGIS_REQUIRE_MODEL=1) with no
+# model in any form, resolution is a hard fatal — a mis-set model fails
+# loudly instead of silently downgrading to a stalling default. The
+# observation layer (capability handlers, manifest generation) never
+# sets AEGIS_REQUIRE_MODEL, so it sources config model-less without fatal.
+# AEGIS_MODEL_RESOLVED=1 marks an upstream resolution and, propagated
+# across env -i whitelists, lets a stripped re-source trust that a model
+# was already validated upstream.
 
-: "${OPENAI_MODEL_READONLY_COGNITION:=${OPENAI_MODEL_ANALYSIS:-google/gemma-4-31b-it}}"
-export OPENAI_MODEL_READONLY_COGNITION
-
-export AEGIS_MUTATION_MODEL="${OPENAI_MODEL_READONLY_COGNITION}"
-
-if [[ "${AEGIS_MUTATION_MODEL}" == */* ]] \
-  && [[ "${AEGIS_MUTATION_MODEL}" != openai/* ]]; then
-  export AEGIS_AIDER_MODEL="openai/${AEGIS_MUTATION_MODEL}"
-else
-  export AEGIS_AIDER_MODEL="${AEGIS_MUTATION_MODEL}"
+if [[ "${AEGIS_REQUIRE_MODEL:-}" == "1" ]] \
+  && [[ "${AEGIS_MODEL_RESOLVED:-}" != "1" ]] \
+  && [[ -z "${AEGIS_OPERATOR_MODEL_RAW}" ]]; then
+  echo "[AEGIS][CONFIG][FATAL] missing_model_configuration" >&2
+  exit 1
 fi
+
+if [[ -z "${OPENAI_MODEL_READONLY_COGNITION:-}" ]] \
+  && [[ -n "${OPENAI_MODEL_ANALYSIS:-}" ]]; then
+  OPENAI_MODEL_READONLY_COGNITION="${OPENAI_MODEL_ANALYSIS}"
+fi
+
+# Honor any pre-set/injected value; derive only when unset.
+: "${AEGIS_MUTATION_MODEL:=${OPENAI_MODEL_READONLY_COGNITION:-}}"
+
+if [[ -z "${AEGIS_AIDER_MODEL:-}" ]] && [[ -n "${AEGIS_MUTATION_MODEL}" ]]; then
+  if [[ "${AEGIS_MUTATION_MODEL}" == */* ]] \
+    && [[ "${AEGIS_MUTATION_MODEL}" != openai/* ]]; then
+    AEGIS_AIDER_MODEL="openai/${AEGIS_MUTATION_MODEL}"
+  else
+    AEGIS_AIDER_MODEL="${AEGIS_MUTATION_MODEL}"
+  fi
+fi
+
+export AEGIS_MODEL_RESOLVED=1
+export OPENAI_MODEL_READONLY_COGNITION="${OPENAI_MODEL_READONLY_COGNITION:-}"
+export AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}"
+export AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}"
 
 : "${AEGIS_AIDER_BIN:=${AEGIS_ROOT_DIR}/.venv/bin/aider}"
 : "${AEGIS_MUTATION_GIT_DIR:=${AEGIS_ROOT_DIR}/.git}"
@@ -409,10 +443,17 @@ validate_provider_configuration() {
     return 1
   }
 
-  [[ -n "${OPENAI_MODEL_READONLY_COGNITION}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_readonly_cognition_model" >&2
-    return 1
-  }
+  # Model presence is only demanded in model-requiring contexts
+  # (AEGIS_REQUIRE_MODEL=1). When demanded, assert on AEGIS_OPERATOR_MODEL_RAW
+  # — the snapshot captured BEFORE any derivation/defaulting — so this
+  # validates genuine operator/injected configuration rather than the
+  # post-default tautology of checking a variable the model block just set.
+  if [[ "${AEGIS_REQUIRE_MODEL:-}" == "1" ]]; then
+    [[ -n "${AEGIS_OPERATOR_MODEL_RAW:-}" ]] || {
+      echo "[AEGIS][CONFIG][FATAL] missing_readonly_cognition_model" >&2
+      return 1
+    }
+  fi
 
   [[ -n "${AEGIS_PROVIDER_MAX_RETRIES}" ]] || {
     echo "[AEGIS][CONFIG][FATAL] missing_provider_max_retries" >&2

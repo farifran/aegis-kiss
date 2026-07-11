@@ -62,7 +62,7 @@ run_aider_substrate() {
     AEGIS_EXECUTION_ID="test-execution" \
     AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
     AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
-    AEGIS_MUTATION_MODEL="google/gemma-4-31b-it" \
+    AEGIS_MUTATION_MODEL="aegis-test-frontier-model" \
     AEGIS_AIDER_BIN="${fake_aider}" \
     AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
@@ -100,7 +100,7 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ "${model}" == "openai/google/gemma-4-31b-it" ]]
+[[ "${model}" == "aegis-test-frontier-model" ]]
 grep -q "adicione uma funcao soma" "${message_file}"
 [[ "${target}" == "src/index.ts" ]]
 
