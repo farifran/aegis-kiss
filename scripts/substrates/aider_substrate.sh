@@ -461,6 +461,7 @@ ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 }You are executing inside Aegis Harness in bounded mutation mode.
 
 Mode: ${AEGIS_MODE}
+Execution ID: ${AEGIS_EXECUTION_ID}
 
 (note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
 
@@ -491,8 +492,6 @@ ${file_jail_instructions}
 ${anti_truncation_instructions:+${anti_truncation_instructions}
 
 }${mode_instructions}
-
-Execution ID: ${AEGIS_EXECUTION_ID}
 EOF
 
   # Whole-prompt path obfuscation: every source above (skill contract,
