@@ -55,7 +55,9 @@
 
     "aegis:test:model-boundary-idempotency-cache": "bash scripts/substrates/test/test_model_boundary_idempotency_cache.sh",
 
-    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache",
+    "aegis:test:net-new-index-isolation": "bash scripts/substrates/test/test_net_new_index_isolation.sh",
+
+    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation",
 
     "aegis:sanity": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
 

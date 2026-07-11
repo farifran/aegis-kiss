@@ -856,9 +856,35 @@ emit_mutation_artifact() {
 # MAIN
 # =========================================================
 
+# The execution surface is a disposable `git worktree` with its own index
+# (.git/worktrees/<mode>/index). Scope EVERY mutation git operation to that
+# index instead of the operator's main .git so the net-new intent-to-add
+# pre-materialization can never leave a phantom staged entry in the
+# operator's index. The worktree index is destroyed when the surface is
+# expunged, so no residue survives on any exit path — success, failure, or
+# signal. Without this, a successful net-new creation (which never takes the
+# rollback path that clears intent-to-add) permanently pollutes the main
+# index, and that phantom path resurfaces in `git ls-files` → pocket map.
+scope_mutation_git_dir_to_surface() {
+
+  local surface_git_dir
+  surface_git_dir="$(
+    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" rev-parse --absolute-git-dir 2>/dev/null
+  )" || true
+
+  if [[ -n "${surface_git_dir}" && -d "${surface_git_dir}" ]]; then
+    AEGIS_MUTATION_GIT_DIR="${surface_git_dir}"
+    aegis_log "Mutation git-dir scoped to disposable surface index: ${AEGIS_MUTATION_GIT_DIR}"
+  else
+    aegis_warn "surface_git_dir_unresolved — mutation ops retain ${AEGIS_MUTATION_GIT_DIR}"
+  fi
+}
+
 main() {
 
   validate_aider_substrate_inputs
+
+  scope_mutation_git_dir_to_surface
 
   aegis_log "Resolving mutation targets..."
 
