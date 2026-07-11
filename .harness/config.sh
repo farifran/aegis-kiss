@@ -408,11 +408,17 @@ declare -ar AEGIS_FORENSICS_EVIDENCE=(
 
 declare -ar AEGIS_VALIDATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
+  "typescript.check"
+  "eslint.check"
+  "test.run"
 )
 
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
   "filesystem.search_symbol"
   "filesystem.read:epistemic_handover"
+  "typescript.check"
+  "eslint.check"
+  "test.run"
 )
 
 declare -ar AEGIS_MUTATION_EVIDENCE=(
