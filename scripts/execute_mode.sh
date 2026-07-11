@@ -290,23 +290,6 @@ prepare_execution_state() {
     mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || aegis_fatal "failed_to_create_capability_payload_dir"
   fi
 
-  # Epistemic cache-partition salt: opaque digest of surface + handover
-  # generation, forwarded to substrates for KV-cache partitioning
-  # (vLLM/LMCache `cache_salt`). Carries no routes or secrets — the
-  # harness stays cache-agnostic. Observation domain owns derivation.
-  # Only meaningful against a self-hosted vLLM+LMCache backend that
-  # honors cache_salt; hosted endpoints ignore it, so it is opt-in via
-  # AEGIS_ENABLE_CACHE_SALT (default false — see .harness/config.sh).
-  # When disabled the variable stays empty and raw_llm omits the field.
-  AEGIS_CACHE_SALT=""
-  if [[ "${AEGIS_ENABLE_CACHE_SALT:-false}" == "true" ]]; then
-    AEGIS_CACHE_SALT="$(
-      derive_cache_salt \
-        "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
-    )"
-  fi
-  export AEGIS_CACHE_SALT
 }
 
 # =========================================================
@@ -438,7 +421,6 @@ invoke_raw_substrate() {
     AEGIS_CAPABILITY_MANIFEST_MAX_BYTES="${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES}" \
     AEGIS_ARTIFACT_BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
     AEGIS_ARTIFACT_END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
-    AEGIS_CACHE_SALT="${AEGIS_CACHE_SALT:-}" \
     bash scripts/substrates/raw_llm.sh \
       "${model}" \
       "${skill_file}" \
@@ -1470,6 +1452,20 @@ normalize_substrate_output() {
             .validated_candidate = ($prev_candidate // .validated_candidate)
             | .findings = ($prev_findings // .findings // [])
             | .basis = (.basis // [] | if type == "string" then [.] else . end)
+            # Physical mutation constraint: a candidate with a blank or
+            # placeholder diff, or an empty files_changed set, is not a
+            # promotable mutation regardless of what the model concluded.
+            # Force a rejected verdict so this state can never reach the
+            # promotion phase (where it would crash on files_changed
+            # mismatch) via a hallucinated "accepted".
+            | (if (
+                 (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
+                 or ((.validated_candidate.diff // "") == "(no changes)")
+                 or (((.validated_candidate.files_changed // []) | length) == 0)
+               ) then
+                 .verdict = "rejected"
+                 | .basis = ["empty_mutation_candidate"]
+               else . end)
             # On a rejected verdict, project the typed adversarial findings
             # into a deterministic repair_feedback contract so the next
             # repair iteration consumes explicit structured parameters

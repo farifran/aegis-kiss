@@ -192,17 +192,13 @@ serving side reuses the stable head across modes and iterations. This
 layout is always on and backend-agnostic — it also helps the automatic
 prefix caching of hosted endpoints such as NVIDIA NIM.
 
-An optional `cache_salt` field can be emitted on raw-substrate requests
-to cryptographically partition KV-cache reuse per surface/handover
-generation (`AEGIS_ENABLE_CACHE_SALT=true`; see `derive_cache_salt` in
-`scripts/lib/common.sh`). This is a **vLLM-native** parameter (vLLM
->= 0.8.3 / LMCache) and is **only meaningful against a self-hosted
-vLLM+LMCache backend the operator controls** (configured with prefix
-caching and `enable_blending: false`). Hosted endpoints (NVIDIA NIM,
-etc.) ignore it, so it is **disabled by default** to avoid dead payload.
-LMCache itself is **not** part of this repository and requires a
-Linux + NVIDIA/CUDA host; it cannot run against a hosted cloud endpoint
-or on Apple Silicon.
+The harness deliberately carries **no** cache-management state of its
+own (no salts, no partition keys, no backend flags): prefix reuse is
+achieved purely through prompt-layout hygiene, which works identically
+against any OpenAI-compatible endpoint. If a self-hosted vLLM/LMCache
+backend is ever adopted, its cache configuration belongs in the serving
+layer — outside this repository — keeping the harness a passive,
+stateless protocol VM.
 
 ## Quick Start
 

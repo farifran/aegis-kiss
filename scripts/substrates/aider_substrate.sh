@@ -705,6 +705,16 @@ invoke_aider() {
     done
   fi
 
+  # History contamination guard: physically delete any aider chat/input
+  # history residue inside the disposable surface before the invocation.
+  # A leaked history file from a previous worktree (or a copied surface)
+  # would be replayed into the token context of this repair loop.
+  rm -f \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.chat.history.md" \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.input.history" \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.llm.history" \
+    >/dev/null 2>&1 || true
+
   aegis_log "Invoking aider mutation substrate..."
   aegis_log "Model: ${AEGIS_AIDER_MODEL}"
   aegis_log "Edit format: ${resolved_edit_format}"

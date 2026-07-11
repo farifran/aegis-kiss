@@ -145,9 +145,15 @@ export AEGIS_MUTATION_GIT_DIR
 : "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0.1}"
 # Output token budget — prevents model truncation of structured JSON artifacts.
 : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
+# Adversarial judgment cap: findings are short structural JSON vectors, and
+# this mode dominates pipeline latency when the model is allowed to decode
+# freely (observed 84s vs 12s for validation). A tight budget forces raw
+# structured emission and cuts conversational prose leakage.
+: "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:=1024}"
 
 export AEGIS_RAW_SUBSTRATE_TEMPERATURE
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS
+export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL
 
 # =========================================================
 # PROVIDER POLICY
@@ -174,22 +180,6 @@ export AEGIS_PROVIDER_RESPONSE_TIMEOUT
 export AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS
-
-# =========================================================
-# KV-CACHE PARTITIONING (cache_salt)
-# =========================================================
-
-# Emit a `cache_salt` field on raw-substrate requests to partition
-# downstream KV-cache prefix reuse (see derive_cache_salt in
-# scripts/lib/common.sh). This is a vLLM-native parameter (vLLM >= 0.8.3
-# / LMCache); it is ONLY meaningful against a self-hosted vLLM+LMCache
-# backend the operator controls. Hosted OpenAI-compatible endpoints
-# (e.g. NVIDIA NIM) ignore it, so it is dead payload there — hence it is
-# OFF by default. Enable only when OPENAI_API_BASE points at a vLLM
-# backend configured with prefix caching (and enable_blending:false).
-: "${AEGIS_ENABLE_CACHE_SALT:=false}"
-
-export AEGIS_ENABLE_CACHE_SALT
 
 # =========================================================
 # EVIDENCE BUDGETS

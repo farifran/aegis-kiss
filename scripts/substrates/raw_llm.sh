@@ -227,13 +227,6 @@ TMP_MANIFEST_FILE="$(
   mktemp
 )"
 
-# Volatile manifest projection (generated_at / execution_id /
-# manifest_hash) — split from the stable projection so per-request
-# identity never breaks the KV-cache prefix of the stable segments.
-TMP_MANIFEST_VOLATILE_FILE="$(
-  mktemp
-)"
-
 TMP_CAPABILITY_CONTEXT_FILE="$(
   mktemp
 )"
@@ -253,7 +246,6 @@ cleanup_raw_substrate() {
   rm -f \
     "${TMP_SYSTEM_PROMPT_FILE}" \
     "${TMP_MANIFEST_FILE}" \
-    "${TMP_MANIFEST_VOLATILE_FILE}" \
     "${TMP_CAPABILITY_CONTEXT_FILE}" \
     "${TMP_REQUEST_FILE}" \
     "${TMP_RESPONSE_FILE}" \
@@ -383,6 +375,9 @@ assemble_system_prompt() {
     mode_specific_instructions="MINIMAL DISCOVERY ARTIFACT: emit ONLY {\"observations\": [\"...\"], \"rationale\": \"...\", \"required_evidence\": [\"filesystem.read:<file>\"]}. The subject of every observation is the INVESTIGATION (gaps, priorities, next evidence), never the system under investigation: no counts/metrics repetition, no architectural role labels (orchestrator/controller/gateway), no semantic domain inference, no risk assessment, no inferring module function from topology position. The runtime injects mode, scope, attention, priorities, and evidence identity — do NOT emit them."
   fi
 
+  # Byte 0 of the stream is the constitutional preamble — static and
+  # clean so any serving-side prefix cache (including the hosted
+  # provider's automatic layer) reuses the stable prompt head.
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
@@ -458,17 +453,6 @@ assemble_bounded_manifest() {
       capabilities: .capabilities
     }' \
     > "${TMP_MANIFEST_FILE}"
-
-  # Volatile projection: per-request identity wrappers. Emitted at the
-  # prompt tail so they never break the stable prefix.
-  printf '%s\n' "${CAPABILITY_MANIFEST}" \
-    | jq -c \
-    '{
-      generated_at: .generated_at,
-      execution_id: .execution_id,
-      manifest_hash: .manifest_hash
-    }' \
-    > "${TMP_MANIFEST_VOLATILE_FILE}"
 
   truncate_file_bytes \
     "${TMP_MANIFEST_FILE}" \
@@ -577,7 +561,10 @@ assemble_bounded_capability_context() {
     echo
     echo "=== MANIFEST EXECUTION METADATA ==="
     echo
-    cat "${TMP_MANIFEST_VOLATILE_FILE}"
+    # Volatile identity wrappers projected inline at the tail — no temp
+    # file: the stable manifest above is the only bounded artifact.
+    printf '%s\n' "${CAPABILITY_MANIFEST}" \
+      | jq -c '{generated_at, execution_id, manifest_hash}'
 
     echo
     echo "=== EXECUTION IDENTITY ==="
@@ -600,24 +587,25 @@ assemble_provider_request() {
   # Default: 4096 — enough for any structured JSON artifact without truncation.
   : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
 
-  # cache_salt (vLLM >= 0.8.3 / LMCache): opaque KV-cache partition key.
-  # Feature-gated — when AEGIS_CACHE_SALT is unset/empty the request stays
-  # byte-identical to the salt-less form so unaware backends never 400.
+  # Adversarial emits short structural findings vectors only — cap its
+  # decode budget hard so judgment latency stays bounded and prose leakage
+  # is physically impossible past the cap.
+  local effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS}"
+  if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
+    effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:-1024}"
+  fi
+
   jq -n \
     --arg model "${MODEL}" \
-    --arg cache_salt "${AEGIS_CACHE_SALT:-}" \
     --rawfile system_prompt "${TMP_SYSTEM_PROMPT_FILE}" \
     --rawfile capability_context "${TMP_CAPABILITY_CONTEXT_FILE}" \
     --argjson temperature "${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
-    --argjson max_tokens "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS}" \
+    --argjson max_tokens "${effective_max_tokens}" \
     '
     {
       model: $model,
       temperature: $temperature,
-      max_tokens: $max_tokens
-    }
-    + (if $cache_salt != "" then {cache_salt: $cache_salt} else {} end)
-    + {
+      max_tokens: $max_tokens,
       messages: [
         {
           role: "system",
@@ -778,11 +766,29 @@ extract_provider_content() {
 # ARTIFACT EXTRACTION
 # =========================================================
 
+# Probabilistic models decorate the protocol markers with markdown despite
+# instructions: '### AEGIS ARTIFACT BEGIN', '`AEGIS_ARTIFACT_END`', fenced
+# code blocks around the JSON. Normalize any line that is a decorated
+# variant of a marker (leading hashes/backticks/whitespace, '_' rendered as
+# space, trailing decoration) back to the literal marker token so the
+# deterministic extraction below never dies on cosmetic noise.
+normalize_decorated_markers() {
+
+  local begin_rx end_rx
+  # '_' in the canonical marker may be rendered as space or hyphen.
+  begin_rx="$(printf '%s' "${AEGIS_ARTIFACT_BEGIN_MARKER}" | sed 's/_/[_ -]/g')"
+  end_rx="$(printf '%s' "${AEGIS_ARTIFACT_END_MARKER}" | sed 's/_/[_ -]/g')"
+
+  sed -E \
+    -e "s/^[[:space:]#\`*]*${begin_rx}[[:space:]#\`*]*\$/${AEGIS_ARTIFACT_BEGIN_MARKER}/" \
+    -e "s/^[[:space:]#\`*]*${end_rx}[[:space:]#\`*]*\$/${AEGIS_ARTIFACT_END_MARKER}/"
+}
+
 extract_artifact_payload() {
 
   local provider_content
   provider_content="$(
-    extract_provider_content
+    extract_provider_content | normalize_decorated_markers
   )"
 
   [[ -n "${provider_content}" ]] \
@@ -797,6 +803,13 @@ extract_artifact_payload() {
 
   local artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
   artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
+
+  # Strip stray markdown code-fence lines the model may have wrapped the
+  # JSON body in (``` / ```json), which would break jq parsing.
+  artifact_payload="$(
+    printf '%s\n' "${artifact_payload}" \
+      | sed -E '/^[[:space:]]*`{3,}[a-zA-Z]*[[:space:]]*$/d'
+  )"
 
   [[ -n "${artifact_payload//[[:space:]]/}" ]] \
     || aegis_fatal "empty_artifact_payload"

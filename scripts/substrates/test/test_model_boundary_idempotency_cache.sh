@@ -1,107 +1,78 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# AEGIS TEST — MODEL BOUNDARY CACHE IDEMPOTENCY
+# AEGIS TEST — MODEL BOUNDARY PROMPT STABILITY
 # =========================================================
 #
-# Guards the KV-cache prefix-matching contract at the model boundary:
+# Guards the deterministic model-boundary rails:
 #
-# 1. Salt derivation (fail-powered): derive_cache_salt must be
-#    deterministic for an unchanged surface (idempotency) and MUST
-#    rotate on any physical mutation of the execution surface —
-#    tracked diff, net-new untracked file, or handover generation
-#    change. The suite goes red if a mutation fails to rotate the salt
-#    (stale attention states would become reachable).
-#
-# 2. Prompt prefix stability: two consecutive same-mode runtime
+# 1. Prompt prefix byte-stability: two consecutive same-mode runtime
 #    executions must produce byte-identical system prompts and
 #    byte-identical user-message stable prefixes (through the payload
 #    section header). Volatile identity (execution id, timestamp,
-#    manifest metadata) must appear only in the tail, and the request
-#    must carry the cache_salt partition key.
+#    manifest metadata) must appear only in the tail. This is the
+#    contract that unlocks serving-side automatic prefix caching.
+#
+# 2. Empty-mutation-candidate rejection gate: the REAL jq gate embedded
+#    in scripts/execute_mode.sh (extracted from source, not duplicated)
+#    must force verdict "rejected" with basis "empty_mutation_candidate"
+#    for blank/placeholder diffs or empty files_changed, and must leave
+#    a genuine candidate untouched.
 #
 # =========================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
-source "scripts/lib/common.sh"
-
 export AEGIS_REPAIR_FEEDBACK_LOOP="false"
-
-# This suite exercises the cache_salt partitioning feature, so it must
-# run with the feature explicitly enabled (default is off — the salt is
-# only meaningful against a self-hosted vLLM/LMCache backend).
-export AEGIS_ENABLE_CACHE_SALT="true"
 
 readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 
 # ---------------------------------------------------------
-# Part 1 — salt derivation: idempotency + forced rotation
+# Part 1 — empty-mutation-candidate gate (real production filter)
 # ---------------------------------------------------------
 
-assert_salt_derivation_contract() {
+assert_empty_candidate_rejection_gate() {
 
-  local surface_dir handover_file
-  surface_dir="$(mktemp -d)"
-  handover_file="$(mktemp)"
+  # Extract the actual gate expression from execute_mode.sh so this test
+  # exercises production logic, not a copy that could drift.
+  local gate_filter
+  gate_filter="$(
+    awk '/# Physical mutation constraint/,/else \. end\)/' scripts/execute_mode.sh \
+      | grep -v '^[[:space:]]*#' \
+      | sed 's/^[[:space:]]*| //'
+  )"
 
-  (
-    cd "${surface_dir}"
-    git init -q
-    git config user.email "aegis-test@localhost"
-    git config user.name "Aegis Test"
-    echo "line one" > tracked.txt
-    git add tracked.txt
-    git commit -qm "seed"
-  ) || fail "salt_test_surface_setup_failed"
+  [[ -n "${gate_filter}" ]] \
+    || fail "empty_candidate_gate_not_found_in_execute_mode"
 
-  printf '%s' '{"artifact_snapshot":{"generated_at":"2026-01-01T00:00:00Z"}}' \
-    > "${handover_file}"
+  local rejected
+  rejected="$(
+    jq -cn '{verdict:"accepted",validated_candidate:{diff:"(no changes)",files_changed:[]},basis:["ok"]}' \
+      | jq "${gate_filter} | {verdict, basis}"
+  )" || fail "empty_candidate_gate_filter_not_executable"
 
-  local salt_base salt_repeat
-  salt_base="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
-  salt_repeat="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
+  [[ "$(jq -r '.verdict' <<<"${rejected}")" == "rejected" ]] \
+    || fail "empty_candidate_not_rejected: ${rejected}"
+  [[ "$(jq -r '.basis[0]' <<<"${rejected}")" == "empty_mutation_candidate" ]] \
+    || fail "empty_candidate_basis_missing: ${rejected}"
 
-  [[ "${salt_base}" =~ ^[0-9a-f]{64}$ ]] \
-    || fail "cache_salt_not_sha256_hex: ${salt_base}"
+  local blank_rejected
+  blank_rejected="$(
+    jq -cn '{verdict:"accepted",validated_candidate:{diff:"   ",files_changed:["x"]},basis:["ok"]}' \
+      | jq "${gate_filter} | .verdict" -r
+  )"
+  [[ "${blank_rejected}" == "rejected" ]] \
+    || fail "blank_diff_not_rejected"
 
-  [[ "${salt_base}" == "${salt_repeat}" ]] \
-    || fail "cache_salt_not_idempotent_on_unchanged_surface"
+  local untouched
+  untouched="$(
+    jq -cn '{verdict:"accepted",validated_candidate:{diff:"diff --git a/x b/x\n+1",files_changed:["x"]},basis:["ok"]}' \
+      | jq "${gate_filter} | .verdict" -r
+  )"
+  [[ "${untouched}" == "accepted" ]] \
+    || fail "genuine_candidate_was_rejected"
 
-  # NEGATIVE POWER: tracked mutation MUST rotate the salt.
-  echo "mutated" >> "${surface_dir}/tracked.txt"
-  local salt_after_tracked_mutation
-  salt_after_tracked_mutation="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
-  [[ "${salt_base}" != "${salt_after_tracked_mutation}" ]] \
-    || fail "cache_salt_failed_to_rotate_on_tracked_mutation"
-
-  # Restoring the surface MUST return to the original partition.
-  git -C "${surface_dir}" checkout -q -- tracked.txt
-  local salt_after_restore
-  salt_after_restore="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
-  [[ "${salt_base}" == "${salt_after_restore}" ]] \
-    || fail "cache_salt_not_restored_after_surface_reset"
-
-  # NEGATIVE POWER: additive-only mutation (net-new untracked file)
-  # MUST rotate the salt.
-  echo "net new" > "${surface_dir}/untracked_new.txt"
-  local salt_after_untracked_addition
-  salt_after_untracked_addition="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
-  [[ "${salt_base}" != "${salt_after_untracked_addition}" ]] \
-    || fail "cache_salt_failed_to_rotate_on_untracked_addition"
-  rm -f "${surface_dir}/untracked_new.txt"
-
-  # NEGATIVE POWER: handover generation change MUST rotate the salt.
-  printf '%s' '{"artifact_snapshot":{"generated_at":"2026-01-02T00:00:00Z"}}' \
-    > "${handover_file}"
-  local salt_after_handover_promotion
-  salt_after_handover_promotion="$(derive_cache_salt "${surface_dir}" "${handover_file}")"
-  [[ "${salt_base}" != "${salt_after_handover_promotion}" ]] \
-    || fail "cache_salt_failed_to_rotate_on_handover_promotion"
-
-  rm -rf "${surface_dir}" "${handover_file}"
-
-  echo "[AEGIS][TEST] salt derivation contract passed"
+  echo "[AEGIS][TEST] empty-mutation-candidate gate contract passed"
 }
 
 # ---------------------------------------------------------
@@ -197,6 +168,7 @@ assert_prompt_prefix_stability() {
   # the system prompt.
   printf '%s' "${sys_a}" | grep -qF "${exec_id_a}" \
     && fail "execution_identity_leaked_into_system_prompt"
+
   prefix_a="${user_a%%=== EXPOSED CAPABILITY PAYLOADS ===*}"
   prefix_b="${user_b%%=== EXPOSED CAPABILITY PAYLOADS ===*}"
 
@@ -221,16 +193,6 @@ assert_prompt_prefix_stability() {
   printf '%s' "${prefix_a}" | grep -q '"manifest_hash"' \
     && fail "manifest_hash_leaked_into_user_stable_prefix"
 
-  # cache_salt partition key: present, sha256-hex, and stable across two
-  # runs with no surface mutation in between.
-  local salt_a salt_b
-  salt_a="$(jq -r '.cache_salt // empty' "${req_a}")"
-  salt_b="$(jq -r '.cache_salt // empty' "${req_b}")"
-  [[ "${salt_a}" =~ ^[0-9a-f]{64}$ ]] \
-    || fail "request_cache_salt_missing_or_malformed: '${salt_a}'"
-  [[ "${salt_a}" == "${salt_b}" ]] \
-    || fail "cache_salt_rotated_without_surface_mutation"
-
   echo "[AEGIS][TEST] prompt prefix stability contract passed"
 }
 
@@ -242,7 +204,7 @@ test_cleanup_extra() {
 # MAIN
 # ---------------------------------------------------------
 
-assert_salt_derivation_contract
+assert_empty_candidate_rejection_gate
 assert_prompt_prefix_stability
 
-echo "[PASS] model boundary cache idempotency"
+echo "[PASS] model boundary prompt stability"
