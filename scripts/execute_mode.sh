@@ -985,6 +985,14 @@ readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; ""
 readonly AEGIS_JQ_AUTHORIZED_TARGETS='def authorized_targets:
   [
     .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
+    # requested_paths carries every path the operator named in the
+    # investigation input, deterministically extracted by structural.builder.
+    # resolved_paths only ever contains files that exist on disk, so a
+    # net-new file the operator explicitly asked to CREATE would otherwise
+    # be un-authorizable. Including requested_paths closes that gap without
+    # model dependence — authorization stays derived from the promoted
+    # discovery artifact, just from the request-extraction channel too.
+    .artifact_snapshot.structural_context.observed_request_alignment.requested_paths[]?,
     (.artifact_snapshot.operational_context.required_evidence[]?
       | select(type == "string" and startswith("filesystem.read:"))
       | ltrimstr("filesystem.read:")),
