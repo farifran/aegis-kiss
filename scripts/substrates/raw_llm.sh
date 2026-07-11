@@ -759,8 +759,18 @@ execute_provider_request() {
 
 extract_provider_content() {
 
+  # Prefer message.content. Reasoning-class models on NVIDIA NIM (e.g.
+  # stepfun-ai/step-3.7-flash) can exhaust max_tokens in reasoning_content
+  # and return an empty content field on large prompts — fall back so the
+  # substrate can still extract an artifact when the provider split output.
   jq -r '
-    .choices[0].message.content // empty
+    .choices[0].message as $m
+    | (
+        ($m.content // "")
+        | if length > 0 then .
+          else ($m.reasoning_content // $m.reasoning // "")
+          end
+      )
   ' "${TMP_RESPONSE_FILE}"
 }
 
