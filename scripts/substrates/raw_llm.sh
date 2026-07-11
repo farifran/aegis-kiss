@@ -227,6 +227,13 @@ TMP_MANIFEST_FILE="$(
   mktemp
 )"
 
+# Volatile manifest projection (generated_at / execution_id /
+# manifest_hash) — split from the stable projection so per-request
+# identity never breaks the KV-cache prefix of the stable segments.
+TMP_MANIFEST_VOLATILE_FILE="$(
+  mktemp
+)"
+
 TMP_CAPABILITY_CONTEXT_FILE="$(
   mktemp
 )"
@@ -246,6 +253,7 @@ cleanup_raw_substrate() {
   rm -f \
     "${TMP_SYSTEM_PROMPT_FILE}" \
     "${TMP_MANIFEST_FILE}" \
+    "${TMP_MANIFEST_VOLATILE_FILE}" \
     "${TMP_CAPABILITY_CONTEXT_FILE}" \
     "${TMP_REQUEST_FILE}" \
     "${TMP_RESPONSE_FILE}" \
@@ -397,6 +405,10 @@ You must treat that investigation input as the current investigation demand with
 
 ${mode_specific_instructions}
 
+Skill contract:
+
+$(cat "${SKILL_FILE}")
+
 You must:
 - consume only runtime-selected evidence
 - avoid assumptions
@@ -421,13 +433,7 @@ The payload MUST:
 - have the opening brace '{' of the JSON object immediately on the line after ${AEGIS_ARTIFACT_BEGIN_MARKER}.
 - have the closing brace '}' of the JSON object immediately on the line before ${AEGIS_ARTIFACT_END_MARKER}.
 
-Execution identity:
-${AEGIS_EXECUTION_ID}
-
-Execution timestamp:
-${AEGIS_EXECUTION_TIMESTAMP}
-
-The investigation input is provided under the "=== INVESTIGATION INPUT ===" header of the user message.
+The investigation input is provided under the "=== INVESTIGATION INPUT ===" header of the user message. Execution identity is provided under the "=== EXECUTION IDENTITY ===" header of the user message.
 EOF
 }
 
@@ -437,14 +443,13 @@ EOF
 
 assemble_bounded_manifest() {
 
+  # Stable projection: deterministic per (mode, configuration). Emitted
+  # high in the prompt so it participates in the KV-cache prefix.
   printf '%s\n' "${CAPABILITY_MANIFEST}" \
     | jq -c \
     '{
       schema_version: .schema_version,
       runtime_model: .runtime_model,
-      generated_at: .generated_at,
-      execution_id: .execution_id,
-      manifest_hash: .manifest_hash,
       mode: .mode,
       execution_engine: .execution_engine,
       capability_envelope: .capability_envelope,
@@ -453,6 +458,17 @@ assemble_bounded_manifest() {
       capabilities: .capabilities
     }' \
     > "${TMP_MANIFEST_FILE}"
+
+  # Volatile projection: per-request identity wrappers. Emitted at the
+  # prompt tail so they never break the stable prefix.
+  printf '%s\n' "${CAPABILITY_MANIFEST}" \
+    | jq -c \
+    '{
+      generated_at: .generated_at,
+      execution_id: .execution_id,
+      manifest_hash: .manifest_hash
+    }' \
+    > "${TMP_MANIFEST_VOLATILE_FILE}"
 
   truncate_file_bytes \
     "${TMP_MANIFEST_FILE}" \
@@ -468,24 +484,20 @@ assemble_bounded_manifest() {
 
 assemble_bounded_capability_context() {
 
+  # Monotonic token-stacking: segments ordered by decreasing half-life so
+  # the KV-cache prefix survives across executions. Stable segments
+  # (pocket map, stable manifest) at the head; volatile segments
+  # (investigation input, volatile manifest, execution identity) at the
+  # tail, appended after the payload loop. The skill contract lives in
+  # the system prompt (assemble_system_prompt).
   {
-    echo "=== INVESTIGATION INPUT ==="
-    echo
-    printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
-
-    echo
-    echo "=== SKILL CONTRACT ==="
-    echo
-    cat "${SKILL_FILE}"
-
     if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
-      echo
       echo "=== REPOSITORY POCKET MAP (flat path census — baseline context) ==="
       echo
       cat "${AEGIS_POCKET_MAP_FILE}"
+      echo
     fi
 
-    echo
     echo "=== SELECTED CAPABILITY MANIFEST ==="
     echo
     cat "${TMP_MANIFEST_FILE}"
@@ -554,6 +566,27 @@ assemble_bounded_capability_context() {
     fi
   done
 
+  # Volatile tail: everything below this line changes per run/request and
+  # must never precede the stable segments above.
+  {
+    echo
+    echo "=== INVESTIGATION INPUT ==="
+    echo
+    printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
+
+    echo
+    echo "=== MANIFEST EXECUTION METADATA ==="
+    echo
+    cat "${TMP_MANIFEST_VOLATILE_FILE}"
+
+    echo
+    echo "=== EXECUTION IDENTITY ==="
+    echo
+    printf 'Execution identity:\n%s\n' "${AEGIS_EXECUTION_ID}"
+    echo
+    printf 'Execution timestamp:\n%s\n' "${AEGIS_EXECUTION_TIMESTAMP}"
+  } >> "${TMP_CAPABILITY_CONTEXT_FILE}"
+
   aegis_log "Capability payload evidence size bytes: $(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}")"
 }
 
@@ -567,8 +600,12 @@ assemble_provider_request() {
   # Default: 4096 — enough for any structured JSON artifact without truncation.
   : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
 
+  # cache_salt (vLLM >= 0.8.3 / LMCache): opaque KV-cache partition key.
+  # Feature-gated — when AEGIS_CACHE_SALT is unset/empty the request stays
+  # byte-identical to the salt-less form so unaware backends never 400.
   jq -n \
     --arg model "${MODEL}" \
+    --arg cache_salt "${AEGIS_CACHE_SALT:-}" \
     --rawfile system_prompt "${TMP_SYSTEM_PROMPT_FILE}" \
     --rawfile capability_context "${TMP_CAPABILITY_CONTEXT_FILE}" \
     --argjson temperature "${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
@@ -577,7 +614,10 @@ assemble_provider_request() {
     {
       model: $model,
       temperature: $temperature,
-      max_tokens: $max_tokens,
+      max_tokens: $max_tokens
+    }
+    + (if $cache_salt != "" then {cache_salt: $cache_salt} else {} end)
+    + {
       messages: [
         {
           role: "system",

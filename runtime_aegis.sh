@@ -290,16 +290,35 @@ resolve_runtime_investigation_input() {
 
 cleanup_runtime() {
 
+  # Capture the terminating status BEFORE any command in this handler can
+  # overwrite $?. A non-zero code means abnormal termination — a fatal
+  # provider error, a validation-rejection abort, or any unhandled failure
+  # under `set -Eeuo pipefail`.
+  local exit_code=$?
+
   set +e
 
-  aegis_log "Starting runtime-owned cleanup..."
+  aegis_log "Starting runtime-owned cleanup (exit_code=${exit_code})..."
 
-  if [[ "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE}" == "true" ]] \
-    && [[ "${AEGIS_EXECUTION_SURFACE_ACTIVE}" == "true" ]]; then
-    remove_runtime_owned_execution_surface_if_present
+  if [[ "${exit_code}" -ne 0 ]]; then
+    # ABSOLUTE CLEANUP INVARIANT: abnormal termination must never leave a
+    # disposable git worktree or intermediate execution surface behind,
+    # regardless of the retention policy that governs clean exits. Force a
+    # comprehensive expunge of every disposable surface under the root —
+    # not just the current mode's — since a partial feedback pipeline may
+    # have materialized siblings before failing.
+    aegis_warn "Abnormal termination — forcing disposable surface expunge (retention policy overridden)"
+    expurge_disposable_execution_surfaces
+    remove_runtime_owned_capability_surfaces false
+  else
+    # Clean exit: honor the operator's retention policy, but still expunge
+    # ALL disposable surfaces (not only the current mode's) so a completed
+    # multi-mode feedback pipeline never orphans intermediate worktrees.
+    if [[ "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE}" == "true" ]]; then
+      expurge_disposable_execution_surfaces
+    fi
+    remove_runtime_owned_capability_surfaces
   fi
-
-  remove_runtime_owned_capability_surfaces
 
   aegis_log "Runtime cleanup completed"
 
@@ -574,12 +593,19 @@ validate_mode_preconditions() {
       # handover: the preserved findings context replaces the forensics
       # repair-candidate contract for those iterations only.
       if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -gt 0 ]]; then
+        # A feedback iteration must consume the deterministic, structured
+        # repair_feedback contract emitted by the rejected validation —
+        # never free-form prose. Assert its schema so repair re-entry is
+        # driven by explicit violations + authorized editing scopes.
         jq -e '
           .artifact_snapshot != null
           and .artifact_snapshot.mode == "validation"
           and .artifact_snapshot.operational_context.verdict == "rejected"
+          and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+          and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
+          and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")
         ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-          || aegis_fatal "precondition_failed_rejected_validation_artifact_missing_or_invalid"
+          || aegis_fatal "precondition_failed_structured_repair_feedback_missing_or_invalid"
         return 0
       fi
 

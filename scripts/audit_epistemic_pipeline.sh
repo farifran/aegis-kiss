@@ -114,7 +114,12 @@ audit_handover_state() {
       and (if has("summary")           then .summary           | nonempty_string else true end)
       and (if has("required_evidence") then .required_evidence | type == "array" else true end)
       and (if has("findings")          then .findings          | type == "array" else true end)
-      and (if has("repair_candidates") then .repair_candidates | type == "array" else true end);
+      and (if has("repair_candidates") then .repair_candidates | type == "array" else true end)
+      and (if has("repair_feedback")   then .repair_feedback
+             | type == "object"
+               and (.violations       | type == "array")
+               and (.authorized_scopes | type == "array")
+             else true end);
 
     def valid_artifact_snapshot:
       . == null

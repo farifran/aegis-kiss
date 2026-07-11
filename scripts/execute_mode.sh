@@ -289,6 +289,17 @@ prepare_execution_state() {
   if [[ ! -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]]; then
     mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || aegis_fatal "failed_to_create_capability_payload_dir"
   fi
+
+  # Epistemic cache-partition salt: opaque digest of surface + handover
+  # generation, forwarded to substrates for KV-cache partitioning
+  # (vLLM/LMCache `cache_salt`). Carries no routes or secrets — the
+  # harness stays cache-agnostic. Observation domain owns derivation.
+  AEGIS_CACHE_SALT="$(
+    derive_cache_salt \
+      "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
+      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
+  )"
+  export AEGIS_CACHE_SALT
 }
 
 # =========================================================
@@ -420,6 +431,7 @@ invoke_raw_substrate() {
     AEGIS_CAPABILITY_MANIFEST_MAX_BYTES="${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES}" \
     AEGIS_ARTIFACT_BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
     AEGIS_ARTIFACT_END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
+    AEGIS_CACHE_SALT="${AEGIS_CACHE_SALT:-}" \
     bash scripts/substrates/raw_llm.sh \
       "${model}" \
       "${skill_file}" \
@@ -1443,6 +1455,35 @@ normalize_substrate_output() {
             .validated_candidate = ($prev_candidate // .validated_candidate)
             | .findings = ($prev_findings // .findings // [])
             | .basis = (.basis // [] | if type == "string" then [.] else . end)
+            # On a rejected verdict, project the typed adversarial findings
+            # into a deterministic repair_feedback contract so the next
+            # repair iteration consumes explicit structured parameters
+            # instead of free-form natural-language critique. Only blocking
+            # findings (evidence-supported, severity >= medium, excluding
+            # missing_evidence) become violations. authorized_scopes are the
+            # changed files of the candidate — the sole editing scope that
+            # repair may touch. Key omitted entirely for non-rejected verdicts.
+            | (if (.verdict // "") == "rejected" then
+                 ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
+                 | .repair_feedback = {
+                     violations: [
+                       (.findings // [])[]
+                       | select(
+                           (.supported_by_evidence == true)
+                           and ((.severity == "high") or (.severity == "medium"))
+                           and (.type != "missing_evidence")
+                         )
+                       | {
+                           origin: (.type // "unspecified"),
+                           severity: (.severity // "unspecified"),
+                           target_files: $scopes,
+                           structural_reason: (.description // ""),
+                           evidence_refs: (.evidence_refs // [])
+                         }
+                     ],
+                     authorized_scopes: $scopes
+                   }
+               else . end)
             | .handover_attention = {
                 next_attention_targets: (.validated_candidate.files_changed // []),
                 attention_scope: "validation_result",
