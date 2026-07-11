@@ -341,6 +341,13 @@ trap 'aegis_warn "Interrupted"; exit 130' INT TERM
 
 inject_capability_evidence() {
 
+  # Optional basename filter: when mutation targets are already loaded
+  # into the chat via --file, most evidence payloads are redundant noise
+  # that drowns small (floor) models — the caller then restricts the
+  # evidence to the payloads matching this substring (e.g. the epistemic
+  # handover, which carries repair_feedback on feedback iterations).
+  local only_matching="${1:-}"
+
   [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]] || return 0
 
   local payload_paths
@@ -356,6 +363,10 @@ inject_capability_evidence() {
   local payload_path payload_bytes
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
+    if [[ -n "${only_matching}" ]] \
+      && [[ "$(basename "${payload_path}")" != *"${only_matching}"* ]]; then
+      continue
+    fi
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
     payload_bytes="$(wc -c < "${payload_path}")"
     if [[ "${payload_bytes}" -le "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}" ]]; then
@@ -393,8 +404,19 @@ assemble_mutation_prompt() {
   shift 2
   local prompt_targets=("$@")
 
+  # Floor-model noise control: with explicit targets already loaded into
+  # the chat, the target file content is present verbatim — evidence
+  # payloads (symbol searches over the whole repo, tree dumps) are pure
+  # distraction that weak models latch onto instead of the demand. Keep
+  # only the epistemic handover (carries repair_feedback context on
+  # feedback iterations). The full evidence set is emitted only in the
+  # no-targets fallback, where the model still needs scope hints.
   local capability_evidence
-  capability_evidence="$(inject_capability_evidence)"
+  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
+    capability_evidence="$(inject_capability_evidence "epistemic_handover")"
+  else
+    capability_evidence="$(inject_capability_evidence)"
+  fi
 
   # File jail: the model must operate exclusively on the pre-loaded
   # targets. Evidence payloads mention many repository paths; without
@@ -473,8 +495,28 @@ Execution ID: ${AEGIS_EXECUTION_ID}
 
 (note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
 
-Skill contract:
-$(cat "${AIDER_SKILL_FILE}")
+$(
+  # Floor-model context control: the full skill contract is hundreds of
+  # lines of governance prose — a weak (floor) model drowns in it and
+  # loses the actual demand. With explicit targets loaded, distill the
+  # contract to its binding core; the runtime enforces everything else
+  # mechanically (jail, diff capture, validation gates). The full
+  # contract is emitted only in the no-targets fallback.
+  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
+    cat <<'DISTILLED'
+Skill contract (bounded mutation core):
+* Implement EXACTLY what the investigation input demands — nothing more.
+* Mutate ONLY the target files already loaded in this chat.
+* No new files, no renames, no scope expansion, no unsolicited functions or logic.
+* Preserve all existing code and behavior not named by the demand.
+* Output only the file edits — no JSON, no explanations, no questions.
+* NEVER ask for clarification. If the demand allows more than one reading, implement the most literal, minimal one and stop.
+DISTILLED
+  else
+    echo "Skill contract:"
+    cat "${AIDER_SKILL_FILE}"
+  fi
+)
 
 $(
   # Context slimming: the pocket map is a flat census of every repo path.
@@ -499,7 +541,19 @@ ${file_jail_instructions}
 
 ${anti_truncation_instructions:+${anti_truncation_instructions}
 
-}${mode_instructions}
+}$(
+  # Recency anchor for floor models: the demand sits mid-prompt above;
+  # restate it as the final actionable line so the last thing the model
+  # reads is the task itself, not governance prose. Repair only —
+  # restating the input in optimize would invite re-implementation.
+  # (Command substitution strips trailing newlines; the separator blank
+  # line lives in the heredoc itself.)
+  if [[ "${AEGIS_MODE}" == "repair" ]]; then
+    printf 'YOUR TASK NOW (restated): %s' "${AEGIS_INVESTIGATION_INPUT}"
+  fi
+)
+
+${mode_instructions}
 EOF
 
   # Whole-prompt path obfuscation: every source above (skill contract,

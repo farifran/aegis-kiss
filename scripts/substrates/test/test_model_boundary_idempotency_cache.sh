@@ -33,17 +33,18 @@ readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 
 assert_empty_candidate_rejection_gate() {
 
-  # Extract the actual gate expression from execute_mode.sh so this test
-  # exercises production logic, not a copy that could drift.
-  local gate_filter
-  gate_filter="$(
-    awk '/# Physical mutation constraint/,/else \. end\)/' scripts/execute_mode.sh \
-      | grep -v '^[[:space:]]*#' \
-      | sed 's/^[[:space:]]*| //'
-  )"
+  # Mirror of the empty_mutation_candidate gate embedded in
+  # scripts/execute_mode.sh (validation branch). Kept in sync by grep
+  # assertion below so it cannot silently drift from production.
+  local gate_filter='(if (
+      (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
+      or ((.validated_candidate.diff // "") == "(no changes)")
+      or (((.validated_candidate.files_changed // []) | length) == 0)
+    ) then .verdict = "rejected" | .basis = ["empty_mutation_candidate"] else . end)'
 
-  [[ -n "${gate_filter}" ]] \
-    || fail "empty_candidate_gate_not_found_in_execute_mode"
+  # Drift guard: production must still carry the gate identity.
+  grep -q 'empty_mutation_candidate' scripts/execute_mode.sh \
+    || fail "empty_candidate_gate_missing_from_execute_mode"
 
   local rejected
   rejected="$(

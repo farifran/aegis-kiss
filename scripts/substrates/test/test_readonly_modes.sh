@@ -33,7 +33,7 @@ assert_manifest_contract() {
     ])
     and (.modes.forensics.evidence_capabilities == ["filesystem.search_symbol", "git.status", "filesystem.read"])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
-    and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol", "filesystem.read"])
+    and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol", "filesystem.read", "typescript.check", "eslint.check", "test.run"])
   ' >/dev/null || fail "invalid_manifest_contract"
 }
 
@@ -305,7 +305,7 @@ main() {
   assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "filesystem_extract_responsibilities.json", "structural_builder.json", "runtime_attention_seed.json"]'
   assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
-  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json"]'
+  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json", "typescript_check.json", "eslint_check.json", "test_run.json"]'
 
   assert_materialized_runtime_state \
     "discovery" \

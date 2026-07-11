@@ -406,11 +406,12 @@ declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "filesystem.read:epistemic_handover"  # Forensics must only interpret evidence provided by Discovery
 )
 
+# Validation is a deterministic tribunal, free of noise: it judges only
+# the typed adversarial findings and the deterministic handover state.
+# Build/test/lint evidence belongs to the adversarial falsification stage,
+# NOT here — admitting it would make the verdict probabilistic.
 declare -ar AEGIS_VALIDATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
-  "typescript.check"
-  "eslint.check"
-  "test.run"
 )
 
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
