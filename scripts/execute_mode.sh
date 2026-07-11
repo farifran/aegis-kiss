@@ -294,11 +294,18 @@ prepare_execution_state() {
   # generation, forwarded to substrates for KV-cache partitioning
   # (vLLM/LMCache `cache_salt`). Carries no routes or secrets — the
   # harness stays cache-agnostic. Observation domain owns derivation.
-  AEGIS_CACHE_SALT="$(
-    derive_cache_salt \
-      "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
-      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
-  )"
+  # Only meaningful against a self-hosted vLLM+LMCache backend that
+  # honors cache_salt; hosted endpoints ignore it, so it is opt-in via
+  # AEGIS_ENABLE_CACHE_SALT (default false — see .harness/config.sh).
+  # When disabled the variable stays empty and raw_llm omits the field.
+  AEGIS_CACHE_SALT=""
+  if [[ "${AEGIS_ENABLE_CACHE_SALT:-false}" == "true" ]]; then
+    AEGIS_CACHE_SALT="$(
+      derive_cache_salt \
+        "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
+    )"
+  fi
   export AEGIS_CACHE_SALT
 }
 

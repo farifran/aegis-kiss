@@ -181,6 +181,29 @@ export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
 
 The current runtime has been validated with NVIDIAâs OpenAI-compatible endpoint and a `meta/llama-3.3-70b-instruct` family model.
 
+### Prompt topology and KV-cache reuse
+
+The runtime assembles prompts with a monotonic, decreasing-half-life
+layout: the constitutional preamble, skill contract and stable manifest
+sit at the head, while per-request volatile segments (investigation
+input, execution identity, volatile manifest metadata) are pushed to the
+tail. This maximises prefix stability so any prefix-caching layer on the
+serving side reuses the stable head across modes and iterations. This
+layout is always on and backend-agnostic — it also helps the automatic
+prefix caching of hosted endpoints such as NVIDIA NIM.
+
+An optional `cache_salt` field can be emitted on raw-substrate requests
+to cryptographically partition KV-cache reuse per surface/handover
+generation (`AEGIS_ENABLE_CACHE_SALT=true`; see `derive_cache_salt` in
+`scripts/lib/common.sh`). This is a **vLLM-native** parameter (vLLM
+>= 0.8.3 / LMCache) and is **only meaningful against a self-hosted
+vLLM+LMCache backend the operator controls** (configured with prefix
+caching and `enable_blending: false`). Hosted endpoints (NVIDIA NIM,
+etc.) ignore it, so it is **disabled by default** to avoid dead payload.
+LMCache itself is **not** part of this repository and requires a
+Linux + NVIDIA/CUDA host; it cannot run against a hosted cloud endpoint
+or on Apple Silicon.
+
 ## Quick Start
 
 Run the full runtime:

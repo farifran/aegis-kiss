@@ -176,6 +176,22 @@ export AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS
 
 # =========================================================
+# KV-CACHE PARTITIONING (cache_salt)
+# =========================================================
+
+# Emit a `cache_salt` field on raw-substrate requests to partition
+# downstream KV-cache prefix reuse (see derive_cache_salt in
+# scripts/lib/common.sh). This is a vLLM-native parameter (vLLM >= 0.8.3
+# / LMCache); it is ONLY meaningful against a self-hosted vLLM+LMCache
+# backend the operator controls. Hosted OpenAI-compatible endpoints
+# (e.g. NVIDIA NIM) ignore it, so it is dead payload there — hence it is
+# OFF by default. Enable only when OPENAI_API_BASE points at a vLLM
+# backend configured with prefix caching (and enable_blending:false).
+: "${AEGIS_ENABLE_CACHE_SALT:=false}"
+
+export AEGIS_ENABLE_CACHE_SALT
+
+# =========================================================
 # EVIDENCE BUDGETS
 # =========================================================
 

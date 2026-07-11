@@ -28,6 +28,11 @@ source "scripts/lib/common.sh"
 
 export AEGIS_REPAIR_FEEDBACK_LOOP="false"
 
+# This suite exercises the cache_salt partitioning feature, so it must
+# run with the feature explicitly enabled (default is off — the salt is
+# only meaningful against a self-hosted vLLM/LMCache backend).
+export AEGIS_ENABLE_CACHE_SALT="true"
+
 readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 
 # ---------------------------------------------------------

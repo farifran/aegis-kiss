@@ -2,7 +2,7 @@
 # AEGIS HARNESS — HUMAN INTERACTIVE PROFILE
 # =========================================================
 
-model: openai/gemini-flash-latest
+model: openai/z-ai/glm-5.2
 
 # ---------------------------------------------------------
 # HUMAN INTERACTION
