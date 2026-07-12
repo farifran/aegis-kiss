@@ -189,10 +189,17 @@ export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION
 : "${AEGIS_PROVIDER_CONNECT_TIMEOUT:=15}"
 : "${AEGIS_PROVIDER_RESPONSE_TIMEOUT:=120}"
 
+# Local repair feedback (no rediscovery): max re-entries into the
+# repair→optimize→adversarial→validation stack after a rejected verdict.
+: "${AEGIS_MAX_REPAIR_ATTEMPTS:=2}"
+: "${AEGIS_REPAIR_FEEDBACK_LOOP:=true}"
+
 export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
 export AEGIS_PROVIDER_CONNECT_TIMEOUT
 export AEGIS_PROVIDER_RESPONSE_TIMEOUT
+export AEGIS_MAX_REPAIR_ATTEMPTS
+export AEGIS_REPAIR_FEEDBACK_LOOP
 
 # =========================================================
 # CLEANUP POLICY
@@ -318,7 +325,15 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
   "${AEGIS_MUTATION_EXTRA_CAPABILITIES[@]}"
 )
 
-# Structural extraction capabilities — readonly, discovery-only
+# ---------------------------------------------------------
+# DEEP TOPOLOGY SATELLITE (opt-in only)
+# ---------------------------------------------------------
+# Graph extractors + structural.builder are NOT on the hot path.
+# Default discovery depth is "fine" (Layer 0 only). Deep composition
+# is a satellite feature: keep handlers registered for authority and
+# for AEGIS_DISCOVERY_DEPTH=deep / required_evidence augmentation, but
+# do not treat this machinery as the product core.
+# ---------------------------------------------------------
 declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_import_graph"
   "filesystem.extract_reference_graph"
@@ -332,7 +347,8 @@ declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "runtime.layer0_facts"
 )
 
-# Discovery envelope = base + structural extraction
+# Discovery envelope = base + structural (authority surface for deep
+# opt-in). Evidence profile still decides what is materialized.
 declare -ar AEGIS_DISCOVERY_CAPABILITIES=(
   "${AEGIS_BASE_CAPABILITIES[@]}"
   "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"
@@ -439,12 +455,13 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 # =========================================================
 #
 # Discovery evidence depth (KISS default = fine):
-#   fine — Layer 0 baseline only (cheap, no graph extractors)
-#   deep — full structural composition (builder + extractors)
+#   fine — Layer 0 baseline only (cheap, no graph extractors)  ← product path
+#   deep — full structural composition (builder + extractors) ← satellite
 #
 # Deep extractors remain in the discovery capability envelope so
 # required_evidence augmentation and AEGIS_DISCOVERY_DEPTH=deep can
-# still request them without re-registering handlers.
+# still request them without re-registering handlers. Prefer fine
+# unless an investigation explicitly needs topology composition.
 
 : "${AEGIS_DISCOVERY_DEPTH:=fine}"
 export AEGIS_DISCOVERY_DEPTH

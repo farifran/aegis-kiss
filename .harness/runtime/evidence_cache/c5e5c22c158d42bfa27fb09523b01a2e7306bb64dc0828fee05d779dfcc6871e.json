@@ -1,0 +1,47 @@
+{
+  "success": true,
+  "capability": "runtime.attention_seed",
+  "classification": "readonly",
+  "execution_id": "1783836016-88098",
+  "generated_at": "2026-07-12T06:00:17Z",
+  "payload": {
+    "target": "src",
+    "selection_rule": "layer0_hot_files_churn",
+    "attention_state": "layer0",
+    "attention_source": "runtime.layer0_facts.hot_files",
+    "attention_confidence": "medium",
+    "ambiguous_candidates": [],
+    "handover_attention": {
+      "next_attention_targets": [
+        "src/conversion_utils.ts",
+        "src/index.ts"
+      ],
+      "attention_scope": "layer0:hot_files",
+      "attention_reason": "highest-churn files under evidence target (no resonant match)"
+    },
+    "investigation_plan": {
+      "primary_targets": [
+        "src/conversion_utils.ts",
+        "src/index.ts"
+      ],
+      "secondary_targets": [],
+      "excluded_targets": []
+    },
+    "investigation_scope": {
+      "scope_type": "layer0",
+      "scope_targets": [
+        "src/conversion_utils.ts",
+        "src/index.ts"
+      ],
+      "scope_confidence": "medium"
+    },
+    "blocking_conditions": [],
+    "attention_targets": [
+      "src/conversion_utils.ts",
+      "src/index.ts"
+    ],
+    "relevant_surfaces": [],
+    "critical_relationships": []
+  },
+  "error": null
+}

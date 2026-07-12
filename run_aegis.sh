@@ -14,6 +14,7 @@ set -Eeuo pipefail
 
 readonly HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
 readonly LAST_FATAL_FILE=".harness/runtime/last_fatal"
+readonly METRICS_FILE=".harness/runtime/pipeline_metrics.jsonl"
 
 usage() {
   cat <<'EOF'
@@ -39,10 +40,14 @@ Options:
                        refusal, atomic apply) still gate the promotion.
   --help               Show this help
 
-Any mode failure aborts the remaining pipeline. The final report always
-shows per-mode status/timings, total duration, verdict, structured
-repair feedback (when present), and pipeline status
-(SUCCESS | HALTED | FAILED).
+Any mode failure aborts the remaining pipeline. Intelligent early-exit
+halts mutation after forensics when status is inconclusive or no
+repair_candidates exist (no wasted repair/optimize LLM). Rejected
+validation re-enters a local repair feedback loop (no rediscovery).
+
+The final report always shows per-mode status/timings, stage budget
+share, hot timing spans, verdict, structured repair feedback (when
+present), and pipeline status (SUCCESS | HALTED | FAILED).
 EOF
 }
 
@@ -184,6 +189,135 @@ clear_pipeline_evidence_cache() {
   mkdir -p "${cache_dir}" 2>/dev/null || true
 }
 
+clear_pipeline_metrics() {
+  mkdir -p "$(dirname "${METRICS_FILE}")" 2>/dev/null || true
+  : > "${METRICS_FILE}"
+  export AEGIS_METRICS_FILE="${METRICS_FILE}"
+}
+
+# Post-mode intelligent early-exit gates (Tier 2).
+# Exit 0 = HALT remaining pipeline (PIPELINE_STATUS already set).
+# Exit 1 = continue.
+pipeline_should_halt_after_mode() {
+  local mode="$1"
+
+  [[ -f "${HANDOVER_FILE}" ]] || return 1
+
+  case "${mode}" in
+    forensics)
+      local forensics_status candidate_count
+      forensics_status="$(
+        jq -r '
+          .artifact_snapshot.operational_context.status
+          // .artifact_snapshot.status
+          // empty
+        ' "${HANDOVER_FILE}" 2>/dev/null || true
+      )"
+      candidate_count="$(
+        jq -r '
+          (.artifact_snapshot.operational_context.repair_candidates // [])
+          | length
+        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
+      )"
+
+      if [[ "${forensics_status}" == "inconclusive" ]]; then
+        echo
+        echo "[RUN] Forensics inconclusive — no mutation surface justified. Halting before repair."
+        PIPELINE_STATUS="HALTED"
+        PIPELINE_REASON="forensics inconclusive"
+        return 0
+      fi
+
+      if [[ "${candidate_count}" -eq 0 ]]; then
+        echo
+        echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
+        PIPELINE_STATUS="HALTED"
+        PIPELINE_REASON="no repair candidates in forensics handover"
+        return 0
+      fi
+      ;;
+
+    adversarial)
+      local adv_status findings_n
+      adv_status="$(
+        jq -r '
+          .artifact_snapshot.operational_context.status
+          // .artifact_snapshot.status
+          // empty
+        ' "${HANDOVER_FILE}" 2>/dev/null || true
+      )"
+      findings_n="$(
+        jq -r '
+          [.artifact_snapshot.operational_context.findings // []
+            | .[]?
+            | select(.supported_by_evidence == true
+                     and ((.severity == "high") or (.severity == "medium")))]
+          | length
+        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
+      )"
+      if [[ "${adv_status}" == "verified" ]] && [[ "${findings_n}" -eq 0 ]]; then
+        echo
+        echo "[RUN] Adversarial verified (no blocking findings) — validation will be tribunal-only (cheap)."
+        # Still continue: validation is the promotion gate.
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
+record_mode_handover_metric() {
+  local mode="$1"
+  local duration="$2"
+  local status="$3"
+
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  [[ -f "${HANDOVER_FILE}" ]] || {
+    jq -cn \
+      --arg mode "${mode}" \
+      --argjson seconds "${duration:-0}" \
+      --arg status "${status}" \
+      '{kind:"mode",mode:$mode,seconds:$seconds,status:$status}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+    return 0
+  }
+
+  jq -c \
+    --arg mode "${mode}" \
+    --argjson seconds "${duration:-0}" \
+    --arg status "${status}" '
+      {
+        kind: "mode",
+        mode: $mode,
+        seconds: $seconds,
+        status: $status,
+        handover_mode: (.artifact_snapshot.mode // null),
+        verdict: (.artifact_snapshot.operational_context.verdict // null),
+        forensics_status: (
+          if $mode == "forensics" then
+            (.artifact_snapshot.operational_context.status // null)
+          else null end
+        ),
+        repair_candidates: (
+          (.artifact_snapshot.operational_context.repair_candidates // [])
+          | length
+        ),
+        findings: (
+          (.artifact_snapshot.operational_context.findings // [])
+          | length
+        ),
+        files_changed: (
+          (
+            .artifact_snapshot.operational_context.candidate_result.files_changed
+            // .artifact_snapshot.operational_context.files_changed
+            // .artifact_snapshot.operational_context.validated_candidate.files_changed
+            // []
+          ) | length
+        )
+      }
+    ' "${HANDOVER_FILE}" >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 run_mode() {
 
   local mode="$1"
@@ -232,10 +366,12 @@ run_mode() {
     MODE_STATUS["${mode}"]="failed"
     PIPELINE_STATUS="FAILED"
     PIPELINE_REASON="mode '${mode}' exited ${rc}"
+    record_mode_handover_metric "${mode}" "${duration}" "failed"
     return "${rc}"
   fi
 
   MODE_STATUS["${mode}"]="ok"
+  record_mode_handover_metric "${mode}" "${duration}" "ok"
   return 0
 }
 
@@ -325,6 +461,40 @@ show_final_report() {
   echo
   echo "Total: ${total}s"
   echo
+
+  # Stage budget telemetry (Tier 2): wall time share + handover signals.
+  if [[ -f "${METRICS_FILE}" ]] && [[ -s "${METRICS_FILE}" ]]; then
+    echo "Stage budget:"
+    jq -r -s --argjson total "${total}" '
+      map(select(.kind == "mode"))
+      | .[]
+      | (.seconds // 0) as $s
+      | (if $total > 0 then (($s * 100 / $total) | floor) else 0 end) as $pct
+      | "  \(.mode)\t\($s)s\t\($pct)%"
+        + (if .verdict != null then "  verdict=\(.verdict)" else "" end)
+        + (if .forensics_status != null then "  status=\(.forensics_status)" else "" end)
+        + (if (.repair_candidates // 0) > 0 then "  candidates=\(.repair_candidates)" else "" end)
+        + (if (.findings // 0) > 0 then "  findings=\(.findings)" else "" end)
+        + (if (.files_changed // 0) > 0 then "  files=\(.files_changed)" else "" end)
+    ' "${METRICS_FILE}" 2>/dev/null || true
+
+    local top_timing
+    top_timing="$(
+      jq -r -s '
+        map(select(.kind == "timing"))
+        | sort_by(-.seconds)
+        | .[0:5]
+        | .[]
+        | "  \(.label): \(.seconds)s"
+      ' "${METRICS_FILE}" 2>/dev/null || true
+    )"
+    if [[ -n "${top_timing}" ]]; then
+      echo
+      echo "Hot spans (top timing labels):"
+      printf '%s\n' "${top_timing}"
+    fi
+    echo
+  fi
 
   fields="$(handover_report_fields)"
 
@@ -474,6 +644,7 @@ main() {
 
   clear_operator_breadcrumbs
   clear_pipeline_evidence_cache
+  clear_pipeline_metrics
 
   local mode
   local final_mode="${EXECUTION_MODES[${#EXECUTION_MODES[@]}-1]}"
@@ -482,20 +653,11 @@ main() {
   fi
 
   for mode in "${EXECUTION_MODES[@]}"; do
+    # Pre-mode gate: entering repair re-checks the forensics handover so
+    # we never spend mutation budget on inconclusive / empty candidates.
     if [[ "${mode}" == "repair" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
-      local candidate_count
-      candidate_count="$(
-        jq -r '
-          (.artifact_snapshot.operational_context.repair_candidates // [])
-          | length
-        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
-      )"
-      if [[ "${candidate_count}" -eq 0 ]]; then
-        echo
-        echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
+      if pipeline_should_halt_after_mode "forensics"; then
         MODE_STATUS["${mode}"]="halted"
-        PIPELINE_STATUS="HALTED"
-        PIPELINE_REASON="no repair candidates in forensics handover"
         mark_remaining_skipped
         break
       fi
@@ -511,6 +673,19 @@ main() {
         mark_remaining_skipped
         break
       fi
+    fi
+
+    # Post-mode early-exit (forensics inconclusive / empty candidates).
+    if pipeline_should_halt_after_mode "${mode}"; then
+      mark_remaining_skipped
+      local m
+      for m in "${EXECUTION_MODES[@]}"; do
+        if [[ "${MODE_STATUS[$m]:-}" == "skipped" ]]; then
+          MODE_STATUS["${m}"]="halted"
+          break
+        fi
+      done
+      break
     fi
 
     if [[ -n "${UNTIL:-}" ]] && [[ "${mode}" == "${UNTIL}" ]]; then

@@ -27,7 +27,8 @@ git add src
 git -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" \
   commit -qm "fixture"
 
-# Load only the pocket-map / attention helpers from the executor.
+# Load only the pocket-map / attention helpers from the evidence lib
+# (sourced by execute_mode; extracted so this unit test stays local).
 aegis_log() { :; }
 aegis_warn() { :; }
 
@@ -36,9 +37,7 @@ source <(
   awk '
     /^: "\$\{AEGIS_POCKET_MAP_MAX_LINES/ {keep=1}
     keep {print}
-    /^# RUNTIME-OWNED MANIFEST/ {exit}
-  ' "${AEGIS_TEST_ROOT}/scripts/execute_mode.sh" \
-    | sed '$d'
+  ' "${AEGIS_TEST_ROOT}/scripts/lib/evidence.sh"
 )
 
 export AEGIS_CAPABILITY_ENV_DIR="${cap_env}"

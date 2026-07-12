@@ -14,10 +14,10 @@
 #    contract that unlocks serving-side automatic prefix caching.
 #
 # 2. Empty-mutation-candidate rejection gate: the REAL jq gate embedded
-#    in scripts/execute_mode.sh (extracted from source, not duplicated)
-#    must force verdict "rejected" with basis "empty_mutation_candidate"
-#    for blank/placeholder diffs or empty files_changed, and must leave
-#    a genuine candidate untouched.
+#    in scripts/lib/artifact_protocol.sh (extracted from source, not
+#    duplicated) must force verdict "rejected" with basis
+#    "empty_mutation_candidate" for blank/placeholder diffs or empty
+#    files_changed, and must leave a genuine candidate untouched.
 #
 # =========================================================
 
@@ -34,17 +34,18 @@ readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 assert_empty_candidate_rejection_gate() {
 
   # Mirror of the empty_mutation_candidate gate embedded in
-  # scripts/execute_mode.sh (validation branch). Kept in sync by grep
-  # assertion below so it cannot silently drift from production.
+  # scripts/lib/artifact_protocol.sh (validation branch). Kept in sync
+  # by grep assertion below so it cannot silently drift from production.
   local gate_filter='(if (
       (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
       or ((.validated_candidate.diff // "") == "(no changes)")
       or (((.validated_candidate.files_changed // []) | length) == 0)
     ) then .verdict = "rejected" | .basis = ["empty_mutation_candidate"] else . end)'
 
-  # Drift guard: production must still carry the gate identity.
-  grep -q 'empty_mutation_candidate' scripts/execute_mode.sh \
-    || fail "empty_candidate_gate_missing_from_execute_mode"
+  # Drift guard: production must still carry the gate identity
+  # (lives in the artifact protocol lib sourced by execute_mode).
+  grep -q 'empty_mutation_candidate' scripts/lib/artifact_protocol.sh \
+    || fail "empty_candidate_gate_missing_from_artifact_protocol"
 
   local rejected
   rejected="$(

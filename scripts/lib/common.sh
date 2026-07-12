@@ -37,12 +37,23 @@ aegis_fatal() {
 # Timestamps via portable date subshells: the printf '%(%s)T' builtin
 # token requires Bash >= 4.2 and evaluates empty on macOS stock Bash 3.2,
 # which would break the $((end-start)) arithmetic below.
+# When AEGIS_METRICS_FILE is set, append one JSON line for pipeline reports.
 measure() {
   local label="$1"
-  local start end
+  local start end elapsed
   start=$(date +%s)
   shift
   "$@"
   end=$(date +%s)
-  echo "[AEGIS][TIMING] ${label}: $((end-start))s" >&2
+  elapsed=$((end - start))
+  echo "[AEGIS][TIMING] ${label}: ${elapsed}s" >&2
+  if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+    jq -cn \
+      --arg label "${label}" \
+      --argjson seconds "${elapsed}" \
+      --arg mode "${AEGIS_MODE:-}" \
+      --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      '{kind:"timing",label:$label,seconds:$seconds,mode:$mode,at:$at}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  fi
 }

@@ -165,6 +165,16 @@ resolve_mutation_targets() {
       '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty')
     [[ "${#targets[@]}" -gt 0 ]] \
       || aegis_fatal "missing_forensics_repair_candidates"
+  elif [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
+    # Local repair feedback: re-enter from a rejected validation without
+    # rediscovery. Scope is the deterministic authorized_scopes (+ any
+    # violation target_files) — never invent new paths.
+    collect < <(jq_lines "${handover}" '
+      (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes // [])[]?,
+      (.artifact_snapshot.operational_context.repair_feedback.violations // [])[]?.target_files[]?
+    ')
+    [[ "${#targets[@]}" -gt 0 ]] \
+      || aegis_fatal "missing_repair_feedback_authorized_scopes"
   elif [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
     collect < <(jq_lines "${handover}" \
       '.artifact_snapshot.operational_context.files_changed[]? // empty')
@@ -548,6 +558,42 @@ Preserve runtime sovereignty, protocol integrity, and containment integrity.
 Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
 Apply the change and stop."
+
+  # Local repair feedback iteration: fix only the structured violations
+  # inside authorized_scopes — do not rediscover or expand scope.
+  if [[ "${AEGIS_MODE}" == "repair" ]] \
+    && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" ]] \
+    && jq -e '
+        .artifact_snapshot.mode == "validation"
+        and .artifact_snapshot.operational_context.verdict == "rejected"
+        and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1; then
+    local feedback_summary
+    feedback_summary="$(
+      jq -r '
+        .artifact_snapshot.operational_context.repair_feedback as $rf
+        | "authorized_scopes: " + (($rf.authorized_scopes // []) | join(", "))
+          + "\nviolations:\n"
+          + (
+              ($rf.violations // [])
+              | map("  - [" + (.severity // "?") + "] " + (.origin // "?")
+                    + ": " + (.structural_reason // ""))
+              | join("\n")
+            )
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
+    )"
+    input_label="Original investigation input (repair feedback iteration — fix only listed violations):"
+    mode_instructions="CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
+A prior validation REJECTED the candidate. Fix ONLY the structured violations below inside authorized_scopes.
+Do NOT re-implement the whole demand from scratch unless a violation requires it.
+Do NOT expand scope beyond authorized_scopes / loaded targets.
+Do NOT add features unrelated to the violations.
+Emit edits only — no narration.
+
+${feedback_summary}
+
+Apply the minimal fix and stop."
+  fi
 
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
     input_label="Original investigation input (already applied by Repair — do NOT re-implement):"
