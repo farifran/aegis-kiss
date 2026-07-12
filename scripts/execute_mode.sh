@@ -1279,10 +1279,17 @@ validate_artifact() {
     [[ -n "${previous_findings}" ]] \
       || aegis_fatal "missing_findings"
 
+    # Core identity only: the runtime tribunal may downgrade
+    # supported_by_evidence / severity when quotations contradict the
+    # candidate diff or tools are mutation-clean. Type + description must
+    # still match the adversarial set (model cannot invent new findings).
     if ! echo "${artifact}" \
       | jq -e \
         --argjson previous_findings "${previous_findings}" \
-        '.findings == $previous_findings' \
+        '
+          def core: map({type: (.type // null), description: (.description // null)});
+          ((.findings // []) | core) == ($previous_findings | core)
+        ' \
         >/dev/null 2>&1; then
       echo "[DEBUG] validation_findings_mismatch details:" >&2
       echo "[DEBUG] Expected findings:" >&2
@@ -1337,6 +1344,66 @@ validate_mutation_artifact() {
 # =========================================================
 # OUTPUT
 # =========================================================
+
+# =========================================================
+# TRIBUNAL GATES (deterministic, model-independent)
+#
+# Floor models invent logic_bug findings that contradict the candidate
+# diff and treat baseline TS errors outside files_changed as candidate
+# defects. The runtime owns the final blocking judgment:
+#   1. quotations in finding descriptions must appear in the candidate
+#      diff when the finding claims implementation content;
+#   2. tool failures only block when they touch mutation files;
+#   3. after sanitization, empty blocking set ⇒ verified/accepted.
+# =========================================================
+
+# Builds a JSON gate object from materialised capability payloads and the
+# candidate files_changed list. Safe when payloads are absent.
+build_tribunal_tools_gate() {
+  local files_changed_json="${1:-[]}"
+  local payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+
+  local ts_payload="${payload_dir}/typescript_check.json"
+  local eslint_payload="${payload_dir}/eslint_check.json"
+  local test_payload="${payload_dir}/test_run.json"
+
+  local ts_json='{"payload":{"status":"skipped","errors":[]}}'
+  local eslint_json='{"payload":{"status":"skipped"}}'
+  local test_json='{"payload":{"status":"skipped"}}'
+
+  [[ -f "${ts_payload}" ]] && ts_json="$(cat "${ts_payload}")"
+  [[ -f "${eslint_payload}" ]] && eslint_json="$(cat "${eslint_payload}")"
+  [[ -f "${test_payload}" ]] && test_json="$(cat "${test_payload}")"
+
+  jq -n \
+    --argjson files "${files_changed_json}" \
+    --argjson ts "${ts_json}" \
+    --argjson eslint "${eslint_json}" \
+    --argjson test "${test_json}" \
+    '
+      def norm_path: gsub("^\\./"; "");
+      def in_scope($f):
+        ($f | norm_path) as $fp
+        | any($files[]?; (. | norm_path) == $fp
+              or ($fp | startswith((. | norm_path) + "/")));
+
+      ($ts.payload.status // "skipped") as $ts_status
+      | ($eslint.payload.status // "skipped") as $es_status
+      | ($test.payload.status // "skipped") as $test_status
+      | [($ts.payload.errors // [])[] | select(.file != null and in_scope(.file))] as $ts_in_scope
+      | {
+          typescript_status: $ts_status,
+          eslint_status: $es_status,
+          test_status: $test_status,
+          typescript_errors_in_scope: $ts_in_scope,
+          mutation_clean: (
+            ($ts_status != "failed" or ($ts_in_scope | length) == 0)
+            and ($es_status != "failed")
+            and ($test_status != "failed")
+          )
+        }
+    ' 2>/dev/null || printf '%s' '{"mutation_clean":true,"typescript_status":"skipped","eslint_status":"skipped","test_status":"skipped","typescript_errors_in_scope":[]}'
+}
 
 # =========================================================
 # MINIMAL COGNITIVE ARTIFACT ENRICHMENT
@@ -1454,6 +1521,16 @@ normalize_substrate_output() {
       operator_named_paths_json="[]"
     fi
 
+    # Tribunal tools gate for adversarial/validation — mutation-scoped.
+    local tribunal_files_json="[]"
+    tribunal_files_json="$(
+      printf '%s' "${prev_candidate_json}" \
+        | jq -c '.files_changed // []' 2>/dev/null \
+        || printf '[]'
+    )"
+    local tools_gate_json
+    tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
+
     local updated_artifact
     updated_artifact="$(
       printf '%s\n' "${raw_artifact}" | jq \
@@ -1468,6 +1545,7 @@ normalize_substrate_output() {
         --argjson seed_conditions "${seed_conditions_json}" \
         --argjson builder_priorities "${builder_priorities_json}" \
         --argjson operator_named_paths "${operator_named_paths_json}" \
+        --argjson tools_gate "${tools_gate_json}" \
         '
         def drop_empty:
           with_entries(select(
@@ -1556,10 +1634,84 @@ normalize_substrate_output() {
           elif $mode == "adversarial" then
             .status = (.status // "challenged")
             | .candidate_result = ($prev_candidate // .candidate_result)
+            | (.candidate_result.diff // "") as $cand_diff
+            # +lines only (not +++ headers); normalize "return X;" → "X"
+            | (
+                [$cand_diff
+                  | split("\n")[]
+                  | select(startswith("+") and (startswith("+++") | not))
+                  | .[1:]
+                  | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+                  | sub("^return[[:space:]]+"; "")
+                  | sub(";[[:space:]]*$"; "")
+                  | gsub("[[:space:]]+"; " ")
+                ]
+              ) as $added_exprs
             | .findings = (.findings // [] | map(
-                .supported_by_evidence = (.supported_by_evidence // true)
+                .supported_by_evidence = (.supported_by_evidence // false)
                 | .evidence_refs = (.evidence_refs // $evidence_refs)
+                # Diff-quotation gate: substantial backtick quotes that claim
+                # implementation content must equal a full added expression
+                # (not a mere substring — "bits/(8*1024)" must not match a
+                # line that is "bits/(8*1024*1024*1024)").
+                | ([(.description // "") | match("`[^`]+`"; "g")
+                    | .string[1:-1]
+                    | gsub("[[:space:]]+"; " ")
+                    | sub("^return[[:space:]]+"; "")
+                    | sub(";[[:space:]]*$"; "")]
+                   | map(select(length >= 8))) as $quotes
+                | if ($quotes | length) > 0
+                     and any($quotes[]; . as $q
+                       | all($added_exprs[]; . != $q)
+                       and ($cand_diff | index($q)) != null)
+                  then
+                    # Quote is a proper substring of the diff but not a full
+                    # added expression — classic floor-model reverse-claim.
+                    .supported_by_evidence = false
+                    | .severity = "info"
+                    | .description = (
+                        (.description // "")
+                        + " [tribunal: quoted snippet is not a full candidate expression]"
+                      )
+                  elif ($quotes | length) > 0
+                     and any($quotes[]; . as $q
+                       | all($added_exprs[]; . != $q)
+                       and (($cand_diff | index($q)) == null))
+                  then
+                    .supported_by_evidence = false
+                    | .severity = "info"
+                    | .description = (
+                        (.description // "")
+                        + " [tribunal: quoted snippet absent from candidate diff]"
+                      )
+                  else . end
+                # Baseline tool noise: findings that only cite typescript
+                # when no in-scope tsc errors exist cannot block.
+                | if ($tools_gate.mutation_clean == true)
+                     and (.type == "logic_bug" or .type == "contract_violation")
+                     and ((.evidence_refs // []) | map(tostring) | any(test("typescript|eslint|test\\.run")))
+                     and (($tools_gate.typescript_errors_in_scope // []) | length) == 0
+                  then
+                    .supported_by_evidence = false
+                    | .severity = "info"
+                  else . end
               ))
+            | (
+                [ .findings[]?
+                  | select(
+                      (.supported_by_evidence == true)
+                      and ((.severity == "high") or (.severity == "medium"))
+                      and (.type != "missing_evidence")
+                      and (.type != "style_issue")
+                    )
+                ] | length
+              ) as $blocking
+            # Tools clean + no surviving blocking findings ⇒ verified.
+            | if ($tools_gate.mutation_clean == true) and ($blocking == 0) then
+                .status = "verified"
+              elif ($tools_gate.mutation_clean == false) then
+                .status = "challenged"
+              else . end
             | .handover_attention = {
                 next_attention_targets: (.candidate_result.files_changed // []),
                 attention_scope: "bounded falsification",
@@ -1567,7 +1719,38 @@ normalize_substrate_output() {
               }
           elif $mode == "validation" then
             .validated_candidate = ($prev_candidate // .validated_candidate)
-            | .findings = ($prev_findings // .findings // [])
+            | (.validated_candidate.diff // "") as $cand_diff
+            | (
+                [$cand_diff
+                  | split("\n")[]
+                  | select(startswith("+") and (startswith("+++") | not))
+                  | .[1:]
+                  | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+                  | sub("^return[[:space:]]+"; "")
+                  | sub(";[[:space:]]*$"; "")
+                  | gsub("[[:space:]]+"; " ")
+                ]
+              ) as $added_exprs
+            # Carry adversarial findings, then re-apply quotation gates so a
+            # prior hallucinated challenge cannot force reject.
+            | .findings = (
+                ($prev_findings // .findings // [])
+                | map(
+                    ([(.description // "") | match("`[^`]+`"; "g")
+                      | .string[1:-1]
+                      | gsub("[[:space:]]+"; " ")
+                      | sub("^return[[:space:]]+"; "")
+                      | sub(";[[:space:]]*$"; "")]
+                     | map(select(length >= 8))) as $quotes
+                    | if ($quotes | length) > 0
+                         and any($quotes[]; . as $q
+                           | all($added_exprs[]; . != $q))
+                      then
+                        .supported_by_evidence = false
+                        | .severity = "info"
+                      else . end
+                  )
+              )
             | .basis = (.basis // [] | if type == "string" then [.] else . end)
             # Physical mutation constraint: a candidate with a blank or
             # placeholder diff, or an empty files_changed set, is not a
@@ -1583,6 +1766,44 @@ normalize_substrate_output() {
                  .verdict = "rejected"
                  | .basis = ["empty_mutation_candidate"]
                else . end)
+            | (
+                [ .findings[]?
+                  | select(
+                      (.supported_by_evidence == true)
+                      and ((.severity == "high") or (.severity == "medium"))
+                      and (.type != "missing_evidence")
+                      and (.type != "style_issue")
+                    )
+                ]
+              ) as $blocking_findings
+            # Deterministic tribunal override (KISS):
+            # - empty candidate already forced rejected above — leave it
+            # - no blocking findings after sanitization ⇒ accepted
+            #   (ignores model rubber-stamping of adversarial hallucinations)
+            # - in-scope tool failures ⇒ rejected
+            | (if ((.basis // []) | index("empty_mutation_candidate") != null) then
+                 .
+               elif ($blocking_findings | length) == 0 then
+                 .verdict = "accepted"
+                 | .basis = ["tribunal: no blocking findings after evidence gates"]
+               elif ($tools_gate.mutation_clean == false) then
+                 .verdict = "rejected"
+                 | .basis = (
+                     if (($tools_gate.typescript_errors_in_scope // []) | length) > 0 then
+                       ["tribunal: typescript errors in mutation files"]
+                     else
+                       ["tribunal: mutation-scoped tool failure"]
+                     end
+                   )
+               else
+                 # Blocking findings remain and tools did not clear them.
+                 .verdict = "rejected"
+                 | .basis = (
+                     if ((.basis // []) | length) > 0 then .basis
+                     else [$blocking_findings[0].description // "blocking adversarial finding"]
+                     end
+                   )
+               end)
             # On a rejected verdict, project the typed adversarial findings
             # into a deterministic repair_feedback contract so the next
             # repair iteration consumes explicit structured parameters
@@ -1595,12 +1816,7 @@ normalize_substrate_output() {
                  ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
                  | .repair_feedback = {
                      violations: [
-                       (.findings // [])[]
-                       | select(
-                           (.supported_by_evidence == true)
-                           and ((.severity == "high") or (.severity == "medium"))
-                           and (.type != "missing_evidence")
-                         )
+                       $blocking_findings[]
                        | {
                            origin: (.type // "unspecified"),
                            severity: (.severity // "unspecified"),
@@ -1611,7 +1827,9 @@ normalize_substrate_output() {
                      ],
                      authorized_scopes: $scopes
                    }
-               else . end)
+               else
+                 del(.repair_feedback)
+               end)
             | .handover_attention = {
                 next_attention_targets: (.validated_candidate.files_changed // []),
                 attention_scope: "validation_result",
