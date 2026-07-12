@@ -59,13 +59,19 @@ aegis_config_fatal() {
 # RUNTIME TOPOLOGY
 # =========================================================
 
-export AEGIS_RUNTIME_DIR="${AEGIS_ROOT_DIR}/.harness/runtime"
-export AEGIS_EXECUTION_SURFACE_ROOT="${AEGIS_ROOT_DIR}/.harness/execution_surfaces"
+# Honor pre-injected values (tests, stripped env -i substrates) so a
+# re-source of config never clobbers an operator/test-provided surface.
+: "${AEGIS_RUNTIME_DIR:=${AEGIS_ROOT_DIR}/.harness/runtime}"
+: "${AEGIS_EXECUTION_SURFACE_ROOT:=${AEGIS_ROOT_DIR}/.harness/execution_surfaces}"
+: "${AEGIS_CAPABILITY_ENV_DIR:=${AEGIS_ROOT_DIR}/.harness/runtime/capability_env}"
+: "${AEGIS_CAPABILITY_PAYLOAD_DIR:=${AEGIS_ROOT_DIR}/.harness/runtime/capability_payloads}"
+: "${AEGIS_EPISTEMIC_HANDOVER_FILE:=${AEGIS_ROOT_DIR}/.harness/runtime/epistemic_handover.json}"
 
-export AEGIS_CAPABILITY_ENV_DIR="${AEGIS_ROOT_DIR}/.harness/runtime/capability_env"
-export AEGIS_CAPABILITY_PAYLOAD_DIR="${AEGIS_ROOT_DIR}/.harness/runtime/capability_payloads"
-
-export AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_ROOT_DIR}/.harness/runtime/epistemic_handover.json"
+export AEGIS_RUNTIME_DIR
+export AEGIS_EXECUTION_SURFACE_ROOT
+export AEGIS_CAPABILITY_ENV_DIR
+export AEGIS_CAPABILITY_PAYLOAD_DIR
+export AEGIS_EPISTEMIC_HANDOVER_FILE
 
 : "${AEGIS_DEFAULT_INVESTIGATION_INPUT:=Analyze repository structure and identify highest-value investigation targets}"
 : "${AEGIS_INVESTIGATION_INPUT:=}"

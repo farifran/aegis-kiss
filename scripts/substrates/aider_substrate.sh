@@ -131,10 +131,11 @@ validate_aider_substrate_inputs() {
 # TARGET RESOLUTION
 # =========================================================
 
-# Resolve mutation targets from:
-# 1. observed_request_alignment.resolved_paths (builder payload) — highest priority
-# 2. epistemic_state.next_attention_targets (epistemic handover)
-# 3. filesystem.search_symbol payload matches — fallback
+# Resolve mutation targets from (in order, then dedupe):
+# 1. Forensics repair_candidates / optimize files_changed (contract-mandatory)
+# 2. UNION — operator-named paths in investigation input (multi-file demands)
+# 3. UNION — required_evidence filesystem.read paths from handover
+# 4. Fallback chain when still empty (builder / attention / search)
 
 resolve_mutation_targets() {
 
@@ -155,7 +156,7 @@ resolve_mutation_targets() {
     done
   }
 
-  # Source 1: handover mode contracts (mandatory targets when present)
+  # Source 1: handover mode contracts (mandatory seeds when present)
   local handover_mode
   handover_mode="$(jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
 
@@ -171,7 +172,29 @@ resolve_mutation_targets() {
       || aegis_fatal "missing_repair_files_changed"
   fi
 
-  # Fallback chain — first source yielding targets wins.
+  # Source 1b (UNION, never first-wins): explicit path tokens the operator
+  # named in the investigation input. Forensics historically emits a single
+  # "Alvo Único"; multi-file demands (create X + re-export from Y) still need
+  # every named path loaded into the mutation chat.
+  # Use `command grep` so shell wrappers (e.g. ugrep aliases) cannot break -oE.
+  collect < <(
+    printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
+      | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
+      | command sed 's|^\./||' \
+      || true
+  )
+
+  # Source 1c (UNION): required_evidence paths promoted by discovery/forensics.
+  collect < <(
+    jq_lines "${handover}" '
+      (.artifact_snapshot.operational_context.required_evidence // [])[]?
+      | select(type == "string")
+      | if startswith("filesystem.read:") then .[16:] else empty end
+      | select(test("\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
+    '
+  )
+
+  # Fallback chain — only when still empty after contract + unions.
 
   # Source 2: structural.builder payload → observed_request_alignment
   [[ "${#targets[@]}" -eq 0 ]] && collect < <(
@@ -446,20 +469,33 @@ If the required change seems to involve a file that is not loaded, do NOT add it
   # The template names the REAL target and describes the shape only.
   local anti_truncation_instructions=""
   if [[ "${resolved_edit_format}" == "whole" ]]; then
-    local shape_target="${prompt_targets[0]:-<target file>}"
-    anti_truncation_instructions="CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
-Your reply MUST have exactly this shape (filename line, then one fenced block):
-
-${shape_target}
+    local shape_blocks=""
+    local shape_target
+    if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
+      shape_blocks="<target file>
+\`\`\`
+<the ENTIRE new content>
+\`\`\`"
+    else
+      for shape_target in "${prompt_targets[@]}"; do
+        shape_blocks+="${shape_target}
 \`\`\`
 <the ENTIRE new content of ${shape_target}, from the very first line to the very last line>
 \`\`\`
 
+"
+      done
+    fi
+    anti_truncation_instructions="CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
+Your reply MUST emit one filename + fenced block per target file (in any order):
+
+${shape_blocks}
 Rules:
-- Use the filename EXACTLY as written above: ${shape_target}
+- Use each filename EXACTLY as written above.
 - Write the complete file content — never placeholders like '// ...' or '... rest of file'.
 - Do NOT copy any code from this prompt's instructions or evidence; write only the code the task requires.
-- If the file is currently empty, the new content is simply the code the task demands.
+- If a file is currently empty (net-new), the new content is simply the code the task demands.
+- TypeScript: prefer strict, compilable code (explicit types, valid exports matching any existing importers).
 
 If you use placeholders or omit code, the parser will fail and your changes will be discarded."
   fi
@@ -968,6 +1004,65 @@ scope_mutation_git_dir_to_surface() {
   fi
 }
 
+# Build a short fix-up prompt when preflight typescript fails on the
+# mutation surface. Keeps the same file jail; injects only the error list.
+assemble_preflight_fix_prompt() {
+
+  local prompt_file="$1"
+  local resolved_edit_format="$2"
+  shift 2
+  local prompt_targets=("$@")
+
+  local tsc_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/typescript_check.json"
+  local error_block="(no structured typescript errors available)"
+  if [[ -f "${tsc_payload}" ]]; then
+    error_block="$(
+      jq -r '
+        (.payload.errors // [])
+        | if length == 0 then "(empty error list)"
+          else
+            map("- \(.file):\(.line // "?"): \(.message // .)")
+            | join("\n")
+          end
+      ' "${tsc_payload}" 2>/dev/null || printf '%s' "${error_block}"
+    )"
+  fi
+
+  local target_list
+  target_list="$(printf -- '- %s\n' "${prompt_targets[@]:-}")"
+
+  cat > "${prompt_file}" << EOF
+You are fixing a TypeScript compile failure after a prior mutation attempt inside Aegis Harness.
+
+Mode: ${AEGIS_MODE}
+Execution ID: ${AEGIS_EXECUTION_ID}
+
+Original demand:
+${AEGIS_INVESTIGATION_INPUT}
+
+TypeScript errors (fix ONLY these; do not expand scope):
+${error_block}
+
+FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
+The ONLY files you may edit are:
+${target_list}
+You are FORBIDDEN from adding files to the chat.
+
+YOUR TASK NOW: edit the loaded files so every listed TypeScript error is resolved. Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
+EOF
+
+  if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then
+    {
+      echo ""
+      echo "WHOLE-FILE FORMAT — one block per file:"
+      local t
+      for t in "${prompt_targets[@]}"; do
+        printf '%s\n```\n<entire content of %s>\n```\n\n' "${t}" "${t}"
+      done
+    } >> "${prompt_file}"
+  fi
+}
+
 main() {
 
   validate_aider_substrate_inputs
@@ -1022,10 +1117,42 @@ main() {
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 
-  # One-shot post-diff preflight: project typescript.check + test.run on
-  # the execution surface, materialised as capability payloads. Not part
-  # of aider's per-edit loop. Hard-fails the mutation when status=failed.
-  run_mutation_preflight
+  # Post-diff preflight with one bounded TypeScript fix retry. The first
+  # failure keeps the worktree (no rollback) so the model can repair its
+  # own compile errors; a second failure aborts and rolls back.
+  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=1}"
+  local preflight_attempt=0
+  local max_preflight_attempts=$((AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS + 1))
+
+  while true; do
+    if run_mutation_preflight; then
+      break
+    fi
+
+    preflight_attempt=$((preflight_attempt + 1))
+    if [[ "${preflight_attempt}" -ge "${max_preflight_attempts}" ]] \
+      || [[ "${#mutation_targets[@]}" -eq 0 ]]; then
+      rollback_execution_surface
+      aegis_fatal "mutation_preflight_failed"
+    fi
+
+    aegis_warn "mutation_preflight_failed — fix attempt ${preflight_attempt}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
+
+    local fix_prompt
+    fix_prompt="$(aider_mktemp)"
+    assemble_preflight_fix_prompt \
+      "${fix_prompt}" \
+      "${resolved_edit_format}" \
+      "${mutation_targets[@]}"
+
+    invoke_aider "${fix_prompt}" "${resolved_edit_format}" "${mutation_targets[@]}"
+
+    diff_content="$(capture_worktree_diff)"
+    if [[ -z "${diff_content}" ]]; then
+      rollback_execution_surface
+      aegis_fatal "empty_diff: surface clean after preflight fix attempt"
+    fi
+  done
 
   # Auto-fix inside the lint gate may have rewritten files after the
   # last model edit; re-capture so the artifact matches the surface.
@@ -1075,17 +1202,14 @@ run_mutation_preflight() {
     changed_files="$(printf '%s\n%s\n' "${changed_files}" "${untracked}" | sed '/^$/d')"
   fi
 
-  if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
+  # Return status only — caller owns rollback / fix-retry policy.
+  AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
     AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
     bash "${preflight_script}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}" \
       "${AIDER_CAPABILITY_PAYLOAD_DIR}"
-  then
-    rollback_execution_surface
-    aegis_fatal "mutation_preflight_failed"
-  fi
 }
 
 main "$@"

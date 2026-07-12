@@ -11,11 +11,12 @@ Runtime-injected Layer 0 facts (declared entrypoints, `import_gravity`, resonant
 - Retain semantic discipline for tension: if the investigation input points at a surface Layer 0 did not anchor (unmapped dependency, hidden structural gap), resolve from payload evidence and encode the divergence in the candidate `reason`.
 
 ## NET-NEW FILE CREATION INTENTS (MANDATORY CANDIDATE)
-If the investigation input or the preceding epistemic handover demands the creation of a brand-new file (e.g., "create `src/tokenBucket.ts`"), the missing path MUST be declared as the repair candidate:
-- Set `status` to `"interpreted"` and emit the exact requested repository-relative path as the single candidate `id`, with a creation `reason` (e.g., "Request: create token bucket module.").
+If the investigation input or the preceding epistemic handover demands the creation of a brand-new file (e.g., "create `src/tokenBucket.ts`"), the missing path MUST be declared as a repair candidate:
+- Set `status` to `"interpreted"` and emit the exact requested repository-relative path as a candidate `id`, with a creation `reason` (e.g., "Request: create token bucket module.").
 - This is the ONE sanctioned exception to strictly factual indexing (Constraint 1): a path explicitly demanded by the investigation is a valid target even though it appears in no capability payload or topology node.
 - Do NOT substitute an existing file for an explicitly requested net-new path, and do NOT return `"inconclusive"` merely because the path is absent from the evidence.
-- `handover_attention` stays runtime-injected — do NOT emit it; the runtime routes `next_attention_targets` from `repair_candidates`, making the net-new path the top-priority mutation target downstream.
+- When the investigation also names a second path (e.g. re-export from `src/index.ts`), emit **both** as `repair_candidates` (net-new first). Multi-file demands are explicit operator paths, not scope expansion.
+- `handover_attention` stays runtime-injected — do NOT emit it; the runtime routes `next_attention_targets` from `repair_candidates`.
 
 ## CONSTRAINTS
 1. **Strictly factual indexing**: Only map files that are explicitly present in the provided capability payloads. (Sole exception: an explicitly demanded net-new creation path — see above.)
@@ -39,6 +40,9 @@ Output MUST contain EXCLUSIVELY the properties below. The runtime injects `mode`
 
 ## DETAILED FIELD INSTRUCTIONS
 - **`status`**: `"interpreted"` if concrete repair targets are found. `"inconclusive"` if not.
-- **`repair_candidates`**: Array of objects. If `status` is `"inconclusive"`, this must be `[]`. If `status` is `"interpreted"`, you MUST propose exactly ONE single target file (the array length must be exactly 1) to act as the single mutation target (Alvo Único) for the subsequent Repair stage. Resolve any target ambiguity using the logical hierarchy or entrypoint type (e.g., choose `src/index.ts` over `src/ui/index.ts` for arithmetic helpers).
+- **`repair_candidates`**: Array of objects. If `status` is `"inconclusive"`, this must be `[]`. If `status` is `"interpreted"`, propose the minimal set of mutation targets:
+  - **Default**: exactly ONE candidate (Alvo Único) when the demand maps to a single file.
+  - **Multi-path demand**: when the investigation input explicitly names multiple repository paths (e.g. create `src/tokenBucket.ts` and re-export from `src/index.ts`), emit one candidate per named path (net-new first). Do not invent extra files.
+  - Resolve ambiguous single-file choices using entrypoint hierarchy (e.g., choose `src/index.ts` over `src/ui/index.ts`).
   - `id`: Repository-relative path to the file to mutate.
   - `reason`: Extremely short reason (3-6 words) for the mutation.
