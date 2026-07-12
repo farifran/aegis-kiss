@@ -2,8 +2,8 @@
   "success": true,
   "capability": "filesystem.list_tree",
   "classification": "readonly",
-  "execution_id": "1783837699-68207",
-  "generated_at": "2026-07-12T06:28:20Z",
+  "execution_id": "1783838184-96846",
+  "generated_at": "2026-07-12T06:36:25Z",
   "payload": {
     "target": "src",
     "max_depth": 4,

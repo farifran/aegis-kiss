@@ -258,6 +258,33 @@ jq -n \
             state: "none"
           }
         end
+      ) as $sel0
+
+    # Alvo Unico for non-explicit multi-seed: Layer0 churn often lists
+    # several hot files (e.g. conversion_utils + index) for a demand that
+    # names no path. Downstream forensics already collapses candidates;
+    # collapsing here keeps discovery attention / pocket map focused.
+    # Explicit multi-path demands (exact_targets >= 2) stay multi-target.
+    | (
+        if ($path_analysis.exact_targets | length) >= 2 then $sel0
+        elif ($path_analysis.exact_targets | length) == 1 then
+          ($sel0 | .targets = $path_analysis.exact_targets)
+        elif (($sel0.targets // []) | length) <= 1 then $sel0
+        else
+          (
+            [($sel0.targets // [])[]
+              | select(test("(^|/)index\\.(ts|tsx|js|jsx)$"))]
+          ) as $entry
+          | if ($entry | length) > 0 then
+              ($sel0
+                | .targets = $entry[0:1]
+                | .reason = ((.reason // "") + " [alvo unico: entrypoint]"))
+            else
+              ($sel0
+                | .targets = .targets[0:1]
+                | .reason = ((.reason // "") + " [alvo unico: top seed]"))
+            end
+        end
       ) as $sel
 
     | ($sel.targets[0:$max]) as $capped

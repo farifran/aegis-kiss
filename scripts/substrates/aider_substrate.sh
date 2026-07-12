@@ -546,6 +546,7 @@ Rules:
 - If a file is currently a stub or empty (net-new), replace it with the full implementation the task demands.
 - TypeScript (NodeNext): relative imports MUST use the .js extension (e.g. from './mod.js').
 - TypeScript: keep export names that existing importers already use unless the demand renames them.
+- TypeScript: new top-level functions use \`export function\` (not a bare unexported function) unless the demand forbids export.
 - TypeScript: prefer strict, compilable code — explicit types, BigInt for high-precision counters when demanded, no any unless unavoidable.
 - Implement ONLY what the investigation input demands. Do not create or keep unrelated modules.
 
@@ -555,6 +556,7 @@ If you use placeholders or omit code, the parser will fail and your changes will
   local input_label="Investigation input (operator mutation demand — single demand, apply once):"
   local mode_instructions="Apply the minimal sufficient mutation described in the investigation input ONCE.
 If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
+TypeScript/JavaScript: new top-level functions SHOULD be \`export function\` (importable API), not a bare function, unless the demand forbids export.
 Preserve runtime sovereignty, protocol integrity, and containment integrity.
 Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
@@ -647,6 +649,8 @@ Skill contract (bounded mutation core):
 * Implement EXACTLY what the investigation input demands — nothing more.
 * Mutate ONLY the target files already loaded in this chat.
 * No new files, no renames, no scope expansion, no unsolicited functions or logic.
+* One demand → one change (no parallel variants).
+* TypeScript: new top-level functions use export function (importable API).
 * Preserve all existing code and behavior not named by the demand.
 * Output only the file edits — no JSON, no explanations, no questions.
 * NEVER ask for clarification. If the demand allows more than one reading, implement the most literal, minimal one and stop.
@@ -1195,6 +1199,36 @@ main() {
     aegis_log "Mutation targets: ${mutation_targets[*]}"
   fi
 
+  # ---------------------------------------------------------
+  # OPTIMIZE SHORT-CIRCUIT (KISS)
+  # ---------------------------------------------------------
+  # Runtime already applied the Repair candidate onto this surface.
+  # When that diff is small, a second LLM pass almost always returns
+  # no_optimization_needed (observed ~17–20s wasted). Forward the
+  # surface diff without calling the model. Set AEGIS_OPTIMIZE_LLM=1
+  # to force a refine pass, or raise AEGIS_OPTIMIZE_MIN_LINES.
+  # ---------------------------------------------------------
+  local diff_content=""
+  if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    : "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
+    : "${AEGIS_OPTIMIZE_LLM:=0}"
+    local baseline_diff baseline_lines
+    baseline_diff="$(capture_worktree_diff)"
+    baseline_lines="$(printf '%s\n' "${baseline_diff}" | wc -l | tr -d ' ')"
+    if [[ -z "${baseline_diff}" ]]; then
+      rollback_execution_surface
+      aegis_fatal "empty_diff: optimize surface has no repair candidate applied"
+    fi
+    if [[ "${AEGIS_OPTIMIZE_LLM}" != "1" ]] \
+      && [[ "${baseline_lines}" -le "${AEGIS_OPTIMIZE_MIN_LINES}" ]]; then
+      aegis_log "optimize_shortcircuit: repair diff is ${baseline_lines} lines (≤ ${AEGIS_OPTIMIZE_MIN_LINES}); forwarding without LLM (AEGIS_OPTIMIZE_LLM=1 to force refine)"
+      emit_mutation_artifact "${baseline_diff}"
+      aegis_log "Aider mutation substrate completed (optimize short-circuit)"
+      return 0
+    fi
+    aegis_log "optimize_llm_refine: lines=${baseline_lines} AEGIS_OPTIMIZE_LLM=${AEGIS_OPTIMIZE_LLM}"
+  fi
+
   # Edit format resolved exactly once (one wc -c pass over the targets);
   # prompt assembly and the invocation both consume the same value.
   local resolved_edit_format
@@ -1216,7 +1250,6 @@ main() {
 
   aegis_log "Capturing worktree diff..."
 
-  local diff_content
   diff_content="$(capture_worktree_diff)"
 
   if [[ -z "${diff_content}" ]]; then

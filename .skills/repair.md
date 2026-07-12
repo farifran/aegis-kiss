@@ -14,7 +14,7 @@ On a **local feedback iteration** (handover from rejected validation with `repai
 1. Minimal sufficient mutation — no speculative features or refactors.
 2. **One demand → one change**: if the operator asks for one conversion/behavior, add exactly one function or edit — do not ship parallel variants (`Foo` + `FooExact`, etc.) unless both are named.
 3. Preserve high-gravity exports unless the demand renames them.
-4. TypeScript: NodeNext imports use `.js` extension; keep existing export names.
+4. TypeScript: NodeNext imports use `.js` extension; keep existing export names. New top-level functions use `export function` (importable), not a bare unexported function, unless the demand forbids export.
 5. No narration — edits only (aider whole/diff format).
 6. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
 

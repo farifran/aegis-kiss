@@ -686,7 +686,26 @@ normalize_substrate_output() {
                     | if ($entry | length) > 0 then $entry else $cands[0:1] end
                   end
               end;
-            .repair_candidates = (
+            # Floor models invent net-new paths (e.g. src/quadratica.ts) not
+            # named by the operator and not in discovery attention. Clamp to
+            # authorized scope (operator paths ∪ seed attention ∪ existing
+            # on-disk paths). If nothing remains, map to the primary seed.
+            def clamp_forensics_scope($cands; $scope):
+              ($cands
+                | map(select(.id as $id | ($scope | index($id)) != null))) as $in
+              | if ($in | length) > 0 then $in
+                elif ($scope | length) > 0 and ($cands | length) > 0 then
+                  [{
+                    id: $scope[0],
+                    reason: ($cands[0].reason // "scoped to attention"),
+                    evidence_refs: $evidence_refs
+                  }]
+                else $cands end;
+            (($operator_named_paths // [])
+              + ($seed_targets // [])
+              + ($existing_paths // [])
+              | unique) as $forensics_scope
+            | .repair_candidates = (
               (.repair_candidates // [])
               | map({
                   id,
@@ -694,6 +713,7 @@ normalize_substrate_output() {
                   evidence_refs: $evidence_refs
                 })
               | unique_by(.id)
+              | clamp_forensics_scope(.; $forensics_scope)
               | prefer_alvo_unico(.; $operator_named_paths)
             )
             | .handover_attention = {

@@ -2,8 +2,8 @@
   "success": true,
   "capability": "runtime.attention_seed",
   "classification": "readonly",
-  "execution_id": "1783837699-68207",
-  "generated_at": "2026-07-12T06:28:20Z",
+  "execution_id": "1783838184-96846",
+  "generated_at": "2026-07-12T06:36:25Z",
   "payload": {
     "target": "src",
     "selection_rule": "layer0_hot_files_churn",
@@ -13,15 +13,13 @@
     "ambiguous_candidates": [],
     "handover_attention": {
       "next_attention_targets": [
-        "src/conversion_utils.ts",
         "src/index.ts"
       ],
       "attention_scope": "layer0:hot_files",
-      "attention_reason": "highest-churn files under evidence target (no resonant match)"
+      "attention_reason": "highest-churn files under evidence target (no resonant match) [alvo unico: entrypoint]"
     },
     "investigation_plan": {
       "primary_targets": [
-        "src/conversion_utils.ts",
         "src/index.ts"
       ],
       "secondary_targets": [],
@@ -30,14 +28,12 @@
     "investigation_scope": {
       "scope_type": "layer0",
       "scope_targets": [
-        "src/conversion_utils.ts",
         "src/index.ts"
       ],
       "scope_confidence": "medium"
     },
     "blocking_conditions": [],
     "attention_targets": [
-      "src/conversion_utils.ts",
       "src/index.ts"
     ],
     "relevant_surfaces": [],

@@ -468,6 +468,8 @@ invoke_aider_substrate() {
     AEGIS_AIDER_MAX_SECONDS="${AEGIS_AIDER_MAX_SECONDS:-}" \
     AEGIS_AIDER_EDIT_FORMAT="${AEGIS_AIDER_EDIT_FORMAT:-}" \
     AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
+    AEGIS_OPTIMIZE_MIN_LINES="${AEGIS_OPTIMIZE_MIN_LINES:-}" \
+    AEGIS_OPTIMIZE_LLM="${AEGIS_OPTIMIZE_LLM:-}" \
     bash scripts/substrates/aider_substrate.sh \
       "${skill_file}" \
       "${capability_payload_dir}"

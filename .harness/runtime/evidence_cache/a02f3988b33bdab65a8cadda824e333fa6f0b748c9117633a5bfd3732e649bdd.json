@@ -2,8 +2,8 @@
   "success": true,
   "capability": "runtime.layer0_facts",
   "classification": "readonly",
-  "execution_id": "1783837699-68207",
-  "generated_at": "2026-07-12T06:28:20Z",
+  "execution_id": "1783838184-96846",
+  "generated_at": "2026-07-12T06:36:25Z",
   "payload": {
     "target": "src",
     "entrypoints": [],
@@ -12,14 +12,14 @@
     "hot_files": [
       {
         "file": "src/conversion_utils.ts",
-        "score": 9,
-        "churn": 9,
+        "score": 10,
+        "churn": 10,
         "resonance": 0
       },
       {
         "file": "src/index.ts",
-        "score": 4,
-        "churn": 4,
+        "score": 6,
+        "churn": 6,
         "resonance": 0
       }
     ]

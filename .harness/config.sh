@@ -194,12 +194,20 @@ export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION
 : "${AEGIS_MAX_REPAIR_ATTEMPTS:=2}"
 : "${AEGIS_REPAIR_FEEDBACK_LOOP:=true}"
 
+# Optimize short-circuit: when the Repair surface diff has at most this
+# many lines, skip the second LLM and forward the candidate (set
+# AEGIS_OPTIMIZE_LLM=1 to always run a refine pass).
+: "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
+: "${AEGIS_OPTIMIZE_LLM:=0}"
+
 export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
 export AEGIS_PROVIDER_CONNECT_TIMEOUT
 export AEGIS_PROVIDER_RESPONSE_TIMEOUT
 export AEGIS_MAX_REPAIR_ATTEMPTS
 export AEGIS_REPAIR_FEEDBACK_LOOP
+export AEGIS_OPTIMIZE_MIN_LINES
+export AEGIS_OPTIMIZE_LLM
 
 # =========================================================
 # CLEANUP POLICY
