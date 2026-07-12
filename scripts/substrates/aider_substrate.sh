@@ -298,10 +298,44 @@ sanitize_mutation_targets() {
       # If aider writes nothing, the file stays empty (empty diff hunk)
       # and the rollback `git clean -fd` sweeps it on failure — no
       # residue can leak past the surface.
-      if ! mkdir -p "$(dirname "${AEGIS_EXECUTION_SURFACE_PATH}/${t}")" \
-        || ! : > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}"; then
+      if ! mkdir -p "$(dirname "${AEGIS_EXECUTION_SURFACE_PATH}/${t}")"; then
         aegis_warn "target_rejected_unmaterializable: ${t}"
         continue
+      fi
+      # Seed net-new TypeScript modules with a minimal type-checking stub
+      # when existing importers already name an export (e.g. index.ts already
+      # imports createTokenBucket). Empty files force the model to invent
+      # the entire module under whole-format pressure; a stub gives a
+      # compilable baseline that whole-edit can replace.
+      if [[ "${t}" == *.ts || "${t}" == *.tsx ]]; then
+        local stub_base stub_export
+        stub_base="$(basename "${t%.*}")"
+        stub_export="$(
+          command grep -RhoE "import[[:space:]]*\\{[^}]*\\}[[:space:]]*from[[:space:]]*['\"]\\./${stub_base}(\\.js)?['\"]" \
+            "${AEGIS_EXECUTION_SURFACE_PATH}" 2>/dev/null \
+            | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' \
+            | command grep -Ev '^(import|from)$' \
+            | head -n 1 \
+            || true
+        )"
+        if [[ -z "${stub_export}" ]]; then
+          # bash 3.2-safe capitalize of the file stem.
+          stub_export="create$(printf '%s' "${stub_base}" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+        fi
+        cat > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" <<STUB
+/**
+ * Net-new module stub — replace with the investigation demand.
+ * Keep export name \`${stub_export}\` unless the demand renames it.
+ */
+export function ${stub_export}(..._args: unknown[]): unknown {
+  throw new Error("${stub_export}: not implemented");
+}
+STUB
+      else
+        : > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" || {
+          aegis_warn "target_rejected_unmaterializable: ${t}"
+          continue
+        }
       fi
       git \
         --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
@@ -494,8 +528,10 @@ Rules:
 - Use each filename EXACTLY as written above.
 - Write the complete file content — never placeholders like '// ...' or '... rest of file'.
 - Do NOT copy any code from this prompt's instructions or evidence; write only the code the task requires.
-- If a file is currently empty (net-new), the new content is simply the code the task demands.
-- TypeScript: prefer strict, compilable code (explicit types, valid exports matching any existing importers).
+- If a file is currently a stub or empty (net-new), replace it with the full implementation the task demands.
+- TypeScript (NodeNext): relative imports MUST use the .js extension (e.g. from './tokenBucket.js').
+- TypeScript: keep export names that existing importers already use (e.g. createTokenBucket) unless the demand renames them.
+- TypeScript: prefer strict, compilable code — explicit types, BigInt for high-precision counters when demanded, no any unless unavoidable.
 
 If you use placeholders or omit code, the parser will fail and your changes will be discarded."
   fi
@@ -1043,6 +1079,11 @@ ${AEGIS_INVESTIGATION_INPUT}
 TypeScript errors (fix ONLY these; do not expand scope):
 ${error_block}
 
+Common NodeNext fixes (apply when matching the errors above):
+- Relative imports need explicit .js: import { x } from './mod.js'
+- Export names must match importers (createTokenBucket, etc.)
+- BigInt literals use n suffix; do not mix number and bigint without conversion
+
 FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
 The ONLY files you may edit are:
 ${target_list}
@@ -1120,7 +1161,9 @@ main() {
   # Post-diff preflight with one bounded TypeScript fix retry. The first
   # failure keeps the worktree (no rollback) so the model can repair its
   # own compile errors; a second failure aborts and rolls back.
-  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=1}"
+  # Default two fix attempts: floor models often need a second compile pass
+  # on multi-file net-new work (export shape + NodeNext import extension).
+  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=2}"
   local preflight_attempt=0
   local max_preflight_attempts=$((AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS + 1))
 

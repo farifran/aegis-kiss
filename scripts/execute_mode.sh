@@ -1012,32 +1012,52 @@ readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; ""
 
 # Shared jq projection of the topology targets a Discovery handover
 # authorizes for Forensics repair candidates.
-readonly AEGIS_JQ_AUTHORIZED_TARGETS='def authorized_targets:
-  [
-    .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
-    # requested_paths carries every path the operator named in the
-    # investigation input, deterministically extracted by structural.builder.
-    # resolved_paths only ever contains files that exist on disk, so a
-    # net-new file the operator explicitly asked to CREATE would otherwise
-    # be un-authorizable. Including requested_paths closes that gap without
-    # model dependence — authorization stays derived from the promoted
-    # discovery artifact, just from the request-extraction channel too.
-    .artifact_snapshot.structural_context.observed_request_alignment.requested_paths[]?,
-    (.artifact_snapshot.operational_context.required_evidence[]?
-      | select(type == "string" and startswith("filesystem.read:"))
-      | ltrimstr("filesystem.read:")),
-    (.artifact_snapshot.structural_context.ranked_targets[]?
-      | select(.type == "explicit_request")
-      | .file),
-    .epistemic_state.next_attention_targets[]?,
-    (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
-    (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
-    (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
-    (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
-    (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
-    (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
-  ]
-  | unique;'
+#
+# Fine discovery depth has no structural.builder, so requested_paths is
+# often empty. Operator-named paths are therefore also extracted
+# deterministically from investigation_input (same regex family as the
+# mutation target union). Placeholder model evidence (e.g. "<file>") is
+# dropped so it cannot authorize garbage or block real net-new paths.
+readonly AEGIS_JQ_AUTHORIZED_TARGETS='def is_real_repo_path:
+  type == "string"
+  and length > 0
+  and (contains("<") | not)
+  and (contains(">") | not)
+  and (test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"));
+
+def operator_named_paths:
+  ((.artifact_snapshot.investigation_input // "") | tostring) as $inv
+  | [$inv | match("[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)"; "g") | .string]
+  | map(sub("^\\./"; ""))
+  | map(select(is_real_repo_path))
+  | unique;
+
+def authorized_targets:
+  (
+    [
+      .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
+      # requested_paths: structural.builder channel (deep discovery).
+      .artifact_snapshot.structural_context.observed_request_alignment.requested_paths[]?,
+      # Fine-mode / model-independent: paths the operator typed in the demand.
+      (operator_named_paths[]?),
+      (.artifact_snapshot.operational_context.required_evidence[]?
+        | select(type == "string" and startswith("filesystem.read:"))
+        | ltrimstr("filesystem.read:")),
+      (.artifact_snapshot.operational_context.operator_named_paths[]?),
+      (.artifact_snapshot.structural_context.ranked_targets[]?
+        | select(.type == "explicit_request")
+        | .file),
+      .epistemic_state.next_attention_targets[]?,
+      (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
+      (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
+      (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
+      (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
+      (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
+      (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
+    ]
+    | map(select(is_real_repo_path))
+    | unique
+  );'
 
 extract_substrate_artifact() {
 
@@ -1406,6 +1426,34 @@ normalize_substrate_output() {
       builder_priorities_json="$(jq -c '.payload.suggested_evidence_priorities // []' "${builder_path}" 2>/dev/null || echo '[]')"
     fi
 
+    # Operator-named repository paths from the investigation input — model-
+    # independent, same family as mutation target union. Used to authorize
+    # net-new files under fine discovery (no structural.builder).
+    # Note: grep-no-match must not double-append via pipefail+|| (that
+    # produced invalid "[]\n[]" for --argjson).
+    local operator_named_paths_json="[]"
+    if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
+      local operator_paths_raw=""
+      operator_paths_raw="$(
+        printf '%s' "${AEGIS_INVESTIGATION_INPUT}" \
+          | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
+          | command sed 's|^\./||' \
+          | command grep -Ev '[<>]' \
+          | sort -u \
+          || true
+      )"
+      if [[ -n "${operator_paths_raw}" ]]; then
+        operator_named_paths_json="$(
+          printf '%s\n' "${operator_paths_raw}" \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+            || printf '[]'
+        )"
+      fi
+    fi
+    if ! printf '%s' "${operator_named_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      operator_named_paths_json="[]"
+    fi
+
     local updated_artifact
     updated_artifact="$(
       printf '%s\n' "${raw_artifact}" | jq \
@@ -1419,12 +1467,29 @@ normalize_substrate_output() {
         --argjson seed_targets "${seed_targets_json}" \
         --argjson seed_conditions "${seed_conditions_json}" \
         --argjson builder_priorities "${builder_priorities_json}" \
+        --argjson operator_named_paths "${operator_named_paths_json}" \
         '
         def drop_empty:
           with_entries(select(
             (.value != null)
             and ((.value | type) != "array" or (.value | length) > 0)
           ));
+
+        # Drop model placeholders (filesystem.read:<file>, empty, non-paths).
+        def sanitize_required_evidence:
+          map(select(
+            type == "string"
+            and startswith("filesystem.read:")
+            and (.[16:] | length > 0)
+            and (.[16:] | contains("<") | not)
+            and (.[16:] | contains(">") | not)
+            and (.[16:] | test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
+          ));
+
+        def merge_operator_required_evidence($req; $paths):
+          ($req | sanitize_required_evidence)
+          + ($paths | map("filesystem.read:" + .))
+          | unique;
 
         .mode = $mode
         | .evidence_refs = $evidence_refs
@@ -1434,14 +1499,18 @@ normalize_substrate_output() {
           else . end
         | if $mode == "discovery" then
             (.operational_context // {}) as $oc
+            | ((.required_evidence // $oc.required_evidence // []) ) as $raw_req
+            | merge_operator_required_evidence($raw_req; $operator_named_paths) as $merged_req
+            | (($seed_targets + $operator_named_paths) | unique) as $merged_attention
             | .operational_context = ({
                 status: ($oc.status // "interpreted"),
                 summary: ($oc.summary // "discovery operational context"),
                 observed_payloads: ($oc.observed_payloads // $observed_payloads),
                 investigation_scope: $seed_scope,
-                attention_targets: $seed_targets,
+                attention_targets: $merged_attention,
                 blocking_conditions: $seed_conditions,
-                required_evidence: (.required_evidence // $oc.required_evidence // []),
+                required_evidence: $merged_req,
+                operator_named_paths: $operator_named_paths,
                 operational_observations: (.observations // $oc.operational_observations // []),
                 rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
                 evidence_priorities: (
@@ -1451,7 +1520,7 @@ normalize_substrate_output() {
               } | drop_empty)
             | del(.observations, .rationale, .required_evidence)
             | .handover_attention = {
-                next_attention_targets: $seed_targets,
+                next_attention_targets: $merged_attention,
                 attention_scope: ($seed_scope.scope_type // "exploratory"),
                 attention_reason: $attention_reason
               }
