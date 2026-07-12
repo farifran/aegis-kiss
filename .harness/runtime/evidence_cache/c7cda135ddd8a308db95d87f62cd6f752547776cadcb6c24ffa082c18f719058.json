@@ -2,8 +2,8 @@
   "success": true,
   "capability": "runtime.attention_seed",
   "classification": "readonly",
-  "execution_id": "1783837449-50649",
-  "generated_at": "2026-07-12T06:24:10Z",
+  "execution_id": "1783837699-68207",
+  "generated_at": "2026-07-12T06:28:20Z",
   "payload": {
     "target": "src",
     "selection_rule": "layer0_hot_files_churn",

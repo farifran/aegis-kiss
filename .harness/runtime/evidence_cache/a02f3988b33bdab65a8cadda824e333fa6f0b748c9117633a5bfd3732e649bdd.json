@@ -2,8 +2,8 @@
   "success": true,
   "capability": "runtime.layer0_facts",
   "classification": "readonly",
-  "execution_id": "1783837477-61510",
-  "generated_at": "2026-07-12T06:24:38Z",
+  "execution_id": "1783837699-68207",
+  "generated_at": "2026-07-12T06:28:20Z",
   "payload": {
     "target": "src",
     "entrypoints": [],
@@ -12,8 +12,8 @@
     "hot_files": [
       {
         "file": "src/conversion_utils.ts",
-        "score": 8,
-        "churn": 8,
+        "score": 9,
+        "churn": 9,
         "resonance": 0
       },
       {
