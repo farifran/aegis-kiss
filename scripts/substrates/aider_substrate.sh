@@ -654,6 +654,17 @@ Skill contract (bounded mutation core):
 * Preserve all existing code and behavior not named by the demand.
 * Output only the file edits — no JSON, no explanations, no questions.
 * NEVER ask for clarification. If the demand allows more than one reading, implement the most literal, minimal one and stop.
+
+Type hygiene (always — any domain):
+* Never use `any`, `as any`, or `@ts-ignore` / bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing.
+* Public APIs: explicit parameter and return types on exported functions.
+* Do not silence the typechecker; fix the type.
+
+Module hygiene (always — any domain):
+* Relative imports use NodeNext `.js` extension: `from './mod.js'` (even when the source file is `.ts`).
+* Only import packages declared in package.json (or Node builtins). Never invent package names for language builtins.
+* Language builtins (e.g. BigInt, JSON, Math) are globals — do not import them as npm packages.
+* Keep existing export names stable unless the demand renames them.
 DISTILLED
     fi
   else
@@ -1205,8 +1216,35 @@ scope_mutation_git_dir_to_surface() {
   fi
 }
 
-# Build a short fix-up prompt when preflight typescript fails on the
-# mutation surface. Keeps the same file jail; injects only the error list.
+# Classify a single diagnostic line into a stable error family for floor models.
+# Families: any | import | type | runtime_load | other
+# Order matters: more specific families first. Avoid bare *any* (false positives).
+classify_preflight_diagnostic_line() {
+  local line="${1:-}"
+  local lower
+  lower="$(printf '%s' "${line}" | tr '[:upper:]' '[:lower:]')"
+
+  case "${lower}" in
+    smoke\ *|*'smoke.'*)
+      printf 'runtime_load'
+      ;;
+    *'as any'*|*': any'*|*'unexpected any'*|*'no-explicit-any'*|*'ts7006'*|*'implicitly has an "any"'*|*"implicitly has an 'any'"*|*'@ts-ignore'*|*'@ts-expect-error'*|*'ts-nocheck'*)
+      printf 'any'
+      ;;
+    *'cannot find module'*|*'cannot find package'*|*'err_module_not_found'*|*'ts2307'*|*'ts2305'*|*'has no exported member'*|*'is not a module'*)
+      printf 'import'
+      ;;
+    *'is not assignable'*|*'not exist on type'*|*'undefined is not'*|*'null is not'*)
+      printf 'type'
+      ;;
+    *)
+      printf 'other'
+      ;;
+  esac
+}
+
+# Build a taxonomized fix-up prompt when preflight fails (tsc / smoke / …).
+# Keeps the same file jail; groups diagnostics so weak models fix by class.
 assemble_preflight_fix_prompt() {
 
   local prompt_file="$1"
@@ -1215,25 +1253,107 @@ assemble_preflight_fix_prompt() {
   local prompt_targets=("$@")
 
   local tsc_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/typescript_check.json"
-  local error_block="(no structured typescript errors available)"
+  local smoke_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/smoke_import.json"
+
+  local -a lines_any=()
+  local -a lines_import=()
+  local -a lines_type=()
+  local -a lines_runtime=()
+  local -a lines_other=()
+
+  local raw_line class
+
   if [[ -f "${tsc_payload}" ]]; then
-    error_block="$(
+    while IFS= read -r raw_line; do
+      [[ -n "${raw_line}" ]] || continue
+      class="$(classify_preflight_diagnostic_line "${raw_line}")"
+      case "${class}" in
+        any) lines_any+=("${raw_line}") ;;
+        import) lines_import+=("${raw_line}") ;;
+        runtime_load) lines_runtime+=("${raw_line}") ;;
+        type) lines_type+=("${raw_line}") ;;
+        *) lines_other+=("${raw_line}") ;;
+      esac
+    done < <(
       jq -r '
         (.payload.errors // [])
-        | if length == 0 then "(empty error list)"
-          else
-            map("- \(.file):\(.line // "?"): \(.message // .)")
-            | join("\n")
-          end
-      ' "${tsc_payload}" 2>/dev/null || printf '%s' "${error_block}"
-    )"
+        | .[]?
+        | "\(.file // "?"):\(.line // "?"): \(.message // .)"
+      ' "${tsc_payload}" 2>/dev/null || true
+    )
+  fi
+
+  if [[ -f "${smoke_payload}" ]]; then
+    while IFS= read -r raw_line; do
+      [[ -n "${raw_line}" ]] || continue
+      # Smoke failures are always runtime_load family.
+      lines_runtime+=("${raw_line}")
+    done < <(
+      jq -r '
+        (.payload.results // [])
+        | .[]?
+        | select(.status == "failed")
+        | "smoke \(.file // "?"): \(.detail // "load failed" | .[0:240])"
+      ' "${smoke_payload}" 2>/dev/null || true
+    )
+  fi
+
+  format_class_block() {
+    local title="$1"
+    local policy="$2"
+    shift 2
+    local -a items=("$@")
+    if [[ "${#items[@]}" -eq 0 ]]; then
+      return 0
+    fi
+    printf '%s\n' "${title}"
+    printf '%s\n' "Policy: ${policy}"
+    local it
+    local n=0
+    for it in "${items[@]}"; do
+      n=$((n + 1))
+      # Cap per class so floor models are not flooded.
+      if [[ "${n}" -gt 8 ]]; then
+        printf '%s\n' "- … ($(( ${#items[@]} - 8 )) more omitted)"
+        break
+      fi
+      printf '%s\n' "- ${it}"
+    done
+    printf '\n'
+  }
+
+  local taxonomy_block=""
+  taxonomy_block+="$(format_class_block \
+    "[any] Type escapes" \
+    "Remove any/as any/@ts-ignore. Use precise types or unknown + narrowing. Never silence the checker." \
+    "${lines_any[@]:-}")"
+  taxonomy_block+="$(format_class_block \
+    "[import] Module resolution" \
+    "Relative imports: NodeNext .js extension (from './mod.js'). Only package.json deps or Node builtins. Builtins are globals — do not import them as npm packages." \
+    "${lines_import[@]:-}")"
+  taxonomy_block+="$(format_class_block \
+    "[type] Type errors" \
+    "Fix signatures and conversions. Prefer smallest correct type fix. Do not add any." \
+    "${lines_type[@]:-}")"
+  taxonomy_block+="$(format_class_block \
+    "[runtime_load] Module load failures" \
+    "Fix import paths/exports so the module loads. Relative .js specifier must match an on-disk sibling module." \
+    "${lines_runtime[@]:-}")"
+  taxonomy_block+="$(format_class_block \
+    "[other] Other diagnostics" \
+    "Fix with the smallest edit; stay inside authorized files." \
+    "${lines_other[@]:-}")"
+
+  if [[ -z "$(printf '%s' "${taxonomy_block}" | sed '/^$/d')" ]]; then
+    taxonomy_block="(no structured diagnostics available — re-read the loaded files and make them compile and load cleanly)
+"
   fi
 
   local target_list
   target_list="$(printf -- '- %s\n' "${prompt_targets[@]:-}")"
 
   cat > "${prompt_file}" << EOF
-You are fixing a TypeScript compile failure after a prior mutation attempt inside Aegis Harness.
+You are fixing a preflight failure after a prior mutation attempt inside Aegis Harness.
 
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
@@ -1241,20 +1361,21 @@ Execution ID: ${AEGIS_EXECUTION_ID}
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
 
-TypeScript errors (fix ONLY these; do not expand scope):
-${error_block}
+Diagnostics by class (fix ONLY these; do not expand scope):
 
-Common NodeNext fixes (apply when matching the errors above):
-- Relative imports need explicit .js: import { x } from './mod.js'
-- Export names must match existing importers
-- BigInt literals use n suffix; do not mix number and bigint without conversion
+${taxonomy_block}
+Standing rules (all classes):
+- No \`any\`, no \`as any\`, no \`@ts-ignore\` / bare \`@ts-expect-error\`.
+- NodeNext relative imports use explicit .js extension.
+- Do not invent npm packages; language builtins are globals.
+- Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
 
 FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
 The ONLY files you may edit are:
 ${target_list}
 You are FORBIDDEN from adding files to the chat.
 
-YOUR TASK NOW: edit the loaded files so every listed TypeScript error is resolved. Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
+YOUR TASK NOW: edit the loaded files so every listed diagnostic is resolved.
 EOF
 
   if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then

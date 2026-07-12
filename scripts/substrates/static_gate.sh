@@ -104,6 +104,7 @@ run_ast_rules_on_path() {
 run_eval_grep_fallback() {
   local file="$1"
   local hits
+  local failed=0
 
   case "${file}" in
     *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs) ;;
@@ -111,23 +112,47 @@ run_eval_grep_fallback() {
   esac
 
   # Only when sg is unavailable — otherwise AST rules own this surface.
-  resolve_sg >/dev/null 2>&1 && return 0
+  if ! resolve_sg >/dev/null 2>&1; then
+    hits="$(
+      grep -nE \
+        '(^|[^[:alnum:]_$])eval[[:space:]]*\(|(^|[^[:alnum:]_$])new[[:space:]]+Function[[:space:]]*\(' \
+        "${file}" 2>/dev/null || true
+    )"
 
-  hits="$(
-    grep -nE \
-      '(^|[^[:alnum:]_$])eval[[:space:]]*\(|(^|[^[:alnum:]_$])new[[:space:]]+Function[[:space:]]*\(' \
-      "${file}" 2>/dev/null || true
-  )"
-
-  if [[ -n "${hits}" ]]; then
-    gate_error "eval/new Function is a hidden execution surface: ${file}"
-    printf '%s\n' "${hits}" | while IFS= read -r line; do
-      gate_error "  ${line}"
-    done
-    return 1
+    if [[ -n "${hits}" ]]; then
+      failed=1
+      gate_error "eval/new Function is a hidden execution surface: ${file}"
+      printf '%s\n' "${hits}" | while IFS= read -r line; do
+        gate_error "  ${line}"
+      done
+    fi
   fi
 
-  return 0
+  # Mechanical type-escape ban (works with or without sg for dual coverage
+  # when rule YAML is missing; cheap enough to always run on TS).
+  case "${file}" in
+    *.ts|*.tsx)
+      hits="$(
+        grep -nE \
+          '([[:space:]]as[[:space:]]+any\b)|(:[[:space:]]*any\b)|(<any>)|(as[[:space:]]+any\b)' \
+          "${file}" 2>/dev/null || true
+      )"
+      # Drop false positives from comments/strings is imperfect; keep
+      # conservative — lint eslint no-explicit-any is authoritative.
+      if [[ -n "${hits}" ]]; then
+        # Prefer sg rule when present; grep is a belt for mutation surfaces.
+        if ! resolve_sg >/dev/null 2>&1; then
+          failed=1
+          gate_error "explicit any / as any is forbidden type escape: ${file}"
+          printf '%s\n' "${hits}" | while IFS= read -r line; do
+            gate_error "  ${line}"
+          done
+        fi
+      fi
+      ;;
+  esac
+
+  return "${failed}"
 }
 
 # ---------------------------------------------------------

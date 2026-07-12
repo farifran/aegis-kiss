@@ -79,6 +79,17 @@ if bash "${GATE}" "${test_tmp}/src/undeclared.ts" 2>/dev/null; then
   fail "undeclared_import_was_accepted"
 fi
 
+# --- as any fails (type escape) ---
+cat > "${test_tmp}/src/uses_as_any.ts" <<'EOF'
+export function bad(x: unknown): number {
+  return x as any;
+}
+EOF
+
+if bash "${GATE}" "${test_tmp}/src/uses_as_any.ts" 2>/dev/null; then
+  fail "as_any_was_accepted"
+fi
+
 # --- declared + node builtin + relative pass ---
 cat > "${test_tmp}/src/declared.ts" <<'EOF'
 import leftPad from 'left-pad';

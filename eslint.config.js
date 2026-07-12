@@ -185,10 +185,34 @@ export default [
       ],
 
       // ---------------------------------------------------
-      // TYPE DISCIPLINE
+      // TYPE DISCIPLINE (mutation lint-gate consumes these)
+      // Floor models invent any / @ts-ignore under pressure —
+      // error severity so aider's --auto-lint loop rejects them.
       // ---------------------------------------------------
 
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "error",
+
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        {
+          "ts-expect-error": "allow-with-description",
+          "minimumDescriptionLength": 8,
+          "ts-ignore": true,
+          "ts-nocheck": true,
+          "ts-check": false
+        }
+      ],
+
+      "no-unused-vars": "off",
+
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_"
+        }
+      ],
 
       "@typescript-eslint/consistent-type-imports": "warn"
 
@@ -201,6 +225,9 @@ export default [
       // - execution visibility;
       // - bounded complexity enforcement;
       // - structural layering guarantees.
+      //
+      // Type discipline (no-explicit-any, ban-ts-comment, no-unused-vars)
+      // is the mechanical floor for mutation quality under weak models.
       //
       // ESLint does NOT provide:
       // - runtime orchestration;

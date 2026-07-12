@@ -14,10 +14,13 @@ On a **local feedback iteration** (handover from rejected validation with `repai
 1. Minimal sufficient mutation — no speculative features or refactors.
 2. **One demand → one change**: if the operator asks for one conversion/behavior, add exactly one function or edit — do not ship parallel variants (`Foo` + `FooExact`, etc.) unless both are named.
 3. Preserve high-gravity exports unless the demand renames them.
-4. TypeScript: NodeNext imports use `.js` extension; keep existing export names. New top-level functions use `export function` (importable), not a bare unexported function, unless the demand forbids export.
-5. No narration — edits only (aider whole/diff format).
-6. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
+4. TypeScript modules: NodeNext relative imports use `.js` extension; keep existing export names. New top-level functions use `export function` (importable), not a bare unexported function, unless the demand forbids export.
+5. Type hygiene (domain-agnostic): no `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing. Exported APIs carry explicit parameter and return types.
+6. Module hygiene (domain-agnostic): only packages declared in `package.json` (or Node builtins). Language builtins are globals — never import them as npm packages.
+7. No narration — edits only (aider whole/diff format).
+8. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
 
 ## SUCCESS
 - Demand (or listed violations) satisfied on the loaded targets.
-- Surface compiles under preflight (tsc/tests) when preflight is enabled.
+- Surface passes mutation preflight (tsc / tests / smoke) when preflight is enabled.
+- Lint gate accepts the edit (no explicit any / empty-catch / eval / undeclared imports).

@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript)
+# `as any` erases type evidence; floor models use it to silence tsc.
+# =========================================================
+
+id: no-as-any-typescript
+
+language: TypeScript
+
+severity: error
+
+message: >
+  as any erases type evidence — use a precise type or unknown + narrowing.
+
+rule:
+  pattern: $EXPR as any
