@@ -16,6 +16,14 @@ readonly HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
 readonly LAST_FATAL_FILE=".harness/runtime/last_fatal"
 readonly METRICS_FILE=".harness/runtime/pipeline_metrics.jsonl"
 
+# Pipeline driver owns the single run-level outcome projection.
+# Runtime cleanup must not emit outcome when this is set (avoids
+# double human block + N mode-level outcome lines).
+export AEGIS_PIPELINE_DRIVER=1
+
+# shellcheck disable=SC1091
+source "scripts/lib/run_outcome.sh"
+
 usage() {
   cat <<'EOF'
 Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
@@ -538,6 +546,47 @@ show_final_report() {
   fi
 
   echo "══════════════════════════════"
+
+  # Outcome projection (Fable path D): classify + human block + metrics line.
+  # Precedence: last_fatal → FAILED; FAILED without breadcrumb → unknown;
+  # PIPELINE_STATUS HALTED → halt reason; else SUCCESS.
+  local outcome_status outcome_reason outcome_class outcome_mode
+  outcome_mode=""
+  for mode in "${EXECUTION_MODES[@]}"; do
+    if [[ "${MODE_STATUS[$mode]:-}" == "failed" ]] \
+      || [[ "${MODE_STATUS[$mode]:-}" == "ok" ]] \
+      || [[ "${MODE_STATUS[$mode]:-}" == "halted" ]]; then
+      outcome_mode="${mode}"
+    fi
+  done
+
+  if [[ -n "${last_fatal}" ]]; then
+    outcome_status="FAILED"
+    outcome_reason="${last_fatal}"
+  elif [[ "${PIPELINE_STATUS}" == "FAILED" ]]; then
+    outcome_status="FAILED"
+    outcome_reason=""
+  elif [[ "${PIPELINE_STATUS}" == "HALTED" ]]; then
+    outcome_status="HALTED"
+    outcome_reason="${PIPELINE_REASON}"
+  else
+    outcome_status="SUCCESS"
+    outcome_reason=""
+  fi
+
+  if [[ "${outcome_status}" == "SUCCESS" ]]; then
+    outcome_class=""
+  else
+    aegis_classify_reason "${outcome_reason}" >/dev/null
+    outcome_class="${AEGIS_OUTCOME_CLASS:-unknown}"
+  fi
+
+  aegis_emit_outcome_block "${outcome_status}" "${outcome_reason}"
+  aegis_append_outcome_metric \
+    "${outcome_status}" \
+    "${outcome_reason}" \
+    "${outcome_class}" \
+    "${outcome_mode}"
 }
 
 resolve_default_target() {

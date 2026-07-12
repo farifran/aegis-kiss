@@ -11,6 +11,8 @@
 .harness/runtime/epistemic_handover.json
 .harness/runtime/last_good_epistemic_handover.json
 .harness/runtime/last_fatal
+.harness/runtime/pipeline_metrics.jsonl
+.harness/runtime/evidence_cache/
 .harness/runtime/capability_env/
 .harness/runtime/capability_payloads/
 

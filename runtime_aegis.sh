@@ -57,6 +57,7 @@ export AEGIS_EXECUTION_TIMESTAMP="$(
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
 source "scripts/lib/epistemic_handover.sh"
+source "scripts/lib/run_outcome.sh"
 AEGIS_LOG_TAG="RUNTIME"
 
 
@@ -325,6 +326,33 @@ cleanup_runtime() {
     remove_runtime_owned_capability_surfaces
   fi
 
+  # Outcome projection: exactly one kind:"outcome" per logical run.
+  # When AEGIS_PIPELINE_DRIVER=1, run_aegis.sh owns the projection at
+  # show_final_report — cleanup stays silent (no double-emit / no mode spam).
+  # Standalone runtime (flag unset): fail → block+metric; success → metric only.
+  if [[ "${AEGIS_PIPELINE_DRIVER:-0}" != "1" ]]; then
+    local outcome_status outcome_reason outcome_class
+    local last_fatal_file="${AEGIS_RUNTIME_DIR:-.harness/runtime}/last_fatal"
+
+    if [[ "${exit_code}" -ne 0 ]]; then
+      outcome_status="FAILED"
+      outcome_reason=""
+      if [[ -f "${last_fatal_file}" ]]; then
+        outcome_reason="$(tr -d '\r' < "${last_fatal_file}" | head -n 1)"
+      fi
+      aegis_classify_reason "${outcome_reason}" >/dev/null
+      outcome_class="${AEGIS_OUTCOME_CLASS:-unknown}"
+      aegis_emit_outcome_block "${outcome_status}" "${outcome_reason}"
+      aegis_append_outcome_metric \
+        "${outcome_status}" \
+        "${outcome_reason}" \
+        "${outcome_class}" \
+        "${AEGIS_MODE:-}"
+    else
+      aegis_append_outcome_metric "SUCCESS" "" "" "${AEGIS_MODE:-}"
+    fi
+  fi
+
   aegis_log "Runtime cleanup completed"
 
   set -e
@@ -549,6 +577,10 @@ validate_runtime_environment() {
 bootstrap_runtime_state() {
 
   mkdir -p "${AEGIS_RUNTIME_DIR}"
+
+  # Anti-staleness: never let a previous run's fatal breadcrumb pollute
+  # this run's outcome projection (pipeline driver clears it too).
+  rm -f "${AEGIS_RUNTIME_DIR}/last_fatal" 2>/dev/null || true
 
   prepare_runtime_owned_epistemic_handover \
     "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
