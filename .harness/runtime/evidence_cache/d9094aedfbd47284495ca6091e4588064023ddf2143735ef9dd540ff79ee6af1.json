@@ -2,27 +2,25 @@
   "success": true,
   "capability": "runtime.attention_seed",
   "classification": "readonly",
-  "execution_id": "1783836013-86775",
-  "generated_at": "2026-07-12T06:00:14Z",
+  "execution_id": "1783836261-9398",
+  "generated_at": "2026-07-12T06:04:23Z",
   "payload": {
     "target": "src",
-    "selection_rule": "layer0_hot_files_churn",
+    "selection_rule": "layer0_hot_files",
     "attention_state": "layer0",
     "attention_source": "runtime.layer0_facts.hot_files",
-    "attention_confidence": "medium",
+    "attention_confidence": "high",
     "ambiguous_candidates": [],
     "handover_attention": {
       "next_attention_targets": [
-        "src/conversion_utils.ts",
-        "src/index.ts"
+        "src/conversion_utils.ts"
       ],
       "attention_scope": "layer0:hot_files",
-      "attention_reason": "highest-churn files under evidence target (no resonant match)"
+      "attention_reason": "git mutation sniffing: churn files resonant with investigation input"
     },
     "investigation_plan": {
       "primary_targets": [
-        "src/conversion_utils.ts",
-        "src/index.ts"
+        "src/conversion_utils.ts"
       ],
       "secondary_targets": [],
       "excluded_targets": []
@@ -30,15 +28,13 @@
     "investigation_scope": {
       "scope_type": "layer0",
       "scope_targets": [
-        "src/conversion_utils.ts",
-        "src/index.ts"
+        "src/conversion_utils.ts"
       ],
-      "scope_confidence": "medium"
+      "scope_confidence": "high"
     },
     "blocking_conditions": [],
     "attention_targets": [
-      "src/conversion_utils.ts",
-      "src/index.ts"
+      "src/conversion_utils.ts"
     ],
     "relevant_surfaces": [],
     "critical_relationships": []
