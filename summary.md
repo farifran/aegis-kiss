@@ -129,6 +129,7 @@ It is included to make the repository shape visible at a glance before the per-f
 ├── AGENTS.md
 ├── LICENSE.md
 ├── README.md
+├── otimizacao-modelos-menores.md
 ├── summary.md
 ├── eslint.config.js
 ├── package-lock.json
@@ -197,6 +198,8 @@ It is included to make the repository shape visible at a glance before the per-f
 │           └── test_validation_and_promotion.sh
 ├── src/
 │   ├── index.ts
+│   ├── conversion_utils.ts
+│   ├── tokenBucket.ts
 │   └── ui/
 │       ├── fake_import.ts
 │       └── index.ts
@@ -219,6 +222,7 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `AGENTS.md` | Aegis Cognition Contract. Guides how the model must interpret and reason within the authority defined by the runtime. It exists to enforce behavior discipline (Runtime Authority, Evidence Discipline, KISS, Ephemeral Cognition). | Loaded by `execute_mode.sh` to dynamically extract raw rules and set `AEGIS_CONSTITUTIONAL_PREAMBLE` before executing cognitive substrates. |
 | `README.md` | Public architecture and usage overview. Explains runtime, capabilities, modes, and common commands. It exists for operator orientation rather than normative control. | Summarizes the structure defined by `AGENTS.md`, `.harness/config.sh`, `runtime_aegis.sh`, `scripts/execute_mode.sh`, and the scripts under `scripts/`. |
 | `summary.md` | This repository map. Documents observed structure, file roles, current cross-file relationships, and known structural mismatches. | Secondary to `AGENTS.md` and `.harness/config.sh`; should stay aligned with `README.md`, runtime files, and the actual tree. |
+| `otimizacao-modelos-menores.md` | Guia de estratégias e caminhos recomendados para otimização do Aegis Harness com modelos menores (8B). | Documento de referência para evolução e refinamento futuro do orquestrador e substratos. |
 | `package.json` | Node package manifest for local tooling. Declares lint, typecheck, enforcement, and shell-based test scripts. It exists to make structural verification reproducible from one entrypoint. | Invokes `runtime_aegis.sh` and the test harnesses under `scripts/substrates/test/`. Depends on `eslint.config.js` and `tsconfig.json` for JS/TS validation. |
 | `package-lock.json` | NPM lockfile that pins exact dev dependency versions. | Freezes the toolchain used by `package.json`, especially TypeScript, ESLint, and ast-grep. |
 | `tsconfig.json` | TypeScript compiler policy for the small `src/` tree. It exists because the repository still wants typed structural discipline even though the main runtime is shell-based. | Used by `package.json` typecheck scripts and by `eslint.config.js` parser options. Covers `src/` and `.harness/`. |
@@ -316,6 +320,8 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `src/index.ts` | Empty TypeScript entry placeholder. Exists mainly to keep the TS toolchain anchored to a minimal source tree. | Included by `tsconfig.json` and linted by `eslint.config.js`; currently has no runtime relationship to the shell harness. |
 | `src/ui/index.ts` | Placeholder UI module with a comment only. | Serves as a minimal target for the ESLint boundaries rules that define a `ui` layer in `eslint.config.js`. |
 | `src/ui/fake_import.ts` | Minimal exported function used to keep the UI layer non-empty. | Exists so the `src/ui/` area contains executable TS content covered by `tsconfig.json` and ESLint rules. |
+| `src/conversion_utils.ts` | Utilitários de conversão matemática de bits/bytes. | Modificado por mutações guiadas do Aegis no pipeline. |
+| `src/tokenBucket.ts` | Implementação de limitador de taxa Token Bucket de alta precisão. | Gerado por mutação baseada em BigInt e bitmasks do Graph Protocol. |
 
 ## How the Main Files Work Together
 
@@ -519,6 +525,12 @@ Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aeg
 * **Prompt topology inversion for prefix-cache stability** (`scripts/substrates/raw_llm.sh`): the raw-substrate prompt is stacked by decreasing token half-life — constitutional preamble + skill contract + stable manifest projection at the head (system prompt, byte 0 static), and per-request volatile segments (investigation input, manifest metadata `generated_at`/`execution_id`/`manifest_hash`, execution identity) pushed to the tail under named headers. The stable manifest is a single bounded jq projection; the volatile identity wrappers are projected inline at the tail (no extra temp file). This is always on, stateless and backend-agnostic — it unlocks the serving side's automatic prefix caching (e.g. NVIDIA NIM) with zero cache-management state inside the harness. The aider mutation prompt keeps the actionable `mode_instructions` last (execution identity stays at the head) — moving it to the tail was found to degrade weak-model instruction following. A previous iteration carried a speculative `cache_salt` partition key + `AEGIS_LOCAL_LMCACHE` poison valve for self-hosted vLLM/LMCache backends; both were **purged under a YAGNI audit** (no local backend exists; the poison default also negated the topology's own benefit) — the harness is again a passive protocol VM with no cache flags.
 
 * **Surface-scoped mutation index (net-new index isolation)** (`scripts/substrates/aider_substrate.sh:scope_mutation_git_dir_to_surface`): the execution surface is a disposable `git worktree` with its own index. The substrate now resolves that worktree's git-dir (`git -C <surface> rev-parse --absolute-git-dir`) and scopes ALL mutation git operations — the net-new `git add --intent-to-add` pre-materialization, `git diff HEAD` capture, and rollback `reset`/`checkout`/`clean` — to it, instead of the operator's main `.git` (`AEGIS_MUTATION_GIT_DIR` default). Previously the intent-to-add landed in the operator's main index and was only cleared on the mutation-failure rollback path; a **successful** net-new creation therefore left a phantom empty-blob staged entry in the main index, which then resurfaced in `git ls-files` → the `git ls-files`-based pocket map → subsequent discovery/forensics prompts (a stale test file contaminating future investigations). Scoping to the worktree index makes cleanup structural: the index is destroyed when the surface is expunged, so no phantom survives on any exit path (success, failure, or signal). Guarded by the fail-powered `test_net_new_index_isolation.sh`.
+
+* **8B Model/Weak-Model Hardening & Loop Prevention** (`scripts/substrates/raw_llm.sh` & `scripts/substrates/aider_substrate.sh`):
+  - *Marker Resilience*: Added robust JSON object fallback extractor in `raw_llm.sh` to parse output between the first `{` and last `}` when the 8B model forgets or misformats the markers.
+  - *Aider Exit Code Tolerance*: Updated `aider_substrate.sh` to allow proceeding if edits are successfully applied and a valid diff is generated, even if Aider exits with a non-zero code due to post-edit summarizer thread pool crashes.
+  - *Strict Error Copying on validation/adversarial modes*: Prompts updated to enforce that findings and validation bases must copy the literal, exact error output of failing compiler/test checks instead of generating hallucinated and misleading natural-language descriptions. This keeps the feedback loop clean and Aider focused.
+
 
 ### Proven architectural properties (verified, not asserted)
 
