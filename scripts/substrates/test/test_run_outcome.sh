@@ -65,7 +65,7 @@ simulate_cleanup_outcome() {
   fi
 }
 
-# --- D remains: known token classify ---
+# --- D remains: known token classify (next_step now points at --fresh) ---
 line="$(aegis_classify_reason "investigation_input_mismatch")"
 class="${line%%$'\t'*}"
 next_step="${line#*$'\t'}"
@@ -74,6 +74,16 @@ next_step="${line#*$'\t'}"
   || fail "classify_mismatch_class: got '${class}'"
 [[ -n "${next_step}" ]] \
   || fail "classify_mismatch_empty_next_step"
+echo "${next_step}" | grep -q -- '--fresh' \
+  || fail "classify_mismatch_next_step_missing_fresh"
+
+line="$(aegis_classify_reason "fresh_resume_conflict")"
+class="${line%%$'\t'*}"
+next_step="${line#*$'\t'}"
+[[ "${class}" == "operator_input" ]] \
+  || fail "classify_fresh_resume_class: got '${class}'"
+[[ -n "${next_step}" ]] \
+  || fail "classify_fresh_resume_empty_next_step"
 
 # --- D remains: prefix match empty_diff:* ---
 line="$(aegis_classify_reason "empty_diff: aider produced no changes")"

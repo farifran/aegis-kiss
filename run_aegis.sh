@@ -37,6 +37,10 @@ Options:
   --pipeline NAME      Select pipeline by name (mutation|readonly)
   --resume             Continue from the mode after the last
                        .harness/runtime/epistemic_handover.json snapshot
+  --fresh              Start a new investigation: wipe handover (and
+                       last_good_*) before the pipeline, then bind the
+                       new demand from discovery. Mutually exclusive
+                       with --resume.
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Investigate GitHub issue #N
@@ -67,11 +71,14 @@ declare -A PIPELINES=(
 PIPELINE="mutation"
 TARGET=""
 RESUME=false
+FRESH_INVESTIGATION=false
 UNTIL=""
 FORCE_APPLY=false
 ISSUE_NUMBER=""
 INVESTIGATION_INPUT=""
 declare -a POSITIONAL=()
+
+readonly LAST_GOOD_HANDOVER_FILE=".harness/runtime/last_good_epistemic_handover.json"
 
 declare -A MODE_TIMINGS
 declare -A MODE_STATUS
@@ -185,6 +192,14 @@ mark_remaining_skipped() {
 
 clear_operator_breadcrumbs() {
   rm -f "${LAST_FATAL_FILE}" 2>/dev/null || true
+
+  # --fresh: atomic investigation rebind at the orchestrator only.
+  # Total reset — last_good_* must go too so recovery cannot resurrect
+  # the previous demand. Runtime resolve_runtime_investigation_input
+  # stays fail-hard and is never relaxed.
+  if [[ "${FRESH_INVESTIGATION}" == "true" ]]; then
+    rm -f "${HANDOVER_FILE}" "${LAST_GOOD_HANDOVER_FILE}" 2>/dev/null || true
+  fi
 }
 
 # Wipe the intra-pipeline evidence cache so modes never reuse payloads
@@ -626,6 +641,10 @@ parse_cli() {
         RESUME=true
         ;;
 
+      --fresh)
+        FRESH_INVESTIGATION=true
+        ;;
+
       --force-apply)
         FORCE_APPLY=true
         ;;
@@ -666,6 +685,14 @@ parse_cli() {
 main() {
 
   parse_cli "$@"
+
+  # --fresh wipes the handover that --resume needs — operator contradiction.
+  if [[ "${FRESH_INVESTIGATION}" == "true" ]] && [[ "${RESUME}" == "true" ]]; then
+    mkdir -p "$(dirname "${LAST_FATAL_FILE}")" 2>/dev/null || true
+    printf '%s\n' "fresh_resume_conflict" > "${LAST_FATAL_FILE}" 2>/dev/null || true
+    echo "[RUN][FATAL] fresh_resume_conflict" >&2
+    exit 1
+  fi
 
   resolve_default_target
 

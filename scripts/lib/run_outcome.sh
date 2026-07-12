@@ -33,11 +33,15 @@ aegis_classify_reason() {
   case "${token}" in
     investigation_input_mismatch)
       class="operator_input"
-      next_step="Handover guarda outra demanda: apague .harness/runtime/epistemic_handover.json ou rode discovery com a nova demanda"
+      next_step="Handover guarda outra demanda: re-execute run_aegis.sh --fresh '<nova demanda>' para investigation nova, ou repita a demanda anterior byte-idêntica"
       ;;
     investigation_input_conflict)
       class="operator_input"
       next_step="Demanda CLI difere de AEGIS_INVESTIGATION_INPUT; passe só uma"
+      ;;
+    fresh_resume_conflict)
+      class="operator_input"
+      next_step="--fresh e --resume são mutuamente exclusivos; escolha um"
       ;;
     missing_provider_api_key)
       class="environment"
