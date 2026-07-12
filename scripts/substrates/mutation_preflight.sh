@@ -23,6 +23,10 @@
 #   AEGIS_EXECUTION_ID   required for JSON capability payloads
 #   AEGIS_SUBSTRATE_ROOT optional; defaults to repo root of this script
 #   AEGIS_MUTATION_PREFLIGHT=0  disable entirely (exit 0)
+#   AEGIS_PREFLIGHT_CHANGED_FILES  optional newline-separated list of
+#     paths changed by the mutation. When set, typescript.check failures
+#     that only cite pre-existing files outside this set are treated as
+#     baseline pollution (warn + pass), not a hard mutation reject.
 #
 # Exit 0 — passed or skipped
 # Exit 1 — at least one check failed (payloads still written when possible)
@@ -169,10 +173,53 @@ test_status="$(
     "package.json"
 )"
 
+# ---------------------------------------------------------
+# Delta gate: pre-existing tsc debt outside the mutation
+# must not abort a candidate that only touches clean files.
+# ---------------------------------------------------------
+
+tsc_effective="${tsc_status}"
+tsc_delta_note=""
+
+if [[ "${tsc_status}" == "failed" ]] \
+  && [[ -n "${AEGIS_PREFLIGHT_CHANGED_FILES:-}" ]] \
+  && [[ -f "${PAYLOAD_DIR}/typescript_check.json" ]]; then
+
+  # Normalize changed paths for comparison (strip leading ./).
+  changed_json="$(
+    printf '%s\n' "${AEGIS_PREFLIGHT_CHANGED_FILES}" \
+      | sed 's|^\./||' \
+      | jq -R . \
+      | jq -s 'map(select(length > 0))'
+  )"
+
+  mutation_error_count="$(
+    jq -r \
+      --argjson changed "${changed_json}" \
+      '
+        def norm: gsub("^\\./"; "");
+        [.payload.errors[]? | .file | norm] as $err_files
+        | [$err_files[] | select(. as $f | any($changed[]; . == $f or ($f | startswith(. + "/")) or (. | startswith($f + "/"))))]
+        | length
+      ' "${PAYLOAD_DIR}/typescript_check.json" 2>/dev/null || printf '0'
+  )"
+
+  if [[ "${mutation_error_count}" == "0" ]]; then
+    tsc_effective="passed"
+    tsc_delta_note="baseline_only"
+    preflight_warn "typescript.check reported failures outside mutation files — treating as baseline (changed=${changed_json})"
+  else
+    tsc_delta_note="mutation_errors=${mutation_error_count}"
+    preflight_warn "typescript.check failures touch mutation files (${tsc_delta_note})"
+  fi
+fi
+
 # Persist a tiny index so operators/downstream can see preflight outcome
 # without re-parsing each payload.
 jq -n \
   --arg ts "${tsc_status}" \
+  --arg ts_effective "${tsc_effective}" \
+  --arg ts_delta "${tsc_delta_note}" \
   --arg test "${test_status}" \
   --arg surface "${SURFACE_PATH}" \
   --arg execution_id "${AEGIS_EXECUTION_ID}" \
@@ -183,19 +230,21 @@ jq -n \
     payload: {
       surface: $surface,
       typescript_check: $ts,
+      typescript_check_effective: $ts_effective,
+      typescript_delta: $ts_delta,
       test_run: $test
     },
     error: null,
     success: true
   }' > "${PAYLOAD_DIR}/mutation_preflight.json" 2>/dev/null || true
 
-[[ "${tsc_status}" == "failed" ]] && failed=1
+[[ "${tsc_effective}" == "failed" ]] && failed=1
 [[ "${test_status}" == "failed" ]] && failed=1
 
 if [[ "${failed}" -ne 0 ]]; then
-  preflight_warn "mutation preflight FAILED (typescript_check=${tsc_status}, test_run=${test_status})"
+  preflight_warn "mutation preflight FAILED (typescript_check=${tsc_effective}, test_run=${test_status})"
   exit 1
 fi
 
-preflight_log "mutation preflight ok (typescript_check=${tsc_status}, test_run=${test_status})"
+preflight_log "mutation preflight ok (typescript_check=${tsc_effective}, test_run=${test_status})"
 exit 0

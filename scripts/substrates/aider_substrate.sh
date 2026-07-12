@@ -1057,9 +1057,28 @@ run_mutation_preflight() {
 
   aegis_log "Running one-shot mutation preflight (typescript.check + test.run)..."
 
+  # Surface the mutation file set so preflight can ignore pre-existing
+  # typescript debt outside the candidate (baseline pollution).
+  local changed_files=""
+  changed_files="$(
+    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" diff --name-only HEAD 2>/dev/null \
+      || true
+  )"
+  # Also include intent-to-add / untracked paths that form part of the
+  # mutation (net-new files) so their tsc errors are still gated.
+  local untracked=""
+  untracked="$(
+    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" ls-files --others --exclude-standard 2>/dev/null \
+      || true
+  )"
+  if [[ -n "${untracked}" ]]; then
+    changed_files="$(printf '%s\n%s\n' "${changed_files}" "${untracked}" | sed '/^$/d')"
+  fi
+
   if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
+    AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
     bash "${preflight_script}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}" \
       "${AIDER_CAPABILITY_PAYLOAD_DIR}"

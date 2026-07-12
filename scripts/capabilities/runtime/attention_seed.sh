@@ -224,6 +224,19 @@ jq -n \
             confidence: "high",
             state: "layer0"
           }
+        # Prefer evidence-target hot files (even without lexical resonance)
+        # before falling through to empty/none — fine discovery has no
+        # topology hotspots, so churn under the SUT is the next best prior.
+        elif (($layer0.hot_files // []) | length) > 0 then
+          {
+            targets: ([($layer0.hot_files // [])[] | .file] | unique),
+            scope: "layer0:hot_files",
+            reason: "highest-churn files under evidence target (no resonant match)",
+            rule: "layer0_hot_files_churn",
+            source: "runtime.layer0_facts.hot_files",
+            confidence: "medium",
+            state: "layer0"
+          }
         elif ($entrypoints | length) > 0 then
           {
             targets: ([$entrypoints[] | .file] | unique),
@@ -295,8 +308,10 @@ jq -n \
         (if ($sel.state == "none") then "no topology targets available" else empty end)
       ]) as $blocking_conditions
 
-    # attention_targets: hotspots in the investigation scope
-    | ([$hotspots[] | select(.file | IN($capped[])) | .file] | unique) as $attention_targets
+    # attention_targets MUST equal the selected capped set. Previously this
+    # field only kept topology hotspots intersecting $capped, which emptied
+    # attention under fine (layer0-only) discovery and broke handover focus.
+    | ($capped) as $attention_targets
 
     # relevant_surfaces: surfaces containing attention or scope targets
     | ([($capped + $attention_targets) | unique | .[] | $ti.node_index[.] | .surface_ref // empty] | [.[] | select(. != null and startswith("surface_cluster_"))] | unique) as $relevant_surfaces

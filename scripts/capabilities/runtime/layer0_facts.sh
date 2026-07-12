@@ -59,6 +59,24 @@ build_layer0_census() {
   else
     git ls-files 2>/dev/null > "${CENSUS_FILE}" || true
   fi
+
+  # Scope census to the capability target when it is a subpath of the
+  # repository (e.g. default AEGIS_EVIDENCE_TARGET_PATH=src). Without this,
+  # package.json harness scripts dominate declared entrypoints and attention
+  # drifts onto runtime_aegis.sh instead of the system under investigation.
+  local scope="${TARGET_PATH:-.}"
+  scope="${scope#./}"
+  scope="${scope%/}"
+  if [[ -n "${scope}" && "${scope}" != "." ]]; then
+    local scoped
+    scoped="$(aegis_mktemp)"
+    grep -E "^(${scope}|${scope}/)" "${CENSUS_FILE}" > "${scoped}" 2>/dev/null || true
+    if [[ -s "${scoped}" ]]; then
+      mv "${scoped}" "${CENSUS_FILE}"
+    else
+      rm -f "${scoped}"
+    fi
+  fi
 }
 
 census_has_path() {
@@ -264,13 +282,28 @@ layer0_import_gravity() {
 
 # layer0_hot_files — emits the top-10 hot-files array over CENSUS_FILE,
 # fusing churn with lexical resonance against AEGIS_INVESTIGATION_INPUT.
+#
+# Resonance rules (KISS, deterministic):
+#   1. lowercase + ASCII-fold accents on tokens and the full relative path
+#   2. token is a substring of the path (or basename stem)
+#   3. token length >= 5 and its 5-char prefix appears in the path
+#      (bridges "conversão"/"conversao" → "conversion_utils")
 layer0_hot_files() {
 
   local tokens_tmp hot_tmp
   tokens_tmp="$(aegis_mktemp)"
   hot_tmp="$(aegis_mktemp)"
 
-  printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
+  # Tokenize investigation input; fold Latin accents when iconv is present.
+  {
+    if command -v iconv >/dev/null 2>&1; then
+      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
+        | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null \
+        || printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}"
+    else
+      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}"
+    fi
+  } \
     | tr -cs '[:alnum:]_.-' '\n' \
     | awk 'length($0) >= 4 { print tolower($0) }' \
     | sort -u > "${tokens_tmp}"
@@ -280,17 +313,35 @@ layer0_hot_files() {
     | grep -Fxf "${CENSUS_FILE:-/dev/null}" \
     | sort | uniq -c | sort -rn \
     | while read -r churn file; do
-        local score resonance base token
+        local score resonance path_norm base token prefix
         score="${churn}"
         resonance=0
-        base="$(basename "${file%.*}" | tr '[:upper:]' '[:lower:]')"
+        path_norm="$(
+          if command -v iconv >/dev/null 2>&1; then
+            printf '%s' "${file}" \
+              | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null \
+              || printf '%s' "${file}"
+          else
+            printf '%s' "${file}"
+          fi \
+            | tr '[:upper:]' '[:lower:]'
+        )"
+        base="$(basename "${path_norm%.*}")"
         if [[ -s "${tokens_tmp}" ]]; then
           while IFS= read -r token; do
             [[ -n "${token}" ]] || continue
-            if [[ "${base}" == *"${token}"* ]]; then
+            if [[ "${path_norm}" == *"${token}"* || "${base}" == *"${token}"* ]]; then
               score=$((score + 10))
               resonance=1
               break
+            fi
+            if [[ "${#token}" -ge 5 ]]; then
+              prefix="${token:0:5}"
+              if [[ "${path_norm}" == *"${prefix}"* || "${base}" == *"${prefix}"* ]]; then
+                score=$((score + 10))
+                resonance=1
+                break
+              fi
             fi
           done < "${tokens_tmp}"
         fi

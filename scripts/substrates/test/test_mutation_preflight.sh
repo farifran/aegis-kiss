@@ -95,4 +95,39 @@ jq -e '.payload.typescript_check == "failed"' \
   "${payloads}/mutation_preflight.json" >/dev/null \
   || fail "preflight_index_missing_tsc_failed"
 
+# --- baseline pollution: tsc fails only outside changed files → pass ---
+rm -rf "${payloads:?}"/*
+mkdir -p "${payloads}" "${surface}/src"
+cat > "${surface}/tsconfig.json" <<'JSON'
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+JSON
+cat > "${surface}/src/legacy_broken.ts" <<'EOF'
+export const x: number = "not-a-number";
+EOF
+cat > "${surface}/src/clean_mutation.ts" <<'EOF'
+export function ok(): number { return 1; }
+EOF
+
+if ! AEGIS_PREFLIGHT_CHANGED_FILES="src/clean_mutation.ts" \
+  bash "${PREFLIGHT}" "${surface}" "${payloads}" 2>/dev/null; then
+  fail "baseline_only_tsc_errors_should_not_fail_preflight"
+fi
+
+jq -e '
+  .payload.typescript_check == "failed"
+  and .payload.typescript_check_effective == "passed"
+  and .payload.typescript_delta == "baseline_only"
+' "${payloads}/mutation_preflight.json" >/dev/null \
+  || fail "unexpected_baseline_delta_index: $(cat "${payloads}/mutation_preflight.json")"
+
 echo "[PASS] mutation preflight"

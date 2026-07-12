@@ -351,7 +351,7 @@ resolve_capability_argument() {
 
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
       ;;
-    filesystem.list_tree|filesystem.extract_import_graph|filesystem.extract_reference_graph|filesystem.extract_symbols|filesystem.extract_entrypoints|filesystem.extract_test_relationships|filesystem.extract_configuration_structure|filesystem.extract_responsibilities|structural.builder)
+    filesystem.list_tree|filesystem.extract_import_graph|filesystem.extract_reference_graph|filesystem.extract_symbols|filesystem.extract_entrypoints|filesystem.extract_test_relationships|filesystem.extract_configuration_structure|filesystem.extract_responsibilities|structural.builder|runtime.layer0_facts|runtime.attention_seed)
       printf '%s' "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
       ;;
     *)
@@ -667,14 +667,31 @@ generate_pocket_map() {
   done
   prune_expr="${prune_expr%|}"
 
+  # When an evidence target directory is set (default: src), the census
+  # should describe the system under investigation — not the harness tree.
+  local target_prefix="${AEGIS_EVIDENCE_TARGET_PATH:-.}"
+  target_prefix="${target_prefix#./}"
+  target_prefix="${target_prefix%/}"
+
   git ls-files 2>/dev/null \
     | { if [[ -n "${prune_expr}" ]]; then grep -Ev "${prune_expr}"; else cat; fi } \
+    | {
+        if [[ -n "${target_prefix}" && "${target_prefix}" != "." ]]; then
+          grep -E "^(${target_prefix}|${target_prefix}/)" || true
+        else
+          cat
+        fi
+      } \
     | head -n "${AEGIS_POCKET_MAP_MAX_LINES}" \
     > "${map_file}" || true
 
   export AEGIS_POCKET_MAP_FILE="${map_file}"
 
-  aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths (full census)"
+  if [[ -n "${target_prefix}" && "${target_prefix}" != "." ]]; then
+    aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths (target=${target_prefix})"
+  else
+    aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths (full census)"
+  fi
 }
 
 mode_uses_attention_zoom() {
