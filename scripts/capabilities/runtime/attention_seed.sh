@@ -11,20 +11,23 @@
 #
 # Responsibilities:
 #
-# - consume the structural.builder payload already materialized
-#   in the capability payload directory
+# - consume Layer 0 facts and/or structural.builder when present
 # - derive attention targets deterministically using the rule:
 #
-#     if observed_request_alignment.resolved_paths is non-empty
-#         attention = resolved_paths (explicit request)
-#     else if hotspots exist
-#         attention = top hotspot files
-#     else if bridges exist
-#         attention = bridge endpoint files
-#     else if entrypoints exist
+#     if observed_request_alignment exact paths (builder)
+#         attention = exact resolved paths
+#     else if layer0 resonant hot_files
+#         attention = resonant churn files
+#     else if topology hotspots/bridges (builder)
+#         attention = topology-derived files
+#     else if layer0 declared entrypoints
+#         attention = manifest entrypoints
+#     else if topology entrypoints (builder)
 #         attention = entrypoint files
 #     else
 #         attention = [] (no targets)
+#
+# Fine discovery depth may omit structural.builder entirely.
 #
 # - emit a handover_attention object consumable verbatim by
 #   the Discovery mode and by runtime_aegis.sh for epistemic
@@ -59,14 +62,20 @@ readonly MAX_ATTENTION_TARGETS="${AEGIS_ATTENTION_SEED_MAX_TARGETS:-5}"
 readonly GENERATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # =========================================================
-# MISSING BUILDER PAYLOAD — fail-fast
-# structural.builder is a required predecessor. If its payload
-# is missing, attention_seed cannot derive attention deterministically.
-# Emit success: false so validate_materialized_payload aborts before
-# the LLM is called. This prevents degraded artifacts.
+# PREDECESSOR RESOLUTION
 # =========================================================
+# Fine discovery depth: Layer 0 only (no structural.builder).
+# Deep discovery depth: structural.builder + Layer 0.
+# Fail only when neither predecessor is available.
 
-if [[ ! -f "${BUILDER_PAYLOAD}" ]]; then
+readonly LAYER0_PAYLOAD_FILE="${PAYLOAD_DIR}/runtime_layer0_facts.json"
+HAS_BUILDER="false"
+HAS_LAYER0="false"
+
+[[ -f "${BUILDER_PAYLOAD}" ]] && HAS_BUILDER="true"
+[[ -f "${LAYER0_PAYLOAD_FILE}" ]] && HAS_LAYER0="true"
+
+if [[ "${HAS_BUILDER}" != "true" ]] && [[ "${HAS_LAYER0}" != "true" ]]; then
   jq -n \
     --arg capability "runtime.attention_seed" \
     --arg classification "readonly" \
@@ -82,7 +91,7 @@ if [[ ! -f "${BUILDER_PAYLOAD}" ]]; then
       payload: null,
       error: {
         type: "missing_required_predecessor",
-        target: "structural.builder"
+        target: "runtime.layer0_facts|structural.builder"
       }
     }'
   exit 0
@@ -90,13 +99,23 @@ fi
 
 # =========================================================
 # DETERMINISTIC ATTENTION SELECTION
-# Rule: explicit > hotspot > bridge > entrypoint > none
+# Rule: explicit > layer0 hot > topology hotspot/bridge > layer0 entry > none
 # =========================================================
 
-# Layer 0 recognition priors (optional predecessor payload).
 LAYER0_PAYLOAD_JSON="$(
-  jq -c '.payload // {}' "${PAYLOAD_DIR}/runtime_layer0_facts.json" 2>/dev/null \
-    || printf '{}'
+  if [[ "${HAS_LAYER0}" == "true" ]]; then
+    jq -c '.payload // {}' "${LAYER0_PAYLOAD_FILE}" 2>/dev/null || printf '{}'
+  else
+    printf '{}'
+  fi
+)"
+
+BUILDER_PAYLOAD_JSON="$(
+  if [[ "${HAS_BUILDER}" == "true" ]]; then
+    jq -c '.payload // {}' "${BUILDER_PAYLOAD}" 2>/dev/null || printf '{}'
+  else
+    printf '{}'
+  fi
 )"
 
 jq -n \
@@ -106,10 +125,10 @@ jq -n \
   --arg generated_at "${GENERATED_AT}" \
   --arg target "${TARGET_PATH}" \
   --arg max_targets "${MAX_ATTENTION_TARGETS}" \
-  --slurpfile builder "${BUILDER_PAYLOAD}" \
+  --argjson builder "${BUILDER_PAYLOAD_JSON}" \
   --argjson layer0 "${LAYER0_PAYLOAD_JSON}" \
   '
-    ($builder[0].payload // {}) as $bp
+    ($builder // {}) as $bp
     | ($bp.observed_request_alignment // {}) as $ora
     | ($ora.resolved_paths // []) as $resolved
     | ($ora.path_resolutions // []) as $path_res

@@ -16,8 +16,10 @@
 
 set -Eeuo pipefail
 
-# Ensure node/npm is in PATH
-export PATH="/Users/rafaelfarias/.gemini/antigravity/bin:$PATH"
+# Prefer project-local tooling when present; never inject machine-absolute PATH.
+if [[ -d "node_modules/.bin" ]]; then
+  export PATH="${PWD}/node_modules/.bin:${PATH}"
+fi
 
 # Determine if we should output JSON
 # JSON is output if AEGIS_EXECUTION_ID is set or if --json is passed

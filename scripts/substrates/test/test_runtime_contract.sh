@@ -18,8 +18,7 @@ assert_manifest_uses_filesystem_read_only() {
     and (.modes.discovery.evidence_capabilities == [
       "filesystem.list_tree",
       "filesystem.read",
-      "filesystem.extract_responsibilities",
-      "structural.builder",
+      "runtime.layer0_facts",
       "runtime.attention_seed"
     ])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])

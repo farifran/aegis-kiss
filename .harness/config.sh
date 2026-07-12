@@ -34,10 +34,26 @@ readonly AEGIS_ROOT_DIR="$(
 )"
 
 # =========================================================
-# SYSTEM METADATA
+# CONFIG FATAL HELPER
 # =========================================================
+# Prefer shared aegis_fatal when the common lib is already loaded;
+# otherwise emit a stable CONFIG-tagged fatal without machine-local
+# PATH hacks or duplicated logging conventions.
 
-export PATH="/Users/rafaelfarias/.gemini/antigravity/bin:$PATH"
+# Soft reject for validate_* helpers (return 1 to the caller).
+aegis_config_reject() {
+  echo "[AEGIS][CONFIG][FATAL] $*" >&2
+  return 1
+}
+
+# Hard fatal for unrecoverable config resolution failures.
+aegis_config_fatal() {
+  if declare -f aegis_fatal >/dev/null 2>&1; then
+    AEGIS_LOG_TAG="${AEGIS_LOG_TAG:-CONFIG}" aegis_fatal "$@"
+  fi
+  echo "[AEGIS][CONFIG][FATAL] $*" >&2
+  exit 1
+}
 
 # =========================================================
 # RUNTIME TOPOLOGY
@@ -102,8 +118,7 @@ export AEGIS_OPERATOR_MODEL_RAW
 if [[ "${AEGIS_REQUIRE_MODEL:-}" == "1" ]] \
   && [[ "${AEGIS_MODEL_RESOLVED:-}" != "1" ]] \
   && [[ -z "${AEGIS_OPERATOR_MODEL_RAW}" ]]; then
-  echo "[AEGIS][CONFIG][FATAL] missing_model_configuration" >&2
-  exit 1
+  aegis_config_fatal "missing_model_configuration"
 fi
 
 if [[ -z "${OPENAI_MODEL_READONLY_COGNITION:-}" ]] \
@@ -391,14 +406,49 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 # =========================================================
 # MODE EVIDENCE PROFILES
 # =========================================================
+#
+# Discovery evidence depth (KISS default = fine):
+#   fine — Layer 0 baseline only (cheap, no graph extractors)
+#   deep — full structural composition (builder + extractors)
+#
+# Deep extractors remain in the discovery capability envelope so
+# required_evidence augmentation and AEGIS_DISCOVERY_DEPTH=deep can
+# still request them without re-registering handlers.
 
-declare -ar AEGIS_DISCOVERY_EVIDENCE=(
+: "${AEGIS_DISCOVERY_DEPTH:=fine}"
+export AEGIS_DISCOVERY_DEPTH
+
+# Fine default: topology census + handover + deterministic Layer 0
+# priors + attention seed. structural.builder is NOT required.
+declare -ar AEGIS_DISCOVERY_EVIDENCE_FINE=(
   "filesystem.list_tree"
   "filesystem.read:epistemic_handover"
+  "runtime.layer0_facts"
+  "runtime.attention_seed"
+)
+
+# Deep profile: prior fine set plus second-order topology composition.
+# structural.builder materializes its extractor dependencies as a side
+# effect; extract_responsibilities is listed so it also enters the
+# selected evidence set for the model when operators opt into depth.
+declare -ar AEGIS_DISCOVERY_EVIDENCE_DEEP=(
+  "filesystem.list_tree"
+  "filesystem.read:epistemic_handover"
+  "runtime.layer0_facts"
   "filesystem.extract_responsibilities"
   "structural.builder"
   "runtime.attention_seed"
 )
+
+if [[ "${AEGIS_DISCOVERY_DEPTH}" == "deep" ]]; then
+  declare -ar AEGIS_DISCOVERY_EVIDENCE=(
+    "${AEGIS_DISCOVERY_EVIDENCE_DEEP[@]}"
+  )
+else
+  declare -ar AEGIS_DISCOVERY_EVIDENCE=(
+    "${AEGIS_DISCOVERY_EVIDENCE_FINE[@]}"
+  )
+fi
 
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "filesystem.search_symbol"
@@ -451,10 +501,9 @@ declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(
 
 validate_provider_configuration() {
 
-  [[ -n "${OPENAI_API_BASE}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_openai_api_base" >&2
-    return 1
-  }
+  [[ -n "${OPENAI_API_BASE}" ]] \
+    || aegis_config_reject "missing_openai_api_base" \
+    || return 1
 
   # Model presence is only demanded in model-requiring contexts
   # (AEGIS_REQUIRE_MODEL=1). When demanded, assert on AEGIS_OPERATOR_MODEL_RAW
@@ -462,49 +511,41 @@ validate_provider_configuration() {
   # validates genuine operator/injected configuration rather than the
   # post-default tautology of checking a variable the model block just set.
   if [[ "${AEGIS_REQUIRE_MODEL:-}" == "1" ]]; then
-    [[ -n "${AEGIS_OPERATOR_MODEL_RAW:-}" ]] || {
-      echo "[AEGIS][CONFIG][FATAL] missing_readonly_cognition_model" >&2
-      return 1
-    }
+    [[ -n "${AEGIS_OPERATOR_MODEL_RAW:-}" ]] \
+      || aegis_config_reject "missing_readonly_cognition_model" \
+      || return 1
   fi
 
-  [[ -n "${AEGIS_PROVIDER_MAX_RETRIES}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_provider_max_retries" >&2
-    return 1
-  }
+  [[ -n "${AEGIS_PROVIDER_MAX_RETRIES}" ]] \
+    || aegis_config_reject "missing_provider_max_retries" \
+    || return 1
 
-  [[ -n "${AEGIS_PROVIDER_RETRY_DELAY}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_provider_retry_delay" >&2
-    return 1
-  }
+  [[ -n "${AEGIS_PROVIDER_RETRY_DELAY}" ]] \
+    || aegis_config_reject "missing_provider_retry_delay" \
+    || return 1
 
-  [[ -n "${AEGIS_PROVIDER_CONNECT_TIMEOUT}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_provider_connect_timeout" >&2
-    return 1
-  }
+  [[ -n "${AEGIS_PROVIDER_CONNECT_TIMEOUT}" ]] \
+    || aegis_config_reject "missing_provider_connect_timeout" \
+    || return 1
 
-  [[ -n "${AEGIS_PROVIDER_RESPONSE_TIMEOUT}" ]] || {
-    echo "[AEGIS][CONFIG][FATAL] missing_provider_response_timeout" >&2
-    return 1
-  }
+  [[ -n "${AEGIS_PROVIDER_RESPONSE_TIMEOUT}" ]] \
+    || aegis_config_reject "missing_provider_response_timeout" \
+    || return 1
 }
 
 validate_evidence_policy() {
 
-  [[ "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" -gt 0 ]] || {
-    echo "[AEGIS][CONFIG][FATAL] invalid_evidence_total_budget" >&2
-    return 1
-  }
+  [[ "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES}" -gt 0 ]] \
+    || aegis_config_reject "invalid_evidence_total_budget" \
+    || return 1
 
-  [[ "${AEGIS_EVIDENCE_MAX_FILES}" -gt 0 ]] || {
-    echo "[AEGIS][CONFIG][FATAL] invalid_evidence_file_budget" >&2
-    return 1
-  }
+  [[ "${AEGIS_EVIDENCE_MAX_FILES}" -gt 0 ]] \
+    || aegis_config_reject "invalid_evidence_file_budget" \
+    || return 1
 
-  [[ "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES}" -gt 0 ]] || {
-    echo "[AEGIS][CONFIG][FATAL] invalid_capability_payload_budget" >&2
-    return 1
-  }
+  [[ "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES}" -gt 0 ]] \
+    || aegis_config_reject "invalid_capability_payload_budget" \
+    || return 1
 }
 
 validate_capability_registry() {
@@ -520,15 +561,13 @@ validate_capability_registry() {
     [[ -n "${seen[$capability]:-}" ]] && continue
     seen["$capability"]=1
 
-    [[ -n "${AEGIS_CAPABILITY_HANDLERS[$capability]:-}" ]] || {
-      echo "[AEGIS][CONFIG][FATAL] unregistered_capability_handler: ${capability}" >&2
-      return 1
-    }
+    [[ -n "${AEGIS_CAPABILITY_HANDLERS[$capability]:-}" ]] \
+      || aegis_config_reject "unregistered_capability_handler: ${capability}" \
+      || return 1
 
-    [[ -n "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}" ]] || {
-      echo "[AEGIS][CONFIG][FATAL] missing_capability_argument_contract: ${capability}" >&2
-      return 1
-    }
+    [[ -n "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}" ]] \
+      || aegis_config_reject "missing_capability_argument_contract: ${capability}" \
+      || return 1
 
   done
 }
@@ -548,23 +587,20 @@ validate_evidence_profiles() {
     profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$mode]}"
     envelope_name="${AEGIS_MODE_CAPABILITY_MAP[$mode]:-}"
 
-    [[ -n "${envelope_name}" ]] || {
-      echo "[AEGIS][CONFIG][FATAL] missing_capability_envelope_for_mode: ${mode}" >&2
-      return 1
-    }
+    [[ -n "${envelope_name}" ]] \
+      || aegis_config_reject "missing_capability_envelope_for_mode: ${mode}" \
+      || return 1
 
-    declare -p "${profile_name}" >/dev/null 2>&1 || {
-      echo "[AEGIS][CONFIG][FATAL] missing_evidence_profile_array: ${profile_name}" >&2
-      return 1
-    }
+    declare -p "${profile_name}" >/dev/null 2>&1 \
+      || aegis_config_reject "missing_evidence_profile_array: ${profile_name}" \
+      || return 1
 
     declare -n profile_ref="${profile_name}"
     declare -n envelope_ref="${envelope_name}"
 
-    [[ "${#profile_ref[@]}" -gt 0 ]] || {
-      echo "[AEGIS][CONFIG][FATAL] empty_evidence_profile_array: ${profile_name}" >&2
-      return 1
-    }
+    [[ "${#profile_ref[@]}" -gt 0 ]] \
+      || aegis_config_reject "empty_evidence_profile_array: ${profile_name}" \
+      || return 1
 
     for capability in "${profile_ref[@]}"; do
 
@@ -579,10 +615,9 @@ validate_evidence_profiles() {
         fi
       done
 
-      [[ "${capability_is_authorized}" == "true" ]] || {
-        echo "[AEGIS][CONFIG][FATAL] evidence_capability_outside_envelope: ${mode}:${capability}" >&2
-        return 1
-      }
+      [[ "${capability_is_authorized}" == "true" ]] \
+        || aegis_config_reject "evidence_capability_outside_envelope: ${mode}:${capability}" \
+        || return 1
 
     done
 
@@ -591,10 +626,9 @@ validate_evidence_profiles() {
 
 validate_filesystem_prune_policy() {
 
-  [[ "${#AEGIS_FILESYSTEM_PRUNE_PATHS[@]}" -gt 0 ]] || {
-    echo "[AEGIS][CONFIG][FATAL] empty_filesystem_prune_policy" >&2
-    return 1
-  }
+  [[ "${#AEGIS_FILESYSTEM_PRUNE_PATHS[@]}" -gt 0 ]] \
+    || aegis_config_reject "empty_filesystem_prune_policy" \
+    || return 1
 }
 
 validate_aegis_configuration() {

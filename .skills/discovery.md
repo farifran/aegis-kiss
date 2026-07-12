@@ -44,5 +44,8 @@ Output MUST be exactly one JSON object wrapped in `AEGIS_ARTIFACT_BEGIN` and `AE
 - **`rationale`**: One dense string with the prioritization rationale — the deciding fact, not a narrative.
 - **`required_evidence`**: Capabilities or files to collect next (`filesystem.read:<path>` entries).
 
+## EVIDENCE DEPTH
+Default discovery evidence is **fine**: `list_tree`, handover, `runtime.layer0_facts`, and `runtime.attention_seed`. Full topology composition (`structural.builder` and extractors) is opt-in via `AEGIS_DISCOVERY_DEPTH=deep` or via `required_evidence` augmentation on a later pass. Do not invent graph metrics that were not injected.
+
 ## FAILURE POLICY
-If `structural.builder` payload is unavailable or failed, state the gap in `observations`, keep `required_evidence` at `[]`, and explain in `rationale` why evidence collection is blocked.
+If `runtime.layer0_facts` is unavailable or failed, state the gap in `observations`, keep `required_evidence` at `[]`, and explain in `rationale` why evidence collection is blocked. Absence of `structural.builder` under fine depth is expected — not a failure.
