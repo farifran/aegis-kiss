@@ -1,0 +1,26 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript)
+# Empty catch blocks hide operational failure surfaces.
+# =========================================================
+
+id: no-empty-catch-typescript
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Empty catch blocks hide operational failure surfaces.
+
+rule:
+  any:
+    - pattern: |
+        try {
+          $$$TRY
+        } catch ($ERR) {
+        }
+    - pattern: |
+        try {
+          $$$TRY
+        } catch {
+        }

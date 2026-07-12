@@ -13,7 +13,7 @@
 
     "aegis:lint": "eslint .",
 
-    "aegis:enforce": "sg scan -r .harness/enforcement/ast_grep_rules.yml",
+    "aegis:enforce": "bash scripts/substrates/static_gate.sh --workspace src",
 
     "aegis:verify-structure": "npm run aegis:typecheck && npm run aegis:lint",
 
@@ -57,7 +57,11 @@
 
     "aegis:test:net-new-index-isolation": "bash scripts/substrates/test/test_net_new_index_isolation.sh",
 
-    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation",
+    "aegis:test:static-gate": "bash scripts/substrates/test/test_static_gate.sh",
+
+    "aegis:test:context-pruning": "bash scripts/substrates/test/test_context_pruning.sh",
+
+    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation && npm run aegis:test:static-gate && npm run aegis:test:context-pruning",
 
     "aegis:sanity": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
 

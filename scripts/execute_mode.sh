@@ -624,9 +624,39 @@ materialize_capability_payloads() {
 
 : "${AEGIS_POCKET_MAP_MAX_LINES:=400}"
 
+# Marker line written at the head of a focused pocket map so substrates
+# can label the prompt section without an extra env-var surface.
+readonly AEGIS_POCKET_MAP_FOCUSED_MARKER="# attention-focused — full path census omitted"
+
 generate_pocket_map() {
 
   local map_file="${AEGIS_CAPABILITY_ENV_DIR}/pocket_map.txt"
+  local attention_targets_json="[]"
+  local target_count=0
+
+  # When a downstream mode already carries explicit attention targets,
+  # the full flat path census is noise: collapse the pocket map to those
+  # targets only. Discovery (and any mode without registered attention)
+  # keeps the baseline census.
+  if mode_uses_attention_zoom; then
+    attention_targets_json="$(resolve_attention_targets_json)"
+    target_count="$(
+      printf '%s' "${attention_targets_json}" | jq 'length'
+    )"
+  fi
+
+  if [[ "${target_count}" -gt 0 ]]; then
+    {
+      printf '%s\n' "${AEGIS_POCKET_MAP_FOCUSED_MARKER}"
+      printf '%s' "${attention_targets_json}" \
+        | jq -r '.[]?' \
+        | sort -u
+    } > "${map_file}"
+
+    export AEGIS_POCKET_MAP_FILE="${map_file}"
+    aegis_log "Pocket map: focused on ${target_count} attention target(s) (full census omitted)"
+    return 0
+  fi
 
   local prune_expr=""
   local prune_path
@@ -643,7 +673,7 @@ generate_pocket_map() {
 
   export AEGIS_POCKET_MAP_FILE="${map_file}"
 
-  aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths"
+  aegis_log "Pocket map: $(wc -l < "${map_file}" | tr -d ' ') paths (full census)"
 }
 
 mode_uses_attention_zoom() {

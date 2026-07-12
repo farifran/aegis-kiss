@@ -1,67 +1,31 @@
 # =========================================================
-# AEGIS HARNESS — AST-GREP ENFORCEMENT RULE
+# DEPRECATED POINTER — use rules/ directory
+# =========================================================
+#
+# Historical single-rule file. Enforcement now lives under:
+#   .harness/enforcement/rules/*.yml
+# and is driven by:
+#   scripts/substrates/static_gate.sh
+#
+# package.json `aegis:enforce` invokes the static gate.
+# This file remains only so stale external docs/scripts fail loudly
+# with a recognizable rule id if someone still points `sg -r` here.
+#
 # =========================================================
 
-# This file provides mechanically enforceable structural containment.
-#
-# It is NOT:
-# - constitutional governance;
-# - runtime orchestration;
-# - mode cognition;
-# - architectural truth.
-#
-# The goal is not stylistic purity.
-#
-# The goal is:
-# - preserving structural observability;
-# - preventing silent operational failure;
-# - constraining hidden execution opacity;
-# - preserving bounded mechanical reliability.
-
-id: no-empty-catch
+id: deprecated-use-static-gate
 
 language: TypeScript
 
 severity: error
 
 message: >
-  Empty catch blocks hide operational failure surfaces.
+  This legacy rule file is retired. Run:
+  bash scripts/substrates/static_gate.sh --workspace
+  Rules live under .harness/enforcement/rules/.
 
 rule:
-  pattern: |
-    try {
-      $$$TRY
-    } catch ($ERR) {
-    }
-
-# =========================================================
-# EPISTEMIC NOTES
-# =========================================================
-
-# AST-Grep enforcement must remain:
-# - mechanically verifiable;
-# - structurally observable;
-# - minimally interpretive;
-# - low ambiguity.
-#
-# AST-Grep should enforce only:
-# - unequivocal structural violations;
-# - mechanically provable failure patterns.
-#
-# Architectural interpretation,
-# proportionality analysis,
-# redesign pressure,
-# adversarial reasoning,
-# and residual uncertainty
-# belong to:
-# - Mode 4;
-# - Mode 5;
-# - human review.
-#
-# AST-Grep is:
-# - structural physics.
-#
-# It is NOT:
-# - epistemological governance;
-# - semantic reasoning;
-# - architectural intelligence.
+  # Unmatchable pattern — never fires on real code. The file exists so
+  # accidental `sg scan -r` against this path does not re-apply old
+  # single-rule semantics as if it were still authoritative.
+  pattern: __AEGIS_LEGACY_AST_GREP_RULES_YML_RETIRED__

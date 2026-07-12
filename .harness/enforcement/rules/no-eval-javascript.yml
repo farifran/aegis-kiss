@@ -1,0 +1,18 @@
+# =========================================================
+# AEGIS — structural physics (JavaScript)
+# eval / new Function are hidden execution surfaces.
+# =========================================================
+
+id: no-eval-javascript
+
+language: JavaScript
+
+severity: error
+
+message: >
+  eval / new Function are hidden execution surfaces.
+
+rule:
+  any:
+    - pattern: eval($$$ARGS)
+    - pattern: new Function($$$ARGS)

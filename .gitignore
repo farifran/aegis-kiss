@@ -10,6 +10,7 @@
 
 .harness/runtime/epistemic_handover.json
 .harness/runtime/last_good_epistemic_handover.json
+.harness/runtime/last_fatal
 .harness/runtime/capability_env/
 .harness/runtime/capability_payloads/
 

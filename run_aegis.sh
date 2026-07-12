@@ -5,13 +5,15 @@
 # =========================================================
 #
 # Fail-fast pipeline driver over runtime_aegis.sh; run with
-# --help for operator usage. Ends with a timing/verdict report.
+# --help for operator usage. Always ends with an honest
+# timing/verdict report (SUCCESS | HALTED | FAILED).
 #
 # =========================================================
 
 set -Eeuo pipefail
 
 readonly HANDOVER_FILE=".harness/runtime/epistemic_handover.json"
+readonly LAST_FATAL_FILE=".harness/runtime/last_fatal"
 
 usage() {
   cat <<'EOF'
@@ -37,8 +39,10 @@ Options:
                        refusal, atomic apply) still gate the promotion.
   --help               Show this help
 
-Any failure aborts immediately. A final report shows per-mode
-timings, total duration, final mode, attention targets, and verdict.
+Any mode failure aborts the remaining pipeline. The final report always
+shows per-mode status/timings, total duration, verdict, structured
+repair feedback (when present), and pipeline status
+(SUCCESS | HALTED | FAILED).
 EOF
 }
 
@@ -57,7 +61,12 @@ INVESTIGATION_INPUT=""
 declare -a POSITIONAL=()
 
 declare -A MODE_TIMINGS
+declare -A MODE_STATUS
 declare -a EXECUTION_MODES
+
+# Pipeline outcome — honest operator signal, not cosmetic SUCCESS.
+PIPELINE_STATUS="SUCCESS"
+PIPELINE_REASON=""
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -151,6 +160,20 @@ build_mode_list() {
 
 }
 
+# Mark every mode after the first without a status as skipped.
+mark_remaining_skipped() {
+  local mode
+  for mode in "${EXECUTION_MODES[@]}"; do
+    if [[ -z "${MODE_STATUS[$mode]:-}" ]]; then
+      MODE_STATUS["${mode}"]="skipped"
+    fi
+  done
+}
+
+clear_operator_breadcrumbs() {
+  rm -f "${LAST_FATAL_FILE}" 2>/dev/null || true
+}
+
 run_mode() {
 
   local mode="$1"
@@ -164,6 +187,7 @@ run_mode() {
   local start
   local end
   local duration
+  local rc=0
 
   # Portable epoch via date subshell (macOS Bash 3.2 lacks printf %(...)T).
   start=$(date +%s)
@@ -184,79 +208,156 @@ run_mode() {
     cmd+=("${INVESTIGATION_INPUT}")
   fi
 
+  # Capture failure without losing timing or the final report path.
+  set +e
   "${cmd[@]}"
+  rc=$?
+  set -e
 
   end=$(date +%s)
-
-  duration=$((end-start))
-
+  duration=$((end - start))
   MODE_TIMINGS["${mode}"]="${duration}"
 
+  if [[ "${rc}" -ne 0 ]]; then
+    MODE_STATUS["${mode}"]="failed"
+    PIPELINE_STATUS="FAILED"
+    PIPELINE_REASON="mode '${mode}' exited ${rc}"
+    return "${rc}"
+  fi
+
+  MODE_STATUS["${mode}"]="ok"
+  return 0
+}
+
+# Single jq projection: all operator-facing handover fields, or empty object.
+handover_report_fields() {
+  if [[ ! -f "${HANDOVER_FILE}" ]]; then
+    printf '%s\n' '{}'
+    return
+  fi
+
+  jq -c '
+    {
+      mode: (.artifact_snapshot.mode // empty),
+      verdict: (.artifact_snapshot.operational_context.verdict // empty),
+      attention: (
+        .epistemic_state.next_attention_targets // []
+        | map(select(type == "string" and length > 0))
+        | .[0:8]
+      ),
+      violations: (
+        .artifact_snapshot.operational_context.repair_feedback.violations // []
+        | map({
+            severity: (.severity // "unspecified"),
+            origin: (.origin // "unspecified"),
+            reason: (.structural_reason // ""),
+            files: (.target_files // [])
+          })
+        | .[0:5]
+      ),
+      basis: (
+        .artifact_snapshot.operational_context.basis // []
+        | if type == "string" then [.] else . end
+        | map(select(type == "string" and length > 0))
+        | .[0:5]
+      )
+    }
+  ' "${HANDOVER_FILE}" 2>/dev/null || printf '%s\n' '{}'
 }
 
 show_final_report() {
 
   local total=0
   local mode
+  local status
+  local mark
+  local timing
+  local fields
+  local last_fatal=""
 
   echo
   echo "══════════════════════════════"
   echo "AEGIS RUN REPORT"
   echo "══════════════════════════════"
   echo
+  echo "Pipeline: ${PIPELINE}"
+  echo "Status:   ${PIPELINE_STATUS}"
+  if [[ -n "${PIPELINE_REASON}" ]]; then
+    echo "Reason:   ${PIPELINE_REASON}"
+  fi
+  if [[ -f "${LAST_FATAL_FILE}" ]]; then
+    last_fatal="$(tr -d '\r' < "${LAST_FATAL_FILE}" | head -n 1)"
+    if [[ -n "${last_fatal}" ]]; then
+      echo "Fatal:    ${last_fatal}"
+    fi
+  fi
+  echo
+  echo "Modes:"
 
   for mode in "${EXECUTION_MODES[@]}"; do
+    status="${MODE_STATUS[$mode]:-skipped}"
+    timing="${MODE_TIMINGS[$mode]:-}"
+    case "${status}" in
+      ok) mark="✓" ;;
+      failed) mark="✗" ;;
+      halted) mark="◼" ;;
+      *) mark="—" ;;
+    esac
 
-    local timing="${MODE_TIMINGS[$mode]:-0}"
-
-    printf "%-12s ✓ %ss\n" \
-      "${mode^}" \
-      "${timing}"
-
-    total=$((total + timing))
+    if [[ -n "${timing}" ]]; then
+      printf "  %-12s %s  %ss\n" "${mode}" "${mark}" "${timing}"
+      total=$((total + timing))
+    else
+      printf "  %-12s %s  %s\n" "${mode}" "${mark}" "${status}"
+    fi
   done
 
   echo
   echo "Total: ${total}s"
   echo
 
-  if [[ -f "${HANDOVER_FILE}" ]]; then
+  fields="$(handover_report_fields)"
 
-    echo "Final Mode:"
-    jq -r '.artifact_snapshot.mode // "unknown"' \
-      "${HANDOVER_FILE}"
+  if [[ "${fields}" != "{}" ]]; then
+    local h_mode h_verdict
+    h_mode="$(jq -r '.mode // empty' <<<"${fields}")"
+    h_verdict="$(jq -r '.verdict // empty' <<<"${fields}")"
 
-    echo
-
-    echo "Final Attention:"
-
-    jq -r '
-      .epistemic_state.next_attention_targets[]?
-    ' "${HANDOVER_FILE}"
-
-    echo
-
-    if jq -e '
-      .artifact_snapshot.operational_context.verdict?
-    ' "${HANDOVER_FILE}" >/dev/null 2>&1; then
-
-      echo "Verdict:"
-
-      jq -r '
-        .artifact_snapshot.operational_context.verdict
-      ' "${HANDOVER_FILE}"
-
-      echo
+    if [[ -n "${h_mode}" ]]; then
+      echo "Final Mode: ${h_mode}"
+    fi
+    if [[ -n "${h_verdict}" ]]; then
+      echo "Verdict:    ${h_verdict}"
     fi
 
+    if jq -e '(.basis | length) > 0' <<<"${fields}" >/dev/null 2>&1; then
+      echo
+      echo "Basis:"
+      jq -r '.basis[] | "  - \(.)"' <<<"${fields}"
+    fi
+
+    if jq -e '(.violations | length) > 0' <<<"${fields}" >/dev/null 2>&1; then
+      echo
+      echo "Repair Feedback (top violations):"
+      jq -r '
+        .violations[]
+        | "  - [\(.severity)] \(.origin): \(.reason)"
+          + (if (.files | length) > 0
+             then " (" + (.files | join(", ")) + ")"
+             else "" end)
+      ' <<<"${fields}"
+    fi
+
+    if jq -e '(.attention | length) > 0' <<<"${fields}" >/dev/null 2>&1; then
+      echo
+      echo "Attention:"
+      jq -r '.attention[] | "  - \(.)"' <<<"${fields}"
+    fi
+
+    echo
   fi
 
-  echo "Pipeline Status:"
-  echo "SUCCESS"
-
-  echo
   echo "══════════════════════════════"
-
 }
 
 resolve_default_target() {
@@ -361,6 +462,8 @@ main() {
     build_mode_list
   fi
 
+  clear_operator_breadcrumbs
+
   local mode
   local final_mode="${EXECUTION_MODES[${#EXECUTION_MODES[@]}-1]}"
   if [[ -n "${UNTIL:-}" ]]; then
@@ -371,28 +474,46 @@ main() {
     if [[ "${mode}" == "repair" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
       local candidate_count
       candidate_count="$(
-        jq -r '.artifact_snapshot.operational_context.repair_candidates | length // 0' \
-          "${HANDOVER_FILE}" 2>/dev/null || echo 0
+        jq -r '
+          (.artifact_snapshot.operational_context.repair_candidates // [])
+          | length
+        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
       )"
       if [[ "${candidate_count}" -eq 0 ]]; then
         echo
         echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
+        MODE_STATUS["${mode}"]="halted"
+        PIPELINE_STATUS="HALTED"
+        PIPELINE_REASON="no repair candidates in forensics handover"
+        mark_remaining_skipped
         break
       fi
     fi
 
     if [[ "${mode}" == "${final_mode}" ]]; then
-      run_mode "${mode}" true
+      if ! run_mode "${mode}" true; then
+        mark_remaining_skipped
+        break
+      fi
     else
-      run_mode "${mode}"
+      if ! run_mode "${mode}"; then
+        mark_remaining_skipped
+        break
+      fi
     fi
+
     if [[ -n "${UNTIL:-}" ]] && [[ "${mode}" == "${UNTIL}" ]]; then
       echo "[RUN] Stopped at mode ${mode} due to --until limit."
+      mark_remaining_skipped
       break
     fi
   done
 
   show_final_report
+
+  if [[ "${PIPELINE_STATUS}" == "FAILED" ]]; then
+    exit 1
+  fi
 }
 
 main "$@"

@@ -23,7 +23,14 @@ aegis_warn() {
 }
 
 aegis_fatal() {
-  echo "[AEGIS][${AEGIS_LOG_TAG:-HARNESS}][FATAL] $*" >&2
+  local msg="$*"
+  echo "[AEGIS][${AEGIS_LOG_TAG:-HARNESS}][FATAL] ${msg}" >&2
+  # Best-effort operator breadcrumb for the pipeline report. Never blocks
+  # the fatal path; never invents a runtime root that does not exist.
+  local breadcrumb_dir="${AEGIS_RUNTIME_ROOT:-.harness/runtime}"
+  if [[ -d "${breadcrumb_dir}" ]]; then
+    printf '%s\n' "${msg}" > "${breadcrumb_dir}/last_fatal" 2>/dev/null || true
+  fi
   exit 1
 }
 

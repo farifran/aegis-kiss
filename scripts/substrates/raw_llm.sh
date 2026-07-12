@@ -482,7 +482,12 @@ assemble_bounded_capability_context() {
   # the system prompt (assemble_system_prompt).
   {
     if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
-      echo "=== REPOSITORY POCKET MAP (flat path census — baseline context) ==="
+      if head -n 1 "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null \
+        | grep -q '^# attention-focused'; then
+        echo "=== REPOSITORY POCKET MAP (attention-focused — full census omitted) ==="
+      else
+        echo "=== REPOSITORY POCKET MAP (flat path census — baseline context) ==="
+      fi
       echo
       cat "${AEGIS_POCKET_MAP_FILE}"
       echo

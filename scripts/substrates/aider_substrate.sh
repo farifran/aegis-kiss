@@ -671,11 +671,11 @@ invoke_aider() {
   fi
 
   # Accelerated local validation loop: after each applied edit, aider
-  # runs the per-file structural gate (bash -n / node --check / tsc
-  # --noResolve single-file) on ONLY the modified delta and self-corrects
-  # structural breakage in its bounded internal reflection step, before
-  # the artifact ever reaches the runtime state machine. Quoted so the
-  # absolute path survives shlex splitting.
+  # runs the per-file structural gate (syntax + static_gate mechanical
+  # rules: empty-catch, eval, undeclared imports) on ONLY the modified
+  # delta and self-corrects structural breakage in its bounded internal
+  # reflection step, before the artifact ever reaches the runtime state
+  # machine. Quoted so the absolute path survives shlex splitting.
   local lint_gate_cmd
   printf -v lint_gate_cmd 'bash "%s"' \
     "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"

@@ -1,0 +1,18 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript)
+# eval / new Function are hidden execution surfaces.
+# =========================================================
+
+id: no-eval-typescript
+
+language: TypeScript
+
+severity: error
+
+message: >
+  eval / new Function are hidden execution surfaces.
+
+rule:
+  any:
+    - pattern: eval($$$ARGS)
+    - pattern: new Function($$$ARGS)

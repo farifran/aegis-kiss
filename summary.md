@@ -96,11 +96,18 @@ The shell tests under `scripts/substrates/test/` exist because most of the impor
 
 They verify that the constitutional model, capability exposure rules, handover semantics, readonly execution path, mutation substrate path, and promotion pipeline still match what the repository claims.
 
-### 6. The TypeScript tree is structural support, not the main runtime
+### 6. `src/` is the operational target surface — not the Aegis system
 
-The `src/` files currently exist mostly to keep TypeScript, ESLint, and boundaries rules anchored to a minimal source surface.
+**Critical boundary for operators and agents:**
 
-That is why they look thinner than the shell runtime: today they support tooling discipline more than product behavior.
+| Tree | Role |
+| --- | --- |
+| Harness (root scripts, `.harness/`, `.skills/`, `scripts/`, `AGENTS.md`, …) | **The Aegis system** — runtime, capabilities, substrates, governance |
+| `src/` | **Target under investigation / mutation** — a disposable sample workspace the pipeline operates *on*, not *as* |
+
+Files under `src/` (e.g. `tokenBucket.ts`, `conversion_utils.ts`, UI placeholders) are fixtures and operator targets for discovery/repair demos and for anchoring TypeScript/ESLint/boundaries tooling. They are **not** part of the harness architecture, must not be treated as runtime source, and must not drive design decisions about Aegis itself.
+
+Default `--target` resolution often points at `src` for that reason: it is the sample system-under-test living beside the harness in this monorepo layout.
 
 ## Repository Tree Snapshot
 
@@ -313,15 +320,17 @@ Directories such as `.git/` and `node_modules/` are intentionally excluded from 
 | `scripts/substrates/test/test_secret_containment.sh` | Formal proof-of-containment test. Invokes the executor's real `invoke_capability_handler` with a probe capability while credentials are present in the parent env, and asserts `OPENAI_API_KEY` / `OPENAI_API_BASE` are absent from the spawned capability process. Has verified negative power: fails when the executor is mutated to leak credentials. | Exercises the `env -i` isolation boundary of `scripts/execute_mode.sh` by execution (not code inspection). Closes the audit gap between "code does not reference the variable" and "the variable does not reach the process". |
 | `scripts/substrates/test/probes/leak_probe.sh` | Probe capability used only by `test_secret_containment.sh`. Emits the standard capability payload contract and reports (by set-ness, never by value) whether `OPENAI_*` variables are present in its environment, plus the env-var count. | Not a production capability; lives under `test/probes/` to keep it out of the registered capability surface. |
 
-### TypeScript Surface
+### Target Surface (`src/`) — not harness code
 
-| Path | Function inside the project | Relationship to other files |
+> **Do not confuse with the system.** Everything below is the sample *system-under-test*. Aegis lives in shell/runtime paths above. Judging harness quality from `src/` contents is a category error.
+
+| Path | Function | Relationship |
 | --- | --- | --- |
-| `src/index.ts` | Empty TypeScript entry placeholder. Exists mainly to keep the TS toolchain anchored to a minimal source tree. | Included by `tsconfig.json` and linted by `eslint.config.js`; currently has no runtime relationship to the shell harness. |
-| `src/ui/index.ts` | Placeholder UI module with a comment only. | Serves as a minimal target for the ESLint boundaries rules that define a `ui` layer in `eslint.config.js`. |
-| `src/ui/fake_import.ts` | Minimal exported function used to keep the UI layer non-empty. | Exists so the `src/ui/` area contains executable TS content covered by `tsconfig.json` and ESLint rules. |
-| `src/conversion_utils.ts` | Utilitários de conversão matemática de bits/bytes. | Modificado por mutações guiadas do Aegis no pipeline. |
-| `src/tokenBucket.ts` | Implementação de limitador de taxa Token Bucket de alta precisão. | Gerado por mutação baseada em BigInt e bitmasks do Graph Protocol. |
+| `src/index.ts` | Target entry placeholder; also anchors `tsc`/ESLint. | Default evidence/mutation playground; no harness runtime role. |
+| `src/ui/index.ts` | Target UI stub for boundaries-layer demos. | ESLint `ui` layer sample only. |
+| `src/ui/fake_import.ts` | Target export so the UI layer is non-empty. | Tooling anchor only. |
+| `src/conversion_utils.ts` | Sample module under investigation/mutation. | Pipeline demo target — not Aegis logic. |
+| `src/tokenBucket.ts` | Sample module created for mutation/tests (e.g. Graph Protocol BigInt experiments). | Pipeline demo target — not Aegis logic; undeclared-deps here are target debt, not harness debt. |
 
 ## How the Main Files Work Together
 
@@ -500,7 +509,7 @@ The repository is fully operational across both primary runtime paths:
 Com essa consolidação de otimizações de baixo nível, o ciclo de vida do Aegis Harness atinge o seu ápice de maturidade:
 
 * **Startup Blindado**: Inicialização atômica e 100% offline. Sem pings ocultos para servidores externos ou perda de milissegundos com resoluções de pacotes.
-* **Contexto Enxuto**: Carregamento cirúrgico em memória. A árvore completa de caminhos (`flat paths census`) é omitida/barrada quando há alvos explícitos de atenção, e os dumps verbosos de capacidades sofrem decapitação estrita no teto de 8 KB.
+* **Contexto Enxuto**: Carregamento cirúrgico em memória. Quando modos downstream (`forensics`+) carregam `epistemic_state.next_attention_targets` não vazios, o pocket map colapsa para esses alvos (marcador `# attention-focused`) e omite o census completo de paths; deep payloads já passam por `apply_attention_zoom`. Sem atenção explícita (ex.: `discovery`), o census baseline permanece. Payloads ainda sofrem decapitação pelo token budgeter (teto 32 KB).
 * **Reflexão Veloz**: O script [aider_lint_gate.sh](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/aider_lint_gate.sh) atua como um sistema nervoso autônomo. Captura quebras sintáticas em milissegundos (`bash -n`, `node --check`, `tsc --noResolve --skipLibCheck`) e força a auto-correção na origem antes mesmo do artefato chegar ao orquestrador central.
 * **Governança Intacta**: A inteligência probabilística fica concentrada na auditoria lógica profunda do modo `adversarial`, enquanto o tribunal da `validation` permanece livre de ruído, operando de forma rigidamente determinística.
 * **Token Budgeter & Loop Mitigation**: Limitação ativa de payload a um teto de **32 KB** (Bash puro com correções BSD/macOS `wc -c`), economizando até **96%** de tráfego redundante. Mitiga loops infinitos no Aider por meio de `.aiderignore` dinâmico, substituições de barras (`∕`), seletor `whole`/`diff` balanceado por tamanho, e diretivas de prompt contra omissão de linhas (*Anti-Lazy Truncation*).

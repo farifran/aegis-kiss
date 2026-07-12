@@ -14,7 +14,13 @@
 # - ts/tsx  → tsc single-file, --noResolve --skipLibCheck (structure
 #             only; project-graph resolution is validation's job)
 # - json    → jq empty
-# - other   → pass-through (no gate, no latency)
+# - other   → pass-through (no syntax gate)
+#
+# After syntax succeeds, the mechanical static gate runs
+# (scripts/substrates/static_gate.sh):
+# - ast-grep structural physics rules
+# - undeclared bare package imports
+# - eval/new Function fallback when sg is absent
 #
 # Exit 0  = edit structurally sound, aider finalizes immediately.
 # Exit !0 = diagnostics on stdout/stderr feed aider's bounded internal
@@ -30,40 +36,55 @@
 set -u
 
 TARGET_FILE="${1:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATIC_GATE="${SCRIPT_DIR}/static_gate.sh"
 
 [[ -n "${TARGET_FILE}" ]] || exit 0
 [[ -f "${TARGET_FILE}" ]] || exit 0
 
 case "${TARGET_FILE}" in
   *.sh|*.bash)
-    bash -n "${TARGET_FILE}"
+    bash -n "${TARGET_FILE}" || exit $?
     ;;
   *.js|*.mjs|*.cjs|*.jsx)
-    command -v node >/dev/null 2>&1 || exit 0
-    node --check "${TARGET_FILE}"
+    if command -v node >/dev/null 2>&1; then
+      node --check "${TARGET_FILE}" || exit $?
+    fi
     ;;
   *.ts|*.tsx)
     # Mode-scoped compiler gate: optimize simplifies an already-repaired,
     # already-gated diff, so the tsc Node VM cold-start (the one non-micro
     # check here) buys nothing there — pass through. The gate stays fully
     # armed for net-new code in repair.
-    [[ "${AEGIS_MODE:-}" == "optimize" ]] && exit 0
-    # Prefer the project-local compiler; fall back to PATH; pass through
-    # when neither exists (no gate is better than a hanging install).
-    TSC_BIN=""
-    if [[ -x "node_modules/.bin/tsc" ]]; then
-      TSC_BIN="node_modules/.bin/tsc"
-    elif command -v tsc >/dev/null 2>&1; then
-      TSC_BIN="tsc"
+    if [[ "${AEGIS_MODE:-}" != "optimize" ]]; then
+      # Prefer the project-local compiler; fall back to PATH; pass through
+      # when neither exists (no gate is better than a hanging install).
+      TSC_BIN=""
+      if [[ -x "node_modules/.bin/tsc" ]]; then
+        TSC_BIN="node_modules/.bin/tsc"
+      elif command -v tsc >/dev/null 2>&1; then
+        TSC_BIN="tsc"
+      fi
+      if [[ -n "${TSC_BIN}" ]]; then
+        "${TSC_BIN}" --noEmit --noResolve --skipLibCheck --pretty false "${TARGET_FILE}" || exit $?
+      fi
     fi
-    [[ -n "${TSC_BIN}" ]] || exit 0
-    "${TSC_BIN}" --noEmit --noResolve --skipLibCheck --pretty false "${TARGET_FILE}"
     ;;
   *.json)
-    command -v jq >/dev/null 2>&1 || exit 0
-    jq empty "${TARGET_FILE}"
+    if command -v jq >/dev/null 2>&1; then
+      jq empty "${TARGET_FILE}" || exit $?
+    fi
     ;;
   *)
-    exit 0
+    # Unknown extension: still allow static gate for shared patterns
+    # if the file is later covered; otherwise pass-through.
     ;;
 esac
+
+# Mechanical structural physics — always on (including optimize).
+# Syntax may pass while empty-catch / eval / undeclared imports remain.
+if [[ -f "${STATIC_GATE}" ]]; then
+  bash "${STATIC_GATE}" "${TARGET_FILE}" || exit $?
+fi
+
+exit 0
