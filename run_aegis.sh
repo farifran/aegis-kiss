@@ -174,6 +174,16 @@ clear_operator_breadcrumbs() {
   rm -f "${LAST_FATAL_FILE}" 2>/dev/null || true
 }
 
+# Wipe the intra-pipeline evidence cache so modes never reuse payloads
+# from a previous pipeline run (investigation input may have changed).
+clear_pipeline_evidence_cache() {
+  local cache_dir="${AEGIS_EVIDENCE_CACHE_DIR:-.harness/runtime/evidence_cache}"
+  if [[ -d "${cache_dir}" ]]; then
+    rm -rf "${cache_dir}"
+  fi
+  mkdir -p "${cache_dir}" 2>/dev/null || true
+}
+
 run_mode() {
 
   local mode="$1"
@@ -463,6 +473,7 @@ main() {
   fi
 
   clear_operator_breadcrumbs
+  clear_pipeline_evidence_cache
 
   local mode
   local final_mode="${EXECUTION_MODES[${#EXECUTION_MODES[@]}-1]}"

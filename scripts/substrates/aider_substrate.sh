@@ -550,15 +550,17 @@ Do not add explanations or narration.
 Apply the change and stop."
 
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    input_label="Original investigation input (already applied by Repair):"
-    mode_instructions="CRITICAL INSTRUCTION FOR OPTIMIZE MODE:
-The requested mutation (investigation input) has ALREADY been implemented and applied to the workspace by the preceding Repair step.
-Your task is ONLY to simplify the implementation, remove complexity, remove redundancy, and clean up formatting inside the files that were modified by the Repair step.
-Do NOT re-apply or re-implement the change.
-Do NOT remove or delete the new functionality added by Repair.
-Do NOT introduce any speculative changes or new unsolicited logic/functions.
-Do NOT add explanations or narration.
-Simplify/optimize the existing code and stop."
+    input_label="Original investigation input (already applied by Repair — do NOT re-implement):"
+    mode_instructions="CRITICAL — OPTIMIZE MODE (recognize → refine):
+1. The Repair candidate is ALREADY applied on this workspace. Read the loaded files as the post-Repair truth.
+2. First recognize what changed relative to the demand: which behavior Repair introduced and where.
+3. Then apply ONLY safe, functionality-preserving improvements inside the loaded files:
+   - remove redundancy / dead code introduced by Repair
+   - tighten types, naming, and local structure without changing behavior
+   - collapse obvious duplication
+4. If the post-Repair code is already minimal and correct, make NO edits and stop.
+5. Forbidden: re-implementing the investigation demand from scratch; removing Repair features; new files; renames; speculative features; narration.
+Simplify in place or leave unchanged. Stop."
   fi
 
   local raw_prompt_file
@@ -582,7 +584,18 @@ $(
   # mechanically (jail, diff capture, validation gates). The full
   # contract is emitted only in the no-targets fallback.
   if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
-    cat <<'DISTILLED'
+    if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+      cat <<'DISTILLED'
+Skill contract (bounded optimize core):
+* Repair already applied the demand — RECOGNIZE the current files, then REFINE only.
+* Mutate ONLY the target files already loaded in this chat.
+* Safe simplifications only: less redundancy, clearer structure, tighter types — same behavior.
+* If already minimal, make NO edits.
+* No re-implementation of the demand, no feature removal, no new files, no renames.
+* Output only file edits — no JSON, no explanations, no questions.
+DISTILLED
+    else
+      cat <<'DISTILLED'
 Skill contract (bounded mutation core):
 * Implement EXACTLY what the investigation input demands — nothing more.
 * Mutate ONLY the target files already loaded in this chat.
@@ -591,6 +604,7 @@ Skill contract (bounded mutation core):
 * Output only the file edits — no JSON, no explanations, no questions.
 * NEVER ask for clarification. If the demand allows more than one reading, implement the most literal, minimal one and stop.
 DISTILLED
+    fi
   else
     echo "Skill contract:"
     cat "${AIDER_SKILL_FILE}"
@@ -996,9 +1010,13 @@ emit_mutation_artifact() {
   diff_tmp="$(aider_mktemp)"
   printf '%s' "${diff_content}" > "${diff_tmp}"
 
+  local attention_reason
+  attention_reason="ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')"
+
   jq -n \
     --arg mode "${AEGIS_MODE}" \
     --arg execution_id "${AEGIS_EXECUTION_ID}" \
+    --arg attention_reason "${attention_reason}" \
     --rawfile diff "${diff_tmp}" \
     --argjson files_changed "${files_changed}" \
     '{
@@ -1009,7 +1027,7 @@ emit_mutation_artifact() {
       handover_attention: {
         next_attention_targets: $files_changed,
         attention_scope: "mutation_applied",
-        attention_reason: "ATTENTION_REASON_REPAIR"
+        attention_reason: $attention_reason
       }
     }' > "${artifact_tmp}"
 

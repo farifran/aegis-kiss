@@ -594,17 +594,25 @@ assemble_bounded_capability_context() {
 
 assemble_provider_request() {
 
-  # AEGIS_RAW_SUBSTRATE_MAX_TOKENS controls the output budget.
-  # Default: 4096 — enough for any structured JSON artifact without truncation.
+  # Per-mode decode budgets: short JSON artifacts must not pay the default
+  # 4096-token ceiling. Mode-specific env vars win; unknown modes fall back.
   : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
-
-  # Adversarial emits short structural findings vectors only — cap its
-  # decode budget hard so judgment latency stays bounded and prose leakage
-  # is physically impossible past the cap.
   local effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS}"
-  if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
-    effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:-1024}"
-  fi
+  case "${AEGIS_MODE}" in
+    discovery)
+      effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY:-1024}"
+      ;;
+    forensics)
+      effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS:-1024}"
+      ;;
+    adversarial)
+      effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:-1024}"
+      ;;
+    validation)
+      effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:-512}"
+      ;;
+  esac
+  aegis_log "raw_substrate_max_tokens[${AEGIS_MODE}]=${effective_max_tokens}"
 
   jq -n \
     --arg model "${MODEL}" \

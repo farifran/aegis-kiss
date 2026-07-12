@@ -164,17 +164,21 @@ export AEGIS_MUTATION_GIT_DIR
 # =========================================================
 
 : "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0.1}"
-# Output token budget — prevents model truncation of structured JSON artifacts.
+# Output token budget — default ceiling for unknown modes. Prefer the
+# per-mode caps below for the hot readonly path: short JSON artifacts
+# must not pay full decode budgets (adversarial was 84s → 12s at 1024).
 : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
-# Adversarial judgment cap: findings are short structural JSON vectors, and
-# this mode dominates pipeline latency when the model is allowed to decode
-# freely (observed 84s vs 12s for validation). A tight budget forces raw
-# structured emission and cuts conversational prose leakage.
+: "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY:=1024}"
+: "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS:=1024}"
 : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:=1024}"
+: "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:=512}"
 
 export AEGIS_RAW_SUBSTRATE_TEMPERATURE
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS
+export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY
+export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL
+export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION
 
 # =========================================================
 # PROVIDER POLICY
@@ -232,6 +236,25 @@ export AEGIS_MAX_DISCOVERY_BYTES
 export AEGIS_MAX_FORENSICS_BYTES
 
 # =========================================================
+# INTRA-PIPELINE EVIDENCE CACHE
+# =========================================================
+# Deterministic, mode-stable payloads (list_tree, layer0, attention_seed)
+# are reused across modes within one pipeline run. Cache is wiped at
+# pipeline start by run_aegis.sh; never treated as cross-run memory.
+
+: "${AEGIS_EVIDENCE_CACHE_DIR:=${AEGIS_ROOT_DIR}/.harness/runtime/evidence_cache}"
+: "${AEGIS_EVIDENCE_CACHE_ENABLED:=true}"
+
+export AEGIS_EVIDENCE_CACHE_DIR
+export AEGIS_EVIDENCE_CACHE_ENABLED
+
+declare -ar AEGIS_CACHEABLE_CAPABILITIES=(
+  "filesystem.list_tree"
+  "runtime.layer0_facts"
+  "runtime.attention_seed"
+)
+
+# =========================================================
 # CAPABILITY DEFAULTS
 # =========================================================
 
@@ -267,7 +290,9 @@ declare -Ar AEGIS_EXECUTION_ENGINES=(
   ["validation"]="raw"
   ["adversarial"]="raw"
   ["repair"]="aider"
-  ["optimize"]="raw"
+  # Optimize is a real mutation pass: recognize the Repair result on a
+  # disposable surface and refine it (or leave it) under the same rails.
+  ["optimize"]="aider"
 )
 
 # =========================================================
@@ -488,8 +513,14 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "test.run"
 )
 
+# Optimize runs on the disposable surface after the Repair candidate is
+# applied. Evidence stays lean: the handover carries the Repair diff and
+# files_changed; tools confirm the surface is still sound after refine.
 declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
   "filesystem.read:epistemic_handover"
+  "git.status"
+  "typescript.check"
+  "eslint.check"
 )
 
 declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(

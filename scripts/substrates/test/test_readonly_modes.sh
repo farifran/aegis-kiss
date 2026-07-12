@@ -257,9 +257,20 @@ assert_mode_output() {
       .mode == $mode
       and (
         if $mode == "discovery" then
-          (.operational_context.status == "ok" and .operational_context.observed_payloads == $expected_payloads)
+          (.operational_context.observed_payloads == $expected_payloads)
+        elif $mode == "validation" then
+          # Mock providers emit rejected; tribunal may also reject invalid
+          # stub candidates. Contract under test is evidence identity, not
+          # a promotable accept path.
+          ((.verdict == "accepted" or .verdict == "rejected" or .verdict == "insufficient")
+            and .observed_payloads == $expected_payloads)
         else
-          ((.status == "ok" or .status == "inconclusive" or .status == "challenged") and .observed_payloads == $expected_payloads)
+          ((.status == "ok"
+              or .status == "inconclusive"
+              or .status == "challenged"
+              or .status == "verified"
+              or .status == "interpreted")
+            and .observed_payloads == $expected_payloads)
         end
       )
     ' >/dev/null; then

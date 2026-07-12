@@ -934,15 +934,36 @@ promote_validated_candidate() {
   printf '%s' "${promotion_payload}" \
     > "${validation_artifact_file}"
 
+  local promotion_rc=0
+  local promotion_log
+  promotion_log="$(mktemp)"
+  set +e
   bash scripts/runtime/promote_validated_candidate.sh \
     "${validation_artifact_file}" \
     "${AEGIS_RUNTIME_ROOT}" \
-    || {
-      rm -f "${validation_artifact_file}"
-      aegis_fatal "validated_candidate_promotion_failed"
-    }
+    >"${promotion_log}" 2>&1
+  promotion_rc=$?
+  set -e
 
-  rm -f "${validation_artifact_file}"
+  # Always surface promoter output (success or failure diagnostics).
+  cat "${promotion_log}" >&2 || true
+
+  if [[ "${promotion_rc}" -ne 0 ]]; then
+    local promo_diag=""
+    promo_diag="$(
+      command grep '\[PROMOTION\]' "${promotion_log}" 2>/dev/null \
+        | command tail -n 3 \
+        | tr '\n' ' ' \
+        || true
+    )"
+    rm -f "${validation_artifact_file}" "${promotion_log}"
+    if [[ -n "${promo_diag}" ]]; then
+      aegis_fatal "validated_candidate_promotion_failed: ${promo_diag}"
+    fi
+    aegis_fatal "validated_candidate_promotion_failed"
+  fi
+
+  rm -f "${validation_artifact_file}" "${promotion_log}"
 }
 
 # =========================================================

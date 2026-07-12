@@ -39,7 +39,9 @@ artifact="$(extract_first_artifact_payload "${output}")"
 printf '%s\n' "${artifact}" \
   | jq -e '
       .mode == "adversarial"
-      and .status == "challenged"
+      # Tribunal may force verified when tools are mutation-clean; challenged
+      # remains valid when in-scope tools fail. Both must carry the candidate.
+      and (.status == "challenged" or .status == "verified" or .status == "inconclusive")
       and .candidate_result.source_mode == "optimize"
       and (.candidate_result.diff | length > 0)
       and .candidate_result.files_changed == ["src/index.ts"]

@@ -418,6 +418,11 @@ invoke_raw_substrate() {
     AEGIS_PROVIDER_RETRY_DELAY="${AEGIS_PROVIDER_RETRY_DELAY}" \
     AEGIS_EVIDENCE_MAX_FILES="${AEGIS_EVIDENCE_MAX_FILES}" \
     AEGIS_RAW_SUBSTRATE_TEMPERATURE="${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
+    AEGIS_RAW_SUBSTRATE_MAX_TOKENS="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:-}" \
+    AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY:-}" \
+    AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS:-}" \
+    AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_ADVERSARIAL:-}" \
+    AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:-}" \
     AEGIS_CAPABILITY_MANIFEST_MAX_BYTES="${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES}" \
     AEGIS_ARTIFACT_BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
     AEGIS_ARTIFACT_END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
@@ -505,6 +510,38 @@ EOF
 # CAPABILITY PAYLOADS
 # =========================================================
 
+# Stable cache key for deterministic, mode-stable evidence payloads.
+# Includes investigation input so Layer 0 / attention_seed never leak
+# across unrelated pipeline demands.
+evidence_cache_key() {
+  local capability="$1"
+  local capability_argument="$2"
+  local seed
+  seed="$(
+    printf '%s\0%s\0%s\0%s' \
+      "${capability}" \
+      "${capability_argument}" \
+      "${AEGIS_INVESTIGATION_INPUT:-}" \
+      "${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
+      | shasum -a 256 2>/dev/null \
+      | awk '{print $1}'
+  )"
+  # Fallback when shasum is unavailable: compact printable token.
+  if [[ -z "${seed}" ]]; then
+    seed="$(printf '%s' "${capability}_${capability_argument}" | tr -c 'A-Za-z0-9._-' '_')"
+  fi
+  printf '%s' "${seed}"
+}
+
+capability_is_cacheable() {
+  local capability="$1"
+  local entry
+  for entry in "${AEGIS_CACHEABLE_CAPABILITIES[@]:-}"; do
+    [[ "${entry}" == "${capability}" ]] && return 0
+  done
+  return 1
+}
+
 materialize_capability_payloads() {
 
   aegis_log "Materializing capability payloads..."
@@ -517,11 +554,18 @@ materialize_capability_payloads() {
   local payload_output
   local payload_file
   local payload_path
+  local cache_hit=0
+  local cache_path=""
 
   # Dynamic Attention Zoom scope for this execution (advanced modes).
   local attention_targets_json="[]"
   if mode_uses_attention_zoom; then
     attention_targets_json="$(resolve_attention_targets_json)"
+  fi
+
+  if [[ "${AEGIS_EVIDENCE_CACHE_ENABLED:-true}" == "true" ]]; then
+    mkdir -p "${AEGIS_EVIDENCE_CACHE_DIR:-.harness/runtime/evidence_cache}" \
+      || aegis_warn "evidence_cache_dir_unavailable"
   fi
 
   for evidence_entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
@@ -548,49 +592,74 @@ materialize_capability_payloads() {
     )"
 
     payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
+    cache_hit=0
+    cache_path=""
 
-    # Net-new evidence guard: Discovery may legitimately request a path
-    # that does not exist yet (net-new file creation intents). The
-    # filesystem.read capability correctly hard-fails on missing files,
-    # which under set -e would abort the whole pipeline here. Intercept
-    # ONLY in this aggregation loop: bypass the physical read and emit a
-    # contract-shaped placeholder payload so context gathering completes
-    # and downstream modes see the absence as evidence, not a crash.
-    if [[ "${capability}" == "filesystem.read" ]] \
-      && [[ -n "${capability_argument}" ]] \
-      && [[ ! -f "${capability_argument}" ]]; then
-      aegis_warn "evidence_target_missing_on_disk — emitting placeholder payload: ${capability_argument}"
-      payload_output="$(
-        jq -n \
-          --arg capability "${capability}" \
-          --arg classification "${AEGIS_CAPABILITY_CLASSIFICATION[$capability]:-readonly}" \
+    # Intra-pipeline cache: skip re-running deterministic Layer 0 work.
+    if [[ "${AEGIS_EVIDENCE_CACHE_ENABLED:-true}" == "true" ]] \
+      && capability_is_cacheable "${capability}" \
+      && [[ -d "${AEGIS_EVIDENCE_CACHE_DIR:-}" ]]; then
+      cache_path="${AEGIS_EVIDENCE_CACHE_DIR}/$(evidence_cache_key "${capability}" "${capability_argument}").json"
+      if [[ -f "${cache_path}" ]] && jq empty "${cache_path}" >/dev/null 2>&1; then
+        # Rewrite execution identity so the payload contract matches this
+        # mode run (cache body is deterministic; identity is per-execution).
+        if jq \
           --arg execution_id "${AEGIS_EXECUTION_ID}" \
           --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
-          --arg target "${capability_argument}" \
-          '{
-            success: true,
-            capability: $capability,
-            classification: $classification,
-            execution_id: $execution_id,
-            generated_at: $generated_at,
-            error: null,
-            payload: {
-              target: $target,
-              file_exists: false,
-              net_new_target: true,
-              content: "FILE_NOT_FOUND_IN_TOPOLOGY"
-            }
-          }'
-      )"
-    else
-      payload_output="$(
-        invoke_capability_handler \
-          "${handler}" \
-          "${capability_argument}"
-      )"
+          '.execution_id = $execution_id | .generated_at = $generated_at' \
+          "${cache_path}" > "${payload_path}"; then
+          cache_hit=1
+          aegis_log "evidence_cache_hit: ${capability}"
+        else
+          rm -f "${payload_path}" 2>/dev/null || true
+        fi
+      fi
     fi
 
-    printf '%s\n' "${payload_output}" > "${payload_path}"
+    if [[ "${cache_hit}" -eq 0 ]]; then
+      # Net-new evidence guard: Discovery may legitimately request a path
+      # that does not exist yet (net-new file creation intents). The
+      # filesystem.read capability correctly hard-fails on missing files,
+      # which under set -e would abort the whole pipeline here. Intercept
+      # ONLY in this aggregation loop: bypass the physical read and emit a
+      # contract-shaped placeholder payload so context gathering completes
+      # and downstream modes see the absence as evidence, not a crash.
+      if [[ "${capability}" == "filesystem.read" ]] \
+        && [[ -n "${capability_argument}" ]] \
+        && [[ ! -f "${capability_argument}" ]]; then
+        aegis_warn "evidence_target_missing_on_disk — emitting placeholder payload: ${capability_argument}"
+        payload_output="$(
+          jq -n \
+            --arg capability "${capability}" \
+            --arg classification "${AEGIS_CAPABILITY_CLASSIFICATION[$capability]:-readonly}" \
+            --arg execution_id "${AEGIS_EXECUTION_ID}" \
+            --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
+            --arg target "${capability_argument}" \
+            '{
+              success: true,
+              capability: $capability,
+              classification: $classification,
+              execution_id: $execution_id,
+              generated_at: $generated_at,
+              error: null,
+              payload: {
+                target: $target,
+                file_exists: false,
+                net_new_target: true,
+                content: "FILE_NOT_FOUND_IN_TOPOLOGY"
+              }
+            }'
+        )"
+      else
+        payload_output="$(
+          invoke_capability_handler \
+            "${handler}" \
+            "${capability_argument}"
+        )"
+      fi
+
+      printf '%s\n' "${payload_output}" > "${payload_path}"
+    fi
 
     jq empty "${payload_path}" \
       >/dev/null 2>&1 \
@@ -604,6 +673,14 @@ materialize_capability_payloads() {
     # deep metadata survives only for registered attention targets.
     if mode_uses_attention_zoom && capability_is_deep_payload "${capability}"; then
       apply_attention_zoom "${payload_path}" "${attention_targets_json}"
+    fi
+
+    # Store only post-validation, post-zoom payloads so consumers match.
+    if [[ "${cache_hit}" -eq 0 ]] \
+      && [[ -n "${cache_path}" ]] \
+      && capability_is_cacheable "${capability}"; then
+      cp "${payload_path}" "${cache_path}" 2>/dev/null \
+        || aegis_warn "evidence_cache_store_failed: ${capability}"
     fi
 
   done
@@ -1325,18 +1402,23 @@ validate_mutation_artifact() {
   [[ "${artifact_mode}" == "${AEGIS_MODE}" ]] \
     || aegis_fatal "mutation_artifact_mode_mismatch"
 
+  # Accept either the raw mutation surface shape (diff/files_changed) or
+  # the post-normalize candidate_result envelope used by optimize.
   echo "${artifact}" \
     | jq -e '
-        (.diff | type == "string" and length > 0)
-        and (.diff != "(no changes)")
+        (
+          (.diff | type == "string" and length > 0 and . != "(no changes)")
+          or (
+            .candidate_result.diff
+            | type == "string" and length > 0 and . != "(no changes)"
+          )
+        )
+        and (
+          ((.files_changed | type == "array" and length > 0)
+            or (.candidate_result.files_changed | type == "array" and length > 0))
+        )
       ' >/dev/null 2>&1 \
-    || aegis_fatal "mutation_artifact_missing_diff"
-
-  echo "${artifact}" \
-    | jq -e '
-        (.files_changed | type == "array" and length > 0)
-      ' >/dev/null 2>&1 \
-    || aegis_fatal "mutation_artifact_missing_files_changed"
+    || aegis_fatal "mutation_artifact_missing_diff_or_files_changed"
 
   aegis_log "Mutation artifact validated successfully"
 }
@@ -1391,18 +1473,20 @@ build_tribunal_tools_gate() {
       | ($eslint.payload.status // "skipped") as $es_status
       | ($test.payload.status // "skipped") as $test_status
       | [($ts.payload.errors // [])[] | select(.file != null and in_scope(.file))] as $ts_in_scope
+      | [($eslint.payload.errors // [])[] | select(.file != null and in_scope(.file))] as $es_in_scope
       | {
           typescript_status: $ts_status,
           eslint_status: $es_status,
           test_status: $test_status,
           typescript_errors_in_scope: $ts_in_scope,
+          eslint_errors_in_scope: $es_in_scope,
           mutation_clean: (
             ($ts_status != "failed" or ($ts_in_scope | length) == 0)
-            and ($es_status != "failed")
+            and ($es_status != "failed" or ($es_in_scope | length) == 0)
             and ($test_status != "failed")
           )
         }
-    ' 2>/dev/null || printf '%s' '{"mutation_clean":true,"typescript_status":"skipped","eslint_status":"skipped","test_status":"skipped","typescript_errors_in_scope":[]}'
+    ' 2>/dev/null || printf '%s' '{"mutation_clean":true,"typescript_status":"skipped","eslint_status":"skipped","test_status":"skipped","typescript_errors_in_scope":[],"eslint_errors_in_scope":[]}'
 }
 
 # =========================================================
@@ -1653,11 +1737,47 @@ normalize_substrate_output() {
                 attention_reason: $attention_reason
               }
           elif $mode == "optimize" then
-            .status = (if .status == "optimized" then "optimized" else "no_optimization_needed" end)
-            | .candidate_result = (
-                $prev_candidate // {diff: "(no changes)", files_changed: []}
-              )
-            | del(.diff, .files_changed)
+            # Prefer a real mutation surface (aider) when present; else
+            # carry the Repair candidate forward (assessment-only / no-op).
+            (
+              if ((.diff | type == "string")
+                    and ((.diff | length) > 0)
+                    and (.diff != "(no changes)")
+                    and (.files_changed | type == "array")
+                    and ((.files_changed | length) > 0))
+              then
+                {
+                  source_mode: "optimize",
+                  diff: .diff,
+                  files_changed: .files_changed
+                }
+              elif ((.candidate_result.diff | type == "string")
+                    and ((.candidate_result.diff | length) > 0)
+                    and (.candidate_result.diff != "(no changes)")
+                    and (.candidate_result.files_changed | type == "array")
+                    and ((.candidate_result.files_changed | length) > 0))
+              then
+                (.candidate_result | .source_mode = "optimize")
+              else
+                ($prev_candidate // {source_mode: "optimize", diff: "(no changes)", files_changed: []})
+              end
+            ) as $cand
+            | (
+                ($prev_candidate.diff // "") as $prev_diff
+                | if ($cand.diff == $prev_diff)
+                     and ($cand.files_changed == ($prev_candidate.files_changed // []))
+                  then "no_optimization_needed"
+                  elif (.status == "no_optimization_needed" or .status == "unoptimized")
+                       and ($cand.diff == $prev_diff or $prev_diff == "")
+                  then "no_optimization_needed"
+                  else "optimized"
+                  end
+              ) as $opt_status
+            | .status = $opt_status
+            | .candidate_result = $cand
+            # Keep top-level diff for validate_mutation_artifact rails.
+            | .diff = $cand.diff
+            | .files_changed = $cand.files_changed
             | .handover_attention = {
                 next_attention_targets: (.candidate_result.files_changed // []),
                 attention_scope: "mutation_applied",
@@ -1790,6 +1910,9 @@ normalize_substrate_output() {
             # Force a rejected verdict so this state can never reach the
             # promotion phase (where it would crash on files_changed
             # mismatch) via a hallucinated "accepted".
+            # Also require a minimal unified-diff shape (at least one
+            # "+++ b/<path>" header) so header-only stubs cannot pass
+            # the tribunal and then die in git-apply.
             | (if (
                  (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
                  or ((.validated_candidate.diff // "") == "(no changes)")
@@ -1797,6 +1920,13 @@ normalize_substrate_output() {
                ) then
                  .verdict = "rejected"
                  | .basis = ["empty_mutation_candidate"]
+               elif (
+                 ((.validated_candidate.diff // "")
+                   | test("(?m)^\\+\\+\\+ b/"))
+                 | not
+               ) then
+                 .verdict = "rejected"
+                 | .basis = ["invalid_candidate_diff_shape"]
                else . end)
             | (
                 [ .findings[]?
@@ -1809,11 +1939,15 @@ normalize_substrate_output() {
                 ]
               ) as $blocking_findings
             # Deterministic tribunal override (KISS):
-            # - empty candidate already forced rejected above — leave it
+            # - structural rejects already forced above (empty / invalid
+            #   shape) are sticky — never promote a non-diff
             # - no blocking findings after sanitization ⇒ accepted
             #   (ignores model rubber-stamping of adversarial hallucinations)
             # - in-scope tool failures ⇒ rejected
-            | (if ((.basis // []) | index("empty_mutation_candidate") != null) then
+            | (if (
+                 ((.basis // []) | index("empty_mutation_candidate") != null)
+                 or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
+               ) then
                  .
                elif ($blocking_findings | length) == 0 then
                  .verdict = "accepted"
@@ -1823,6 +1957,8 @@ normalize_substrate_output() {
                  | .basis = (
                      if (($tools_gate.typescript_errors_in_scope // []) | length) > 0 then
                        ["tribunal: typescript errors in mutation files"]
+                     elif (($tools_gate.eslint_errors_in_scope // []) | length) > 0 then
+                       ["tribunal: eslint errors in mutation files"]
                      else
                        ["tribunal: mutation-scoped tool failure"]
                      end
