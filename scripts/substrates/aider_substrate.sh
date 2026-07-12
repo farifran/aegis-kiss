@@ -552,8 +552,9 @@ Rules:
 If you use placeholders or omit code, the parser will fail and your changes will be discarded."
   fi
 
-  local input_label="Investigation input (operator mutation demand):"
-  local mode_instructions="Apply the minimal sufficient mutation described in the investigation input.
+  local input_label="Investigation input (operator mutation demand — single demand, apply once):"
+  local mode_instructions="Apply the minimal sufficient mutation described in the investigation input ONCE.
+If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
 Preserve runtime sovereignty, protocol integrity, and containment integrity.
 Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
@@ -681,14 +682,14 @@ ${file_jail_instructions}
 ${anti_truncation_instructions:+${anti_truncation_instructions}
 
 }$(
-  # Recency anchor for floor models: the demand sits mid-prompt above;
-  # restate it as the final actionable line so the last thing the model
-  # reads is the task itself, not governance prose. Repair only —
-  # restating the input in optimize would invite re-implementation.
-  # (Command substitution strips trailing newlines; the separator blank
-  # line lives in the heredoc itself.)
+  # Recency anchor for floor models: the demand already appears once
+  # under input_label above. Do NOT paste it again — re-pasting the full
+  # investigation input made models treat the same file demand as two
+  # separate tasks (e.g. two conversion helpers for one GB→Mb request).
+  # Point back to the single demand and force one minimal change.
+  # Repair only — restating in optimize would invite re-implementation.
   if [[ "${AEGIS_MODE}" == "repair" ]]; then
-    printf 'YOUR TASK NOW (restated): %s' "${AEGIS_INVESTIGATION_INPUT}"
+    printf '%s' "YOUR TASK NOW: apply the single investigation demand stated above to the loaded target file(s) only. One minimal sufficient change — do not invent a second parallel API or duplicate the same conversion."
   fi
 )
 

@@ -575,6 +575,7 @@ normalize_substrate_output() {
       printf '%s\n' "${raw_artifact}" | jq \
         --arg mode "${AEGIS_MODE}" \
         --arg attention_reason "ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')" \
+        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT:-}" \
         --argjson evidence_refs "${evidence_refs_json}" \
         --argjson observed_payloads "${observed_payloads_json}" \
         --argjson prev_candidate "${prev_candidate_json}" \
@@ -657,15 +658,48 @@ normalize_substrate_output() {
           elif $mode == "forensics" then
             # Project candidates onto the exact contract shape: the model
             # supplies id+reason only; the runtime owns evidence identity.
-            .repair_candidates = (.repair_candidates // [] | map({
-              id,
-              reason: (.reason // "unspecified"),
-              evidence_refs: $evidence_refs
-            }))
+            # unique_by(.id): floor models often emit the same path twice
+            # with different reasons ("add conversion" + "GB to Mb"), which
+            # then loads as a duplicated mutation instruction on one file.
+            #
+            # Alvo Único: when the operator did not name multiple paths,
+            # collapse to one candidate even if Layer0 attention listed
+            # several files (observed: conversion_utils + index for a
+            # single "add quadratic function" demand → dual-file repair).
+            def prefer_alvo_unico($cands; $named):
+              if ($named | length) >= 2 then $cands
+              elif ($cands | length) <= 1 then $cands
+              else
+                (
+                  if ($named | length) == 1 then
+                    ($cands | map(select(.id == $named[0])) | .[0:1])
+                  else [] end
+                ) as $named_hit
+                | if ($named_hit | length) > 0 then $named_hit
+                  else
+                    # Prefer entrypoint-shaped paths, else first candidate.
+                    (
+                      $cands
+                      | map(select(.id | test("(^|/)index\\.(ts|tsx|js|jsx)$")))
+                      | .[0:1]
+                    ) as $entry
+                    | if ($entry | length) > 0 then $entry else $cands[0:1] end
+                  end
+              end;
+            .repair_candidates = (
+              (.repair_candidates // [])
+              | map({
+                  id,
+                  reason: (.reason // "unspecified"),
+                  evidence_refs: $evidence_refs
+                })
+              | unique_by(.id)
+              | prefer_alvo_unico(.; $operator_named_paths)
+            )
             | .handover_attention = {
                 next_attention_targets: (
                   if .status == "interpreted"
-                  then [.repair_candidates[].id]
+                  then ([.repair_candidates[].id] | unique)
                   else []
                   end
                 ),
@@ -675,6 +709,23 @@ normalize_substrate_output() {
           elif $mode == "optimize" then
             # Prefer a real mutation surface (aider) when present; else
             # carry the Repair candidate forward (assessment-only / no-op).
+            #
+            # Scope-expansion guard: if optimize introduces new export
+            # names absent from the Repair candidate AND not named in the
+            # investigation input, discard the optimize diff and keep
+            # Repair (observed: quadratic repair → optimize added free
+            # `add(x,y)` and still passed adversarial/tools).
+            def added_export_names($diff):
+              [
+                ($diff // "")
+                | split("\n")[]
+                | select(startswith("+") and (startswith("+++") | not))
+                | .[1:]
+                | select(test("^export\\s+(async\\s+)?function\\s+|^export\\s+const\\s+|^export\\s+class\\s+|^export\\s+\\{"))
+                | capture("(?:function|const|class)\\s+(?<n>[A-Za-z_][A-Za-z0-9_]*)")?
+                | .n
+                | select(. != null)
+              ] | unique;
             (
               if ((.diff | type == "string")
                     and ((.diff | length) > 0)
@@ -697,7 +748,23 @@ normalize_substrate_output() {
               else
                 ($prev_candidate // {source_mode: "optimize", diff: "(no changes)", files_changed: []})
               end
-            ) as $cand
+            ) as $raw_cand
+            | (
+                added_export_names($raw_cand.diff) as $opt_exports
+                | added_export_names($prev_candidate.diff // "") as $repair_exports
+                | ($opt_exports - $repair_exports) as $novel
+                | if ($novel | length) == 0 then $raw_cand
+                  elif any($novel[]; . as $n
+                    | ($investigation_input // "")
+                      | test("\\b\($n)\\b"; "i"))
+                  then $raw_cand
+                  else
+                    # Revert to Repair — optimize expanded scope.
+                    ($prev_candidate
+                      // $raw_cand
+                      | .source_mode = "optimize")
+                  end
+              ) as $cand
             | (
                 ($prev_candidate.diff // "") as $prev_diff
                 | if ($cand.diff == $prev_diff)

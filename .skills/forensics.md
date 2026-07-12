@@ -43,6 +43,7 @@ Output MUST contain EXCLUSIVELY the properties below. The runtime injects `mode`
 - **`status`**: `"interpreted"` if concrete repair targets are found. `"inconclusive"` if not.
 - **`repair_candidates`**: Array of objects. If `status` is `"inconclusive"`, this must be `[]`. If `status` is `"interpreted"`, propose the minimal set of mutation targets:
   - **Default**: exactly ONE candidate (Alvo Único) when the demand maps to a single file.
+  - **Never duplicate an `id`**: one path → one candidate object, even if multiple reasons apply (merge reasons into one short string).
   - **Multi-path demand**: when the investigation input explicitly names multiple repository paths (e.g. create `src/feature/widget.ts` and re-export from `src/index.ts`), emit one candidate per named path (net-new first). Do not invent extra files.
   - Resolve ambiguous single-file choices using entrypoint hierarchy (e.g., choose `src/index.ts` over `src/ui/index.ts`).
   - `id`: Repository-relative path to the file to mutate.

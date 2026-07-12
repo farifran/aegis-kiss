@@ -115,10 +115,18 @@ while IFS= read -r changed_file; do
       git -C "${REPOSITORY_ROOT}" status --short -- "${changed_file}" 2>/dev/null \
         || echo "status_unavailable"
     )"
-    promotion_diag "promotion_target_is_dirty" \
-      "file=${changed_file}" \
-      "status=${dirty_stat}" \
-      "hint=commit_or_stash_operator_edits_before_promotion"
+    # Opt-in: reset dirty targets to HEAD so a clean apply can proceed.
+    # Default remains refuse — never silently discard operator work.
+    if [[ "${AEGIS_PROMOTION_RESET_DIRTY:-false}" == "true" ]]; then
+      echo "[AEGIS][PROMOTION][WARN] resetting dirty target to HEAD: ${changed_file} (${dirty_stat})" >&2
+      git -C "${REPOSITORY_ROOT}" checkout -- "${changed_file}" \
+        || promotion_diag "promotion_dirty_reset_failed" "file=${changed_file}"
+    else
+      promotion_diag "promotion_target_is_dirty" \
+        "file=${changed_file}" \
+        "status=${dirty_stat}" \
+        "hint=commit_or_stash_or_AEGIS_PROMOTION_RESET_DIRTY=true"
+    fi
   fi
 done < "${files_file}"
 

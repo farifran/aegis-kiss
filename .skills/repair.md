@@ -12,10 +12,11 @@ On a **local feedback iteration** (handover from rejected validation with `repai
 
 ## CONSTRAINTS
 1. Minimal sufficient mutation — no speculative features or refactors.
-2. Preserve high-gravity exports unless the demand renames them.
-3. TypeScript: NodeNext imports use `.js` extension; keep existing export names.
-4. No narration — edits only (aider whole/diff format).
-5. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
+2. **One demand → one change**: if the operator asks for one conversion/behavior, add exactly one function or edit — do not ship parallel variants (`Foo` + `FooExact`, etc.) unless both are named.
+3. Preserve high-gravity exports unless the demand renames them.
+4. TypeScript: NodeNext imports use `.js` extension; keep existing export names.
+5. No narration — edits only (aider whole/diff format).
+6. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
 
 ## SUCCESS
 - Demand (or listed violations) satisfied on the loaded targets.

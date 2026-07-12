@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "capability": "filesystem.list_tree",
+  "classification": "readonly",
+  "execution_id": "1783837477-61510",
+  "generated_at": "2026-07-12T06:24:37Z",
+  "payload": {
+    "target": "src",
+    "max_depth": 4,
+    "tree": "src\nsrc/conversion_utils.ts\nsrc/index.ts\nsrc/ui\nsrc/ui/fake_import.ts\n"
+  },
+  "error": null
+}
