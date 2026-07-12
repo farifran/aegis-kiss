@@ -440,27 +440,28 @@ If the required change seems to involve a file that is not loaded, do NOT add it
   # parser reject the reply and re-request it until the watchdog fires.
   # The format is resolved ONCE in main() and passed down, so prompt and
   # invocation can never disagree and target files are sized only once.
+  # Reply-shape template instead of concrete code examples: floor models
+  # copy example code verbatim into their answer (observed: the GOOD
+  # example's helper import and oldFunc leaked into a real mutation).
+  # The template names the REAL target and describes the shape only.
   local anti_truncation_instructions=""
   if [[ "${resolved_edit_format}" == "whole" ]]; then
+    local shape_target="${prompt_targets[0]:-<target file>}"
     anti_truncation_instructions="CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
-You MUST write the entire file from the very first line to the very last line.
-DO NOT use placeholders like '// ...' or '// existing code' or '... rest of file'.
+Your reply MUST have exactly this shape (filename line, then one fenced block):
 
-[BAD EXAMPLE — WILL CAUSE CRASH]
-\`\`\`typescript
-// ... existing imports ...
-export function newFunc() { return 1; }
-// ... rest of file ...
+${shape_target}
+\`\`\`
+<the ENTIRE new content of ${shape_target}, from the very first line to the very last line>
 \`\`\`
 
-[GOOD EXAMPLE — REQUIRED]
-\`\`\`typescript
-import { helper } from './utils';
-export function oldFunc() { return 0; }
-export function newFunc() { return 1; }
-\`\`\`
+Rules:
+- Use the filename EXACTLY as written above: ${shape_target}
+- Write the complete file content — never placeholders like '// ...' or '... rest of file'.
+- Do NOT copy any code from this prompt's instructions or evidence; write only the code the task requires.
+- If the file is currently empty, the new content is simply the code the task demands.
 
-If you use any placeholders or omit any code, the parser will fail and your changes will be discarded."
+If you use placeholders or omit code, the parser will fail and your changes will be discarded."
   fi
 
   local input_label="Investigation input (operator mutation demand):"
@@ -560,6 +561,25 @@ EOF
   # preamble, evidence, investigation input) may carry real repository
   # paths that aider's mention-sniffer would otherwise pick up.
   obfuscate_evidence_paths < "${raw_prompt_file}" > "${prompt_file}"
+
+  # CRITICAL de-obfuscation of the MUTATION TARGETS themselves: the jail
+  # list and edit instructions must show the REAL path, because floor
+  # models echo the filename verbatim in their whole-format reply — an
+  # obfuscated name (src∕index.ts, U+2215) makes aider write a junk file
+  # with that literal name instead of editing the tracked target, which
+  # then captures as an empty diff. The targets are already loaded in the
+  # chat, so the mention-sniffer re-detecting them is harmless.
+  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
+    local t obf_t restored_file
+    restored_file="$(aider_mktemp)"
+    cp "${prompt_file}" "${restored_file}"
+    for t in "${prompt_targets[@]}"; do
+      obf_t="${t//\//$(printf '\342\210\225')}"
+      sed -i.bak "s|${obf_t}|${t}|g" "${restored_file}" 2>/dev/null \
+        && rm -f "${restored_file}.bak"
+    done
+    mv "${restored_file}" "${prompt_file}"
+  fi
 }
 
 # =========================================================
