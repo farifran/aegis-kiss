@@ -460,6 +460,7 @@ invoke_aider_substrate() {
     AEGIS_AIDER_TIMEOUT="${AEGIS_AIDER_TIMEOUT:-}" \
     AEGIS_AIDER_MAX_SECONDS="${AEGIS_AIDER_MAX_SECONDS:-}" \
     AEGIS_AIDER_EDIT_FORMAT="${AEGIS_AIDER_EDIT_FORMAT:-}" \
+    AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
     bash scripts/substrates/aider_substrate.sh \
       "${skill_file}" \
       "${capability_payload_dir}"

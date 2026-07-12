@@ -104,6 +104,16 @@ if (
   fail "lint_gate_did_not_surface_static_violation"
 fi
 
+# --- lint gate: prettier/eslint absent → pass-through (no hang) ---
+# clean.ts is structurally fine; missing prettier must not fail the gate.
+if ! (
+  cd "${test_tmp}"
+  # Hide project bins so resolve_local_bin falls through to PATH miss.
+  PATH="/usr/bin:/bin" bash "${OLDPWD}/${LINT}" "src/clean.ts" 2>/dev/null
+); then
+  fail "lint_gate_failed_without_prettier_eslint"
+fi
+
 # --- workspace mode rejects dirty tree ---
 if bash "${GATE}" --workspace "${test_tmp}/src" 2>/dev/null; then
   fail "workspace_mode_accepted_violations"

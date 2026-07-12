@@ -671,11 +671,11 @@ invoke_aider() {
   fi
 
   # Accelerated local validation loop: after each applied edit, aider
-  # runs the per-file structural gate (syntax + static_gate mechanical
-  # rules: empty-catch, eval, undeclared imports) on ONLY the modified
-  # delta and self-corrects structural breakage in its bounded internal
-  # reflection step, before the artifact ever reaches the runtime state
-  # machine. Quoted so the absolute path survives shlex splitting.
+  # runs the per-file structural gate (syntax → prettier --write →
+  # eslint --fix → static_gate) on ONLY the modified delta and
+  # self-corrects structural breakage in its bounded internal reflection
+  # step. Project-wide tsc/tests are NOT here — they run once as
+  # mutation_preflight after the diff is closed.
   local lint_gate_cmd
   printf -v lint_gate_cmd 'bash "%s"' \
     "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"
@@ -742,10 +742,8 @@ invoke_aider() {
     "--exit"
   )
 
-  # Mutation runs one bounded internal reflection loop: the per-file
-  # structural lint gate above (milliseconds per check, capped by aider's
-  # reflection limit and the wall-clock watchdog). Test suites and
-  # workspace-wide verification remain owned by adversarial/validation.
+  # Mutation reflection is the per-file lint gate only. Project tsc/tests
+  # run once in run_mutation_preflight after the worktree diff exists.
 
   # Jail aider to exactly the mutation targets with a PHYSICAL deny-all
   # .aiderignore at the execution-surface root (aider's native discovery
@@ -1024,11 +1022,51 @@ main() {
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 
+  # One-shot post-diff preflight: project typescript.check + test.run on
+  # the execution surface, materialised as capability payloads. Not part
+  # of aider's per-edit loop. Hard-fails the mutation when status=failed.
+  run_mutation_preflight
+
+  # Auto-fix inside the lint gate may have rewritten files after the
+  # last model edit; re-capture so the artifact matches the surface.
+  diff_content="$(capture_worktree_diff)"
+  if [[ -z "${diff_content}" ]]; then
+    rollback_execution_surface
+    aegis_fatal "empty_diff: surface clean after preflight"
+  fi
+
   aegis_log "Emitting mutation artifact..."
 
   emit_mutation_artifact "${diff_content}"
 
   aegis_log "Aider mutation substrate completed"
+}
+
+# =========================================================
+# POST-DIFF PREFLIGHT (runtime evidence, not aider reflection)
+# =========================================================
+
+run_mutation_preflight() {
+
+  local preflight_script="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_preflight.sh"
+
+  if [[ ! -f "${preflight_script}" ]]; then
+    aegis_warn "mutation_preflight_script_missing — skipping"
+    return 0
+  fi
+
+  aegis_log "Running one-shot mutation preflight (typescript.check + test.run)..."
+
+  if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
+    AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
+    AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
+    bash "${preflight_script}" \
+      "${AEGIS_EXECUTION_SURFACE_PATH}" \
+      "${AIDER_CAPABILITY_PAYLOAD_DIR}"
+  then
+    rollback_execution_surface
+    aegis_fatal "mutation_preflight_failed"
+  fi
 }
 
 main "$@"

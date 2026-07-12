@@ -9,27 +9,20 @@
 # the file aider just modified — never the workspace — so the internal
 # correct-and-retry loop stays high-velocity:
 #
-# - shell   → bash -n            (syntax only, milliseconds)
-# - js      → node --check       (parse only, no execution)
-# - ts/tsx  → tsc single-file, --noResolve --skipLibCheck (structure
-#             only; project-graph resolution is validation's job)
-# - json    → jq empty
-# - other   → pass-through (no syntax gate)
+# Order (cheap → structural):
+#   1. syntax      — bash -n / node --check / tsc --noResolve 1-file / jq
+#   2. prettier    — --write on the file only (pass-through if absent)
+#   3. eslint      — --fix on the file only; residual errors fail the gate
+#   4. static_gate — empty-catch, eval, undeclared imports
 #
-# After syntax succeeds, the mechanical static gate runs
-# (scripts/substrates/static_gate.sh):
-# - ast-grep structural physics rules
-# - undeclared bare package imports
-# - eval/new Function fallback when sg is absent
+# Deliberately NOT in this gate (wrong loop / wrong cost model):
+#   - project-wide tsc
+#   - test suites
+# Those belong to the one-shot mutation preflight (mutation_preflight.sh)
+# and/or runtime capability evidence for adversarial/validation.
 #
 # Exit 0  = edit structurally sound, aider finalizes immediately.
-# Exit !0 = diagnostics on stdout/stderr feed aider's bounded internal
-#           reflection (capped by aider itself and by the substrate's
-#           wall-clock watchdog).
-#
-# This gate deliberately runs NO test suites, NO workspace-wide
-# typecheck, NO installs — deep verification belongs to the
-# adversarial/validation pipeline stages.
+# Exit !0 = diagnostics feed aider's bounded internal reflection.
 #
 # =========================================================
 
@@ -42,6 +35,23 @@ STATIC_GATE="${SCRIPT_DIR}/static_gate.sh"
 [[ -n "${TARGET_FILE}" ]] || exit 0
 [[ -f "${TARGET_FILE}" ]] || exit 0
 
+resolve_local_bin() {
+  local name="$1"
+  if [[ -x "node_modules/.bin/${name}" ]]; then
+    printf '%s\n' "node_modules/.bin/${name}"
+    return 0
+  fi
+  if command -v "${name}" >/dev/null 2>&1; then
+    command -v "${name}"
+    return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------
+# 1. SYNTAX
+# ---------------------------------------------------------
+
 case "${TARGET_FILE}" in
   *.sh|*.bash)
     bash -n "${TARGET_FILE}" || exit $?
@@ -53,20 +63,12 @@ case "${TARGET_FILE}" in
     ;;
   *.ts|*.tsx)
     # Mode-scoped compiler gate: optimize simplifies an already-repaired,
-    # already-gated diff, so the tsc Node VM cold-start (the one non-micro
-    # check here) buys nothing there — pass through. The gate stays fully
-    # armed for net-new code in repair.
+    # already-gated diff, so the tsc Node VM cold-start buys nothing there.
     if [[ "${AEGIS_MODE:-}" != "optimize" ]]; then
-      # Prefer the project-local compiler; fall back to PATH; pass through
-      # when neither exists (no gate is better than a hanging install).
       TSC_BIN=""
-      if [[ -x "node_modules/.bin/tsc" ]]; then
-        TSC_BIN="node_modules/.bin/tsc"
-      elif command -v tsc >/dev/null 2>&1; then
-        TSC_BIN="tsc"
-      fi
-      if [[ -n "${TSC_BIN}" ]]; then
-        "${TSC_BIN}" --noEmit --noResolve --skipLibCheck --pretty false "${TARGET_FILE}" || exit $?
+      if TSC_BIN="$(resolve_local_bin tsc)"; then
+        "${TSC_BIN}" --noEmit --noResolve --skipLibCheck --pretty false \
+          "${TARGET_FILE}" || exit $?
       fi
     fi
     ;;
@@ -76,13 +78,40 @@ case "${TARGET_FILE}" in
     fi
     ;;
   *)
-    # Unknown extension: still allow static gate for shared patterns
-    # if the file is later covered; otherwise pass-through.
     ;;
 esac
 
-# Mechanical structural physics — always on (including optimize).
-# Syntax may pass while empty-catch / eval / undeclared imports remain.
+# ---------------------------------------------------------
+# 2. PRETTIER (auto-format, file-scoped)
+# ---------------------------------------------------------
+
+case "${TARGET_FILE}" in
+  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.json|*.css|*.md|*.yml|*.yaml)
+    if PRETTIER_BIN="$(resolve_local_bin prettier)"; then
+      "${PRETTIER_BIN}" --write --log-level warn "${TARGET_FILE}" || exit $?
+    fi
+    ;;
+esac
+
+# ---------------------------------------------------------
+# 3. ESLINT --fix (auto-fix + residual errors fail)
+# ---------------------------------------------------------
+
+case "${TARGET_FILE}" in
+  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
+    if ESLINT_BIN="$(resolve_local_bin eslint)"; then
+      # --fix rewrites safe issues; non-zero exit means residual
+      # unfixed problems that aider must address or abandon.
+      "${ESLINT_BIN}" --fix --no-error-on-unmatched-pattern \
+        "${TARGET_FILE}" || exit $?
+    fi
+    ;;
+esac
+
+# ---------------------------------------------------------
+# 4. STATIC STRUCTURAL GATE
+# ---------------------------------------------------------
+
 if [[ -f "${STATIC_GATE}" ]]; then
   bash "${STATIC_GATE}" "${TARGET_FILE}" || exit $?
 fi

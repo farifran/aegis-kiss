@@ -61,7 +61,9 @@
 
     "aegis:test:context-pruning": "bash scripts/substrates/test/test_context_pruning.sh",
 
-    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation && npm run aegis:test:static-gate && npm run aegis:test:context-pruning",
+    "aegis:test:mutation-preflight": "bash scripts/substrates/test/test_mutation_preflight.sh",
+
+    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation && npm run aegis:test:static-gate && npm run aegis:test:context-pruning && npm run aegis:test:mutation-preflight",
 
     "aegis:sanity": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
 
