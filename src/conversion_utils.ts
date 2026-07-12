@@ -17,3 +17,7 @@ export function bitsToKilobits(bits: number): number {
 export function bitsToTerabits(bits: number): number {
   return bits / (8 * 1024 * 1024 * 1024 * 1024);
 }
+
+export function kiloBitsToTerabits(kiloBits: number): number {
+  return kiloBits / (8 * 1024 * 1024 * 1024);
+}
