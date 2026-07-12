@@ -130,4 +130,66 @@ jq -e '
 ' "${payloads}/mutation_preflight.json" >/dev/null \
   || fail "unexpected_baseline_delta_index: $(cat "${payloads}/mutation_preflight.json")"
 
+# --- smoke.import: clean JS module passes ---
+rm -rf "${payloads:?}"/*
+mkdir -p "${payloads}" "${surface}/src"
+# Drop tsconfig so tsc skips; focus smoke path.
+rm -f "${surface}/tsconfig.json" "${surface}/broken.ts" \
+  "${surface}/src/legacy_broken.ts" "${surface}/src/clean_mutation.ts" 2>/dev/null || true
+cat > "${surface}/package.json" <<'JSON'
+{
+  "name": "preflight-smoke",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
+JSON
+cat > "${surface}/src/good.js" <<'EOF'
+export function add(a, b) { return a + b; }
+EOF
+
+if ! AEGIS_PREFLIGHT_CHANGED_FILES="src/good.js" \
+  bash "${PREFLIGHT}" "${surface}" "${payloads}" 2>/dev/null; then
+  fail "clean_js_smoke_should_pass"
+fi
+
+jq -e '.payload.smoke_import == "passed"' \
+  "${payloads}/mutation_preflight.json" >/dev/null \
+  || fail "smoke_index_not_passed: $(cat "${payloads}/mutation_preflight.json")"
+
+[[ -f "${payloads}/smoke_import.json" ]] \
+  || fail "missing_smoke_import_payload"
+
+# --- smoke.import: top-level throw fails preflight ---
+rm -rf "${payloads:?}"/*
+mkdir -p "${payloads}"
+cat > "${surface}/src/boom.js" <<'EOF'
+throw new Error("smoke-boom");
+export const x = 1;
+EOF
+
+if AEGIS_PREFLIGHT_CHANGED_FILES="src/boom.js" \
+  bash "${PREFLIGHT}" "${surface}" "${payloads}" 2>/dev/null; then
+  fail "top_level_throw_should_fail_smoke"
+fi
+
+jq -e '.payload.smoke_import == "failed"' \
+  "${payloads}/mutation_preflight.json" >/dev/null \
+  || fail "smoke_index_not_failed: $(cat "${payloads}/mutation_preflight.json")"
+
+# --- smoke disabled ---
+rm -rf "${payloads:?}"/*
+mkdir -p "${payloads}"
+if ! AEGIS_MUTATION_SMOKE_IMPORT=0 \
+  AEGIS_PREFLIGHT_CHANGED_FILES="src/boom.js" \
+  bash "${PREFLIGHT}" "${surface}" "${payloads}" 2>/dev/null; then
+  fail "disabled_smoke_should_not_fail_on_boom"
+fi
+
+jq -e '.payload.smoke_import == "skipped"' \
+  "${payloads}/mutation_preflight.json" >/dev/null \
+  || fail "disabled_smoke_not_skipped: $(cat "${payloads}/mutation_preflight.json")"
+
 echo "[PASS] mutation preflight"

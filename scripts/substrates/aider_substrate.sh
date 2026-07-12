@@ -1038,6 +1038,96 @@ capture_worktree_diff() {
   printf '%s' "${diff_output}"
 }
 
+# Operational residue on the disposable surface is not mutation authority.
+# Preflight may symlink node_modules; aider may drop .aiderignore — neither
+# is a model-authored path and must not trip the hard scope gate.
+mutation_path_is_operational_noise() {
+  case "${1:-}" in
+    node_modules|node_modules/*|*/node_modules|*/node_modules/*) return 0 ;;
+    .aiderignore|.aider*|.DS_Store|*/.DS_Store) return 0 ;;
+  esac
+  return 1
+}
+
+# Paths touched by the mutation: unified-diff +++ b/ lines plus untracked
+# residue (net-new files not yet in the diff stream).
+list_mutation_changed_paths() {
+
+  local diff_content="${1:-}"
+  local from_diff=""
+  local untracked=""
+  local p
+
+  if [[ -n "${diff_content}" ]]; then
+    from_diff="$(
+      printf '%s\n' "${diff_content}" \
+        | command sed -n 's|^+++ b/||p' \
+        | command sed 's|^\./||' \
+        | command sed '/^$/d' \
+        || true
+    )"
+  fi
+
+  untracked="$(
+    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" ls-files --others --exclude-standard 2>/dev/null \
+      | command sed 's|^\./||' \
+      || true
+  )"
+
+  {
+    printf '%s\n' "${from_diff}"
+    printf '%s\n' "${untracked}"
+  } | while IFS= read -r p; do
+    [[ -n "${p}" ]] || continue
+    mutation_path_is_operational_noise "${p}" && continue
+    printf '%s\n' "${p}"
+  done | sort -u
+}
+
+# Hard authority gate: every changed path must be ⊆ authorized targets.
+# Soft jail (.aiderignore + prompt) is not enough — the real diff is truth.
+# Empty authorized set skips (no-targets fallback already warned).
+assert_mutation_diff_scope() {
+
+  local diff_content="${1:-}"
+  shift
+  local -a authorized_targets=("$@")
+
+  if [[ "${#authorized_targets[@]}" -eq 0 ]]; then
+    aegis_warn "mutation_scope_gate_skipped: no authorized targets resolved"
+    return 0
+  fi
+
+  local scope_lib="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_scope_gate.sh"
+  if [[ ! -f "${scope_lib}" ]]; then
+    aegis_warn "mutation_scope_gate_missing — skipping hard scope check"
+    return 0
+  fi
+
+  # shellcheck disable=SC1090
+  source "${scope_lib}"
+
+  local authorized_blob changed_blob offenders
+  authorized_blob="$(printf '%s\n' "${authorized_targets[@]}")"
+  changed_blob="$(list_mutation_changed_paths "${diff_content}")"
+
+  if [[ -z "$(printf '%s' "${changed_blob}" | sed '/^$/d')" ]]; then
+    return 0
+  fi
+
+  offenders=""
+  if ! offenders="$(mutation_scope_check "${authorized_blob}" "${changed_blob}")"; then
+    local offender_csv
+    offender_csv="$(printf '%s\n' "${offenders}" | paste -sd ',' - | sed 's/,/, /g')"
+    aegis_warn "mutation_scope_violation offenders: ${offender_csv}"
+    aegis_warn "authorized targets were: $(printf '%s ' "${authorized_targets[@]}")"
+    rollback_execution_surface
+    aegis_fatal "mutation_scope_violation: ${offender_csv}"
+  fi
+
+  aegis_log "mutation_scope_gate: ok ($(printf '%s\n' "${changed_blob}" | sed '/^$/d' | wc -l | tr -d ' ') path(s) within authorized set)"
+}
+
 # =========================================================
 # ARTIFACT EMISSION
 # =========================================================
@@ -1262,6 +1352,9 @@ main() {
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 
+  # Hard scope gate before any preflight spend (authority, not style).
+  assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
+
   # Post-diff preflight with one bounded TypeScript fix retry. The first
   # failure keeps the worktree (no rollback) so the model can repair its
   # own compile errors; a second failure aborts and rolls back.
@@ -1299,6 +1392,9 @@ main() {
       rollback_execution_surface
       aegis_fatal "empty_diff: surface clean after preflight fix attempt"
     fi
+
+    # Re-assert scope after fix attempts (model must not expand surface).
+    assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
   done
 
   # Auto-fix inside the lint gate may have rewritten files after the
@@ -1308,6 +1404,8 @@ main() {
     rollback_execution_surface
     aegis_fatal "empty_diff: surface clean after preflight"
   fi
+
+  assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
 
   aegis_log "Emitting mutation artifact..."
 
@@ -1329,25 +1427,15 @@ run_mutation_preflight() {
     return 0
   fi
 
-  aegis_log "Running one-shot mutation preflight (typescript.check + test.run)..."
+  aegis_log "Running one-shot mutation preflight (typescript.check + test.run + smoke.import)..."
 
   # Surface the mutation file set so preflight can ignore pre-existing
-  # typescript debt outside the candidate (baseline pollution).
+  # typescript debt outside the candidate (baseline pollution), and so
+  # smoke.import only loads model-authored paths (not node_modules residue).
   local changed_files=""
   changed_files="$(
-    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" diff --name-only HEAD 2>/dev/null \
-      || true
+    list_mutation_changed_paths "$(capture_worktree_diff)"
   )"
-  # Also include intent-to-add / untracked paths that form part of the
-  # mutation (net-new files) so their tsc errors are still gated.
-  local untracked=""
-  untracked="$(
-    git -C "${AEGIS_EXECUTION_SURFACE_PATH}" ls-files --others --exclude-standard 2>/dev/null \
-      || true
-  )"
-  if [[ -n "${untracked}" ]]; then
-    changed_files="$(printf '%s\n%s\n' "${changed_files}" "${untracked}" | sed '/^$/d')"
-  fi
 
   # Return status only — caller owns rollback / fix-retry policy.
   AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \

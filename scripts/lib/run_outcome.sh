@@ -87,6 +87,10 @@ aegis_classify_reason() {
       class="scope"
       next_step="Re-execute discovery com target mais amplo que inclua o arquivo citado"
       ;;
+    mutation_preflight_failed)
+      class="mutation"
+      next_step="Preflight (tsc/test/smoke) falhou na surface; leia payloads em capability_payloads e corrija o candidate"
+      ;;
     max_repair_attempts_exceeded)
       class="budget"
       next_step="Teto do loop de repair; leia findings no handover, refine a demanda ou aumente AEGIS_MAX_REPAIR_ATTEMPTS"
@@ -112,6 +116,9 @@ aegis_classify_reason() {
       if [[ "${token}" == empty_diff:* ]]; then
         class="mutation"
         next_step="Substrate não produziu mudança; demanda pode já estar satisfeita — confira worktree/git log antes de repetir"
+      elif [[ "${token}" == mutation_scope_violation* ]]; then
+        class="scope"
+        next_step="Diff tocou path fora dos mutation targets autorizados; re-execute repair com escopo explícito ou refine forensics/authorized_scopes"
       elif [[ "${token}" == precondition_failed_* ]]; then
         class="pipeline_state"
         next_step="Artifact upstream ausente/inválido; rode o mode anterior da cadeia"
