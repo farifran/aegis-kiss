@@ -1521,6 +1521,25 @@ normalize_substrate_output() {
       operator_named_paths_json="[]"
     fi
 
+    # Existing repo paths (for required_evidence keep-filter). Prefer the
+    # evidence-target census when available so harness scripts do not count.
+    local existing_paths_json="[]"
+    existing_paths_json="$(
+      {
+        if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" && -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+          command grep -v '^#' "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null || true
+        else
+          git ls-files 2>/dev/null || true
+        fi
+      } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
+        | sort -u \
+        | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+        || printf '[]'
+    )"
+    if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      existing_paths_json="[]"
+    fi
+
     # Tribunal tools gate for adversarial/validation — mutation-scoped.
     local tribunal_files_json="[]"
     tribunal_files_json="$(
@@ -1545,6 +1564,7 @@ normalize_substrate_output() {
         --argjson seed_conditions "${seed_conditions_json}" \
         --argjson builder_priorities "${builder_priorities_json}" \
         --argjson operator_named_paths "${operator_named_paths_json}" \
+        --argjson existing_paths "${existing_paths_json}" \
         --argjson tools_gate "${tools_gate_json}" \
         '
         def drop_empty:
@@ -1564,9 +1584,19 @@ normalize_substrate_output() {
             and (.[16:] | test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
           ));
 
-        def merge_operator_required_evidence($req; $paths):
-          ($req | sanitize_required_evidence)
-          + ($paths | map("filesystem.read:" + .))
+        # Model-required net-new paths are kept ONLY when the operator named
+        # them in the investigation input. Otherwise floor models copy skill
+        # examples (ghost modules) into required_evidence and authorize them.
+        # Existing on-disk paths may still be requested for read-through.
+        def merge_operator_required_evidence($req; $named; $existing):
+          ($req
+            | sanitize_required_evidence
+            | map(select(
+                (.[16:] as $p
+                  | (($named | index($p)) != null)
+                    or (($existing | index($p)) != null))
+              )))
+          + ($named | map("filesystem.read:" + .))
           | unique;
 
         .mode = $mode
@@ -1578,7 +1608,9 @@ normalize_substrate_output() {
         | if $mode == "discovery" then
             (.operational_context // {}) as $oc
             | ((.required_evidence // $oc.required_evidence // []) ) as $raw_req
-            | merge_operator_required_evidence($raw_req; $operator_named_paths) as $merged_req
+            | merge_operator_required_evidence($raw_req; $operator_named_paths; $existing_paths) as $merged_req
+            # Attention: seed + operator-named only. Never let model-only
+            # required_evidence invent attention targets (ghost net-new).
             | (($seed_targets + $operator_named_paths) | unique) as $merged_attention
             | .operational_context = ({
                 status: ($oc.status // "interpreted"),

@@ -194,6 +194,38 @@ resolve_mutation_targets() {
     '
   )
 
+  # Ghost-path filter: a net-new target (absent on the mutation surface)
+  # is kept only when the operator named it in the investigation input.
+  # Forensics/discovery may still list skill-example paths; without this
+  # filter those become real mutation targets and empty stubs leak into
+  # the accepted candidate.
+  if [[ "${#targets[@]}" -gt 0 ]]; then
+    local -a filtered_targets=()
+    local inv_paths=""
+    inv_paths="$(
+      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
+        | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
+        | command sed 's|^\./||' \
+        | sort -u \
+        || true
+    )"
+    for t in "${targets[@]}"; do
+      [[ -n "${t}" ]] || continue
+      t="${t#./}"
+      if [[ -f "${AEGIS_EXECUTION_SURFACE_PATH:-.}/${t}" ]]; then
+        filtered_targets+=("${t}")
+        continue
+      fi
+      # Net-new: require explicit operator path token.
+      if printf '%s\n' "${inv_paths}" | command grep -Fxq "${t}"; then
+        filtered_targets+=("${t}")
+      else
+        aegis_warn "target_dropped_ghost_net_new_not_in_investigation: ${t}"
+      fi
+    done
+    targets=("${filtered_targets[@]:-}")
+  fi
+
   # Fallback chain — only when still empty after contract + unions.
 
   # Source 2: structural.builder payload → observed_request_alignment
@@ -302,40 +334,13 @@ sanitize_mutation_targets() {
         aegis_warn "target_rejected_unmaterializable: ${t}"
         continue
       fi
-      # Seed net-new TypeScript modules with a minimal type-checking stub
-      # when existing importers already name an export (e.g. index.ts already
-      # imports createTokenBucket). Empty files force the model to invent
-      # the entire module under whole-format pressure; a stub gives a
-      # compilable baseline that whole-edit can replace.
-      if [[ "${t}" == *.ts || "${t}" == *.tsx ]]; then
-        local stub_base stub_export
-        stub_base="$(basename "${t%.*}")"
-        stub_export="$(
-          command grep -RhoE "import[[:space:]]*\\{[^}]*\\}[[:space:]]*from[[:space:]]*['\"]\\./${stub_base}(\\.js)?['\"]" \
-            "${AEGIS_EXECUTION_SURFACE_PATH}" 2>/dev/null \
-            | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' \
-            | command grep -Ev '^(import|from)$' \
-            | head -n 1 \
-            || true
-        )"
-        if [[ -z "${stub_export}" ]]; then
-          # bash 3.2-safe capitalize of the file stem.
-          stub_export="create$(printf '%s' "${stub_base}" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
-        fi
-        cat > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" <<STUB
-/**
- * Net-new module stub — replace with the investigation demand.
- * Keep export name \`${stub_export}\` unless the demand renames it.
- */
-export function ${stub_export}(..._args: unknown[]): unknown {
-  throw new Error("${stub_export}: not implemented");
-}
-STUB
-      else
-        : > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}" || {
-          aegis_warn "target_rejected_unmaterializable: ${t}"
-          continue
-        }
+      # Empty regular file only — never seed domain stubs or invented
+      # export names. Content-bearing stubs were left as the "implementation"
+      # by floor models and leaked ghost modules (e.g. createTokenBucket)
+      # into accepted candidates.
+      if ! : > "${AEGIS_EXECUTION_SURFACE_PATH}/${t}"; then
+        aegis_warn "target_rejected_unmaterializable: ${t}"
+        continue
       fi
       git \
         --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
@@ -529,9 +534,10 @@ Rules:
 - Write the complete file content — never placeholders like '// ...' or '... rest of file'.
 - Do NOT copy any code from this prompt's instructions or evidence; write only the code the task requires.
 - If a file is currently a stub or empty (net-new), replace it with the full implementation the task demands.
-- TypeScript (NodeNext): relative imports MUST use the .js extension (e.g. from './tokenBucket.js').
-- TypeScript: keep export names that existing importers already use (e.g. createTokenBucket) unless the demand renames them.
+- TypeScript (NodeNext): relative imports MUST use the .js extension (e.g. from './mod.js').
+- TypeScript: keep export names that existing importers already use unless the demand renames them.
 - TypeScript: prefer strict, compilable code — explicit types, BigInt for high-precision counters when demanded, no any unless unavoidable.
+- Implement ONLY what the investigation input demands. Do not create or keep unrelated modules.
 
 If you use placeholders or omit code, the parser will fail and your changes will be discarded."
   fi
@@ -1081,7 +1087,7 @@ ${error_block}
 
 Common NodeNext fixes (apply when matching the errors above):
 - Relative imports need explicit .js: import { x } from './mod.js'
-- Export names must match importers (createTokenBucket, etc.)
+- Export names must match existing importers
 - BigInt literals use n suffix; do not mix number and bigint without conversion
 
 FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
