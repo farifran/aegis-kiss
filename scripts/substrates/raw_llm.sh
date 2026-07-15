@@ -303,24 +303,6 @@ render_bounded_payload_section() {
     cat "${payload_path}" > "${compact_file}"
   fi
 
-  # The structural.builder payload contains a node_index (reverse lookup
-  # table, file -> topology facts) that is consumed by Forensics via the
-  # epistemic handover — NOT by the Discovery LLM. It grows linearly with
-  # node count and can dominate the payload (30KB+ for ~80 nodes), pushing
-  # it past the per-payload byte limit and causing truncation that breaks
-  # the JSON. Strip it from the LLM evidence copy; the full payload on disk
-  # (with node_index intact) is still read by promote_epistemic_handover.
-  if [[ "${payload_name}" == "structural_builder.json" ]]; then
-    local stripped_file
-    stripped_file="$(mktemp)"
-    if jq -c '.payload = { topology_summary: .payload.topology_summary, suggested_evidence_priorities: .payload.suggested_evidence_priorities, ranked_targets: .payload.ranked_targets, observed_request_alignment: .payload.observed_request_alignment, gap_counts: .payload.gap_counts }' \
-        "${compact_file}" > "${stripped_file}" 2>/dev/null; then
-      mv "${stripped_file}" "${compact_file}"
-    else
-      rm -f "${stripped_file}" >/dev/null 2>&1 || true
-    fi
-  fi
-
   if [[ "${payload_name}" == *"epistemic_handover.json" ]]; then
     local stripped_file
     stripped_file="$(mktemp)"

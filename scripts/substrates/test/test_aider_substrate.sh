@@ -23,16 +23,6 @@ git -C "${execution_surface}" \
   -c user.email="aegis-test@example.invalid" \
   commit -qm "test fixture"
 
-cat > "${payload_dir}/structural_builder.json" <<'JSON'
-{
-  "payload": {
-    "observed_request_alignment": {
-      "resolved_paths": ["src/index.ts"]
-    }
-  }
-}
-JSON
-
 jq -n '
   {
     artifact_snapshot: {

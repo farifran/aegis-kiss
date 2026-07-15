@@ -53,24 +53,13 @@ def operator_named_paths:
 def authorized_targets:
   (
     [
-      .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
-      .artifact_snapshot.structural_context.observed_request_alignment.requested_paths[]?,
       # Operator-typed paths (model-independent net-new authorization).
       (operator_named_paths[]?),
       (.artifact_snapshot.operational_context.required_evidence[]?
         | select(type == "string" and startswith("filesystem.read:"))
         | ltrimstr("filesystem.read:")),
       (.artifact_snapshot.operational_context.operator_named_paths[]?),
-      (.artifact_snapshot.structural_context.ranked_targets[]?
-        | select(.type == "explicit_request")
-        | .file),
-      .epistemic_state.next_attention_targets[]?,
-      (.artifact_snapshot.structural_context.topology_index.boundaries[]?.file),
-      (.artifact_snapshot.structural_context.topology_index.hotspots[]?.file),
-      (.artifact_snapshot.structural_context.topology_index.entrypoints[]?.file),
-      (.artifact_snapshot.structural_context.topology_index.bridges[]?.from),
-      (.artifact_snapshot.structural_context.topology_index.bridges[]?.to),
-      (.artifact_snapshot.structural_context.topology_index.surfaces[]?.members[]?)
+      .epistemic_state.next_attention_targets[]?
     ]
     | map(select(is_real_repo_path))
     | unique
@@ -553,8 +542,7 @@ if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
   prev_findings_json="${handover_ctx[1]:-null}"
 fi
 
-# Attention-seed scope/targets/conditions and builder priorities for
-# discovery enrichment.
+# Attention-seed scope/targets/conditions for discovery enrichment.
 local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
 local seed_targets_json="[]"
 local seed_conditions_json="[]"
@@ -572,12 +560,6 @@ if [[ -f "${seed_path}" ]]; then
   seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
   seed_targets_json="${seed_ctx[1]:-[]}"
   seed_conditions_json="${seed_ctx[2]:-[]}"
-fi
-
-local builder_priorities_json="[]"
-local builder_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
-if [[ -f "${builder_path}" ]]; then
-  builder_priorities_json="$(jq -c '.payload.suggested_evidence_priorities // []' "${builder_path}" 2>/dev/null || echo '[]')"
 fi
 
 # Operator-named repository paths (common.sh helper — single regex family).
@@ -627,7 +609,6 @@ tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
     --argjson seed_scope "${seed_scope_json}" \
     --argjson seed_targets "${seed_targets_json}" \
     --argjson seed_conditions "${seed_conditions_json}" \
-    --argjson builder_priorities "${builder_priorities_json}" \
     --argjson operator_named_paths "${operator_named_paths_json}" \
     --argjson existing_paths "${existing_paths_json}" \
     --argjson tools_gate "${tools_gate_json}" \
@@ -639,7 +620,6 @@ tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
       seed_scope: $seed_scope,
       seed_targets: $seed_targets,
       seed_conditions: $seed_conditions,
-      builder_priorities: $builder_priorities,
       operator_named_paths: $operator_named_paths,
       existing_paths: $existing_paths,
       tools_gate: $tools_gate
@@ -664,7 +644,6 @@ enrich_cognitive_artifact() {
     | $ctx.seed_scope as $seed_scope
     | $ctx.seed_targets as $seed_targets
     | $ctx.seed_conditions as $seed_conditions
-    | $ctx.builder_priorities as $builder_priorities
     | $ctx.operator_named_paths as $operator_named_paths
     | $ctx.existing_paths as $existing_paths
     | $ctx.tools_gate as $tools_gate
@@ -725,10 +704,7 @@ enrich_cognitive_artifact() {
                 operator_named_paths: $operator_named_paths,
                 operational_observations: (.observations // $oc.operational_observations // []),
                 rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
-                evidence_priorities: (
-                  if ($builder_priorities | length) > 0 then $builder_priorities
-                  else ($oc.evidence_priorities // []) end
-                )
+                evidence_priorities: ($oc.evidence_priorities // [])
               } | drop_empty)
             | del(.observations, .rationale, .required_evidence)
             | .handover_attention = {

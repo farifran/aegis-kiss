@@ -833,51 +833,21 @@ promote_epistemic_handover() {
     || aegis_fatal "missing_promoted_artifact_for_handover"
 
   local handover_json
-  local builder_payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
 
-  # structural_context is runtime-owned (not LLM-writable). Prefer any
-  # residual topology payload if present; else carry prior handover.
-  local structural_context_json='{}'
-  if [[ -f "${builder_payload_path}" ]]; then
-    structural_context_json="$(
-      jq -c '
-        (.payload // {}) as $bp
-        | {
-            topology_index:             $bp.topology_index,
-            topology_summary:           $bp.topology_summary,
-            ranked_targets:             $bp.ranked_targets,
-            bridge_data:                $bp.topology_index.bridges,
-            boundary_data:              $bp.topology_index.boundaries,
-            hotspot_data:               $bp.topology_index.hotspots,
-            entrypoints:                $bp.topology_index.entrypoints,
-            evidence_summary:           $bp.evidence,
-            unresolved_references:      $bp.unresolved_references,
-            observed_request_alignment:    $bp.observed_request_alignment,
-            suggested_evidence_priorities: $bp.suggested_evidence_priorities,
-            gap_counts:                    $bp.gap_counts
-          }
-      ' "${builder_payload_path}"
-    )" || aegis_fatal "failed_to_materialize_handover"
-  elif [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    structural_context_json="$(
-      jq -c '.artifact_snapshot.structural_context // {}' \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
-    )" || aegis_fatal "failed_to_materialize_handover"
-  fi
-
+  # structural_context is runtime-owned and empty after the deep-topology cut
+  # (no structural.builder). Kept as {} for handover schema stability.
   handover_json="$(
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
       jq -c \
         --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
-        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" \
-        --argjson structural_context "${structural_context_json}" '
+        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" '
         . as $orig
         | {
             artifact_snapshot: {
               mode: $orig.mode,
               investigation_input: $investigation_input,
               generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
-              structural_context: $structural_context,
+              structural_context: {},
               operational_context: (
                 (if ($orig | has("operational_context")) then
                   $orig.operational_context

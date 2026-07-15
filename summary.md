@@ -195,6 +195,6 @@ Individual harnesses live under `scripts/substrates/test/`.
 
 ## Status notes
 
-- **Deep topology cut complete:** product discovery path is Layer 0 + fine only.
+- **Deep topology cut complete:** product discovery path is Layer 0 + fine only. Residual `structural_builder` reads were removed from handover, attention_seed, enrich, and mutation fallbacks.
 - **Docs role:** this file is the living map; README stays operator-facing; `entry.md` is future demand protocol, not current behavior.
 - Prefer hardening and KISS reduction over new architectural surfaces.

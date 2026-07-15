@@ -205,36 +205,12 @@ mutation_filter_ghost_net_new() {
   done
 }
 
-# First non-empty fallback source among builder / ranked / attention.
+# Fallback when contract + operator + required_evidence are empty:
+# path-shaped epistemic attention only (Layer 0 / forensics handover).
 mutation_targets_first_fallback() {
   local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
-  local out
   local line
 
-  out="$(mutation_jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json" \
-    '.payload.observed_request_alignment.resolved_paths[]? // empty')"
-  if [[ -n "${out}" ]]; then
-    printf '%s\n' "${out}"
-    return 0
-  fi
-
-  out="$(mutation_jq_lines "${handover}" \
-    '.artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]? // empty')"
-  if [[ -n "${out}" ]]; then
-    printf '%s\n' "${out}"
-    return 0
-  fi
-
-  out="$(mutation_jq_lines "${handover}" \
-    '.artifact_snapshot.structural_context.ranked_targets[]?
-     | select(.type == "explicit_request")
-     | .file // empty')"
-  if [[ -n "${out}" ]]; then
-    printf '%s\n' "${out}"
-    return 0
-  fi
-
-  # Path-shaped attention targets only
   while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
     if [[ "${line}" == *"."* ]] || [[ "${line}" == *"/"* ]]; then

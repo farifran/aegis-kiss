@@ -54,8 +54,6 @@ git -C "${main_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@exampl
 git -C "${main_repo}" worktree add --detach -q "${surface}" HEAD
 
 mkdir -p "${payload_dir}"
-printf '{"payload":{"observed_request_alignment":{"resolved_paths":[]}}}' \
-  > "${payload_dir}/structural_builder.json"
 
 # Forensics handover proposing the NET-NEW file as the repair candidate.
 jq -n --arg t "${net_new_target}" '
