@@ -13,3 +13,7 @@ export function kilobitsToMegabits(kilobits: number): number {
 export function bytesToMegabits(bytes: number): number {
   return bytes * 8 / (1024);
 }
+
+export function gigabytesToKilobits(gigabytes: number): number {
+  return gigabytes * 8 * 1024 / (1024);
+}
