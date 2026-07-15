@@ -1,0 +1,5 @@
+any|Remove any/as any/@ts-ignore. Use precise types or unknown + narrowing. Never silence the checker.
+import|Relative imports: NodeNext .js extension (from './mod.js'). Only package.json deps or Node builtins. Builtins are globals — do not import them as npm packages.
+type|Fix signatures and conversions. Prefer smallest correct type fix. Do not add any.
+runtime_load|Fix import paths/exports so the module loads. Relative .js specifier must match an on-disk sibling module.
+other|Fix with the smallest edit; stay inside authorized files.

@@ -1289,8 +1289,42 @@ classify_preflight_diagnostic_line() {
   esac
 }
 
-# Build a taxonomized fix-up prompt when preflight fails (tsc / smoke / …).
-# Keeps the same file jail; groups diagnostics so weak models fix by class.
+# Policy line for a diagnostic class (from prompts/preflight_class_policies.txt).
+preflight_class_policy() {
+  local class="$1"
+  local policies="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/prompts/preflight_class_policies.txt"
+  local line
+  line="$(command grep -E "^${class}\\|" "${policies}" 2>/dev/null | head -n 1 || true)"
+  if [[ -n "${line}" ]]; then
+    printf '%s' "${line#*|}"
+  else
+    printf '%s' "Fix with the smallest edit; stay inside authorized files."
+  fi
+}
+
+# Emit one class section (title + policy + up to 8 items).
+preflight_format_class_block() {
+  local title="$1"
+  local policy="$2"
+  shift 2
+  local -a items=("$@")
+  [[ "${#items[@]}" -gt 0 ]] || return 0
+  printf '%s\n' "${title}"
+  printf '%s\n' "Policy: ${policy}"
+  local it n=0
+  for it in "${items[@]}"; do
+    n=$((n + 1))
+    if [[ "${n}" -gt 8 ]]; then
+      printf '%s\n' "- … ($(( ${#items[@]} - 8 )) more omitted)"
+      break
+    fi
+    printf '%s\n' "- ${it}"
+  done
+  printf '\n'
+}
+
+# Taxonomized fix prompt after preflight failure (tsc / smoke / …).
+# Static standing rules live under scripts/substrates/prompts/.
 assemble_preflight_fix_prompt() {
 
   local prompt_file="$1"
@@ -1300,13 +1334,9 @@ assemble_preflight_fix_prompt() {
 
   local tsc_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/typescript_check.json"
   local smoke_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/smoke_import.json"
+  local standing_rules="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/prompts/preflight_standing_rules.txt"
 
-  local -a lines_any=()
-  local -a lines_import=()
-  local -a lines_type=()
-  local -a lines_runtime=()
-  local -a lines_other=()
-
+  local -a lines_any=() lines_import=() lines_type=() lines_runtime=() lines_other=()
   local raw_line class
 
   if [[ -f "${tsc_payload}" ]]; then
@@ -1332,7 +1362,6 @@ assemble_preflight_fix_prompt() {
   if [[ -f "${smoke_payload}" ]]; then
     while IFS= read -r raw_line; do
       [[ -n "${raw_line}" ]] || continue
-      # Smoke failures are always runtime_load family.
       lines_runtime+=("${raw_line}")
     done < <(
       jq -r '
@@ -1344,51 +1373,17 @@ assemble_preflight_fix_prompt() {
     )
   fi
 
-  format_class_block() {
-    local title="$1"
-    local policy="$2"
-    shift 2
-    local -a items=("$@")
-    if [[ "${#items[@]}" -eq 0 ]]; then
-      return 0
-    fi
-    printf '%s\n' "${title}"
-    printf '%s\n' "Policy: ${policy}"
-    local it
-    local n=0
-    for it in "${items[@]}"; do
-      n=$((n + 1))
-      # Cap per class so floor models are not flooded.
-      if [[ "${n}" -gt 8 ]]; then
-        printf '%s\n' "- … ($(( ${#items[@]} - 8 )) more omitted)"
-        break
-      fi
-      printf '%s\n' "- ${it}"
-    done
-    printf '\n'
-  }
-
   local taxonomy_block=""
-  taxonomy_block+="$(format_class_block \
-    "[any] Type escapes" \
-    "Remove any/as any/@ts-ignore. Use precise types or unknown + narrowing. Never silence the checker." \
-    "${lines_any[@]:-}")"
-  taxonomy_block+="$(format_class_block \
-    "[import] Module resolution" \
-    "Relative imports: NodeNext .js extension (from './mod.js'). Only package.json deps or Node builtins. Builtins are globals — do not import them as npm packages." \
-    "${lines_import[@]:-}")"
-  taxonomy_block+="$(format_class_block \
-    "[type] Type errors" \
-    "Fix signatures and conversions. Prefer smallest correct type fix. Do not add any." \
-    "${lines_type[@]:-}")"
-  taxonomy_block+="$(format_class_block \
-    "[runtime_load] Module load failures" \
-    "Fix import paths/exports so the module loads. Relative .js specifier must match an on-disk sibling module." \
-    "${lines_runtime[@]:-}")"
-  taxonomy_block+="$(format_class_block \
-    "[other] Other diagnostics" \
-    "Fix with the smallest edit; stay inside authorized files." \
-    "${lines_other[@]:-}")"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[any] Type escapes" "$(preflight_class_policy any)" "${lines_any[@]:-}")"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[import] Module resolution" "$(preflight_class_policy import)" "${lines_import[@]:-}")"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[type] Type errors" "$(preflight_class_policy type)" "${lines_type[@]:-}")"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[runtime_load] Module load failures" "$(preflight_class_policy runtime_load)" "${lines_runtime[@]:-}")"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[other] Other diagnostics" "$(preflight_class_policy other)" "${lines_other[@]:-}")"
 
   if [[ -z "$(printf '%s' "${taxonomy_block}" | sed '/^$/d')" ]]; then
     taxonomy_block="(no structured diagnostics available — re-read the loaded files and make them compile and load cleanly)
@@ -1397,6 +1392,8 @@ assemble_preflight_fix_prompt() {
 
   local target_list
   target_list="$(printf -- '- %s\n' "${prompt_targets[@]:-}")"
+  local standing=""
+  [[ -f "${standing_rules}" ]] && standing="$(cat "${standing_rules}")"
 
   cat > "${prompt_file}" << EOF
 You are fixing a preflight failure after a prior mutation attempt inside Aegis Harness.
@@ -1410,11 +1407,7 @@ ${AEGIS_INVESTIGATION_INPUT}
 Diagnostics by class (fix ONLY these; do not expand scope):
 
 ${taxonomy_block}
-Standing rules (all classes):
-- No \`any\`, no \`as any\`, no \`@ts-ignore\` / bare \`@ts-expect-error\`.
-- NodeNext relative imports use explicit .js extension.
-- Do not invent npm packages; language builtins are globals.
-- Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
+${standing}
 
 FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
 The ONLY files you may edit are:

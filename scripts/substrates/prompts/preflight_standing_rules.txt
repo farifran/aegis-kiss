@@ -1,0 +1,5 @@
+Standing rules (all classes):
+- No `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`.
+- NodeNext relative imports use explicit .js extension.
+- Do not invent npm packages; language builtins are globals.
+- Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
