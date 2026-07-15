@@ -334,13 +334,21 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
 )
 
 # ---------------------------------------------------------
-# DEEP TOPOLOGY SATELLITE (opt-in only)
+# TOPOLOGY CAPABILITIES (fine core + deep satellite)
 # ---------------------------------------------------------
-# Graph extractors + structural.builder are NOT on the hot path.
-# Default discovery depth is "fine" (Layer 0 only). Deep composition
-# is a satellite feature: keep handlers registered for authority and
-# for AEGIS_DISCOVERY_DEPTH=deep / required_evidence augmentation, but
-# do not treat this machinery as the product core.
+# Product path (AEGIS_DISCOVERY_DEPTH=fine, default):
+#   runtime.layer0_facts + runtime.attention_seed only
+#   (see AEGIS_DISCOVERY_EVIDENCE_FINE). No graph extractors run.
+#
+# Satellite path (AEGIS_DISCOVERY_DEPTH=deep or required_evidence):
+#   extract_* + structural.builder (~2k LOC under
+#   scripts/capabilities/{filesystem/extract_*,structural/}).
+#   Handlers stay registered so deep opt-in and authority audits work
+#   without re-wiring; they are NOT the product core and must not grow
+#   the fine hot path.
+#
+# Maintenance rule: prefer Layer 0 / attention_seed fixes over expanding
+# builder/extractors unless an investigation explicitly needs composition.
 # ---------------------------------------------------------
 declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_import_graph"

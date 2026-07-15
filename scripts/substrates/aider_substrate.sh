@@ -1464,14 +1464,67 @@ main() {
   # Hard scope gate before any preflight spend (authority, not style).
   assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
 
-  # Post-diff preflight with one bounded TypeScript fix retry. The first
-  # failure keeps the worktree (no rollback) so the model can repair its
-  # own compile errors; a second failure aborts and rolls back.
-  # Default two fix attempts: floor models often need a second compile pass
-  # on multi-file net-new work (export shape + NodeNext import extension).
+  # Post-diff preflight + bounded fix retries; returns final surface diff.
+  diff_content="$(
+    run_mutation_preflight_with_fix_attempts \
+      "${resolved_edit_format}" \
+      "${mutation_targets[@]:-}"
+  )"
+
+  aegis_log "Emitting mutation artifact..."
+  emit_mutation_artifact "${diff_content}"
+  aegis_log "Aider mutation substrate completed"
+}
+
+# =========================================================
+# POST-DIFF PREFLIGHT (runtime evidence, not aider reflection)
+# =========================================================
+
+run_mutation_preflight() {
+
+  local preflight_script="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_preflight.sh"
+
+  if [[ ! -f "${preflight_script}" ]]; then
+    aegis_warn "mutation_preflight_script_missing — skipping"
+    return 0
+  fi
+
+  aegis_log "Running one-shot mutation preflight (typescript.check + test.run + smoke.import)..."
+
+  # Surface the mutation file set so preflight can ignore pre-existing
+  # typescript debt outside the candidate (baseline pollution), and so
+  # smoke.import only loads model-authored paths (not node_modules residue).
+  local changed_files=""
+  changed_files="$(
+    list_mutation_changed_paths "$(capture_worktree_diff)"
+  )"
+
+  # Return status only — caller owns rollback / fix-retry policy.
+  AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
+    AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
+    AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
+    AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
+    bash "${preflight_script}" \
+      "${AEGIS_EXECUTION_SURFACE_PATH}" \
+      "${AIDER_CAPABILITY_PAYLOAD_DIR}"
+}
+
+# Preflight with bounded model fix retries. Prints the final surface diff
+# on stdout (for artifact emission). First failure keeps the worktree so
+# the model can repair compile errors; exhausted attempts abort+rollback.
+# Default two fix attempts: floor models often need a second compile pass
+# on multi-file net-new work (export shape + NodeNext import extension).
+#
+# Usage: diff="$(run_mutation_preflight_with_fix_attempts <edit_format> [targets...])"
+run_mutation_preflight_with_fix_attempts() {
+  local resolved_edit_format="$1"
+  shift
+  local mutation_targets=("$@")
+
   : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=2}"
   local preflight_attempt=0
   local max_preflight_attempts=$((AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS + 1))
+  local diff_content=""
 
   while true; do
     if run_mutation_preflight; then
@@ -1515,45 +1568,7 @@ main() {
   fi
 
   assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
-
-  aegis_log "Emitting mutation artifact..."
-
-  emit_mutation_artifact "${diff_content}"
-
-  aegis_log "Aider mutation substrate completed"
-}
-
-# =========================================================
-# POST-DIFF PREFLIGHT (runtime evidence, not aider reflection)
-# =========================================================
-
-run_mutation_preflight() {
-
-  local preflight_script="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_preflight.sh"
-
-  if [[ ! -f "${preflight_script}" ]]; then
-    aegis_warn "mutation_preflight_script_missing — skipping"
-    return 0
-  fi
-
-  aegis_log "Running one-shot mutation preflight (typescript.check + test.run + smoke.import)..."
-
-  # Surface the mutation file set so preflight can ignore pre-existing
-  # typescript debt outside the candidate (baseline pollution), and so
-  # smoke.import only loads model-authored paths (not node_modules residue).
-  local changed_files=""
-  changed_files="$(
-    list_mutation_changed_paths "$(capture_worktree_diff)"
-  )"
-
-  # Return status only — caller owns rollback / fix-retry policy.
-  AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
-    AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
-    AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
-    AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
-    bash "${preflight_script}" \
-      "${AEGIS_EXECUTION_SURFACE_PATH}" \
-      "${AIDER_CAPABILITY_PAYLOAD_DIR}"
+  printf '%s' "${diff_content}"
 }
 
 main "$@"
