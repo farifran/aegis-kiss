@@ -191,23 +191,36 @@ extract_isolation_helper() {
   local src="$1"
   local out="$2"
 
+  # Extract run_with_isolated_base_env (owns env -i) + invoke_capability_handler.
   awk '
-    /^invoke_capability_handler\(\) *\{/ { in_fn = 1; depth = 0 }
+    /^run_with_isolated_base_env\(\) *\{/ { in_fn = 1; depth = 0; want_handler = 1 }
+    /^invoke_capability_handler\(\) *\{/ {
+      if (!want_handler) next
+      in_fn = 1
+      depth = 0
+      capturing_handler = 1
+    }
     in_fn {
       print
       depth += gsub(/{/, "{")
       depth -= gsub(/}/, "}")
-      if (depth <= 0) in_fn = 0
+      if (depth <= 0) {
+        in_fn = 0
+        if (capturing_handler) exit
+      }
     }
   ' "${src}" > "${out}"
 
   [[ -s "${out}" ]] \
     || fail "failed_to_extract_isolation_helper_from_executor"
 
-  local def_count
-  def_count="$(grep -c '^invoke_capability_handler()' "${out}")"
-  [[ "${def_count}" -eq 1 ]] \
-    || fail "isolation_helper_extraction_captured_wrong_scope: ${def_count} definitions"
+  local base_count handler_count
+  base_count="$(grep -c '^run_with_isolated_base_env()' "${out}" || true)"
+  handler_count="$(grep -c '^invoke_capability_handler()' "${out}" || true)"
+  [[ "${base_count}" -eq 1 ]] \
+    || fail "isolation_helper_extraction_missing_base_env: ${base_count}"
+  [[ "${handler_count}" -eq 1 ]] \
+    || fail "isolation_helper_extraction_captured_wrong_scope: ${handler_count} definitions"
 }
 
 helper_file="${test_tmp}/isolation_helper.sh"

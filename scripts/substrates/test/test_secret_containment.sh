@@ -50,53 +50,61 @@ export AEGIS_EXECUTION_TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 export AEGIS_EXECUTION_SURFACE_PATH="${test_tmp}"
 export AEGIS_INVESTIGATION_INPUT="secret containment probe"
 
-# The executor defines invoke_capability_handler inline. To exercise the REAL
-# function (not a copy), we extract it from the executor source at runtime so
-# this test breaks loudly if the executor's isolation helper is ever renamed.
-#
-# IMPORTANT: we must extract ONLY invoke_capability_handler. The sibling
-# functions invoke_raw_substrate and invoke_aider_substrate legitimately
-# include OPENAI_* in their env whitelists (substrates are the credential
-# boundary by design). The capability handler must NOT. A naive brace match
-# that over-captures would grab those siblings and produce a false failure.
+# The executor defines run_with_isolated_base_env + invoke_capability_handler.
+# Extract BOTH so the real isolation path (env -i lives in the base helper)
+# is exercised. Do NOT capture invoke_raw_substrate / invoke_aider_substrate
+# — those legitimately whitelist OPENAI_* for cognition substrates.
 extract_isolation_helper() {
   local src="$1"
   local out="$2"
 
   awk '
-    # Match the function definition line.
-    /^invoke_capability_handler\(\) *\{/ { in_fn = 1; depth = 0 }
+    # Start at the shared base helper (env -i owner).
+    /^run_with_isolated_base_env\(\) *\{/ { in_fn = 1; depth = 0; want_handler = 1 }
+    # Continue through invoke_capability_handler only.
+    /^invoke_capability_handler\(\) *\{/ {
+      if (!want_handler) next
+      in_fn = 1
+      depth = 0
+      capturing_handler = 1
+    }
+    # Skip other siblings if we somehow land on them.
+    /^(invoke_raw_substrate|invoke_aider_substrate)\(\)/ {
+      if (capturing_handler && depth <= 0) { in_fn = 0 }
+    }
     in_fn {
       print
-      # Update brace depth from this line, then check for close.
-      # The signature line contributes 1 "{" so depth becomes 1; the closing
-      # "}" line brings it back to 0, which ends the function.
       depth += gsub(/{/, "{")
       depth -= gsub(/}/, "}")
-      if (depth <= 0) in_fn = 0
+      if (depth <= 0) {
+        in_fn = 0
+        if (capturing_handler) exit
+      }
     }
   ' "${src}" > "${out}"
 
   [[ -s "${out}" ]] \
     || fail "failed_to_extract_isolation_helper_from_executor"
 
-  # Guard: we must have captured exactly one function definition.
-  local def_count
-  def_count="$(grep -c '^invoke_capability_handler()' "${out}")"
-  [[ "${def_count}" -eq 1 ]] \
-    || fail "isolation_helper_extraction_captured_wrong_scope: ${def_count} definitions"
+  local base_count handler_count
+  base_count="$(grep -c '^run_with_isolated_base_env()' "${out}" || true)"
+  handler_count="$(grep -c '^invoke_capability_handler()' "${out}" || true)"
+  [[ "${base_count}" -eq 1 ]] \
+    || fail "isolation_helper_extraction_missing_base_env: ${base_count}"
+  [[ "${handler_count}" -eq 1 ]] \
+    || fail "isolation_helper_extraction_captured_wrong_scope: ${handler_count} definitions"
 }
 
 helper_file="${test_tmp}/isolation_helper.sh"
 extract_isolation_helper scripts/execute_mode.sh "${helper_file}"
 
-# Confirm the extracted helper actually uses env -i before trusting it.
+# Confirm the isolation path still uses env -i (in the base helper).
 grep -q 'env -i' "${helper_file}" \
   || fail "extracted_isolation_helper_missing_env_i"
 
-# Confirm the extracted helper does NOT pass credentials through.
-# (Defensive: if someone later edits the executor to inject OPENAI_* into the
-# capability env, this test must fail at this assertion.)
+# Confirm the capability path does NOT pass credentials through.
+# OPENAI_* must not appear in the extracted capability isolation surface
+# (base + capability handler only — not raw/aider substrates).
 grep -q 'OPENAI_API_KEY' "${helper_file}" \
   && fail "isolation_helper_leaks_OPENAI_API_KEY"
 grep -q 'OPENAI_API_BASE' "${helper_file}" \

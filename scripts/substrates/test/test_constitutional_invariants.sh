@@ -46,6 +46,9 @@ assert_executor_subprocess_isolation_contract() {
   grep -q 'env -i' scripts/execute_mode.sh \
     || fail "missing_sanitized_subprocess_environment"
 
+  grep -q 'run_with_isolated_base_env()' scripts/execute_mode.sh \
+    || fail "missing_isolated_base_env_helper"
+
   grep -q 'invoke_capability_handler()' scripts/execute_mode.sh \
     || fail "missing_capability_handler_isolation_helper"
 

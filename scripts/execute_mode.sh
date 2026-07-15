@@ -130,14 +130,18 @@ trap 'aegis_warn "Interrupted by SIGTERM"; trap - INT TERM; exit 143' TERM
 
 validate_executor_inputs() {
 
-  [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] \
-    || aegis_fatal "missing_execution_surface_path"
-
-  [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
-    || aegis_fatal "missing_execution_id"
-
-  [[ -n "${AEGIS_EXECUTION_TIMESTAMP:-}" ]] \
-    || aegis_fatal "missing_execution_timestamp"
+  local pair name fatal_tag
+  # Non-empty scalar requireds: name:fatal_tag
+  for pair in \
+    "AEGIS_EXECUTION_SURFACE_PATH:missing_execution_surface_path" \
+    "AEGIS_EXECUTION_ID:missing_execution_id" \
+    "AEGIS_EXECUTION_TIMESTAMP:missing_execution_timestamp" \
+    "AEGIS_CAPABILITY_MANIFEST:missing_runtime_owned_capability_manifest"
+  do
+    name="${pair%%:*}"
+    fatal_tag="${pair#*:}"
+    [[ -n "${!name:-}" ]] || aegis_fatal "${fatal_tag}"
+  done
 
   [[ -f "${AEGIS_SKILL_FILE}" ]] \
     || aegis_fatal "missing_skill_contract"
@@ -145,23 +149,17 @@ validate_executor_inputs() {
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" ]] \
     || aegis_fatal "missing_epistemic_handover"
 
-  [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] \
-    || aegis_fatal "missing_runtime_owned_capability_manifest"
-
-  declare -p AEGIS_EXECUTION_ENGINES >/dev/null 2>&1 \
-    || aegis_fatal "missing_execution_engine_registry"
-
-  declare -p AEGIS_MODE_CAPABILITY_MAP >/dev/null 2>&1 \
-    || aegis_fatal "missing_mode_capability_map"
-
-  declare -p AEGIS_CAPABILITY_HANDLERS >/dev/null 2>&1 \
-    || aegis_fatal "missing_capability_handler_registry"
-
-  declare -p AEGIS_CAPABILITY_ARGUMENTS >/dev/null 2>&1 \
-    || aegis_fatal "missing_capability_argument_registry"
-
-  declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
-    || aegis_fatal "missing_evidence_profile_registry"
+  for pair in \
+    "AEGIS_EXECUTION_ENGINES:missing_execution_engine_registry" \
+    "AEGIS_MODE_CAPABILITY_MAP:missing_mode_capability_map" \
+    "AEGIS_CAPABILITY_HANDLERS:missing_capability_handler_registry" \
+    "AEGIS_CAPABILITY_ARGUMENTS:missing_capability_argument_registry" \
+    "AEGIS_MODE_EVIDENCE_PROFILE:missing_evidence_profile_registry"
+  do
+    name="${pair%%:*}"
+    fatal_tag="${pair#*:}"
+    declare -p "${name}" >/dev/null 2>&1 || aegis_fatal "${fatal_tag}"
+  done
 
   [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
     || aegis_fatal "unknown_execution_mode"
@@ -362,17 +360,25 @@ resolve_capability_argument() {
   esac
 }
 
-invoke_capability_handler() {
-
-  local handler="$1"
-  local capability_argument="$2"
-
+# Isolated child process envelope: clean env with locale + PATH only.
+# Callers pass additional KEY=value pairs then the command.
+#   run_with_isolated_base_env FOO=bar bash script.sh args...
+run_with_isolated_base_env() {
   env -i \
     PATH="${PATH}" \
     HOME="${HOME:-}" \
     TMPDIR="${TMPDIR:-/tmp}" \
     LANG="${LANG:-C.UTF-8}" \
     LC_ALL="${LC_ALL:-}" \
+    "$@"
+}
+
+invoke_capability_handler() {
+
+  local handler="$1"
+  local capability_argument="$2"
+
+  run_with_isolated_base_env \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
     AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_EXECUTION_SURFACE_PATH}" \
@@ -396,12 +402,7 @@ invoke_raw_substrate() {
   local selected_manifest="$3"
   local capability_payload_dir="$4"
 
-  env -i \
-    PATH="${PATH}" \
-    HOME="${HOME:-}" \
-    TMPDIR="${TMPDIR:-/tmp}" \
-    LANG="${LANG:-C.UTF-8}" \
-    LC_ALL="${LC_ALL:-}" \
+  run_with_isolated_base_env \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
     AEGIS_SKIP_LOCAL_ENV="${AEGIS_SKIP_LOCAL_ENV:-}" \
@@ -441,12 +442,7 @@ invoke_aider_substrate() {
   local skill_file="$1"
   local capability_payload_dir="$2"
 
-  env -i \
-    PATH="${PATH}" \
-    HOME="${HOME:-}" \
-    TMPDIR="${TMPDIR:-/tmp}" \
-    LANG="${LANG:-C.UTF-8}" \
-    LC_ALL="${LC_ALL:-}" \
+  run_with_isolated_base_env \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
     AEGIS_SKIP_LOCAL_ENV="${AEGIS_SKIP_LOCAL_ENV:-}" \

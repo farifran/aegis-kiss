@@ -366,20 +366,34 @@ render_bounded_payload_section() {
 # PROMPT ASSEMBLY
 # =========================================================
 
+# Mode-specific minimal-artifact instructions (injected into system prompt).
+raw_mode_minimal_artifact_instructions() {
+  case "${AEGIS_MODE}" in
+    forensics)
+      printf '%s' "MINIMAL FORENSICS ARTIFACT: emit ONLY {\"status\": \"interpreted|inconclusive\", \"repair_candidates\": [{\"id\": \"<file>\", \"reason\": \"<3-6 words>\"}]}. When status is 'inconclusive', repair_candidates MUST be []. When status is 'interpreted', default to ONE candidate (Alvo Único) from active topology evidence — UNLESS the investigation input explicitly names multiple paths (e.g. create src/feature/widget.ts AND re-export from src/index.ts), in which case emit one candidate per named path (net-new first). A net-new path is valid ONLY when the investigation input names that exact path — never invent or copy example paths. Interpret only the evidence Discovery provided. The runtime injects mode, evidence identity, and attention routing — do NOT emit them."
+      ;;
+    discovery)
+      printf '%s' "MINIMAL DISCOVERY ARTIFACT: emit ONLY {\"observations\": [\"...\"], \"rationale\": \"...\", \"required_evidence\": [\"filesystem.read:<file>\"]}. The subject of every observation is the INVESTIGATION (gaps, priorities, next evidence), never the system under investigation: no counts/metrics repetition, no architectural role labels (orchestrator/controller/gateway), no semantic domain inference, no risk assessment, no inferring module function from topology position. The runtime injects mode, scope, attention, priorities, and evidence identity — do NOT emit them."
+      ;;
+    optimize)
+      printf '%s' "MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."
+      ;;
+    adversarial)
+      printf '%s' "MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' ONLY for defects proven by (a) in-scope tool failures on files_changed, or (b) a logic error whose description quotes the EXACT added expression from the candidate diff. If tools pass for mutation files, prefer status 'verified' with findings []. NEVER invent an 'actual implementation' that is not a full +line of the diff. The runtime tribunal will downgrade fabricated quotes. Do NOT emit mode/candidate_result/handover_attention."
+      ;;
+    validation)
+      printf '%s' "MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
 assemble_system_prompt() {
 
-  local mode_specific_instructions=""
-  if [[ "${AEGIS_MODE}" == "forensics" ]]; then
-    mode_specific_instructions="MINIMAL FORENSICS ARTIFACT: emit ONLY {\"status\": \"interpreted|inconclusive\", \"repair_candidates\": [{\"id\": \"<file>\", \"reason\": \"<3-6 words>\"}]}. When status is 'inconclusive', repair_candidates MUST be []. When status is 'interpreted', default to ONE candidate (Alvo Único) from active topology evidence — UNLESS the investigation input explicitly names multiple paths (e.g. create src/feature/widget.ts AND re-export from src/index.ts), in which case emit one candidate per named path (net-new first). A net-new path is valid ONLY when the investigation input names that exact path — never invent or copy example paths. Interpret only the evidence Discovery provided. The runtime injects mode, evidence identity, and attention routing — do NOT emit them."
-  elif [[ "${AEGIS_MODE}" == "discovery" ]]; then
-    mode_specific_instructions="MINIMAL DISCOVERY ARTIFACT: emit ONLY {\"observations\": [\"...\"], \"rationale\": \"...\", \"required_evidence\": [\"filesystem.read:<file>\"]}. The subject of every observation is the INVESTIGATION (gaps, priorities, next evidence), never the system under investigation: no counts/metrics repetition, no architectural role labels (orchestrator/controller/gateway), no semantic domain inference, no risk assessment, no inferring module function from topology position. The runtime injects mode, scope, attention, priorities, and evidence identity — do NOT emit them."
-  elif [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    mode_specific_instructions="MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."
-  elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then
-    mode_specific_instructions="MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' ONLY for defects proven by (a) in-scope tool failures on files_changed, or (b) a logic error whose description quotes the EXACT added expression from the candidate diff. If tools pass for mutation files, prefer status 'verified' with findings []. NEVER invent an 'actual implementation' that is not a full +line of the diff. The runtime tribunal will downgrade fabricated quotes. Do NOT emit mode/candidate_result/handover_attention."
-  elif [[ "${AEGIS_MODE}" == "validation" ]]; then
-    mode_specific_instructions="MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
-  fi
+  local mode_specific_instructions
+  mode_specific_instructions="$(raw_mode_minimal_artifact_instructions)"
 
   # Byte 0 of the stream is the constitutional preamble — static and
   # clean so any serving-side prefix cache (including the hosted
@@ -437,6 +451,7 @@ The payload MUST:
 The investigation input is provided under the "=== INVESTIGATION INPUT ===" header of the user message. Execution identity is provided under the "=== EXECUTION IDENTITY ===" header of the user message.
 EOF
 }
+
 
 # =========================================================
 # MANIFEST BOUNDING
@@ -592,10 +607,8 @@ assemble_bounded_capability_context() {
 # REQUEST ASSEMBLY
 # =========================================================
 
-assemble_provider_request() {
-
-  # Per-mode decode budgets: short JSON artifacts must not pay the default
-  # 4096-token ceiling. Mode-specific env vars win; unknown modes fall back.
+# Per-mode decode budget: short JSON artifacts must not pay the default ceiling.
+resolve_raw_max_tokens() {
   : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS:=4096}"
   local effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS}"
   case "${AEGIS_MODE}" in
@@ -612,6 +625,13 @@ assemble_provider_request() {
       effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:-512}"
       ;;
   esac
+  printf '%s' "${effective_max_tokens}"
+}
+
+assemble_provider_request() {
+
+  local effective_max_tokens
+  effective_max_tokens="$(resolve_raw_max_tokens)"
   aegis_log "raw_substrate_max_tokens[${AEGIS_MODE}]=${effective_max_tokens}"
 
   jq -n \
@@ -640,6 +660,7 @@ assemble_provider_request() {
 
   aegis_log "Request size bytes: $(wc -c < "${TMP_REQUEST_FILE}")"
 }
+
 
 # =========================================================
 # PROVIDER EXECUTION
@@ -803,65 +824,17 @@ normalize_decorated_markers() {
     -e "s/^[[:space:]#\`*]*${end_rx}[[:space:]#\`*]*\$/${AEGIS_ARTIFACT_END_MARKER}/"
 }
 
-extract_artifact_payload() {
-
-  local provider_content
-  provider_content="$(
-    extract_provider_content | normalize_decorated_markers
-  )"
-
-  [[ -n "${provider_content}" ]] \
-    || aegis_fatal "empty_provider_response"
-
-  local has_markers=true
-  if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
-    || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
-    has_markers=false
-  fi
-
-  local artifact_payload=""
-  if [[ "${has_markers}" == "true" ]]; then
-    artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
-    artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
-  else
-    # Fallback: Extract the first outer JSON object block { ... } in the content.
-    # This prevents failures when 8B models output JSON without markers.
-    local first_brace last_brace
-    first_brace="$(echo "${provider_content}" | grep -n "{" | head -n 1 | cut -d: -f1)"
-    last_brace="$(echo "${provider_content}" | grep -n "}" | tail -n 1 | cut -d: -f1)"
-    if [[ -n "${first_brace}" ]] && [[ -n "${last_brace}" ]] && [[ "${first_brace}" -le "${last_brace}" ]]; then
-      artifact_payload="$(echo "${provider_content}" | sed -n "${first_brace},${last_brace}p")"
-    else
-      echo "[DEBUG] Raw LLM content (markers and JSON braces missing):" >&2
-      echo "${provider_content}" >&2
-      aegis_fatal "missing_artifact_markers"
-    fi
-  fi
-
-  # Strip stray markdown code-fence lines the model may have wrapped the
-  # JSON body in (``` / ```json), which would break jq parsing.
-  artifact_payload="$(
-    printf '%s\n' "${artifact_payload}" \
-      | sed -E '/^[[:space:]]*`{3,}[a-zA-Z]*[[:space:]]*$/d'
-  )"
-
-  [[ -n "${artifact_payload//[[:space:]]/}" ]] \
-    || aegis_fatal "empty_artifact_payload"
-
-  if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
-    # Try a Python-based JSON repair for two classes of LLM slip:
-    #   1. Missing closing quote on property keys.
-    #   2. Truncated JSON (model stopped before closing all arrays/objects).
-    local repaired_payload
-    repaired_payload="$(python3 - <<'PY' "${artifact_payload}"
+# Repair common LLM JSON slips (missing key quotes, truncated braces).
+# Prints repaired JSON on success, original on failure.
+repair_llm_json_payload() {
+  local artifact_payload="$1"
+  python3 - <<'PY' "${artifact_payload}"
 import sys
 import json
 import re
 
 raw = sys.argv[1]
-# Fix common LLM syntax slip: "property: "value" (missing closing quote on key)
 fixed = re.sub(r'\"([a-zA-Z0-9_]+)(?<!\"):\s*\"', r'"\1": "', raw)
-# Fix missing quote on property keys like "scope_confidence: "low"
 fixed = re.sub(r'\"([a-zA-Z0-9_]+)\s*:\s*\"', r'"\1": "', fixed)
 
 try:
@@ -871,8 +844,6 @@ try:
 except Exception:
     pass
 
-# Attempt to close a truncated JSON object by appending missing brackets.
-# Count unmatched open brackets (arrays and objects) and close them.
 stack = []
 in_str = False
 escape_next = False
@@ -908,10 +879,59 @@ if truncation_suffix:
     except Exception:
         pass
 
-# Give up — return raw so jq check triggers the fatal error
 print(raw)
 PY
-)"
+}
+
+# Pull body between markers or first/last brace object from provider content.
+slice_artifact_json_body() {
+  local provider_content="$1"
+  local has_markers=true
+  if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
+    || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
+    has_markers=false
+  fi
+
+  local artifact_payload=""
+  if [[ "${has_markers}" == "true" ]]; then
+    artifact_payload="${provider_content#*"${AEGIS_ARTIFACT_BEGIN_MARKER}"}"
+    artifact_payload="${artifact_payload%%"${AEGIS_ARTIFACT_END_MARKER}"*}"
+  else
+    local first_brace last_brace
+    first_brace="$(echo "${provider_content}" | grep -n "{" | head -n 1 | cut -d: -f1)"
+    last_brace="$(echo "${provider_content}" | grep -n "}" | tail -n 1 | cut -d: -f1)"
+    if [[ -n "${first_brace}" ]] && [[ -n "${last_brace}" ]] && [[ "${first_brace}" -le "${last_brace}" ]]; then
+      artifact_payload="$(echo "${provider_content}" | sed -n "${first_brace},${last_brace}p")"
+    else
+      echo "[DEBUG] Raw LLM content (markers and JSON braces missing):" >&2
+      echo "${provider_content}" >&2
+      aegis_fatal "missing_artifact_markers"
+    fi
+  fi
+
+  printf '%s\n' "${artifact_payload}" \
+    | sed -E '/^[[:space:]]*`{3,}[a-zA-Z]*[[:space:]]*$/d'
+}
+
+extract_artifact_payload() {
+
+  local provider_content
+  provider_content="$(
+    extract_provider_content | normalize_decorated_markers
+  )"
+
+  [[ -n "${provider_content}" ]] \
+    || aegis_fatal "empty_provider_response"
+
+  local artifact_payload
+  artifact_payload="$(slice_artifact_json_body "${provider_content}")"
+
+  [[ -n "${artifact_payload//[[:space:]]/}" ]] \
+    || aegis_fatal "empty_artifact_payload"
+
+  if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
+    local repaired_payload
+    repaired_payload="$(repair_llm_json_payload "${artifact_payload}")"
     if echo "${repaired_payload}" | jq empty >/dev/null 2>&1; then
       artifact_payload="${repaired_payload}"
     else
@@ -925,6 +945,7 @@ PY
   echo "${artifact_payload}"
   echo "${AEGIS_ARTIFACT_END_MARKER}"
 }
+
 
 # =========================================================
 # MAIN
