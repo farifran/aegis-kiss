@@ -144,5 +144,93 @@ if ! git -C "${REPOSITORY_ROOT}" apply "${diff_file}" 2>"${check_err_file}"; the
     "stderr=$(tr '\n' ' ' < "${check_err_file}")"
 fi
 
+promoted_paths="$(grep -v '^$' "${files_file}" | paste -sd' ' -)"
 echo "[AEGIS][PROMOTION] Validated candidate applied" >&2
-echo "[AEGIS][PROMOTION] files=$(tr '\n' ' ' < "${files_file}")" >&2
+echo "[AEGIS][PROMOTION] files=${promoted_paths}" >&2
+
+# ---------------------------------------------------------
+# Opt-in persist (best-effort). Never fails promotion after apply.
+#   AEGIS_AUTO_COMMIT=1  → commit only promoted paths
+#   AEGIS_ISSUE_COMMENT=1 + AEGIS_ISSUE_NUMBER → gh issue comment
+# ---------------------------------------------------------
+promotion_flag_on() {
+  case "${1:-0}" in 1|true|yes) return 0 ;; *) return 1 ;; esac
+}
+
+export AEGIS_LAST_PROMOTED_COMMIT=""
+do_auto_commit=false
+do_issue_comment=false
+promotion_flag_on "${AEGIS_AUTO_COMMIT:-0}" && do_auto_commit=true
+promotion_flag_on "${AEGIS_ISSUE_COMMENT:-0}" && do_issue_comment=true
+
+if [[ "${do_auto_commit}" == "true" || "${do_issue_comment}" == "true" ]]; then
+  promoted_verdict="$(jq -r '.verdict // empty' "${ARTIFACT_FILE}" 2>/dev/null || true)"
+  issue_n="${AEGIS_ISSUE_NUMBER:-}"
+  task_k="${AEGIS_ISSUE_TASK:-}"
+
+  if [[ "${do_auto_commit}" == "true" ]]; then
+    if [[ "${promoted_verdict}" != "accepted" ]]; then
+      echo "[AEGIS][PROMOTION][WARN] auto_commit_skipped: verdict=${promoted_verdict:-empty}" >&2
+    else
+      set +e
+      while IFS= read -r p || [[ -n "${p}" ]]; do
+        [[ -n "${p}" ]] || continue
+        git -C "${REPOSITORY_ROOT}" add -- "${p}" 2>/dev/null
+      done < "${files_file}"
+
+      if git -C "${REPOSITORY_ROOT}" diff --cached --quiet 2>/dev/null; then
+        echo "[AEGIS][PROMOTION][WARN] auto_commit_skipped: nothing staged" >&2
+      else
+        subject="aegis: accept validation"
+        if [[ "${issue_n}" =~ ^[0-9]+$ && -n "${task_k}" ]]; then
+          subject="aegis: issue#${issue_n} task#${task_k} accept validation"
+        elif [[ "${issue_n}" =~ ^[0-9]+$ ]]; then
+          subject="aegis: issue#${issue_n} accept validation"
+        fi
+        body="Aegis-Promoted: true
+Aegis-Verdict: accepted
+Aegis-Mode: validation
+Aegis-Issue: ${issue_n}
+Aegis-Task: ${task_k}
+Aegis-Paths: ${promoted_paths}"
+        if git -C "${REPOSITORY_ROOT}" commit -m "${subject}" -m "${body}" >/dev/null 2>&1; then
+          AEGIS_LAST_PROMOTED_COMMIT="$(
+            git -C "${REPOSITORY_ROOT}" rev-parse --short HEAD 2>/dev/null || true
+          )"
+          export AEGIS_LAST_PROMOTED_COMMIT
+          echo "[AEGIS][PROMOTION] auto_commit ok commit=${AEGIS_LAST_PROMOTED_COMMIT}" >&2
+        else
+          echo "[AEGIS][PROMOTION][WARN] auto_commit_failed (apply kept; check git user.email)" >&2
+          git -C "${REPOSITORY_ROOT}" reset HEAD --quiet 2>/dev/null || true
+        fi
+      fi
+      set -e
+    fi
+  fi
+
+  if [[ "${do_issue_comment}" == "true" ]]; then
+    set +e
+    if [[ ! "${issue_n}" =~ ^[0-9]+$ ]]; then
+      echo "[AEGIS][PROMOTION][WARN] issue_comment_skipped: invalid AEGIS_ISSUE_NUMBER" >&2
+    elif ! command -v gh >/dev/null 2>&1; then
+      echo "[AEGIS][PROMOTION][WARN] issue_comment_skipped: gh not found" >&2
+    else
+      comment_body="### AEGIS OUTCOME
+- status: SUCCESS
+- verdict: ${promoted_verdict:-accepted}
+- mode: validation
+- issue: ${issue_n}
+- task: ${task_k:-n/a}
+- commit: \`${AEGIS_LAST_PROMOTED_COMMIT:-n/a}\`
+- paths: ${promoted_paths}
+- next: mark task done if applicable; next task with a clean investigation"
+      if ( cd "${REPOSITORY_ROOT}" && gh issue comment "${issue_n}" --body "${comment_body}" ) \
+        >/dev/null 2>&1; then
+        echo "[AEGIS][PROMOTION] issue_comment ok issue=#${issue_n}" >&2
+      else
+        echo "[AEGIS][PROMOTION][WARN] issue_comment_failed issue=#${issue_n}" >&2
+      fi
+    fi
+    set -e
+  fi
+fi
