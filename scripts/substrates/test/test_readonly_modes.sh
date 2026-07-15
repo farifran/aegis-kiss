@@ -317,7 +317,7 @@ main() {
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
   assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json", "typescript_check.json", "eslint_check.json", "test_run.json"]'
 
-  # Fine default: Layer 0 only — no structural.builder side-effect extractors.
+  # Discovery materializes Layer 0 priors only (no graph extractors).
   assert_materialized_runtime_state \
     "discovery" \
     '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "runtime_layer0_facts.json"]'

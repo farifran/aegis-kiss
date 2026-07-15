@@ -349,7 +349,7 @@ resolve_capability_argument() {
 
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
       ;;
-    filesystem.list_tree|filesystem.extract_import_graph|filesystem.extract_reference_graph|filesystem.extract_symbols|filesystem.extract_entrypoints|filesystem.extract_test_relationships|filesystem.extract_configuration_structure|filesystem.extract_responsibilities|structural.builder|runtime.layer0_facts|runtime.attention_seed)
+    filesystem.list_tree|runtime.layer0_facts|runtime.attention_seed)
       printf '%s' "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
       ;;
     *)

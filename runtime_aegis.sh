@@ -835,10 +835,8 @@ promote_epistemic_handover() {
   local handover_json
   local builder_payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
 
-  # artifact_snapshot separates structural_context (runtime-owned facts
-  # from structural.builder — the LLM cannot corrupt them) from
-  # operational_context (mode-owned interpretation). mode,
-  # investigation_input, and generated_at stay top-level as metadata.
+  # structural_context is runtime-owned (not LLM-writable). Prefer any
+  # residual topology payload if present; else carry prior handover.
   local structural_context_json='{}'
   if [[ -f "${builder_payload_path}" ]]; then
     structural_context_json="$(
@@ -861,8 +859,6 @@ promote_epistemic_handover() {
       ' "${builder_payload_path}"
     )" || aegis_fatal "failed_to_materialize_handover"
   elif [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-    # Builder payload missing — carry structural context forward from
-    # the preceding handover.
     structural_context_json="$(
       jq -c '.artifact_snapshot.structural_context // {}' \
         "${AEGIS_EPISTEMIC_HANDOVER_FILE}"

@@ -11,35 +11,13 @@
 #
 # Responsibilities:
 #
-# - consume Layer 0 facts and/or structural.builder when present
-# - derive attention targets deterministically using the rule:
+# - consume Layer 0 facts (required); optional leftover topology
+#   JSON is ignored if absent
+# - derive attention targets deterministically:
+#     layer0 resonant hot_files → declared entrypoints → []
+# - emit handover_attention for Discovery and runtime promotion
 #
-#     if observed_request_alignment exact paths (builder)
-#         attention = exact resolved paths
-#     else if layer0 resonant hot_files
-#         attention = resonant churn files
-#     else if topology hotspots/bridges (builder)
-#         attention = topology-derived files
-#     else if layer0 declared entrypoints
-#         attention = manifest entrypoints
-#     else if topology entrypoints (builder)
-#         attention = entrypoint files
-#     else
-#         attention = [] (no targets)
-#
-# Fine discovery depth may omit structural.builder entirely.
-#
-# - emit a handover_attention object consumable verbatim by
-#   the Discovery mode and by runtime_aegis.sh for epistemic
-#   handover promotion
-#
-# This capability intentionally:
-#
-# - performs no LLM calls or semantic inference
-# - performs no filesystem reads of source code
-# - derives attention from topology mathematics and request
-#   alignment only
-# - removes model judgment from attention selection
+# No LLM. No source reads. No model judgment.
 #
 # =========================================================
 
@@ -64,9 +42,8 @@ readonly GENERATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 # =========================================================
 # PREDECESSOR RESOLUTION
 # =========================================================
-# Fine discovery depth: Layer 0 only (no structural.builder).
-# Deep discovery depth: structural.builder + Layer 0.
-# Fail only when neither predecessor is available.
+# Layer 0 is required. Optional structural_builder.json is only
+# read if present (tests / residual payloads); it is not produced.
 
 readonly LAYER0_PAYLOAD_FILE="${PAYLOAD_DIR}/runtime_layer0_facts.json"
 HAS_BUILDER="false"
@@ -75,7 +52,7 @@ HAS_LAYER0="false"
 [[ -f "${BUILDER_PAYLOAD}" ]] && HAS_BUILDER="true"
 [[ -f "${LAYER0_PAYLOAD_FILE}" ]] && HAS_LAYER0="true"
 
-if [[ "${HAS_BUILDER}" != "true" ]] && [[ "${HAS_LAYER0}" != "true" ]]; then
+if [[ "${HAS_LAYER0}" != "true" ]] && [[ "${HAS_BUILDER}" != "true" ]]; then
   jq -n \
     --arg capability "runtime.attention_seed" \
     --arg classification "readonly" \
@@ -91,7 +68,7 @@ if [[ "${HAS_BUILDER}" != "true" ]] && [[ "${HAS_LAYER0}" != "true" ]]; then
       payload: null,
       error: {
         type: "missing_required_predecessor",
-        target: "runtime.layer0_facts|structural.builder"
+        target: "runtime.layer0_facts"
       }
     }'
   exit 0

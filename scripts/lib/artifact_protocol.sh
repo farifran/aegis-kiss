@@ -33,12 +33,9 @@ readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; ""
 # Shared jq projection of the topology targets a Discovery handover
 # authorizes for Forensics repair candidates.
 #
-# Fine discovery depth has no structural.builder, so requested_paths is
-# often empty. Operator-named paths are extracted with the same pattern
-# family as AEGIS_SOURCE_PATH_RE in common.sh (bash side uses that helper;
-# this jq fragment keeps explicit escapes — do not interpolate bash vars
-# into jq regex strings). Placeholder model evidence (e.g. "<file>") is
-# dropped so it cannot authorize garbage or block real net-new paths.
+# Operator-named paths use the same pattern family as AEGIS_SOURCE_PATH_RE
+# in common.sh (bash helper; this jq keeps explicit escapes). Placeholder
+# model evidence (e.g. "<file>") cannot authorize garbage or net-new ghosts.
 readonly AEGIS_JQ_AUTHORIZED_TARGETS='def is_real_repo_path:
   type == "string"
   and length > 0
@@ -57,9 +54,8 @@ def authorized_targets:
   (
     [
       .artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]?,
-      # requested_paths: structural.builder channel (deep discovery).
       .artifact_snapshot.structural_context.observed_request_alignment.requested_paths[]?,
-      # Fine-mode / model-independent: paths the operator typed in the demand.
+      # Operator-typed paths (model-independent net-new authorization).
       (operator_named_paths[]?),
       (.artifact_snapshot.operational_context.required_evidence[]?
         | select(type == "string" and startswith("filesystem.read:"))

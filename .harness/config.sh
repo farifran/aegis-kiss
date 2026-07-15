@@ -346,53 +346,23 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
 )
 
 # ---------------------------------------------------------
-# TOPOLOGY CAPABILITIES (fine core + deep satellite)
+# TOPOLOGY — Layer 0 only (product path)
 # ---------------------------------------------------------
-# Product path (AEGIS_DISCOVERY_DEPTH=fine, default):
-#   AEGIS_LAYER0_CAPABILITIES only in the evidence profile
-#   (see AEGIS_DISCOVERY_EVIDENCE_FINE). No graph extractors run.
-#
-# Satellite path (AEGIS_DISCOVERY_DEPTH=deep or required_evidence):
-#   AEGIS_DEEP_TOPOLOGY_CAPABILITIES (~2k LOC under
-#   scripts/capabilities/{filesystem/extract_*,structural/}).
-#   Handlers stay registered so deep opt-in and authority audits work
-#   without re-wiring; they are NOT the product core and must not grow
-#   the fine hot path.
-#
-# Maintenance rule: prefer Layer 0 / attention_seed fixes over expanding
-# builder/extractors unless an investigation explicitly needs composition.
+# Graph extractors + structural.builder were removed. Discovery uses
+# deterministic Layer 0 facts + attention seed. Scope authorization for
+# forensics/mutation uses operator-named paths, required_evidence, and
+# Layer 0 attention — not composed topology graphs.
 # ---------------------------------------------------------
 
-# Fine-path topology priors (always cheap, always on the product path).
 declare -ar AEGIS_LAYER0_CAPABILITIES=(
   "runtime.attention_seed"
   "runtime.layer0_facts"
 )
 
-# Deep satellite only — not materialized on fine discovery.
-declare -ar AEGIS_DEEP_TOPOLOGY_CAPABILITIES=(
-  "filesystem.extract_import_graph"
-  "filesystem.extract_reference_graph"
-  "filesystem.extract_symbols"
-  "filesystem.extract_entrypoints"
-  "filesystem.extract_test_relationships"
-  "filesystem.extract_configuration_structure"
-  "filesystem.extract_responsibilities"
-  "structural.builder"
-)
-
-# Full topology authority envelope = deep satellite + Layer 0.
-# Prefer AEGIS_LAYER0_* / AEGIS_DEEP_* when choosing what to materialize.
-declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
-  "${AEGIS_DEEP_TOPOLOGY_CAPABILITIES[@]}"
-  "${AEGIS_LAYER0_CAPABILITIES[@]}"
-)
-
-# Discovery envelope = base + structural (authority surface for deep
-# opt-in). Evidence profile still decides what is materialized.
+# Discovery envelope = base + Layer 0 topology priors.
 declare -ar AEGIS_DISCOVERY_CAPABILITIES=(
   "${AEGIS_BASE_CAPABILITIES[@]}"
-  "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"
+  "${AEGIS_LAYER0_CAPABILITIES[@]}"
 )
 
 # =========================================================
@@ -426,14 +396,6 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["filesystem.search_symbol"]="scripts/capabilities/filesystem/search_symbol.sh"
   ["git.diff"]="scripts/capabilities/git/git_diff.sh"
   ["git.status"]="scripts/capabilities/git/git_status.sh"
-  ["filesystem.extract_import_graph"]="scripts/capabilities/filesystem/extract_import_graph.sh"
-  ["filesystem.extract_reference_graph"]="scripts/capabilities/filesystem/extract_reference_graph.sh"
-  ["filesystem.extract_symbols"]="scripts/capabilities/filesystem/extract_symbols.sh"
-  ["filesystem.extract_entrypoints"]="scripts/capabilities/filesystem/extract_entrypoints.sh"
-  ["filesystem.extract_test_relationships"]="scripts/capabilities/filesystem/extract_test_relationships.sh"
-  ["filesystem.extract_configuration_structure"]="scripts/capabilities/filesystem/extract_configuration_structure.sh"
-  ["filesystem.extract_responsibilities"]="scripts/capabilities/filesystem/extract_responsibilities.sh"
-  ["structural.builder"]="scripts/capabilities/structural/builder.sh"
   ["runtime.attention_seed"]="scripts/capabilities/runtime/attention_seed.sh"
   ["runtime.layer0_facts"]="scripts/capabilities/runtime/layer0_facts.sh"
   ["typescript.check"]="scripts/capabilities/typescript_check.sh"
@@ -451,14 +413,6 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["filesystem.search_symbol"]="readonly"
   ["git.diff"]="readonly"
   ["git.status"]="readonly"
-  ["filesystem.extract_import_graph"]="readonly"
-  ["filesystem.extract_reference_graph"]="readonly"
-  ["filesystem.extract_symbols"]="readonly"
-  ["filesystem.extract_entrypoints"]="readonly"
-  ["filesystem.extract_test_relationships"]="readonly"
-  ["filesystem.extract_configuration_structure"]="readonly"
-  ["filesystem.extract_responsibilities"]="readonly"
-  ["structural.builder"]="readonly"
   ["runtime.attention_seed"]="readonly"
   ["runtime.layer0_facts"]="readonly"
   ["typescript.check"]="readonly"
@@ -476,14 +430,6 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["filesystem.search_symbol"]="AEGIS"
   ["git.diff"]="HEAD~1"
   ["git.status"]="."
-  ["filesystem.extract_import_graph"]="."
-  ["filesystem.extract_reference_graph"]="."
-  ["filesystem.extract_symbols"]="."
-  ["filesystem.extract_entrypoints"]="."
-  ["filesystem.extract_test_relationships"]="."
-  ["filesystem.extract_configuration_structure"]="."
-  ["filesystem.extract_responsibilities"]="."
-  ["structural.builder"]="."
   ["runtime.attention_seed"]="."
   ["runtime.layer0_facts"]="."
   ["typescript.check"]="."
@@ -494,50 +440,14 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 # =========================================================
 # MODE EVIDENCE PROFILES
 # =========================================================
-#
-# Discovery evidence depth (KISS default = fine):
-#   fine — Layer 0 baseline only (cheap, no graph extractors)  ← product path
-#   deep — full structural composition (builder + extractors) ← satellite
-#
-# Deep extractors remain in the discovery capability envelope so
-# required_evidence augmentation and AEGIS_DISCOVERY_DEPTH=deep can
-# still request them without re-registering handlers. Prefer fine
-# unless an investigation explicitly needs topology composition.
 
-: "${AEGIS_DISCOVERY_DEPTH:=fine}"
-export AEGIS_DISCOVERY_DEPTH
-
-# Fine default: topology census + handover + deterministic Layer 0
-# priors + attention seed. structural.builder is NOT required.
-declare -ar AEGIS_DISCOVERY_EVIDENCE_FINE=(
+# Discovery: tree + handover + Layer 0 priors + attention seed.
+declare -ar AEGIS_DISCOVERY_EVIDENCE=(
   "filesystem.list_tree"
   "filesystem.read:epistemic_handover"
   "runtime.layer0_facts"
   "runtime.attention_seed"
 )
-
-# Deep profile: prior fine set plus second-order topology composition.
-# structural.builder materializes its extractor dependencies as a side
-# effect; extract_responsibilities is listed so it also enters the
-# selected evidence set for the model when operators opt into depth.
-declare -ar AEGIS_DISCOVERY_EVIDENCE_DEEP=(
-  "filesystem.list_tree"
-  "filesystem.read:epistemic_handover"
-  "runtime.layer0_facts"
-  "filesystem.extract_responsibilities"
-  "structural.builder"
-  "runtime.attention_seed"
-)
-
-if [[ "${AEGIS_DISCOVERY_DEPTH}" == "deep" ]]; then
-  declare -ar AEGIS_DISCOVERY_EVIDENCE=(
-    "${AEGIS_DISCOVERY_EVIDENCE_DEEP[@]}"
-  )
-else
-  declare -ar AEGIS_DISCOVERY_EVIDENCE=(
-    "${AEGIS_DISCOVERY_EVIDENCE_FINE[@]}"
-  )
-fi
 
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "filesystem.search_symbol"
@@ -651,8 +561,9 @@ validate_capability_registry() {
   for capability in \
     "${AEGIS_BASE_CAPABILITIES[@]}" \
     "${AEGIS_MUTATION_CAPABILITIES[@]}" \
-    "${AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES[@]}"; do
+    "${AEGIS_LAYER0_CAPABILITIES[@]}"; do
 
+    [[ -n "${capability}" ]] || continue
     [[ -n "${seen[$capability]:-}" ]] && continue
     seen["$capability"]=1
 

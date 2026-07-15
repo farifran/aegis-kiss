@@ -288,7 +288,7 @@ mode_uses_attention_zoom() {
 
 capability_is_deep_payload() {
   case "$1" in
-    structural.builder|filesystem.list_tree|filesystem.extract_*) return 0 ;;
+    filesystem.list_tree) return 0 ;;
     *) return 1 ;;
   esac
 }
