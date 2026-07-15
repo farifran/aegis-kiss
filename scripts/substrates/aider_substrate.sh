@@ -457,73 +457,51 @@ obfuscate_evidence_paths() {
 # MUTATION PROMPT ASSEMBLY
 # =========================================================
 
-assemble_mutation_prompt() {
-
-  local prompt_file="$1"
-  local resolved_edit_format="$2"
-  shift 2
-  local prompt_targets=("$@")
-
-  # Floor-model noise control: with explicit targets already loaded into
-  # the chat, the target file content is present verbatim — evidence
-  # payloads (symbol searches over the whole repo, tree dumps) are pure
-  # distraction that weak models latch onto instead of the demand. Keep
-  # only the epistemic handover (carries repair_feedback context on
-  # feedback iterations). The full evidence set is emitted only in the
-  # no-targets fallback, where the model still needs scope hints.
-  local capability_evidence
-  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
-    capability_evidence="$(inject_capability_evidence "epistemic_handover")"
-  else
-    capability_evidence="$(inject_capability_evidence)"
-  fi
-
-  # File jail: the model must operate exclusively on the pre-loaded
-  # targets. Evidence payloads mention many repository paths; without
-  # this prohibition the model asks for them and --yes-always floods
-  # the chat context with the whole repository.
+# Emit file-jail block for the loaded mutation targets.
+mutation_prompt_file_jail() {
+  local -a prompt_targets=("$@")
   local target_list="(none — mutate only what the investigation input names among the files already in the chat)"
   if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
     target_list="$(printf -- '- %s\n' "${prompt_targets[@]}")"
   fi
-
-  local file_jail_instructions="FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
+  cat <<EOF
+FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
 The ONLY files you may edit are the ones already loaded into this chat:
 ${target_list}
 You are FORBIDDEN from adding files to the chat.
 Never ask for, request, suggest, or reference additional files to be added or edited.
 File paths that appear inside the capability evidence payloads are READ-ONLY CONTEXT, not an invitation to open or edit them.
-If the required change seems to involve a file that is not loaded, do NOT add it: apply the closest sufficient change within the loaded files only."
+If the required change seems to involve a file that is not loaded, do NOT add it: apply the closest sufficient change within the loaded files only.
+EOF
+}
 
-  # Anti-lazy-truncation constraint: under the whole edit format the
-  # model must re-emit complete files; placeholder elision makes aider's
-  # parser reject the reply and re-request it until the watchdog fires.
-  # The format is resolved ONCE in main() and passed down, so prompt and
-  # invocation can never disagree and target files are sized only once.
-  # Reply-shape template instead of concrete code examples: floor models
-  # copy example code verbatim into their answer (observed: the GOOD
-  # example's helper import and oldFunc leaked into a real mutation).
-  # The template names the REAL target and describes the shape only.
-  local anti_truncation_instructions=""
-  if [[ "${resolved_edit_format}" == "whole" ]]; then
-    local shape_blocks=""
-    local shape_target
-    if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
-      shape_blocks="<target file>
+# Whole-format anti-truncation instructions (empty string when not whole).
+mutation_prompt_anti_truncation() {
+  local resolved_edit_format="$1"
+  shift
+  local -a prompt_targets=("$@")
+
+  [[ "${resolved_edit_format}" == "whole" ]] || return 0
+
+  local shape_blocks=""
+  local shape_target
+  if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
+    shape_blocks="<target file>
 \`\`\`
 <the ENTIRE new content>
 \`\`\`"
-    else
-      for shape_target in "${prompt_targets[@]}"; do
-        shape_blocks+="${shape_target}
+  else
+    for shape_target in "${prompt_targets[@]}"; do
+      shape_blocks+="${shape_target}
 \`\`\`
 <the ENTIRE new content of ${shape_target}, from the very first line to the very last line>
 \`\`\`
 
 "
-      done
-    fi
-    anti_truncation_instructions="CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
+    done
+  fi
+  cat <<EOF
+CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
 Your reply MUST emit one filename + fenced block per target file (in any order):
 
 ${shape_blocks}
@@ -538,17 +516,38 @@ Rules:
 - TypeScript: prefer strict, compilable code — explicit types, BigInt for high-precision counters when demanded, no any unless unavoidable.
 - Implement ONLY what the investigation input demands. Do not create or keep unrelated modules.
 
-If you use placeholders or omit code, the parser will fail and your changes will be discarded."
-  fi
+If you use placeholders or omit code, the parser will fail and your changes will be discarded.
+EOF
+}
 
-  local input_label="Investigation input (operator mutation demand — single demand, apply once):"
-  local mode_instructions="Apply the minimal sufficient mutation described in the investigation input ONCE.
+# Prints two lines via a temp protocol: actually sets globals is messy.
+# Instead print a record: first line is input_label, rest is mode_instructions
+# Better: two functions.
+
+mutation_prompt_default_input_label() {
+  printf '%s' "Investigation input (operator mutation demand — single demand, apply once):"
+}
+
+mutation_prompt_default_mode_instructions() {
+  cat <<'EOF'
+Apply the minimal sufficient mutation described in the investigation input ONCE.
 If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
-TypeScript/JavaScript: new top-level functions SHOULD be \`export function\` (importable API), not a bare function, unless the demand forbids export.
+TypeScript/JavaScript: new top-level functions SHOULD be `export function` (importable API), not a bare function, unless the demand forbids export.
 Preserve runtime sovereignty, protocol integrity, and containment integrity.
 Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
-Apply the change and stop."
+Apply the change and stop.
+EOF
+}
+
+# Override input_label + mode_instructions for repair-feedback / optimize.
+# Writes to named files: $1=label_file $2=instructions_file
+mutation_prompt_resolve_mode_copy() {
+  local label_file="$1"
+  local instructions_file="$2"
+
+  mutation_prompt_default_input_label > "${label_file}"
+  mutation_prompt_default_mode_instructions > "${instructions_file}"
 
   # Local repair feedback iteration: fix only the structured violations
   # inside authorized_scopes — do not rediscover or expand scope.
@@ -573,8 +572,9 @@ Apply the change and stop."
             )
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
     )"
-    input_label="Original investigation input (repair feedback iteration — fix only listed violations):"
-    mode_instructions="CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
+    printf '%s' "Original investigation input (repair feedback iteration — fix only listed violations):" > "${label_file}"
+    cat > "${instructions_file}" <<EOF
+CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
 A prior validation REJECTED the candidate. Fix ONLY the structured violations below inside authorized_scopes.
 Do NOT re-implement the whole demand from scratch unless a violation requires it.
 Do NOT expand scope beyond authorized_scopes / loaded targets.
@@ -583,12 +583,14 @@ Emit edits only — no narration.
 
 ${feedback_summary}
 
-Apply the minimal fix and stop."
+Apply the minimal fix and stop.
+EOF
   fi
 
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    input_label="Original investigation input (already applied by Repair — do NOT re-implement):"
-    mode_instructions="CRITICAL — OPTIMIZE MODE (recognize → refine):
+    printf '%s' "Original investigation input (already applied by Repair — do NOT re-implement):" > "${label_file}"
+    cat > "${instructions_file}" <<'EOF'
+CRITICAL — OPTIMIZE MODE (recognize → refine):
 1. The Repair candidate is ALREADY applied on this workspace. Read the loaded files as the post-Repair truth.
 2. First recognize what changed relative to the demand: which behavior Repair introduced and where.
 3. Then apply ONLY safe, functionality-preserving improvements inside the loaded files:
@@ -597,29 +599,17 @@ Apply the minimal fix and stop."
    - collapse obvious duplication
 4. If the post-Repair code is already minimal and correct, make NO edits and stop.
 5. Forbidden: re-implementing the investigation demand from scratch; removing Repair features; new files; renames; speculative features; narration.
-Simplify in place or leave unchanged. Stop."
+Simplify in place or leave unchanged. Stop.
+EOF
   fi
+}
 
-  local raw_prompt_file
-  raw_prompt_file="$(aider_mktemp)"
+mutation_prompt_skill_contract() {
+  local -a prompt_targets=("$@")
 
-  cat > "${raw_prompt_file}" << EOF
-${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
-
-}You are executing inside Aegis Harness in bounded mutation mode.
-
-Mode: ${AEGIS_MODE}
-Execution ID: ${AEGIS_EXECUTION_ID}
-
-(note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
-
-$(
-  # Floor-model context control: the full skill contract is hundreds of
-  # lines of governance prose — a weak (floor) model drowns in it and
-  # loses the actual demand. With explicit targets loaded, distill the
-  # contract to its binding core; the runtime enforces everything else
-  # mechanically (jail, diff capture, validation gates). The full
-  # contract is emitted only in the no-targets fallback.
+  # Floor-model context control: full skill is hundreds of lines; with
+  # explicit targets distill to binding core; full contract only in
+  # no-targets fallback.
   if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
     if [[ "${AEGIS_MODE}" == "optimize" ]]; then
       cat <<'DISTILLED'
@@ -659,19 +649,75 @@ DISTILLED
     echo "Skill contract:"
     cat "${AIDER_SKILL_FILE}"
   fi
-)
+}
 
-$(
-  # Context slimming: the pocket map is a flat census of every repo path.
-  # Once the exact mutation targets are loaded via --file, that census is
-  # pure redundant context that inflates Time-To-First-Token. Emit it ONLY
-  # in the no-targets fallback, where the model still needs a scope hint.
+mutation_prompt_pocket_map_section() {
+  local -a prompt_targets=("$@")
+  # Once exact targets are loaded, the census is pure redundant context.
   if [[ "${#prompt_targets[@]}" -eq 0 ]] \
     && [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
     echo "Repository pocket map (flat path census — read-only baseline context):"
     cat "${AEGIS_POCKET_MAP_FILE}"
   fi
-)
+}
+
+assemble_mutation_prompt() {
+
+  local prompt_file="$1"
+  local resolved_edit_format="$2"
+  shift 2
+  local prompt_targets=("$@")
+
+  # Floor-model noise control: with explicit targets already loaded into
+  # the chat, keep only the epistemic handover. Full evidence only in
+  # the no-targets fallback.
+  local capability_evidence
+  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
+    capability_evidence="$(inject_capability_evidence "epistemic_handover")"
+  else
+    capability_evidence="$(inject_capability_evidence)"
+  fi
+
+  local file_jail_instructions anti_truncation_instructions
+  file_jail_instructions="$(mutation_prompt_file_jail "${prompt_targets[@]:-}")"
+  anti_truncation_instructions="$(
+    mutation_prompt_anti_truncation "${resolved_edit_format}" "${prompt_targets[@]:-}"
+  )"
+
+  local label_file instructions_file
+  label_file="$(aider_mktemp)"
+  instructions_file="$(aider_mktemp)"
+  mutation_prompt_resolve_mode_copy "${label_file}" "${instructions_file}"
+  local input_label mode_instructions
+  input_label="$(cat "${label_file}")"
+  mode_instructions="$(cat "${instructions_file}")"
+
+  local skill_contract pocket_section
+  skill_contract="$(mutation_prompt_skill_contract "${prompt_targets[@]:-}")"
+  pocket_section="$(mutation_prompt_pocket_map_section "${prompt_targets[@]:-}")"
+
+  local recency_anchor=""
+  # Repair only — restating in optimize would invite re-implementation.
+  if [[ "${AEGIS_MODE}" == "repair" ]]; then
+    recency_anchor="YOUR TASK NOW: apply the single investigation demand stated above to the loaded target file(s) only. One minimal sufficient change — do not invent a second parallel API or duplicate the same conversion."
+  fi
+
+  local raw_prompt_file
+  raw_prompt_file="$(aider_mktemp)"
+
+  cat > "${raw_prompt_file}" << EOF
+${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
+
+}You are executing inside Aegis Harness in bounded mutation mode.
+
+Mode: ${AEGIS_MODE}
+Execution ID: ${AEGIS_EXECUTION_ID}
+
+(note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
+
+${skill_contract}
+
+${pocket_section}
 
 ---
 
@@ -684,17 +730,7 @@ ${file_jail_instructions}
 
 ${anti_truncation_instructions:+${anti_truncation_instructions}
 
-}$(
-  # Recency anchor for floor models: the demand already appears once
-  # under input_label above. Do NOT paste it again — re-pasting the full
-  # investigation input made models treat the same file demand as two
-  # separate tasks (e.g. two conversion helpers for one GB→Mb request).
-  # Point back to the single demand and force one minimal change.
-  # Repair only — restating in optimize would invite re-implementation.
-  if [[ "${AEGIS_MODE}" == "repair" ]]; then
-    printf '%s' "YOUR TASK NOW: apply the single investigation demand stated above to the loaded target file(s) only. One minimal sufficient change — do not invent a second parallel API or duplicate the same conversion."
-  fi
-)
+}${recency_anchor}
 
 ${mode_instructions}
 EOF
@@ -723,6 +759,7 @@ EOF
     mv "${restored_file}" "${prompt_file}"
   fi
 }
+
 
 # =========================================================
 # SURFACE ROLLBACK

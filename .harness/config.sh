@@ -337,11 +337,11 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
 # TOPOLOGY CAPABILITIES (fine core + deep satellite)
 # ---------------------------------------------------------
 # Product path (AEGIS_DISCOVERY_DEPTH=fine, default):
-#   runtime.layer0_facts + runtime.attention_seed only
+#   AEGIS_LAYER0_CAPABILITIES only in the evidence profile
 #   (see AEGIS_DISCOVERY_EVIDENCE_FINE). No graph extractors run.
 #
 # Satellite path (AEGIS_DISCOVERY_DEPTH=deep or required_evidence):
-#   extract_* + structural.builder (~2k LOC under
+#   AEGIS_DEEP_TOPOLOGY_CAPABILITIES (~2k LOC under
 #   scripts/capabilities/{filesystem/extract_*,structural/}).
 #   Handlers stay registered so deep opt-in and authority audits work
 #   without re-wiring; they are NOT the product core and must not grow
@@ -350,7 +350,15 @@ declare -ar AEGIS_MUTATION_CAPABILITIES=(
 # Maintenance rule: prefer Layer 0 / attention_seed fixes over expanding
 # builder/extractors unless an investigation explicitly needs composition.
 # ---------------------------------------------------------
-declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
+
+# Fine-path topology priors (always cheap, always on the product path).
+declare -ar AEGIS_LAYER0_CAPABILITIES=(
+  "runtime.attention_seed"
+  "runtime.layer0_facts"
+)
+
+# Deep satellite only — not materialized on fine discovery.
+declare -ar AEGIS_DEEP_TOPOLOGY_CAPABILITIES=(
   "filesystem.extract_import_graph"
   "filesystem.extract_reference_graph"
   "filesystem.extract_symbols"
@@ -359,8 +367,13 @@ declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
   "filesystem.extract_configuration_structure"
   "filesystem.extract_responsibilities"
   "structural.builder"
-  "runtime.attention_seed"
-  "runtime.layer0_facts"
+)
+
+# Full topology authority envelope = deep satellite + Layer 0.
+# Prefer AEGIS_LAYER0_* / AEGIS_DEEP_* when choosing what to materialize.
+declare -ar AEGIS_STRUCTURAL_EXTRACT_CAPABILITIES=(
+  "${AEGIS_DEEP_TOPOLOGY_CAPABILITIES[@]}"
+  "${AEGIS_LAYER0_CAPABILITIES[@]}"
 )
 
 # Discovery envelope = base + structural (authority surface for deep
