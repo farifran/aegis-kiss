@@ -636,14 +636,40 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
   | (.operational_context // {}) as $oc
   | ((.required_evidence // $oc.required_evidence // [])) as $raw_req
   | merge_operator_required_evidence($raw_req; $operator_named_paths; $existing_paths) as $merged_req
-  | (($seed_targets + $operator_named_paths) | unique) as $merged_attention
+  # Attention: seed + operator first. If Layer0 left attention empty,
+  # promote existing on-disk required_evidence paths (not invent-net-new).
+  | (($seed_targets + $operator_named_paths) | unique) as $seed_att
+  | (
+      if ($seed_att | length) > 0 then $seed_att
+      else
+        ($merged_req
+          | map(select(startswith("filesystem.read:")) | .[16:])
+          | map(select((. as $p | ($existing_paths | index($p)) != null)))
+          | unique)
+      end
+    ) as $merged_attention
+  | (
+      if ($seed_att | length) > 0 then $seed_scope
+      elif ($merged_attention | length) > 0 then
+        {
+          scope_type: "required_evidence",
+          scope_targets: $merged_attention,
+          scope_confidence: "medium"
+        }
+      else $seed_scope
+      end
+    ) as $eff_scope
   | .operational_context = ({
       status: ($oc.status // "interpreted"),
       summary: ($oc.summary // "discovery operational context"),
       observed_payloads: ($oc.observed_payloads // $observed_payloads),
-      investigation_scope: $seed_scope,
+      investigation_scope: $eff_scope,
       attention_targets: $merged_attention,
-      blocking_conditions: $seed_conditions,
+      blocking_conditions: (
+        if ($merged_attention | length) > 0 then
+          ($seed_conditions | map(select(. != "no layer0 targets available")))
+        else $seed_conditions end
+      ),
       required_evidence: $merged_req,
       operator_named_paths: $operator_named_paths,
       operational_observations: (.observations // $oc.operational_observations // []),
@@ -653,7 +679,7 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
   | del(.observations, .rationale, .required_evidence)
   | .handover_attention = {
       next_attention_targets: $merged_attention,
-      attention_scope: ($seed_scope.scope_type // "exploratory"),
+      attention_scope: ($eff_scope.scope_type // "exploratory"),
       attention_reason: $attention_reason
     }
 '

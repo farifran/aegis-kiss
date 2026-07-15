@@ -185,10 +185,30 @@ layer0_entrypoints() {
     fi
   done < <(list_manifest_declarations)
 
+  # Floor prior when manifests declare nothing useful under the census
+  # (playgrounds: package.json scripts only, no main/module). Prefer
+  # index.* then shallow source files so attention_seed is never empty.
+  local entrypoint_source="declared_manifest"
+  if [[ ! -s "${entrypoints_tmp}" ]] && [[ -n "${CENSUS_FILE:-}" ]]; then
+    entrypoint_source="census_floor"
+    command grep -E '(^|/)index\.(ts|tsx|js|jsx|mjs|cjs)$' \
+      "${CENSUS_FILE}" 2>/dev/null \
+      | sort -u > "${entrypoints_tmp}" || true
+    if [[ ! -s "${entrypoints_tmp}" ]]; then
+      command grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' \
+        "${CENSUS_FILE}" 2>/dev/null \
+        | awk -F/ 'NF <= 3' \
+        | sort -u \
+        | head -5 > "${entrypoints_tmp}" || true
+    fi
+  fi
+
   jq -n \
+    --arg source "${entrypoint_source}" \
     --argjson entrypoints "$(
       sort -u "${entrypoints_tmp}" \
-        | jq -Rn '[inputs | select(length > 0) | {file: ., source: "declared_manifest"}]'
+        | jq -Rn --arg source "${entrypoint_source}" \
+          '[inputs | select(length > 0) | {file: ., source: $source}]'
     )" \
     --argjson gaps "$(
       sort -u "${gaps_tmp}" \
