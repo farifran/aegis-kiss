@@ -130,146 +130,206 @@ validate_aider_substrate_inputs() {
 # =========================================================
 # TARGET RESOLUTION
 # =========================================================
-
+#
 # Resolve mutation targets from (in order, then dedupe):
 # 1. Forensics repair_candidates / optimize files_changed (contract-mandatory)
 # 2. UNION — operator-named paths in investigation input (multi-file demands)
 # 3. UNION — required_evidence filesystem.read paths from handover
 # 4. Fallback chain when still empty (builder / attention / search)
+#
 
-resolve_mutation_targets() {
+# jq over a file that may be absent or malformed; emits zero lines then.
+mutation_jq_lines() {
+  [[ -f "$1" ]] || return 0
+  jq -r "$2" "$1" 2>/dev/null || true
+}
 
-  local targets=()
+# Contract-mandatory seeds from the preceding mode handover (stdout lines).
+mutation_targets_from_handover_contract() {
   local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
-  local line
-
-  # jq over a file that may be absent or malformed; emits zero lines then.
-  jq_lines() {
-    [[ -f "$1" ]] || return 0
-    jq -r "$2" "$1" 2>/dev/null || true
-  }
-
-  # Append every non-empty stdin line to targets.
-  collect() {
-    while IFS= read -r line; do
-      [[ -n "${line}" ]] && targets+=("${line}")
-    done
-  }
-
-  # Source 1: handover mode contracts (mandatory seeds when present)
   local handover_mode
-  handover_mode="$(jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
+  handover_mode="$(mutation_jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
 
   if [[ "${handover_mode}" == "forensics" ]]; then
-    collect < <(jq_lines "${handover}" \
-      '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty')
-    [[ "${#targets[@]}" -gt 0 ]] \
-      || aegis_fatal "missing_forensics_repair_candidates"
-  elif [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
-    # Local repair feedback: re-enter from a rejected validation without
-    # rediscovery. Scope is the deterministic authorized_scopes (+ any
-    # violation target_files) — never invent new paths.
-    collect < <(jq_lines "${handover}" '
+    mutation_jq_lines "${handover}" \
+      '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty'
+    return 0
+  fi
+
+  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
+    # Local repair feedback: re-enter from rejected validation without
+    # rediscovery. Scope is authorized_scopes (+ violation target_files).
+    mutation_jq_lines "${handover}" '
       (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes // [])[]?,
       (.artifact_snapshot.operational_context.repair_feedback.violations // [])[]?.target_files[]?
-    ')
-    [[ "${#targets[@]}" -gt 0 ]] \
-      || aegis_fatal "missing_repair_feedback_authorized_scopes"
-  elif [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    collect < <(jq_lines "${handover}" \
-      '.artifact_snapshot.operational_context.files_changed[]? // empty')
-    [[ "${#targets[@]}" -gt 0 ]] \
-      || aegis_fatal "missing_repair_files_changed"
-  fi
-
-  # Source 1b (UNION, never first-wins): explicit path tokens the operator
-  # named in the investigation input (common.sh — single regex family).
-  collect < <(
-    aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}"
-  )
-
-  # Source 1c (UNION): required_evidence paths promoted by discovery/forensics.
-  collect < <(
-    jq_lines "${handover}" '
-      (.artifact_snapshot.operational_context.required_evidence // [])[]?
-      | select(type == "string")
-      | if startswith("filesystem.read:") then .[16:] else empty end
-      | select(test("\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
     '
-  )
-
-  # Ghost-path filter: a net-new target (absent on the mutation surface)
-  # is kept only when the operator named it in the investigation input.
-  # Forensics/discovery may still list skill-example paths; without this
-  # filter those become real mutation targets and empty stubs leak into
-  # the accepted candidate.
-  if [[ "${#targets[@]}" -gt 0 ]]; then
-    local -a filtered_targets=()
-    local inv_paths=""
-    inv_paths="$(aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}")"
-    for t in "${targets[@]}"; do
-      [[ -n "${t}" ]] || continue
-      t="${t#./}"
-      if [[ -f "${AEGIS_EXECUTION_SURFACE_PATH:-.}/${t}" ]]; then
-        filtered_targets+=("${t}")
-        continue
-      fi
-      # Net-new: require explicit operator path token.
-      if printf '%s\n' "${inv_paths}" | command grep -Fxq "${t}"; then
-        filtered_targets+=("${t}")
-      else
-        aegis_warn "target_dropped_ghost_net_new_not_in_investigation: ${t}"
-      fi
-    done
-    targets=("${filtered_targets[@]:-}")
+    return 0
   fi
 
-  # Fallback chain — only when still empty after contract + unions.
+  if [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    mutation_jq_lines "${handover}" \
+      '.artifact_snapshot.operational_context.files_changed[]? // empty'
+    return 0
+  fi
+}
 
-  # Source 2: structural.builder payload → observed_request_alignment
-  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
-    jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json" \
-      '.payload.observed_request_alignment.resolved_paths[]? // empty'
-  )
+# required_evidence filesystem.read paths from handover (stdout lines).
+mutation_targets_from_required_evidence() {
+  local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+  mutation_jq_lines "${handover}" '
+    (.artifact_snapshot.operational_context.required_evidence // [])[]?
+    | select(type == "string")
+    | if startswith("filesystem.read:") then .[16:] else empty end
+    | select(test("\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
+  '
+}
 
-  # Source 3: handover → structural_context.observed_request_alignment
-  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
-    jq_lines "${handover}" \
-      '.artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]? // empty'
-  )
+# Drop ghost net-new targets (absent on surface, not operator-named).
+# Reads candidate paths from stdin; writes kept paths to stdout.
+mutation_filter_ghost_net_new() {
+  local inv_paths=""
+  inv_paths="$(aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}")"
+  local t
+  while IFS= read -r t; do
+    [[ -n "${t}" ]] || continue
+    t="${t#./}"
+    if [[ -f "${AEGIS_EXECUTION_SURFACE_PATH:-.}/${t}" ]]; then
+      printf '%s\n' "${t}"
+      continue
+    fi
+    if printf '%s\n' "${inv_paths}" | command grep -Fxq "${t}"; then
+      printf '%s\n' "${t}"
+    else
+      aegis_warn "target_dropped_ghost_net_new_not_in_investigation: ${t}"
+    fi
+  done
+}
 
-  # Source 4: handover → ranked_targets (explicit_request)
-  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
-    jq_lines "${handover}" \
-      '.artifact_snapshot.structural_context.ranked_targets[]?
-       | select(.type == "explicit_request")
-       | .file // empty'
-  )
+# First non-empty fallback source among builder / ranked / attention.
+mutation_targets_first_fallback() {
+  local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+  local out
+  local line
 
-  # Source 5: handover → next_attention_targets (path-shaped entries only)
-  if [[ "${#targets[@]}" -eq 0 ]]; then
-    while IFS= read -r line; do
-      [[ -z "${line}" ]] && continue
-      if [[ "${line}" == *"."* ]] || [[ "${line}" == *"/"* ]]; then
-        targets+=("${line}")
-      fi
-    done < <(jq_lines "${handover}" '.epistemic_state.next_attention_targets[]? // empty')
+  out="$(mutation_jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/structural_builder.json" \
+    '.payload.observed_request_alignment.resolved_paths[]? // empty')"
+  if [[ -n "${out}" ]]; then
+    printf '%s\n' "${out}"
+    return 0
   fi
 
-  # Source 6: search_symbol payload matches
-  [[ "${#targets[@]}" -eq 0 ]] && collect < <(
-    jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/filesystem_search_symbol.json" \
-      '.payload.matches[]?.file? // empty' | sort -u
-  )
+  out="$(mutation_jq_lines "${handover}" \
+    '.artifact_snapshot.structural_context.observed_request_alignment.resolved_paths[]? // empty')"
+  if [[ -n "${out}" ]]; then
+    printf '%s\n' "${out}"
+    return 0
+  fi
 
-  # Deduplicate while preserving order
+  out="$(mutation_jq_lines "${handover}" \
+    '.artifact_snapshot.structural_context.ranked_targets[]?
+     | select(.type == "explicit_request")
+     | .file // empty')"
+  if [[ -n "${out}" ]]; then
+    printf '%s\n' "${out}"
+    return 0
+  fi
+
+  # Path-shaped attention targets only
+  while IFS= read -r line; do
+    [[ -z "${line}" ]] && continue
+    if [[ "${line}" == *"."* ]] || [[ "${line}" == *"/"* ]]; then
+      printf '%s\n' "${line}"
+    fi
+  done < <(mutation_jq_lines "${handover}" '.epistemic_state.next_attention_targets[]? // empty')
+}
+
+mutation_targets_search_symbol_fallback() {
+  mutation_jq_lines "${AIDER_CAPABILITY_PAYLOAD_DIR}/filesystem_search_symbol.json" \
+    '.payload.matches[]?.file? // empty' | sort -u
+}
+
+# Deduplicate stdin lines while preserving order.
+mutation_targets_dedupe() {
+  # bash 4+ associative array (already required elsewhere in this file).
   local -A seen=()
   local t
-  for t in "${targets[@]:-}"; do
+  while IFS= read -r t; do
     [[ -n "${t}" && -z "${seen[$t]:-}" ]] || continue
     seen["${t}"]=1
     printf '%s\n' "${t}"
   done
+}
+
+# Assert contract sources that must not be empty when the mode applies.
+mutation_targets_assert_contract_nonempty() {
+  local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+  local handover_mode
+  local count="$1"
+  handover_mode="$(mutation_jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
+
+  if [[ "${handover_mode}" == "forensics" ]] && [[ "${count}" -eq 0 ]]; then
+    aegis_fatal "missing_forensics_repair_candidates"
+  fi
+  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]] \
+    && [[ "${count}" -eq 0 ]]; then
+    aegis_fatal "missing_repair_feedback_authorized_scopes"
+  fi
+  if [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]] \
+    && [[ "${count}" -eq 0 ]]; then
+    aegis_fatal "missing_repair_files_changed"
+  fi
+}
+
+resolve_mutation_targets() {
+  local -a targets=()
+  local line
+  local contract_count=0
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    targets+=("${line}")
+  done < <(mutation_targets_from_handover_contract)
+  contract_count="${#targets[@]}"
+  mutation_targets_assert_contract_nonempty "${contract_count}"
+
+  # UNION — operator-named paths (never first-wins).
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    targets+=("${line}")
+  done < <(aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}")
+
+  # UNION — required_evidence paths.
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    targets+=("${line}")
+  done < <(mutation_targets_from_required_evidence)
+
+  # Ghost-path filter over the union so far.
+  if [[ "${#targets[@]}" -gt 0 ]]; then
+    local -a filtered=()
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] || continue
+      filtered+=("${line}")
+    done < <(printf '%s\n' "${targets[@]}" | mutation_filter_ghost_net_new)
+    targets=("${filtered[@]:-}")
+  fi
+
+  # Fallback chain only when still empty.
+  if [[ "${#targets[@]}" -eq 0 ]]; then
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] || continue
+      targets+=("${line}")
+    done < <(mutation_targets_first_fallback)
+
+    if [[ "${#targets[@]}" -eq 0 ]]; then
+      while IFS= read -r line; do
+        [[ -n "${line}" ]] || continue
+        targets+=("${line}")
+      done < <(mutation_targets_search_symbol_fallback)
+    fi
+  fi
+
+  printf '%s\n' "${targets[@]:-}" | mutation_targets_dedupe
 }
 
 # =========================================================
@@ -828,6 +888,129 @@ resolve_aider_edit_format() {
 # AIDER INVOCATION
 # =========================================================
 
+assert_aider_not_stalling_config() {
+  local resolved_edit_format="$1"
+  # gemma-class non-frontier models loop indefinitely in whole-file emission.
+  if [[ "${AEGIS_AIDER_MODEL,,}" == *gemma* ]] \
+    && [[ "${resolved_edit_format}" == "whole" ]]; then
+    aegis_fatal "stalling_model_configuration: '${AEGIS_AIDER_MODEL}' (gemma-class) stalls under whole edit format — configure a frontier mutation model or force AEGIS_AIDER_EDIT_FORMAT=diff"
+  fi
+}
+
+# Ensure the disposable surface still exists (feedback loops may expunge it).
+ensure_execution_surface_live() {
+  if [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]]; then
+    return 0
+  fi
+  aegis_warn "execution_surface_missing_before_invocation — waiting for surface re-initialization"
+  local settle
+  for settle in 1 2 3; do
+    sleep 1
+    [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] && return 0
+  done
+  aegis_fatal "execution_surface_vanished: ${AEGIS_EXECUTION_SURFACE_PATH}"
+}
+
+# Physical deny-all .aiderignore with per-target allow. Writes the file.
+write_aiderignore_jail() {
+  local aiderignore_file="$1"
+  shift
+  local file_args=("$@")
+
+  # gitignore semantics: "*" excludes everything, "!*/" re-includes
+  # directories so per-file negations can take effect.
+  printf '*\n!*/\n' > "${aiderignore_file}"
+  local f
+  for f in "${file_args[@]:-}"; do
+    [[ -z "${f}" ]] && continue
+    printf '!%s\n' "${f}" >> "${aiderignore_file}"
+  done
+}
+
+clear_aider_history_residue() {
+  rm -f \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.chat.history.md" \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.input.history" \
+    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.llm.history" \
+    >/dev/null 2>&1 || true
+}
+
+# Run aider under a wall-clock watchdog.
+# Side effects (must NOT run under command substitution — need parent shell):
+#   AEGIS_AIDER_OUTPUT_LOG, AEGIS_AIDER_LAST_STATUS, AEGIS_AIDER_LAST_ELAPSED
+AEGIS_AIDER_LAST_STATUS=0
+AEGIS_AIDER_LAST_ELAPSED=0
+
+run_aider_with_watchdog() {
+  local aider_cmd=("$@")
+  local aider_status=0
+  local aider_pid watchdog_pid
+  local aider_start_time aider_end_time
+
+  AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
+  aider_start_time=$(date +%s)
+
+  set +e
+  (
+    cd "${AEGIS_EXECUTION_SURFACE_PATH}" || {
+      echo "[AEGIS][AIDER][FATAL] execution_surface_unreachable: ${AEGIS_EXECUTION_SURFACE_PATH}" >&2
+      exit 97
+    }
+
+    # exec so the watchdog kill reaches aider, not a wrapper shell.
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+    GIT_EDITOR=true \
+    EDITOR=true \
+      exec "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
+  ) &
+  aider_pid=$!
+
+  (
+    sleep "${AEGIS_AIDER_MAX_SECONDS}"
+    kill "${aider_pid}" 2>/dev/null
+    sleep 5
+    kill -9 "${aider_pid}" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  watchdog_pid=$!
+
+  wait "${aider_pid}"
+  aider_status=$?
+
+  kill "${watchdog_pid}" 2>/dev/null
+  wait "${watchdog_pid}" 2>/dev/null
+  set -e
+
+  aider_end_time=$(date +%s)
+  AEGIS_AIDER_LAST_ELAPSED=$((aider_end_time - aider_start_time))
+  AEGIS_AIDER_LAST_STATUS="${aider_status}"
+  echo "[AEGIS][TIMING] aider_substrate_call: ${AEGIS_AIDER_LAST_ELAPSED}s" >&2
+}
+
+# Interpret non-zero aider exit: tolerate post-edit summarizer crash when
+# edits landed; otherwise rollback + fatal.
+interpret_aider_exit_status() {
+  local aider_status="$1"
+  local aider_elapsed="$2"
+
+  [[ "${aider_status}" -eq 0 ]] && return 0
+
+  # Deliverable is the worktree diff — if edits applied, proceed.
+  if grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" \
+    && [[ -n "$(capture_worktree_diff)" ]]; then
+    aegis_warn "aider exited with status ${aider_status} (possibly due to post-edit summarizer crash) but applied edits successfully — proceeding"
+    return 0
+  fi
+
+  if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]]; then
+    aegis_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
+  else
+    aegis_warn "aider invocation failed with exit status ${aider_status}"
+  fi
+  tail -n 60 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
+  rollback_execution_surface
+  aegis_fatal "aider_execution_failed"
+}
+
 invoke_aider() {
 
   local prompt_file="$1"
@@ -836,25 +1019,11 @@ invoke_aider() {
   local file_args=("$@")
 
   local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
-  local aider_output
-  local aider_status
 
-  # Stalling-configuration precondition (was a passive comment): gemma-class
-  # non-frontier models loop indefinitely in whole-file emission and only
-  # ever surface as a 360s watchdog kill with an empty diff. Refuse the
-  # combination up front with a loud, deterministic fatal instead of
-  # burning the wall-clock budget on a known dead end.
-  if [[ "${AEGIS_AIDER_MODEL,,}" == *gemma* ]] \
-    && [[ "${resolved_edit_format}" == "whole" ]]; then
-    aegis_fatal "stalling_model_configuration: '${AEGIS_AIDER_MODEL}' (gemma-class) stalls under whole edit format — configure a frontier mutation model or force AEGIS_AIDER_EDIT_FORMAT=diff"
-  fi
+  assert_aider_not_stalling_config "${resolved_edit_format}"
 
-  # Accelerated local validation loop: after each applied edit, aider
-  # runs the per-file structural gate (syntax → prettier --write →
-  # eslint --fix → static_gate) on ONLY the modified delta and
-  # self-corrects structural breakage in its bounded internal reflection
-  # step. Project-wide tsc/tests are NOT here — they run once as
-  # mutation_preflight after the diff is closed.
+  # Per-file structural lint gate (syntax → prettier → eslint → static_gate).
+  # Project-wide tsc/tests run once in mutation_preflight after the diff.
   local lint_gate_cmd
   printf -v lint_gate_cmd 'bash "%s"' \
     "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"
@@ -866,191 +1035,56 @@ invoke_aider() {
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
     "--timeout" "${AEGIS_AIDER_TIMEOUT}"
-    # Full headless mode: --yes auto-accepts every interactive check
-    # (file-addition confirmations included) and --yes-always keeps the
-    # session non-interactive across retries — no prompt may ever block
-    # the pipeline waiting for a human.
     "--yes"
     "--yes-always"
-    # No background git operations from aider: --no-auto-commit(s)
-    # blocks auto-commit entirely, so no commit editor can ever spawn
-    # and freeze the headless worktree until the watchdog fires.
     "--no-auto-commit"
     "--no-auto-commits"
     "--no-dirty-commits"
-    # Git stays ENABLED so aider recognizes the ephemeral worktree
-    # ("Git repo: none" otherwise). Repo-scanning costs are stripped
-    # instead: no sanity check, no repo map, subtree-only discovery.
     "--git"
     "--skip-sanity-check-repo"
     "--subtree-only"
     "--map-tokens" "0"
-    # Edit format is resolved dynamically (see resolve_aider_edit_format):
-    # "whole" for small target surfaces so non-frontier models emit the
-    # complete file instead of stalling in a diff-calculation loop;
-    # "diff" only when the target surface is too large to re-emit.
     "--edit-format" "${resolved_edit_format}"
-    # Proxy/network hang containment:
-    # --no-stream forces atomic payload delivery — no infinite loops on
-    #   broken chunk streams or missing EOF markers from the API proxy;
-    # --no-check-update stops background internet pings in the headless
-    #   runner;
-    # --no-suggest-shell-commands disables interactive shell-command
-    #   reasoning that can block non-interactive execution threads.
     "--no-stream"
     "--no-pretty"
     "--no-show-model-warnings"
-    # Ultra-fast internal validation loop: structural gate on the edited
-    # files only (no workspace-wide processes). Broad verification stays
-    # with the adversarial/validation stages; the wall-clock watchdog
-    # and aider's own reflection cap bound any correction loop.
     "--auto-lint"
     "--lint-cmd" "${lint_gate_cmd}"
     "--no-auto-test"
-    # No prior-session chat history may be replayed into the message
-    # stream: history injects volatile turns ahead of the prompt file
-    # and breaks KV-cache prefix stability across invocations.
     "--no-restore-chat-history"
     "--no-check-update"
     "--no-detect-urls"
     "--no-suggest-shell-commands"
-    # aider's analytics default is "random": suppress the PostHog
-    # telemetry path entirely — no non-deterministic background network
-    # evaluation in the headless runner.
     "--analytics-disable"
     "--exit"
   )
 
-  # Mutation reflection is the per-file lint gate only. Project tsc/tests
-  # run once in run_mutation_preflight after the worktree diff exists.
-
-  # Jail aider to exactly the mutation targets with a PHYSICAL deny-all
-  # .aiderignore at the execution-surface root (aider's native discovery
-  # location — not a CLI argument): every repository path is ignored
-  # except the explicit targets, so neither git auto-discovery nor
-  # LLM-induced /add requests can flood the chat context with tracked
-  # files. The surface is ephemeral and the file is untracked, so it
-  # never reaches the captured diff.
-  # Surface liveness guard: the runtime owns the worktree and rapid
-  # feedback loops can expunge/re-initialize it between input validation
-  # and this invocation. Re-verify NOW — immediately before the first
-  # write into the surface and the subshell cd — so a vanished surface
-  # produces one deterministic fatal instead of a subshell cd crash.
-  # A brief settle window absorbs an in-flight surface re-initialization.
-  if [[ ! -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]]; then
-    aegis_warn "execution_surface_missing_before_invocation — waiting for surface re-initialization"
-    local settle
-    for settle in 1 2 3; do
-      sleep 1
-      [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] && break
-    done
-    [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
-      || aegis_fatal "execution_surface_vanished: ${AEGIS_EXECUTION_SURFACE_PATH}"
-  fi
+  ensure_execution_surface_live
 
   local aiderignore_file="${AEGIS_EXECUTION_SURFACE_PATH}/.aiderignore"
+  write_aiderignore_jail "${aiderignore_file}" "${file_args[@]:-}"
 
-  # gitignore semantics: "*" excludes everything, "!*/" re-includes
-  # directories so per-file negations below can take effect (a file
-  # cannot be re-included while its parent directory is excluded).
-  printf '*\n!*/\n' > "${aiderignore_file}"
-
-  # Add mutation target files (guard against empty expansion)
   if [[ "${#file_args[@]}" -gt 0 ]]; then
+    local f
     for f in "${file_args[@]}"; do
       [[ -z "${f}" ]] && continue
       aider_cmd+=("--file" "${f}")
-      printf '!%s\n' "${f}" >> "${aiderignore_file}"
     done
   fi
 
-  # History contamination guard: physically delete any aider chat/input
-  # history residue inside the disposable surface before the invocation.
-  # A leaked history file from a previous worktree (or a copied surface)
-  # would be replayed into the token context of this repair loop.
-  rm -f \
-    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.chat.history.md" \
-    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.input.history" \
-    "${AEGIS_EXECUTION_SURFACE_PATH}/.aider.llm.history" \
-    >/dev/null 2>&1 || true
+  clear_aider_history_residue
 
   aegis_log "Invoking aider mutation substrate..."
   aegis_log "Model: ${AEGIS_AIDER_MODEL}"
   aegis_log "Edit format: ${resolved_edit_format}"
   aegis_log "Targets: ${file_args[*]:-<none>}"
 
-  AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
+  run_aider_with_watchdog "${aider_cmd[@]}"
 
-  # Portable timestamp via date subshell (macOS Bash 3.2 lacks printf %(...)T).
-  local aider_start_time
-  aider_start_time=$(date +%s)
+  # Jail file is invocation-scoped — never leave it on the surface.
+  rm -f "${aiderignore_file}" 2>/dev/null || true
 
-  # Wall-clock watchdog: --timeout only bounds individual API requests,
-  # so retry loops can still hang the pipeline. The watchdog kills the
-  # whole aider process after AEGIS_AIDER_MAX_SECONDS.
-  set +e
-  (
-    cd "${AEGIS_EXECUTION_SURFACE_PATH}" || {
-      echo "[AEGIS][AIDER][FATAL] execution_surface_unreachable: ${AEGIS_EXECUTION_SURFACE_PATH}" >&2
-      exit 97
-    }
-
-    # exec replaces the subshell with aider itself, so the watchdog's
-    # kill reaches the real process instead of a wrapper shell.
-    # GIT_EDITOR/EDITOR pinned to true: even if a git operation slips
-    # through, no interactive editor can ever block the pipeline.
-    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-    GIT_EDITOR=true \
-    EDITOR=true \
-      exec "${aider_cmd[@]}" >"${AEGIS_AIDER_OUTPUT_LOG}" 2>&1 </dev/null
-  ) &
-  local aider_pid=$!
-
-  # stdout/stderr detached so the lingering sleep cannot hold the caller's
-  # command-substitution pipe open after the watchdog is killed.
-  # TERM first for a graceful stop, KILL escalation if aider ignores it.
-  (
-    sleep "${AEGIS_AIDER_MAX_SECONDS}"
-    kill "${aider_pid}" 2>/dev/null
-    sleep 5
-    kill -9 "${aider_pid}" 2>/dev/null
-  ) >/dev/null 2>&1 &
-  local watchdog_pid=$!
-
-  wait "${aider_pid}"
-  aider_status=$?
-
-  kill "${watchdog_pid}" 2>/dev/null
-  wait "${watchdog_pid}" 2>/dev/null
-
-  # The jail file is invocation-scoped: never leave it on the surface.
-  rm -f "${aiderignore_file}" 2>/dev/null
-  set -e
-
-  local aider_end_time
-  aider_end_time=$(date +%s)
-  local aider_elapsed=$((aider_end_time - aider_start_time))
-  echo "[AEGIS][TIMING] aider_substrate_call: ${aider_elapsed}s" >&2
-
-  if [[ "${aider_status}" -ne 0 ]]; then
-    # aider sometimes hangs or fails during exit/summarization (especially under 8B models)
-    # after successfully applying its edits. The substrate's deliverable is the worktree diff:
-    # if it produced a diff and applied edits, the mutation is usable — proceed.
-    if grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" \
-      && [[ -n "$(capture_worktree_diff)" ]]; then
-      aegis_warn "aider exited with status ${aider_status} (possibly due to post-edit summarizer crash) but applied edits successfully — proceeding"
-      return 0
-    fi
-
-    if [[ "${aider_elapsed}" -ge "${AEGIS_AIDER_MAX_SECONDS}" ]]; then
-      aegis_warn "aider exceeded ${AEGIS_AIDER_MAX_SECONDS}s wall clock — killed by watchdog"
-    else
-      aegis_warn "aider invocation failed with exit status ${aider_status}"
-    fi
-    tail -n 60 "${AEGIS_AIDER_OUTPUT_LOG}" >&2
-    rollback_execution_surface
-    aegis_fatal "aider_execution_failed"
-  fi
+  interpret_aider_exit_status "${AEGIS_AIDER_LAST_STATUS}" "${AEGIS_AIDER_LAST_ELAPSED}"
 }
 
 # =========================================================
