@@ -107,6 +107,10 @@ aegis_classify_reason() {
       class="mutation"
       next_step="Inspecione stderr do aider; confira .aider.conf e versão do binário"
       ;;
+    mode_exit_without_fatal_breadcrumb)
+      class="harness_bug"
+      next_step="Mode saiu com erro sem aegis_fatal; leia stderr (ex. unbound variable) e reporte bug do harness"
+      ;;
     "")
       class="unknown"
       next_step="inspecione stderr"
@@ -116,6 +120,11 @@ aegis_classify_reason() {
       if [[ "${token}" == empty_diff:* ]]; then
         class="mutation"
         next_step="Substrate não produziu mudança; demanda pode já estar satisfeita — confira worktree/git log antes de repetir"
+      elif [[ "${token}" == *unbound\ variable* ]] \
+        || [[ "${token}" == *unbound_variable* ]]; then
+        # bash set -u crashes (often no aegis_fatal breadcrumb on older paths)
+        class="harness_bug"
+        next_step="Variável bash não definida sob set -u; actualize o harness (defaults locais) e re-execute; se persistir, reporte o path no stderr"
       elif [[ "${token}" == mutation_scope_violation* ]]; then
         class="scope"
         next_step="Diff tocou path fora dos mutation targets autorizados; re-execute repair com escopo explícito ou refine forensics/authorized_scopes"

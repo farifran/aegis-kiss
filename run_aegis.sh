@@ -505,8 +505,8 @@ show_final_report() {
   echo "══════════════════════════════"
 
   # Outcome projection (Fable path D): classify + human block + metrics line.
-  # Precedence: last_fatal → FAILED; FAILED without breadcrumb → unknown;
-  # PIPELINE_STATUS HALTED → halt reason; else SUCCESS.
+  # Precedence: last_fatal → FAILED; FAILED without breadcrumb → harness_bug
+  # token; PIPELINE_STATUS HALTED → halt reason; else SUCCESS.
   local outcome_status outcome_reason outcome_class outcome_mode
   outcome_mode=""
   for mode in "${EXECUTION_MODES[@]}"; do
@@ -521,8 +521,10 @@ show_final_report() {
     outcome_status="FAILED"
     outcome_reason="${last_fatal}"
   elif [[ "${PIPELINE_STATUS}" == "FAILED" ]]; then
+    # set -u / bare exit often leave no aegis_fatal breadcrumb — still
+    # classify so the operator is not left with Class: unknown / Reason: —.
     outcome_status="FAILED"
-    outcome_reason=""
+    outcome_reason="mode_exit_without_fatal_breadcrumb"
   elif [[ "${PIPELINE_STATUS}" == "HALTED" ]]; then
     outcome_status="HALTED"
     outcome_reason="${PIPELINE_REASON}"

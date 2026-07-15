@@ -102,6 +102,20 @@ next_step="${line#*$'\t'}"
 [[ -n "${next_step}" ]] \
   || fail "classify_unknown_empty_next_step"
 
+# --- harness_bug: set -u unbound (substring) + empty-breadcrumb token ---
+line="$(aegis_classify_reason 'scripts/substrates/aider/prompt.sh: line 58: AEGIS_AIDER_EVIDENCE_MAX_BYTES: unbound variable')"
+class="${line%%$'\t'*}"
+next_step="${line#*$'\t'}"
+[[ "${class}" == "harness_bug" ]] \
+  || fail "classify_unbound_class: got '${class}'"
+[[ -n "${next_step}" ]] \
+  || fail "classify_unbound_empty_next_step"
+
+line="$(aegis_classify_reason "mode_exit_without_fatal_breadcrumb")"
+class="${line%%$'\t'*}"
+[[ "${class}" == "harness_bug" ]] \
+  || fail "classify_mode_exit_no_breadcrumb_class: got '${class}'"
+
 # --- D remains: aegis_fatal path + exit 1 ---
 set +e
 (
