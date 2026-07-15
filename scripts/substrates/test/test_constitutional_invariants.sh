@@ -57,18 +57,21 @@ assert_executor_subprocess_isolation_contract() {
 }
 
 assert_raw_substrate_isolation_contract() {
-
-  grep -q 'prepare_isolated_substrate_workspace()' scripts/substrates/raw_llm.sh \
+  # Isolation lives in raw/workspace + payload scope guard in raw/prompt.
+  grep -q 'prepare_isolated_substrate_workspace()' scripts/substrates/raw/workspace.sh \
     || fail "missing_isolated_substrate_workspace_helper"
 
-  grep -q 'cd "${AEGIS_SUBSTRATE_WORKSPACE}"' scripts/substrates/raw_llm.sh \
+  grep -q 'cd "${AEGIS_SUBSTRATE_WORKSPACE}"' scripts/substrates/raw/workspace.sh \
     || fail "missing_isolated_substrate_workspace_entry"
 
-  grep -q 'normalize_selected_payload_paths' scripts/substrates/raw_llm.sh \
+  grep -q 'normalize_selected_payload_paths' scripts/substrates/raw/workspace.sh \
     || fail "missing_selected_payload_normalization"
 
-  grep -q 'exposed_capability_payload_out_of_scope' scripts/substrates/raw_llm.sh \
+  grep -q 'exposed_capability_payload_out_of_scope' scripts/substrates/raw/prompt.sh \
     || fail "missing_payload_scope_guard"
+
+  grep -q 'scripts/substrates/raw/workspace.sh' scripts/substrates/raw_llm.sh \
+    || fail "missing_raw_workspace_module_source"
 }
 
 assert_evidence_profiles_are_subset_of_envelopes() {

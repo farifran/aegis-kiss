@@ -171,7 +171,8 @@ Also produced (not memory): `pipeline_metrics.jsonl`, `last_outcome.json` (gitig
     ├── capabilities/         # handlers above only
     ├── runtime/              # promote / apply
     └── substrates/
-        ├── raw_llm.sh
+        ├── raw_llm.sh           # entry
+        ├── raw/                 # workspace, prompt, provider, artifact
         ├── aider_substrate.sh   # entry
         ├── aider/               # targets, prompt, invoke, preflight
         ├── prompts/
