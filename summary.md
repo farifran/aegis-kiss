@@ -172,7 +172,8 @@ Also produced (not memory): `pipeline_metrics.jsonl`, `last_outcome.json` (gitig
     ├── runtime/              # promote / apply
     └── substrates/
         ├── raw_llm.sh
-        ├── aider_substrate.sh
+        ├── aider_substrate.sh   # entry
+        ├── aider/               # targets, prompt, invoke, preflight
         ├── prompts/
         └── test/             # contract suite
 ```

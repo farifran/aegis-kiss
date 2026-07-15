@@ -6,14 +6,9 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
-# Extract classify_preflight_diagnostic_line from the substrate without
-# executing main (source only the function body via sed range).
+# Source classify from the preflight module (no main).
 # shellcheck disable=SC1091
-source <(
-  sed -n \
-    '/^classify_preflight_diagnostic_line()/,/^}/p' \
-    "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh"
-)
+source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh"
 
 assert_class() {
   local line="$1"
