@@ -4,33 +4,13 @@
 # AEGIS HARNESS — AIDER MUTATION SUBSTRATE
 # =========================================================
 #
-# Version: 1.0
-# Layer: Mutation Substrate
-# Status: Operational
-#
-# Responsibilities:
-#
-# - resolve mutation targets from epistemic handover
-#   and observed_request_alignment capability payload
-# - build bounded aider invocation inside git worktree
-# - capture git diff as mutation evidence
-# - emit bounded mutation artifact (diff JSON)
-#
-# This substrate intentionally:
-#
-# - does not commit, push, or manage git state (runtime owns)
-# - does not apply mutations to the main worktree
-# - does not inherit implicit repository awareness
-# - exposes only the diff as an artifact candidate
-# - delegates promotion decisions to the runtime
+# Bounded mutation inside a disposable worktree: resolve targets,
+# invoke aider, capture diff, preflight, emit candidate artifact.
+# Does not commit/push or promote (runtime owns that).
 #
 # =========================================================
 
 set -Eeuo pipefail
-
-# =========================================================
-# ROOT RESOLUTION
-# =========================================================
 
 readonly AEGIS_AIDER_SUBSTRATE_ROOT="$(
   cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
@@ -38,80 +18,49 @@ readonly AEGIS_AIDER_SUBSTRATE_ROOT="$(
 
 cd "${AEGIS_AIDER_SUBSTRATE_ROOT}"
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
-
 [[ -f ".harness/config.sh" ]] || {
   echo "[AEGIS][AIDER][FATAL] missing_config" >&2
   exit 1
 }
 
-# Cognition substrate: a model is mandatory here. Declare it before
-# sourcing config so a missing/unconfigured model fails loudly at the
-# config gate instead of silently downgrading to a stalling default.
+# Model is mandatory for cognition substrates.
 export AEGIS_REQUIRE_MODEL=1
 
 source ".harness/config.sh"
 
-# Mutation timeouts: per-request (aider --timeout) and total wall clock
-# (watchdog kill). Both operator-overridable. The wall clock defaults to
-# whichever is larger: 300s, or three per-request timeouts — so raising
-# AEGIS_AIDER_TIMEOUT can never make the watchdog clip a legitimate
-# request/retry sequence.
+# Per-request timeout + wall-clock watchdog (max of 300s or 3× request).
 : "${AEGIS_AIDER_TIMEOUT:=${AEGIS_PROVIDER_RESPONSE_TIMEOUT:-120}}"
 _aider_wallclock_floor=$(( AEGIS_AIDER_TIMEOUT * 3 ))
 [[ "${_aider_wallclock_floor}" -lt 300 ]] && _aider_wallclock_floor=300
 : "${AEGIS_AIDER_MAX_SECONDS:=${_aider_wallclock_floor}}"
 unset _aider_wallclock_floor
 
-# =========================================================
-# INPUTS
-# =========================================================
-
 readonly AIDER_SKILL_FILE="${1:-}"
 readonly AIDER_CAPABILITY_PAYLOAD_DIR="${2:-}"
 
 AEGIS_AIDER_OUTPUT_LOG=""
 
-# =========================================================
-# LOGGING
-# =========================================================
-
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
 AEGIS_LOG_TAG="AIDER"
 
-# =========================================================
-# VALIDATION
-# =========================================================
-
 validate_aider_substrate_inputs() {
-
   [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] \
     || aegis_fatal "missing_execution_surface_path"
-
   [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
     || aegis_fatal "execution_surface_not_materialized"
-
   [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
     || aegis_fatal "missing_investigation_input"
-
   [[ -n "${AEGIS_MODE:-}" ]] \
     || aegis_fatal "missing_execution_mode"
-
   [[ -n "${AEGIS_EXECUTION_ID:-}" ]] \
     || aegis_fatal "missing_execution_id"
-
   [[ -n "${AEGIS_AIDER_MODEL:-}" ]] \
     || aegis_fatal "missing_aider_model"
-
   [[ -f "${AIDER_SKILL_FILE}" ]] \
     || aegis_fatal "missing_skill_file"
-
   [[ -d "${AIDER_CAPABILITY_PAYLOAD_DIR}" ]] \
     || aegis_fatal "missing_capability_payload_directory"
-
   command -v git >/dev/null 2>&1 \
     || aegis_fatal "missing_dependency_git"
 
@@ -131,11 +80,9 @@ validate_aider_substrate_inputs() {
 # TARGET RESOLUTION
 # =========================================================
 #
-# Resolve mutation targets from (in order, then dedupe):
-# 1. Forensics repair_candidates / optimize files_changed (contract-mandatory)
-# 2. UNION — operator-named paths in investigation input (multi-file demands)
-# 3. UNION — required_evidence filesystem.read paths from handover
-# 4. Fallback chain when still empty (builder / attention / search)
+# 1. Contract: forensics repair_candidates / optimize files_changed
+# 2. UNION operator-named paths + required_evidence reads
+# 3. Fallback: attention targets, then search_symbol
 #
 
 # jq over a file that may be absent or malformed; emits zero lines then.
@@ -1455,24 +1402,16 @@ main() {
     aegis_log "optimize_llm_refine: lines=${baseline_lines} AEGIS_OPTIMIZE_LLM=${AEGIS_OPTIMIZE_LLM}"
   fi
 
-  # Edit format resolved exactly once (one wc -c pass over the targets);
-  # prompt assembly and the invocation both consume the same value.
+  # Edit format resolved once; prompt + invoke share the same value.
   local resolved_edit_format
   resolved_edit_format="$(resolve_aider_edit_format "${mutation_targets[@]:-}")"
 
   local prompt_file
   prompt_file="$(aider_mktemp)"
-  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    assemble_mutation_prompt "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]}"
-  else
-    assemble_mutation_prompt "${prompt_file}" "${resolved_edit_format}"
-  fi
-
-  if [[ "${#mutation_targets[@]}" -gt 0 ]]; then
-    invoke_aider "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]}"
-  else
-    invoke_aider "${prompt_file}" "${resolved_edit_format}"
-  fi
+  assemble_mutation_prompt \
+    "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]:-}"
+  invoke_aider \
+    "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]:-}"
 
   aegis_log "Capturing worktree diff..."
 

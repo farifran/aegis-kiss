@@ -4,62 +4,19 @@
 # AEGIS HARNESS — EXECUTION PROTOCOL VM
 # =========================================================
 #
-# Version: 2.9
-# Layer: Protocol VM
-# Status: Evidence Transition Hardened
-#
-# Responsibilities:
-#
-# - capability envelope resolution
-# - capability environment materialization
-# - capability payload persistence
-# - runtime-owned capability manifest consumption
-# - evidence profile resolution
-# - selective evidence payload selection
-# - selected manifest materialization
-# - capability invocation contracts
-# - capability evidence generation
-# - substrate invocation
-# - protocol validation
-# - candidate artifact validation
-#
-# The executor intentionally owns:
-#
-# - capability routing
-# - payload persistence
-# - evidence selection
-# - runtime-owned capability manifest validation
-# - selected manifest generation
-# - capability invocation
-# - protocol enforcement
-# - capability evidence lifecycle
-# - candidate artifact validation
-#
-# The executor intentionally does NOT:
-#
-# - own orchestration
-# - own runtime lifecycle
-# - own persistence decisions
-# - own capability manifest generation
-# - reason semantically
+# Capability envelope → evidence payloads → substrate →
+# artifact normalize/validate. Does not own orchestration
+# or handover lifecycle (runtime_aegis.sh).
 #
 # =========================================================
 
 set -Eeuo pipefail
-
-# =========================================================
-# ROOT RESOLUTION
-# =========================================================
 
 readonly AEGIS_EXECUTOR_ROOT="$(
   cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
 )"
 
 cd "${AEGIS_EXECUTOR_ROOT}"
-
-# =========================================================
-# CONFIGURATION
-# =========================================================
 
 [[ -f ".harness/config.sh" ]] || {
   echo "[AEGIS][EXECUTOR][FATAL] missing_config" >&2
@@ -70,38 +27,20 @@ cd "${AEGIS_EXECUTOR_ROOT}"
 export AEGIS_LOAD_LOCAL_ENV=1
 source ".harness/config.sh"
 
-extract_agents_constitution() {
+# Full AGENTS.md is the constitutional preamble (short, always current).
+# Do not section-filter: headings drift, the whole contract must ship.
+load_agents_constitution() {
   local agents_file="${AEGIS_ROOT_DIR}/AGENTS.md"
   [[ -f "${agents_file}" ]] || return 0
-
-  echo "### AEGIS CONSTITUTIONAL CONSTRAINTS (AGENTS.md) ###"
-
-  # Extrai as seções de Princípios Constitucionais e de Restrições
-  # Não-Negociáveis em uma única passada (dois flags independentes;
-  # as regiões são disjuntas e ordenadas no documento).
-  awk '
-    /## Constitutional Principles/{principles=1;next}
-    /## Constitutional Model/{principles=0}
-    /## Non-Negotiable Constraints/{constraints=1;next}
-    /## Summary/{constraints=0}
-    principles||constraints' "${agents_file}"
+  cat "${agents_file}"
 }
 
 export AEGIS_CONSTITUTIONAL_PREAMBLE
-AEGIS_CONSTITUTIONAL_PREAMBLE="$(extract_agents_constitution)"
-
-
-# =========================================================
-# INPUTS
-# =========================================================
+AEGIS_CONSTITUTIONAL_PREAMBLE="$(load_agents_constitution)"
 
 readonly AEGIS_SKILL_FILE="${1:-}"
 readonly AEGIS_MODE="${2:-}"
 readonly AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT="${3:-}"
-
-# =========================================================
-# LOGGING
-# =========================================================
 
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
@@ -109,27 +48,12 @@ source "scripts/lib/evidence.sh"
 source "scripts/lib/artifact_protocol.sh"
 AEGIS_LOG_TAG="EXECUTOR"
 
-
-# =========================================================
-# SIGNAL PROPAGATION
-# =========================================================
-#
-# The executor owns no runtime-persistent state (the runtime remains
-# sovereign over surfaces, payload retention and handover lifecycle),
-# so there is nothing to clean up here: its only signal duty is to
-# propagate a deterministic signal-based status code to the runtime.
-
+# Executor holds no durable state — only propagate signal exit codes.
 trap 'aegis_warn "Interrupted by SIGINT"; trap - INT TERM; exit 130' INT
 trap 'aegis_warn "Interrupted by SIGTERM"; trap - INT TERM; exit 143' TERM
 
-# =========================================================
-# VALIDATION
-# =========================================================
-
 validate_executor_inputs() {
-
   local pair name fatal_tag
-  # Non-empty scalar requireds: name:fatal_tag
   for pair in \
     "AEGIS_EXECUTION_SURFACE_PATH:missing_execution_surface_path" \
     "AEGIS_EXECUTION_ID:missing_execution_id" \
@@ -163,56 +87,35 @@ validate_executor_inputs() {
     || aegis_fatal "unknown_execution_mode"
 }
 
-# =========================================================
-# EXECUTION ENGINE
-# =========================================================
-
 resolve_execution_engine() {
-
   export AEGIS_EXECUTION_ENGINE="${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]}"
-
   [[ -n "${AEGIS_EXECUTION_ENGINE}" ]] \
     || aegis_fatal "missing_execution_engine"
-
   aegis_log "Execution engine: ${AEGIS_EXECUTION_ENGINE}"
 }
 
-# =========================================================
-# CAPABILITY ENVELOPE
-# =========================================================
+# Bind mode array from config map: map_name → dest nameref.
+resolve_mode_array() {
+  local -n _mode_map="$1"
+  local -n _dest="$2"
+  local missing_tag="$3"
+  local empty_tag="$4"
+  local ref_name="${_mode_map[$AEGIS_MODE]:-}"
 
-resolve_capability_envelope() {
-
-  local envelope_name="${AEGIS_MODE_CAPABILITY_MAP[$AEGIS_MODE]:-}"
-
-  [[ -n "${envelope_name}" ]] \
-    || aegis_fatal "missing_capability_envelope"
-
-  declare -n envelope_ref="${envelope_name}"
-
-  [[ "${#envelope_ref[@]}" -gt 0 ]] \
-    || aegis_fatal "empty_capability_envelope"
-
-  AEGIS_ACTIVE_CAPABILITIES=("${envelope_ref[@]}")
+  [[ -n "${ref_name}" ]] || aegis_fatal "${missing_tag}"
+  local -n _src="${ref_name}"
+  [[ "${#_src[@]}" -gt 0 ]] || aegis_fatal "${empty_tag}"
+  _dest=("${_src[@]}")
 }
 
-# =========================================================
-# EVIDENCE PROFILE
-# =========================================================
+resolve_capability_envelope() {
+  resolve_mode_array AEGIS_MODE_CAPABILITY_MAP AEGIS_ACTIVE_CAPABILITIES \
+    "missing_capability_envelope" "empty_capability_envelope"
+}
 
 resolve_evidence_profile() {
-
-  local profile_name="${AEGIS_MODE_EVIDENCE_PROFILE[$AEGIS_MODE]:-}"
-
-  [[ -n "${profile_name}" ]] \
-    || aegis_fatal "missing_evidence_profile"
-
-  declare -n evidence_ref="${profile_name}"
-
-  [[ "${#evidence_ref[@]}" -gt 0 ]] \
-    || aegis_fatal "empty_evidence_profile"
-
-  AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${evidence_ref[@]}")
+  resolve_mode_array AEGIS_MODE_EVIDENCE_PROFILE AEGIS_ACTIVE_EVIDENCE_ENTRIES \
+    "missing_evidence_profile" "empty_evidence_profile"
 }
 
 augment_evidence_profile_from_handover() {

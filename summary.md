@@ -51,7 +51,7 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 |---|---|
 | `run_aegis.sh` | Operator CLI, pipelines (`mutation` / `readonly`), timing report, run-level outcome |
 | `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke |
-| `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich artifact |
+| `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; ships full `AGENTS.md` as preamble |
 | `.harness/config.sh` | Modes, handlers, evidence profiles, budgets, provider defaults |
 
 ---
