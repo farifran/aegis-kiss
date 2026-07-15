@@ -61,7 +61,7 @@ cd "${AEGIS_EXECUTOR_ROOT}"
 # CONFIGURATION
 # =========================================================
 
-if [[ -f ".harness/local.env" ]] && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
+if [[ "${AEGIS_SKIP_LOCAL_ENV:-}" != "1" ]] && [[ -f ".harness/local.env" ]] && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
     source ".harness/local.env"
 fi
 
@@ -404,6 +404,7 @@ invoke_raw_substrate() {
     LC_ALL="${LC_ALL:-}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
+    AEGIS_SKIP_LOCAL_ENV="${AEGIS_SKIP_LOCAL_ENV:-}" \
     AEGIS_MODE="${AEGIS_MODE}" \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
@@ -448,6 +449,7 @@ invoke_aider_substrate() {
     LC_ALL="${LC_ALL:-}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
+    AEGIS_SKIP_LOCAL_ENV="${AEGIS_SKIP_LOCAL_ENV:-}" \
     AEGIS_MODE="${AEGIS_MODE}" \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \

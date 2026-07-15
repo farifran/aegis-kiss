@@ -110,6 +110,32 @@ validate_artifact() {
       >/dev/null 2>&1 \
       || aegis_fatal "invalid_artifact_json"
 
+  # Normalize status for weaker models (e.g., Qwen 1.5B) that might output 'interpreted|inconclusive'
+  if [[ "${AEGIS_MODE}" == "forensics" ]]; then
+    local status
+    status="$(echo "${artifact}" | jq -r '.status // empty')"
+    if [[ "${status}" == *"|"* || "${status}" == "" ]]; then
+      local num_candidates
+      num_candidates="$(echo "${artifact}" | jq '.repair_candidates | length')"
+      if [[ "${num_candidates}" -gt 0 ]]; then
+        artifact="$(echo "${artifact}" | jq '.status = "interpreted" | .handover_attention.next_attention_targets = [.repair_candidates[].id]')"
+      else
+        artifact="$(echo "${artifact}" | jq '.status = "inconclusive"')"
+      fi
+    fi
+  fi
+
+  # Normalize discovery for weaker models (e.g. Qwen 1.5B) where handover_attention targets are missing/empty
+  if [[ "${AEGIS_MODE}" == "discovery" ]]; then
+    local next_targets_len
+    next_targets_len="$(echo "${artifact}" | jq '.handover_attention.next_attention_targets | length')"
+    if [[ "${next_targets_len}" -eq 0 ]]; then
+      artifact="$(echo "${artifact}" | jq '
+        .handover_attention.next_attention_targets = (.attention_targets // .investigation_scope.scope_targets // [])
+      ')"
+    fi
+  fi
+
   local artifact_mode
 
   artifact_mode="$(
