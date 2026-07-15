@@ -22,7 +22,9 @@ readonly METRICS_FILE=".harness/runtime/pipeline_metrics.jsonl"
 export AEGIS_PIPELINE_DRIVER=1
 
 # shellcheck disable=SC1091
+source "scripts/lib/common.sh"
 source "scripts/lib/run_outcome.sh"
+AEGIS_LOG_TAG="RUN"
 
 usage() {
   cat <<'EOF'
@@ -96,41 +98,14 @@ require() {
 }
 
 check_dependencies() {
-
-  echo
-  echo "Checking requirements..."
-  echo
-
   require jq
-  echo "jq           ✓"
-
   require git
-  echo "git          ✓"
-
-  if [[ "${PIPELINE}" == "mutation" ]]; then
-    require aider
-    echo "aider        ✓"
-  fi
-
-  echo
+  [[ "${PIPELINE}" != "mutation" ]] || require aider
 }
 
-# Successor lookup derived from the authoritative PIPELINES definition —
-# the full mutation sequence is the single source of mode order.
+# Successor from authoritative PIPELINES[mutation] order.
 next_mode() {
-
-  local -a sequence
-  read -r -a sequence <<< "${PIPELINES[mutation]}"
-
-  local i
-  for i in "${!sequence[@]}"; do
-    if [[ "${sequence[$i]}" == "$1" ]]; then
-      echo "${sequence[$((i + 1))]:-}"
-      return
-    fi
-  done
-
-  echo ""
+  printf '%s\n' "$(aegis_next_in_sequence "$1" "${PIPELINES[mutation]}")"
 }
 
 resolve_resume() {
@@ -218,73 +193,40 @@ clear_pipeline_metrics() {
   export AEGIS_METRICS_FILE="${METRICS_FILE}"
 }
 
-# Post-mode intelligent early-exit gates (Tier 2).
-# Exit 0 = HALT remaining pipeline (PIPELINE_STATUS already set).
-# Exit 1 = continue.
+# Post-forensics early-exit. 0 = HALT (status set); 1 = continue.
 pipeline_should_halt_after_mode() {
   local mode="$1"
-
+  [[ "${mode}" == "forensics" ]] || return 1
   [[ -f "${HANDOVER_FILE}" ]] || return 1
 
-  case "${mode}" in
-    forensics)
-      local forensics_status candidate_count
-      forensics_status="$(
-        jq -r '
-          .artifact_snapshot.operational_context.status
-          // .artifact_snapshot.status
-          // empty
-        ' "${HANDOVER_FILE}" 2>/dev/null || true
-      )"
-      candidate_count="$(
-        jq -r '
-          (.artifact_snapshot.operational_context.repair_candidates // [])
-          | length
-        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
-      )"
+  local forensics_status candidate_count
+  forensics_status="$(
+    jq -r '
+      .artifact_snapshot.operational_context.status
+      // .artifact_snapshot.status // empty
+    ' "${HANDOVER_FILE}" 2>/dev/null || true
+  )"
+  candidate_count="$(
+    jq -r '
+      (.artifact_snapshot.operational_context.repair_candidates // []) | length
+    ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
+  )"
 
-      if [[ "${forensics_status}" == "inconclusive" ]]; then
-        echo
-        echo "[RUN] Forensics inconclusive — no mutation surface justified. Halting before repair."
-        PIPELINE_STATUS="HALTED"
-        PIPELINE_REASON="forensics inconclusive"
-        return 0
-      fi
+  if [[ "${forensics_status}" == "inconclusive" ]]; then
+    echo
+    echo "[RUN] Forensics inconclusive — no mutation surface justified. Halting before repair."
+    PIPELINE_STATUS="HALTED"
+    PIPELINE_REASON="forensics inconclusive"
+    return 0
+  fi
 
-      if [[ "${candidate_count}" -eq 0 ]]; then
-        echo
-        echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
-        PIPELINE_STATUS="HALTED"
-        PIPELINE_REASON="no repair candidates in forensics handover"
-        return 0
-      fi
-      ;;
-
-    adversarial)
-      local adv_status findings_n
-      adv_status="$(
-        jq -r '
-          .artifact_snapshot.operational_context.status
-          // .artifact_snapshot.status
-          // empty
-        ' "${HANDOVER_FILE}" 2>/dev/null || true
-      )"
-      findings_n="$(
-        jq -r '
-          [.artifact_snapshot.operational_context.findings // []
-            | .[]?
-            | select(.supported_by_evidence == true
-                     and ((.severity == "high") or (.severity == "medium")))]
-          | length
-        ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
-      )"
-      if [[ "${adv_status}" == "verified" ]] && [[ "${findings_n}" -eq 0 ]]; then
-        echo
-        echo "[RUN] Adversarial verified (no blocking findings) — validation will be tribunal-only (cheap)."
-        # Still continue: validation is the promotion gate.
-      fi
-      ;;
-  esac
+  if [[ "${candidate_count}" -eq 0 ]]; then
+    echo
+    echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
+    PIPELINE_STATUS="HALTED"
+    PIPELINE_REASON="no repair candidates in forensics handover"
+    return 0
+  fi
 
   return 1
 }

@@ -70,6 +70,21 @@ aegis_extract_operator_named_paths_json() {
   fi
 }
 
+# Successor of $1 in whitespace-separated sequence $2 (empty if last/missing).
+aegis_next_in_sequence() {
+  local current="$1"
+  local -a sequence=()
+  local i
+  read -r -a sequence <<< "${2:-}"
+  for i in "${!sequence[@]}"; do
+    if [[ "${sequence[$i]}" == "${current}" ]]; then
+      printf '%s' "${sequence[$((i + 1))]:-}"
+      return 0
+    fi
+  done
+  printf ''
+}
+
 # Timestamps via portable date subshells: the printf '%(%s)T' builtin
 # token requires Bash >= 4.2 and evaluates empty on macOS stock Bash 3.2,
 # which would break the $((end-start)) arithmetic below.

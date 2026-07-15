@@ -232,23 +232,11 @@ mode_starts_new_investigation() {
 }
 
 artifact_snapshot_investigation_input_from_handover() {
-
   local handover_file="$1"
-
-  if ! handover_schema_is_valid "${handover_file}"; then
-    return 0
-  fi
-
+  handover_schema_is_valid "${handover_file}" || return 0
   jq -r '
-    if (
-      (.artifact_snapshot | type == "object")
-      and (.artifact_snapshot.investigation_input? | type == "string")
-      and (.artifact_snapshot.investigation_input | length > 0)
-    ) then
-      .artifact_snapshot.investigation_input
-    else
-      empty
-    end
+    .artifact_snapshot.investigation_input? // empty
+    | select(type == "string" and length > 0)
   ' "${handover_file}" 2>/dev/null || true
 }
 
@@ -422,80 +410,79 @@ trap 'handle_runtime_termination_signal SIGINT 130' INT
 trap 'handle_runtime_termination_signal SIGTERM 143' TERM
 
 
-validate_mode_preconditions() {
+# jq -e against the epistemic handover or fatal with the given code.
+assert_handover_precondition() {
+  local fatal_code="$1"
+  local filter="$2"
+  jq -e "${filter}" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+    || aegis_fatal "${fatal_code}"
+}
 
-  if [[ "${AEGIS_MODE}" == "discovery" ]]; then
-    return 0
-  fi
+# Shared shape: prior mode left a non-empty candidate_result.diff + files_changed.
+readonly AEGIS_JQ_HANDOVER_CANDIDATE_RESULT='
+  (.artifact_snapshot.operational_context.candidate_result | type == "object")
+  and (.artifact_snapshot.operational_context.candidate_result.diff
+        | type == "string" and length > 0 and . != "(no changes)")
+  and (.artifact_snapshot.operational_context.candidate_result.files_changed
+        | type == "array" and length > 0)
+'
+
+validate_mode_preconditions() {
+  [[ "${AEGIS_MODE}" == "discovery" ]] && return 0
 
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
     || aegis_fatal "missing_epistemic_handover_for_mode: ${AEGIS_MODE}"
 
   case "${AEGIS_MODE}" in
     forensics)
-      jq -e '
-        .artifact_snapshot != null
-        and .artifact_snapshot.mode == "discovery"
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || aegis_fatal "precondition_failed_discovery_artifact_missing_or_invalid"
+      assert_handover_precondition \
+        "precondition_failed_discovery_artifact_missing_or_invalid" \
+        '.artifact_snapshot != null and .artifact_snapshot.mode == "discovery"'
       ;;
     repair)
-      # Feedback iterations re-enter repair from a rejected validation
-      # handover: the preserved findings context replaces the forensics
-      # repair-candidate contract for those iterations only.
+      # Feedback re-entry: rejected validation + structured repair_feedback.
       if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -gt 0 ]]; then
-        # A feedback iteration must consume the deterministic, structured
-        # repair_feedback contract emitted by the rejected validation —
-        # never free-form prose. Assert its schema so repair re-entry is
-        # driven by explicit violations + authorized editing scopes.
-        jq -e '
-          .artifact_snapshot != null
-          and .artifact_snapshot.mode == "validation"
-          and .artifact_snapshot.operational_context.verdict == "rejected"
-          and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
-          and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
-          and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")
-        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-          || aegis_fatal "precondition_failed_structured_repair_feedback_missing_or_invalid"
+        assert_handover_precondition \
+          "precondition_failed_structured_repair_feedback_missing_or_invalid" \
+          '.artifact_snapshot != null
+           and .artifact_snapshot.mode == "validation"
+           and .artifact_snapshot.operational_context.verdict == "rejected"
+           and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+           and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
+           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")'
         return 0
       fi
-
-      jq -e '
-        .artifact_snapshot != null
-        and .artifact_snapshot.mode == "forensics"
-        and (.artifact_snapshot.operational_context.repair_candidates | type == "array" and length > 0)
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || aegis_fatal "precondition_failed_forensics_artifact_missing_or_invalid"
+      assert_handover_precondition \
+        "precondition_failed_forensics_artifact_missing_or_invalid" \
+        '.artifact_snapshot != null
+         and .artifact_snapshot.mode == "forensics"
+         and (.artifact_snapshot.operational_context.repair_candidates
+              | type == "array" and length > 0)'
       ;;
     optimize)
-      jq -e '
-        .artifact_snapshot != null
-        and .artifact_snapshot.mode == "repair"
-        and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0 and . != "(no changes)")
-        and (.artifact_snapshot.operational_context.files_changed | type == "array" and length > 0)
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || aegis_fatal "precondition_failed_repair_candidate_missing_or_invalid"
+      assert_handover_precondition \
+        "precondition_failed_repair_candidate_missing_or_invalid" \
+        '.artifact_snapshot != null
+         and .artifact_snapshot.mode == "repair"
+         and (.artifact_snapshot.operational_context.diff
+              | type == "string" and length > 0 and . != "(no changes)")
+         and (.artifact_snapshot.operational_context.files_changed
+              | type == "array" and length > 0)'
       ;;
     adversarial)
-      jq -e '
-        .artifact_snapshot != null
-        and .artifact_snapshot.mode == "optimize"
-        and (.artifact_snapshot.operational_context.candidate_result | type == "object")
-        and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
-        and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || aegis_fatal "precondition_failed_optimize_candidate_missing_or_invalid"
+      assert_handover_precondition \
+        "precondition_failed_optimize_candidate_missing_or_invalid" \
+        ".artifact_snapshot != null
+         and .artifact_snapshot.mode == \"optimize\"
+         and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})"
       ;;
     validation)
-      jq -e '
-        .artifact_snapshot != null
-        and .artifact_snapshot.mode == "adversarial"
-        and (.artifact_snapshot.operational_context.candidate_result | type == "object")
-        and (.artifact_snapshot.operational_context.candidate_result.diff | type == "string" and length > 0 and . != "(no changes)")
-        and (.artifact_snapshot.operational_context.candidate_result.files_changed | type == "array" and length > 0)
-        and (.artifact_snapshot.operational_context.findings | type == "array")
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-        || aegis_fatal "precondition_failed_findings_missing_or_invalid"
+      assert_handover_precondition \
+        "precondition_failed_findings_missing_or_invalid" \
+        ".artifact_snapshot != null
+         and .artifact_snapshot.mode == \"adversarial\"
+         and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
+         and (.artifact_snapshot.operational_context.findings | type == \"array\")"
       ;;
   esac
 }
@@ -729,8 +716,6 @@ execute_mode() {
   [[ -n "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" ]] \
     || aegis_fatal "invalid_promoted_artifact_shape"
 
-  aegis_log "Promoting validated artifact..."
-
   aegis_log "Execution completed successfully"
 }
 
@@ -834,8 +819,7 @@ promote_epistemic_handover() {
 
   local handover_json
 
-  # structural_context is runtime-owned and empty after the deep-topology cut
-  # (no structural.builder). Kept as {} for handover schema stability.
+  # structural_context stays {} (deep topology cut). Schema kept stable.
   handover_json="$(
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
       jq -c \
@@ -849,20 +833,13 @@ promote_epistemic_handover() {
               generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
               structural_context: {},
               operational_context: (
-                (if ($orig | has("operational_context")) then
-                  $orig.operational_context
-                else
-                  ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at))
-                end)
-                | del(.topology_summary, .topology_index, .ranked_targets,
-                      .observed_request_alignment, .gap_counts, .evidence,
-                      .unresolved_references, .boundary_count, .bridge_count,
-                      .hotspot_count, .entrypoint_count, .unresolved_reference_count)
+                if ($orig | has("operational_context")) then $orig.operational_context
+                else ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at))
+                end
               )
             },
             epistemic_state: (
-              $orig.handover_attention //
-              {
+              $orig.handover_attention // {
                 next_attention_targets: [],
                 attention_scope: "none",
                 attention_reason: "no active attention"
@@ -951,25 +928,11 @@ repair_feedback_loop_should_fire() {
 # through an explicit "accepted" verdict from a fresh validation pass.
 AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
 
-# Single authoritative mode-order string for feedback progression —
-# successor lookup replaces a hand-maintained case table so pipeline
-# drift cannot silently diverge from the sequence.
+# Authoritative feedback progression (re-entered repair → validation).
 readonly AEGIS_FEEDBACK_MODE_SEQUENCE="repair optimize adversarial validation"
 
 next_feedback_pipeline_mode() {
-
-  local -a sequence
-  read -r -a sequence <<< "${AEGIS_FEEDBACK_MODE_SEQUENCE}"
-
-  local i
-  for i in "${!sequence[@]}"; do
-    if [[ "${sequence[$i]}" == "${AEGIS_MODE}" ]]; then
-      printf '%s' "${sequence[$((i + 1))]:-}"
-      return
-    fi
-  done
-
-  printf ''
+  aegis_next_in_sequence "${AEGIS_MODE}" "${AEGIS_FEEDBACK_MODE_SEQUENCE}"
 }
 
 main() {
