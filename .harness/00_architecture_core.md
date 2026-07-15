@@ -1,5 +1,8 @@
 # 00_architecture_core.md — Epistemic Architecture Core
 
+Epistemic doctrine (why modes exist and how confidence is bounded).  
+**Not** the live file map — see `summary.md`. Constitution: `AGENTS.md`.
+
 # Aegis Harness — Structural Core
 
 The Aegis Harness is an epistemology-first runtime for structurally bounded frontier-model engineering.

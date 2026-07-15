@@ -1,6 +1,7 @@
 # entry.md — Demand Protocol via GitHub Issues (proposta)
 
-**Status:** proposta / memória de desenho (não implementado)  
+**Status:** proposta / memória de desenho (**não implementado**, **não é o mapa do produto**)  
+**Mapa canónico do repo atual:** `summary.md` · **Setup operador:** `README.md` · **Constituição:** `AGENTS.md`  
 **Âmbito:** padronizar como o Aegis obtém, valida e consome a *investigation demand*  
 **Persistência da demanda:** GitHub Issue (remoto) — sem store local de demands  
 **Data da discussão:** 2026-07 (sessão de desenho Aegis KISS)
