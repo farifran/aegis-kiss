@@ -119,7 +119,7 @@ Cacheable (stable) capabilities: `list_tree`, `layer0_facts`, `attention_seed`.
 | File | Role |
 |---|---|
 | `scripts/lib/common.sh` | Logging, path helpers (`AEGIS_SOURCE_PATH_RE`), isolation (`run_with_isolated_base_env`), `measure` |
-| `scripts/lib/artifact_protocol.sh` | Validate / enrich artifacts, continuity, jq constants |
+| `scripts/lib/artifact_protocol.sh` | Validate / enrich artifacts; shared jq enrich lib + per-mode bodies |
 | `scripts/lib/evidence.sh` | Evidence materialization / selection |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write helpers |
 | `scripts/lib/run_outcome.sh` | Human `AEGIS OUTCOME`, metrics JSONL, `last_outcome.json` |

@@ -481,125 +481,464 @@ build_tribunal_tools_gate() {
 # =========================================================
 # MINIMAL COGNITIVE ARTIFACT ENRICHMENT
 #
-# Models emit only their minimal cognitive payload; the runtime is the
-# sole constructor of state: mode, evidence_refs, observed_payloads,
-# candidates carried from the handover, attention routing and the
-# ATTENTION_REASON_* enum are all injected deterministically here.
+# Models emit minimal cognitive fields; runtime injects mode, evidence,
+# candidates, attention (see .skills/field_ownership.md).
 #
-# Structure (KISS split):
-#   1. load_artifact_enrichment_context  — gather runtime evidence/handover
-#   2. enrich_cognitive_artifact         — pure jq mode enrichment
-#   3. rewrite_substrate_output_with_artifact — splice markers
-#   4. normalize_substrate_output        — thin orchestrator
+#   load_artifact_enrichment_context → enrich_cognitive_artifact (per-mode)
+#   → rewrite_substrate_output_with_artifact → normalize_substrate_output
 # =========================================================
+
+# Shared jq defs for all mode enrichers (piped once per enrich call).
+readonly AEGIS_JQ_ENRICH_LIB='
+  def drop_empty:
+    with_entries(select(
+      (.value != null)
+      and ((.value | type) != "array" or (.value | length) > 0)
+    ));
+
+  def sanitize_required_evidence:
+    map(select(
+      type == "string"
+      and startswith("filesystem.read:")
+      and (.[16:] | length > 0)
+      and (.[16:] | contains("<") | not)
+      and (.[16:] | contains(">") | not)
+      and (.[16:] | test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
+    ));
+
+  # Keep model required_evidence only for operator-named or on-disk paths;
+  # always union operator-named as filesystem.read: entries.
+  def merge_operator_required_evidence($req; $named; $existing):
+    ($req
+      | sanitize_required_evidence
+      | map(select(
+          (.[16:] as $p
+            | (($named | index($p)) != null)
+              or (($existing | index($p)) != null))
+        )))
+    + ($named | map("filesystem.read:" + .))
+    | unique;
+
+  # Collapse multi-candidate forensics when operator named 0–1 paths.
+  def prefer_alvo_unico($cands; $named):
+    if ($named | length) >= 2 then $cands
+    elif ($cands | length) <= 1 then $cands
+    else
+      (if ($named | length) == 1 then
+        ($cands | map(select(.id == $named[0])) | .[0:1])
+       else [] end) as $named_hit
+      | if ($named_hit | length) > 0 then $named_hit
+        else
+          ($cands
+            | map(select(.id | test("(^|/)index\\.(ts|tsx|js|jsx)$")))
+            | .[0:1]) as $entry
+          | if ($entry | length) > 0 then $entry else $cands[0:1] end
+        end
+    end;
+
+  # Drop invent-net-new candidates; remap empty set onto primary scope path.
+  def clamp_forensics_scope($cands; $scope; $evidence_refs):
+    ($cands | map(select(.id as $id | ($scope | index($id)) != null))) as $in
+    | if ($in | length) > 0 then $in
+      elif ($scope | length) > 0 and ($cands | length) > 0 then
+        [{
+          id: $scope[0],
+          reason: ($cands[0].reason // "scoped to attention"),
+          evidence_refs: $evidence_refs
+        }]
+      else $cands end;
+
+  def added_export_names($diff):
+    [($diff // "")
+      | split("\n")[]
+      | select(startswith("+") and (startswith("+++") | not))
+      | .[1:]
+      | select(test("^export\\s+(async\\s+)?function\\s+|^export\\s+const\\s+|^export\\s+class\\s+|^export\\s+\\{"))
+      | capture("(?:function|const|class)\\s+(?<n>[A-Za-z_][A-Za-z0-9_]*)")?
+      | .n
+      | select(. != null)
+    ] | unique;
+
+  # +lines only; normalize "return X;" → "X" for quotation matching.
+  def diff_added_exprs($diff):
+    [($diff // "")
+      | split("\n")[]
+      | select(startswith("+") and (startswith("+++") | not))
+      | .[1:]
+      | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+      | sub("^return[[:space:]]+"; "")
+      | sub(";[[:space:]]*$"; "")
+      | gsub("[[:space:]]+"; " ")
+    ];
+
+  def backtick_quotes:
+    [(.description // "") | match("`[^`]+`"; "g")
+      | .string[1:-1]
+      | gsub("[[:space:]]+"; " ")
+      | sub("^return[[:space:]]+"; "")
+      | sub(";[[:space:]]*$"; "")]
+    | map(select(length >= 8));
+
+  # $mode: "full" (adversarial: substring vs absent messages) | "soft" (validation).
+  def gate_finding_quotes($added_exprs; $cand_diff; $mode):
+    backtick_quotes as $quotes
+    | if ($quotes | length) == 0 then .
+      elif ($mode == "full")
+           and any($quotes[]; . as $q
+             | all($added_exprs[]; . != $q)
+             and ($cand_diff | index($q)) != null) then
+        .supported_by_evidence = false
+        | .severity = "info"
+        | .description = ((.description // "")
+            + " [tribunal: quoted snippet is not a full candidate expression]")
+      elif any($quotes[]; . as $q
+             | all($added_exprs[]; . != $q)
+             and (($mode != "full") or (($cand_diff | index($q)) == null))) then
+        .supported_by_evidence = false
+        | .severity = "info"
+        | if $mode == "full" then
+            .description = ((.description // "")
+              + " [tribunal: quoted snippet absent from candidate diff]")
+          else . end
+      else . end;
+
+  def is_blocking_finding:
+    (.supported_by_evidence == true)
+    and ((.severity == "high") or (.severity == "medium"))
+    and (.type != "missing_evidence")
+    and (.type != "style_issue");
+
+  def blocking_findings_of:
+    [.[]? | select(is_blocking_finding)];
+'
+
+# Common bind + identity injection used by every mode program.
+readonly AEGIS_JQ_ENRICH_HEAD='
+  $ctx.evidence_refs as $evidence_refs
+  | $ctx.observed_payloads as $observed_payloads
+  | $ctx.prev_candidate as $prev_candidate
+  | $ctx.prev_findings as $prev_findings
+  | $ctx.seed_scope as $seed_scope
+  | $ctx.seed_targets as $seed_targets
+  | $ctx.seed_conditions as $seed_conditions
+  | $ctx.operator_named_paths as $operator_named_paths
+  | $ctx.existing_paths as $existing_paths
+  | $ctx.tools_gate as $tools_gate
+  | .mode = $mode
+  | .evidence_refs = $evidence_refs
+  | .observed_payloads = (.observed_payloads // $observed_payloads)
+  | if .status? == null then
+      if .verdict? then . else .status = "interpreted" end
+    else . end
+'
+
+readonly AEGIS_JQ_ENRICH_DISCOVERY='
+  | (.operational_context // {}) as $oc
+  | ((.required_evidence // $oc.required_evidence // [])) as $raw_req
+  | merge_operator_required_evidence($raw_req; $operator_named_paths; $existing_paths) as $merged_req
+  | (($seed_targets + $operator_named_paths) | unique) as $merged_attention
+  | .operational_context = ({
+      status: ($oc.status // "interpreted"),
+      summary: ($oc.summary // "discovery operational context"),
+      observed_payloads: ($oc.observed_payloads // $observed_payloads),
+      investigation_scope: $seed_scope,
+      attention_targets: $merged_attention,
+      blocking_conditions: $seed_conditions,
+      required_evidence: $merged_req,
+      operator_named_paths: $operator_named_paths,
+      operational_observations: (.observations // $oc.operational_observations // []),
+      rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
+      evidence_priorities: ($oc.evidence_priorities // [])
+    } | drop_empty)
+  | del(.observations, .rationale, .required_evidence)
+  | .handover_attention = {
+      next_attention_targets: $merged_attention,
+      attention_scope: ($seed_scope.scope_type // "exploratory"),
+      attention_reason: $attention_reason
+    }
+'
+
+readonly AEGIS_JQ_ENRICH_FORENSICS='
+  | (($operator_named_paths // [])
+      + ($seed_targets // [])
+      + ($existing_paths // [])
+      | unique) as $forensics_scope
+  | .repair_candidates = (
+      (.repair_candidates // [])
+      | map({
+          id,
+          reason: (.reason // "unspecified"),
+          evidence_refs: $evidence_refs
+        })
+      | unique_by(.id)
+      | clamp_forensics_scope(.; $forensics_scope; $evidence_refs)
+      | prefer_alvo_unico(.; $operator_named_paths)
+    )
+  | .handover_attention = {
+      next_attention_targets: (
+        if .status == "interpreted"
+        then ([.repair_candidates[].id] | unique)
+        else []
+        end
+      ),
+      attention_scope: "evidence-backed interpretation",
+      attention_reason: $attention_reason
+    }
+'
+
+readonly AEGIS_JQ_ENRICH_OPTIMIZE='
+  | (
+      if ((.diff | type == "string")
+            and ((.diff | length) > 0)
+            and (.diff != "(no changes)")
+            and (.files_changed | type == "array")
+            and ((.files_changed | length) > 0))
+      then { source_mode: "optimize", diff: .diff, files_changed: .files_changed }
+      elif ((.candidate_result.diff | type == "string")
+            and ((.candidate_result.diff | length) > 0)
+            and (.candidate_result.diff != "(no changes)")
+            and (.candidate_result.files_changed | type == "array")
+            and ((.candidate_result.files_changed | length) > 0))
+      then (.candidate_result | .source_mode = "optimize")
+      else
+        ($prev_candidate // {source_mode: "optimize", diff: "(no changes)", files_changed: []})
+      end
+    ) as $raw_cand
+  | (
+      added_export_names($raw_cand.diff) as $opt_exports
+      | added_export_names($prev_candidate.diff // "") as $repair_exports
+      | ($opt_exports - $repair_exports) as $novel
+      | if ($novel | length) == 0 then $raw_cand
+        elif any($novel[]; . as $n
+          | ($investigation_input // "") | test("\\b\($n)\\b"; "i"))
+        then $raw_cand
+        else ($prev_candidate // $raw_cand | .source_mode = "optimize")
+        end
+    ) as $cand
+  | (
+      ($prev_candidate.diff // "") as $prev_diff
+      | if ($cand.diff == $prev_diff)
+           and ($cand.files_changed == ($prev_candidate.files_changed // []))
+        then "no_optimization_needed"
+        elif (.status == "no_optimization_needed" or .status == "unoptimized")
+             and ($cand.diff == $prev_diff or $prev_diff == "")
+        then "no_optimization_needed"
+        else "optimized"
+        end
+    ) as $opt_status
+  | .status = $opt_status
+  | .candidate_result = $cand
+  | .diff = $cand.diff
+  | .files_changed = $cand.files_changed
+  | .handover_attention = {
+      next_attention_targets: (.candidate_result.files_changed // []),
+      attention_scope: "mutation_applied",
+      attention_reason: $attention_reason
+    }
+'
+
+readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
+  | .status = (.status // "challenged")
+  | .candidate_result = ($prev_candidate // .candidate_result)
+  | (.candidate_result.diff // "") as $cand_diff
+  | diff_added_exprs($cand_diff) as $added_exprs
+  | .findings = (.findings // [] | map(
+      .supported_by_evidence = (.supported_by_evidence // false)
+      | .evidence_refs = (.evidence_refs // $evidence_refs)
+      | gate_finding_quotes($added_exprs; $cand_diff; "full")
+      | if ($tools_gate.mutation_clean == true)
+           and (.type == "logic_bug" or .type == "contract_violation")
+           and ((.evidence_refs // []) | map(tostring) | any(test("typescript|eslint|test\\.run")))
+           and (($tools_gate.typescript_errors_in_scope // []) | length) == 0
+        then .supported_by_evidence = false | .severity = "info"
+        else . end
+    ))
+  | ((.findings | blocking_findings_of) | length) as $blocking
+  | if ($tools_gate.mutation_clean == true) and ($blocking == 0) then
+      .status = "verified"
+    elif ($tools_gate.mutation_clean == false) then
+      .status = "challenged"
+    else . end
+  | .handover_attention = {
+      next_attention_targets: (.candidate_result.files_changed // []),
+      attention_scope: "bounded falsification",
+      attention_reason: $attention_reason
+    }
+'
+
+readonly AEGIS_JQ_ENRICH_VALIDATION='
+  | .validated_candidate = ($prev_candidate // .validated_candidate)
+  | (.validated_candidate.diff // "") as $cand_diff
+  | diff_added_exprs($cand_diff) as $added_exprs
+  | .findings = (
+      ($prev_findings // .findings // [])
+      | map(gate_finding_quotes($added_exprs; $cand_diff; "soft"))
+    )
+  | .basis = (.basis // [] | if type == "string" then [.] else . end)
+  | (if (
+       (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
+       or ((.validated_candidate.diff // "") == "(no changes)")
+       or (((.validated_candidate.files_changed // []) | length) == 0)
+     ) then
+       .verdict = "rejected" | .basis = ["empty_mutation_candidate"]
+     elif (((.validated_candidate.diff // "") | test("(?m)^\\+\\+\\+ b/")) | not) then
+       .verdict = "rejected" | .basis = ["invalid_candidate_diff_shape"]
+     else . end)
+  | (.findings | blocking_findings_of) as $blocking_findings
+  | (if (
+       ((.basis // []) | index("empty_mutation_candidate") != null)
+       or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
+     ) then .
+     elif ($blocking_findings | length) == 0 then
+       .verdict = "accepted"
+       | .basis = ["tribunal: no blocking findings after evidence gates"]
+     elif ($tools_gate.mutation_clean == false) then
+       .verdict = "rejected"
+       | .basis = (
+           if (($tools_gate.typescript_errors_in_scope // []) | length) > 0 then
+             ["tribunal: typescript errors in mutation files"]
+           elif (($tools_gate.eslint_errors_in_scope // []) | length) > 0 then
+             ["tribunal: eslint errors in mutation files"]
+           else ["tribunal: mutation-scoped tool failure"] end
+         )
+     else
+       .verdict = "rejected"
+       | .basis = (
+           if ((.basis // []) | length) > 0 then .basis
+           else [$blocking_findings[0].description // "blocking adversarial finding"]
+           end
+         )
+     end)
+  | (if (.verdict // "") == "rejected" then
+       ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
+       | .repair_feedback = {
+           violations: [
+             $blocking_findings[]
+             | {
+                 origin: (.type // "unspecified"),
+                 severity: (.severity // "unspecified"),
+                 target_files: $scopes,
+                 structural_reason: (.description // ""),
+                 evidence_refs: (.evidence_refs // [])
+               }
+           ],
+           authorized_scopes: $scopes
+         }
+     else del(.repair_feedback) end)
+  | .handover_attention = {
+      next_attention_targets: (.validated_candidate.files_changed // []),
+      attention_scope: "validation_result",
+      attention_reason: $attention_reason
+    }
+'
+
+readonly AEGIS_JQ_ENRICH_DEFAULT='
+  | .handover_attention = (
+      .handover_attention // {
+        next_attention_targets: [],
+        attention_scope: "exploratory",
+        attention_reason: $attention_reason
+      }
+    )
+'
 
 # Emit one JSON object with every runtime input the enricher needs.
 load_artifact_enrichment_context() {
-# Runtime-owned evidence identity: refs from the active envelope,
-# observed payload filenames derived from the evidence entries.
-local evidence_refs_json
-evidence_refs_json="$(
-  jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
-)"
+  local evidence_refs_json
+  evidence_refs_json="$(
+    jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
+  )"
 
-local -a observed_payloads_arr=()
-local entry
-for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-  [[ -n "${entry}" ]] || continue
-  observed_payloads_arr+=("$(
-    resolve_evidence_payload_file \
-      "$(resolve_evidence_entry_capability "${entry}")" \
-      "$(resolve_evidence_entry_alias "${entry}")"
-  )")
-done
-local observed_payloads_json
-observed_payloads_json="$(jq -cn '$ARGS.positional' --args "${observed_payloads_arr[@]}")"
+  local -a observed_payloads_arr=()
+  local entry
+  for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+    [[ -n "${entry}" ]] || continue
+    observed_payloads_arr+=("$(
+      resolve_evidence_payload_file \
+        "$(resolve_evidence_entry_capability "${entry}")" \
+        "$(resolve_evidence_entry_alias "${entry}")"
+    )")
+  done
+  local observed_payloads_json
+  observed_payloads_json="$(jq -cn '$ARGS.positional' --args "${observed_payloads_arr[@]}")"
 
-# One pass over the handover: previous candidate (source_mode coerced)
-# and previous findings — the runtime, not the model, carries them.
-local prev_candidate_json="null"
-local prev_findings_json="null"
-if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
-  local handover_ctx=()
-  mapfile -t handover_ctx < <(
-    jq -c '
-      .artifact_snapshot as $snap
-      | ((
-          $snap.operational_context.candidate_result
-          // $snap.candidate_result
-          // (if ($snap.operational_context.diff | type == "string") then
-               {
-                 diff: $snap.operational_context.diff,
-                 files_changed: ($snap.operational_context.files_changed // [])
-               }
-             else null end)
-         )
-         | if . != null then .source_mode = "optimize" else . end),
-        ($snap.operational_context.findings // $snap.findings // null)
-    ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
-  )
-  prev_candidate_json="${handover_ctx[0]:-null}"
-  prev_findings_json="${handover_ctx[1]:-null}"
-fi
+  local prev_candidate_json="null"
+  local prev_findings_json="null"
+  if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
+    local handover_ctx=()
+    mapfile -t handover_ctx < <(
+      jq -c '
+        .artifact_snapshot as $snap
+        | ((
+            $snap.operational_context.candidate_result
+            // $snap.candidate_result
+            // (if ($snap.operational_context.diff | type == "string") then
+                 {
+                   diff: $snap.operational_context.diff,
+                   files_changed: ($snap.operational_context.files_changed // [])
+                 }
+               else null end)
+           )
+           | if . != null then .source_mode = "optimize" else . end),
+          ($snap.operational_context.findings // $snap.findings // null)
+      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
+    )
+    prev_candidate_json="${handover_ctx[0]:-null}"
+    prev_findings_json="${handover_ctx[1]:-null}"
+  fi
 
-# Attention-seed scope/targets/conditions for discovery enrichment.
-local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
-local seed_targets_json="[]"
-local seed_conditions_json="[]"
-local seed_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/runtime_attention_seed.json"
-if [[ -f "${seed_path}" ]]; then
-  local seed_ctx=()
-  mapfile -t seed_ctx < <(
-    jq -c '
-      (.payload.investigation_scope
-        // {"scope_type":"none","scope_targets":[],"scope_confidence":"none"}),
-      (.payload.attention_targets // []),
-      (.payload.blocking_conditions // [])
-    ' "${seed_path}" 2>/dev/null
-  )
-  seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
-  seed_targets_json="${seed_ctx[1]:-[]}"
-  seed_conditions_json="${seed_ctx[2]:-[]}"
-fi
+  local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
+  local seed_targets_json="[]"
+  local seed_conditions_json="[]"
+  local seed_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/runtime_attention_seed.json"
+  if [[ -f "${seed_path}" ]]; then
+    local seed_ctx=()
+    mapfile -t seed_ctx < <(
+      jq -c '
+        (.payload.investigation_scope
+          // {"scope_type":"none","scope_targets":[],"scope_confidence":"none"}),
+        (.payload.attention_targets // []),
+        (.payload.blocking_conditions // [])
+      ' "${seed_path}" 2>/dev/null
+    )
+    seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
+    seed_targets_json="${seed_ctx[1]:-[]}"
+    seed_conditions_json="${seed_ctx[2]:-[]}"
+  fi
 
-# Operator-named repository paths (common.sh helper — single regex family).
-local operator_named_paths_json
-operator_named_paths_json="$(
-  aegis_extract_operator_named_paths_json "${AEGIS_INVESTIGATION_INPUT:-}"
-)"
-if ! printf '%s' "${operator_named_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  operator_named_paths_json="[]"
-fi
+  local operator_named_paths_json
+  operator_named_paths_json="$(
+    aegis_extract_operator_named_paths_json "${AEGIS_INVESTIGATION_INPUT:-}"
+  )"
+  if ! printf '%s' "${operator_named_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    operator_named_paths_json="[]"
+  fi
 
-# Existing repo paths (for required_evidence keep-filter). Prefer the
-# evidence-target census when available so harness scripts do not count.
-local existing_paths_json="[]"
-existing_paths_json="$(
-  {
-    if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" && -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
-      command grep -v '^#' "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null || true
-    else
-      git ls-files 2>/dev/null || true
-    fi
-  } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
-    | sort -u \
-    | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
-    || printf '[]'
-)"
-if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  existing_paths_json="[]"
-fi
+  local existing_paths_json="[]"
+  existing_paths_json="$(
+    {
+      if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" && -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+        command grep -v '^#' "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null || true
+      else
+        git ls-files 2>/dev/null || true
+      fi
+    } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
+      | sort -u \
+      | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+      || printf '[]'
+  )"
+  if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    existing_paths_json="[]"
+  fi
 
-# Tribunal tools gate for adversarial/validation — mutation-scoped.
-local tribunal_files_json="[]"
-tribunal_files_json="$(
-  printf '%s' "${prev_candidate_json}" \
-    | jq -c '.files_changed // []' 2>/dev/null \
-    || printf '[]'
-)"
-local tools_gate_json
-tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
-
+  local tribunal_files_json="[]"
+  tribunal_files_json="$(
+    printf '%s' "${prev_candidate_json}" \
+      | jq -c '.files_changed // []' 2>/dev/null \
+      || printf '[]'
+  )"
+  local tools_gate_json
+  tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
 
   jq -n \
     --argjson evidence_refs "${evidence_refs_json}" \
@@ -630,469 +969,23 @@ tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
 enrich_cognitive_artifact() {
   local raw_artifact="$1"
   local ctx_json="$2"
+  local mode_body
+
+  case "${AEGIS_MODE}" in
+    discovery)   mode_body="${AEGIS_JQ_ENRICH_DISCOVERY}" ;;
+    forensics)   mode_body="${AEGIS_JQ_ENRICH_FORENSICS}" ;;
+    optimize)    mode_body="${AEGIS_JQ_ENRICH_OPTIMIZE}" ;;
+    adversarial) mode_body="${AEGIS_JQ_ENRICH_ADVERSARIAL}" ;;
+    validation)  mode_body="${AEGIS_JQ_ENRICH_VALIDATION}" ;;
+    *)           mode_body="${AEGIS_JQ_ENRICH_DEFAULT}" ;;
+  esac
 
   printf '%s\n' "${raw_artifact}" | jq \
     --arg mode "${AEGIS_MODE}" \
     --arg attention_reason "ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')" \
     --arg investigation_input "${AEGIS_INVESTIGATION_INPUT:-}" \
     --argjson ctx "${ctx_json}" \
-    '
-    $ctx.evidence_refs as $evidence_refs
-    | $ctx.observed_payloads as $observed_payloads
-    | $ctx.prev_candidate as $prev_candidate
-    | $ctx.prev_findings as $prev_findings
-    | $ctx.seed_scope as $seed_scope
-    | $ctx.seed_targets as $seed_targets
-    | $ctx.seed_conditions as $seed_conditions
-    | $ctx.operator_named_paths as $operator_named_paths
-    | $ctx.existing_paths as $existing_paths
-    | $ctx.tools_gate as $tools_gate
-    |
-        def drop_empty:
-          with_entries(select(
-            (.value != null)
-            and ((.value | type) != "array" or (.value | length) > 0)
-          ));
-
-        # Drop model placeholders (filesystem.read:<file>, empty, non-paths).
-        def sanitize_required_evidence:
-          map(select(
-            type == "string"
-            and startswith("filesystem.read:")
-            and (.[16:] | length > 0)
-            and (.[16:] | contains("<") | not)
-            and (.[16:] | contains(">") | not)
-            and (.[16:] | test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
-          ));
-
-        # Model-required net-new paths are kept ONLY when the operator named
-        # them in the investigation input. Otherwise floor models copy skill
-        # examples (ghost modules) into required_evidence and authorize them.
-        # Existing on-disk paths may still be requested for read-through.
-        def merge_operator_required_evidence($req; $named; $existing):
-          ($req
-            | sanitize_required_evidence
-            | map(select(
-                (.[16:] as $p
-                  | (($named | index($p)) != null)
-                    or (($existing | index($p)) != null))
-              )))
-          + ($named | map("filesystem.read:" + .))
-          | unique;
-
-        .mode = $mode
-        | .evidence_refs = $evidence_refs
-        | .observed_payloads = (.observed_payloads // $observed_payloads)
-        | if .status? == null then
-            if .verdict? then . else .status = "interpreted" end
-          else . end
-        | if $mode == "discovery" then
-            (.operational_context // {}) as $oc
-            | ((.required_evidence // $oc.required_evidence // []) ) as $raw_req
-            | merge_operator_required_evidence($raw_req; $operator_named_paths; $existing_paths) as $merged_req
-            # Attention: seed + operator-named only. Never let model-only
-            # required_evidence invent attention targets (ghost net-new).
-            | (($seed_targets + $operator_named_paths) | unique) as $merged_attention
-            | .operational_context = ({
-                status: ($oc.status // "interpreted"),
-                summary: ($oc.summary // "discovery operational context"),
-                observed_payloads: ($oc.observed_payloads // $observed_payloads),
-                investigation_scope: $seed_scope,
-                attention_targets: $merged_attention,
-                blocking_conditions: $seed_conditions,
-                required_evidence: $merged_req,
-                operator_named_paths: $operator_named_paths,
-                operational_observations: (.observations // $oc.operational_observations // []),
-                rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
-                evidence_priorities: ($oc.evidence_priorities // [])
-              } | drop_empty)
-            | del(.observations, .rationale, .required_evidence)
-            | .handover_attention = {
-                next_attention_targets: $merged_attention,
-                attention_scope: ($seed_scope.scope_type // "exploratory"),
-                attention_reason: $attention_reason
-              }
-          elif $mode == "forensics" then
-            # Project candidates onto the exact contract shape: the model
-            # supplies id+reason only; the runtime owns evidence identity.
-            # unique_by(.id): floor models often emit the same path twice
-            # with different reasons ("add conversion" + "GB to Mb"), which
-            # then loads as a duplicated mutation instruction on one file.
-            #
-            # Alvo Único: when the operator did not name multiple paths,
-            # collapse to one candidate even if Layer0 attention listed
-            # several files (observed: conversion_utils + index for a
-            # single "add quadratic function" demand → dual-file repair).
-            def prefer_alvo_unico($cands; $named):
-              if ($named | length) >= 2 then $cands
-              elif ($cands | length) <= 1 then $cands
-              else
-                (
-                  if ($named | length) == 1 then
-                    ($cands | map(select(.id == $named[0])) | .[0:1])
-                  else [] end
-                ) as $named_hit
-                | if ($named_hit | length) > 0 then $named_hit
-                  else
-                    # Prefer entrypoint-shaped paths, else first candidate.
-                    (
-                      $cands
-                      | map(select(.id | test("(^|/)index\\.(ts|tsx|js|jsx)$")))
-                      | .[0:1]
-                    ) as $entry
-                    | if ($entry | length) > 0 then $entry else $cands[0:1] end
-                  end
-              end;
-            # Floor models invent net-new paths (e.g. src/quadratica.ts) not
-            # named by the operator and not in discovery attention. Clamp to
-            # authorized scope (operator paths ∪ seed attention ∪ existing
-            # on-disk paths). If nothing remains, map to the primary seed.
-            def clamp_forensics_scope($cands; $scope):
-              ($cands
-                | map(select(.id as $id | ($scope | index($id)) != null))) as $in
-              | if ($in | length) > 0 then $in
-                elif ($scope | length) > 0 and ($cands | length) > 0 then
-                  [{
-                    id: $scope[0],
-                    reason: ($cands[0].reason // "scoped to attention"),
-                    evidence_refs: $evidence_refs
-                  }]
-                else $cands end;
-            (($operator_named_paths // [])
-              + ($seed_targets // [])
-              + ($existing_paths // [])
-              | unique) as $forensics_scope
-            | .repair_candidates = (
-              (.repair_candidates // [])
-              | map({
-                  id,
-                  reason: (.reason // "unspecified"),
-                  evidence_refs: $evidence_refs
-                })
-              | unique_by(.id)
-              | clamp_forensics_scope(.; $forensics_scope)
-              | prefer_alvo_unico(.; $operator_named_paths)
-            )
-            | .handover_attention = {
-                next_attention_targets: (
-                  if .status == "interpreted"
-                  then ([.repair_candidates[].id] | unique)
-                  else []
-                  end
-                ),
-                attention_scope: "evidence-backed interpretation",
-                attention_reason: $attention_reason
-              }
-          elif $mode == "optimize" then
-            # Prefer a real mutation surface (aider) when present; else
-            # carry the Repair candidate forward (assessment-only / no-op).
-            #
-            # Scope-expansion guard: if optimize introduces new export
-            # names absent from the Repair candidate AND not named in the
-            # investigation input, discard the optimize diff and keep
-            # Repair (observed: quadratic repair → optimize added free
-            # `add(x,y)` and still passed adversarial/tools).
-            def added_export_names($diff):
-              [
-                ($diff // "")
-                | split("\n")[]
-                | select(startswith("+") and (startswith("+++") | not))
-                | .[1:]
-                | select(test("^export\\s+(async\\s+)?function\\s+|^export\\s+const\\s+|^export\\s+class\\s+|^export\\s+\\{"))
-                | capture("(?:function|const|class)\\s+(?<n>[A-Za-z_][A-Za-z0-9_]*)")?
-                | .n
-                | select(. != null)
-              ] | unique;
-            (
-              if ((.diff | type == "string")
-                    and ((.diff | length) > 0)
-                    and (.diff != "(no changes)")
-                    and (.files_changed | type == "array")
-                    and ((.files_changed | length) > 0))
-              then
-                {
-                  source_mode: "optimize",
-                  diff: .diff,
-                  files_changed: .files_changed
-                }
-              elif ((.candidate_result.diff | type == "string")
-                    and ((.candidate_result.diff | length) > 0)
-                    and (.candidate_result.diff != "(no changes)")
-                    and (.candidate_result.files_changed | type == "array")
-                    and ((.candidate_result.files_changed | length) > 0))
-              then
-                (.candidate_result | .source_mode = "optimize")
-              else
-                ($prev_candidate // {source_mode: "optimize", diff: "(no changes)", files_changed: []})
-              end
-            ) as $raw_cand
-            | (
-                added_export_names($raw_cand.diff) as $opt_exports
-                | added_export_names($prev_candidate.diff // "") as $repair_exports
-                | ($opt_exports - $repair_exports) as $novel
-                | if ($novel | length) == 0 then $raw_cand
-                  elif any($novel[]; . as $n
-                    | ($investigation_input // "")
-                      | test("\\b\($n)\\b"; "i"))
-                  then $raw_cand
-                  else
-                    # Revert to Repair — optimize expanded scope.
-                    ($prev_candidate
-                      // $raw_cand
-                      | .source_mode = "optimize")
-                  end
-              ) as $cand
-            | (
-                ($prev_candidate.diff // "") as $prev_diff
-                | if ($cand.diff == $prev_diff)
-                     and ($cand.files_changed == ($prev_candidate.files_changed // []))
-                  then "no_optimization_needed"
-                  elif (.status == "no_optimization_needed" or .status == "unoptimized")
-                       and ($cand.diff == $prev_diff or $prev_diff == "")
-                  then "no_optimization_needed"
-                  else "optimized"
-                  end
-              ) as $opt_status
-            | .status = $opt_status
-            | .candidate_result = $cand
-            # Keep top-level diff for validate_mutation_artifact rails.
-            | .diff = $cand.diff
-            | .files_changed = $cand.files_changed
-            | .handover_attention = {
-                next_attention_targets: (.candidate_result.files_changed // []),
-                attention_scope: "mutation_applied",
-                attention_reason: $attention_reason
-              }
-          elif $mode == "adversarial" then
-            .status = (.status // "challenged")
-            | .candidate_result = ($prev_candidate // .candidate_result)
-            | (.candidate_result.diff // "") as $cand_diff
-            # +lines only (not +++ headers); normalize "return X;" → "X"
-            | (
-                [$cand_diff
-                  | split("\n")[]
-                  | select(startswith("+") and (startswith("+++") | not))
-                  | .[1:]
-                  | gsub("^[[:space:]]+|[[:space:]]+$"; "")
-                  | sub("^return[[:space:]]+"; "")
-                  | sub(";[[:space:]]*$"; "")
-                  | gsub("[[:space:]]+"; " ")
-                ]
-              ) as $added_exprs
-            | .findings = (.findings // [] | map(
-                .supported_by_evidence = (.supported_by_evidence // false)
-                | .evidence_refs = (.evidence_refs // $evidence_refs)
-                # Diff-quotation gate: substantial backtick quotes that claim
-                # implementation content must equal a full added expression
-                # (not a mere substring — "bits/(8*1024)" must not match a
-                # line that is "bits/(8*1024*1024*1024)").
-                | ([(.description // "") | match("`[^`]+`"; "g")
-                    | .string[1:-1]
-                    | gsub("[[:space:]]+"; " ")
-                    | sub("^return[[:space:]]+"; "")
-                    | sub(";[[:space:]]*$"; "")]
-                   | map(select(length >= 8))) as $quotes
-                | if ($quotes | length) > 0
-                     and any($quotes[]; . as $q
-                       | all($added_exprs[]; . != $q)
-                       and ($cand_diff | index($q)) != null)
-                  then
-                    # Quote is a proper substring of the diff but not a full
-                    # added expression — classic floor-model reverse-claim.
-                    .supported_by_evidence = false
-                    | .severity = "info"
-                    | .description = (
-                        (.description // "")
-                        + " [tribunal: quoted snippet is not a full candidate expression]"
-                      )
-                  elif ($quotes | length) > 0
-                     and any($quotes[]; . as $q
-                       | all($added_exprs[]; . != $q)
-                       and (($cand_diff | index($q)) == null))
-                  then
-                    .supported_by_evidence = false
-                    | .severity = "info"
-                    | .description = (
-                        (.description // "")
-                        + " [tribunal: quoted snippet absent from candidate diff]"
-                      )
-                  else . end
-                # Baseline tool noise: findings that only cite typescript
-                # when no in-scope tsc errors exist cannot block.
-                | if ($tools_gate.mutation_clean == true)
-                     and (.type == "logic_bug" or .type == "contract_violation")
-                     and ((.evidence_refs // []) | map(tostring) | any(test("typescript|eslint|test\\.run")))
-                     and (($tools_gate.typescript_errors_in_scope // []) | length) == 0
-                  then
-                    .supported_by_evidence = false
-                    | .severity = "info"
-                  else . end
-              ))
-            | (
-                [ .findings[]?
-                  | select(
-                      (.supported_by_evidence == true)
-                      and ((.severity == "high") or (.severity == "medium"))
-                      and (.type != "missing_evidence")
-                      and (.type != "style_issue")
-                    )
-                ] | length
-              ) as $blocking
-            # Tools clean + no surviving blocking findings ⇒ verified.
-            | if ($tools_gate.mutation_clean == true) and ($blocking == 0) then
-                .status = "verified"
-              elif ($tools_gate.mutation_clean == false) then
-                .status = "challenged"
-              else . end
-            | .handover_attention = {
-                next_attention_targets: (.candidate_result.files_changed // []),
-                attention_scope: "bounded falsification",
-                attention_reason: $attention_reason
-              }
-          elif $mode == "validation" then
-            .validated_candidate = ($prev_candidate // .validated_candidate)
-            | (.validated_candidate.diff // "") as $cand_diff
-            | (
-                [$cand_diff
-                  | split("\n")[]
-                  | select(startswith("+") and (startswith("+++") | not))
-                  | .[1:]
-                  | gsub("^[[:space:]]+|[[:space:]]+$"; "")
-                  | sub("^return[[:space:]]+"; "")
-                  | sub(";[[:space:]]*$"; "")
-                  | gsub("[[:space:]]+"; " ")
-                ]
-              ) as $added_exprs
-            # Carry adversarial findings, then re-apply quotation gates so a
-            # prior hallucinated challenge cannot force reject.
-            | .findings = (
-                ($prev_findings // .findings // [])
-                | map(
-                    ([(.description // "") | match("`[^`]+`"; "g")
-                      | .string[1:-1]
-                      | gsub("[[:space:]]+"; " ")
-                      | sub("^return[[:space:]]+"; "")
-                      | sub(";[[:space:]]*$"; "")]
-                     | map(select(length >= 8))) as $quotes
-                    | if ($quotes | length) > 0
-                         and any($quotes[]; . as $q
-                           | all($added_exprs[]; . != $q))
-                      then
-                        .supported_by_evidence = false
-                        | .severity = "info"
-                      else . end
-                  )
-              )
-            | .basis = (.basis // [] | if type == "string" then [.] else . end)
-            # Physical mutation constraint: a candidate with a blank or
-            # placeholder diff, or an empty files_changed set, is not a
-            # promotable mutation regardless of what the model concluded.
-            # Force a rejected verdict so this state can never reach the
-            # promotion phase (where it would crash on files_changed
-            # mismatch) via a hallucinated "accepted".
-            # Also require a minimal unified-diff shape (at least one
-            # "+++ b/<path>" header) so header-only stubs cannot pass
-            # the tribunal and then die in git-apply.
-            | (if (
-                 (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
-                 or ((.validated_candidate.diff // "") == "(no changes)")
-                 or (((.validated_candidate.files_changed // []) | length) == 0)
-               ) then
-                 .verdict = "rejected"
-                 | .basis = ["empty_mutation_candidate"]
-               elif (
-                 ((.validated_candidate.diff // "")
-                   | test("(?m)^\\+\\+\\+ b/"))
-                 | not
-               ) then
-                 .verdict = "rejected"
-                 | .basis = ["invalid_candidate_diff_shape"]
-               else . end)
-            | (
-                [ .findings[]?
-                  | select(
-                      (.supported_by_evidence == true)
-                      and ((.severity == "high") or (.severity == "medium"))
-                      and (.type != "missing_evidence")
-                      and (.type != "style_issue")
-                    )
-                ]
-              ) as $blocking_findings
-            # Deterministic tribunal override (KISS):
-            # - structural rejects already forced above (empty / invalid
-            #   shape) are sticky — never promote a non-diff
-            # - no blocking findings after sanitization ⇒ accepted
-            #   (ignores model rubber-stamping of adversarial hallucinations)
-            # - in-scope tool failures ⇒ rejected
-            | (if (
-                 ((.basis // []) | index("empty_mutation_candidate") != null)
-                 or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
-               ) then
-                 .
-               elif ($blocking_findings | length) == 0 then
-                 .verdict = "accepted"
-                 | .basis = ["tribunal: no blocking findings after evidence gates"]
-               elif ($tools_gate.mutation_clean == false) then
-                 .verdict = "rejected"
-                 | .basis = (
-                     if (($tools_gate.typescript_errors_in_scope // []) | length) > 0 then
-                       ["tribunal: typescript errors in mutation files"]
-                     elif (($tools_gate.eslint_errors_in_scope // []) | length) > 0 then
-                       ["tribunal: eslint errors in mutation files"]
-                     else
-                       ["tribunal: mutation-scoped tool failure"]
-                     end
-                   )
-               else
-                 # Blocking findings remain and tools did not clear them.
-                 .verdict = "rejected"
-                 | .basis = (
-                     if ((.basis // []) | length) > 0 then .basis
-                     else [$blocking_findings[0].description // "blocking adversarial finding"]
-                     end
-                   )
-               end)
-            # On a rejected verdict, project the typed adversarial findings
-            # into a deterministic repair_feedback contract so the next
-            # repair iteration consumes explicit structured parameters
-            # instead of free-form natural-language critique. Only blocking
-            # findings (evidence-supported, severity >= medium, excluding
-            # missing_evidence) become violations. authorized_scopes are the
-            # changed files of the candidate — the sole editing scope that
-            # repair may touch. Key omitted entirely for non-rejected verdicts.
-            | (if (.verdict // "") == "rejected" then
-                 ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
-                 | .repair_feedback = {
-                     violations: [
-                       $blocking_findings[]
-                       | {
-                           origin: (.type // "unspecified"),
-                           severity: (.severity // "unspecified"),
-                           target_files: $scopes,
-                           structural_reason: (.description // ""),
-                           evidence_refs: (.evidence_refs // [])
-                         }
-                     ],
-                     authorized_scopes: $scopes
-                   }
-               else
-                 del(.repair_feedback)
-               end)
-            | .handover_attention = {
-                next_attention_targets: (.validated_candidate.files_changed // []),
-                attention_scope: "validation_result",
-                attention_reason: $attention_reason
-              }
-          else
-            .handover_attention = (
-              .handover_attention // {
-                next_attention_targets: [],
-                attention_scope: "exploratory",
-                attention_reason: $attention_reason
-              }
-            )
-          end
-    '
+    "${AEGIS_JQ_ENRICH_LIB}${AEGIS_JQ_ENRICH_HEAD}${mode_body}"
 }
 
 # Splice the enriched artifact back between protocol markers.
