@@ -46,6 +46,9 @@ inject_capability_evidence() {
 
   printf '\n---\n\nCapability evidence payloads:\n'
 
+  # set -u safe: optional operator override, else payload budget, else floor.
+  local max_bytes="${AEGIS_AIDER_EVIDENCE_MAX_BYTES:-${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-12000}}"
+
   local payload_path payload_bytes
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
@@ -55,12 +58,12 @@ inject_capability_evidence() {
     fi
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
     payload_bytes="$(wc -c < "${payload_path}")"
-    if [[ "${payload_bytes}" -le "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}" ]]; then
+    if [[ "${payload_bytes}" -le "${max_bytes}" ]]; then
       cat "${payload_path}"
     else
-      head -c "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}" "${payload_path}"
+      head -c "${max_bytes}" "${payload_path}"
       printf '\n[AEGIS][EVIDENCE_TRUNCATED:%s->%s bytes]\n' \
-        "${payload_bytes}" "${AEGIS_AIDER_EVIDENCE_MAX_BYTES}"
+        "${payload_bytes}" "${max_bytes}"
     fi
     printf '\n'
   done
