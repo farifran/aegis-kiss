@@ -580,16 +580,14 @@ If you use placeholders or omit code, the parser will fail and your changes will
 EOF
 }
 
-# Prints two lines via a temp protocol: actually sets globals is messy.
-# Instead print a record: first line is input_label, rest is mode_instructions
-# Better: two functions.
+# Writes default (or mode-overridden) label + instructions into the two files.
+mutation_prompt_resolve_mode_copy() {
+  local label_file="$1"
+  local instructions_file="$2"
 
-mutation_prompt_default_input_label() {
-  printf '%s' "Investigation input (operator mutation demand — single demand, apply once):"
-}
-
-mutation_prompt_default_mode_instructions() {
-  cat <<'EOF'
+  printf '%s' "Investigation input (operator mutation demand — single demand, apply once):" \
+    > "${label_file}"
+  cat > "${instructions_file}" <<'EOF'
 Apply the minimal sufficient mutation described in the investigation input ONCE.
 If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
 TypeScript/JavaScript: new top-level functions SHOULD be `export function` (importable API), not a bare function, unless the demand forbids export.
@@ -598,19 +596,8 @@ Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.
 Apply the change and stop.
 EOF
-}
 
-# Override input_label + mode_instructions for repair-feedback / optimize.
-# Writes to named files: $1=label_file $2=instructions_file
-mutation_prompt_resolve_mode_copy() {
-  local label_file="$1"
-  local instructions_file="$2"
-
-  mutation_prompt_default_input_label > "${label_file}"
-  mutation_prompt_default_mode_instructions > "${instructions_file}"
-
-  # Local repair feedback iteration: fix only the structured violations
-  # inside authorized_scopes — do not rediscover or expand scope.
+  # Local repair feedback: fix only structured violations inside authorized_scopes.
   if [[ "${AEGIS_MODE}" == "repair" ]] \
     && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" ]] \
     && jq -e '

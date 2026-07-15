@@ -9,15 +9,6 @@
 # handover lifecycle. It never reasons semantically or mutates
 # implicitly — cognition belongs to the substrates.
 #
-# =========================================================
-# Provider credentials: source gitignored local.env unless the shell already
-# opted into an alternate provider (e.g. source scripts/use_local_mlx.sh sets
-# AEGIS_SKIP_LOCAL_ENV=1 so cloud keys do not clobber local OpenAI-compatible).
-if [[ "${AEGIS_SKIP_LOCAL_ENV:-0}" != "1" ]] \
-  && [[ -f ".harness/local.env" ]] \
-  && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
-    source ".harness/local.env"
-fi
 set -Eeuo pipefail
 
 # =========================================================
@@ -39,6 +30,8 @@ cd "${AEGIS_RUNTIME_ROOT}"
   exit 1
 }
 
+# Allow config to load .harness/local.env once (never in env -i children).
+export AEGIS_LOAD_LOCAL_ENV=1
 source ".harness/config.sh"
 
 # =========================================================

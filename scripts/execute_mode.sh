@@ -61,15 +61,13 @@ cd "${AEGIS_EXECUTOR_ROOT}"
 # CONFIGURATION
 # =========================================================
 
-if [[ "${AEGIS_SKIP_LOCAL_ENV:-}" != "1" ]] && [[ -f ".harness/local.env" ]] && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
-    source ".harness/local.env"
-fi
-
 [[ -f ".harness/config.sh" ]] || {
   echo "[AEGIS][EXECUTOR][FATAL] missing_config" >&2
   exit 1
 }
 
+# Allow config to load .harness/local.env once (never in env -i children).
+export AEGIS_LOAD_LOCAL_ENV=1
 source ".harness/config.sh"
 
 extract_agents_constitution() {

@@ -33,6 +33,18 @@ readonly AEGIS_ROOT_DIR="$(
   cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
 )"
 
+# Provider credentials (gitignored). Opt-in via AEGIS_LOAD_LOCAL_ENV=1 so
+# isolated capability children that re-source config under env -i never pull
+# secrets from disk. Entry points (runtime/executor/raw) set the flag.
+# Also skip when AEGIS_SKIP_LOCAL_ENV=1 (local MLX) or test-key sentinels.
+if [[ "${AEGIS_LOAD_LOCAL_ENV:-0}" == "1" ]] \
+  && [[ "${AEGIS_SKIP_LOCAL_ENV:-0}" != "1" ]] \
+  && [[ -f "${AEGIS_ROOT_DIR}/.harness/local.env" ]] \
+  && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
+  # shellcheck disable=SC1091
+  source "${AEGIS_ROOT_DIR}/.harness/local.env"
+fi
+
 # =========================================================
 # CONFIG FATAL HELPER
 # =========================================================
