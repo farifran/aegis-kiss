@@ -220,3 +220,60 @@ aegis_append_outcome_metric() {
     }' \
     >> "${metrics_file}" 2>/dev/null || true
 }
+
+# Write operator-facing machine-readable summary for the last pipeline run.
+# Path: ${AEGIS_RUNTIME_DIR}/last_outcome.json (gitignored).
+# modes_json: compact JSON array of {mode,status,seconds?}; default [].
+aegis_write_last_outcome() {
+  local status="${1:-}"
+  local reason_code="${2:-}"
+  local reason_class="${3:-}"
+  local mode="${4:-}"
+  local pipeline="${5:-}"
+  local pipeline_status="${6:-}"
+  local total_seconds="${7:-0}"
+  local modes_json="${8:-[]}"
+  local next_step="—"
+  local outcome_file
+  local at
+
+  if [[ "${status}" != "SUCCESS" ]]; then
+    aegis_classify_reason "${reason_code}" >/dev/null
+    reason_class="${reason_class:-${AEGIS_OUTCOME_CLASS:-unknown}}"
+    next_step="${AEGIS_OUTCOME_NEXT_STEP:-inspecione stderr}"
+  fi
+
+  outcome_file="${AEGIS_RUNTIME_DIR:-.harness/runtime}/last_outcome.json"
+  at="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")"
+  mkdir -p "$(dirname "${outcome_file}")" 2>/dev/null || true
+
+  if ! printf '%s' "${modes_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    modes_json='[]'
+  fi
+
+  jq -n \
+    --arg schema "aegis.outcome.v1" \
+    --arg status "${status}" \
+    --arg reason_code "${reason_code}" \
+    --arg reason_class "${reason_class}" \
+    --arg next_step "${next_step}" \
+    --arg mode "${mode}" \
+    --arg pipeline "${pipeline}" \
+    --arg pipeline_status "${pipeline_status}" \
+    --argjson total_seconds "${total_seconds:-0}" \
+    --argjson modes "${modes_json}" \
+    --arg at "${at}" \
+    '{
+      schema: $schema,
+      status: $status,
+      reason_code: $reason_code,
+      reason_class: $reason_class,
+      next_step: $next_step,
+      mode: $mode,
+      pipeline: $pipeline,
+      pipeline_status: $pipeline_status,
+      total_seconds: $total_seconds,
+      modes: $modes,
+      at: $at
+    }' > "${outcome_file}" 2>/dev/null || true
+}

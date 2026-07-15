@@ -142,6 +142,35 @@ echo "${last_line}" | jq -e '
 echo "${last_line}" | jq -e 'has("next_step") | not' >/dev/null \
   || fail "outcome_metric_must_not_store_next_step"
 
+# --- last_outcome.json (operator machine summary) ---
+export AEGIS_RUNTIME_DIR="${test_tmp}/runtime_outcome"
+mkdir -p "${AEGIS_RUNTIME_DIR}"
+aegis_write_last_outcome \
+  "FAILED" \
+  "missing_provider_api_key" \
+  "environment" \
+  "discovery" \
+  "discovery→forensics" \
+  "FAILED" \
+  "12" \
+  '[{"mode":"discovery","status":"ok","seconds":3},{"mode":"forensics","status":"failed","seconds":9}]'
+
+[[ -f "${AEGIS_RUNTIME_DIR}/last_outcome.json" ]] \
+  || fail "last_outcome_file_missing"
+
+jq -e '
+  .schema == "aegis.outcome.v1"
+  and .status == "FAILED"
+  and .reason_code == "missing_provider_api_key"
+  and .reason_class == "environment"
+  and (.next_step | type == "string" and length > 0)
+  and .mode == "discovery"
+  and .pipeline == "discovery→forensics"
+  and .total_seconds == 12
+  and (.modes | length) == 2
+' "${AEGIS_RUNTIME_DIR}/last_outcome.json" >/dev/null \
+  || fail "last_outcome_schema_invalid: $(cat "${AEGIS_RUNTIME_DIR}/last_outcome.json")"
+
 # --- B accept 1: driver=1 → cleanup emits zero outcome lines ---
 : > "${AEGIS_METRICS_FILE}"
 export AEGIS_PIPELINE_DRIVER=1
@@ -235,6 +264,10 @@ fi
 git -C "${AEGIS_TEST_ROOT}" check-ignore -q \
   '.harness/runtime/pipeline_metrics.jsonl' \
   || fail "pipeline_metrics_not_gitignored"
+
+git -C "${AEGIS_TEST_ROOT}" check-ignore -q \
+  '.harness/runtime/last_outcome.json' \
+  || fail "last_outcome_not_gitignored"
 
 git -C "${AEGIS_TEST_ROOT}" check-ignore -q \
   '.harness/runtime/evidence_cache/dummy.json' \

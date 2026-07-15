@@ -602,6 +602,38 @@ show_final_report() {
     "${outcome_reason}" \
     "${outcome_class}" \
     "${outcome_mode}"
+
+  # Compact machine-readable summary for operators/CI (gitignored).
+  local modes_json="[]"
+  modes_json="$(
+    {
+      for mode in "${EXECUTION_MODES[@]}"; do
+        status="${MODE_STATUS[$mode]:-skipped}"
+        timing="${MODE_TIMINGS[$mode]:-}"
+        if [[ -n "${timing}" ]]; then
+          jq -cn \
+            --arg mode "${mode}" \
+            --arg status "${status}" \
+            --argjson seconds "${timing}" \
+            '{mode:$mode,status:$status,seconds:$seconds}'
+        else
+          jq -cn \
+            --arg mode "${mode}" \
+            --arg status "${status}" \
+            '{mode:$mode,status:$status}'
+        fi
+      done
+    } | jq -s -c '.' 2>/dev/null || printf '[]'
+  )"
+  aegis_write_last_outcome \
+    "${outcome_status}" \
+    "${outcome_reason}" \
+    "${outcome_class}" \
+    "${outcome_mode}" \
+    "${PIPELINE}" \
+    "${PIPELINE_STATUS}" \
+    "${total}" \
+    "${modes_json}"
 }
 
 resolve_default_target() {
