@@ -15,6 +15,13 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
+# Path regex and extract helpers live in common.sh (sourced first by execute_mode).
+if [[ -z "${AEGIS_SOURCE_PATH_RE:-}" ]] \
+  || ! declare -f aegis_extract_operator_named_paths_json >/dev/null 2>&1; then
+  echo "[AEGIS][FATAL] artifact_protocol_requires_common_lib" >&2
+  exit 1
+fi
+
 # =========================================================
 # ARTIFACT VALIDATION
 # =========================================================
@@ -27,9 +34,10 @@ readonly AEGIS_JQ_DIFF_NORM='def norm(s): s | gsub("\\\\r"; "") | gsub("\\r"; ""
 # authorizes for Forensics repair candidates.
 #
 # Fine discovery depth has no structural.builder, so requested_paths is
-# often empty. Operator-named paths are therefore also extracted
-# deterministically from investigation_input (same regex family as the
-# mutation target union). Placeholder model evidence (e.g. "<file>") is
+# often empty. Operator-named paths are extracted with the same pattern
+# family as AEGIS_SOURCE_PATH_RE in common.sh (bash side uses that helper;
+# this jq fragment keeps explicit escapes — do not interpolate bash vars
+# into jq regex strings). Placeholder model evidence (e.g. "<file>") is
 # dropped so it cannot authorize garbage or block real net-new paths.
 readonly AEGIS_JQ_AUTHORIZED_TARGETS='def is_real_repo_path:
   type == "string"
@@ -458,162 +466,179 @@ build_tribunal_tools_gate() {
 # sole constructor of state: mode, evidence_refs, observed_payloads,
 # candidates carried from the handover, attention routing and the
 # ATTENTION_REASON_* enum are all injected deterministically here.
+#
+# Structure (KISS split):
+#   1. load_artifact_enrichment_context  — gather runtime evidence/handover
+#   2. enrich_cognitive_artifact         — pure jq mode enrichment
+#   3. rewrite_substrate_output_with_artifact — splice markers
+#   4. normalize_substrate_output        — thin orchestrator
 # =========================================================
 
-normalize_substrate_output() {
-  local raw_artifact
-  raw_artifact="$(extract_substrate_artifact)"
-  # If it is valid JSON, normalize/ensure the structural fields exist
-  if printf '%s\n' "${raw_artifact}" | jq empty >/dev/null 2>&1; then
-    # Runtime-owned evidence identity: refs from the active envelope,
-    # observed payload filenames derived from the evidence entries.
-    local evidence_refs_json
-    evidence_refs_json="$(
-      jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
-    )"
+# Emit one JSON object with every runtime input the enricher needs.
+load_artifact_enrichment_context() {
+# Runtime-owned evidence identity: refs from the active envelope,
+# observed payload filenames derived from the evidence entries.
+local evidence_refs_json
+evidence_refs_json="$(
+  jq -cn '$ARGS.positional' --args "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
+)"
 
-    local -a observed_payloads_arr=()
-    local entry
-    for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-      [[ -n "${entry}" ]] || continue
-      observed_payloads_arr+=("$(
-        resolve_evidence_payload_file \
-          "$(resolve_evidence_entry_capability "${entry}")" \
-          "$(resolve_evidence_entry_alias "${entry}")"
-      )")
-    done
-    local observed_payloads_json
-    observed_payloads_json="$(jq -cn '$ARGS.positional' --args "${observed_payloads_arr[@]}")"
+local -a observed_payloads_arr=()
+local entry
+for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+  [[ -n "${entry}" ]] || continue
+  observed_payloads_arr+=("$(
+    resolve_evidence_payload_file \
+      "$(resolve_evidence_entry_capability "${entry}")" \
+      "$(resolve_evidence_entry_alias "${entry}")"
+  )")
+done
+local observed_payloads_json
+observed_payloads_json="$(jq -cn '$ARGS.positional' --args "${observed_payloads_arr[@]}")"
 
-    # One pass over the handover: previous candidate (source_mode coerced)
-    # and previous findings — the runtime, not the model, carries them.
-    local prev_candidate_json="null"
-    local prev_findings_json="null"
-    if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
-      local handover_ctx=()
-      mapfile -t handover_ctx < <(
-        jq -c '
-          .artifact_snapshot as $snap
-          | ((
-              $snap.operational_context.candidate_result
-              // $snap.candidate_result
-              // (if ($snap.operational_context.diff | type == "string") then
-                   {
-                     diff: $snap.operational_context.diff,
-                     files_changed: ($snap.operational_context.files_changed // [])
-                   }
-                 else null end)
-             )
-             | if . != null then .source_mode = "optimize" else . end),
-            ($snap.operational_context.findings // $snap.findings // null)
-        ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
-      )
-      prev_candidate_json="${handover_ctx[0]:-null}"
-      prev_findings_json="${handover_ctx[1]:-null}"
+# One pass over the handover: previous candidate (source_mode coerced)
+# and previous findings — the runtime, not the model, carries them.
+local prev_candidate_json="null"
+local prev_findings_json="null"
+if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
+  local handover_ctx=()
+  mapfile -t handover_ctx < <(
+    jq -c '
+      .artifact_snapshot as $snap
+      | ((
+          $snap.operational_context.candidate_result
+          // $snap.candidate_result
+          // (if ($snap.operational_context.diff | type == "string") then
+               {
+                 diff: $snap.operational_context.diff,
+                 files_changed: ($snap.operational_context.files_changed // [])
+               }
+             else null end)
+         )
+         | if . != null then .source_mode = "optimize" else . end),
+        ($snap.operational_context.findings // $snap.findings // null)
+    ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
+  )
+  prev_candidate_json="${handover_ctx[0]:-null}"
+  prev_findings_json="${handover_ctx[1]:-null}"
+fi
+
+# Attention-seed scope/targets/conditions and builder priorities for
+# discovery enrichment.
+local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
+local seed_targets_json="[]"
+local seed_conditions_json="[]"
+local seed_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/runtime_attention_seed.json"
+if [[ -f "${seed_path}" ]]; then
+  local seed_ctx=()
+  mapfile -t seed_ctx < <(
+    jq -c '
+      (.payload.investigation_scope
+        // {"scope_type":"none","scope_targets":[],"scope_confidence":"none"}),
+      (.payload.attention_targets // []),
+      (.payload.blocking_conditions // [])
+    ' "${seed_path}" 2>/dev/null
+  )
+  seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
+  seed_targets_json="${seed_ctx[1]:-[]}"
+  seed_conditions_json="${seed_ctx[2]:-[]}"
+fi
+
+local builder_priorities_json="[]"
+local builder_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
+if [[ -f "${builder_path}" ]]; then
+  builder_priorities_json="$(jq -c '.payload.suggested_evidence_priorities // []' "${builder_path}" 2>/dev/null || echo '[]')"
+fi
+
+# Operator-named repository paths (common.sh helper — single regex family).
+local operator_named_paths_json
+operator_named_paths_json="$(
+  aegis_extract_operator_named_paths_json "${AEGIS_INVESTIGATION_INPUT:-}"
+)"
+if ! printf '%s' "${operator_named_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  operator_named_paths_json="[]"
+fi
+
+# Existing repo paths (for required_evidence keep-filter). Prefer the
+# evidence-target census when available so harness scripts do not count.
+local existing_paths_json="[]"
+existing_paths_json="$(
+  {
+    if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" && -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
+      command grep -v '^#' "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null || true
+    else
+      git ls-files 2>/dev/null || true
     fi
+  } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
+    | sort -u \
+    | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+    || printf '[]'
+)"
+if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  existing_paths_json="[]"
+fi
 
-    # Attention-seed scope/targets/conditions and builder priorities for
-    # discovery enrichment.
-    local seed_scope_json='{"scope_type":"none","scope_targets":[],"scope_confidence":"none"}'
-    local seed_targets_json="[]"
-    local seed_conditions_json="[]"
-    local seed_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/runtime_attention_seed.json"
-    if [[ -f "${seed_path}" ]]; then
-      local seed_ctx=()
-      mapfile -t seed_ctx < <(
-        jq -c '
-          (.payload.investigation_scope
-            // {"scope_type":"none","scope_targets":[],"scope_confidence":"none"}),
-          (.payload.attention_targets // []),
-          (.payload.blocking_conditions // [])
-        ' "${seed_path}" 2>/dev/null
-      )
-      seed_scope_json="${seed_ctx[0]:-${seed_scope_json}}"
-      seed_targets_json="${seed_ctx[1]:-[]}"
-      seed_conditions_json="${seed_ctx[2]:-[]}"
-    fi
+# Tribunal tools gate for adversarial/validation — mutation-scoped.
+local tribunal_files_json="[]"
+tribunal_files_json="$(
+  printf '%s' "${prev_candidate_json}" \
+    | jq -c '.files_changed // []' 2>/dev/null \
+    || printf '[]'
+)"
+local tools_gate_json
+tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
 
-    local builder_priorities_json="[]"
-    local builder_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/structural_builder.json"
-    if [[ -f "${builder_path}" ]]; then
-      builder_priorities_json="$(jq -c '.payload.suggested_evidence_priorities // []' "${builder_path}" 2>/dev/null || echo '[]')"
-    fi
 
-    # Operator-named repository paths from the investigation input — model-
-    # independent, same family as mutation target union. Used to authorize
-    # net-new files under fine discovery (no structural.builder).
-    # Note: grep-no-match must not double-append via pipefail+|| (that
-    # produced invalid "[]\n[]" for --argjson).
-    local operator_named_paths_json="[]"
-    if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
-      local operator_paths_raw=""
-      operator_paths_raw="$(
-        printf '%s' "${AEGIS_INVESTIGATION_INPUT}" \
-          | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
-          | command sed 's|^\./||' \
-          | command grep -Ev '[<>]' \
-          | sort -u \
-          || true
-      )"
-      if [[ -n "${operator_paths_raw}" ]]; then
-        operator_named_paths_json="$(
-          printf '%s\n' "${operator_paths_raw}" \
-            | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
-            || printf '[]'
-        )"
-      fi
-    fi
-    if ! printf '%s' "${operator_named_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-      operator_named_paths_json="[]"
-    fi
+  jq -n \
+    --argjson evidence_refs "${evidence_refs_json}" \
+    --argjson observed_payloads "${observed_payloads_json}" \
+    --argjson prev_candidate "${prev_candidate_json}" \
+    --argjson prev_findings "${prev_findings_json}" \
+    --argjson seed_scope "${seed_scope_json}" \
+    --argjson seed_targets "${seed_targets_json}" \
+    --argjson seed_conditions "${seed_conditions_json}" \
+    --argjson builder_priorities "${builder_priorities_json}" \
+    --argjson operator_named_paths "${operator_named_paths_json}" \
+    --argjson existing_paths "${existing_paths_json}" \
+    --argjson tools_gate "${tools_gate_json}" \
+    '{
+      evidence_refs: $evidence_refs,
+      observed_payloads: $observed_payloads,
+      prev_candidate: $prev_candidate,
+      prev_findings: $prev_findings,
+      seed_scope: $seed_scope,
+      seed_targets: $seed_targets,
+      seed_conditions: $seed_conditions,
+      builder_priorities: $builder_priorities,
+      operator_named_paths: $operator_named_paths,
+      existing_paths: $existing_paths,
+      tools_gate: $tools_gate
+    }'
+}
 
-    # Existing repo paths (for required_evidence keep-filter). Prefer the
-    # evidence-target census when available so harness scripts do not count.
-    local existing_paths_json="[]"
-    existing_paths_json="$(
-      {
-        if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" && -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
-          command grep -v '^#' "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null || true
-        else
-          git ls-files 2>/dev/null || true
-        fi
-      } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
-        | sort -u \
-        | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
-        || printf '[]'
-    )"
-    if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-      existing_paths_json="[]"
-    fi
+# Pure transformation: raw model artifact + enrichment context → full artifact.
+enrich_cognitive_artifact() {
+  local raw_artifact="$1"
+  local ctx_json="$2"
 
-    # Tribunal tools gate for adversarial/validation — mutation-scoped.
-    local tribunal_files_json="[]"
-    tribunal_files_json="$(
-      printf '%s' "${prev_candidate_json}" \
-        | jq -c '.files_changed // []' 2>/dev/null \
-        || printf '[]'
-    )"
-    local tools_gate_json
-    tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
-
-    local updated_artifact
-    updated_artifact="$(
-      printf '%s\n' "${raw_artifact}" | jq \
-        --arg mode "${AEGIS_MODE}" \
-        --arg attention_reason "ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')" \
-        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT:-}" \
-        --argjson evidence_refs "${evidence_refs_json}" \
-        --argjson observed_payloads "${observed_payloads_json}" \
-        --argjson prev_candidate "${prev_candidate_json}" \
-        --argjson prev_findings "${prev_findings_json}" \
-        --argjson seed_scope "${seed_scope_json}" \
-        --argjson seed_targets "${seed_targets_json}" \
-        --argjson seed_conditions "${seed_conditions_json}" \
-        --argjson builder_priorities "${builder_priorities_json}" \
-        --argjson operator_named_paths "${operator_named_paths_json}" \
-        --argjson existing_paths "${existing_paths_json}" \
-        --argjson tools_gate "${tools_gate_json}" \
-        '
+  printf '%s\n' "${raw_artifact}" | jq \
+    --arg mode "${AEGIS_MODE}" \
+    --arg attention_reason "ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')" \
+    --arg investigation_input "${AEGIS_INVESTIGATION_INPUT:-}" \
+    --argjson ctx "${ctx_json}" \
+    '
+    $ctx.evidence_refs as $evidence_refs
+    | $ctx.observed_payloads as $observed_payloads
+    | $ctx.prev_candidate as $prev_candidate
+    | $ctx.prev_findings as $prev_findings
+    | $ctx.seed_scope as $seed_scope
+    | $ctx.seed_targets as $seed_targets
+    | $ctx.seed_conditions as $seed_conditions
+    | $ctx.builder_priorities as $builder_priorities
+    | $ctx.operator_named_paths as $operator_named_paths
+    | $ctx.existing_paths as $existing_paths
+    | $ctx.tools_gate as $tools_gate
+    |
         def drop_empty:
           with_entries(select(
             (.value != null)
@@ -1061,24 +1086,39 @@ normalize_substrate_output() {
               }
             )
           end
-        '
-    )"
-    
-    # Reconstruct output around the normalized artifact using parameter expansion
-    local prefix="${AEGIS_SUBSTRATE_OUTPUT%%"${AEGIS_ARTIFACT_BEGIN_MARKER}"*}"
-    local suffix="${AEGIS_SUBSTRATE_OUTPUT#*"${AEGIS_ARTIFACT_END_MARKER}"}"
-
-    AEGIS_SUBSTRATE_OUTPUT="$(
-      printf '%s\n' "${prefix}"
-      printf '%s\n' "${AEGIS_ARTIFACT_BEGIN_MARKER}"
-      printf '%s\n' "${updated_artifact}"
-      printf '%s\n' "${AEGIS_ARTIFACT_END_MARKER}"
-      printf '%s\n' "${suffix}"
-    )"
-  else
-    aegis_warn "substrate_artifact_not_normalizable"
-  fi
+    '
 }
+
+# Splice the enriched artifact back between protocol markers.
+rewrite_substrate_output_with_artifact() {
+  local updated_artifact="$1"
+  local prefix="${AEGIS_SUBSTRATE_OUTPUT%%"${AEGIS_ARTIFACT_BEGIN_MARKER}"*}"
+  local suffix="${AEGIS_SUBSTRATE_OUTPUT#*"${AEGIS_ARTIFACT_END_MARKER}"}"
+
+  AEGIS_SUBSTRATE_OUTPUT="$(
+    printf '%s\n' "${prefix}"
+    printf '%s\n' "${AEGIS_ARTIFACT_BEGIN_MARKER}"
+    printf '%s\n' "${updated_artifact}"
+    printf '%s\n' "${AEGIS_ARTIFACT_END_MARKER}"
+    printf '%s\n' "${suffix}"
+  )"
+}
+
+normalize_substrate_output() {
+  local raw_artifact
+  raw_artifact="$(extract_substrate_artifact)"
+
+  if ! printf '%s\n' "${raw_artifact}" | jq empty >/dev/null 2>&1; then
+    aegis_warn "substrate_artifact_not_normalizable"
+    return 0
+  fi
+
+  local ctx_json updated_artifact
+  ctx_json="$(load_artifact_enrichment_context)"
+  updated_artifact="$(enrich_cognitive_artifact "${raw_artifact}" "${ctx_json}")"
+  rewrite_substrate_output_with_artifact "${updated_artifact}"
+}
+
 
 emit_output() {
   echo "${AEGIS_SUBSTRATE_OUTPUT}"

@@ -2,58 +2,18 @@
 
 set -Eeuo pipefail
 
-readonly EXECUTION_ID="${AEGIS_EXECUTION_ID:-unknown}"
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../_emit.sh"
 
-readonly GENERATED_AT="$(
-  date -u +"%Y-%m-%dT%H:%M:%SZ"
-)"
-
-fail() {
-  local error_type="$1"
-  local target="${2:-.}"
-
-  jq -n \
-    --arg capability "git.status" \
-    --arg classification "readonly" \
-    --arg execution_id "${EXECUTION_ID}" \
-    --arg generated_at "${GENERATED_AT}" \
-    --arg error_type "${error_type}" \
-    --arg target "${target}" \
-    '{
-      success: false,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: null,
-      error: {
-        type: $error_type,
-        target: $target
-      }
-    }'
-}
+readonly CAPABILITY_NAME="git.status"
 
 if ! STATUS_OUTPUT="$(
   git status --short
 )"; then
-  fail "git_status_failed"
+  aegis_emit_capability_failure "${CAPABILITY_NAME}" "git_status_failed" "."
   exit 1
 fi
 
-jq -n \
-  --arg capability "git.status" \
-  --arg classification "readonly" \
-  --arg execution_id "${EXECUTION_ID}" \
-  --arg generated_at "${GENERATED_AT}" \
-  --arg status "${STATUS_OUTPUT}" \
-  '{
-    success: true,
-    capability: $capability,
-    classification: $classification,
-    execution_id: $execution_id,
-    generated_at: $generated_at,
-    payload: {
-      status: $status
-    },
-    error: null
-  }'
+aegis_emit_capability_success "${CAPABILITY_NAME}" "$(
+  jq -nc --arg status "${STATUS_OUTPUT}" '{status: $status}'
+)"

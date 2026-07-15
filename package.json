@@ -17,7 +17,7 @@
 
     "aegis:verify-structure": "npm run aegis:typecheck && npm run aegis:lint",
 
-    "aegis:adversarial": "echo 'Adversarial bounded challenge topology pending implementation'",
+    "aegis:adversarial": "bash scripts/substrates/test/test_adversarial_contract.sh",
 
     "aegis:validate-confidence": "npm run aegis:verify-structure && npm run aegis:adversarial",
 

@@ -16,6 +16,11 @@
 
 set -Eeuo pipefail
 
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_emit.sh"
+
+readonly CAPABILITY_NAME="eslint.check"
+
 # Find eslint
 if [[ -f "node_modules/.bin/eslint" ]]; then
   readonly ESLINT_BIN="node_modules/.bin/eslint"
@@ -45,10 +50,6 @@ run_eslint_check() {
       --ignore-pattern ".harness"
     )
 
-    # -----------------------------------------------------
-    # Execute ESLint and capture stdout and stderr separately
-    # -----------------------------------------------------
-
     local eslint_stdout_file
     local eslint_stderr_file
     eslint_stdout_file="$(mktemp)"
@@ -68,18 +69,9 @@ run_eslint_check() {
 
     set -e
 
-    # Read output and error message files
     eslint_output="$(cat "${eslint_stdout_file}")"
     local eslint_err_msg
     eslint_err_msg="$(cat "${eslint_stderr_file}")"
-
-    # -----------------------------------------------------
-    # Detect ESLint infrastructure failures
-    # Examples:
-    # - broken eslint.config.js
-    # - parser crash
-    # - plugin load failure
-    # -----------------------------------------------------
 
     if [[ -z "${eslint_output}" ]] || ! echo "${eslint_output}" | jq empty >/dev/null 2>&1; then
       local err_detail="${eslint_err_msg}"
@@ -90,28 +82,9 @@ run_eslint_check() {
         err_detail="ESLint execution failed with exit code ${eslint_exit} and no output"
       fi
 
-      jq -n \
-        --arg capability "eslint.check" \
-        --arg classification "readonly" \
-        --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-        --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-        --arg message "${err_detail}" \
-        '{
-          success: false,
-          capability: $capability,
-          classification: $classification,
-          execution_id: $execution_id,
-          generated_at: $generated_at,
-          payload: null,
-          error: $message
-        }'
-
+      aegis_emit_capability_error_message "${CAPABILITY_NAME}" "${err_detail}"
       exit 1
     fi
-
-    # -----------------------------------------------------
-    # Parse ESLint JSON output
-    # -----------------------------------------------------
 
     local parsed_errors
 
@@ -135,13 +108,12 @@ run_eslint_check() {
     )"
 
     local error_count
-
     error_count="$(echo "${parsed_errors}" | jq 'length')"
 
     if [[ "${error_count}" -eq 0 ]]; then
-      emit_aegis_json "passed" "[]"
+      aegis_emit_tool_status "${CAPABILITY_NAME}" "passed" "[]"
     else
-      emit_aegis_json "failed" "${parsed_errors}"
+      aegis_emit_tool_status "${CAPABILITY_NAME}" "failed" "${parsed_errors}"
     fi
 
     exit 0
@@ -150,31 +122,6 @@ run_eslint_check() {
     # Direct mode (Aider/manual execution)
     exec ${ESLINT_BIN} "$@"
   fi
-}
-
-emit_aegis_json() {
-  local status="$1"
-  local errors_json="$2"
-
-  jq -n \
-    --arg capability "eslint.check" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg status "${status}" \
-    --argjson errors "${errors_json}" \
-    '{
-      success: true,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: {
-        status: $status,
-        errors: $errors
-      },
-      error: null
-    }'
 }
 
 run_eslint_check "$@"

@@ -1,66 +1,42 @@
 #!/usr/bin/env bash
+
 # =========================================================
-# CAPABILITY: filesystem.extract_responsibilities
-# CLASSIFICATION: readonly
+# AEGIS CAPABILITY — filesystem.extract_responsibilities
 # =========================================================
-# Mechanically classifies each file by its architectural
-# responsibility using deterministic signals only:
-#   - directory path segments (controllers/, models/, tests/, etc.)
-#   - file basename (main.py, *_controller.py, test_*, etc.)
-#   - file extension (.yml, .html, .go, etc.)
-#   - file content patterns (shebang, __main__, package X, decorators)
+#
+# Classification:
+# readonly
+#
+# Responsibilities:
+# - classify each file by architectural responsibility using
+#   deterministic signals only (path, basename, extension, content)
+# - emit { responsibilities, summary } under the standard envelope
 #
 # No LLM. No interpretation. Pure signal extraction.
 #
-# Output: { responsibilities: [{file, responsibility, signals, confidence}] }
 # =========================================================
 
-set -euo pipefail
+set -Eeuo pipefail
 
-REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-cd "${REPOSITORY_ROOT}"
+# =========================================================
+# INPUTS
+# =========================================================
+
+readonly TARGET_PATH="${1:-.}"
 
 # shellcheck disable=SC1091
-source "${REPOSITORY_ROOT}/scripts/capabilities/filesystem/_shared_utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/_shared_utils.sh"
 aegis_capability_init "filesystem.extract_responsibilities"
 
-TARGET_PATH="${1:-.}"
-EXECUTION_ID="${AEGIS_EXECUTION_ID:-unknown}"
-GENERATED_AT="$(aegis_now)"
+require_directory_target "${TARGET_PATH}"
+require_prune_policy
 
-emit_failure() {
-  local err="$1"
-  jq -n \
-    --arg eid "${EXECUTION_ID}" \
-    --arg err "${err}" \
-    --arg ts "${GENERATED_AT}" \
-    '{
-      success: false,
-      capability: "filesystem.extract_responsibilities",
-      classification: "readonly",
-      execution_id: $eid,
-      generated_at: $ts,
-      error: $err,
-      payload: { responsibilities: [] }
-    }'
-  exit 0
-}
+# =========================================================
+# EXTRACTION
+# =========================================================
 
-if [[ ! -d "${TARGET_PATH}" ]]; then
-  emit_failure "target_path_not_found: ${TARGET_PATH}"
-fi
-
-export PRUNE_PATHS="${AEGIS_FILESYSTEM_PRUNE_PATHS[*]}"
-
-run_python_extractor "$TARGET_PATH" "${GENERATED_AT}" "${EXECUTION_ID}" <<'PY'
+RESP_PAYLOAD_JSON="$(run_python_extractor "${TARGET_PATH}" <<'PY'
 from collections import Counter
-
-generated_at = sys.argv[2]
-execution_id = sys.argv[3]
-
-# =========================================================
-# RESPONSIBILITY DETECTION
-# =========================================================
 
 STRONG = "high"
 MEDIUM = "medium"
@@ -212,10 +188,6 @@ def detect(f):
     return 'module', [], 'low'
 
 
-# =========================================================
-# CLASSIFY ALL FILES
-# =========================================================
-
 responsibilities = []
 for f in sorted(all_files):
     resp, sigs, conf = detect(f)
@@ -226,26 +198,22 @@ for f in sorted(all_files):
         'confidence': conf
     })
 
-# =========================================================
-# OUTPUT
-# =========================================================
-
 counts = Counter(r['responsibility'] for r in responsibilities)
 
-output = {
-    'success': True,
-    'capability': 'filesystem.extract_responsibilities',
-    'classification': 'readonly',
-    'execution_id': execution_id,
-    'generated_at': generated_at,
-    'payload': {
-        'responsibilities': responsibilities,
-        'summary': {
-            'total_files': len(responsibilities),
-            'by_responsibility': dict(counts)
-        }
+print(json.dumps({
+    'responsibilities': responsibilities,
+    'summary': {
+        'total_files': len(responsibilities),
+        'by_responsibility': dict(counts)
     }
-}
-
-print(json.dumps(output, indent=2, sort_keys=True))
+}))
 PY
+)"
+
+# =========================================================
+# JSON EMISSION
+# =========================================================
+
+payload_tmp="$(aegis_mktemp)"
+printf '%s' "${RESP_PAYLOAD_JSON}" > "${payload_tmp}"
+emit_success_payload_file "${payload_tmp}"

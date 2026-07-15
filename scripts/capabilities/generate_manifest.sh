@@ -114,6 +114,9 @@ validate_handler_registry() {
 
   [[ -f "${AEGIS_SHARED_WALK_SNIPPET}" ]] \
     || aegis_fatal "missing_shared_walk_snippet: ${AEGIS_SHARED_WALK_SNIPPET}"
+
+  [[ -f "${AEGIS_SHARED_CAPABILITY_EMIT}" ]] \
+    || aegis_fatal "missing_shared_capability_emit: ${AEGIS_SHARED_CAPABILITY_EMIT}"
 }
 
 validate_evidence_profiles() {
@@ -285,11 +288,11 @@ build_modes_object() {
   printf '%s\n' "${modes_json}"
 }
 
-# Shared helpers sourced/injected by every filesystem capability surface.
-# They carry behavior for all of them, so their content participates in
-# manifest integrity.
+# Shared helpers sourced by capability surfaces. Their content participates
+# in manifest integrity so envelope/walk changes re-hash the contract.
 readonly AEGIS_SHARED_CAPABILITY_UTILS="scripts/capabilities/filesystem/_shared_utils.sh"
 readonly AEGIS_SHARED_WALK_SNIPPET="scripts/capabilities/filesystem/_walk.py"
+readonly AEGIS_SHARED_CAPABILITY_EMIT="scripts/capabilities/_emit.sh"
 
 compute_manifest_hash() {
 
@@ -298,6 +301,7 @@ compute_manifest_hash() {
   cat "${manifest_body_file}" \
     "${AEGIS_SHARED_CAPABILITY_UTILS}" \
     "${AEGIS_SHARED_WALK_SNIPPET}" \
+    "${AEGIS_SHARED_CAPABILITY_EMIT}" \
     | sha256sum \
     | awk '{print $1}'
 }

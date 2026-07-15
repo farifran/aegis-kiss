@@ -16,6 +16,11 @@
 
 set -Eeuo pipefail
 
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_emit.sh"
+
+readonly CAPABILITY_NAME="typescript.check"
+
 # Find tsc
 if [[ -f "node_modules/.bin/tsc" ]]; then
   readonly TSC_BIN="node_modules/.bin/tsc"
@@ -23,27 +28,24 @@ else
   readonly TSC_BIN="tsc"
 fi
 
-# Determine if we should output JSON
-# JSON is output if AEGIS_EXECUTION_ID is set or if --json is passed
+# JSON mode when AEGIS_EXECUTION_ID is set
 readonly IS_JSON_OUTPUT="${AEGIS_EXECUTION_ID:-}"
 
 run_tsc_check() {
   local exit_code=0
   local tsc_output=""
-  
-  # Run tsc and capture output
+
   tsc_output="$(${TSC_BIN} --noEmit --pretty false 2>&1)" || exit_code=$?
-  
+
   if [[ "${exit_code}" -eq 0 ]]; then
     if [[ -n "${IS_JSON_OUTPUT}" ]]; then
-      emit_aegis_json "passed" "[]"
+      aegis_emit_tool_status "${CAPABILITY_NAME}" "passed" "[]"
     else
       echo "TypeScript typecheck passed."
       exit 0
     fi
   else
     if [[ -n "${IS_JSON_OUTPUT}" ]]; then
-      # Parse errors into JSON array using jq
       local parsed_errors
       parsed_errors="$(echo "${tsc_output}" | jq -R -s '
         split("\n")
@@ -57,38 +59,13 @@ run_tsc_check() {
               }
           )
       ')"
-      emit_aegis_json "failed" "${parsed_errors}"
+      aegis_emit_tool_status "${CAPABILITY_NAME}" "failed" "${parsed_errors}"
       exit 0
     else
       echo "${tsc_output}"
       exit "${exit_code}"
     fi
   fi
-}
-
-emit_aegis_json() {
-  local status="$1"
-  local errors_json="$2"
-  
-  jq -n \
-    --arg capability "typescript.check" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg status "${status}" \
-    --argjson errors "${errors_json}" \
-    '{
-      success: true,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: {
-        status: $status,
-        errors: $errors
-      },
-      error: null
-    }'
 }
 
 run_tsc_check

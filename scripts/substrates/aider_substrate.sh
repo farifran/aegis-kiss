@@ -183,15 +183,9 @@ resolve_mutation_targets() {
   fi
 
   # Source 1b (UNION, never first-wins): explicit path tokens the operator
-  # named in the investigation input. Forensics historically emits a single
-  # "Alvo Único"; multi-file demands (create X + re-export from Y) still need
-  # every named path loaded into the mutation chat.
-  # Use `command grep` so shell wrappers (e.g. ugrep aliases) cannot break -oE.
+  # named in the investigation input (common.sh — single regex family).
   collect < <(
-    printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
-      | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
-      | command sed 's|^\./||' \
-      || true
+    aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}"
   )
 
   # Source 1c (UNION): required_evidence paths promoted by discovery/forensics.
@@ -212,13 +206,7 @@ resolve_mutation_targets() {
   if [[ "${#targets[@]}" -gt 0 ]]; then
     local -a filtered_targets=()
     local inv_paths=""
-    inv_paths="$(
-      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
-        | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)' 2>/dev/null \
-        | command sed 's|^\./||' \
-        | sort -u \
-        || true
-    )"
+    inv_paths="$(aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}")"
     for t in "${targets[@]}"; do
       [[ -n "${t}" ]] || continue
       t="${t#./}"

@@ -36,6 +36,40 @@ aegis_fatal() {
   exit 1
 }
 
+# ---------------------------------------------------------
+# Operator-named source paths (single regex family)
+# ---------------------------------------------------------
+# Shared by mutation target resolution and artifact authorization.
+# grep -oE and jq match() must stay byte-equivalent on this pattern.
+readonly AEGIS_SOURCE_PATH_RE='[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)'
+
+# Newline-separated unique paths; strips leading ./. Empty text → no lines.
+aegis_extract_operator_named_paths() {
+  local text="${1-}"
+  [[ -n "${text}" ]] || return 0
+  printf '%s' "${text}" \
+    | command grep -oE "${AEGIS_SOURCE_PATH_RE}" 2>/dev/null \
+    | command sed 's|^\./||' \
+    | command grep -Ev '[<>]' \
+    | sort -u \
+    || true
+}
+
+# Always emits a compact JSON array (possibly empty).
+aegis_extract_operator_named_paths_json() {
+  local text="${1-}"
+  local raw=""
+  raw="$(aegis_extract_operator_named_paths "${text}")"
+  if [[ -z "${raw}" ]]; then
+    printf '[]'
+    return 0
+  fi
+  if ! printf '%s\n' "${raw}" \
+    | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null; then
+    printf '[]'
+  fi
+}
+
 # Timestamps via portable date subshells: the printf '%(%s)T' builtin
 # token requires Bash >= 4.2 and evaluates empty on macOS stock Bash 3.2,
 # which would break the $((end-start)) arithmetic below.
