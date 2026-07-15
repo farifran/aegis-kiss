@@ -23,7 +23,6 @@ write_discovery_handover() {
       mode: "discovery",
       investigation_input: $inv,
       generated_at: "2026-01-01T00:00:00Z",
-      structural_context: {},
       operational_context: {}
     },
     epistemic_state: {

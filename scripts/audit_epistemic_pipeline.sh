@@ -73,32 +73,24 @@ runtime_promotes_validated_diff() {
 # The persisted handover must be structurally sane: a deep, type-strict
 # schema over the runtime-owned state, enforced in a single jq pass.
 #
-# Contract (mirrors write_runtime_owned_epistemic_handover /
-# promote_epistemic_handover in runtime_aegis.sh, but type-strict):
+# Contract (mirrors promote_epistemic_handover, type-strict):
 #
 #   root                 exactly {artifact_snapshot, epistemic_state}
-#   artifact_snapshot    null (pre-investigation) OR an object with
-#                        exactly {mode, investigation_input, generated_at,
-#                        structural_context, operational_context}:
-#                          mode                 non-empty string
-#                          investigation_input  non-empty string
-#                          generated_at         non-empty string
-#                          structural_context   object
-#                          operational_context  object; when it carries
-#                                               status / summary they must
-#                                               be non-empty strings, and
-#                                               required_evidence /
-#                                               findings / repair_candidates
-#                                               must be arrays
+#   artifact_snapshot    null (pre-investigation) OR exactly
+#                        {mode, investigation_input, generated_at,
+#                         operational_context}:
+#                          mode / investigation_input / generated_at
+#                            non-empty strings
+#                          operational_context  object; optional status /
+#                            summary non-empty strings; optional
+#                            required_evidence / findings /
+#                            repair_candidates arrays; optional
+#                            repair_feedback object
 #   epistemic_state      exactly {next_attention_targets, attention_scope,
-#                        attention_reason}:
-#                          next_attention_targets  array of strings
-#                          attention_scope         non-empty string
-#                          attention_reason        non-empty string
+#                        attention_reason}
 #
-# Rogue structural extensions (extra keys at any governed level) and
-# type-coercion bypasses (e.g. numeric mode, object-typed status,
-# stringified arrays) are unsanitized state transitions.
+# Extra keys (including legacy structural_context) and type-coercion
+# bypasses are unsanitized state transitions.
 audit_handover_state() {
 
   local handover_file="${AEGIS_EPISTEMIC_HANDOVER_FILE:-.harness/runtime/epistemic_handover.json}"
@@ -129,13 +121,11 @@ audit_handover_state() {
           "generated_at",
           "investigation_input",
           "mode",
-          "operational_context",
-          "structural_context"
+          "operational_context"
         ])
         and (.mode                | nonempty_string)
         and (.investigation_input | nonempty_string)
         and (.generated_at        | nonempty_string)
-        and (.structural_context  | type == "object")
         and (.operational_context | valid_operational_context)
       );
 

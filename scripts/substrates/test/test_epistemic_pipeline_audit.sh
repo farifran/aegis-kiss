@@ -7,6 +7,18 @@ if grep -Eq '(^|[[:space:]])rg([[:space:]]|$)' \
   fail "audit_depends_on_ripgrep"
 fi
 
+# Isolate from leftover runtime handovers (legacy structural_context, etc.).
+backup_epistemic_handover
+mkdir -p "$(dirname "${AEGIS_EPISTEMIC_HANDOVER_FILE}")"
+jq -n '{
+  artifact_snapshot: null,
+  epistemic_state: {
+    next_attention_targets: [],
+    attention_scope: "none",
+    attention_reason: "no active attention"
+  }
+}' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+
 output="$("${BASH}" scripts/audit_epistemic_pipeline.sh)"
 
 printf '%s\n' "${output}" \
@@ -38,8 +50,6 @@ printf '%s\n' "${output}" \
 # unsanitized_handover_state fatal envelope, and keep accepting the
 # runtime-owned contract shapes.
 # ---------------------------------------------------------------------
-
-backup_epistemic_handover
 
 # run_audit_with_handover <handover_json>
 # Writes the handover, runs the auditor, returns its exit code and
@@ -92,13 +102,12 @@ valid_snapshot='{
   "mode": "discovery",
   "investigation_input": "audit probe",
   "generated_at": "2026-07-07T00:00:00Z",
-  "structural_context": {},
   "operational_context": {"status": "interpreted", "summary": "probe"}
 }'
 
 valid_state='{
   "next_attention_targets": ["src/a.ts"],
-  "attention_scope": "topology",
+  "attention_scope": "layer0",
   "attention_reason": "ATTENTION_REASON_DISCOVERY"
 }'
 
@@ -115,6 +124,9 @@ assert_handover_rejected "rogue_snapshot_key" \
   "{\"artifact_snapshot\": $(jq -c '. + {rogue_extension: {}}' <<< "${valid_snapshot}"), \"epistemic_state\": ${valid_state}}"
 assert_handover_rejected "rogue_epistemic_state_key" \
   "{\"artifact_snapshot\": ${valid_snapshot}, \"epistemic_state\": $(jq -c '. + {escalate: "now"}' <<< "${valid_state}")}"
+# Legacy deep-topology field is no longer a legal snapshot key.
+assert_handover_rejected "legacy_structural_context" \
+  "{\"artifact_snapshot\": $(jq -c '. + {structural_context: {}}' <<< "${valid_snapshot}"), \"epistemic_state\": ${valid_state}}"
 
 # Type-coercion bypass attempts.
 assert_handover_rejected "snapshot_as_array" \
@@ -131,8 +143,6 @@ assert_handover_rejected "empty_attention_scope" \
   "{\"artifact_snapshot\": ${valid_snapshot}, \"epistemic_state\": $(jq -c '.attention_scope = ""' <<< "${valid_state}")}"
 assert_handover_rejected "missing_epistemic_state_field" \
   "{\"artifact_snapshot\": ${valid_snapshot}, \"epistemic_state\": $(jq -c 'del(.attention_reason)' <<< "${valid_state}")}"
-assert_handover_rejected "structural_context_as_string" \
-  "{\"artifact_snapshot\": $(jq -c '.structural_context = "{}"' <<< "${valid_snapshot}"), \"epistemic_state\": ${valid_state}}"
 
 restore_epistemic_handover
 

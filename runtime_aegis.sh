@@ -819,7 +819,8 @@ promote_epistemic_handover() {
 
   local handover_json
 
-  # structural_context stays {} (deep topology cut). Schema kept stable.
+  # Snapshot keys: mode, investigation_input, generated_at, operational_context
+  # only (structural_context removed with deep topology).
   handover_json="$(
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
       jq -c \
@@ -831,10 +832,10 @@ promote_epistemic_handover() {
               mode: $orig.mode,
               investigation_input: $investigation_input,
               generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
-              structural_context: {},
               operational_context: (
                 if ($orig | has("operational_context")) then $orig.operational_context
-                else ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at))
+                else ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at,
+                                  .structural_context))
                 end
               )
             },
