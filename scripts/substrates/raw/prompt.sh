@@ -266,11 +266,28 @@ resolve_raw_max_tokens() {
   printf '%s' "${effective_max_tokens}"
 }
 
+# Returns 1 when the raw request should include response_format json_object.
+raw_want_json_object_format() {
+  case "${AEGIS_RAW_JSON_OBJECT_FORMAT:-1}" in
+    0|false|no|off) return 1 ;;
+  esac
+  case "${AEGIS_RAW_JSON_OBJECT_FORMAT_SUPPORTED:-1}" in
+    0|false|no|off) return 1 ;;
+  esac
+  return 0
+}
+
 assemble_provider_request() {
 
   local effective_max_tokens
   effective_max_tokens="$(resolve_raw_max_tokens)"
   aegis_log "raw_substrate_max_tokens[${AEGIS_MODE}]=${effective_max_tokens}"
+
+  local want_json_object=0
+  if raw_want_json_object_format; then
+    want_json_object=1
+  fi
+  aegis_log "raw_json_object_format=${want_json_object}"
 
   jq -n \
     --arg model "${MODEL}" \
@@ -278,6 +295,7 @@ assemble_provider_request() {
     --rawfile capability_context "${TMP_CAPABILITY_CONTEXT_FILE}" \
     --argjson temperature "${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
     --argjson max_tokens "${effective_max_tokens}" \
+    --argjson want_json_object "${want_json_object}" \
     '
     {
       model: $model,
@@ -294,6 +312,11 @@ assemble_provider_request() {
         }
       ]
     }
+    + (if $want_json_object == 1 then
+        {response_format: {type: "json_object"}}
+      else
+        {}
+      end)
     ' > "${TMP_REQUEST_FILE}"
 
   aegis_log "Request size bytes: $(wc -c < "${TMP_REQUEST_FILE}")"

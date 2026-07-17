@@ -175,7 +175,14 @@ export AEGIS_MUTATION_GIT_DIR
 # RAW SUBSTRATE POLICY
 # =========================================================
 
-: "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0.1}"
+# Deterministic decode for JSON/code artifacts (small models: less variance).
+: "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0}"
+# Prefer provider-side JSON object mode when supported. On HTTP 400 the
+# raw provider strips response_format once and continues (MLX/local
+# servers often lack the field). Set to 0 to never send it.
+: "${AEGIS_RAW_JSON_OBJECT_FORMAT:=1}"
+# Session/process cache: set to 0 after a provider rejects response_format.
+: "${AEGIS_RAW_JSON_OBJECT_FORMAT_SUPPORTED:=1}"
 # Output token budget — default ceiling for unknown modes. Prefer the
 # per-mode caps below for the hot readonly path: short JSON artifacts
 # must not pay full decode budgets (adversarial was 84s → 12s at 1024).
@@ -186,6 +193,8 @@ export AEGIS_MUTATION_GIT_DIR
 : "${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:=512}"
 
 export AEGIS_RAW_SUBSTRATE_TEMPERATURE
+export AEGIS_RAW_JSON_OBJECT_FORMAT
+export AEGIS_RAW_JSON_OBJECT_FORMAT_SUPPORTED
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_DISCOVERY
 export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_FORENSICS

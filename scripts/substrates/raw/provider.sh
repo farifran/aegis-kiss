@@ -5,6 +5,24 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
+# Drop response_format from the staged request and mark the capability
+# unsupported for the rest of this process (and any parent that reuses env).
+raw_strip_json_object_format() {
+  local stripped
+  stripped="$(
+    jq 'del(.response_format)' "${TMP_REQUEST_FILE}" 2>/dev/null
+  )" || return 1
+  [[ -n "${stripped}" ]] || return 1
+  printf '%s\n' "${stripped}" > "${TMP_REQUEST_FILE}"
+  export AEGIS_RAW_JSON_OBJECT_FORMAT_SUPPORTED=0
+  return 0
+}
+
+request_has_json_object_format() {
+  jq -e '.response_format.type == "json_object"' "${TMP_REQUEST_FILE}" \
+    >/dev/null 2>&1
+}
+
 execute_provider_request() {
 
   aegis_log "Executing raw cognition substrate..."
@@ -89,12 +107,30 @@ execute_provider_request() {
 
       400)
         error_message="$(
-          jq -r '.error.message // empty' "${TMP_RESPONSE_FILE}" 2>/dev/null || true
+          jq -r '
+            .error.message
+            // .message
+            // .error
+            // empty
+            | if type == "string" then .
+              else tostring
+              end
+          ' "${TMP_RESPONSE_FILE}" 2>/dev/null || true
         )"
 
         if [[ "${error_message}" == *"maximum context length"* ]]; then
           cat "${TMP_RESPONSE_FILE}" >&2 || true
           aegis_fatal "provider_context_length_exceeded"
+        fi
+
+        # Pareto fallback: many local OpenAI-compat servers reject
+        # response_format. Strip once and re-fire without burning the
+        # provider retry budget on a permanent capability gap.
+        if request_has_json_object_format; then
+          if raw_strip_json_object_format; then
+            echo "[AEGIS][RAW][WARN] provider rejected response_format=json_object — retrying without it (${error_message:-no message})" >&2
+            continue
+          fi
         fi
 
         cat "${TMP_RESPONSE_FILE}" >&2 || true
