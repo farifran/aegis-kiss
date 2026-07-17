@@ -14,6 +14,7 @@
 | Soft normalize de headers `## Goal` / `## Targets` / … | `aegis_normalize_demand_text` |
 | Path safety (sem `..`, sem absolutos) | `aegis_demand_assert_paths_safe` |
 | `filesystem.read` determinístico (paths do operador + attention) | `augment_evidence_profile_from_anchors` em `execute_mode.sh` |
+| Tokens da demand → `search_symbol` + Layer 0 content resonance | `aegis_demand_tokens` / `aegis_demand_search_query` + `git grep -l` |
 
 ### Ainda proposta (não implementado)
 

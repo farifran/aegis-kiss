@@ -74,7 +74,15 @@ guard_path_containment "${SEARCH_ROOT}"
 TMP_MATCH_FILE="$(aegis_mktemp)"
 TMP_BOUNDED_FILE="$(aegis_mktemp)"
 
+# Demand-bound queries may be a single token (fixed) or top tokens joined
+# with | (extended regex). Never treat bare words as regex metacharacters.
+GREP_PATTERN_OPTS=(-F)
+if [[ "${QUERY}" == *"|"* ]]; then
+  GREP_PATTERN_OPTS=(-E)
+fi
+
 grep -Rni \
+  "${GREP_PATTERN_OPTS[@]}" \
   -C "${CONTEXT_LINES}" \
   --exclude-dir=node_modules \
   --exclude-dir=.git \
@@ -84,6 +92,7 @@ grep -Rni \
   --exclude-dir=.venv \
   --exclude='*.lock' \
   --exclude='*.log' \
+  -- \
   "${QUERY}" \
   "${SEARCH_ROOT}" \
   > "${TMP_MATCH_FILE}" || true
@@ -113,18 +122,20 @@ fi
 # MATCH METADATA
 # =========================================================
 
+# Count with the same -F/-E mode as the search. Do not use
+# `grep -c … || echo 0`: zero matches still print "0" and exit 1,
+# so the || branch would emit a second 0 → "0\n0" and break
+# jq --argjson (demand multi-token queries use | + -E).
 MATCH_COUNT="$(
-  grep -c "${QUERY}" "${TMP_MATCH_FILE}" \
-    2>/dev/null || echo 0
+  grep -c "${GREP_PATTERN_OPTS[@]}" -- "${QUERY}" "${TMP_MATCH_FILE}" \
+    2>/dev/null || true
 )"
+MATCH_COUNT="$(printf '%s' "${MATCH_COUNT}" | tr -d '[:space:]')"
+[[ -n "${MATCH_COUNT}" ]] || MATCH_COUNT=0
 
-BOUNDED_LINE_COUNT="$(
-  wc -l < "${TMP_BOUNDED_FILE}"
-)"
-
-FINAL_SIZE_BYTES="$(
-  wc -c < "${TMP_BOUNDED_FILE}"
-)"
+# macOS wc pads with spaces; jq --argjson requires a bare JSON number.
+BOUNDED_LINE_COUNT="$(wc -l < "${TMP_BOUNDED_FILE}" | tr -d '[:space:]')"
+FINAL_SIZE_BYTES="$(wc -c < "${TMP_BOUNDED_FILE}" | tr -d '[:space:]')"
 
 # =========================================================
 # JSON EMISSION

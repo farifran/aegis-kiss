@@ -123,7 +123,7 @@ Cacheable (stable) capabilities: `list_tree`, `layer0_facts`, `attention_seed`.
 | `scripts/lib/evidence.sh` | Evidence materialization / selection |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write helpers |
 | `scripts/lib/run_outcome.sh` | Human `AEGIS OUTCOME`, metrics JSONL, `last_outcome.json` |
-| `scripts/lib/demand.sh` | Issue fetch (`gh`), soft structured-demand normalize, path safety |
+| `scripts/lib/demand.sh` | Issue fetch (`gh`), soft structured-demand normalize, path safety, demand tokens (search + Layer 0 resonance) |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.
 

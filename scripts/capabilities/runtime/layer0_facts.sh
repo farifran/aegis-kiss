@@ -19,13 +19,14 @@
 #   imports / require() / shell source, awk in-degree frequency map,
 #   top 20 central files
 # - git mutation sniffing: churn from the last 25 commits fused with
-#   lexical resonance between AEGIS_INVESTIGATION_INPUT tokens and
-#   file basenames (+10 deterministic bonus), top 10 hot files
+#   lexical resonance (path/basename + content grep) against demand
+#   tokens (+score bonus), top 10 hot files
 #
 # This capability intentionally:
 #
 # - performs no LLM calls or semantic inference
-# - reads no source file contents (manifests and git metadata only)
+# - content inspection is limited to deterministic `git grep -l`
+#   for demand-token resonance (not full file dumps)
 # - claims recognition facts for the runtime so downstream
 #   capabilities and substrates consume priors, not guesses
 #
@@ -37,6 +38,9 @@ readonly TARGET_PATH="${1:-.}"
 
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../filesystem/_shared_utils.sh"
+# Demand tokens shared with search_symbol (source-only; no network).
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/demand.sh"
 aegis_capability_init "runtime.layer0_facts"
 
 # ---------------------------------------------------------
@@ -304,30 +308,38 @@ layer0_import_gravity() {
 # fusing churn with lexical resonance against AEGIS_INVESTIGATION_INPUT.
 #
 # Resonance rules (KISS, deterministic):
-#   1. lowercase + ASCII-fold accents on tokens and the full relative path
-#   2. token is a substring of the path (or basename stem)
-#   3. token length >= 5 and its 5-char prefix appears in the path
-#      (bridges "conversão"/"conversao" → "conversion_utils")
+#   1. demand tokens via aegis_demand_tokens (stopwords stripped)
+#   2. path/basename substring (+ prefix ≥5) → +20, resonance=1
+#      (path beats content so require('./util') cannot outrank util.js)
+#   3. content hit via `git grep -l -i -F` for any token → +10, resonance=1
+#   4. content-only files (no recent churn) still surface with score=10
 layer0_hot_files() {
 
-  local tokens_tmp hot_tmp
+  local tokens_tmp content_hits_tmp scored_tmp hot_tmp
   tokens_tmp="$(aegis_mktemp)"
+  content_hits_tmp="$(aegis_mktemp)"
+  scored_tmp="$(aegis_mktemp)"
   hot_tmp="$(aegis_mktemp)"
 
-  # Tokenize investigation input; fold Latin accents when iconv is present.
-  {
-    if command -v iconv >/dev/null 2>&1; then
-      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}" \
-        | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null \
-        || printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}"
-    else
-      printf '%s' "${AEGIS_INVESTIGATION_INPUT:-}"
-    fi
-  } \
-    | tr -cs '[:alnum:]_.-' '\n' \
-    | awk 'length($0) >= 4 { print tolower($0) }' \
-    | sort -u > "${tokens_tmp}"
+  aegis_demand_tokens "${AEGIS_INVESTIGATION_INPUT:-}" > "${tokens_tmp}" || true
 
+  # Content resonance: which census files contain any demand token?
+  : > "${content_hits_tmp}"
+  if [[ -s "${tokens_tmp}" ]] && [[ -f "${CENSUS_FILE:-}" ]]; then
+    local token
+    while IFS= read -r token; do
+      [[ -n "${token}" ]] || continue
+      # -I skip binary; -F fixed string; bounded by census intersection.
+      git grep -l -i -F -I -- "${token}" -- . 2>/dev/null \
+        | grep -Fxf "${CENSUS_FILE}" \
+        || true
+    done < "${tokens_tmp}" \
+      | sort -u \
+      | head -n 40 \
+      > "${content_hits_tmp}" || true
+  fi
+
+  # Churn × path resonance × content resonance.
   git log --name-only --pretty=format: -n 25 -- . 2>/dev/null \
     | awk 'NF' \
     | grep -Fxf "${CENSUS_FILE:-/dev/null}" \
@@ -351,23 +363,41 @@ layer0_hot_files() {
           while IFS= read -r token; do
             [[ -n "${token}" ]] || continue
             if [[ "${path_norm}" == *"${token}"* || "${base}" == *"${token}"* ]]; then
-              score=$((score + 10))
+              score=$((score + 20))
               resonance=1
               break
             fi
             if [[ "${#token}" -ge 5 ]]; then
               prefix="${token:0:5}"
               if [[ "${path_norm}" == *"${prefix}"* || "${base}" == *"${prefix}"* ]]; then
-                score=$((score + 10))
+                score=$((score + 20))
                 resonance=1
                 break
               fi
             fi
           done < "${tokens_tmp}"
         fi
+        if [[ -s "${content_hits_tmp}" ]] \
+          && grep -Fxq -- "${file}" "${content_hits_tmp}"; then
+          score=$((score + 10))
+          resonance=1
+        fi
         printf '%d\t%d\t%d\t%s\n' "${score}" "${churn}" "${resonance}" "${file}"
-      done \
-    | sort -rn -k1,1 \
+      done > "${scored_tmp}" || true
+
+  # Content-only files with no recent churn still matter for free-text demand.
+  if [[ -s "${content_hits_tmp}" ]]; then
+    local hit
+    while IFS= read -r hit; do
+      [[ -n "${hit}" ]] || continue
+      if ! awk -F'\t' -v f="${hit}" '$4 == f { found=1 } END { exit !found }' \
+        "${scored_tmp}" 2>/dev/null; then
+        printf '10\t0\t1\t%s\n' "${hit}" >> "${scored_tmp}"
+      fi
+    done < "${content_hits_tmp}"
+  fi
+
+  sort -rn -k1,1 "${scored_tmp}" 2>/dev/null \
     | head -10 > "${hot_tmp}" || true
 
   awk -F'\t' '{ printf "{\"file\":\"%s\",\"score\":%d,\"churn\":%d,\"resonance\":%d}\n", $4, $1, $2, $3 }' "${hot_tmp}" \

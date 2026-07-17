@@ -8,6 +8,7 @@
 #   - GitHub issue fetch (real body, not "issue #N" placeholder)
 #   - Soft normalize of optional markdown headers into a short head
 #   - Mechanical path-safety on operator-named source paths
+#   - Shared demand tokenization (search_symbol + Layer 0 resonance)
 #
 # Free-text demands remain valid. Structured headers improve small
 # models and give the runtime stable Targets/Done-when anchors.
@@ -19,6 +20,84 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   echo "[AEGIS][FATAL] demand_lib_not_invocable" >&2
   exit 1
 fi
+
+# ---------------------------------------------------------
+# Demand tokens (shared by search_symbol + Layer 0)
+# ---------------------------------------------------------
+# Mechanical only: ASCII-fold when iconv exists, drop short tokens
+# and a small EN/PT stopword set, keep [a-z0-9_.-] length >= 4.
+
+aegis_demand_is_stopword() {
+  case "$(printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]')" in
+    # EN glue
+    that|this|with|from|have|been|will|into|your|about|after|before|over|under|when|what|which|where|while|than|then|them|they|were|also|just|only|more|most|some|such|each|other|into|onto|upon|make|made|like|using|used|use|function|functions|helper|helpers|module|modules|file|files|code|test|tests|add|fix|create|update|change|changes|implement|please|need|needs|want|should|could|would|investigate|analysis|analyze|repository|project|feature)
+      return 0
+      ;;
+    # PT glue (keep domain stems like conversao/megabits out of this list)
+    como|para|pelo|pela|pelos|pelas|uma|umas|uns|este|esta|estes|estas|isso|aquele|aquela|sobre|entre|sem|com|dos|das|nos|nas|funcao|funcoes|funcionalidade|arquivo|arquivos|codigo|projeto|repositorio|preciso|adicionar|corrigir|criar|implementar|analise|analisar)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Newline-separated unique tokens (lowercase). Empty text → no lines.
+# Accent fold via Python NFKD (macOS iconv//TRANSLIT mangles ões/ão).
+aegis_demand_tokens() {
+  local text="${1-}"
+  [[ -n "${text}" ]] || return 0
+
+  printf '%s' "${text}" | python3 -c '
+import re
+import sys
+import unicodedata
+
+raw = sys.stdin.read()
+folded = unicodedata.normalize("NFKD", raw)
+folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+folded = folded.lower()
+# Identifier-ish tokens only (search + path resonance safe).
+tokens = re.findall(r"[a-z0-9][a-z0-9_.-]*[a-z0-9]|[a-z0-9]{4,}", folded)
+seen = set()
+for t in tokens:
+    if len(t) < 4 or t in seen:
+        continue
+    seen.add(t)
+    print(t)
+' | while IFS= read -r token; do
+    [[ -n "${token}" ]] || continue
+    aegis_demand_is_stopword "${token}" && continue
+    printf '%s\n' "${token}"
+  done | sort -u
+}
+
+# Compact search query for filesystem.search_symbol.
+# Picks up to max tokens (longest first) joined with | for grep -E.
+# Falls back to $2 (default AEGIS) when no tokens survive.
+aegis_demand_search_query() {
+  local text="${1-}"
+  local fallback="${2:-AEGIS}"
+  local max_tokens="${3:-3}"
+  local tokens query
+
+  tokens="$(
+    aegis_demand_tokens "${text}" \
+      | awk '{ print length, $0 }' \
+      | sort -rn \
+      | awk '{ print $2 }' \
+      | head -n "${max_tokens}"
+  )"
+
+  if [[ -z "${tokens}" ]]; then
+    printf '%s' "${fallback}"
+    return 0
+  fi
+
+  query="$(printf '%s\n' "${tokens}" | paste -sd '|' -)"
+  printf '%s' "${query}"
+}
 
 # ---------------------------------------------------------
 # Section extract (optional ## Headers)

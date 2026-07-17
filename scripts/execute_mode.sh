@@ -44,6 +44,7 @@ readonly AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT="${3:-}"
 
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
+source "scripts/lib/demand.sh"
 source "scripts/lib/evidence.sh"
 source "scripts/lib/artifact_protocol.sh"
 AEGIS_LOG_TAG="EXECUTOR"
@@ -304,6 +305,13 @@ resolve_capability_argument() {
       fi
 
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
+      ;;
+    filesystem.search_symbol)
+      # Bind search to demand tokens (not the static "AEGIS" default).
+      # Fallback keeps config default when free-text yields no tokens.
+      aegis_demand_search_query \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-AEGIS}"
       ;;
     filesystem.list_tree|runtime.layer0_facts|runtime.attention_seed)
       printf '%s' "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
