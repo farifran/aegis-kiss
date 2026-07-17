@@ -45,7 +45,7 @@ Options:
                        with --resume.
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
-  --issue N            Investigate GitHub issue #N
+  --issue N            Fetch GitHub issue #N (title+body via gh) as demand
   --force-apply        Operator override: on the FINAL executed mode of a
                        partial run (e.g. with --until optimize), promote the
                        candidate diff into the working directory even without

@@ -54,6 +54,7 @@ export AEGIS_EXECUTION_TIMESTAMP="$(
 
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
+source "scripts/lib/demand.sh"
 source "scripts/lib/epistemic_handover.sh"
 source "scripts/lib/run_outcome.sh"
 AEGIS_LOG_TAG="RUNTIME"
@@ -143,7 +144,8 @@ parse_runtime_cli() {
     [[ "${#positional_args[@]}" -eq 0 ]] \
       || aegis_fatal "mixed_investigation_input_forms"
 
-    cli_investigation_input="issue #${cli_issue_number}"
+    # Real body via gh — never the opaque placeholder "issue #N".
+    cli_investigation_input="$(aegis_fetch_issue_demand "${cli_issue_number}")"
   elif [[ "${#positional_args[@]}" -gt 0 ]]; then
     if [[ -z "${cli_target_path}" ]] && [[ -d "${positional_args[0]}" ]]; then
       cli_target_path="${positional_args[0]}"
@@ -153,16 +155,39 @@ parse_runtime_cli() {
     cli_investigation_input="${positional_args[*]}"
   fi
 
+  # Soft-normalize structured markdown + mechanical path safety.
+  # Free-text demands pass through unchanged (aside from path checks).
+  if [[ -n "${cli_investigation_input}" ]]; then
+    cli_investigation_input="$(
+      aegis_materialize_investigation_input "${cli_investigation_input}"
+    )"
+  fi
+
   if [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]] \
     && [[ -n "${cli_investigation_input}" ]] \
     && [[ "${AEGIS_INVESTIGATION_INPUT}" != "${cli_investigation_input}" ]]; then
-    aegis_fatal "investigation_input_conflict"
+    # Env may already hold a materialised demand (pipeline re-entry).
+    # Re-materialise the env value for an apples-to-apples compare only
+    # when the CLI form differs in surface text.
+    local env_materialised
+    env_materialised="$(
+      aegis_materialize_investigation_input "${AEGIS_INVESTIGATION_INPUT}"
+    )"
+    if [[ "${env_materialised}" != "${cli_investigation_input}" ]]; then
+      aegis_fatal "investigation_input_conflict"
+    fi
+    cli_investigation_input="${env_materialised}"
   fi
 
   AEGIS_MODE="${cli_mode}"
 
   if [[ -n "${cli_investigation_input}" ]]; then
     export AEGIS_INVESTIGATION_INPUT="${cli_investigation_input}"
+  elif [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
+    # Env-only demand (tests / outer pipeline): still normalise + scrub.
+    export AEGIS_INVESTIGATION_INPUT="$(
+      aegis_materialize_investigation_input "${AEGIS_INVESTIGATION_INPUT}"
+    )"
   fi
 
   if [[ -n "${cli_target_path}" ]]; then

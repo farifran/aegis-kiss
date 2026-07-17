@@ -118,6 +118,20 @@ resolve_evidence_profile() {
     "missing_evidence_profile" "empty_evidence_profile"
 }
 
+# Append evidence entry if not already present (O(n) over the small profile).
+_append_evidence_entry_unique() {
+  local entry="$1"
+  local active
+  [[ -n "${entry}" ]] || return 0
+  for active in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+    [[ "${active}" == "${entry}" ]] && return 0
+  done
+  AEGIS_ACTIVE_EVIDENCE_ENTRIES+=("${entry}")
+}
+
+# Discovery-requested reads only (operational_context.required_evidence).
+# Epistemic next_attention_targets are NOT promoted here — those are
+# incomplete attention, materialised separately as deterministic anchors.
 augment_evidence_profile_from_handover() {
 
   if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
@@ -127,19 +141,58 @@ augment_evidence_profile_from_handover() {
         "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null || true
     )"
     while IFS= read -r entry; do
-      [[ -z "${entry}" ]] && continue
-      local dup="false"
-      local active
-      for active in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-        if [[ "${active}" == "${entry}" ]]; then
-          dup="true"
-          break
-        fi
-      done
-      if [[ "${dup}" == "false" ]]; then
-        AEGIS_ACTIVE_EVIDENCE_ENTRIES+=("${entry}")
-      fi
+      _append_evidence_entry_unique "${entry}"
     done <<< "${req_ev}"
+  fi
+}
+
+# Runtime-owned content seeds for modes that must interpret file bodies.
+# Sources (mechanical only — never model-invented):
+#   1. operator-named source paths in AEGIS_INVESTIGATION_INPUT
+#   2. epistemic_state.next_attention_targets (path tokens)
+# Caps at AEGIS_DETERMINISTIC_READ_MAX so budgets stay honest.
+# Missing-on-disk paths still materialise as net-new placeholders
+# (see materialize_capability_payloads).
+augment_evidence_profile_from_anchors() {
+  case "${AEGIS_MODE}" in
+    forensics|repair|adversarial|optimize) ;;
+    *) return 0 ;;
+  esac
+
+  local max_reads="${AEGIS_DETERMINISTIC_READ_MAX:-8}"
+  local added=0
+  local path entry before candidate_paths=""
+
+  # Collect candidate path tokens (newline-separated), then apply.
+  candidate_paths="$(
+    {
+      aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}"
+      if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
+        jq -r '.epistemic_state.next_attention_targets[]? // empty' \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null || true
+      fi
+    } | sed 's|^filesystem\.read:||' | awk 'NF' | sort -u
+  )"
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    [[ "${added}" -lt "${max_reads}" ]] || break
+    if ! printf '%s' "${path}" | grep -qE "^${AEGIS_SOURCE_PATH_RE}\$"; then
+      continue
+    fi
+    if [[ "${path}" == /* ]] || [[ "${path}" == *..* ]]; then
+      continue
+    fi
+    entry="filesystem.read:${path}"
+    before="${#AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"
+    _append_evidence_entry_unique "${entry}"
+    if [[ "${#AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}" -gt "${before}" ]]; then
+      added=$((added + 1))
+    fi
+  done <<< "${candidate_paths}"
+
+  if [[ "${added}" -gt 0 ]]; then
+    aegis_log "deterministic_read_anchors: +${added} (cap ${max_reads})"
   fi
 }
 
@@ -660,6 +713,7 @@ main() {
   resolve_capability_envelope
   resolve_evidence_profile
   augment_evidence_profile_from_handover
+  augment_evidence_profile_from_anchors
   prepare_execution_state
   generate_pocket_map
   materialize_capability_environment

@@ -5,6 +5,13 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
+# Capture absolute helper path at source time — raw_llm later cds into an
+# isolated temp workspace, so dirname(BASH_SOURCE) is no longer resolvable
+# relative to $PWD during extract_artifact_payload.
+readonly AEGIS_RAW_RECOVER_ARTIFACT_PY="$(
+  cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+)/recover_artifact.py"
+
 extract_provider_content() {
 
   # Prefer message.content. Reasoning-class models on NVIDIA NIM (e.g.
@@ -44,68 +51,29 @@ normalize_decorated_markers() {
     -e "s/^[[:space:]#\`*]*${end_rx}[[:space:]#\`*]*\$/${AEGIS_ARTIFACT_END_MARKER}/"
 }
 
-# Repair common LLM JSON slips (missing key quotes, truncated braces).
-# Prints repaired JSON on success, original on failure.
-repair_llm_json_payload() {
-  local artifact_payload="$1"
-  python3 - <<'PY' "${artifact_payload}"
-import sys
-import json
-import re
+# Multi-strategy JSON recovery (see recover_artifact.py).
+# Prints one compact JSON object on stdout; exit 0 on success, 1 on failure.
+recover_artifact_json() {
+  local provider_content="$1"
+  [[ -f "${AEGIS_RAW_RECOVER_ARTIFACT_PY}" ]] || return 1
 
-raw = sys.argv[1]
-fixed = re.sub(r'\"([a-zA-Z0-9_]+)(?<!\"):\s*\"', r'"\1": "', raw)
-fixed = re.sub(r'\"([a-zA-Z0-9_]+)\s*:\s*\"', r'"\1": "', fixed)
-
-try:
-    parsed = json.loads(fixed)
-    print(json.dumps(parsed))
-    sys.exit(0)
-except Exception:
-    pass
-
-stack = []
-in_str = False
-escape_next = False
-for ch in fixed:
-    if escape_next:
-        escape_next = False
-        continue
-    if ch == '\\':
-        escape_next = True
-        continue
-    if ch == '"':
-        in_str = not in_str
-        continue
-    if in_str:
-        continue
-    if ch in ('{', '['):
-        stack.append(ch)
-    elif ch == '}':
-        if stack and stack[-1] == '{':
-            stack.pop()
-    elif ch == ']':
-        if stack and stack[-1] == '[':
-            stack.pop()
-
-closers = {'[': ']', '{': '}'}
-truncation_suffix = ''.join(closers[c] for c in reversed(stack))
-if truncation_suffix:
-    candidate = fixed.rstrip().rstrip(',') + '\n' + truncation_suffix
-    try:
-        parsed = json.loads(candidate)
-        print(json.dumps(parsed))
-        sys.exit(0)
-    except Exception:
-        pass
-
-print(raw)
-PY
+  printf '%s' "${provider_content}" \
+    | BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
+      END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
+      python3 "${AEGIS_RAW_RECOVER_ARTIFACT_PY}"
 }
 
 # Pull body between markers or first/last brace object from provider content.
+# Prefer recover_artifact_json; this remains a thin fallback/debug helper.
 slice_artifact_json_body() {
   local provider_content="$1"
+  local recovered=""
+
+  if recovered="$(recover_artifact_json "${provider_content}" 2>/dev/null)"; then
+    printf '%s\n' "${recovered}"
+    return 0
+  fi
+
   local has_markers=true
   if [[ "${provider_content}" != *"${AEGIS_ARTIFACT_BEGIN_MARKER}"* ]] \
     || [[ "${provider_content}" != *"${AEGIS_ARTIFACT_END_MARKER}"* ]]; then
@@ -143,27 +111,23 @@ extract_artifact_payload() {
   [[ -n "${provider_content}" ]] \
     || aegis_fatal "empty_provider_response"
 
-  local artifact_payload
-  artifact_payload="$(slice_artifact_json_body "${provider_content}")"
-
-  [[ -n "${artifact_payload//[[:space:]]/}" ]] \
-    || aegis_fatal "empty_artifact_payload"
+  local artifact_payload=""
+  if ! artifact_payload="$(recover_artifact_json "${provider_content}")"; then
+    echo "[DEBUG] Failed to parse artifact JSON. Raw provider content:" >&2
+    echo "${provider_content}" >&2
+    aegis_fatal "artifact_not_json"
+  fi
 
   if ! echo "${artifact_payload}" | jq empty >/dev/null 2>&1; then
-    local repaired_payload
-    repaired_payload="$(repair_llm_json_payload "${artifact_payload}")"
-    if echo "${repaired_payload}" | jq empty >/dev/null 2>&1; then
-      artifact_payload="${repaired_payload}"
-    else
-      echo "[DEBUG] Failed to parse artifact JSON. Raw payload:" >&2
-      echo "${artifact_payload}" >&2
-      aegis_fatal "artifact_not_json"
-    fi
+    echo "[DEBUG] recover_artifact_json returned non-JSON:" >&2
+    echo "${artifact_payload}" >&2
+    aegis_fatal "artifact_not_json"
   fi
+
+  # Compact single-line object for downstream envelope stability.
+  artifact_payload="$(echo "${artifact_payload}" | jq -c '.')"
 
   echo "${AEGIS_ARTIFACT_BEGIN_MARKER}"
   echo "${artifact_payload}"
   echo "${AEGIS_ARTIFACT_END_MARKER}"
 }
-
-

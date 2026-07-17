@@ -102,7 +102,7 @@ Discovery is **Layer 0 only**:
 | Mode | Evidence (config names) |
 |---|---|
 | discovery | `list_tree`, handover read, `layer0_facts`, `attention_seed` |
-| forensics | `search_symbol`, `git.status`, handover |
+| forensics | `search_symbol`, `git.status`, handover; **+ runtime `filesystem.read` anchors** (operator paths + attention, cap) |
 | adversarial | `search_symbol`, handover, tsc, eslint, test |
 | validation | handover only (tribunal) |
 | repair | search, handover, git, tsc, eslint, test |
@@ -123,6 +123,7 @@ Cacheable (stable) capabilities: `list_tree`, `layer0_facts`, `attention_seed`.
 | `scripts/lib/evidence.sh` | Evidence materialization / selection |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write helpers |
 | `scripts/lib/run_outcome.sh` | Human `AEGIS OUTCOME`, metrics JSONL, `last_outcome.json` |
+| `scripts/lib/demand.sh` | Issue fetch (`gh`), soft structured-demand normalize, path safety |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.
 

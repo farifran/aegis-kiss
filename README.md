@@ -62,6 +62,10 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 
 **Discovery evidence (product path):** `list_tree` + handover + Layer 0 facts + attention seed. Graph extractors and `structural.builder` were removed; scope uses operator paths, `required_evidence`, and Layer 0 attention.
 
+**Demand:** `--issue N` fetches the real GitHub issue body via `gh` (not a placeholder). Optional markdown headers (`## Goal`, `## Targets`, …) get a short structured head; free-text still works. Operator-named paths are path-safety checked.
+
+**Forensics+ content seeds:** the runtime materializes `filesystem.read` for operator-named paths and attention targets (cap `AEGIS_DETERMINISTIC_READ_MAX`) so content does not depend solely on Discovery requesting it.
+
 **Operational memory (only three surfaces):** capability payloads, epistemic handover, git.
 
 Details, file map, and capability table: **`summary.md`**. Field ownership (model vs runtime): `.skills/field_ownership.md`.

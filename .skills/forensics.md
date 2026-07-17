@@ -2,20 +2,26 @@
 
 ## PURPOSE
 Forensics is a bounded readonly cognition topology.
-Its mission is to analyze the content of files (evidence) and decide where changes need to be made, producing concrete `repair_candidates` and routing attention to them via `handover_attention`.
+Its mission is to analyze the content of files (evidence) and decide where changes need to be made, producing concrete `repair_candidates`.
 Forensics does NOT write summaries of files, explain code flow, or construct qualitative narrative paragraphs. It must strictly list the targets of mutation.
+
+## RUNTIME-OWNED CONTENT SEEDS
+The runtime materializes `filesystem.read` payloads for:
+- source paths named in the investigation input, and
+- paths in `epistemic_state.next_attention_targets`,
+up to a small cap — **before** this mode runs. Treat those payloads as primary content evidence. Discovery `required_evidence` may add more reads; do not assume content was absent just because Discovery was thin.
 
 ## LAYER 0 BASELINE TRUST
 Runtime-injected Layer 0 facts (declared entrypoints, `import_gravity`, resonant `hot_files`) are the primary authoritative anchor for target resolution:
 - When selecting the single repair candidate, prefer the target already anchored by Layer 0 (resonant hot file, declared entrypoint, high-gravity node) over filename intuition — do NOT blindly re-map entrypoints.
-- Retain semantic discipline for tension: if the investigation input points at a surface Layer 0 did not anchor (unmapped dependency, hidden structural gap), resolve from payload evidence and encode the divergence in the candidate `reason`.
+- Retain semantic discipline for tension: if the investigation input points at a surface Layer 0 did not anchor, resolve from payload evidence and encode the divergence in the candidate `reason`.
 
 ## NET-NEW FILE CREATION INTENTS (MANDATORY CANDIDATE)
 If the investigation input or the preceding epistemic handover demands the creation of a brand-new file (e.g., "create `src/feature/widget.ts`"), the missing path MUST be declared as a repair candidate:
 - Set `status` to `"interpreted"` and emit the exact requested repository-relative path as a candidate `id`, with a creation `reason` (e.g., "Request: create net-new module.").
-- This is the ONE sanctioned exception to strictly factual indexing (Constraint 1): a path explicitly demanded by the investigation is a valid target even though it appears in no capability payload or topology node.
+- This is the ONE sanctioned exception to strictly factual indexing (Constraint 1): a path explicitly demanded by the investigation is a valid target even though it appears in no capability payload.
 - Do NOT substitute an existing file for an explicitly requested net-new path, and do NOT return `"inconclusive"` merely because the path is absent from the evidence.
-- When the investigation also names a second path (e.g. re-export from `src/index.ts`), emit **both** as `repair_candidates` (net-new first). Multi-file demands are explicit operator paths, not scope expansion.
+- When the investigation also names a second path (e.g. re-export from `src/index.ts`), emit **both** as `repair_candidates` (net-new first).
 - **Do NOT invent paths.** Never add candidates from skill examples, prior runs, or unrelated modules. If the investigation does not name a path, do not create one.
 - `handover_attention` stays runtime-injected — do NOT emit it; the runtime routes `next_attention_targets` from `repair_candidates`.
 

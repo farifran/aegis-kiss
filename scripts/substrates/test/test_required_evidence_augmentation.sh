@@ -43,11 +43,18 @@ jq -n '{
 export AEGIS_MODE="forensics"
 export AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT="${TMP_HANDOVER_FILE}"
 
+# Include resolve_mode_array + evidence augment helpers (stop before
+# resolve_evidence_entry_capability).
 source <(
   sed -n \
-    '/^resolve_evidence_profile()/,/^# EXECUTION STATE/p' \
-    scripts/execute_mode.sh
+    '/^resolve_mode_array()/,/^resolve_evidence_entry_capability()/p' \
+    scripts/execute_mode.sh \
+    | sed '$d'
 )
+
+# Keep investigation empty so deterministic anchors do not add extras —
+# this test owns only the required_evidence promotion contract.
+export AEGIS_INVESTIGATION_INPUT=""
 
 resolve_evidence_profile
 augment_evidence_profile_from_handover
@@ -70,5 +77,12 @@ expected="$(
 
 [[ "${actual}" == "${expected}" ]] \
   || fail "unexpected_augmented_evidence_entries: ${actual}"
+
+# required_evidence path still must NOT promote epistemic attention
+# (anchors are a separate step; call it and only operator/attention
+# source paths may appear — fixture attention is non-path-prefixed
+# "filesystem.read:…" which anchors strip and accept if source-like).
+# Explicitly assert the operational_context next_attention noise stays out
+# of the required_evidence-only pass above (already covered by expected).
 
 echo "[AEGIS][TEST] required evidence augmentation passed"

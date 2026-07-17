@@ -49,6 +49,12 @@
 
     "aegis:test:required-evidence-augmentation": "bash scripts/substrates/test/test_required_evidence_augmentation.sh",
 
+    "aegis:test:demand-materialization": "bash scripts/substrates/test/test_demand_materialization.sh",
+
+    "aegis:test:artifact-recovery": "bash scripts/substrates/test/test_artifact_recovery.sh",
+
+    "aegis:test:deterministic-read-anchors": "bash scripts/substrates/test/test_deterministic_read_anchors.sh",
+
     "aegis:test:sovereignty-fallback": "bash scripts/substrates/test/test_sovereignty_fallback.sh",
 
     "aegis:test:model-boundary-idempotency": "bash scripts/substrates/test/test_model_boundary_idempotency.sh",
@@ -73,9 +79,9 @@
 
     "aegis:test:investigation-binding": "bash scripts/substrates/test/test_investigation_binding.sh",
 
-    "aegis:test:fast": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:static-gate && npm run aegis:test:run-outcome && npm run aegis:test:aider-evidence-budget && npm run aegis:test:mutation-scope-gate && npm run aegis:test:constitutional-invariants",
+    "aegis:test:fast": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:static-gate && npm run aegis:test:run-outcome && npm run aegis:test:aider-evidence-budget && npm run aegis:test:mutation-scope-gate && npm run aegis:test:constitutional-invariants && npm run aegis:test:demand-materialization && npm run aegis:test:artifact-recovery && npm run aegis:test:deterministic-read-anchors && npm run aegis:test:required-evidence-augmentation",
 
-    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation && npm run aegis:test:static-gate && npm run aegis:test:context-pruning && npm run aegis:test:mutation-preflight && npm run aegis:test:mutation-scope-gate && npm run aegis:test:preflight-fix-taxonomy && npm run aegis:test:run-outcome && npm run aegis:test:aider-evidence-budget && npm run aegis:test:investigation-binding",
+    "aegis:test": "npm run aegis:test:capabilities && npm run aegis:test:runtime-contract && npm run aegis:test:readonly-modes && npm run aegis:test:constitutional-invariants && npm run aegis:test:adversarial && npm run aegis:test:aider-substrate && npm run aegis:test:validation-and-promotion && npm run aegis:test:candidate-continuity && npm run aegis:test:epistemic-pipeline && npm run aegis:test:forensics-behavior && npm run aegis:test:secret-containment && npm run aegis:test:authority-isolation && npm run aegis:test:recognition-benchmarks && npm run aegis:test:required-evidence-augmentation && npm run aegis:test:demand-materialization && npm run aegis:test:artifact-recovery && npm run aegis:test:deterministic-read-anchors && npm run aegis:test:sovereignty-fallback && npm run aegis:test:model-boundary-idempotency && npm run aegis:test:model-boundary-idempotency-cache && npm run aegis:test:net-new-index-isolation && npm run aegis:test:static-gate && npm run aegis:test:context-pruning && npm run aegis:test:mutation-preflight && npm run aegis:test:mutation-scope-gate && npm run aegis:test:preflight-fix-taxonomy && npm run aegis:test:run-outcome && npm run aegis:test:aider-evidence-budget && npm run aegis:test:investigation-binding",
 
     "aegis:sanity": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
 

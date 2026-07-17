@@ -65,18 +65,23 @@ Aegis intentionally separates:
 | Layer | Responsibility |
 |---|---|
 | AGENTS.md | constitutional governance |
-| mode_*.md | local cognition semantics |
-| runtime/orchestrator | execution sequencing |
+| `.skills/<mode>.md` | local cognition semantics (product contracts) |
+| runtime/orchestrator | execution sequencing + demand materialization |
 | enforcement | mechanically enforceable containment |
 | capability manifests | runtime-materialized structural contracts |
 
 These layers must not silently collapse into each other.
 
+**Product mode names (live):** `discovery` · `forensics` · `repair` · `optimize` · `adversarial` · `validation`.  
+The Mode 0–5 labels below are epistemic roles only — not CLI/config identifiers.
+
+**Product evidence path:** Layer 0 + fine only (`list_tree`, `layer0_facts`, `attention_seed`, targeted `filesystem.read`). Deep graph extractors / `structural.builder` are **not** in the product path.
+
 ---
 
 # Cognitive Layering
 
-## Mode 0 — Semantic Perception
+## Mode 0 — Semantic Perception (`discovery`)
 
 Expands materially relevant possibility space before confidence convergence.
 
@@ -90,7 +95,7 @@ Does not establish structural truth.
 
 ---
 
-## Mode 1 — Confidence Calibration
+## Mode 1 — Confidence Calibration (`forensics`)
 
 Transforms semantic perception into proportionally calibrated structural understanding.
 
@@ -104,7 +109,7 @@ Does not authorize operational convergence.
 
 ---
 
-## Mode 2 — Integrated Execution Cognition
+## Mode 2 — Integrated Execution Cognition (`repair`)
 
 Executes approved structural changes through bounded integrated cognition.
 
@@ -118,7 +123,7 @@ Does not authorize redesign.
 
 ---
 
-## Mode 3 — Proportional Optimization Cognition
+## Mode 3 — Proportional Optimization Cognition (`optimize`)
 
 Performs bounded refinement proportional to observable operational need.
 
@@ -132,7 +137,7 @@ Does not authorize implicit redesign.
 
 ---
 
-## Mode 4 — Adversarial Falsification
+## Mode 4 — Adversarial Falsification (`adversarial`)
 
 Attempts to invalidate structural and execution assumptions through bounded contradiction-oriented pressure.
 
@@ -148,7 +153,7 @@ Material contradiction discovery requires escalation or interruption before resi
 
 ---
 
-## Mode 5 — Confidence Validation
+## Mode 5 — Confidence Validation (`validation`)
 
 Measures how much confidence remains justified after execution, optimization, and falsification.
 

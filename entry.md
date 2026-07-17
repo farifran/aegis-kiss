@@ -1,13 +1,26 @@
 # entry.md — Demand Protocol via GitHub Issues (proposta)
 
-**Status:** proposta / memória de desenho (**não implementado**, **não é o mapa do produto**)  
+**Status:** proposta completa; **mínimo KISS parcialmente implementado**  
 **Mapa canónico do repo atual:** `summary.md` · **Setup operador:** `README.md` · **Constituição:** `AGENTS.md`  
 **Âmbito:** padronizar como o Aegis obtém, valida e consome a *investigation demand*  
 **Persistência da demanda:** GitHub Issue (remoto) — sem store local de demands  
 **Data da discussão:** 2026-07 (sessão de desenho Aegis KISS)
 
-Este documento regista o acordo conceptual discutido para implementação futura.  
-Se conflitar com código, o código atual manda até esta proposta ser implementada.  
+### Já no produto (KISS slice)
+
+| Capacidade | Onde |
+|---|---|
+| `--issue N` → `gh issue view` (title+body real) | `scripts/lib/demand.sh` + `runtime_aegis.sh` |
+| Soft normalize de headers `## Goal` / `## Targets` / … | `aegis_normalize_demand_text` |
+| Path safety (sem `..`, sem absolutos) | `aegis_demand_assert_paths_safe` |
+| `filesystem.read` determinístico (paths do operador + attention) | `augment_evidence_profile_from_anchors` em `execute_mode.sh` |
+
+### Ainda proposta (não implementado)
+
+Wizard de intake, labels GitHub, 1-task-1-pipeline batch, schema fatal completo, `--task K`.
+
+Este documento regista o acordo conceptual.  
+Se conflitar com código, o **código atual manda**.  
 Se conflitar com `AGENTS.md`, a constituição manda.
 
 ---
@@ -28,11 +41,11 @@ Se conflitar com `AGENTS.md`, a constituição manda.
 
 ### 1.3 Comportamento atual da instrução (baseline a substituir)
 
-| Entrada | `AEGIS_INVESTIGATION_INPUT` hoje |
+| Entrada | `AEGIS_INVESTIGATION_INPUT` |
 |---|---|
-| `./run_aegis.sh "texto livre..."` | String inteira do CLI |
-| `./run_aegis.sh --issue N` | Literal **`issue #N`** — **não** faz fetch do body |
-| env / default | Conforme config |
+| `./run_aegis.sh "texto livre..."` | String do CLI (path-scrub + soft normalize se headers) |
+| `./run_aegis.sh --issue N` | **Body real** via `gh issue view` (title+body) |
+| env / default | Conforme config; materializado no runtime |
 
 - O **mesmo** input alimenta **todos** os modes de **uma** run.
 - Não há schema Goal/Tasks/Acceptance, nem 1-task-1-pipeline, nem wizard de intake.

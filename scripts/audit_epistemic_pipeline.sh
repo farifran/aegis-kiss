@@ -49,16 +49,26 @@ skill_declares() {
   grep -Eq "(^|[^[:alnum:]_])${field}([^[:alnum:]_]|$)" "${skill_file}"
 }
 
+# Mutation target resolution lives in the aider module split (targets.sh),
+# not only in the thin aider_substrate.sh entrypoint.
 mutation_resolver_consumes() {
   local field="$1"
 
-  grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/substrates/aider_substrate.sh
+  grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/substrates/aider_substrate.sh \
+    || grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/substrates/aider/targets.sh \
+    || grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/substrates/aider/invoke.sh
 }
 
 candidate_materializer_consumes() {
   local field="$1"
 
   grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/runtime/apply_candidate_diff.sh
+}
+
+# Runtime-owned content seeds for forensics+ (operator paths + attention).
+runtime_seeds_deterministic_reads() {
+  grep -Eq 'augment_evidence_profile_from_anchors' scripts/execute_mode.sh \
+    && grep -Eq 'AEGIS_DETERMINISTIC_READ_MAX' .harness/config.sh
 }
 
 runtime_promotes_validated_diff() {
@@ -231,10 +241,15 @@ verdict() {
 }
 
 check_discovery_to_forensics() {
-  skill_declares ".skills/discovery.md" "evidence_priorities" \
+  # Minimal discovery contract (model emits) + runtime routing fields
+  # named in the skill + forensics candidates + handover evidence +
+  # deterministic content anchors so Forensics is not content-blind.
+  skill_declares ".skills/discovery.md" "required_evidence" \
+    && skill_declares ".skills/discovery.md" "observations" \
     && skill_declares ".skills/discovery.md" "handover_attention" \
     && skill_declares ".skills/forensics.md" "repair_candidates" \
-    && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}"
+    && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
+    && runtime_seeds_deterministic_reads
 }
 
 check_forensics_to_repair() {
@@ -268,16 +283,16 @@ main() {
 
   record_boundary \
     "Discovery -> Forensics" \
-    '["evidence_refs","handover_attention","summary","observations","findings","investigation_scope","blocking_conditions","attention_targets","relevant_surfaces","critical_relationships"]' \
-    '["filesystem.read:epistemic_handover","filesystem.search_symbol","git.status"]' \
-    '["handover_attention","investigation_scope","attention_targets"]' \
+    '["observations","rationale","required_evidence","handover_attention"]' \
+    '["filesystem.read:epistemic_handover","filesystem.search_symbol","git.status","filesystem.read:<anchors>"]' \
+    '["required_evidence","handover_attention","operator_named_paths"]' \
     "$(verdict check_discovery_to_forensics)" \
-    "Forensics explicitly consumes Discovery routing fields while deriving evidence from exposed capability payloads." \
-    "The producer fields or the handover exposure required by Forensics are absent."
+    "Forensics consumes Discovery routing via handover, capability payloads, and runtime-owned content anchors." \
+    "The producer fields, handover exposure, or deterministic read anchors required by Forensics are absent."
 
   record_boundary \
     "Forensics -> Repair" \
-    '["status","summary","evidence","interpretations","observations","unresolved_questions","confidence","repair_candidates","handover_attention"]' \
+    '["status","repair_candidates","handover_attention"]' \
     '["repair_candidates"]' \
     '["repair_candidates[].id"]' \
     "$(verdict check_forensics_to_repair)" \

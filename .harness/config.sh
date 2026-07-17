@@ -97,6 +97,11 @@ export AEGIS_DEFAULT_INVESTIGATION_INPUT
 export AEGIS_INVESTIGATION_INPUT
 export AEGIS_EVIDENCE_TARGET_PATH
 
+# Cap on runtime-owned filesystem.read seeds (operator paths + attention).
+# Soft budget: keeps forensics/repair contentful without flooding context.
+: "${AEGIS_DETERMINISTIC_READ_MAX:=8}"
+export AEGIS_DETERMINISTIC_READ_MAX
+
 # =========================================================
 # ARTIFACT PROTOCOL
 # =========================================================

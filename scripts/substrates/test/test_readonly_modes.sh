@@ -107,21 +107,54 @@ assert_discovery_accepts_informal_cli_investigation_input() {
 assert_discovery_accepts_issue_cli_investigation_input() {
   local runtime_log_file
   local status
-  local expected_investigation_input="issue #123"
+  local mock_bin
+  local expected_investigation_input
 
   runtime_log_file="$(mktemp)"
+  mock_bin="$(mktemp -d)"
+
+  # --issue N must fetch a real body via gh (not the placeholder "issue #N").
+  cat > "${mock_bin}/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "issue" && "$2" == "view" && "$3" == "123" ]]; then
+  jq -n '{title:"Fixture issue",body:"Repair the helper in src/index.ts"}'
+  exit 0
+fi
+echo "unexpected gh $*" >&2
+exit 1
+EOF
+  chmod +x "${mock_bin}/gh"
+
+  # Expected demand after fetch + soft normalize + path safety.
+  expected_investigation_input="$(
+    # shellcheck disable=SC1091
+    source scripts/lib/common.sh
+    source scripts/lib/demand.sh
+    export PATH="${mock_bin}:${PATH}"
+    raw="$(aegis_fetch_issue_demand 123)"
+    aegis_materialize_investigation_input "${raw}"
+  )"
 
   set +e
   env -u AEGIS_INVESTIGATION_INPUT \
+    PATH="${mock_bin}:${PATH}" \
     bash runtime_aegis.sh discovery --issue 123 >/dev/null 2>"${runtime_log_file}"
   status=$?
   set -e
+
+  rm -rf "${mock_bin}"
 
   [[ "${status}" -eq 0 ]] \
     || fail "discovery_failed_issue_cli_investigation_input"
 
   if grep -q "No investigation input provided\." "${runtime_log_file}"; then
     fail "issue_cli_investigation_input_fell_back_to_default"
+  fi
+
+  # Must not persist the old opaque placeholder.
+  if jq -e '.artifact_snapshot.investigation_input == "issue #123"' \
+    .harness/runtime/epistemic_handover.json >/dev/null 2>&1; then
+    fail "issue_cli_still_using_opaque_placeholder"
   fi
 
   jq -e \
@@ -156,6 +189,27 @@ seed_required_predecessor() {
   mkdir -p "$(dirname "${handover_file}")"
 
   case "${mode}" in
+    forensics)
+      # Clean attention so the base forensics profile (no content anchors)
+      # remains observable. Anchor seeding is covered by
+      # test_deterministic_read_anchors.sh.
+      jq -n \
+        --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
+        {
+          artifact_snapshot: {
+            mode: "discovery",
+            investigation_input: $investigation_input,
+            generated_at: "2026-01-01T00:00:00Z",
+            operational_context: {}
+          },
+          epistemic_state: {
+            next_attention_targets: [],
+            attention_scope: "none",
+            attention_reason: "no active attention"
+          }
+        }
+      ' > "${handover_file}"
+      ;;
     adversarial)
       jq -n \
         --arg investigation_input "${TEST_INVESTIGATION_INPUT}" '
@@ -315,7 +369,8 @@ main() {
   assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_layer0_facts.json", "runtime_attention_seed.json"]'
   assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
-  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json", "typescript_check.json", "eslint_check.json", "test_run.json"]'
+  # Attention target src/index.ts → runtime deterministic read anchor.
+  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json", "typescript_check.json", "eslint_check.json", "test_run.json", "filesystem_read_src_index_ts.json"]'
 
   # Discovery materializes Layer 0 priors only (no graph extractors).
   assert_materialized_runtime_state \
