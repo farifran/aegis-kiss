@@ -26,6 +26,10 @@ fi
 # ---------------------------------------------------------
 # Mechanical only: ASCII-fold when iconv exists, drop short tokens
 # and a small EN/PT stopword set, keep [a-z0-9_.-] length >= 4.
+#
+# Multi-token search delimiter (not valid in token alphabet):
+# search_symbol splits on this and runs fixed-string greps (no ERE).
+readonly AEGIS_DEMAND_TOKEN_SEP=';;'
 
 aegis_demand_is_stopword() {
   case "$(printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]')" in
@@ -35,6 +39,19 @@ aegis_demand_is_stopword() {
       ;;
     # PT glue (keep domain stems like conversao/megabits out of this list)
     como|para|pelo|pela|pelos|pelas|uma|umas|uns|este|esta|estes|estas|isso|aquele|aquela|sobre|entre|sem|com|dos|das|nos|nas|funcao|funcoes|funcionalidade|arquivo|arquivos|codigo|projeto|repositorio|preciso|adicionar|corrigir|criar|implementar|analise|analisar)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Ultra-common stems: OK for path/basename hints, too noisy for content
+# resonance and primary search in larger trees (e.g. "bytes" everywhere).
+aegis_demand_is_generic_token() {
+  case "$(printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]')" in
+    byte|bytes|bit|bits|data|type|types|name|names|value|values|list|item|items|path|paths|text|json|http|https|main|index|app|src|lib|util|utils|core|base|info|error|errors|true|false|null|void|string|number|object|array|class|const|export|import|return|async|await|public|private|static|input|output|result|results|config|default|option|options|param|params|arg|args|key|keys|id|ids|user|users|request|response|service|server|client|model|models|state|status|content|context|message|messages|line|lines|size|length|count|total|unit|units|time|date|year|home|root|node|package|script|scripts|build|dist|temp|tmp|todo|note|notes|readme|license|version|v1|v2)
       return 0
       ;;
     *)
@@ -73,20 +90,40 @@ for t in tokens:
   done | sort -u
 }
 
+# Dense tokens: non-generic, length >= 5. Preferred for content resonance
+# and search so short/common stems do not flood monorepos.
+aegis_demand_dense_tokens() {
+  local text="${1-}"
+  local token
+  while IFS= read -r token; do
+    [[ -n "${token}" ]] || continue
+    [[ "${#token}" -ge 5 ]] || continue
+    aegis_demand_is_generic_token "${token}" && continue
+    printf '%s\n' "${token}"
+  done < <(aegis_demand_tokens "${text}")
+}
+
 # Compact search query for filesystem.search_symbol.
-# Picks up to max tokens (longest first) joined with | for grep -E.
-# Falls back to $2 (default AEGIS) when no tokens survive.
+# Prefers dense tokens (longest first), falls back to any tokens, then $2.
+# Multiple tokens joined with AEGIS_DEMAND_TOKEN_SEP for multi -F search
+# (never ERE — dots in identifiers must stay literal).
 aegis_demand_search_query() {
   local text="${1-}"
   local fallback="${2:-AEGIS}"
   local max_tokens="${3:-3}"
   local tokens query
 
+  tokens="$(aegis_demand_dense_tokens "${text}")"
+  # Fallback when demand is only short/generic stems.
+  if [[ -z "${tokens}" ]]; then
+    tokens="$(aegis_demand_tokens "${text}")"
+  fi
   tokens="$(
-    aegis_demand_tokens "${text}" \
-      | awk '{ print length, $0 }' \
+    printf '%s\n' "${tokens}" \
+      | awk 'NF { print length, $0 }' \
       | sort -rn \
       | awk '{ print $2 }' \
+      | awk '!seen[$0]++' \
       | head -n "${max_tokens}"
   )"
 
@@ -95,7 +132,15 @@ aegis_demand_search_query() {
     return 0
   fi
 
-  query="$(printf '%s\n' "${tokens}" | paste -sd '|' -)"
+  # paste -d only takes single-char delimiters; join multi-char manually.
+  query="$(
+    printf '%s\n' "${tokens}" | awk -v sep="${AEGIS_DEMAND_TOKEN_SEP}" '
+      NF {
+        if (n++) printf "%s", sep
+        printf "%s", $0
+      }
+    '
+  )"
   printf '%s' "${query}"
 }
 

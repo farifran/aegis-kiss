@@ -53,12 +53,14 @@ def operator_named_paths:
 def authorized_targets:
   (
     [
-      # Operator-typed paths (model-independent net-new authorization).
+      # Mechanical only: operator-named + attention. required_evidence is
+      # already filtered at discovery enrich (named ∪ seed); still listed
+      # so net-new operator paths requested as reads stay authorized.
       (operator_named_paths[]?),
+      (.artifact_snapshot.operational_context.operator_named_paths[]?),
       (.artifact_snapshot.operational_context.required_evidence[]?
         | select(type == "string" and startswith("filesystem.read:"))
         | ltrimstr("filesystem.read:")),
-      (.artifact_snapshot.operational_context.operator_named_paths[]?),
       .epistemic_state.next_attention_targets[]?
     ]
     | map(select(is_real_repo_path))
@@ -506,15 +508,24 @@ readonly AEGIS_JQ_ENRICH_LIB='
       and (.[16:] | test("^[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$"))
     ));
 
-  # Keep model required_evidence only for operator-named or on-disk paths;
-  # always union operator-named as filesystem.read: entries.
-  def merge_operator_required_evidence($req; $named; $existing):
-    ($req
+  # Keep model required_evidence only when the path is mechanical:
+  #   - operator-named in investigation input, or
+  #   - Layer0/attention seed target ($anchors).
+  # Do NOT admit arbitrary on-disk paths the model invents (e.g. fake_import).
+  # Always union operator-named as filesystem.read: entries.
+  # Bootstrap: when both named and anchors are empty, allow on-disk model
+  # paths so a seed-less tree can still request first reads.
+  def merge_operator_required_evidence($req; $named; $anchors; $existing):
+    (($named + $anchors) | unique) as $mechanical
+    | ($req
       | sanitize_required_evidence
       | map(select(
           (.[16:] as $p
-            | (($named | index($p)) != null)
-              or (($existing | index($p)) != null))
+            | if ($mechanical | length) > 0 then
+                (($mechanical | index($p)) != null)
+              else
+                (($existing | index($p)) != null)
+              end)
         )))
     + ($named | map("filesystem.read:" + .))
     | unique;
@@ -635,10 +646,12 @@ readonly AEGIS_JQ_ENRICH_HEAD='
 readonly AEGIS_JQ_ENRICH_DISCOVERY='
   | (.operational_context // {}) as $oc
   | ((.required_evidence // $oc.required_evidence // [])) as $raw_req
-  | merge_operator_required_evidence($raw_req; $operator_named_paths; $existing_paths) as $merged_req
+  | (($seed_targets + $operator_named_paths) | unique) as $seed_att
+  | merge_operator_required_evidence(
+      $raw_req; $operator_named_paths; $seed_targets; $existing_paths
+    ) as $merged_req
   # Attention: seed + operator first. If Layer0 left attention empty,
   # promote existing on-disk required_evidence paths (not invent-net-new).
-  | (($seed_targets + $operator_named_paths) | unique) as $seed_att
   | (
       if ($seed_att | length) > 0 then $seed_att
       else

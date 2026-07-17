@@ -66,7 +66,7 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 
 **Forensics+ content seeds:** the runtime materializes `filesystem.read` for operator-named paths and attention targets (cap `AEGIS_DETERMINISTIC_READ_MAX`) so content does not depend solely on Discovery requesting it.
 
-**Demand tokens:** free-text investigation input is tokenized once (`aegis_demand_tokens`) to bind `filesystem.search_symbol` and Layer 0 content resonance (`git grep -l`), so queries like “Megabits para Gigabits” no longer search the static string `AEGIS`.
+**Demand tokens:** free-text investigation input is tokenized once (`aegis_demand_tokens` / dense filter) to bind `filesystem.search_symbol` (multi-token fixed-string via `;;`, never ERE) and Layer 0 content resonance (`git grep -l` on dense tokens only). Generic stems like `bytes` do not flood search/hot files. Discovery `required_evidence` is clamped to operator-named paths ∪ Layer0 seed (not arbitrary on-disk invent).
 
 **Operational memory (only three surfaces):** capability payloads, epistemic handover, git.
 

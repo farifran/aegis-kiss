@@ -74,28 +74,50 @@ guard_path_containment "${SEARCH_ROOT}"
 TMP_MATCH_FILE="$(aegis_mktemp)"
 TMP_BOUNDED_FILE="$(aegis_mktemp)"
 
-# Demand-bound queries may be a single token (fixed) or top tokens joined
-# with | (extended regex). Never treat bare words as regex metacharacters.
-GREP_PATTERN_OPTS=(-F)
-if [[ "${QUERY}" == *"|"* ]]; then
-  GREP_PATTERN_OPTS=(-E)
-fi
+# Always fixed-string. Demand multi-token queries use ";;" (demand.sh
+# AEGIS_DEMAND_TOKEN_SEP) so dots in identifiers never become ERE.
+readonly _TOKEN_SEP="${AEGIS_DEMAND_TOKEN_SEP:-;;}"
 
-grep -Rni \
-  "${GREP_PATTERN_OPTS[@]}" \
-  -C "${CONTEXT_LINES}" \
-  --exclude-dir=node_modules \
-  --exclude-dir=.git \
-  --exclude-dir=.harness \
-  --exclude-dir=.skills \
-  --exclude-dir=scripts \
-  --exclude-dir=.venv \
-  --exclude='*.lock' \
-  --exclude='*.log' \
-  -- \
-  "${QUERY}" \
-  "${SEARCH_ROOT}" \
-  > "${TMP_MATCH_FILE}" || true
+_grep_fixed_into() {
+  local pattern="$1"
+  local out="$2"
+  [[ -n "${pattern}" ]] || return 0
+  grep -Rni \
+    -F \
+    -C "${CONTEXT_LINES}" \
+    --exclude-dir=node_modules \
+    --exclude-dir=.git \
+    --exclude-dir=.harness \
+    --exclude-dir=.skills \
+    --exclude-dir=scripts \
+    --exclude-dir=.venv \
+    --exclude='*.lock' \
+    --exclude='*.log' \
+    -- \
+    "${pattern}" \
+    "${SEARCH_ROOT}" \
+    >> "${out}" || true
+}
+
+: > "${TMP_MATCH_FILE}"
+if [[ "${QUERY}" == *"${_TOKEN_SEP}"* ]]; then
+  # Multi-char split (IFS cannot use ";;" as a single delimiter).
+  _rest="${QUERY}"
+  while [[ -n "${_rest}" ]]; do
+    if [[ "${_rest}" == *"${_TOKEN_SEP}"* ]]; then
+      _tok="${_rest%%"${_TOKEN_SEP}"*}"
+      _rest="${_rest#*"${_TOKEN_SEP}"}"
+    else
+      _tok="${_rest}"
+      _rest=""
+    fi
+    [[ -n "${_tok}" ]] || continue
+    _grep_fixed_into "${_tok}" "${TMP_MATCH_FILE}"
+  done
+  unset _rest _tok
+else
+  _grep_fixed_into "${QUERY}" "${TMP_MATCH_FILE}"
+fi
 
 # =========================================================
 # MATCH AND PAYLOAD SIZE LIMITING
@@ -107,7 +129,7 @@ head -n "${MAX_MATCH_LINES}" \
 
 TRUNCATED="false"
 
-TOTAL_MATCH_LINES="$(wc -l < "${TMP_MATCH_FILE}")"
+TOTAL_MATCH_LINES="$(wc -l < "${TMP_MATCH_FILE}" | tr -d '[:space:]')"
 if [[ "${TOTAL_MATCH_LINES}" -gt "${MAX_MATCH_LINES}" ]]; then
   TRUNCATED="true"
 fi
@@ -122,15 +144,10 @@ fi
 # MATCH METADATA
 # =========================================================
 
-# Count with the same -F/-E mode as the search. Do not use
-# `grep -c … || echo 0`: zero matches still print "0" and exit 1,
-# so the || branch would emit a second 0 → "0\n0" and break
-# jq --argjson (demand multi-token queries use | + -E).
-MATCH_COUNT="$(
-  grep -c "${GREP_PATTERN_OPTS[@]}" -- "${QUERY}" "${TMP_MATCH_FILE}" \
-    2>/dev/null || true
-)"
-MATCH_COUNT="$(printf '%s' "${MATCH_COUNT}" | tr -d '[:space:]')"
+# Line count of the grep dump (context included). Never use
+# `grep -c … || echo 0` — zero matches still print 0 and exit 1,
+# which would produce "0\n0" and break jq --argjson.
+MATCH_COUNT="${TOTAL_MATCH_LINES}"
 [[ -n "${MATCH_COUNT}" ]] || MATCH_COUNT=0
 
 # macOS wc pads with spaces; jq --argjson requires a bare JSON number.

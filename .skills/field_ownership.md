@@ -12,6 +12,8 @@ Models emit only the minimal cognitive fields for the active skill. The runtime 
 
 **Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`): real GitHub issue body when `--issue N`, optional structured-header compact head, mechanical path safety. Modes never rewrite demand.
 
-**Net-new paths:** only paths the operator named in the investigation input (or explicit `required_evidence`) authorize creation. Skill examples are not targets.
+**Net-new paths:** only paths the operator named in the investigation input authorize creation. Skill examples are not targets.
+
+**required_evidence clamp:** at discovery enrich, model-requested `filesystem.read:<path>` is kept only when the path is operator-named **or** present in Layer0 attention seed. Arbitrary on-disk paths the model invents are dropped (bootstrap exception when both named and seed are empty).
 
 **Evidence:** capability payloads are evidence, not memory. Epistemic handover is incomplete attention, not truth. Content reads for forensics+ are runtime-seeded from mechanical anchors — Discovery is not the sole gatekeeper of `filesystem.read`.

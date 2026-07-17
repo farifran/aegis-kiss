@@ -308,24 +308,29 @@ layer0_import_gravity() {
 # fusing churn with lexical resonance against AEGIS_INVESTIGATION_INPUT.
 #
 # Resonance rules (KISS, deterministic):
-#   1. demand tokens via aegis_demand_tokens (stopwords stripped)
+#   1. path tokens via aegis_demand_tokens (stopwords stripped)
 #   2. path/basename substring (+ prefix ≥5) → +20, resonance=1
 #      (path beats content so require('./util') cannot outrank util.js)
-#   3. content hit via `git grep -l -i -F` for any token → +10, resonance=1
+#   3. content hit via `git grep -l -i -F` for DENSE tokens only
+#      (generic stems like "bytes"/"index" skipped) → +10, resonance=1
 #   4. content-only files (no recent churn) still surface with score=10
+#      (cap AEGIS_LAYER0_CONTENT_HIT_MAX, default 20)
 layer0_hot_files() {
 
-  local tokens_tmp content_hits_tmp scored_tmp hot_tmp
+  local tokens_tmp dense_tmp content_hits_tmp scored_tmp hot_tmp
+  local content_hit_max="${AEGIS_LAYER0_CONTENT_HIT_MAX:-20}"
   tokens_tmp="$(aegis_mktemp)"
+  dense_tmp="$(aegis_mktemp)"
   content_hits_tmp="$(aegis_mktemp)"
   scored_tmp="$(aegis_mktemp)"
   hot_tmp="$(aegis_mktemp)"
 
   aegis_demand_tokens "${AEGIS_INVESTIGATION_INPUT:-}" > "${tokens_tmp}" || true
+  aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}" > "${dense_tmp}" || true
 
-  # Content resonance: which census files contain any demand token?
+  # Content resonance: dense tokens only (avoids monorepo noise).
   : > "${content_hits_tmp}"
-  if [[ -s "${tokens_tmp}" ]] && [[ -f "${CENSUS_FILE:-}" ]]; then
+  if [[ -s "${dense_tmp}" ]] && [[ -f "${CENSUS_FILE:-}" ]]; then
     local token
     while IFS= read -r token; do
       [[ -n "${token}" ]] || continue
@@ -333,9 +338,9 @@ layer0_hot_files() {
       git grep -l -i -F -I -- "${token}" -- . 2>/dev/null \
         | grep -Fxf "${CENSUS_FILE}" \
         || true
-    done < "${tokens_tmp}" \
+    done < "${dense_tmp}" \
       | sort -u \
-      | head -n 40 \
+      | head -n "${content_hit_max}" \
       > "${content_hits_tmp}" || true
   fi
 
