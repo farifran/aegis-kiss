@@ -197,6 +197,55 @@ augment_evidence_profile_from_anchors() {
   fi
 }
 
+# Rank evidence entries so budget cuts hit low-signal first.
+# Lower rank number = higher priority (materialize + expose first).
+#   10 demand_anchors
+#   18 layer0_facts  (must precede attention_seed — predecessor payload)
+#   20 attention_seed
+#   30 filesystem.read (content seeds + handover)
+#   40 search_symbol
+#   50 git
+#   60 tools (tsc/eslint/test)
+#   70 list_tree
+#   80 other
+_evidence_entry_priority_rank() {
+  local entry="$1"
+  local capability="${entry%%:*}"
+  case "${capability}" in
+    runtime.demand_anchors) echo 10 ;;
+    runtime.layer0_facts) echo 18 ;;
+    runtime.attention_seed) echo 20 ;;
+    filesystem.read) echo 30 ;;
+    filesystem.search_symbol) echo 40 ;;
+    git.status|git.diff) echo 50 ;;
+    typescript.check|eslint.check|test.run) echo 60 ;;
+    filesystem.list_tree) echo 70 ;;
+    *) echo 80 ;;
+  esac
+}
+
+prioritize_evidence_entries() {
+  local entry rank
+  local -a ranked=()
+  local -a ordered=()
+
+  [[ "${#AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}" -gt 0 ]] || return 0
+
+  for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
+    [[ -n "${entry}" ]] || continue
+    rank="$(_evidence_entry_priority_rank "${entry}")"
+    # Tab-separated: rank is numeric key; entry may contain spaces rarely.
+    ranked+=("${rank}"$'\t'"${entry}")
+  done
+
+  mapfile -t ordered < <(
+    printf '%s\n' "${ranked[@]}" \
+      | LC_ALL=C sort -t $'\t' -k1,1n -k2,2 \
+      | cut -f2-
+  )
+  AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${ordered[@]}")
+}
+
 resolve_evidence_entry_capability() {
 
   local evidence_entry="$1"
@@ -313,7 +362,7 @@ resolve_capability_argument() {
         "${AEGIS_INVESTIGATION_INPUT:-}" \
         "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-AEGIS}"
       ;;
-    filesystem.list_tree|runtime.layer0_facts|runtime.attention_seed)
+    filesystem.list_tree|runtime.layer0_facts|runtime.attention_seed|runtime.demand_anchors)
       printf '%s' "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
       ;;
     *)
@@ -604,8 +653,9 @@ enforce_context_token_budget() {
 
   aegis_warn "Context budget exceeded: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — pruning lower-priority evidence"
 
-  # Prunable payloads, largest first. The epistemic handover read is
-  # priority context and exempt.
+  # Prunable payloads, largest first among low-priority evidence.
+  # Protected (never pruned first): demand_anchors, epistemic handover,
+  # and filesystem.read content seeds — these are the mechanical anchors.
   local payload_path
   while IFS= read -r payload_path; do
     [[ -f "${payload_path}" ]] || continue
@@ -620,9 +670,14 @@ enforce_context_token_budget() {
   done < <(
     printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" \
       | jq -r '.[]?' \
-      | grep -v 'epistemic_handover' \
       | while IFS= read -r p; do
-          [[ -f "${p}" ]] && printf '%s %s\n' "$(wc -c < "${p}" | tr -d ' ')" "${p}"
+          [[ -f "${p}" ]] || continue
+          case "${p}" in
+            *epistemic_handover*|*runtime_demand_anchors*|*filesystem_read_*)
+              continue
+              ;;
+          esac
+          printf '%s %s\n' "$(wc -c < "${p}" | tr -d ' ')" "${p}"
         done \
       | sort -rn \
       | cut -d' ' -f2-
@@ -722,6 +777,8 @@ main() {
   resolve_evidence_profile
   augment_evidence_profile_from_handover
   augment_evidence_profile_from_anchors
+  # Rank so materialize + budget exposure hit anchors/content before noise.
+  prioritize_evidence_entries
   prepare_execution_state
   generate_pocket_map
   materialize_capability_environment

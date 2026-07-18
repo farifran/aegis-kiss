@@ -25,14 +25,27 @@ assert_manifest_contract() {
     and ([.modes[].evidence_capabilities[]] | index("topology.read_graph") == null)
     and ([.modes[].capabilities[].handler] | index("scripts/capabilities/topology/read_graph.sh") == null)
     and (.modes.discovery.evidence_capabilities == [
+      "runtime.demand_anchors",
       "filesystem.list_tree",
       "filesystem.read",
       "runtime.layer0_facts",
       "runtime.attention_seed"
     ])
-    and (.modes.forensics.evidence_capabilities == ["filesystem.search_symbol", "git.status", "filesystem.read"])
+    and (.modes.forensics.evidence_capabilities == [
+      "runtime.demand_anchors",
+      "filesystem.read",
+      "filesystem.search_symbol",
+      "git.status"
+    ])
     and (.modes.validation.evidence_capabilities == ["filesystem.read"])
-    and (.modes.adversarial.evidence_capabilities == ["filesystem.search_symbol", "filesystem.read", "typescript.check", "eslint.check", "test.run"])
+    and (.modes.adversarial.evidence_capabilities == [
+      "runtime.demand_anchors",
+      "filesystem.read",
+      "typescript.check",
+      "eslint.check",
+      "test.run",
+      "filesystem.search_symbol"
+    ])
   ' >/dev/null || fail "invalid_manifest_contract"
 }
 

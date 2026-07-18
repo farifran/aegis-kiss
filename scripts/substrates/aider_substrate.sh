@@ -45,6 +45,8 @@ AEGIS_AIDER_OUTPUT_LOG=""
 
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
+# shellcheck disable=SC1091
+source "scripts/lib/demand.sh"
 AEGIS_LOG_TAG="AIDER"
 
 # shellcheck disable=SC1091

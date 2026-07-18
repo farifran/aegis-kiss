@@ -218,6 +218,12 @@ assemble_bounded_capability_context() {
   # must never precede the stable segments above.
   {
     echo
+    # Mechanical demand projection — before free-text so floor models
+    # bind to operator paths / dense tokens / seed without re-parsing prose.
+    if declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
+      aegis_format_demand_anchors_section
+    fi
+
     echo "=== INVESTIGATION INPUT ==="
     echo
     printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"

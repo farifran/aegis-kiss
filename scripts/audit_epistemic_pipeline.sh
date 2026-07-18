@@ -95,7 +95,8 @@ runtime_promotes_validated_diff() {
 #                            summary non-empty strings; optional
 #                            required_evidence / findings /
 #                            repair_candidates arrays; optional
-#                            repair_feedback object
+#                            repair_feedback object; optional
+#                            demand_anchors object (runtime mechanical)
 #   epistemic_state      exactly {next_attention_targets, attention_scope,
 #                        attention_reason}
 #
@@ -121,6 +122,15 @@ audit_handover_state() {
              | type == "object"
                and (.violations       | type == "array")
                and (.authorized_scopes | type == "array")
+             else true end)
+      and (if has("demand_anchors") then .demand_anchors
+             | type == "object"
+               and (.operator_named_paths | type == "array")
+               and (.dense_tokens | type == "array")
+               and (.search_query | type == "string")
+               and (.seed_targets | type == "array")
+               and (.seed_source | type == "string")
+               and (.content_resonance | type == "array")
              else true end);
 
     def valid_artifact_snapshot:
@@ -249,6 +259,7 @@ check_discovery_to_forensics() {
     && skill_declares ".skills/discovery.md" "handover_attention" \
     && skill_declares ".skills/forensics.md" "repair_candidates" \
     && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
+    && array_contains "runtime.demand_anchors" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
     && runtime_seeds_deterministic_reads
 }
 
@@ -284,10 +295,10 @@ main() {
   record_boundary \
     "Discovery -> Forensics" \
     '["observations","rationale","required_evidence","handover_attention"]' \
-    '["filesystem.read:epistemic_handover","filesystem.search_symbol","git.status","filesystem.read:<anchors>"]' \
-    '["required_evidence","handover_attention","operator_named_paths"]' \
+    '["runtime.demand_anchors","filesystem.read:epistemic_handover","filesystem.search_symbol","git.status","filesystem.read:<anchors>"]' \
+    '["required_evidence","handover_attention","operator_named_paths","demand_anchors"]' \
     "$(verdict check_discovery_to_forensics)" \
-    "Forensics consumes Discovery routing via handover, capability payloads, and runtime-owned content anchors." \
+    "Forensics consumes Discovery routing via handover, demand_anchors, capability payloads, and runtime-owned content anchors." \
     "The producer fields, handover exposure, or deterministic read anchors required by Forensics are absent."
 
   record_boundary \

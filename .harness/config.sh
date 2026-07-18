@@ -293,6 +293,7 @@ declare -ar AEGIS_CACHEABLE_CAPABILITIES=(
   "filesystem.list_tree"
   "runtime.layer0_facts"
   "runtime.attention_seed"
+  "runtime.demand_anchors"
 )
 
 # =========================================================
@@ -348,6 +349,7 @@ declare -ar AEGIS_BASE_CAPABILITIES=(
   "typescript.check"
   "eslint.check"
   "test.run"
+  "runtime.demand_anchors"
 )
 
 declare -ar AEGIS_MUTATION_EXTRA_CAPABILITIES=(
@@ -412,6 +414,7 @@ declare -Ar AEGIS_CAPABILITY_HANDLERS=(
   ["git.status"]="scripts/capabilities/git/git_status.sh"
   ["runtime.attention_seed"]="scripts/capabilities/runtime/attention_seed.sh"
   ["runtime.layer0_facts"]="scripts/capabilities/runtime/layer0_facts.sh"
+  ["runtime.demand_anchors"]="scripts/capabilities/runtime/demand_anchors.sh"
   ["typescript.check"]="scripts/capabilities/typescript_check.sh"
   ["eslint.check"]="scripts/capabilities/eslint_check.sh"
   ["test.run"]="scripts/capabilities/test_runner.sh"
@@ -429,6 +432,7 @@ declare -Ar AEGIS_CAPABILITY_CLASSIFICATION=(
   ["git.status"]="readonly"
   ["runtime.attention_seed"]="readonly"
   ["runtime.layer0_facts"]="readonly"
+  ["runtime.demand_anchors"]="readonly"
   ["typescript.check"]="readonly"
   ["eslint.check"]="readonly"
   ["test.run"]="readonly"
@@ -446,6 +450,7 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
   ["git.status"]="."
   ["runtime.attention_seed"]="."
   ["runtime.layer0_facts"]="."
+  ["runtime.demand_anchors"]="."
   ["typescript.check"]="."
   ["eslint.check"]="src"
   ["test.run"]="."
@@ -455,18 +460,24 @@ declare -Ar AEGIS_CAPABILITY_ARGUMENTS=(
 # MODE EVIDENCE PROFILES
 # =========================================================
 
-# Discovery: tree + handover + Layer 0 priors + attention seed.
+# Discovery: anchors + tree + handover + Layer 0 priors + attention seed.
+# Order is a soft preference; execute_mode re-ranks before materialize.
 declare -ar AEGIS_DISCOVERY_EVIDENCE=(
+  "runtime.demand_anchors"
   "filesystem.list_tree"
   "filesystem.read:epistemic_handover"
   "runtime.layer0_facts"
   "runtime.attention_seed"
 )
 
+# Forensics: mechanical anchors first, then handover + demand-bound search.
+# Content seeds (operator/attention reads) are appended at runtime.
+# git.status is low-signal for target choice — kept last among defaults.
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
+  "runtime.demand_anchors"
+  "filesystem.read:epistemic_handover"
   "filesystem.search_symbol"
   "git.status"
-  "filesystem.read:epistemic_handover"  # Forensics must only interpret evidence provided by Discovery
 )
 
 # Validation is a deterministic tribunal, free of noise: it judges only
@@ -478,16 +489,18 @@ declare -ar AEGIS_VALIDATION_EVIDENCE=(
 )
 
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
-  "filesystem.search_symbol"
+  "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "typescript.check"
   "eslint.check"
   "test.run"
+  "filesystem.search_symbol"
 )
 
 declare -ar AEGIS_MUTATION_EVIDENCE=(
-  "filesystem.search_symbol"
+  "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
+  "filesystem.search_symbol"
   "git.diff"
   "git.status"
   "typescript.check"
@@ -499,6 +512,7 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
 # applied. Evidence stays lean: the handover carries the Repair diff and
 # files_changed; tools confirm the surface is still sound after refine.
 declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
+  "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "git.status"
   "typescript.check"

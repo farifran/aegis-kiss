@@ -41,6 +41,8 @@ AEGIS_SUBSTRATE_WORKSPACE=""
 
 # shellcheck disable=SC1091
 source "scripts/lib/common.sh"
+# shellcheck disable=SC1091
+source "scripts/lib/demand.sh"
 AEGIS_LOG_TAG="RAW"
 
 # shellcheck disable=SC1091

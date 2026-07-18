@@ -10,7 +10,7 @@ Models emit only the minimal cognitive fields for the active skill. The runtime 
 | adversarial | `status`, `findings[]` | `mode`, `candidate_result` (from optimize), `handover_attention`, tribunal gates, read anchors |
 | validation | `verdict`, `basis` | `mode`, `validated_candidate`, `findings` (from adversarial), `handover_attention`, tribunal / `repair_feedback` |
 
-**Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`): real GitHub issue body when `--issue N`, optional structured-header compact head, mechanical path safety. Modes never rewrite demand.
+**Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`): real GitHub issue body when `--issue N`, optional structured-header compact head, mechanical path safety. Modes never rewrite demand. Runtime also projects **`demand_anchors`** (operator paths, dense tokens, search query, seed targets, content resonance) into prompts, capability `runtime.demand_anchors`, and `operational_context.demand_anchors` on handover. Evidence materialization order prefers anchors and content reads over search/git/tools under budget pressure.
 
 **Net-new paths:** only paths the operator named in the investigation input authorize creation. Skill examples are not targets.
 

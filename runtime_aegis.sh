@@ -846,23 +846,42 @@ promote_epistemic_handover() {
 
   # Snapshot keys: mode, investigation_input, generated_at, operational_context
   # only (structural_context removed with deep topology).
+  # Mechanical demand anchors (stable across modes). Prefer recompute
+  # from investigation input + current handover/payloads; never LLM prose.
+  local demand_anchors_json="{}"
+  if declare -f aegis_materialize_demand_anchors_json >/dev/null 2>&1; then
+    demand_anchors_json="$(
+      aegis_materialize_demand_anchors_json \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" \
+        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+        2>/dev/null || printf '{}'
+    )"
+  fi
+  if ! printf '%s' "${demand_anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    demand_anchors_json="{}"
+  fi
+
   handover_json="$(
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD}" |
       jq -c \
         --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
-        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" '
+        --arg investigation_input "${AEGIS_INVESTIGATION_INPUT}" \
+        --argjson demand_anchors "${demand_anchors_json}" '
         . as $orig
+        | (
+            if ($orig | has("operational_context")) then $orig.operational_context
+            else ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at,
+                              .structural_context))
+            end
+          ) as $oc
+        | ($oc + {demand_anchors: $demand_anchors}) as $oc_anchored
         | {
             artifact_snapshot: {
               mode: $orig.mode,
               investigation_input: $investigation_input,
               generated_at: (if $orig | has("generated_at") then $orig.generated_at else $generated_at end),
-              operational_context: (
-                if ($orig | has("operational_context")) then $orig.operational_context
-                else ($orig | del(.handover_attention, .mode, .investigation_input, .generated_at,
-                                  .structural_context))
-                end
-              )
+              operational_context: $oc_anchored
             },
             epistemic_state: (
               $orig.handover_attention // {

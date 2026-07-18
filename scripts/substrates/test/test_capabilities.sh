@@ -63,6 +63,13 @@ assert_capability_success \
   '.success == true and .capability == "git.diff" and .error == null' \
   scripts/capabilities/git/git_diff.sh
 
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Megabits para bytes"
+assert_capability_success \
+  "runtime.demand_anchors" \
+  '.success == true and .capability == "runtime.demand_anchors" and (.payload.dense_tokens | index("megabits")) != null and (.payload.search_query | type == "string")' \
+  scripts/capabilities/runtime/demand_anchors.sh \
+  .
+
 handover_output="$("${BASH}" scripts/capabilities/filesystem/read_file.sh "${AEGIS_EPISTEMIC_HANDOVER_FILE}")" \
   || fail "capability_execution_failed: filesystem.read epistemic_handover"
 

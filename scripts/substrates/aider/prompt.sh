@@ -318,6 +318,11 @@ assemble_mutation_prompt() {
     recency_anchor="YOUR TASK NOW: apply the single investigation demand stated above to the loaded target file(s) only. One minimal sufficient change — do not invent a second parallel API or duplicate the same conversion."
   fi
 
+  local demand_anchors_section=""
+  if declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
+    demand_anchors_section="$(aegis_format_demand_anchors_section)"
+  fi
+
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
 
@@ -337,7 +342,7 @@ ${pocket_section}
 
 ---
 
-${input_label}
+${demand_anchors_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---

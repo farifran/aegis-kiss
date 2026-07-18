@@ -177,4 +177,87 @@ echo "${enriched_named}" | jq -e '
 ' >/dev/null \
   || fail "operator_named_must_survive_enrich: ${enriched_named}"
 
+# --- prioritize_evidence_entries ranks anchors/reads before search/git ---
+# shellcheck disable=SC1091
+source <(
+  sed -n \
+    '/^_evidence_entry_priority_rank()/,/^resolve_evidence_entry_capability()/p' \
+    scripts/execute_mode.sh \
+    | sed '$d'
+)
+AEGIS_ACTIVE_EVIDENCE_ENTRIES=(
+  "git.status"
+  "filesystem.search_symbol"
+  "runtime.attention_seed"
+  "runtime.layer0_facts"
+  "filesystem.read:src/index.ts"
+  "runtime.demand_anchors"
+  "filesystem.read:epistemic_handover"
+)
+prioritize_evidence_entries
+[[ "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[0]}" == "runtime.demand_anchors" ]] \
+  || fail "priority_first_should_be_demand_anchors: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
+# layer0 must precede attention_seed (predecessor payload dependency)
+_l0_pos=-1
+_seed_pos=-1
+_i=0
+for _e in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
+  [[ "${_e}" == "runtime.layer0_facts" ]] && _l0_pos="${_i}"
+  [[ "${_e}" == "runtime.attention_seed" ]] && _seed_pos="${_i}"
+  _i=$((_i + 1))
+done
+[[ "${_l0_pos}" -ge 0 && "${_seed_pos}" -ge 0 && "${_l0_pos}" -lt "${_seed_pos}" ]] \
+  || fail "priority_layer0_before_attention_seed: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
+_last_idx=$((${#AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]} - 1))
+[[ "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[_last_idx]}" == "git.status" ]] \
+  || fail "priority_git_should_be_last: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
+unset _last_idx _l0_pos _seed_pos _i _e
+
+# --- demand_anchors mechanical projection ---
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Megabits para bytes"
+anchors="$(aegis_materialize_demand_anchors_json "${AEGIS_INVESTIGATION_INPUT}" "" "")"
+echo "${anchors}" | jq -e '
+  (.dense_tokens | index("megabits")) != null
+  and (.dense_tokens | index("bytes") | not)
+  and (.search_query | contains("megabits"))
+  and (.search_query | contains(";;") or (.search_query | contains("conversao")))
+  and (.operator_named_paths | type == "array")
+  and (.seed_targets | type == "array")
+  and (.seed_source | type == "string")
+  and (.content_resonance | type == "array")
+' >/dev/null \
+  || fail "demand_anchors_shape_invalid: ${anchors}"
+
+# seed from synthetic handover
+tmp_h="$(mktemp)"
+jq -n '{
+  artifact_snapshot: null,
+  epistemic_state: {
+    next_attention_targets: ["src/index.ts"],
+    attention_scope: "layer0",
+    attention_reason: "test"
+  }
+}' > "${tmp_h}"
+anchors_h="$(aegis_materialize_demand_anchors_json "${AEGIS_INVESTIGATION_INPUT}" "${tmp_h}" "")"
+rm -f "${tmp_h}"
+echo "${anchors_h}" | jq -e '
+  (.seed_targets | index("src/index.ts")) != null
+  and .seed_source == "handover"
+' >/dev/null \
+  || fail "demand_anchors_handover_seed: ${anchors_h}"
+
+# section formatter emits header + json
+section="$(aegis_format_demand_anchors_section "${anchors}")"
+printf '%s' "${section}" | grep -q 'DEMAND ANCHORS' \
+  || fail "demand_anchors_section_missing_header"
+printf '%s' "${section}" | grep -q 'dense_tokens' \
+  || fail "demand_anchors_section_missing_json"
+
+# named path demand
+named_a="$(aegis_materialize_demand_anchors_json "edit src/index.ts convert megabits" "" "")"
+echo "${named_a}" | jq -e '
+  (.operator_named_paths | index("src/index.ts")) != null
+' >/dev/null \
+  || fail "demand_anchors_operator_path: ${named_a}"
+
 echo "[AEGIS][TEST] demand tokens passed"

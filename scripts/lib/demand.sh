@@ -303,3 +303,173 @@ aegis_materialize_investigation_input() {
   aegis_demand_assert_paths_safe "${normalized}"
   printf '%s' "${normalized}"
 }
+
+# ---------------------------------------------------------
+# Demand anchors (runtime-owned mechanical projection)
+# ---------------------------------------------------------
+# Stable JSON object every mode can consume without re-tokenizing
+# free-text. Sources (priority for seed_targets):
+#   1. epistemic handover next_attention_targets
+#   2. runtime_attention_seed.json payload (if present)
+#   3. runtime_layer0_facts.json hot_files with resonance==1
+#   4. empty
+# operator_named_paths / dense_tokens / search_query always from demand text.
+
+aegis_materialize_demand_anchors_json() {
+  local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
+  local handover="${2-}"
+  local payload_dir="${3-}"
+
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+  fi
+  if [[ -z "${payload_dir}" ]]; then
+    payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+  fi
+
+  local operator_json="[]"
+  local dense_json="[]"
+  local search_query=""
+  local seed_json="[]"
+  local seed_source="none"
+  local resonance_json="[]"
+
+  if declare -f aegis_extract_operator_named_paths_json >/dev/null 2>&1; then
+    operator_json="$(aegis_extract_operator_named_paths_json "${text}")"
+  else
+    operator_json="[]"
+  fi
+  if ! printf '%s' "${operator_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    operator_json="[]"
+  fi
+
+  dense_json="$(
+    aegis_demand_dense_tokens "${text}" \
+      | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+      || printf '[]'
+  )"
+  if ! printf '%s' "${dense_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    dense_json="[]"
+  fi
+
+  search_query="$(aegis_demand_search_query "${text}" "AEGIS" 3)"
+
+  # --- seed_targets (mechanical attention prior) ---
+  if [[ -n "${handover}" && -f "${handover}" ]]; then
+    local from_handover
+    from_handover="$(
+      jq -c '
+        [.epistemic_state.next_attention_targets[]?
+          | select(type == "string" and length > 0)]
+      ' "${handover}" 2>/dev/null || printf '[]'
+    )"
+    if printf '%s' "${from_handover}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      seed_json="${from_handover}"
+      seed_source="handover"
+    fi
+  fi
+
+  if [[ "${seed_source}" == "none" \
+    && -n "${payload_dir}" \
+    && -f "${payload_dir}/runtime_attention_seed.json" ]]; then
+    local from_seed
+    from_seed="$(
+      jq -c '
+        [.payload.attention_targets[]?
+          | select(type == "string" and length > 0)]
+      ' "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || printf '[]'
+    )"
+    if printf '%s' "${from_seed}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      seed_json="${from_seed}"
+      seed_source="attention_seed"
+    fi
+  fi
+
+  if [[ -n "${payload_dir}" && -f "${payload_dir}/runtime_layer0_facts.json" ]]; then
+    resonance_json="$(
+      jq -c '
+        [(.payload.hot_files // [])[]
+          | select(.resonance == 1 and (.file | type == "string"))
+          | {file: .file, score: (.score // 0), churn: (.churn // 0)}]
+        | .[0:5]
+      ' "${payload_dir}/runtime_layer0_facts.json" 2>/dev/null || printf '[]'
+    )"
+    if ! printf '%s' "${resonance_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      resonance_json="[]"
+    fi
+
+    if [[ "${seed_source}" == "none" ]]; then
+      local from_layer0
+      from_layer0="$(
+        printf '%s' "${resonance_json}" \
+          | jq -c '[.[].file] | unique' 2>/dev/null || printf '[]'
+      )"
+      if printf '%s' "${from_layer0}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        seed_json="${from_layer0}"
+        seed_source="layer0_resonance"
+      fi
+    fi
+  fi
+
+  # Prefer preserving prior demand_anchors.seed_* when re-materializing
+  # mid-pipeline without payloads (stable investigation anchors).
+  if [[ "${seed_source}" == "none" \
+    && -n "${handover}" \
+    && -f "${handover}" ]]; then
+    local prior
+    prior="$(
+      jq -c '.artifact_snapshot.operational_context.demand_anchors // empty' \
+        "${handover}" 2>/dev/null || true
+    )"
+    if printf '%s' "${prior}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      local prior_seed prior_src prior_res
+      prior_seed="$(printf '%s' "${prior}" | jq -c '.seed_targets // []')"
+      prior_src="$(printf '%s' "${prior}" | jq -r '.seed_source // "none"')"
+      prior_res="$(printf '%s' "${prior}" | jq -c '.content_resonance // []')"
+      if printf '%s' "${prior_seed}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        seed_json="${prior_seed}"
+        seed_source="prior_${prior_src}"
+      fi
+      if printf '%s' "${prior_res}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        resonance_json="${prior_res}"
+      fi
+    fi
+  fi
+
+  jq -n \
+    --argjson operator_named_paths "${operator_json}" \
+    --argjson dense_tokens "${dense_json}" \
+    --arg search_query "${search_query}" \
+    --argjson seed_targets "${seed_json}" \
+    --arg seed_source "${seed_source}" \
+    --argjson content_resonance "${resonance_json}" \
+    '{
+      operator_named_paths: $operator_named_paths,
+      dense_tokens: $dense_tokens,
+      search_query: $search_query,
+      seed_targets: $seed_targets,
+      seed_source: $seed_source,
+      content_resonance: $content_resonance
+    }'
+}
+
+# Human-readable block for raw/aider prompts (mechanical only).
+aegis_format_demand_anchors_section() {
+  local anchors_json="${1-}"
+  if [[ -z "${anchors_json}" ]]; then
+    anchors_json="$(aegis_materialize_demand_anchors_json)"
+  fi
+  if ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    anchors_json='{"operator_named_paths":[],"dense_tokens":[],"search_query":"AEGIS","seed_targets":[],"seed_source":"none","content_resonance":[]}'
+  fi
+
+  {
+    echo "=== DEMAND ANCHORS (runtime-owned, mechanical) ==="
+    echo
+    echo "Treat these as authoritative investigation anchors. Do not invent"
+    echo "operator-named paths or seed targets that are absent here."
+    echo
+    printf '%s\n' "${anchors_json}" | jq -c '.'
+    echo
+  }
+}

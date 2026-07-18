@@ -119,8 +119,15 @@ write_runtime_owned_epistemic_handover() {
   local artifact_snapshot_json="$2"
   local epistemic_state_json="$3"
   local tmp_handover_file
+  local handover_dir
 
-  tmp_handover_file="$(mktemp)"
+  # Parent may be missing when a stale AEGIS_EPISTEMIC_HANDOVER_FILE
+  # points at a cleaned temp test dir — recreate before commit.
+  handover_dir="$(dirname "${handover_file}")"
+  mkdir -p "${handover_dir}" \
+    || aegis_fatal "failed_to_create_epistemic_handover_dir"
+
+  tmp_handover_file="$(mktemp "${handover_dir}/.handover.XXXXXX")"
 
   jq -n \
     --argjson artifact_snapshot "${artifact_snapshot_json}" \
@@ -129,13 +136,21 @@ write_runtime_owned_epistemic_handover() {
       artifact_snapshot: $artifact_snapshot,
       epistemic_state: $epistemic_state
     }' > "${tmp_handover_file}" \
-    || aegis_fatal "failed_to_materialize_epistemic_handover"
+    || {
+      rm -f "${tmp_handover_file}"
+      aegis_fatal "failed_to_materialize_epistemic_handover"
+    }
 
-  handover_size_is_valid "${tmp_handover_file}" \
-    || aegis_fatal "epistemic_handover_runtime_state_exceeds_max_bytes"
+  if ! handover_size_is_valid "${tmp_handover_file}"; then
+    rm -f "${tmp_handover_file}"
+    aegis_fatal "epistemic_handover_runtime_state_exceeds_max_bytes"
+  fi
 
   mv "${tmp_handover_file}" "${handover_file}" \
-    || aegis_fatal "failed_to_commit_epistemic_handover"
+    || {
+      rm -f "${tmp_handover_file}"
+      aegis_fatal "failed_to_commit_epistemic_handover"
+    }
 }
 
 remove_runtime_owned_execution_surface_if_present() {

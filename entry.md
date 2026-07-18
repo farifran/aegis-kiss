@@ -16,6 +16,8 @@
 | `filesystem.read` determinístico (paths do operador + attention) | `augment_evidence_profile_from_anchors` em `execute_mode.sh` |
 | Tokens da demand → `search_symbol` + Layer 0 content resonance | `aegis_demand_tokens` / dense + `;;` multi `-F` + `git grep -l` |
 | `required_evidence` só âncoras mecânicas (named ∪ seed) | `merge_operator_required_evidence` em `artifact_protocol.sh` |
+| Bloco `demand_anchors` no prompt + handover + capability | `runtime.demand_anchors` + `aegis_format_demand_anchors_section` |
+| Evidence rank (anchors/reads antes de search/git) | `prioritize_evidence_entries` em `execute_mode.sh` |
 
 ### Ainda proposta (não implementado)
 
