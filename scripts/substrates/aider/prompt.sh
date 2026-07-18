@@ -323,6 +323,15 @@ assemble_mutation_prompt() {
     demand_anchors_section="$(aegis_format_demand_anchors_section)"
   fi
 
+  # Repair: surface forensics alvo/reason explicitly (not buried in handover JSON).
+  local forensics_handoff_section=""
+  if [[ "${AEGIS_MODE}" == "repair" ]] \
+    && declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
+    forensics_handoff_section="$(
+      aegis_format_forensics_handoff_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+    )"
+  fi
+
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
 
@@ -342,7 +351,7 @@ ${pocket_section}
 
 ---
 
-${demand_anchors_section}${input_label}
+${demand_anchors_section}${forensics_handoff_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---

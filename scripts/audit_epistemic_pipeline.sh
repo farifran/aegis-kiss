@@ -131,6 +131,9 @@ audit_handover_state() {
                and (.seed_targets | type == "array")
                and (.seed_source | type == "string")
                and (.content_resonance | type == "array")
+               and (if has("goal") then .goal | type == "string" else true end)
+               and (if has("targets_header") then .targets_header | type == "array" else true end)
+               and (if has("done_when") then .done_when | type == "array" else true end)
              else true end);
 
     def valid_artifact_snapshot:
@@ -322,11 +325,11 @@ main() {
   record_boundary \
     "Optimize -> Adversarial" \
     '["diff","files_changed","handover_attention"]' \
-    '["filesystem.read:epistemic_handover","filesystem.search_symbol"]' \
+    '["runtime.demand_anchors","filesystem.read:epistemic_handover","typescript.check","eslint.check","test.run"]' \
     '["diff","files_changed"]' \
     "$(verdict check_optimize_to_adversarial)" \
-    "Adversarial receives the optimized candidate artifact." \
-    "Adversarial receives only filesystem.search_symbol and cannot observe the Optimize artifact or candidate diff."
+    "Adversarial receives the optimized candidate artifact plus tools." \
+    "Adversarial cannot observe the Optimize artifact or candidate diff."
 
   record_boundary \
     "Adversarial -> Validation" \

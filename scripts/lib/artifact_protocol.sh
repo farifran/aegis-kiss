@@ -667,6 +667,21 @@ readonly AEGIS_JQ_ENRICH_LIB='
 
   def blocking_findings_of:
     [.[]? | select(is_blocking_finding)];
+
+  # Discovery prose hygiene: when no operator-named path exists in the
+  # demand, rewrite false "operator named <path>" claims (models invent them).
+  def scrub_false_operator_claim($s; $named):
+    if ($named | length) > 0 then $s
+    elif ($s | type) != "string" then $s
+    elif ($s | test("operator[[:space:]]+named"; "i")) then
+      ($s
+        | gsub("(?i)operator[[:space:]]+named[[:space:]]+[^;,.]+"; "attention seed targets")
+        | gsub("(?i)the operator named"; "attention seed targets include")
+        | gsub("(?i)Operator named"; "Attention seed targets"))
+    else $s end;
+
+  def scrub_observation_list($arr; $named):
+    [($arr // [])[] | scrub_false_operator_claim(.; $named)];
 '
 
 # Common bind + identity injection used by every mode program.
@@ -733,8 +748,14 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
       ),
       required_evidence: $merged_req,
       operator_named_paths: $operator_named_paths,
-      operational_observations: (.observations // $oc.operational_observations // []),
-      rationale: ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end),
+      operational_observations: scrub_observation_list(
+        (.observations // $oc.operational_observations // []);
+        $operator_named_paths
+      ),
+      rationale: (
+        ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end)
+        | scrub_observation_list(.; $operator_named_paths)
+      ),
       evidence_priorities: ($oc.evidence_priorities // [])
     } | drop_empty)
   | del(.observations, .rationale, .required_evidence)

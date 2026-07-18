@@ -43,8 +43,7 @@ assert_manifest_contract() {
       "filesystem.read",
       "typescript.check",
       "eslint.check",
-      "test.run",
-      "filesystem.search_symbol"
+      "test.run"
     ])
   ' >/dev/null || fail "invalid_manifest_contract"
 }
@@ -379,20 +378,22 @@ main() {
   assert_discovery_accepts_informal_cli_investigation_input
   assert_discovery_accepts_issue_cli_investigation_input
 
-  assert_mode_output "discovery" '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_layer0_facts.json", "runtime_attention_seed.json"]'
-  assert_mode_output "forensics" '["filesystem_search_symbol.json", "git_status.json", "filesystem_read_epistemic_handover.json"]'
+  # observed_payloads follow prioritize_evidence_entries order.
+  assert_mode_output "discovery" '["runtime_layer0_facts.json", "runtime_attention_seed.json", "runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json", "filesystem_list_tree.json"]'
+  assert_mode_output "forensics" '["runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json", "git_status.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
   # Attention target src/index.ts → runtime deterministic read anchor.
-  assert_mode_output "adversarial" '["filesystem_search_symbol.json", "filesystem_read_epistemic_handover.json", "typescript_check.json", "eslint_check.json", "test_run.json", "filesystem_read_src_index_ts.json"]'
+  # Adversarial is tools-first (no search_symbol noise); same-rank tools alpha-sorted.
+  assert_mode_output "adversarial" '["runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json", "filesystem_read_src_index_ts.json", "eslint_check.json", "test_run.json", "typescript_check.json"]'
 
-  # Discovery materializes Layer 0 priors only (no graph extractors).
+  # Materialized payloads listed alphabetically (find | sort).
   assert_materialized_runtime_state \
     "discovery" \
-    '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "runtime_layer0_facts.json"]'
+    '["filesystem_list_tree.json", "filesystem_read_epistemic_handover.json", "runtime_attention_seed.json", "runtime_demand_anchors.json", "runtime_layer0_facts.json"]'
 
   assert_materialized_runtime_state \
     "forensics" \
-    '["filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json", "git_status.json"]'
+    '["filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json", "git_status.json", "runtime_demand_anchors.json"]'
 
   assert_no_execution_surface_for_mode "discovery"
 

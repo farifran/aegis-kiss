@@ -16,8 +16,12 @@
 | `filesystem.read` determinístico (paths do operador + attention) | `augment_evidence_profile_from_anchors` em `execute_mode.sh` |
 | Tokens da demand → `search_symbol` + Layer 0 content resonance | `aegis_demand_tokens` / dense + `;;` multi `-F` + `git grep -l` |
 | `required_evidence` só âncoras mecânicas (named ∪ seed) | `merge_operator_required_evidence` em `artifact_protocol.sh` |
-| Bloco `demand_anchors` no prompt + handover + capability | `runtime.demand_anchors` + `aegis_format_demand_anchors_section` |
-| Evidence rank (anchors/reads antes de search/git) | `prioritize_evidence_entries` em `execute_mode.sh` |
+| Bloco `demand_anchors` legível + handover + capability | `aegis_format_demand_anchors_section` (SEED/TOKENS/…) |
+| Structured goal/targets/done_when nos anchors | `aegis_materialize_demand_anchors_json` |
+| Forensics handoff no repair | `aegis_format_forensics_handoff_section` |
+| Scrub “operator named” falso no discovery | enrich discovery |
+| Preflight soft token↔diff | `assert_demand_tokens_in_mutation_diff` |
+| Evidence rank (layer0→seed→anchors→reads) | `prioritize_evidence_entries` |
 
 ### Ainda proposta (não implementado)
 

@@ -41,6 +41,10 @@ aegis_demand_is_stopword() {
     como|para|pelo|pela|pelos|pelas|uma|umas|uns|este|esta|estes|estas|isso|aquele|aquela|sobre|entre|sem|com|dos|das|nos|nas|funcao|funcoes|funcionalidade|arquivo|arquivos|codigo|projeto|repositorio|preciso|adicionar|corrigir|criar|implementar|analise|analisar)
       return 0
       ;;
+    # Structured-demand header labels (never domain signal)
+    goal|goals|target|targets|acceptance|constraint|constraints|change|scope|demand|structured|when)
+      return 0
+      ;;
     *)
       return 1
       ;;
@@ -343,8 +347,23 @@ aegis_materialize_demand_anchors_json() {
     operator_json="[]"
   fi
 
+  # When structured, tokenize Goal/Change/Acceptance bodies only — not
+  # header labels ("targets", "acceptance") that pollute dense tokens.
+  local token_source="${text}"
+  if aegis_demand_is_structured "${text}"; then
+    token_source="$(
+      {
+        aegis_demand_md_section "Goal" "${text}"
+        aegis_demand_md_section "Change" "${text}"
+        aegis_demand_md_section "Acceptance" "${text}"
+      } | tr '\n' ' '
+    )"
+    [[ -n "$(printf '%s' "${token_source}" | tr -d '[:space:]')" ]] \
+      || token_source="${text}"
+  fi
+
   dense_json="$(
-    aegis_demand_dense_tokens "${text}" \
+    aegis_demand_dense_tokens "${token_source}" \
       | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
       || printf '[]'
   )"
@@ -352,7 +371,7 @@ aegis_materialize_demand_anchors_json() {
     dense_json="[]"
   fi
 
-  search_query="$(aegis_demand_search_query "${text}" "AEGIS" 3)"
+  search_query="$(aegis_demand_search_query "${token_source}" "AEGIS" 3)"
 
   # --- seed_targets (mechanical attention prior) ---
   if [[ -n "${handover}" && -f "${handover}" ]]; then
@@ -436,6 +455,35 @@ aegis_materialize_demand_anchors_json() {
     fi
   fi
 
+  # Structured demand sections (optional ## headers) — empty when free-text.
+  local goal_s="" targets_json="[]" done_when_json="[]"
+  if aegis_demand_is_structured "${text}"; then
+    goal_s="$(aegis_demand_flatten_section "$(aegis_demand_md_section "Goal" "${text}")")"
+    local targets_raw acceptance_raw
+    targets_raw="$(aegis_demand_md_section "Targets" "${text}")"
+    acceptance_raw="$(aegis_demand_md_section "Acceptance" "${text}")"
+    # Paths from Targets section (same regex family as operator-named).
+    if declare -f aegis_extract_operator_named_paths_json >/dev/null 2>&1; then
+      targets_json="$(aegis_extract_operator_named_paths_json "${targets_raw}")"
+    fi
+    if ! printf '%s' "${targets_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      targets_json="[]"
+    fi
+    # Acceptance bullets → short done_when strings (cap 5).
+    done_when_json="$(
+      printf '%s\n' "${acceptance_raw}" \
+        | sed -E 's/^[[:space:]]*[-*][[:space:]]*//; s/^[[:space:]]*[0-9]+[.)][[:space:]]*//' \
+        | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' \
+        | awk 'NF && length($0) >= 3 { print }' \
+        | head -n 5 \
+        | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+        || printf '[]'
+    )"
+    if ! printf '%s' "${done_when_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      done_when_json="[]"
+    fi
+  fi
+
   jq -n \
     --argjson operator_named_paths "${operator_json}" \
     --argjson dense_tokens "${dense_json}" \
@@ -443,33 +491,173 @@ aegis_materialize_demand_anchors_json() {
     --argjson seed_targets "${seed_json}" \
     --arg seed_source "${seed_source}" \
     --argjson content_resonance "${resonance_json}" \
+    --arg goal "${goal_s}" \
+    --argjson targets_header "${targets_json}" \
+    --argjson done_when "${done_when_json}" \
     '{
       operator_named_paths: $operator_named_paths,
       dense_tokens: $dense_tokens,
       search_query: $search_query,
       seed_targets: $seed_targets,
       seed_source: $seed_source,
-      content_resonance: $content_resonance
+      content_resonance: $content_resonance,
+      goal: $goal,
+      targets_header: $targets_header,
+      done_when: $done_when
     }'
 }
 
 # Human-readable block for raw/aider prompts (mechanical only).
+# Floor models: lines first; compact JSON last for machines.
 aegis_format_demand_anchors_section() {
   local anchors_json="${1-}"
   if [[ -z "${anchors_json}" ]]; then
     anchors_json="$(aegis_materialize_demand_anchors_json)"
   fi
   if ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
-    anchors_json='{"operator_named_paths":[],"dense_tokens":[],"search_query":"AEGIS","seed_targets":[],"seed_source":"none","content_resonance":[]}'
+    anchors_json='{"operator_named_paths":[],"dense_tokens":[],"search_query":"AEGIS","seed_targets":[],"seed_source":"none","content_resonance":[],"goal":"","targets_header":[],"done_when":[]}'
   fi
+
+  local seed_line tokens_line search_line ops_line goal_line targets_line done_line src
+  seed_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      ((.seed_targets // []) | join(", ")) as $t
+      | (if ($t | length) > 0 then $t else "(none)" end)
+        + " (" + (.seed_source // "none") + ")"
+    ' 2>/dev/null || echo "(none)"
+  )"
+  tokens_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      ((.dense_tokens // []) | join(", ")) as $t
+      | if ($t | length) > 0 then $t else "(none)" end
+    ' 2>/dev/null || echo "(none)"
+  )"
+  search_line="$(
+    printf '%s' "${anchors_json}" | jq -r '.search_query // "AEGIS"' 2>/dev/null || echo "AEGIS"
+  )"
+  ops_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      ((.operator_named_paths // []) | join(", ")) as $t
+      | if ($t | length) > 0 then $t else "(none)" end
+    ' 2>/dev/null || echo "(none)"
+  )"
+  goal_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      (.goal // "") as $g
+      | if ($g | length) > 0 then $g else empty end
+    ' 2>/dev/null || true
+  )"
+  targets_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      ((.targets_header // []) | join(", ")) as $t
+      | if ($t | length) > 0 then $t else empty end
+    ' 2>/dev/null || true
+  )"
+  done_line="$(
+    printf '%s' "${anchors_json}" | jq -r '
+      ((.done_when // []) | join(" | ")) as $t
+      | if ($t | length) > 0 then $t else empty end
+    ' 2>/dev/null || true
+  )"
 
   {
     echo "=== DEMAND ANCHORS (runtime-owned, mechanical) ==="
     echo
-    echo "Treat these as authoritative investigation anchors. Do not invent"
-    echo "operator-named paths or seed targets that are absent here."
+    echo "Treat these as authoritative. Do not invent operator-named paths"
+    echo "or seed targets absent below. Prefer SEED/TOKENS over free-text."
     echo
+    echo "SEED: ${seed_line}"
+    echo "TOKENS: ${tokens_line}"
+    echo "SEARCH: ${search_line}"
+    echo "OPERATOR PATHS: ${ops_line}"
+    if [[ -n "${goal_line}" ]]; then
+      echo "GOAL: ${goal_line}"
+    fi
+    if [[ -n "${targets_line}" ]]; then
+      echo "TARGETS (header): ${targets_line}"
+    fi
+    if [[ -n "${done_line}" ]]; then
+      echo "DONE WHEN: ${done_line}"
+    fi
+    echo
+    echo "json:"
     printf '%s\n' "${anchors_json}" | jq -c '.'
     echo
   }
+}
+
+# Compact forensics→repair handoff lines (alvo + reason + done_when).
+aegis_format_forensics_handoff_section() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local lines
+  lines="$(
+    jq -r '
+      .artifact_snapshot as $snap
+      | ($snap.operational_context // {}) as $oc
+      | ($oc.repair_candidates // []) as $cands
+      | ($oc.demand_anchors // {}) as $da
+      | if ($cands | length) == 0 and (($da.seed_targets // []) | length) == 0
+        then empty
+        else
+          "=== FORENSICS HANDOFF (runtime) ===",
+          "",
+          (
+            if ($cands | length) > 0 then
+              ($cands[] | "ALVO: \(.id) — \(.reason // "unspecified")")
+            else
+              "ALVO: \($da.seed_targets[0]) — Demand: \((($da.dense_tokens // [])[0:3] | join(" ")))"
+            end
+          ),
+          (
+            if (($da.done_when // []) | length) > 0 then
+              "DONE WHEN: \($da.done_when | join(" | "))"
+            else empty end
+          ),
+          (
+            if (($da.dense_tokens // []) | length) > 0 then
+              "TOKENS: \($da.dense_tokens | join(", "))"
+            else empty end
+          ),
+          ""
+        end
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${lines}" ]] || return 0
+  printf '%s\n' "${lines}"
+}
+
+# Runtime tribunal snapshot for validation prompts (from handover + optional tools).
+aegis_format_tribunal_summary_section() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  jq -r '
+    .artifact_snapshot as $snap
+    | ($snap.operational_context // {}) as $oc
+    | ($oc.findings // $snap.findings // []) as $f
+    | ($oc.candidate_result // {}) as $c
+    | ($c.files_changed // $oc.files_changed // []) as $files
+    | "=== TRIBUNAL SUMMARY (runtime) ===",
+      "",
+      "candidate_files: " + (if ($files | length) > 0 then ($files | join(", ")) else "(none)" end),
+      "findings_count: " + (($f | length) | tostring),
+      "blocking_findings: " + ([ $f[]? | select(
+          (.supported_by_evidence == true)
+          and ((.severity == "high") or (.severity == "medium"))
+        )] | length | tostring),
+      "adversarial_status: " + (
+        if ($snap.mode == "adversarial") then ($oc.status // $snap.status // "?")
+        else ($oc.status // "n/a") end
+      ),
+      "Prefer tools + evidence-backed findings; do not invent new defects.",
+      ""
+  ' "${handover}" 2>/dev/null || true
 }

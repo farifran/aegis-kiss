@@ -169,6 +169,54 @@ EOF
   fi
 }
 
+# Soft gate: dense demand tokens should appear in added mutation lines.
+# Default: warn only. Set AEGIS_DEMAND_TOKEN_PREFLIGHT=hard to fail.
+assert_demand_tokens_in_mutation_diff() {
+  local diff_content="${1-}"
+  [[ -n "${diff_content}" ]] || return 0
+  [[ "${AEGIS_MODE:-}" == "repair" ]] || return 0
+
+  if ! declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local tokens token hit=0
+  tokens="$(aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}")"
+  [[ -n "${tokens}" ]] || return 0
+
+  local added
+  added="$(
+    printf '%s\n' "${diff_content}" \
+      | grep -E '^\+' \
+      | grep -vE '^\+\+\+' \
+      | tr '[:upper:]' '[:lower:]' \
+      || true
+  )"
+  [[ -n "${added}" ]] || return 0
+
+  while IFS= read -r token; do
+    [[ -n "${token}" ]] || continue
+    [[ "${#token}" -ge 4 ]] || continue
+    if printf '%s' "${added}" | grep -Fqi -- "${token}"; then
+      hit=1
+      break
+    fi
+  done <<< "${tokens}"
+
+  if [[ "${hit}" -eq 1 ]]; then
+    return 0
+  fi
+
+  local token_list
+  token_list="$(printf '%s' "${tokens}" | tr '\n' ' ')"
+  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-soft}" == "hard" ]]; then
+    aegis_warn "demand_token_preflight_miss (hard): none of [${token_list}] in added lines"
+    return 1
+  fi
+  aegis_warn "demand_token_preflight_miss: none of [${token_list}] appear in added diff lines"
+  return 0
+}
+
 run_mutation_preflight() {
 
   local preflight_script="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_preflight.sh"
@@ -184,18 +232,24 @@ run_mutation_preflight() {
   # typescript debt outside the candidate (baseline pollution), and so
   # smoke.import only loads model-authored paths (not node_modules residue).
   local changed_files=""
+  local surface_diff=""
+  surface_diff="$(capture_worktree_diff)"
   changed_files="$(
-    list_mutation_changed_paths "$(capture_worktree_diff)"
+    list_mutation_changed_paths "${surface_diff}"
   )"
 
   # Return status only — caller owns rollback / fix-retry policy.
-  AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
+  if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
     AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
     bash "${preflight_script}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}" \
-      "${AIDER_CAPABILITY_PAYLOAD_DIR}"
+      "${AIDER_CAPABILITY_PAYLOAD_DIR}"; then
+    return 1
+  fi
+
+  assert_demand_tokens_in_mutation_diff "${surface_diff}"
 }
 
 # Preflight with bounded model fix retries. Prints the final surface diff

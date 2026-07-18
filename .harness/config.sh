@@ -488,13 +488,13 @@ declare -ar AEGIS_VALIDATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
 )
 
+# Adversarial is tools + candidate falsification — search_symbol is noise.
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
   "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "typescript.check"
   "eslint.check"
   "test.run"
-  "filesystem.search_symbol"
 )
 
 declare -ar AEGIS_MUTATION_EVIDENCE=(

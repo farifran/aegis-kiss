@@ -224,6 +224,12 @@ assemble_bounded_capability_context() {
       aegis_format_demand_anchors_section
     fi
 
+    # Validation: compact tribunal view from handover (tools already ran upstream).
+    if [[ "${AEGIS_MODE}" == "validation" ]] \
+      && declare -f aegis_format_tribunal_summary_section >/dev/null 2>&1; then
+      aegis_format_tribunal_summary_section
+    fi
+
     echo "=== INVESTIGATION INPUT ==="
     echo
     printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"

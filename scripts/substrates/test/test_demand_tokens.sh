@@ -314,10 +314,14 @@ echo "${anchors_h}" | jq -e '
 ' >/dev/null \
   || fail "demand_anchors_handover_seed: ${anchors_h}"
 
-# section formatter emits header + json
+# section formatter: human lines + json
 section="$(aegis_format_demand_anchors_section "${anchors}")"
 printf '%s' "${section}" | grep -q 'DEMAND ANCHORS' \
   || fail "demand_anchors_section_missing_header"
+printf '%s' "${section}" | grep -q '^SEED:' \
+  || fail "demand_anchors_section_missing_seed_line"
+printf '%s' "${section}" | grep -q '^TOKENS:' \
+  || fail "demand_anchors_section_missing_tokens_line"
 printf '%s' "${section}" | grep -q 'dense_tokens' \
   || fail "demand_anchors_section_missing_json"
 
@@ -327,5 +331,105 @@ echo "${named_a}" | jq -e '
   (.operator_named_paths | index("src/index.ts")) != null
 ' >/dev/null \
   || fail "demand_anchors_operator_path: ${named_a}"
+
+# structured demand → goal / targets_header / done_when
+structured_demand="$(cat <<'EOF'
+## Goal
+Add terabits conversion helper.
+
+## Targets
+- src/index.ts
+
+## Acceptance
+- terabitsToGigabits(1) returns 1024
+- exported from index
+
+## Change
+one function
+
+## Out of scope
+UI
+EOF
+)"
+struct_a="$(aegis_materialize_demand_anchors_json "${structured_demand}" "" "")"
+echo "${struct_a}" | jq -e '
+  (.goal | test("terabits"; "i"))
+  and (.targets_header | index("src/index.ts")) != null
+  and (.done_when | length) >= 1
+  and (.done_when[0] | test("1024|terabits"; "i"))
+' >/dev/null \
+  || fail "structured_demand_anchors_incomplete: ${struct_a}"
+struct_sec="$(aegis_format_demand_anchors_section "${struct_a}")"
+printf '%s' "${struct_sec}" | grep -q '^GOAL:' \
+  || fail "structured_section_missing_goal"
+printf '%s' "${struct_sec}" | grep -q '^DONE WHEN:' \
+  || fail "structured_section_missing_done_when"
+
+# discovery scrub: false "operator named" when no operator paths
+export AEGIS_MODE="discovery"
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
+raw_scrub='{
+  "observations": [
+    "Operator named src/index.ts; Layer 0 lists it as an entrypoint."
+  ],
+  "rationale": "Operator named src/index.ts without demand path.",
+  "required_evidence": ["filesystem.read:src/index.ts"]
+}'
+ctx_scrub="$(
+  printf '%s' "${ctx_disc}" | jq \
+    --argjson named '[]' \
+    --argjson seed '["src/index.ts"]' \
+    '.operator_named_paths = $named | .seed_targets = $seed'
+)"
+enriched_scrub="$(enrich_cognitive_artifact "${raw_scrub}" "${ctx_scrub}")"
+echo "${enriched_scrub}" | jq -e '
+  (.operational_context.operational_observations | tostring | test("Operator named"; "i") | not)
+  and (.operational_context.rationale | tostring | test("Operator named"; "i") | not)
+' >/dev/null \
+  || fail "discovery_should_scrub_false_operator_named: ${enriched_scrub}"
+
+# forensics handoff section for repair
+tmp_fh="$(mktemp)"
+jq -n \
+  --argjson anchors "${struct_a}" \
+  '{
+    artifact_snapshot: {
+      mode: "forensics",
+      investigation_input: "terabits",
+      generated_at: "2026-07-18T00:00:00Z",
+      operational_context: {
+        status: "interpreted",
+        repair_candidates: [
+          {id: "src/index.ts", reason: "Demand: terabits gigabits"}
+        ],
+        demand_anchors: $anchors
+      }
+    },
+    epistemic_state: {
+      next_attention_targets: ["src/index.ts"],
+      attention_scope: "forensics",
+      attention_reason: "test"
+    }
+  }' > "${tmp_fh}"
+handoff="$(aegis_format_forensics_handoff_section "${tmp_fh}")"
+rm -f "${tmp_fh}"
+printf '%s' "${handoff}" | grep -q 'FORENSICS HANDOFF' \
+  || fail "forensics_handoff_missing_header: ${handoff}"
+printf '%s' "${handoff}" | grep -q 'ALVO: src/index.ts' \
+  || fail "forensics_handoff_missing_alvo: ${handoff}"
+
+# demand token preflight soft miss
+export AEGIS_MODE="repair"
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
+# shellcheck disable=SC1091
+source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh" 2>/dev/null || true
+if declare -f assert_demand_tokens_in_mutation_diff >/dev/null 2>&1; then
+  bad_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function power(x: number): number { return x; }\n'
+  assert_demand_tokens_in_mutation_diff "${bad_diff}" \
+    || fail "soft_token_preflight_should_warn_not_fail"
+  good_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToGigabits(t: number): number { return t * 1024; }\n'
+  assert_demand_tokens_in_mutation_diff "${good_diff}" \
+    || fail "token_preflight_should_pass_when_token_in_diff"
+fi
 
 echo "[AEGIS][TEST] demand tokens passed"
