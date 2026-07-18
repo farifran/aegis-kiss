@@ -15,7 +15,7 @@ export function bytesToKilobits(bytes: number): number {
 }
 
 export function terabitsToMegabits(terabits: number): number {
-  return terabits * 1024 * 1024;
+  return terabits * 1024;
 }
 
 export function bytesToGigabits(bytes: number): number {
@@ -32,4 +32,8 @@ export function megabytesToPentabits(megabytes: number): number {
 
 export function gigabytesToPentabits(gigabytes: number): number {
   return gigabytes * 1024 * 1024 * 1024 * 1024;
+}
+
+export function bitsToPentabits(bits: number): number {
+  return bits / (1024 * 1024 * 1024 * 1024);
 }
