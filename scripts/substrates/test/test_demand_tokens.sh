@@ -487,10 +487,15 @@ echo "${for_mech}" | jq -e '
   || fail "mechanical_forensics_shape: ${for_mech}"
 
 # multi-seed, both no demand hits → probe tie → needs LLM
-jq -n '{
-  success: true,
-  payload: { attention_targets: ["src/index.ts", "src/ui/fake_import.ts"] }
-}' > "${for_pd}/runtime_attention_seed.json"
+# (do not use src/index.ts — product files may already contain demand tokens)
+_tie_a="src/.aegis_test_forensics_tie_a.ts"
+_tie_b="src/.aegis_test_forensics_tie_b.ts"
+printf '%s\n' 'export function alphaHelper(): void {}' > "${_tie_a}"
+printf '%s\n' 'export function betaHelper(): void {}' > "${_tie_b}"
+jq -n \
+  --arg a "${_tie_a}" --arg b "${_tie_b}" \
+  '{ success: true, payload: { attention_targets: [ $a, $b ] } }' \
+  > "${for_pd}/runtime_attention_seed.json"
 if ! aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
   fail "forensics_auto_should_need_llm_on_multi_seed_tie"
 fi
@@ -502,6 +507,7 @@ fi
 if ! AEGIS_FORENSICS_LLM=1 aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
   fail "forensics_llm=1_should_force_llm"
 fi
+rm -f "${_tie_a}" "${_tie_b}"
 
 # multi-seed with unique probe winner → mechanical (no LLM)
 _win_a="src/.aegis_test_forensics_win_a.ts"
@@ -708,6 +714,31 @@ if declare -f enrich_cognitive_artifact >/dev/null 2>&1; then
     and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
   ' >/dev/null \
     || fail "validation_should_reject_intent_violations: ${val_out}"
+fi
+
+# Intent metrics (jsonl) when AEGIS_METRICS_FILE is set
+if declare -f record_mutation_intent_metric >/dev/null 2>&1; then
+  metrics_tmp="$(mktemp)"
+  export AEGIS_METRICS_FILE="${metrics_tmp}"
+  export AEGIS_MUTATION_PREFLIGHT_ATTEMPT=0
+  export AEGIS_MODE="repair"
+  export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Megabits"
+  good_m=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToMegabits(t: number): number { return t * 1024; }\n'
+  bad_m=$'diff --git a/src/index.ts b/src/index.ts\n+export function power(x: number): number { return x; }\n'
+  assert_mutation_intent_gates "${good_m}" || fail "metrics_good_should_pass"
+  assert_mutation_intent_gates "${bad_m}" && fail "metrics_bad_should_fail" || true
+  record_mutation_intent_metric "soft_accept" 2 1 "intent"
+  jq -e 'select(.kind=="intent" and .result=="pass")' "${metrics_tmp}" >/dev/null \
+    || fail "metrics_missing_pass: $(cat "${metrics_tmp}")"
+  jq -e 'select(.kind=="intent" and .result=="fail")' "${metrics_tmp}" >/dev/null \
+    || fail "metrics_missing_fail: $(cat "${metrics_tmp}")"
+  jq -e 'select(.kind=="intent" and .result=="soft_accept" and .export_n==1)' "${metrics_tmp}" >/dev/null \
+    || fail "metrics_missing_soft_accept: $(cat "${metrics_tmp}")"
+  # shape
+  jq -e 'select(.kind=="intent") | .violations | type == "array"' "${metrics_tmp}" >/dev/null \
+    || fail "metrics_violations_not_array"
+  rm -f "${metrics_tmp}"
+  unset AEGIS_METRICS_FILE
 fi
 
 echo "[AEGIS][TEST] demand tokens passed"

@@ -265,11 +265,71 @@ collect_mutation_intent_violations() {
   return 1
 }
 
+# Append one intent metric line to AEGIS_METRICS_FILE (jsonl), if set.
+# result: pass | fail | warn_only | soft_accept | fix_attempt
+# optional: attempt (0-based check index), export_n, phase (tools|intent)
+record_mutation_intent_metric() {
+  local result="${1:-}"
+  local attempt="${2:-${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}}"
+  local export_n="${3-}"
+  local phase="${4:-intent}"
+  local policy violations_json export_json
+
+  [[ -n "${result}" ]] || return 0
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+
+  policy="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
+  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
+    policy="hard"
+  fi
+
+  violations_json="[]"
+  if [[ -n "${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-}" ]]; then
+    violations_json="$(
+      printf '%s\n' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" \
+        | awk 'NF' \
+        | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+        || printf '[]'
+    )"
+  fi
+  if ! printf '%s' "${violations_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    violations_json="[]"
+  fi
+
+  if [[ -n "${export_n}" ]]; then
+    export_json="${export_n}"
+  else
+    export_json="null"
+  fi
+
+  jq -cn \
+    --arg kind "intent" \
+    --arg result "${result}" \
+    --arg mode "${AEGIS_MODE:-repair}" \
+    --arg policy "${policy}" \
+    --arg phase "${phase}" \
+    --argjson attempt "${attempt}" \
+    --argjson export_n "${export_json}" \
+    --argjson violations "${violations_json}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{
+      kind: $kind,
+      result: $result,
+      mode: $mode,
+      policy: $policy,
+      phase: $phase,
+      attempt: $attempt,
+      export_n: $export_n,
+      violations: $violations,
+      at: $at
+    }' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 # Policy wrapper: maps soft/hard/off → pass/fail for the preflight loop.
 # Exit 0 = do not block. Exit 1 = intent failure (retry or hard-fail).
 assert_mutation_intent_gates() {
   local diff_content="${1-}"
-  local mode
+  local mode export_n
 
   # Legacy: AEGIS_DEMAND_TOKEN_PREFLIGHT=hard upgrades intent to hard.
   mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
@@ -277,18 +337,26 @@ assert_mutation_intent_gates() {
     mode="hard"
   fi
 
+  export_n="$(count_diff_added_exports "${diff_content}")"
+
   if ! collect_mutation_intent_violations "${diff_content}"; then
     case "$(printf '%s' "${mode}" | tr '[:upper:]' '[:lower:]')" in
       off|0|false|no|warn)
         aegis_warn "mutation_intent (warn-only): ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
+        record_mutation_intent_metric "warn_only" \
+          "${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}" "${export_n}" "intent"
         return 0
         ;;
       hard|soft|retry|*)
         aegis_warn "mutation_intent: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
+        record_mutation_intent_metric "fail" \
+          "${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}" "${export_n}" "intent"
         return 1
         ;;
     esac
   fi
+  record_mutation_intent_metric "pass" \
+    "${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}" "${export_n}" "intent"
   return 0
 }
 
@@ -389,6 +457,8 @@ run_mutation_preflight() {
         "${AIDER_CAPABILITY_PAYLOAD_DIR}"; then
       AEGIS_MUTATION_PREFLIGHT_LAST="tools"
       export AEGIS_MUTATION_PREFLIGHT_LAST
+      record_mutation_intent_metric "fail" \
+        "${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}" "" "tools"
       return 1
     fi
   fi
@@ -430,6 +500,8 @@ run_mutation_preflight_with_fix_attempts() {
   intent_mode="$(printf '%s' "${intent_mode}" | tr '[:upper:]' '[:lower:]')"
 
   while true; do
+    AEGIS_MUTATION_PREFLIGHT_ATTEMPT="${preflight_attempt}"
+    export AEGIS_MUTATION_PREFLIGHT_ATTEMPT
     if run_mutation_preflight; then
       break
     fi
@@ -448,6 +520,10 @@ run_mutation_preflight_with_fix_attempts() {
         # Re-collect diagnostics on final diff for the stamp.
         diff_content="$(capture_worktree_diff)"
         collect_mutation_intent_violations "${diff_content}" || true
+        record_mutation_intent_metric "soft_accept" \
+          "${preflight_attempt}" \
+          "$(count_diff_added_exports "${diff_content}")" \
+          "intent"
         break
       fi
       rollback_execution_surface
@@ -456,9 +532,12 @@ run_mutation_preflight_with_fix_attempts() {
 
     aegis_warn "mutation_preflight_failed (${AEGIS_MUTATION_PREFLIGHT_LAST:-?}) — fix attempt ${preflight_attempt}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
 
-    local fix_prompt
+    local fix_prompt fix_phase
+    fix_phase="${AEGIS_MUTATION_PREFLIGHT_LAST:-tools}"
+    record_mutation_intent_metric "fix_attempt" \
+      "${preflight_attempt}" "" "${fix_phase}"
     fix_prompt="$(aider_mktemp)"
-    if [[ "${AEGIS_MUTATION_PREFLIGHT_LAST:-}" == "intent" ]]; then
+    if [[ "${fix_phase}" == "intent" ]]; then
       assemble_intent_fix_prompt \
         "${fix_prompt}" \
         "${resolved_edit_format}" \
