@@ -100,7 +100,10 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS` | tsc/test/smoke fix retries (default 2) |
 | `AEGIS_MUTATION_MAX_NEW_EXPORTS` | Over-delivery cap (default 1) |
 | `AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES` | Cap on REPAIR RESULT diff in optimize prompt (default 12000) |
-| `AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS` | Max optimize→repair refine loops (default **1**) |
+| `AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES` | Cap per post-repair file body in optimize prompt (default 8000) |
+| `AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES` | Max files materialized for optimize bodies (default 4) |
+| `OPENAI_MODEL_OPTIMIZE` | Model for optimize raw (default = readonly cognition) |
+| `AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS` | Max optimize→repair refine loops (default **1**); 2nd optimize is mechanical no-LLM passthrough |
 | `AEGIS_OPTIMIZE_REPAIR_LOOP=true\|false` | Enable can_improve → repair re-entry (default true) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 

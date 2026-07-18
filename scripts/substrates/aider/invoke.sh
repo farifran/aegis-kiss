@@ -206,17 +206,10 @@ invoke_aider() {
   printf -v lint_gate_cmd 'bash "%s"' \
     "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"
 
-  # Optional stronger/cheaper model for optimize only.
-  local aider_model="${AEGIS_AIDER_MODEL}"
-  if [[ "${AEGIS_MODE:-}" == "optimize" ]] \
-    && [[ -n "${AEGIS_AIDER_MODEL_OPTIMIZE:-}" ]]; then
-    aider_model="${AEGIS_AIDER_MODEL_OPTIMIZE}"
-  fi
-
   local aider_cmd=(
     "${AEGIS_AIDER_BIN}"
     "--config" "${mutation_conf}"
-    "--model" "${aider_model}"
+    "--model" "${AEGIS_AIDER_MODEL}"
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
     "--timeout" "${AEGIS_AIDER_TIMEOUT}"
@@ -260,7 +253,7 @@ invoke_aider() {
   clear_aider_history_residue
 
   aegis_log "Invoking aider mutation substrate..."
-  aegis_log "Model: ${aider_model}"
+  aegis_log "Model: ${AEGIS_AIDER_MODEL}"
   aegis_log "Edit format: ${resolved_edit_format}"
   aegis_log "Targets: ${file_args[*]:-<none>}"
 

@@ -28,7 +28,7 @@
 | Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |
 | Soft-accept → `intent_violations` → validation `demand_mismatch` feedback | stamp + `repair_feedback` + `aegis_format_repair_feedback_section` |
 | Intent metrics jsonl (`pass`/`fail`/`soft_accept`/`fix_attempt`) | `record_mutation_intent_metric` → `AEGIS_METRICS_FILE` |
-| Profiles lean: forensics sem git.status; optimize/adversarial sem demand_anchors | config evidence profiles |
+| Profiles lean: forensics sem git.status; optimize handover-only + sem demand anchors no prompt | config + raw/prompt |
 
 ### Ainda proposta (não implementado)
 

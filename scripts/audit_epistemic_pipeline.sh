@@ -328,11 +328,11 @@ main() {
   record_boundary \
     "Repair -> Optimize" \
     '["diff","files_changed","handover_attention"]' \
-    '["epistemic_state.next_attention_targets","original investigation_input"]' \
-    '["diff","files_changed"]' \
+    '["filesystem.read:epistemic_handover","REPAIR RESULT","optimize skill plan"]' \
+    '["status","improvements","candidate_result(from repair)"]' \
     "$(verdict check_repair_to_optimize)" \
-    "The runtime reconstructs the Repair candidate from diff and files_changed before Optimize executes." \
-    "Repair emits diff and files_changed, but Optimize starts from HEAD and consumes only target attention; the repaired state is discarded with the worktree."
+    "Optimize is raw advisory: judges Repair via REPAIR RESULT; can_improve re-enters Repair once; else passthrough." \
+    "Optimize skill/engine contract missing (raw + can_improve / no_improvement_needed)."
 
   record_boundary \
     "Optimize -> Adversarial" \

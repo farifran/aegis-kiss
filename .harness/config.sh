@@ -161,8 +161,12 @@ if [[ -z "${AEGIS_AIDER_MODEL:-}" ]] && [[ -n "${AEGIS_MUTATION_MODEL}" ]]; then
   fi
 fi
 
+# Optimize advisory may use a stronger/cheaper JSON model than residual cognition.
+: "${OPENAI_MODEL_OPTIMIZE:=${OPENAI_MODEL_READONLY_COGNITION:-}}"
+
 export AEGIS_MODEL_RESOLVED=1
 export OPENAI_MODEL_READONLY_COGNITION="${OPENAI_MODEL_READONLY_COGNITION:-}"
+export OPENAI_MODEL_OPTIMIZE="${OPENAI_MODEL_OPTIMIZE:-}"
 export AEGIS_MUTATION_MODEL="${AEGIS_MUTATION_MODEL:-}"
 export AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}"
 
@@ -171,6 +175,7 @@ export AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}"
 
 export OPENAI_API_BASE
 export OPENAI_MODEL_READONLY_COGNITION
+export OPENAI_MODEL_OPTIMIZE
 export AEGIS_MUTATION_MODEL
 export AEGIS_AIDER_MODEL
 export AEGIS_AIDER_BIN
@@ -399,7 +404,8 @@ declare -Ar AEGIS_MODE_CAPABILITY_MAP=(
   ["validation"]="AEGIS_BASE_CAPABILITIES"
   ["adversarial"]="AEGIS_BASE_CAPABILITIES"
   ["repair"]="AEGIS_MUTATION_CAPABILITIES"
-  ["optimize"]="AEGIS_MUTATION_CAPABILITIES"
+  # Advisory only — lean envelope (evidence is handover-only).
+  ["optimize"]="AEGIS_BASE_CAPABILITIES"
 )
 
 # =========================================================

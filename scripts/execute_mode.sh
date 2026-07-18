@@ -473,7 +473,6 @@ invoke_aider_substrate() {
     AEGIS_POCKET_MAP_FILE="${AEGIS_POCKET_MAP_FILE:-}" \
     AEGIS_CONSTITUTIONAL_PREAMBLE="${AEGIS_CONSTITUTIONAL_PREAMBLE:-}" \
     AEGIS_AIDER_MODEL="${AEGIS_AIDER_MODEL:-}" \
-    AEGIS_AIDER_MODEL_OPTIMIZE="${AEGIS_AIDER_MODEL_OPTIMIZE:-}" \
     AEGIS_AIDER_BIN="${AEGIS_AIDER_BIN:-}" \
     AEGIS_MUTATION_GIT_DIR="${AEGIS_MUTATION_GIT_DIR:-}" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" \
@@ -490,9 +489,6 @@ invoke_aider_substrate() {
     AEGIS_DEMAND_TOKEN_PREFLIGHT="${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" \
     AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS="${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:-}" \
     AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE:-}" \
-    AEGIS_OPTIMIZE_MIN_LINES="${AEGIS_OPTIMIZE_MIN_LINES:-}" \
-    AEGIS_OPTIMIZE_LLM="${AEGIS_OPTIMIZE_LLM:-}" \
-    AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES="${AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES:-}" \
     bash scripts/substrates/aider_substrate.sh \
       "${skill_file}" \
       "${capability_payload_dir}"
@@ -763,6 +759,22 @@ execute_substrate() {
     return 0
   fi
 
+  # Optimize after refine: cap already spent — passthrough without LLM (P0/A1).
+  if [[ "${AEGIS_MODE}" == "optimize" ]] \
+    && [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT:-0}" -ge 1 ]]; then
+    declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
+      || aegis_fatal "optimize_passthrough_unavailable"
+    substrate_output="$(
+      aegis_emit_mechanical_optimize_passthrough \
+        "optimize_passthrough_after_refine"
+    )" || substrate_output=""
+    [[ -n "${substrate_output}" ]] \
+      || aegis_fatal "optimize_passthrough_failed"
+    aegis_log "optimize_passthrough: after refine (count=${AEGIS_OPTIMIZE_REPAIR_COUNT}) — no LLM"
+    AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+    return 0
+  fi
+
   # Forensics: AEGIS_FORENSICS_USE_LLM set once in main (evidence + substrate).
   # Search omitted on mechanical evidence path; re-materialize on LLM fallthrough.
   if [[ "${AEGIS_MODE}" == "forensics" ]] \
@@ -805,9 +817,13 @@ execute_substrate() {
   case "${AEGIS_EXECUTION_ENGINE}" in
 
     raw)
+      local raw_model="${OPENAI_MODEL_READONLY_COGNITION}"
+      if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+        raw_model="${OPENAI_MODEL_OPTIMIZE:-${OPENAI_MODEL_READONLY_COGNITION}}"
+      fi
       substrate_output="$(
         invoke_raw_substrate \
-          "${OPENAI_MODEL_READONLY_COGNITION}" \
+          "${raw_model}" \
           "${AEGIS_SKILL_FILE}" \
           "${AEGIS_SELECTED_MANIFEST}" \
           "${AEGIS_CAPABILITY_PAYLOAD_DIR}"

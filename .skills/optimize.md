@@ -17,9 +17,10 @@ Emit **JSON only** inside the artifact markers. No markdown fences, no prose out
 
 ## What you read (later in this prompt)
 
-1. **REPAIR RESULT** — `files_changed` + unified **diff** (primary evidence). Judge **this delta**, not the whole repo.  
-2. Investigation input — **already implemented by Repair**. Closed. Do not re-open the demand or invent features.  
-3. Optional evidence — read-only; never invent paths from it.
+1. **REPAIR RESULT** — `files_changed` + unified **diff** (primary delta). Judge **this**, not the whole repo.  
+2. **POST-REPAIR FILE BODIES** — file contents **after** applying the Repair diff (when present). Use them to verify “unused”, types, and safe edits.  
+3. Investigation input — **already implemented by Repair**. Closed. Do not re-open the demand or invent features.  
+4. Optional evidence — read-only; never invent paths from it.
 
 If REPAIR RESULT is missing/empty → `no_improvement_needed`, `improvements: []`.
 
@@ -32,7 +33,7 @@ If REPAIR RESULT is missing/empty → `no_improvement_needed`, `improvements: []
 3. **Would need** new file, rename/remove public export, new API, parallel helper, npm package, or scope outside `files_changed`? → `no_improvement_needed`  
 4. **Would re-implement the demand** or strip what Repair correctly added? → `no_improvement_needed`  
 5. **Repair already minimal** for the demand (short clear diff, correct API)? → `no_improvement_needed`  
-6. **Otherwise**, only if you can write **1 (prefer) to 3** items that pass every gate below → `can_improve`
+6. **Otherwise**, only if you can write **exactly one** item that passes every gate below → `can_improve`
 
 ---
 
@@ -88,7 +89,7 @@ Everything else → `no_improvement_needed`.
 - Cross-file moves / “architecture”  
 - Dependencies for what the language already provides  
 - Speculative performance or “future-proofing”  
-- More than **three** improvements (prefer **one**)
+- More than **one** improvement (runtime keeps only the first valid item)
 
 ---
 
@@ -120,7 +121,7 @@ Everything else → `no_improvement_needed`.
 |-------|------|
 | `status` | Exactly `no_improvement_needed` or `can_improve` |
 | `basis` | Non-empty; one sentence for the **verdict** (not the full plan) |
-| `improvements` | `[]` when no_improvement; **1–3** when can_improve (**prefer 1**) |
+| `improvements` | `[]` when no_improvement; runtime keeps **at most one** valid item |
 | `target_files` | Non-empty array; each path ∈ REPAIR RESULT `files_changed` |
 | `change` | Non-empty imperative edit instruction (see shape above) |
 | `why_safe` | Non-empty; empty items are **dropped by runtime** |

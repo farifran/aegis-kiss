@@ -224,7 +224,9 @@ assemble_bounded_capability_context() {
     echo
     # Mechanical demand projection — before free-text so floor models
     # bind to operator paths / dense tokens / seed without re-parsing prose.
-    if declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
+    # Optimize: omit anchors (demand already closed by Repair; avoids 2nd-repair drift).
+    if [[ "${AEGIS_MODE}" != "optimize" ]] \
+      && declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
       aegis_format_demand_anchors_section
     fi
 
@@ -234,16 +236,30 @@ assemble_bounded_capability_context() {
       aegis_format_tribunal_summary_section
     fi
 
-    # Optimize: Repair delta to judge (advise only — no second mutation here).
-    if [[ "${AEGIS_MODE}" == "optimize" ]] \
-      && declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
-      aegis_format_repair_result_section \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+    # Optimize: Repair delta + post-repair file bodies (advise only).
+    if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+      if declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
+        aegis_format_repair_result_section \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+      fi
+      if declare -f aegis_format_repair_file_bodies_section >/dev/null 2>&1; then
+        aegis_format_repair_file_bodies_section \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}" \
+          "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
+      fi
     fi
 
-    echo "=== INVESTIGATION INPUT ==="
-    echo
-    printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
+    if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+      echo "=== INVESTIGATION INPUT (closed — already satisfied by Repair) ==="
+      echo
+      echo "Do not re-open or re-implement this demand. Judge REPAIR RESULT only."
+      echo
+      printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
+    else
+      echo "=== INVESTIGATION INPUT ==="
+      echo
+      printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
+    fi
 
     echo
     echo "=== MANIFEST EXECUTION METADATA ==="

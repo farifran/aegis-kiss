@@ -875,14 +875,18 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
             ]
           ) as $tf
         | select(($tf | length) > 0)
-        | select((($imp.change // "") | type == "string") and (($imp.change // "") | length) > 0)
+        | select((($imp.change // "") | type == "string"))
         | select((($imp.why_safe // "") | type == "string") and (($imp.why_safe // "") | length) > 0)
+        # P1: reject vague / too-short change lines (Repair cannot act).
+        | select((.change | length) >= 24)
+        | select(.change | test("(?i)\\b(add|remove|delete|give|inline|collapse|replace|use|set|fix|strip|drop|type|explicit|return|export|unused|local|duplicate|rename|convert|extract)\\b"))
+        | select((.change | test("(?i)^(improve|clean\\s*up|cleanup|refactor|consider|maybe|make it|prettier|more idiomatic|better)\\b")) | not)
         | {
             target_files: $tf,
-            change: $imp.change,
-            why_safe: $imp.why_safe
+            change: .change,
+            why_safe: .why_safe
           }
-      ][0:3]
+      ][0:1]
     ) as $valid_imps
   | (
       (.status // "") as $raw_st

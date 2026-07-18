@@ -29,3 +29,7 @@ export function bytesToPentabits(bytes: number): number {
 export function megabytesToPentabits(megabytes: number): number {
   return megabytes * 1024 * 1024 * 1024 * 1024;
 }
+
+export function gigabytesToPentabits(gigabytes: number): number {
+  return gigabytes * 1024 * 1024 * 1024 * 1024;
+}

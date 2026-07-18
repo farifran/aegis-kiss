@@ -39,8 +39,8 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
        │                  │              capability_payloads/
        │                  │                      │
        │                  ├── mechanical (discovery always; forensics if clear)
-       │                  ├── raw_llm.sh      (forensics residual, adversarial, validation)
-       │                  └── aider_substrate (repair / optimize)
+       │                  ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
+       │                  └── aider_substrate (repair only)
        │                              │
        │                         framed JSON artifact
        │                              │
@@ -116,7 +116,7 @@ Config lists a base set; execute_mode **re-ranks** and may **omit** search when 
 | discovery | `demand_anchors`, `list_tree`, handover, `layer0_facts`, `attention_seed` | Always mechanical body |
 | forensics | `demand_anchors`, handover, `search_symbol` | **Search omitted** if mechanical; + `filesystem.read` anchors |
 | repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
-| optimize | handover, git.status, tsc, eslint | Lean |
+| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; max 1 improvement; 2nd pass mechanical |
 | adversarial | handover, tsc, eslint, test | No demand search |
 | validation | handover only | Tribunal; may reject on `intent_violations` |
 

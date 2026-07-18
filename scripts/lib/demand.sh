@@ -865,7 +865,7 @@ aegis_format_repair_result_section() {
   {
     echo "=== REPAIR RESULT (runtime) ==="
     echo
-    echo "Repair already applied on the surface. Refine against this delta only — do not re-implement the demand."
+    echo "Judge this Repair delta only (advise; do not edit files; do not re-implement the demand)."
     echo
     echo "files_changed: ${files_line}"
     echo
@@ -877,6 +877,129 @@ aegis_format_repair_result_section() {
     fi
     echo
   }
+}
+
+# Optimize after a refine pass: no second LLM — forward Repair as no_improvement.
+aegis_emit_mechanical_optimize_passthrough() {
+  local basis="${1:-optimize_passthrough_after_refine}"
+  local body
+  body="$(
+    jq -nc --arg basis "${basis}" '{
+      status: "no_improvement_needed",
+      basis: $basis,
+      improvements: []
+    }'
+  )" || return 1
+  aegis_emit_framed_json_artifact "${body}"
+}
+
+# Post-Repair file bodies for optimize (apply candidate on temp copies of HEAD).
+# Args: [handover_path] [repo_root]
+# Env: AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES (default 8000 per file)
+#      AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES (default 4)
+aegis_format_repair_file_bodies_section() {
+  local handover="${1-}"
+  local root="${2:-.}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local max_bytes max_files
+  : "${AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES:=8000}"
+  : "${AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES:=4}"
+  max_bytes="${AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES}"
+  max_files="${AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES}"
+
+  local diff_body files_json
+  diff_body="$(
+    jq -r '
+      .artifact_snapshot as $snap
+      | select($snap.mode == "repair")
+      | ($snap.operational_context.diff // empty)
+      | select(type == "string" and length > 0 and . != "(no changes)")
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${diff_body}" ]] || return 0
+
+  files_json="$(
+    jq -c '
+      .artifact_snapshot as $snap
+      | select($snap.mode == "repair")
+      | [($snap.operational_context.files_changed // [])[]?
+          | select(type == "string" and length > 0)][0:'"${max_files}"']
+    ' "${handover}" 2>/dev/null || printf '[]'
+  )"
+  if ! printf '%s' "${files_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local tmp diff_file path full rel body trunc note n=0
+  tmp="$(mktemp -d 2>/dev/null || true)"
+  [[ -n "${tmp}" && -d "${tmp}" ]] || return 0
+  diff_file="$(mktemp 2>/dev/null || true)"
+  if [[ -z "${diff_file}" ]]; then
+    rm -rf "${tmp}" 2>/dev/null || true
+    return 0
+  fi
+  printf '%s\n' "${diff_body}" > "${diff_file}"
+
+  {
+    echo "=== POST-REPAIR FILE BODIES (runtime; after applying Repair diff) ==="
+    echo
+    echo "Read-only snapshot for judgment. Prefer citing symbols from these bodies + REPAIR RESULT."
+    echo
+  }
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    n=$((n + 1))
+    rel="${path#./}"
+    full="${tmp}/${rel}"
+    mkdir -p "$(dirname "${full}")" 2>/dev/null || true
+    # Baseline from HEAD when tracked; empty for net-new.
+    if git -C "${root}" cat-file -e "HEAD:${rel}" 2>/dev/null; then
+      git -C "${root}" show "HEAD:${rel}" > "${full}" 2>/dev/null || : > "${full}"
+    else
+      : > "${full}"
+    fi
+  done < <(printf '%s' "${files_json}" | jq -r '.[]?')
+
+  # Apply full repair patch into the temp tree (paths match +++ b/...).
+  # Use patch(1) from inside tmp (more portable than git apply --directory).
+  if ! (
+    cd "${tmp}" && patch -p1 --forward --batch --silent < "${diff_file}"
+  ) >/dev/null 2>&1; then
+    # Fallback: still show HEAD bodies if apply fails (better than silence).
+    echo "(post-repair apply failed — showing pre-repair HEAD bodies where available)"
+    echo
+  fi
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    rel="${path#./}"
+    full="${tmp}/${rel}"
+    echo "--- file: ${rel} ---"
+    if [[ ! -f "${full}" ]]; then
+      echo "(missing after apply)"
+      echo
+      continue
+    fi
+    body="$(head -c "$((max_bytes + 1))" "${full}" 2>/dev/null || true)"
+    if [[ "${#body}" -gt "${max_bytes}" ]]; then
+      trunc_note="[AEGIS][FILE_BODY_TRUNCATED:${#body}->${max_bytes}]"
+      body="${body:0:${max_bytes}}"
+      printf '%s\n' "${body}"
+      echo
+      echo "${trunc_note}"
+    else
+      printf '%s\n' "${body}"
+    fi
+    echo
+  done < <(printf '%s' "${files_json}" | jq -r '.[]?')
+
+  rm -f "${diff_file}" 2>/dev/null || true
+  rm -rf "${tmp}" 2>/dev/null || true
 }
 
 # Local re-repair feedback from rejected validation (demand_mismatch + others).
