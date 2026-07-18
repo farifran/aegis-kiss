@@ -399,7 +399,7 @@ echo "${enriched_scrub}" | jq -e '
 ' >/dev/null \
   || fail "discovery_should_clamp_paths_and_mechanical_rationale: ${enriched_scrub}"
 
-# mechanical discovery (no LLM): seed path → reads + observations
+# mechanical discovery: seed path + content probe
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Megabits"
 mech_pd="$(mktemp -d)"
 jq -n '{
@@ -418,20 +418,58 @@ mech="$(aegis_build_mechanical_discovery_json "${AEGIS_INVESTIGATION_INPUT}" "${
 rm -rf "${mech_pd}"
 echo "${mech}" | jq -e '
   (.required_evidence | index("filesystem.read:src/index.ts")) != null
-  and (.observations | length) == 1
+  and (.observations | length) >= 1
   and (.observations[0] | test("src/index.ts"))
-  and (.rationale | test("seed|src/index"; "i"))
+  and (.rationale | test("seed|src/index|token"; "i"))
 ' >/dev/null \
   || fail "mechanical_discovery_seed_shape: ${mech}"
+# content-aware: if index already has megabit/terabit symbols, expect present_hits tone
+if grep -qiE 'megabit|terabit' src/index.ts 2>/dev/null; then
+  echo "${mech}" | jq -e '
+    .observations[0] | test("already contains|demand-related|exists"; "i")
+  ' >/dev/null \
+    || fail "mechanical_discovery_should_report_token_hits: ${mech}"
+fi
 
-# mechanical empty anchors
+# missing path probe
+probe_miss="$(aegis_discovery_probe_path "src/does_not_exist_zz.ts" $'megabits\nterabits' ".")"
+[[ "${probe_miss}" == "missing" ]] \
+  || fail "probe_expected_missing: ${probe_miss}"
+
+# mechanical empty anchors (explicit empty handover/payload — no env leak)
 mech_empty="$(aegis_build_mechanical_discovery_json "the and for para como" "" "")"
 echo "${mech_empty}" | jq -e '
   (.required_evidence | length) == 0
-  and (.observations | length) == 1
+  and (.observations | length) >= 1
   and (.rationale | test("empty"; "i"))
 ' >/dev/null \
   || fail "mechanical_discovery_empty_shape: ${mech_empty}"
+
+# mechanical forensics: single seed → interpreted candidate + directed reason
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Megabits"
+for_pd="$(mktemp -d)"
+jq -n '{
+  success: true,
+  payload: { attention_targets: ["src/index.ts"] }
+}' > "${for_pd}/runtime_attention_seed.json"
+for_mech="$(aegis_build_mechanical_forensics_json "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" "")"
+rm -rf "${for_pd}"
+echo "${for_mech}" | jq -e '
+  .status == "interpreted"
+  and (.repair_candidates | length) == 1
+  and .repair_candidates[0].id == "src/index.ts"
+  and (.repair_candidates[0].reason | test("terabit|megabit|Demand"; "i"))
+  and (.repair_candidates[0].reason | test("power"; "i") | not)
+' >/dev/null \
+  || fail "mechanical_forensics_shape: ${for_mech}"
+
+# forensics empty anchors → inconclusive
+for_empty="$(aegis_build_mechanical_forensics_json "the and for para como" "" "")"
+echo "${for_empty}" | jq -e '
+  .status == "inconclusive"
+  and (.repair_candidates | length) == 0
+' >/dev/null \
+  || fail "mechanical_forensics_empty: ${for_empty}"
 
 # forensics handoff section for repair
 tmp_fh="$(mktemp)"

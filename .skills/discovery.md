@@ -1,46 +1,51 @@
 # MODE 0 — DISCOVERY
 
 ## PURPOSE
-Discovery projects **investigation gaps** for downstream modes (Forensics, Repair).
+Discovery projects **investigation gaps** for Forensics (and later modes).
 
-**Default (product path):** the runtime emits a **mechanical** discovery artifact from demand anchors + Layer0/attention seed — **no LLM**.  
+**Default:** runtime **mechanical** discovery (no LLM) — content-aware probes over demand anchors + Layer0/attention seed.  
 Opt-in model path: `AEGIS_DISCOVERY_LLM=1`.
 
-- Runtime produces facts (`list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`, handover).
-- Discovery states only what evidence is still missing for those anchors.
-- Code meaning and mutation targets are **Forensics** territory.
+- Runtime owns facts: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`, handover.
+- Discovery states what is still missing or ambiguous for those anchors.
+- **Code meaning and mutation choice are Forensics.**
 
-## LAYER 0 / DEMAND ANCHORS (AUTHORITATIVE)
-- Operator-named paths and Layer0/attention seed are mechanical truth.
-- Do **not** invent paths, re-rank Layer0, or restate scores/trees.
-- Do **not** claim “operator named X” unless X appears as an operator-named path in demand anchors.
+## MECHANICAL PROBES (RUNTIME)
+For each operator-named or seed path:
 
-## NET-NEW FILE CREATION
-Only when the investigation input **explicitly** names a repository-relative path (e.g. create `src/feature/widget.ts`):
-- Include `filesystem.read:<that path>` in `required_evidence`.
-- Never invent or copy example paths.
+| Path state | Observation meaning |
+|---|---|
+| **missing** | Net-new / absent — read still materializes absence; create only if operator-named |
+| **present, no demand-token hits** | Likely mutation site — forensics needs file body |
+| **present, token/export hits** | Demand-related identifiers already in file — forensics confirms edit vs already-satisfied |
 
-## CONSTRAINTS (LLM path only — `AEGIS_DISCOVERY_LLM=1`)
-1. Observations = investigation gaps only (not what the code does).
-2. No metric dumps, architecture labels, domain invention, risk, or topology graphs.
-3. Paths in observations must be operator-named or seed targets only.
-4. Runtime injects mode, scope, attention, evidence identity — do not emit them.
+Dense tokens come from demand anchors. Empty path anchors → weak targeting + token hint for `search_symbol` when tokens exist.
 
-## JSON SCHEMA — MINIMAL COGNITIVE ARTIFACT
+## LAYER 0 / DEMAND ANCHORS
+Authoritative. Do not invent paths, re-rank Layer0, or restate scores.  
+Never claim “operator named X” unless X is an operator-named path in anchors.
+
+## NET-NEW
+Only paths **explicitly** written in the investigation input. Never invent examples.
+
+## CONSTRAINTS (LLM path — `AEGIS_DISCOVERY_LLM=1` only)
+1. Observations = investigation gaps only.
+2. No code narrative, metrics dump, architecture labels, domain invention, risk, topology graphs.
+3. Paths in observations ⊆ operator-named ∪ seed only.
+4. Do not emit mode / scope / attention / evidence identity (runtime injects).
+
+## JSON SCHEMA — MINIMAL ARTIFACT
 ```json
 {
   "observations": [
-    "Investigation needs content of src/index.ts before forensics can choose a mutation target."
+    "Path src/index.ts exists; demand tokens not found in content — likely mutation target; forensics needs file body."
   ],
-  "rationale": "Attention seed (layer0): src/index.ts",
+  "rationale": "Attention seed (attention_seed): src/index.ts; tokens: terabits, megabits",
   "required_evidence": ["filesystem.read:src/index.ts"]
 }
 ```
 
 ## FIELDS
-- **`observations`**: one gap per line; every line must change what forensics can do.
-- **`rationale`**: one dense prioritization fact (mechanical when anchors exist).
-- **`required_evidence`**: `filesystem.read:<path>` only for mechanical paths.
-
-## FAILURE / EMPTY ANCHORS
-If there is no operator-named path and no seed target: one observation that targeting will be weak; `required_evidence: []`.
+- **`observations`**: one fact per line; each must change what forensics does.
+- **`rationale`**: dense prioritization (paths + tokens).
+- **`required_evidence`**: `filesystem.read:<path>` for probed mechanical paths.

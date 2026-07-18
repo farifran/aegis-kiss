@@ -23,11 +23,11 @@ export function power(base: number, exponent: number): number {
 }
 
 export function terabitsToMegabits(terabits: number): number {
-  return terabits * 1024 * 1024;
+  return terabits * 1024 * 1024 * 125000;
 }
 
 export function terabitsToGigabits(terabits: number): number {
-  return terabits * 1024;
+  return terabits * 1024 * 1024;
 }
 
 export function terabitsToBytes(terabits: number): number {
@@ -36,4 +36,12 @@ export function terabitsToBytes(terabits: number): number {
 
 export function terabitsToKilobits(terabits: number): number {
   return terabits * 1024 * 1024;
+}
+
+export function terabytesToMegabytes(terabytes: number): number {
+  return terabytes * 1280000000;
+}
+
+export function terabytesToGigabytes(terabytes: number): number {
+  return terabytes * 1024 * 1024;
 }

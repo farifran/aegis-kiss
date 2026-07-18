@@ -703,15 +703,18 @@ readonly AEGIS_JQ_ENRICH_LIB='
   def scrub_observation_list($arr; $named):
     [($arr // [])[] | scrub_false_operator_claim(.; $named)];
 
-  def mechanical_discovery_rationale($named; $seed; $seed_source):
-    if ($named | length) > 0 then
-      "Operator-named path(s): " + ($named | join(", "))
-        + (if ($seed | length) > 0 then "; seed: " + ($seed | join(", ")) else "" end)
-    elif ($seed | length) > 0 then
-      "Attention seed (" + ($seed_source // "seed") + "): " + ($seed | join(", "))
-    else
-      "empty demand path anchors"
-    end;
+  def mechanical_discovery_rationale($named; $seed; $seed_source; $tokens):
+    (
+      if ($named | length) > 0 then
+        "Operator-named path(s): " + ($named | join(", "))
+          + (if ($seed | length) > 0 then "; seed: " + ($seed | join(", ")) else "" end)
+      elif ($seed | length) > 0 then
+        "Attention seed (" + ($seed_source // "seed") + "): " + ($seed | join(", "))
+      else
+        "empty demand path anchors"
+      end
+    )
+    + (if (($tokens // []) | length) > 0 then "; tokens: " + ($tokens | join(", ")) else "" end);
 '
 
 # Common bind + identity injection used by every mode program.
@@ -774,7 +777,7 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
   # Prefer mechanical rationale whenever anchors exist (drops scrub garbage).
   | (
       if ($seed_att | length) > 0 then
-        [mechanical_discovery_rationale($operator_named_paths; $seed_targets; $seed_src)]
+        [mechanical_discovery_rationale($operator_named_paths; $seed_targets; $seed_src; $dense_tokens)]
       else
         (
           ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end)
