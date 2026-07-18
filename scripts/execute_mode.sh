@@ -735,26 +735,22 @@ execute_substrate() {
 
   local substrate_output
 
-  # Discovery / forensics default: mechanical substrate — does NOT load
-  # .skills/*.md (skill is contract + LLM residual only). Skill file still
-  # must exist on disk for fallthrough / force-LLM and runtime preconditions.
-  #
-  # Discovery: force model only with AEGIS_DISCOVERY_LLM=1.
-  if [[ "${AEGIS_MODE}" == "discovery" ]] \
-    && [[ "${AEGIS_DISCOVERY_LLM:-0}" != "1" ]] \
-    && declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1; then
+  # Discovery is always mechanical (no LLM path). Skill .md is contract/docs
+  # only — never loaded into a model for this mode.
+  if [[ "${AEGIS_MODE}" == "discovery" ]]; then
+    declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1 \
+      || aegis_fatal "discovery_mechanical_unavailable"
     substrate_output="$(
       aegis_emit_mechanical_discovery_substrate \
         "${AEGIS_INVESTIGATION_INPUT:-}" \
         "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
         "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
     )" || substrate_output=""
-    if [[ -n "${substrate_output}" ]]; then
-      aegis_log "discovery_mechanical: skipped LLM+skill (anchor projection)"
-      AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-      return 0
-    fi
-    aegis_warn "discovery_mechanical_failed — falling back to LLM substrate (skill loaded)"
+    [[ -n "${substrate_output}" ]] \
+      || aegis_fatal "discovery_mechanical_failed"
+    aegis_log "discovery_mechanical: runtime-only (no LLM)"
+    AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+    return 0
   fi
 
   # Forensics: AEGIS_FORENSICS_USE_LLM set once in main (evidence + substrate).

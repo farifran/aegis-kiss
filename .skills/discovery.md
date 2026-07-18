@@ -1,14 +1,11 @@
 # MODE — DISCOVERY
 
-## AUTHORITY (read this first)
+## AUTHORITY
 
-| Path | Who runs | Loads this file? |
-|------|----------|------------------|
-| **Default mechanical** | Runtime (`aegis_build_mechanical_discovery_json`) | **No** — probes + anchors only |
-| **LLM opt-in** | Model via raw substrate | **Yes** — system prompt (`AEGIS_DISCOVERY_LLM=1`) |
-
-This file is a **mode contract** (schema + LLM rules + human doc).  
-It is **not** the mechanical implementation. Runtime code is the source of truth for the default path.
+**Runtime-only.** Discovery never runs an LLM substrate.  
+Implementation: `aegis_build_mechanical_discovery_json` / `execute_mode` short-circuit.  
+This file is a **mode contract** (schema fields + human doc + pipeline audit).  
+It is **not** loaded into a model prompt for this mode.
 
 ---
 
@@ -21,9 +18,7 @@ Project **investigation gaps** for forensics (and later modes): what still needs
 
 ---
 
-## RUNTIME — MECHANICAL (default)
-
-Implementation: `scripts/lib/demand.sh` + `execute_mode` short-circuit.
+## MECHANICAL RULES (runtime)
 
 For each operator-named or seed path:
 
@@ -33,7 +28,7 @@ For each operator-named or seed path:
 | **present, no demand-token hits** | Likely mutation site — forensics needs file body |
 | **present, token/export hits** | Related symbols already in file — forensics confirms edit vs already-satisfied |
 
-Empty path anchors → weak targeting; dense tokens may still hint search when LLM is forced.
+Empty path anchors → weak targeting note (no path invent).
 
 **Net-new:** only paths **explicitly** written in the investigation input.
 
@@ -41,17 +36,10 @@ Runtime injects after the body: `mode`, evidence identity, `investigation_scope`
 
 ---
 
-## LLM PATH ONLY (`AEGIS_DISCOVERY_LLM=1`)
+## ARTIFACT SHAPE (runtime-emitted body)
 
-Used only when the operator forces the model path (or mechanical emit fails and falls back).
+The mechanical substrate emits (before enrich):
 
-### Constraints
-1. Emit **gaps only** — no code narrative, architecture, risk, topology graphs, domain invention.
-2. Paths in observations ⊆ operator-named ∪ seed only; never invent paths.
-3. Never claim “operator named X” unless X is in demand anchors.
-4. Do **not** emit mode / scope / attention / evidence identity / **`handover_attention`** (runtime injects).
-
-### Model emits (minimal JSON body)
 ```json
 {
   "observations": [
@@ -67,3 +55,5 @@ Used only when the operator forces the model path (or mechanical emit fails and 
 | `observations` | One fact per line; each must change what forensics does |
 | `rationale` | Dense prioritization (paths + tokens) |
 | `required_evidence` | `filesystem.read:<path>` for probed mechanical paths only |
+
+There is **no** model-emitted discovery path. Do not reintroduce `AEGIS_DISCOVERY_LLM`.

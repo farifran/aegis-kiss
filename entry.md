@@ -16,7 +16,7 @@
 | `filesystem.read` determinístico (paths do operador + attention) | `augment_evidence_profile_from_anchors` em `execute_mode.sh` |
 | Tokens da demand → `search_symbol` + Layer 0 content resonance | `aegis_demand_tokens` / dense + `;;` multi `-F` + `git grep -l` |
 | `required_evidence` só âncoras mecânicas (named ∪ seed) | `merge_operator_required_evidence` em `artifact_protocol.sh` |
-| Discovery mecânico content-aware (missing / hits / no hits) | `aegis_discovery_probe_path` + `aegis_build_mechanical_discovery_json` |
+| Discovery **sempre** mecânico (sem LLM) | `aegis_discovery_probe_path` + `aegis_build_mechanical_discovery_json` |
 | Forensics mecânico; LLM se multi-seed sem vencedor de probe | `aegis_forensics_needs_llm` + probes + search só no ramo LLM |
 | Uma história mecânica: prompt (linhas) + capability (JSON) + handover | `aegis_materialize_demand_anchors_json` |
 | Structured goal/targets/done_when | mesmo helper |
@@ -541,7 +541,8 @@ Cada fase deve manter testes shell de contrato (parser, tetos, isolamento de can
 - `scripts/runtime/promote_validated_candidate.sh` — `git apply` (sem commit automático)  
 - `scripts/capabilities/git/*` — status/diff evidence  
 - `scripts/substrates/aider_substrate.sh` — mutation, scope, preflight fix taxonomy  
-- `.skills/discovery.md` / `forensics.md` — contratos (mecânico não carrega; LLM residual + audit)
+- `.skills/discovery.md` — contrato/docs/audit only (sem path LLM)
+- `.skills/forensics.md` — contrato + LLM residual (ambiguidade)
 - `.skills/repair.md` — type/module hygiene + MUTATION BRIEF / intent  
 
 *Fim de entry.md — proposta para implementação futura.*

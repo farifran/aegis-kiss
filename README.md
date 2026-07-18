@@ -56,7 +56,7 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 | `scripts/substrates/aider_substrate.sh` | Bounded mutation |
 | `scripts/capabilities/*` | Authority handlers → evidence payloads |
 | `.harness/config.sh` | Modes, handlers, evidence profiles |
-| `.skills/*.md` | Mode contracts (discovery/forensics: LLM residual + docs; mechanical path does not load them) |
+| `.skills/*.md` | Mode contracts (discovery: docs/audit only; forensics: + LLM residual when used) |
 
 **Modes:** readonly — `discovery`, `forensics`, `adversarial`, `validation`. Mutation — `repair`, `optimize`.
 
@@ -68,7 +68,7 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 
 **Demand tokens:** free-text investigation input is tokenized once (`aegis_demand_tokens` / dense filter) to bind `filesystem.search_symbol` (multi-token fixed-string via `;;`, never ERE) and Layer 0 content resonance (`git grep -l` on dense tokens only). Generic stems like `bytes` do not flood search/hot files. Discovery `required_evidence` is clamped to operator-named paths ∪ Layer0 seed (not arbitrary on-disk invent).
 
-**Demand anchors:** one mechanical story — `aegis_materialize_demand_anchors_json` → prompt (human lines only), capability payload (nested JSON), handover. Structured demands add `goal` / `targets_header` / `done_when`. Evidence rank: layer0 → seed → anchors → reads → search/tools. **Discovery** is mechanical and content-aware by default (path missing / token hits / no hits; no LLM unless `AEGIS_DISCOVERY_LLM=1`). **Forensics** is mechanical by default; LLM only when multi-seed probes cannot pick a winner (`AEGIS_FORENSICS_LLM=auto`) or force `=1`. Search evidence is LLM-path only. **Repair** sees FORENSICS HANDOFF + MUTATION BRIEF (+ REPAIR FEEDBACK on re-entry). **Intent gates** on the diff with soft retry; soft-accept stamps `intent_violations` so validation rejects with `demand_mismatch` and local re-repair. Hard: `AEGIS_MUTATION_INTENT_PREFLIGHT=hard`. **Adversarial/optimize** lean. **Validation** TRIBUNAL SUMMARY.
+**Demand anchors:** one mechanical story — `aegis_materialize_demand_anchors_json` → prompt (human lines only), capability payload (nested JSON), handover. Structured demands add `goal` / `targets_header` / `done_when`. Evidence rank: layer0 → seed → anchors → reads → search/tools. **Discovery** is always mechanical (path missing / token hits / no hits; no LLM). **Forensics** is mechanical by default; LLM only when multi-seed probes cannot pick a winner (`AEGIS_FORENSICS_LLM=auto`) or force `=1`. Search evidence is forensics LLM-path only. **Repair** sees FORENSICS HANDOFF + MUTATION BRIEF (+ REPAIR FEEDBACK on re-entry). **Intent gates** on the diff with soft retry; soft-accept stamps `intent_violations` so validation rejects with `demand_mismatch` and local re-repair. Hard: `AEGIS_MUTATION_INTENT_PREFLIGHT=hard`. **Adversarial/optimize** lean. **Validation** TRIBUNAL SUMMARY.
 
 **Operational memory (only three surfaces):** capability payloads, epistemic handover, git.
 

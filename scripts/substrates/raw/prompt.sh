@@ -5,16 +5,17 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
-# Hard one-liners for the LLM substrate only. Discovery/forensics default
-# paths never reach this (mechanical short-circuit). Detail lives in
-# .skills/<mode>.md — do not re-expand mechanical rules here.
+# Hard one-liners for the LLM substrate only.
+# Discovery never reaches raw (runtime-only mechanical). Forensics reaches
+# raw only on multi-seed probe tie / force. Detail: .skills/<mode>.md.
 raw_mode_minimal_artifact_instructions() {
   case "${AEGIS_MODE}" in
     forensics)
       printf '%s' "MINIMAL FORENSICS (LLM residual only): emit ONLY status + repair_candidates[{id,reason}]. Prefer ONE anchor path. Reason = demand (tokens or X-to-Y), never invent features/paths. Runtime injects mode/evidence_refs/handover_attention — do NOT emit them. Full contract: skill file."
       ;;
     discovery)
-      printf '%s' "MINIMAL DISCOVERY (LLM opt-in only): emit ONLY observations + rationale + required_evidence. Gaps only; paths ⊆ anchors. Runtime injects mode/scope/attention/handover_attention — do NOT emit them. Full contract: skill file."
+      # Guard if raw is ever invoked by mistake — discovery has no LLM path.
+      printf '%s' "DISCOVERY IS RUNTIME-ONLY: do not invent discovery JSON. If you see this prompt, the harness mis-routed; emit {\"observations\":[],\"rationale\":\"runtime_only\",\"required_evidence\":[]}."
       ;;
     optimize)
       printf '%s' "MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."

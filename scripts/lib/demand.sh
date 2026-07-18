@@ -874,15 +874,14 @@ aegis_format_repair_feedback_section() {
 #   handover > attention_seed > layer0_resonance > prior
 # Mechanical modes only project that object — no re-ranking.
 #
-# Discovery: content-aware gap projection (probe each path).
+# Discovery: always mechanical content-aware gap projection (no LLM).
 # Forensics: {id, reason}; multi named → one each; else Alvo Único
 #   (1 seed, or multi-seed unique probe winner, else first seed if forced).
-# AEGIS_DISCOVERY_LLM=1  → force discovery LLM
 # AEGIS_FORENSICS_LLM:
 #   auto (default) — LLM only on multi-seed probe tie / no signal
 #   1|llm          — always LLM
 #   0|mechanical   — always mechanical
-# Search evidence: LLM path only (see execute_mode + ensure_search).
+# Search evidence: forensics LLM path only (see execute_mode + ensure_search).
 #
 # Call shape (execute_mode): text, payload_dir, handover
 # (materialize itself takes text, handover, payload_dir).

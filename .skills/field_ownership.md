@@ -3,12 +3,12 @@
 Models emit only the minimal cognitive fields for the active skill **when the LLM substrate runs**.  
 The runtime injects identity, evidence, candidates, and attention. Do not re-emit runtime-owned fields.
 
-**Discovery and forensics default paths are mechanical:** the runtime emits the body; the skill `.md` is **not** loaded. Skills still exist as contracts for LLM residual paths, audits, and humans.
+**Discovery is always mechanical** (no LLM). **Forensics** is mechanical by default; LLM only on multi-seed probe tie / force. Skill `.md` files are contracts (and LLM prompts only where a model still runs).
 
-| Mode | Who produces the body (default) | Model emits (LLM path only) | Runtime injects / owns |
+| Mode | Who produces the body (default) | Model emits (if any) | Runtime injects / owns |
 |---|---|---|---|
-| discovery | Runtime mechanical | `observations`, `rationale`, `required_evidence` (`AEGIS_DISCOVERY_LLM=1`) | `mode`, evidence identity, `investigation_scope`, `attention_targets`, `handover_attention`; path clamp + mechanical rationale |
-| forensics | Runtime mechanical | `status`, `repair_candidates[{id,reason}]` (ambiguity / force) | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates (alvo + reason); search only on LLM path |
+| discovery | Runtime only (`observations`, `rationale`, `required_evidence`) | — (no LLM path) | `mode`, evidence identity, `investigation_scope`, `attention_targets`, `handover_attention`; path clamp + mechanical rationale |
+| forensics | Runtime mechanical | `status`, `repair_candidates[{id,reason}]` only on ambiguity / force | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates; search only on LLM path |
 | repair / optimize | Model (Aider edits) | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention, optional `intent_violations`; MUTATION BRIEF / REPAIR FEEDBACK |
 | adversarial | Model | `status`, `findings[]` | `mode`, `candidate_result`, `handover_attention`, tribunal gates |
 | validation | Model + tribunal | `verdict`, `basis` | `mode`, `validated_candidate`, `findings`, `handover_attention`, `repair_feedback` (incl. `demand_mismatch`) |
