@@ -78,10 +78,32 @@ TMP_BOUNDED_FILE="$(aegis_mktemp)"
 # AEGIS_DEMAND_TOKEN_SEP) so dots in identifiers never become ERE.
 readonly _TOKEN_SEP="${AEGIS_DEMAND_TOKEN_SEP:-;;}"
 
+# Prefer git grep over tracked files (same universe as layer0 census):
+# orders of magnitude faster than grep -R on trees with node_modules /
+# local venvs. Fallback: recursive grep with harness excludes.
+_use_git_grep=0
+if command -v git >/dev/null 2>&1 \
+  && git -C "${SEARCH_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  _use_git_grep=1
+fi
+
 _grep_fixed_into() {
   local pattern="$1"
   local out="$2"
   [[ -n "${pattern}" ]] || return 0
+
+  if [[ "${_use_git_grep}" -eq 1 ]]; then
+    # -C SEARCH_ROOT: pathspecs and printed paths relative to that root.
+    # -I skip binary; -F fixed-string; -i case-insensitive; -n line numbers.
+    git -C "${SEARCH_ROOT}" grep \
+      -n -i -F -I \
+      -C "${CONTEXT_LINES}" \
+      -- "${pattern}" \
+      -- . \
+      >> "${out}" 2>/dev/null || true
+    return 0
+  fi
+
   grep -Rni \
     -F \
     -C "${CONTEXT_LINES}" \
@@ -91,12 +113,21 @@ _grep_fixed_into() {
     --exclude-dir=.skills \
     --exclude-dir=scripts \
     --exclude-dir=.venv \
+    --exclude-dir=.venv-mlx \
+    --exclude-dir=dist \
+    --exclude-dir=build \
+    --exclude-dir=coverage \
     --exclude='*.lock' \
     --exclude='*.log' \
     -- \
     "${pattern}" \
     "${SEARCH_ROOT}" \
     >> "${out}" || true
+}
+
+# Line count helper (macOS wc pads spaces).
+_match_lines_so_far() {
+  wc -l < "${TMP_MATCH_FILE}" 2>/dev/null | tr -d '[:space:]'
 }
 
 : > "${TMP_MATCH_FILE}"
@@ -113,6 +144,11 @@ if [[ "${QUERY}" == *"${_TOKEN_SEP}"* ]]; then
     fi
     [[ -n "${_tok}" ]] || continue
     _grep_fixed_into "${_tok}" "${TMP_MATCH_FILE}"
+    # Stop once the expose budget is filled — more tokens cannot add
+    # exposed lines and multi-token walks used to dominate forensics time.
+    if [[ "$(_match_lines_so_far)" -ge "${MAX_MATCH_LINES}" ]]; then
+      break
+    fi
   done
   unset _rest _tok
 else
