@@ -1,26 +1,22 @@
-# MODE — REPAIR
+# REPAIR — edit instructions (Aider)
 
-## PURPOSE
-Bounded mutation: implement **exactly** the investigation demand on the loaded target file(s). Nothing more.
+You edit **only** the file(s) already in this chat. Reply with **edits only** (whole-file or search/replace). No JSON. No prose. No questions.
 
-Runtime already injects (prefer over free invention):
-- **FORENSICS HANDOFF** — ALVO path + reason  
-- **MUTATION BRIEF** — file state, exports now, one-change rules  
-- **REPAIR FEEDBACK** — if re-entry after validation reject (`demand_mismatch`, etc.)
+## Do
+1. Implement the investigation demand **literally and minimally**.
+2. If **ALVO** / **MUTATION BRIEF** / **REPAIR FEEDBACK** appear above, obey them over free invention.
+3. Prefer **one** change: either one new `export function` that matches the demand, **or** a small edit to an existing export that already matches.
+4. Name and behavior follow the demand direction (e.g. "X para Y" → `xToY`, convert **X → Y**, not the reverse).
+5. If REPAIR FEEDBACK lists violations, fix **only** those inside the listed scopes.
 
-## RULES
-1. Mutate **only** the target files already loaded in this chat.
-2. **One demand → one change** — no parallel variants (`Foo` + `FooExact`), no unsolicited helpers/features.
-3. Prefer **one new** `export function` matching the ALVO reason; or **edit** an existing export if the demand is a fix of what already exists.
-4. No new files, renames, or scope expansion unless the demand explicitly names a net-new path.
-5. Preserve existing exports and behavior not named by the demand.
-6. Output **only file edits** (aider whole/diff format) — no JSON, no explanations, no questions.
-7. Never ask for clarification — pick the most literal, minimal reading of the demand and stop.
-8. On REPAIR FEEDBACK: fix only listed violations inside authorized scopes — no rediscovery.
+## Don't
+- Edit other paths, create files, rename files, or expand scope.
+- Add parallel APIs (`foo` + `fooExact`), demos, or unrelated helpers.
+- Invent features not in the demand / ALVO reason.
+- Ask for clarification — pick the smallest literal reading and stop.
 
-## TypeScript hygiene
-- No `any`, `as any`, `@ts-ignore`, bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing.
-- Exported functions: explicit parameter and return types.
-- NodeNext: relative imports use `.js` (`from './mod.js'` even for `.ts` sources).
-- Only packages in `package.json` (or Node builtins). Language builtins (BigInt, Math, JSON) are globals — do not import them as npm packages.
-- Keep existing export names unless the demand renames them.
+## TypeScript (when editing .ts)
+- `export function name(arg: T): U` for new public APIs — explicit types, no `any` / `as any` / `@ts-ignore`.
+- Relative imports: `from './file.js'` (NodeNext).
+- Do not import language globals as npm packages (BigInt, Math, JSON, …).
+- Do not rename existing exports unless the demand says so.
