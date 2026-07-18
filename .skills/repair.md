@@ -1,37 +1,26 @@
 # MODE — REPAIR
 
 ## PURPOSE
-Repair is a **bounded mutation** mode. Implement exactly the investigation demand on the seeded targets (forensics `repair_candidates` / Layer 0), with minimal sufficient edits.
+Bounded mutation: implement **exactly** the investigation demand on the loaded target file(s). Nothing more.
 
-On a **local feedback iteration** (handover from rejected validation with `repair_feedback`), fix only the listed violations inside `authorized_scopes` — no rediscovery, no scope expansion.
+Runtime already injects (prefer over free invention):
+- **FORENSICS HANDOFF** — ALVO path + reason  
+- **MUTATION BRIEF** — file state, exports now, one-change rules  
+- **REPAIR FEEDBACK** — if re-entry after validation reject (`demand_mismatch`, etc.)
 
-`demand_mismatch` violations come from repair intent gates (soft-accept stamp): missing demand tokens or over-export. Prefer fixing those before any other polish.
+## RULES
+1. Mutate **only** the target files already loaded in this chat.
+2. **One demand → one change** — no parallel variants (`Foo` + `FooExact`), no unsolicited helpers/features.
+3. Prefer **one new** `export function` matching the ALVO reason; or **edit** an existing export if the demand is a fix of what already exists.
+4. No new files, renames, or scope expansion unless the demand explicitly names a net-new path.
+5. Preserve existing exports and behavior not named by the demand.
+6. Output **only file edits** (aider whole/diff format) — no JSON, no explanations, no questions.
+7. Never ask for clarification — pick the most literal, minimal reading of the demand and stop.
+8. On REPAIR FEEDBACK: fix only listed violations inside authorized scopes — no rediscovery.
 
-## TARGETS
-- Primary: forensics `repair_candidates[].id` (or `repair_feedback.authorized_scopes` on feedback).
-- UNION: operator-named paths in the investigation input.
-- Mutate **only** files loaded into the chat. No new files unless the demand names a net-new path.
-
-## RUNTIME MUTATION BRIEF
-Before editing, the runtime injects a mechanical **MUTATION BRIEF** (not model prose):
-- FILE + content probe state (missing / no demand tokens / related symbols)
-- EXPORTS NOW on that file
-- RULES: one demand → one minimal change; one new export preferred; no invent features
-
-Prefer this brief + FORENSICS HANDOFF over free-text invention.
-
-## CONSTRAINTS
-1. Minimal sufficient mutation — no speculative features or refactors.
-2. **One demand → one change**: if the operator asks for one conversion/behavior, add exactly one function or edit — do not ship parallel variants (`Foo` + `FooExact`, etc.) unless both are named.
-3. Preserve high-gravity exports unless the demand renames them.
-4. TypeScript modules: NodeNext relative imports use `.js` extension; keep existing export names. New top-level functions use `export function` (importable), not a bare unexported function, unless the demand forbids export.
-5. Type hygiene (domain-agnostic): no `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing. Exported APIs carry explicit parameter and return types.
-6. Module hygiene (domain-agnostic): only packages declared in `package.json` (or Node builtins). Language builtins are globals — never import them as npm packages.
-7. No narration — edits only (aider whole/diff format).
-8. Feedback iterations: honor `repair_feedback.violations[]` and stay inside `authorized_scopes`.
-
-## SUCCESS
-- Demand (or listed violations) satisfied on the loaded targets.
-- Surface passes mutation preflight (tsc / tests / smoke) when preflight is enabled.
-- **Intent gates** (repair): dense demand tokens in `+` lines; at most `AEGIS_MUTATION_MAX_NEW_EXPORTS` (default 1) new exports. Soft default retries once/twice then may warn-and-accept; `AEGIS_MUTATION_INTENT_PREFLIGHT=hard` refuses dirty intent.
-- Lint gate accepts the edit (no explicit any / empty-catch / eval / undeclared imports).
+## TypeScript hygiene
+- No `any`, `as any`, `@ts-ignore`, bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing.
+- Exported functions: explicit parameter and return types.
+- NodeNext: relative imports use `.js` (`from './mod.js'` even for `.ts` sources).
+- Only packages in `package.json` (or Node builtins). Language builtins (BigInt, Math, JSON) are globals — do not import them as npm packages.
+- Keep existing export names unless the demand renames them.

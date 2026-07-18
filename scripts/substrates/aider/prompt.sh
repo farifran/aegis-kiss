@@ -224,49 +224,26 @@ EOF
 }
 
 mutation_prompt_skill_contract() {
-  local -a prompt_targets=("$@")
-
-  # Floor-model context control: full skill is hundreds of lines; with
-  # explicit targets distill to binding core; full contract only in
-  # no-targets fallback.
-  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
-    if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-      cat <<'DISTILLED'
-Skill contract (bounded optimize core):
-* Repair already applied the demand — RECOGNIZE the current files, then REFINE only.
-* Mutate ONLY the target files already loaded in this chat.
-* Safe simplifications only: less redundancy, clearer structure, tighter types — same behavior.
-* If already minimal, make NO edits.
-* No re-implementation of the demand, no feature removal, no new files, no renames.
-* Output only file edits — no JSON, no explanations, no questions.
-DISTILLED
-    else
-      cat <<'DISTILLED'
-Skill contract (bounded mutation core):
-* Implement EXACTLY what the investigation input demands — nothing more.
-* Mutate ONLY the target files already loaded in this chat.
-* No new files, no renames, no scope expansion, no unsolicited functions or logic.
-* One demand → one change (no parallel variants).
-* TypeScript: new top-level functions use export function (importable API).
-* Preserve all existing code and behavior not named by the demand.
-* Output only the file edits — no JSON, no explanations, no questions.
-* NEVER ask for clarification. If the demand allows more than one reading, implement the most literal, minimal one and stop.
-
-Type hygiene (always — any domain):
-* Never use `any`, `as any`, or `@ts-ignore` / bare `@ts-expect-error`. Prefer precise types or `unknown` + narrowing.
-* Public APIs: explicit parameter and return types on exported functions.
-* Do not silence the typechecker; fix the type.
-
-Module hygiene (always — any domain):
-* Relative imports use NodeNext `.js` extension: `from './mod.js'` (even when the source file is `.ts`).
-* Only import packages declared in package.json (or Node builtins). Never invent package names for language builtins.
-* Language builtins (e.g. BigInt, JSON, Math) are globals — do not import them as npm packages.
-* Keep existing export names stable unless the demand renames them.
-DISTILLED
-    fi
-  else
-    echo "Skill contract:"
+  # Single source of truth: .skills/<mode>.md (kept short for floor models).
+  # Always inject the skill file — no hardcoded DISTILLED that drifts from it.
+  echo "Skill contract:"
+  if [[ -n "${AIDER_SKILL_FILE:-}" && -f "${AIDER_SKILL_FILE}" ]]; then
     cat "${AIDER_SKILL_FILE}"
+    return 0
+  fi
+  # Fallback if skill path missing (should not happen in normal runs).
+  if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    cat <<'DISTILLED'
+* Repair already applied the demand — REFINE only; same behavior.
+* Mutate ONLY loaded targets. No new files, renames, or re-implementation.
+* Output only file edits — no JSON, no questions.
+DISTILLED
+  else
+    cat <<'DISTILLED'
+* Implement EXACTLY the investigation demand on loaded targets only.
+* One demand → one change. No parallel APIs, no narration.
+* TypeScript: export function for new APIs; no any; NodeNext .js imports.
+DISTILLED
   fi
 }
 

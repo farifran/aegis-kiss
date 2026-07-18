@@ -544,6 +544,6 @@ Cada fase deve manter testes shell de contrato (parser, tetos, isolamento de can
 - `scripts/substrates/aider_substrate.sh` — mutation, scope, preflight fix taxonomy  
 - `.skills/discovery.md` — contrato/docs/audit only (sem path LLM)
 - `.skills/forensics.md` — contrato + LLM residual (ambiguidade)
-- `.skills/repair.md` — type/module hygiene + MUTATION BRIEF / intent  
+- `.skills/repair.md` — skill injectado no Aider (fonte única; sem DISTILLED paralelo)  
 
 *Fim de entry.md — proposta para implementação futura.*
