@@ -1,38 +1,58 @@
-# MODE 1 — FORENSICS
+# MODE — FORENSICS
+
+## AUTHORITY (read this first)
+
+| Path | Who runs | Loads this file? |
+|------|----------|------------------|
+| **Default mechanical** | Runtime (`aegis_build_mechanical_forensics_json` + probes) | **No** |
+| **LLM residual** | Model via raw substrate | **Yes** — multi-seed probe **tie**, force `AEGIS_FORENSICS_LLM=1`, or mechanical fallthrough |
+
+This file is a **mode contract** (schema + LLM rules + human doc).  
+It is **not** the mechanical implementation. Runtime code owns Alvo Único, probe scores, and gates.
+
+---
 
 ## PURPOSE
-Forensics decides **where to mutate** and **why**, producing `repair_candidates`.
 
-**Default (product path):** runtime **mechanical** forensics — targets and reasons from demand anchors + content probes.  
-**LLM only when ambiguous** (`AEGIS_FORENSICS_LLM=auto`, default): multi-seed with **no unique probe winner** (or force).  
-Force always LLM: `AEGIS_FORENSICS_LLM=1`. Force never: `AEGIS_FORENSICS_LLM=0` / `mechanical`.
+Decide **where to mutate** and **why** → `repair_candidates[{id,reason}]`.  
+Does **not** write the patch (repair does). Does **not** narrate architecture or risk.
 
-Does **not** narrate code flow, architecture, or risk. Does **not** write the patch (Repair does).
+---
 
-## RUNTIME EVIDENCE
-Before this mode runs, the runtime materializes:
-- `runtime.demand_anchors` (tokens, seed, operator paths)
-- `filesystem.read` for operator-named paths + attention targets
-- discovery handover (gaps / probes)
-- `filesystem.search_symbol` **only on LLM path** (or mechanical→LLM fallthrough)
+## RUNTIME — MECHANICAL (default)
 
-Treat **file bodies** as primary content when present. Mechanical path does not need search.
+Implementation: `scripts/lib/demand.sh` + `execute_mode` (`AEGIS_FORENSICS_USE_LLM=0`).
 
-## DEFAULT MECHANICAL RULES
-1. **Alvo:** operator-named path(s) if any; else single attention/seed path (Alvo Único).
-2. **Multi-seed:** content-probe discrimination — unique winner → mechanical on that path; probe **tie** → LLM.
-3. **Reason:** directed demand phrase when possible (`X para/to Y` → convert X to Y, one new export) + probe note (missing / no hits / related symbols exist).
+### Rules
+1. **Alvo:** operator-named path(s) if any; else single seed (Alvo Único).
+2. **Multi-seed:** unique content-probe winner → mechanical on that path; **tie / no signal → LLM**.
+3. **Reason:** directed demand (`X para/to Y`) + probe note (missing / no hits / related symbols).
 4. **Never invent paths** outside anchors.
-5. Multi operator-named paths → one candidate per named path (net-new first if missing on disk).
+5. Multi operator-named → one candidate per named path.
 
-## LLM PATH (probe tie / `AEGIS_FORENSICS_LLM=1`) ONLY
+### Evidence (mechanical)
+- `runtime.demand_anchors`, handover read, deterministic `filesystem.read` of anchors  
+- **`filesystem.search_symbol` omitted** (not used for id/reason)
+
+### Evidence (LLM residual)
+- Same plus **`filesystem.search_symbol`** (pathspecs scoped to anchors / `src`)
+
+Flags: `AEGIS_FORENSICS_LLM=auto|0|1` (or `mechanical` / `llm`).
+
+Runtime injects: `mode`, `evidence_refs`, **`handover_attention`**, demand-anchor gates (alvo + reason bind).
+
+---
+
+## LLM PATH ONLY (probe tie / force / fallthrough)
+
 ### Constraints
 1. Candidates only for paths in payloads / operator-named net-new.
-2. Default **one** candidate unless investigation names multiple paths.
+2. Prefer **one** candidate unless investigation names multiple paths.
 3. No summaries, risks, confidence fields, or prose outside the JSON contract.
-4. Runtime injects `mode`, `evidence_refs`, `handover_attention`.
+4. Do **not** emit mode / evidence_refs / **`handover_attention`** (runtime injects).
+5. `reason` must reflect the demand (tokens or X→Y), never unrelated features (e.g. invent “power”).
 
-### JSON SCHEMA
+### Model emits (minimal JSON body)
 ```json
 {
   "status": "interpreted|inconclusive",
@@ -45,8 +65,11 @@ Treat **file bodies** as primary content when present. Mechanical path does not 
 }
 ```
 
-- **`status`:** `interpreted` if ≥1 candidate; `inconclusive` if none.
-- **`reason`:** short, must reflect the demand (tokens or X→Y), not unrelated features.
+| Field | Role |
+|-------|------|
+| `status` | `interpreted` if ≥1 candidate; `inconclusive` if none |
+| `repair_candidates[].id` | Repo-relative path (anchor-scoped) |
+| `repair_candidates[].reason` | Short demand-aligned reason |
 
-## NET-NEW
-Only if the investigation input explicitly names the path. Missing on disk is OK for that path only.
+### Net-new
+Only if the investigation input **explicitly** names the path. Missing on disk is OK for that path only.

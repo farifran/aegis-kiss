@@ -735,8 +735,11 @@ execute_substrate() {
 
   local substrate_output
 
-  # Discovery default: mechanical projection over runtime anchors (no LLM).
-  # Force model path only with AEGIS_DISCOVERY_LLM=1.
+  # Discovery / forensics default: mechanical substrate — does NOT load
+  # .skills/*.md (skill is contract + LLM residual only). Skill file still
+  # must exist on disk for fallthrough / force-LLM and runtime preconditions.
+  #
+  # Discovery: force model only with AEGIS_DISCOVERY_LLM=1.
   if [[ "${AEGIS_MODE}" == "discovery" ]] \
     && [[ "${AEGIS_DISCOVERY_LLM:-0}" != "1" ]] \
     && declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1; then
@@ -747,11 +750,11 @@ execute_substrate() {
         "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
     )" || substrate_output=""
     if [[ -n "${substrate_output}" ]]; then
-      aegis_log "discovery_mechanical: skipped LLM (anchor projection)"
+      aegis_log "discovery_mechanical: skipped LLM+skill (anchor projection)"
       AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
       return 0
     fi
-    aegis_warn "discovery_mechanical_failed — falling back to LLM substrate"
+    aegis_warn "discovery_mechanical_failed — falling back to LLM substrate (skill loaded)"
   fi
 
   # Forensics: AEGIS_FORENSICS_USE_LLM set once in main (evidence + substrate).
@@ -779,16 +782,16 @@ execute_substrate() {
           "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
       )" || substrate_output=""
       if [[ -n "${substrate_output}" ]]; then
-        aegis_log "forensics_mechanical: skipped LLM (unambiguous anchors)"
+        aegis_log "forensics_mechanical: skipped LLM+skill (unambiguous anchors)"
         AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
         return 0
       fi
-      aegis_warn "forensics_mechanical_failed — falling back to LLM substrate"
+      aegis_warn "forensics_mechanical_failed — falling back to LLM substrate (skill loaded)"
       if declare -f aegis_forensics_ensure_search_symbol_payload >/dev/null 2>&1; then
         aegis_forensics_ensure_search_symbol_payload || true
       fi
     else
-      aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force"
+      aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force (skill loaded)"
     fi
     unset _forensics_llm
   fi

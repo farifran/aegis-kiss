@@ -1,19 +1,22 @@
 # Field ownership — model vs runtime
 
-Models emit only the minimal cognitive fields for the active skill. The runtime injects identity, evidence, candidates, and attention. Do not re-emit runtime-owned fields.
+Models emit only the minimal cognitive fields for the active skill **when the LLM substrate runs**.  
+The runtime injects identity, evidence, candidates, and attention. Do not re-emit runtime-owned fields.
 
-| Mode | Model emits | Runtime injects / owns |
-|---|---|---|
-| discovery | `observations`, `rationale`, `required_evidence` (mechanical by default; LLM only if `AEGIS_DISCOVERY_LLM=1`) | `mode`, evidence identity, `investigation_scope`, `attention_targets`, handover routing; path clamp + mechanical rationale |
-| forensics | `status`, `repair_candidates[{id,reason}]` (mechanical; LLM if ambiguous or `AEGIS_FORENSICS_LLM=1`) | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates (alvo + reason) |
-| repair / optimize | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention; same read anchors as forensics |
-| adversarial | `status`, `findings[]` | `mode`, `candidate_result` (from optimize), `handover_attention`, tribunal gates, read anchors |
-| validation | `verdict`, `basis` | `mode`, `validated_candidate`, `findings` (from adversarial), `handover_attention`, tribunal / `repair_feedback` |
+**Discovery and forensics default paths are mechanical:** the runtime emits the body; the skill `.md` is **not** loaded. Skills still exist as contracts for LLM residual paths, audits, and humans.
 
-**Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`): real GitHub issue body when `--issue N`, optional structured-header compact head, mechanical path safety. Modes never rewrite demand. Runtime projects **`demand_anchors`** (paths, dense tokens, search, seed, optional goal/targets/done_when) into prompts (human-readable), capability, and handover; scrubs false operator-named prose in discovery; binds forensics reasons/alvo; exposes forensics handoff to repair; soft token-in-diff preflight on repair.
+| Mode | Who produces the body (default) | Model emits (LLM path only) | Runtime injects / owns |
+|---|---|---|---|
+| discovery | Runtime mechanical | `observations`, `rationale`, `required_evidence` (`AEGIS_DISCOVERY_LLM=1`) | `mode`, evidence identity, `investigation_scope`, `attention_targets`, `handover_attention`; path clamp + mechanical rationale |
+| forensics | Runtime mechanical | `status`, `repair_candidates[{id,reason}]` (ambiguity / force) | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates (alvo + reason); search only on LLM path |
+| repair / optimize | Model (Aider edits) | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention, optional `intent_violations`; MUTATION BRIEF / REPAIR FEEDBACK |
+| adversarial | Model | `status`, `findings[]` | `mode`, `candidate_result`, `handover_attention`, tribunal gates |
+| validation | Model + tribunal | `verdict`, `basis` | `mode`, `validated_candidate`, `findings`, `handover_attention`, `repair_feedback` (incl. `demand_mismatch`) |
 
-**Net-new paths:** only paths the operator named in the investigation input authorize creation. Skill examples are not targets.
+**Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`). Modes never rewrite demand. Runtime projects **`demand_anchors`** into prompts, capability, and handover.
 
-**required_evidence clamp:** at discovery enrich, model-requested `filesystem.read:<path>` is kept only when the path is operator-named **or** present in Layer0 attention seed. Arbitrary on-disk paths the model invents are dropped (bootstrap exception when both named and seed are empty).
+**Net-new paths:** only paths the operator named in the investigation input. Skill examples are not targets.
 
-**Evidence:** capability payloads are evidence, not memory. Epistemic handover is incomplete attention, not truth. Content reads for forensics+ are runtime-seeded from mechanical anchors — Discovery is not the sole gatekeeper of `filesystem.read`.
+**required_evidence clamp:** discovery enrich keeps `filesystem.read:<path>` only when operator-named **or** in Layer0/attention seed (bootstrap exception when both empty).
+
+**Evidence:** capability payloads are evidence, not memory. Epistemic handover is incomplete attention, not truth.

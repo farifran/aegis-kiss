@@ -56,7 +56,7 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 | `scripts/substrates/aider_substrate.sh` | Bounded mutation |
 | `scripts/capabilities/*` | Authority handlers → evidence payloads |
 | `.harness/config.sh` | Modes, handlers, evidence profiles |
-| `.skills/*.md` | Mode contracts |
+| `.skills/*.md` | Mode contracts (discovery/forensics: LLM residual + docs; mechanical path does not load them) |
 
 **Modes:** readonly — `discovery`, `forensics`, `adversarial`, `validation`. Mutation — `repair`, `optimize`.
 

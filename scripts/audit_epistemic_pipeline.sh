@@ -40,6 +40,9 @@ array_contains() {
 
 # Match the field as a whole token so substrings ("verdicts",
 # "refindings") and formatting tricks cannot satisfy the audit.
+# Grep mode-contract fields in .skills/<mode>.md.
+# Note: discovery/forensics mechanical paths do not load skill content;
+# these declarations still gate LLM residual schemas + pipeline continuity.
 skill_declares() {
   local skill_file="$1"
   local field="$2"

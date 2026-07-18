@@ -541,6 +541,7 @@ Cada fase deve manter testes shell de contrato (parser, tetos, isolamento de can
 - `scripts/runtime/promote_validated_candidate.sh` — `git apply` (sem commit automático)  
 - `scripts/capabilities/git/*` — status/diff evidence  
 - `scripts/substrates/aider_substrate.sh` — mutation, scope, preflight fix taxonomy  
-- `.skills/repair.md` — type/module hygiene  
+- `.skills/discovery.md` / `forensics.md` — contratos (mecânico não carrega; LLM residual + audit)
+- `.skills/repair.md` — type/module hygiene + MUTATION BRIEF / intent  
 
 *Fim de entry.md — proposta para implementação futura.*

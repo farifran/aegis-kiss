@@ -5,13 +5,16 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
+# Hard one-liners for the LLM substrate only. Discovery/forensics default
+# paths never reach this (mechanical short-circuit). Detail lives in
+# .skills/<mode>.md — do not re-expand mechanical rules here.
 raw_mode_minimal_artifact_instructions() {
   case "${AEGIS_MODE}" in
     forensics)
-      printf '%s' "MINIMAL FORENSICS ARTIFACT (LLM opt-in only): emit ONLY {\"status\": \"interpreted|inconclusive\", \"repair_candidates\": [{\"id\": \"<path>\", \"reason\": \"...\"}]}. Prefer ONE candidate from demand anchors SEED/OPERATOR PATHS. Reason must reflect the demand (tokens or X-to-Y conversion), never unrelated features. Honor file body + discovery gaps. Never invent paths. Runtime injects mode/evidence_refs/handover_attention — do NOT emit them."
+      printf '%s' "MINIMAL FORENSICS (LLM residual only): emit ONLY status + repair_candidates[{id,reason}]. Prefer ONE anchor path. Reason = demand (tokens or X-to-Y), never invent features/paths. Runtime injects mode/evidence_refs/handover_attention — do NOT emit them. Full contract: skill file."
       ;;
     discovery)
-      printf '%s' "MINIMAL DISCOVERY ARTIFACT (LLM opt-in only): emit ONLY {\"observations\": [\"...\"], \"rationale\": \"...\", \"required_evidence\": [\"filesystem.read:<path>\"]}. Gaps only — never code narrative. Paths only from demand anchors SEED/OPERATOR PATHS — never invent paths or claim operator-named unless listed. Prefer one observation per anchor path. Runtime injects mode/scope/attention/evidence identity — do NOT emit them."
+      printf '%s' "MINIMAL DISCOVERY (LLM opt-in only): emit ONLY observations + rationale + required_evidence. Gaps only; paths ⊆ anchors. Runtime injects mode/scope/attention/handover_attention — do NOT emit them. Full contract: skill file."
       ;;
     optimize)
       printf '%s' "MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."

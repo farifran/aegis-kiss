@@ -1,40 +1,57 @@
-# MODE 0 — DISCOVERY
+# MODE — DISCOVERY
+
+## AUTHORITY (read this first)
+
+| Path | Who runs | Loads this file? |
+|------|----------|------------------|
+| **Default mechanical** | Runtime (`aegis_build_mechanical_discovery_json`) | **No** — probes + anchors only |
+| **LLM opt-in** | Model via raw substrate | **Yes** — system prompt (`AEGIS_DISCOVERY_LLM=1`) |
+
+This file is a **mode contract** (schema + LLM rules + human doc).  
+It is **not** the mechanical implementation. Runtime code is the source of truth for the default path.
+
+---
 
 ## PURPOSE
-Discovery projects **investigation gaps** for Forensics (and later modes).
 
-**Default:** runtime **mechanical** discovery (no LLM) — content-aware probes over demand anchors + Layer0/attention seed.  
-Opt-in model path: `AEGIS_DISCOVERY_LLM=1`.
+Project **investigation gaps** for forensics (and later modes): what still needs content or confirmation on mechanical path anchors.
 
 - Runtime owns facts: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`, handover.
-- Discovery states what is still missing or ambiguous for those anchors.
-- **Code meaning and mutation choice are Forensics.**
+- Discovery does **not** choose the mutation target (forensics does).
 
-## MECHANICAL PROBES (RUNTIME)
+---
+
+## RUNTIME — MECHANICAL (default)
+
+Implementation: `scripts/lib/demand.sh` + `execute_mode` short-circuit.
+
 For each operator-named or seed path:
 
-| Path state | Observation meaning |
+| Path state | Meaning |
 |---|---|
-| **missing** | Net-new / absent — read still materializes absence; create only if operator-named |
+| **missing** | Net-new / absent — create only if operator-named |
 | **present, no demand-token hits** | Likely mutation site — forensics needs file body |
-| **present, token/export hits** | Demand-related identifiers already in file — forensics confirms edit vs already-satisfied |
+| **present, token/export hits** | Related symbols already in file — forensics confirms edit vs already-satisfied |
 
-Dense tokens come from demand anchors. Empty path anchors → weak targeting + token hint for `search_symbol` when tokens exist.
+Empty path anchors → weak targeting; dense tokens may still hint search when LLM is forced.
 
-## LAYER 0 / DEMAND ANCHORS
-Authoritative. Do not invent paths, re-rank Layer0, or restate scores.  
-Never claim “operator named X” unless X is an operator-named path in anchors.
+**Net-new:** only paths **explicitly** written in the investigation input.
 
-## NET-NEW
-Only paths **explicitly** written in the investigation input. Never invent examples.
+Runtime injects after the body: `mode`, evidence identity, `investigation_scope`, `attention_targets`, **`handover_attention`**, path clamp, mechanical rationale.
 
-## CONSTRAINTS (LLM path — `AEGIS_DISCOVERY_LLM=1` only)
-1. Observations = investigation gaps only.
-2. No code narrative, metrics dump, architecture labels, domain invention, risk, topology graphs.
-3. Paths in observations ⊆ operator-named ∪ seed only.
-4. Do not emit mode / scope / attention / evidence identity (runtime injects).
+---
 
-## JSON SCHEMA — MINIMAL ARTIFACT
+## LLM PATH ONLY (`AEGIS_DISCOVERY_LLM=1`)
+
+Used only when the operator forces the model path (or mechanical emit fails and falls back).
+
+### Constraints
+1. Emit **gaps only** — no code narrative, architecture, risk, topology graphs, domain invention.
+2. Paths in observations ⊆ operator-named ∪ seed only; never invent paths.
+3. Never claim “operator named X” unless X is in demand anchors.
+4. Do **not** emit mode / scope / attention / evidence identity / **`handover_attention`** (runtime injects).
+
+### Model emits (minimal JSON body)
 ```json
 {
   "observations": [
@@ -45,7 +62,8 @@ Only paths **explicitly** written in the investigation input. Never invent examp
 }
 ```
 
-## FIELDS
-- **`observations`**: one fact per line; each must change what forensics does.
-- **`rationale`**: dense prioritization (paths + tokens).
-- **`required_evidence`**: `filesystem.read:<path>` for probed mechanical paths.
+| Field | Role |
+|-------|------|
+| `observations` | One fact per line; each must change what forensics does |
+| `rationale` | Dense prioritization (paths + tokens) |
+| `required_evidence` | `filesystem.read:<path>` for probed mechanical paths only |
