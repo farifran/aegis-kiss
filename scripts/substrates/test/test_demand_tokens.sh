@@ -486,13 +486,13 @@ echo "${for_mech}" | jq -e '
 ' >/dev/null \
   || fail "mechanical_forensics_shape: ${for_mech}"
 
-# multi-seed, no operator-named → ambiguous → needs LLM
+# multi-seed, both no demand hits → probe tie → needs LLM
 jq -n '{
   success: true,
   payload: { attention_targets: ["src/index.ts", "src/ui/fake_import.ts"] }
 }' > "${for_pd}/runtime_attention_seed.json"
 if ! aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
-  fail "forensics_auto_should_need_llm_on_multi_seed"
+  fail "forensics_auto_should_need_llm_on_multi_seed_tie"
 fi
 # force mechanical
 if AEGIS_FORENSICS_LLM=0 aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
@@ -502,6 +502,29 @@ fi
 if ! AEGIS_FORENSICS_LLM=1 aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
   fail "forensics_llm=1_should_force_llm"
 fi
+
+# multi-seed with unique probe winner → mechanical (no LLM)
+_win_a="src/.aegis_test_forensics_win_a.ts"
+_win_b="src/.aegis_test_forensics_win_b.ts"
+printf '%s\n' 'export function terabitsToMegabits(x: number): number { return x; }' > "${_win_a}"
+printf '%s\n' 'export function unrelatedHelper(): void {}' > "${_win_b}"
+jq -n \
+  --arg a "${_win_a}" --arg b "${_win_b}" \
+  '{ success: true, payload: { attention_targets: [ $a, $b ] } }' \
+  > "${for_pd}/runtime_attention_seed.json"
+if aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
+  fail "forensics_auto_should_be_mechanical_on_probe_winner"
+fi
+for_win="$(aegis_build_mechanical_forensics_json "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" "")"
+echo "${for_win}" | jq -e \
+  --arg a "${_win_a}" \
+  '.status == "interpreted"
+   and (.repair_candidates | length) == 1
+   and .repair_candidates[0].id == $a
+   and (.repair_candidates[0].reason | test("terabit|megabit|Demand"; "i"))' \
+  >/dev/null \
+  || fail "mechanical_forensics_probe_winner: ${for_win}"
+rm -f "${_win_a}" "${_win_b}"
 rm -rf "${for_pd}"
 
 # forensics empty anchors → inconclusive + no LLM (do not invent paths)

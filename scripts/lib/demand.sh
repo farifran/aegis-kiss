@@ -928,9 +928,77 @@ aegis_forensics_anchor_sets_json() {
     }'
 }
 
+# Rank a content probe for multi-seed discrimination (higher = stronger).
+#   missing          → 0
+#   present_no_hits  → 5
+#   present_hits:…   → 10 + hit count
+aegis_forensics_probe_score() {
+  local probe="${1-}"
+  local n
+  case "${probe}" in
+    missing)
+      printf '0'
+      ;;
+    present_no_hits)
+      printf '5'
+      ;;
+    present_hits:*)
+      n="$(
+        printf '%s' "${probe#present_hits:}" \
+          | tr ',' '\n' \
+          | awk 'NF' \
+          | wc -l \
+          | tr -d '[:space:]'
+      )"
+      [[ -n "${n}" ]] || n=0
+      printf '%s' "$((10 + n))"
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
+
+# Among seed paths, print unique winner by probe score, or empty if tie / no signal.
+# Args: tokens_nl, seeds_json_array [, root]
+aegis_forensics_discriminate_seeds() {
+  local tokens_nl="${1-}"
+  local seeds_json="${2:-[]}"
+  local root="${3:-.}"
+  local path probe score
+  local best_score=-1
+  local best_path=""
+  local tie=0
+
+  if ! printf '%s' "${seeds_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    printf ''
+    return 0
+  fi
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    probe="$(aegis_discovery_probe_path "${path}" "${tokens_nl}" "${root}")"
+    score="$(aegis_forensics_probe_score "${probe}")"
+    if [[ "${score}" -gt "${best_score}" ]]; then
+      best_score="${score}"
+      best_path="${path}"
+      tie=0
+    elif [[ "${score}" -eq "${best_score}" ]]; then
+      tie=1
+    fi
+  done < <(printf '%s' "${seeds_json}" | jq -r '.[]?')
+
+  # No unique positive winner → empty (caller may use LLM or first-seed force).
+  if [[ "${best_score}" -le 0 || "${tie}" -eq 1 || -z "${best_path}" ]]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "${best_path}"
+}
+
 # Exit 0 → use LLM. Exit 1 → mechanical is enough.
 aegis_forensics_needs_llm() {
-  local mode_flag sets named_n seed_n
+  local mode_flag sets named_n seed_n tokens_nl seed_json winner
 
   mode_flag="$(printf '%s' "${AEGIS_FORENSICS_LLM:-auto}" | tr '[:upper:]' '[:lower:]')"
   case "${mode_flag}" in
@@ -938,7 +1006,7 @@ aegis_forensics_needs_llm() {
     0|false|no|off|mechanical|mech) return 1 ;;
   esac
 
-  # auto: LLM only when multi-seed and no operator-named path.
+  # auto: LLM only when multi-seed cannot be discriminated by content probes.
   sets="$(aegis_forensics_anchor_sets_json "$@")"
   named_n="$(printf '%s' "${sets}" | jq -r '.named | length')"
   seed_n="$(printf '%s' "${sets}" | jq -r '.seed | length')"
@@ -950,6 +1018,15 @@ aegis_forensics_needs_llm() {
     # 0 seeds → inconclusive mechanical (do not invent); 1 seed → Alvo Único.
     return 1
   fi
+
+  tokens_nl="$(printf '%s' "${sets}" | jq -r '.dense[]?' 2>/dev/null || true)"
+  seed_json="$(printf '%s' "${sets}" | jq -c '.seed // []')"
+  winner="$(aegis_forensics_discriminate_seeds "${tokens_nl}" "${seed_json}" ".")"
+  if [[ -n "${winner}" ]]; then
+    # Unique probe winner → mechanical Alvo Único on that path.
+    return 1
+  fi
+  # True ambiguity (tie / no signal) → LLM guarantee.
   return 0
 }
 
@@ -993,18 +1070,29 @@ aegis_build_mechanical_forensics_json() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
   local sets named_json seed_json paths_json tokens_nl
   local cands_json="[]"
-  local path probe reason
+  local path probe reason winner
 
   sets="$(aegis_forensics_anchor_sets_json "$@")"
   named_json="$(printf '%s' "${sets}" | jq -c '.named // []')"
   seed_json="$(printf '%s' "${sets}" | jq -c '.seed // []')"
   tokens_nl="$(printf '%s' "${sets}" | jq -r '.dense[]?' 2>/dev/null || true)"
 
-  # Multi operator-named → one candidate each. Else single seed (alvo único).
+  # Multi operator-named → one candidate each.
+  # Else Alvo Único: single seed, or multi-seed probe winner, else first seed.
   if printf '%s' "${named_json}" | jq -e 'length >= 1' >/dev/null 2>&1; then
     paths_json="${named_json}"
+  elif printf '%s' "${seed_json}" | jq -e 'length == 1' >/dev/null 2>&1; then
+    paths_json="${seed_json}"
+  elif printf '%s' "${seed_json}" | jq -e 'length > 1' >/dev/null 2>&1; then
+    winner="$(aegis_forensics_discriminate_seeds "${tokens_nl}" "${seed_json}" ".")"
+    if [[ -n "${winner}" ]]; then
+      paths_json="$(jq -n -c --arg p "${winner}" '[ $p ]')"
+    else
+      # Force-mechanical / fallthrough: first seed only (never invent).
+      paths_json="$(printf '%s' "${seed_json}" | jq -c '.[0:1]')"
+    fi
   else
-    paths_json="$(printf '%s' "${seed_json}" | jq -c '.[0:1]')"
+    paths_json='[]'
   fi
 
   if ! printf '%s' "${paths_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then

@@ -384,7 +384,8 @@ main() {
 
   # observed_payloads follow prioritize_evidence_entries order.
   assert_mode_output "discovery" '["runtime_layer0_facts.json", "runtime_attention_seed.json", "runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json", "filesystem_list_tree.json"]'
-  assert_mode_output "forensics" '["runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json"]'
+  # Mechanical forensics (empty attention → no LLM) omits search_symbol.
+  assert_mode_output "forensics" '["runtime_demand_anchors.json", "filesystem_read_epistemic_handover.json"]'
   assert_mode_output "validation" '["filesystem_read_epistemic_handover.json"]'
   # Attention target src/index.ts → runtime deterministic read anchor.
   # Adversarial is tools-first; same-rank tools alpha-sorted.
@@ -397,7 +398,7 @@ main() {
 
   assert_materialized_runtime_state \
     "forensics" \
-    '["filesystem_read_epistemic_handover.json", "filesystem_search_symbol.json", "runtime_demand_anchors.json"]'
+    '["filesystem_read_epistemic_handover.json", "runtime_demand_anchors.json"]'
 
   assert_no_execution_surface_for_mode "discovery"
 

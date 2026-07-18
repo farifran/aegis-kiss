@@ -50,6 +50,68 @@ capability_is_cacheable() {
   return 1
 }
 
+# Late materialize of filesystem.search_symbol for forensics LLM fallthrough
+# when the mechanical evidence path omitted it. Writes payload + appends to
+# AEGIS_SELECTED_CAPABILITY_PAYLOADS when present.
+aegis_forensics_ensure_search_symbol_payload() {
+  local payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+  local payload_path handler query payload_output selected
+
+  [[ -n "${payload_dir}" ]] || return 1
+  payload_path="${payload_dir}/filesystem_search_symbol.json"
+  if [[ -f "${payload_path}" ]] && jq empty "${payload_path}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  handler="${AEGIS_CAPABILITY_HANDLERS[filesystem.search_symbol]:-}"
+  [[ -f "${handler}" ]] || return 1
+
+  if declare -f aegis_search_symbol_pathspecs >/dev/null 2>&1; then
+    AEGIS_SEARCH_SYMBOL_PATHSPECS="$(
+      aegis_search_symbol_pathspecs \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${payload_dir}" \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+    )"
+    export AEGIS_SEARCH_SYMBOL_PATHSPECS
+  fi
+
+  if declare -f resolve_capability_argument >/dev/null 2>&1; then
+    query="$(resolve_capability_argument "filesystem.search_symbol" "")"
+  elif declare -f aegis_demand_search_query >/dev/null 2>&1; then
+    query="$(aegis_demand_search_query "${AEGIS_INVESTIGATION_INPUT:-}" "AEGIS")"
+  else
+    query="AEGIS"
+  fi
+
+  if declare -f invoke_capability_handler >/dev/null 2>&1; then
+    payload_output="$(invoke_capability_handler "${handler}" "${query}")" || return 1
+  else
+    payload_output="$(
+      AEGIS_SEARCH_SYMBOL_PATHSPECS="${AEGIS_SEARCH_SYMBOL_PATHSPECS:-}" \
+        bash "${handler}" "${query}"
+    )" || return 1
+  fi
+
+  printf '%s\n' "${payload_output}" > "${payload_path}"
+  jq empty "${payload_path}" >/dev/null 2>&1 || return 1
+
+  if [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]]; then
+    selected="$(
+      printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS}" \
+        | jq -c --arg p "${payload_path}" \
+          'if (map(select(. == $p)) | length) > 0 then . else . + [$p] end' \
+          2>/dev/null || true
+    )"
+    if [[ -n "${selected}" ]]; then
+      export AEGIS_SELECTED_CAPABILITY_PAYLOADS="${selected}"
+    fi
+  fi
+
+  aegis_log "forensics_evidence: late search_symbol for LLM fallthrough"
+  return 0
+}
+
 materialize_capability_payloads() {
 
   aegis_log "Materializing capability payloads..."

@@ -17,7 +17,7 @@
 | Tokens da demand → `search_symbol` + Layer 0 content resonance | `aegis_demand_tokens` / dense + `;;` multi `-F` + `git grep -l` |
 | `required_evidence` só âncoras mecânicas (named ∪ seed) | `merge_operator_required_evidence` em `artifact_protocol.sh` |
 | Discovery mecânico content-aware (missing / hits / no hits) | `aegis_discovery_probe_path` + `aegis_build_mechanical_discovery_json` |
-| Forensics mecânico; LLM só se ambíguo (multi-seed) | `aegis_forensics_needs_llm` + `AEGIS_FORENSICS_LLM=auto|0|1` |
+| Forensics mecânico; LLM se multi-seed sem vencedor de probe | `aegis_forensics_needs_llm` + probes + search só no ramo LLM |
 | Uma história mecânica: prompt (linhas) + capability (JSON) + handover | `aegis_materialize_demand_anchors_json` |
 | Structured goal/targets/done_when | mesmo helper |
 | Forensics handoff = só ALVO/reason (sem duplicar TOKENS) | `aegis_format_forensics_handoff_section` |

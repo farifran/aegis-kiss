@@ -754,8 +754,8 @@ execute_substrate() {
     aegis_warn "discovery_mechanical_failed — falling back to LLM substrate"
   fi
 
-  # Forensics: mechanical unless aegis_forensics_needs_llm (multi-seed auto,
-  # or AEGIS_FORENSICS_LLM=1). Force mechanical with =0.
+  # Forensics: mechanical unless aegis_forensics_needs_llm (probe tie / force).
+  # Search was omitted on mechanical evidence path; re-materialize before LLM.
   if [[ "${AEGIS_MODE}" == "forensics" ]] \
     && declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1 \
     && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
@@ -775,6 +775,9 @@ execute_substrate() {
         return 0
       fi
       aegis_warn "forensics_mechanical_failed — falling back to LLM substrate"
+      if declare -f aegis_forensics_ensure_search_symbol_payload >/dev/null 2>&1; then
+        aegis_forensics_ensure_search_symbol_payload || true
+      fi
     else
       aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force"
     fi
@@ -823,6 +826,28 @@ main() {
   resolve_evidence_profile
   augment_evidence_profile_from_handover
   augment_evidence_profile_from_anchors
+  # Forensics mechanical path does not consume search_symbol — omit it
+  # before materialize (LLM path / fallthrough re-adds via ensure).
+  if [[ "${AEGIS_MODE}" == "forensics" ]] \
+    && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
+    if ! aegis_forensics_needs_llm \
+      "${AEGIS_INVESTIGATION_INPUT:-}" \
+      "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"; then
+      local -a _fe_filtered=()
+      local _fe
+      for _fe in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+        [[ "${_fe}" == "filesystem.search_symbol" ]] && continue
+        _fe_filtered+=("${_fe}")
+      done
+      AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${_fe_filtered[@]}")
+      aegis_log "forensics_evidence: omitted search_symbol (mechanical path)"
+      unset _fe _fe_filtered
+    else
+      aegis_log "forensics_evidence: keep search_symbol (LLM path)"
+    fi
+  fi
+
   # Rank so materialize + budget exposure hit anchors/content before noise.
   prioritize_evidence_entries
   prepare_execution_state
