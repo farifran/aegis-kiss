@@ -314,7 +314,7 @@ echo "${anchors_h}" | jq -e '
 ' >/dev/null \
   || fail "demand_anchors_handover_seed: ${anchors_h}"
 
-# section formatter: human lines + json
+# section formatter: human lines only (JSON lives in capability payload)
 section="$(aegis_format_demand_anchors_section "${anchors}")"
 printf '%s' "${section}" | grep -q 'DEMAND ANCHORS' \
   || fail "demand_anchors_section_missing_header"
@@ -322,8 +322,10 @@ printf '%s' "${section}" | grep -q '^SEED:' \
   || fail "demand_anchors_section_missing_seed_line"
 printf '%s' "${section}" | grep -q '^TOKENS:' \
   || fail "demand_anchors_section_missing_tokens_line"
-printf '%s' "${section}" | grep -q 'dense_tokens' \
-  || fail "demand_anchors_section_missing_json"
+printf '%s' "${section}" | grep -q 'megabits' \
+  || fail "demand_anchors_section_missing_token_value"
+printf '%s' "${section}" | grep -q '^json:' \
+  && fail "demand_anchors_section_should_not_duplicate_json"
 
 # named path demand
 named_a="$(aegis_materialize_demand_anchors_json "edit src/index.ts convert megabits" "" "")"
@@ -365,15 +367,20 @@ printf '%s' "${struct_sec}" | grep -q '^GOAL:' \
 printf '%s' "${struct_sec}" | grep -q '^DONE WHEN:' \
   || fail "structured_section_missing_done_when"
 
-# discovery scrub: false "operator named" when no operator paths
+# discovery scrub + path clamp + mechanical rationale when seed present
 export AEGIS_MODE="discovery"
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
 raw_scrub='{
   "observations": [
-    "Operator named src/index.ts; Layer 0 lists it as an entrypoint."
+    "Operator named src/index.ts; Layer 0 lists it as an entrypoint.",
+    "Investigation needs content of src/ui/fake_import.ts before forensics can choose a mutation target.",
+    "Investigation needs content of src/index.ts before forensics can choose a mutation target."
   ],
   "rationale": "Operator named src/index.ts without demand path.",
-  "required_evidence": ["filesystem.read:src/index.ts"]
+  "required_evidence": [
+    "filesystem.read:src/index.ts",
+    "filesystem.read:src/ui/fake_import.ts"
+  ]
 }'
 ctx_scrub="$(
   printf '%s' "${ctx_disc}" | jq \
@@ -384,9 +391,47 @@ ctx_scrub="$(
 enriched_scrub="$(enrich_cognitive_artifact "${raw_scrub}" "${ctx_scrub}")"
 echo "${enriched_scrub}" | jq -e '
   (.operational_context.operational_observations | tostring | test("Operator named"; "i") | not)
+  and (.operational_context.operational_observations | tostring | test("fake_import") | not)
+  and (.operational_context.operational_observations | map(select(test("src/index.ts"))) | length) >= 1
   and (.operational_context.rationale | tostring | test("Operator named"; "i") | not)
+  and (.operational_context.rationale | tostring | test("seed|src/index"; "i"))
+  and (.operational_context.required_evidence | index("filesystem.read:src/ui/fake_import.ts")) == null
 ' >/dev/null \
-  || fail "discovery_should_scrub_false_operator_named: ${enriched_scrub}"
+  || fail "discovery_should_clamp_paths_and_mechanical_rationale: ${enriched_scrub}"
+
+# mechanical discovery (no LLM): seed path → reads + observations
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Megabits"
+mech_pd="$(mktemp -d)"
+jq -n '{
+  success: true,
+  capability: "runtime.attention_seed",
+  payload: {
+    attention_targets: ["src/index.ts"],
+    investigation_scope: {
+      scope_type: "layer0",
+      scope_targets: ["src/index.ts"],
+      scope_confidence: "high"
+    }
+  }
+}' > "${mech_pd}/runtime_attention_seed.json"
+mech="$(aegis_build_mechanical_discovery_json "${AEGIS_INVESTIGATION_INPUT}" "${mech_pd}" "")"
+rm -rf "${mech_pd}"
+echo "${mech}" | jq -e '
+  (.required_evidence | index("filesystem.read:src/index.ts")) != null
+  and (.observations | length) == 1
+  and (.observations[0] | test("src/index.ts"))
+  and (.rationale | test("seed|src/index"; "i"))
+' >/dev/null \
+  || fail "mechanical_discovery_seed_shape: ${mech}"
+
+# mechanical empty anchors
+mech_empty="$(aegis_build_mechanical_discovery_json "the and for para como" "" "")"
+echo "${mech_empty}" | jq -e '
+  (.required_evidence | length) == 0
+  and (.observations | length) == 1
+  and (.rationale | test("empty"; "i"))
+' >/dev/null \
+  || fail "mechanical_discovery_empty_shape: ${mech_empty}"
 
 # forensics handoff section for repair
 tmp_fh="$(mktemp)"

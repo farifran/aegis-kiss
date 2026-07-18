@@ -154,7 +154,9 @@ main() {
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 
-  assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
+  if ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
+    aegis_fatal "mutation_scope_violation: after primary mutation"
+  fi
 
   diff_content="$(
     run_mutation_preflight_with_fix_attempts \

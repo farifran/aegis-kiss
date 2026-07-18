@@ -558,10 +558,9 @@ readonly AEGIS_JQ_ENRICH_LIB='
 
   def mechanical_demand_reason($tokens; $inv):
     if ($tokens | length) > 0 then
-      "Demand: " + ($tokens | .[0:3] | join(" "))
+      "Demand: " + ($tokens | .[0:3] | join(" ")) + " (one new export)"
     else
-      ((($inv // "") | gsub("\\s+"; " ") | gsub("^ +| +$"; ""))[0:72]) as $s
-      | if ($s | length) > 0 then "Demand: " + $s else "unspecified demand" end
+      "Demand: apply investigation (one new export)"
     end;
 
   def bind_forensics_reasons($cands; $tokens; $inv):
@@ -674,14 +673,45 @@ readonly AEGIS_JQ_ENRICH_LIB='
     if ($named | length) > 0 then $s
     elif ($s | type) != "string" then $s
     elif ($s | test("operator[[:space:]]+named"; "i")) then
+      # Match full path tokens (dots included) — do not stop at '.' in src/index.ts
       ($s
-        | gsub("(?i)operator[[:space:]]+named[[:space:]]+[^;,.]+"; "attention seed targets")
-        | gsub("(?i)the operator named"; "attention seed targets include")
-        | gsub("(?i)Operator named"; "Attention seed targets"))
+        | gsub("(?i)operator[[:space:]]+named[[:space:]]+[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)"; "attention seed targets")
+        | gsub("(?i)operator[[:space:]]+named[[:space:]]+"; "attention seed: "))
     else $s end;
+
+  def discovery_path_mentions:
+    [match("[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs|sh|py)"; "g") | .string | sub("^\\./"; "")];
+
+  # Keep observations that mention no path, or only paths in the mechanical set.
+  def observation_paths_allowed($s; $allowed):
+    ($s | discovery_path_mentions) as $paths
+    | if ($paths | length) == 0 then true
+      else
+        ($paths
+          | map(. as $p | ($allowed | index($p)) != null)
+          | all)
+      end;
+
+  def filter_discovery_observations($arr; $named; $allowed):
+    [
+      ($arr // [])[]
+      | scrub_false_operator_claim(.; $named)
+      | select(type == "string" and length > 0)
+      | select(observation_paths_allowed(.; $allowed))
+    ][0:5];
 
   def scrub_observation_list($arr; $named):
     [($arr // [])[] | scrub_false_operator_claim(.; $named)];
+
+  def mechanical_discovery_rationale($named; $seed; $seed_source):
+    if ($named | length) > 0 then
+      "Operator-named path(s): " + ($named | join(", "))
+        + (if ($seed | length) > 0 then "; seed: " + ($seed | join(", ")) else "" end)
+    elif ($seed | length) > 0 then
+      "Attention seed (" + ($seed_source // "seed") + "): " + ($seed | join(", "))
+    else
+      "empty demand path anchors"
+    end;
 '
 
 # Common bind + identity injection used by every mode program.
@@ -710,6 +740,7 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
   | (.operational_context // {}) as $oc
   | ((.required_evidence // $oc.required_evidence // [])) as $raw_req
   | (($seed_targets + $operator_named_paths) | unique) as $seed_att
+  | (($demand_anchors.seed_source // "seed") ) as $seed_src
   | merge_operator_required_evidence(
       $raw_req; $operator_named_paths; $seed_targets; $existing_paths
     ) as $merged_req
@@ -735,6 +766,23 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
       else $seed_scope
       end
     ) as $eff_scope
+  | filter_discovery_observations(
+      (.observations // $oc.operational_observations // []);
+      $operator_named_paths;
+      $seed_att
+    ) as $clean_obs
+  # Prefer mechanical rationale whenever anchors exist (drops scrub garbage).
+  | (
+      if ($seed_att | length) > 0 then
+        [mechanical_discovery_rationale($operator_named_paths; $seed_targets; $seed_src)]
+      else
+        (
+          ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end)
+          | scrub_observation_list(.; $operator_named_paths)
+        ) as $r
+        | if ($r | length) > 0 then $r else ["empty demand path anchors"] end
+      end
+    ) as $clean_rationale
   | .operational_context = ({
       status: ($oc.status // "interpreted"),
       summary: ($oc.summary // "discovery operational context"),
@@ -748,14 +796,15 @@ readonly AEGIS_JQ_ENRICH_DISCOVERY='
       ),
       required_evidence: $merged_req,
       operator_named_paths: $operator_named_paths,
-      operational_observations: scrub_observation_list(
-        (.observations // $oc.operational_observations // []);
-        $operator_named_paths
+      operational_observations: (
+        if ($clean_obs | length) > 0 then $clean_obs
+        elif ($seed_att | length) > 0 then
+          [$seed_att[] | "Investigation needs content of \(.) before forensics can choose a mutation target."]
+        else
+          ["No mechanical path anchor (operator-named or Layer0/attention seed); forensics targeting will be weak."]
+        end
       ),
-      rationale: (
-        ((.rationale // $oc.rationale // []) | if type == "string" then [.] else . end)
-        | scrub_observation_list(.; $operator_named_paths)
-      ),
+      rationale: $clean_rationale,
       evidence_priorities: ($oc.evidence_priorities // [])
     } | drop_empty)
   | del(.observations, .rationale, .required_evidence)
@@ -1054,7 +1103,7 @@ load_artifact_enrichment_context() {
   local anchors_payload="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}/runtime_demand_anchors.json"
   if [[ -f "${anchors_payload}" ]]; then
     demand_anchors_json="$(
-      jq -c '.payload.demand_anchors // .payload // {}' "${anchors_payload}" 2>/dev/null || printf '{}'
+      jq -c '.payload.demand_anchors // {}' "${anchors_payload}" 2>/dev/null || printf '{}'
     )"
   fi
   if ! printf '%s' "${demand_anchors_json}" | jq -e 'type == "object" and has("dense_tokens")' >/dev/null 2>&1; then

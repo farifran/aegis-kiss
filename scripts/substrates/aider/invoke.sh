@@ -370,10 +370,12 @@ assert_mutation_diff_scope() {
     aegis_warn "mutation_scope_violation offenders: ${offender_csv}"
     aegis_warn "authorized targets were: $(printf '%s ' "${authorized_targets[@]}")"
     rollback_execution_surface
-    aegis_fatal "mutation_scope_violation: ${offender_csv}"
+    # Soft return — callers decide fatal vs preflight-fix retry.
+    return 1
   fi
 
   aegis_log "mutation_scope_gate: ok ($(printf '%s\n' "${changed_blob}" | sed '/^$/d' | wc -l | tr -d ' ') path(s) within authorized set)"
+  return 0
 }
 
 # =========================================================

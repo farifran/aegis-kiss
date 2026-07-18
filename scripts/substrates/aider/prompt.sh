@@ -160,6 +160,9 @@ mutation_prompt_resolve_mode_copy() {
 Apply the minimal sufficient mutation described in the investigation input ONCE.
 If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
 TypeScript/JavaScript: new top-level functions SHOULD be `export function` (importable API), not a bare function, unless the demand forbids export.
+Honor direction: "A para B" / "A to B" means convert A→B (e.g. terabitsToMegabits), never the inverse.
+Do NOT redeclare existing exports. Append one new function only when needed.
+Mutate ONLY the loaded target file(s). Never create or edit other paths.
 Preserve runtime sovereignty, protocol integrity, and containment integrity.
 Do not introduce speculative changes beyond what is explicitly requested.
 Do not add explanations or narration.

@@ -470,14 +470,13 @@ declare -ar AEGIS_DISCOVERY_EVIDENCE=(
   "runtime.attention_seed"
 )
 
-# Forensics: mechanical anchors first, then handover + demand-bound search.
+# Forensics: anchors + handover + demand-bound search.
 # Content seeds (operator/attention reads) are appended at runtime.
-# git.status is low-signal for target choice — kept last among defaults.
+# git.status omitted — does not change repair_candidates.
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "filesystem.search_symbol"
-  "git.status"
 )
 
 # Validation is a deterministic tribunal, free of noise: it judges only
@@ -488,9 +487,9 @@ declare -ar AEGIS_VALIDATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
 )
 
-# Adversarial is tools + candidate falsification — search_symbol is noise.
+# Adversarial: tools + candidate via handover. Demand tokens are not
+# falsification evidence (search_symbol and demand_anchors omitted).
 declare -ar AEGIS_ADVERSARIAL_EVIDENCE=(
-  "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "typescript.check"
   "eslint.check"
@@ -508,11 +507,9 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "test.run"
 )
 
-# Optimize runs on the disposable surface after the Repair candidate is
-# applied. Evidence stays lean: the handover carries the Repair diff and
-# files_changed; tools confirm the surface is still sound after refine.
+# Optimize: recognize Repair result on surface — do not re-bind demand.
+# Handover carries diff/files_changed; tools confirm surface soundness.
 declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
-  "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
   "git.status"
   "typescript.check"

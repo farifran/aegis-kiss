@@ -40,19 +40,14 @@ if ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; t
   exit 1
 fi
 
+# Single nested object — no flattened duplicates of the same fields.
 tmp_payload="$(aegis_mktemp)"
 jq -n \
   --arg target "${TARGET_PATH}" \
-  --argjson anchors "${anchors_json}" \
+  --argjson demand_anchors "${anchors_json}" \
   '{
     target: $target,
-    demand_anchors: $anchors,
-    operator_named_paths: $anchors.operator_named_paths,
-    dense_tokens: $anchors.dense_tokens,
-    search_query: $anchors.search_query,
-    seed_targets: $anchors.seed_targets,
-    seed_source: $anchors.seed_source,
-    content_resonance: $anchors.content_resonance
+    demand_anchors: $demand_anchors
   }' > "${tmp_payload}"
 
 emit_success_payload_file "${tmp_payload}"

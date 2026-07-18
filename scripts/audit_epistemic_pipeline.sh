@@ -298,7 +298,7 @@ main() {
   record_boundary \
     "Discovery -> Forensics" \
     '["observations","rationale","required_evidence","handover_attention"]' \
-    '["runtime.demand_anchors","filesystem.read:epistemic_handover","filesystem.search_symbol","git.status","filesystem.read:<anchors>"]' \
+    '["runtime.demand_anchors","filesystem.read:epistemic_handover","filesystem.search_symbol","filesystem.read:<anchors>"]' \
     '["required_evidence","handover_attention","operator_named_paths","demand_anchors"]' \
     "$(verdict check_discovery_to_forensics)" \
     "Forensics consumes Discovery routing via handover, demand_anchors, capability payloads, and runtime-owned content anchors." \
@@ -325,7 +325,7 @@ main() {
   record_boundary \
     "Optimize -> Adversarial" \
     '["diff","files_changed","handover_attention"]' \
-    '["runtime.demand_anchors","filesystem.read:epistemic_handover","typescript.check","eslint.check","test.run"]' \
+    '["filesystem.read:epistemic_handover","typescript.check","eslint.check","test.run"]' \
     '["diff","files_changed"]' \
     "$(verdict check_optimize_to_adversarial)" \
     "Adversarial receives the optimized candidate artifact plus tools." \

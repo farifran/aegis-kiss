@@ -66,7 +66,7 @@ assert_capability_success \
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Megabits para bytes"
 assert_capability_success \
   "runtime.demand_anchors" \
-  '.success == true and .capability == "runtime.demand_anchors" and (.payload.dense_tokens | index("megabits")) != null and (.payload.search_query | type == "string")' \
+  '.success == true and .capability == "runtime.demand_anchors" and (.payload.demand_anchors.dense_tokens | index("megabits")) != null and (.payload.demand_anchors.search_query | type == "string")' \
   scripts/capabilities/runtime/demand_anchors.sh \
   .
 

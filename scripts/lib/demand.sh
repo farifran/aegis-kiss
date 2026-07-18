@@ -321,13 +321,16 @@ aegis_materialize_investigation_input() {
 
 aegis_materialize_demand_anchors_json() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local handover="${2-}"
-  local payload_dir="${3-}"
-
-  if [[ -z "${handover}" ]]; then
+  # Explicit args win (even empty). Env fallback only when arg omitted.
+  local handover payload_dir
+  if [[ "$#" -ge 2 ]]; then
+    handover="$2"
+  else
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
   fi
-  if [[ -z "${payload_dir}" ]]; then
+  if [[ "$#" -ge 3 ]]; then
+    payload_dir="$3"
+  else
     payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
   fi
 
@@ -508,7 +511,7 @@ aegis_materialize_demand_anchors_json() {
 }
 
 # Human-readable block for raw/aider prompts (mechanical only).
-# Floor models: lines first; compact JSON last for machines.
+# Lines only — full JSON lives in capability payload / handover (one machine shape).
 aegis_format_demand_anchors_section() {
   local anchors_json="${1-}"
   if [[ -z "${anchors_json}" ]]; then
@@ -518,12 +521,15 @@ aegis_format_demand_anchors_section() {
     anchors_json='{"operator_named_paths":[],"dense_tokens":[],"search_query":"AEGIS","seed_targets":[],"seed_source":"none","content_resonance":[],"goal":"","targets_header":[],"done_when":[]}'
   fi
 
-  local seed_line tokens_line search_line ops_line goal_line targets_line done_line src
+  local seed_line tokens_line search_line ops_line goal_line targets_line done_line
   seed_line="$(
     printf '%s' "${anchors_json}" | jq -r '
       ((.seed_targets // []) | join(", ")) as $t
-      | (if ($t | length) > 0 then $t else "(none)" end)
-        + " (" + (.seed_source // "none") + ")"
+      | (.seed_source // "none") as $src
+      | if ($t | length) == 0 then "(none)"
+        elif $src == "none" then $t
+        else $t + " (" + $src + ")"
+        end
     ' 2>/dev/null || echo "(none)"
   )"
   tokens_line="$(
@@ -563,8 +569,7 @@ aegis_format_demand_anchors_section() {
   {
     echo "=== DEMAND ANCHORS (runtime-owned, mechanical) ==="
     echo
-    echo "Treat these as authoritative. Do not invent operator-named paths"
-    echo "or seed targets absent below. Prefer SEED/TOKENS over free-text."
+    echo "Authoritative. Prefer SEED/TOKENS over free-text. Do not invent paths."
     echo
     echo "SEED: ${seed_line}"
     echo "TOKENS: ${tokens_line}"
@@ -579,9 +584,6 @@ aegis_format_demand_anchors_section() {
     if [[ -n "${done_line}" ]]; then
       echo "DONE WHEN: ${done_line}"
     fi
-    echo
-    echo "json:"
-    printf '%s\n' "${anchors_json}" | jq -c '.'
     echo
   }
 }
@@ -601,6 +603,7 @@ aegis_format_forensics_handoff_section() {
       | ($snap.operational_context // {}) as $oc
       | ($oc.repair_candidates // []) as $cands
       | ($oc.demand_anchors // {}) as $da
+      # TOKENS live in DEMAND ANCHORS above — handoff is alvo/reason only.
       | if ($cands | length) == 0 and (($da.seed_targets // []) | length) == 0
         then empty
         else
@@ -618,17 +621,110 @@ aegis_format_forensics_handoff_section() {
               "DONE WHEN: \($da.done_when | join(" | "))"
             else empty end
           ),
-          (
-            if (($da.dense_tokens // []) | length) > 0 then
-              "TOKENS: \($da.dense_tokens | join(", "))"
-            else empty end
-          ),
           ""
         end
     ' "${handover}" 2>/dev/null || true
   )"
   [[ -n "${lines}" ]] || return 0
   printf '%s\n' "${lines}"
+}
+
+# ---------------------------------------------------------
+# Mechanical discovery (default — no LLM)
+# ---------------------------------------------------------
+# Discovery is gap projection over runtime anchors, not a second Layer0.
+# When seed ∪ operator paths exist: one observation + read per path.
+# When empty: single no-anchor observation. Opt-in LLM: AEGIS_DISCOVERY_LLM=1.
+
+aegis_build_mechanical_discovery_json() {
+  local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
+  local payload_dir handover
+  if [[ "$#" -ge 2 ]]; then
+    payload_dir="$2"
+  else
+    payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+  fi
+  if [[ "$#" -ge 3 ]]; then
+    handover="$3"
+  else
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+  fi
+  local anchors_json named_json seed_json paths_json
+
+  anchors_json="$(
+    aegis_materialize_demand_anchors_json "${text}" "${handover}" "${payload_dir}"
+  )"
+  if ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    anchors_json='{}'
+  fi
+
+  # Prefer live attention_seed payload over stale anchors seed.
+  if [[ -n "${payload_dir}" && -f "${payload_dir}/runtime_attention_seed.json" ]]; then
+    local live_seed
+    live_seed="$(
+      jq -c '[.payload.attention_targets[]? | select(type == "string" and length > 0)]' \
+        "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || printf '[]'
+    )"
+    if printf '%s' "${live_seed}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      anchors_json="$(
+        printf '%s' "${anchors_json}" | jq -c --argjson s "${live_seed}" \
+          '.seed_targets = $s | .seed_source = "attention_seed"'
+      )"
+    fi
+  fi
+
+  named_json="$(printf '%s' "${anchors_json}" | jq -c '.operator_named_paths // []')"
+  seed_json="$(printf '%s' "${anchors_json}" | jq -c '.seed_targets // []')"
+  paths_json="$(
+    jq -n --argjson n "${named_json}" --argjson s "${seed_json}" \
+      '($n + $s) | unique'
+  )"
+
+  jq -n \
+    --argjson paths "${paths_json}" \
+    --argjson named "${named_json}" \
+    --argjson seed "${seed_json}" \
+    --arg seed_source "$(printf '%s' "${anchors_json}" | jq -r '.seed_source // "none"')" \
+    '
+      if ($paths | length) > 0 then
+        {
+          observations: [
+            $paths[]
+            | "Investigation needs content of \(.) before forensics can choose a mutation target."
+          ],
+          rationale: (
+            if ($named | length) > 0 then
+              "Operator-named path(s): " + ($named | join(", "))
+                + (if ($seed | length) > 0 then "; seed: " + ($seed | join(", ")) else "" end)
+            else
+              "Attention seed (" + $seed_source + "): " + ($seed | join(", "))
+            end
+          ),
+          required_evidence: [$paths[] | "filesystem.read:" + .]
+        }
+      else
+        {
+          observations: [
+            "No mechanical path anchor (operator-named or Layer0/attention seed); forensics targeting will be weak."
+          ],
+          rationale: "empty demand path anchors",
+          required_evidence: []
+        }
+      end
+    '
+}
+
+# Framed substrate output for execute_mode (markers + JSON body).
+aegis_emit_mechanical_discovery_substrate() {
+  local body
+  body="$(aegis_build_mechanical_discovery_json "$@")" \
+    || return 1
+  printf '%s' "${body}" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || return 1
+
+  local begin="${AEGIS_ARTIFACT_BEGIN_MARKER:-AEGIS_ARTIFACT_BEGIN}"
+  local end="${AEGIS_ARTIFACT_END_MARKER:-AEGIS_ARTIFACT_END}"
+  printf '%s\n%s\n%s\n' "${begin}" "${body}" "${end}"
 }
 
 # Runtime tribunal snapshot for validation prompts (from handover + optional tools).

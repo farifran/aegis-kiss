@@ -141,6 +141,10 @@ You are fixing a preflight failure after a prior mutation attempt inside Aegis H
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
 
+HARD SCOPE: edit ONLY these files (never create or touch other paths):
+${target_list}
+If a prior edit introduced duplicate exports, remove the duplicate — do not redeclare existing names.
+
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
 
@@ -295,11 +299,16 @@ run_mutation_preflight_with_fix_attempts() {
     diff_content="$(capture_worktree_diff)"
     if [[ -z "${diff_content}" ]]; then
       rollback_execution_surface
-      aegis_fatal "empty_diff: surface clean after preflight fix attempt"
+      # Empty after fix: keep looping if attempts remain.
+      aegis_warn "empty_diff after preflight fix attempt — continuing if retries left"
+      continue
     fi
 
-    # Re-assert scope after fix attempts (model must not expand surface).
-    assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
+    # Scope violation on fix: already rolled back by assert; retry or exhaust.
+    if ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
+      aegis_warn "mutation_scope_violation on preflight fix — retry remaining attempts"
+      continue
+    fi
   done
 
   # Auto-fix inside the lint gate may have rewritten files after the
@@ -310,7 +319,9 @@ run_mutation_preflight_with_fix_attempts() {
     aegis_fatal "empty_diff: surface clean after preflight"
   fi
 
-  assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"
+  if ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
+    aegis_fatal "mutation_scope_violation: after preflight"
+  fi
   printf '%s' "${diff_content}"
 }
 

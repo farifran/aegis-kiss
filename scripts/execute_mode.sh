@@ -734,6 +734,25 @@ execute_substrate() {
 
   local substrate_output
 
+  # Discovery default: mechanical projection over runtime anchors (no LLM).
+  # Force model path only with AEGIS_DISCOVERY_LLM=1.
+  if [[ "${AEGIS_MODE}" == "discovery" ]] \
+    && [[ "${AEGIS_DISCOVERY_LLM:-0}" != "1" ]] \
+    && declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1; then
+    substrate_output="$(
+      aegis_emit_mechanical_discovery_substrate \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
+    )" || substrate_output=""
+    if [[ -n "${substrate_output}" ]]; then
+      aegis_log "discovery_mechanical: skipped LLM (anchor projection)"
+      AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+      return 0
+    fi
+    aegis_warn "discovery_mechanical_failed — falling back to LLM substrate"
+  fi
+
   case "${AEGIS_EXECUTION_ENGINE}" in
 
     raw)
