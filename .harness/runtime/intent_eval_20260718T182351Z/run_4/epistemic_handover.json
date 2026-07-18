@@ -1,0 +1,67 @@
+{
+  "artifact_snapshot": {
+    "mode": "adversarial",
+    "investigation_input": "funções de conversão, como Megabits para Gigabits",
+    "generated_at": "2026-07-18T18:31:07Z",
+    "operational_context": {
+      "status": "verified",
+      "findings": [
+        {
+          "type": "logic_bug",
+          "severity": "info",
+          "description": "The function `megabitsToGigabits` is incorrectly implemented. It should return `megabits / 1000` instead of `megabits / 1000000`. [tribunal: quoted snippet is not a full candidate expression]",
+          "supported_by_evidence": false,
+          "evidence_refs": [
+            "typescript.check"
+          ]
+        }
+      ],
+      "evidence_refs": [
+        "filesystem.read:epistemic_handover",
+        "filesystem.read:src/index.ts",
+        "eslint.check",
+        "test.run",
+        "typescript.check"
+      ],
+      "observed_payloads": [
+        "filesystem_read_epistemic_handover.json",
+        "filesystem_read_src_index_ts.json",
+        "eslint_check.json",
+        "test_run.json",
+        "typescript_check.json"
+      ],
+      "candidate_result": {
+        "source_mode": "optimize",
+        "diff": "diff --git a/src/index.ts b/src/index.ts\nindex b7ac736..80575e4 100644\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -9,3 +9,7 @@ export function bytesToBits(bytes: number): number {\n export function bytesToKilobits(bytes: number): number {\n   return bytesToBits(bytes) / 1024;\n }\n+\n+export function megabitsToGigabits(megabits: number): number {\n+  return megabits / 1000;\n+}",
+        "files_changed": [
+          "src/index.ts"
+        ],
+        "intent_violations": []
+      },
+      "demand_anchors": {
+        "operator_named_paths": [],
+        "dense_tokens": [
+          "conversao",
+          "gigabits",
+          "megabits"
+        ],
+        "search_query": "conversao;;megabits;;gigabits",
+        "seed_targets": [
+          "src/index.ts"
+        ],
+        "seed_source": "handover",
+        "content_resonance": [],
+        "goal": "",
+        "targets_header": [],
+        "done_when": []
+      }
+    }
+  },
+  "epistemic_state": {
+    "next_attention_targets": [
+      "src/index.ts"
+    ],
+    "attention_scope": "bounded falsification",
+    "attention_reason": "ATTENTION_REASON_ADVERSARIAL"
+  }
+}

@@ -10,6 +10,6 @@ export function bytesToKilobits(bytes: number): number {
   return bytesToBits(bytes) / 1024;
 }
 
-export function terabitsToMegabits(terabits: number): number {
-  return terabits * 1024 * 1024;
+export function bitsToKilobits(bits: number): number {
+  return bits / (1024 * 8);
 }

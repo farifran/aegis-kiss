@@ -1,0 +1,12 @@
+diff --git a/src/index.ts b/src/index.ts
+index b7ac736..80575e4 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -9,3 +9,7 @@ export function bytesToBits(bytes: number): number {
+ export function bytesToKilobits(bytes: number): number {
+   return bytesToBits(bytes) / 1024;
+ }
++
++export function megabitsToGigabits(megabits: number): number {
++  return megabits / 1000;
++}

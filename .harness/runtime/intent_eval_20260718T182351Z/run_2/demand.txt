@@ -1,0 +1,1 @@
+funções de conversão, como bits para Kilobits

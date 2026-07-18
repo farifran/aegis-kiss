@@ -1,0 +1,1 @@
+funções de conversão, como bytes para Megabits

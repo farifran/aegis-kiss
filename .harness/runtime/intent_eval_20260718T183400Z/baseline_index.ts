@@ -9,7 +9,3 @@ export function bytesToBits(bytes: number): number {
 export function bytesToKilobits(bytes: number): number {
   return bytesToBits(bytes) / 1024;
 }
-
-export function terabitsToMegabits(terabits: number): number {
-  return terabits * 1024 * 1024;
-}
