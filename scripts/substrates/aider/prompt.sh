@@ -326,13 +326,25 @@ assemble_mutation_prompt() {
     demand_anchors_section="$(aegis_format_demand_anchors_section)"
   fi
 
-  # Repair: surface forensics alvo/reason explicitly (not buried in handover JSON).
+  # Repair: surface forensics alvo/reason + mechanical mutation brief.
   local forensics_handoff_section=""
-  if [[ "${AEGIS_MODE}" == "repair" ]] \
-    && declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
-    forensics_handoff_section="$(
-      aegis_format_forensics_handoff_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
-    )"
+  local mutation_brief_section=""
+  if [[ "${AEGIS_MODE}" == "repair" ]]; then
+    if declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
+      forensics_handoff_section="$(
+        aegis_format_forensics_handoff_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+      )"
+    fi
+    if declare -f aegis_format_mutation_brief_section >/dev/null 2>&1; then
+      # Prefer execution surface for exports/probe; fall back to cwd.
+      local _brief_root="${AEGIS_EXECUTION_SURFACE_PATH:-.}"
+      mutation_brief_section="$(
+        aegis_format_mutation_brief_section \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" \
+          "${_brief_root}"
+      )"
+      unset _brief_root
+    fi
   fi
 
   local raw_prompt_file
@@ -354,7 +366,7 @@ ${pocket_section}
 
 ---
 
-${demand_anchors_section}${forensics_handoff_section}${input_label}
+${demand_anchors_section}${forensics_handoff_section}${mutation_brief_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---

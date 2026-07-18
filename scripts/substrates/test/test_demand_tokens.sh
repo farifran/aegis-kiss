@@ -562,11 +562,24 @@ jq -n \
     }
   }' > "${tmp_fh}"
 handoff="$(aegis_format_forensics_handoff_section "${tmp_fh}")"
-rm -f "${tmp_fh}"
 printf '%s' "${handoff}" | grep -q 'FORENSICS HANDOFF' \
   || fail "forensics_handoff_missing_header: ${handoff}"
 printf '%s' "${handoff}" | grep -q 'ALVO: src/index.ts' \
   || fail "forensics_handoff_missing_alvo: ${handoff}"
+
+# mutation brief for repair (exports + probe state on ALVO)
+brief="$(aegis_format_mutation_brief_section "${tmp_fh}" ".")"
+printf '%s' "${brief}" | grep -q 'MUTATION BRIEF' \
+  || fail "mutation_brief_missing_header: ${brief}"
+printf '%s' "${brief}" | grep -q 'FILE: src/index.ts' \
+  || fail "mutation_brief_missing_file: ${brief}"
+printf '%s' "${brief}" | grep -q 'EXPORTS NOW:' \
+  || fail "mutation_brief_missing_exports: ${brief}"
+printf '%s' "${brief}" | grep -q 'one new export\|One demand' \
+  || fail "mutation_brief_missing_rules: ${brief}"
+aegis_handover_has_repair_alvo "${tmp_fh}" \
+  || fail "handover_should_report_repair_alvo"
+rm -f "${tmp_fh}"
 
 # demand token preflight soft miss
 export AEGIS_MODE="repair"

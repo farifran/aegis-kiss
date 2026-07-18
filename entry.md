@@ -21,6 +21,8 @@
 | Uma história mecânica: prompt (linhas) + capability (JSON) + handover | `aegis_materialize_demand_anchors_json` |
 | Structured goal/targets/done_when | mesmo helper |
 | Forensics handoff = só ALVO/reason (sem duplicar TOKENS) | `aegis_format_forensics_handoff_section` |
+| Repair: MUTATION BRIEF (exports + probe + one-change) | `aegis_format_mutation_brief_section` |
+| Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
 | Preflight soft token↔diff | `assert_demand_tokens_in_mutation_diff` |
 | Profiles lean: forensics sem git.status; optimize/adversarial sem demand_anchors | config evidence profiles |

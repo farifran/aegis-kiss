@@ -705,6 +705,128 @@ aegis_format_forensics_handoff_section() {
   printf '%s\n' "${lines}"
 }
 
+# Exported identifiers in a source file (function/const), one per line, cap 12.
+aegis_list_file_exports() {
+  local file="${1-}"
+  [[ -n "${file}" && -f "${file}" ]] || return 0
+  grep -Eio \
+    "export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z0-9_]+|export[[:space:]]+const[[:space:]]+[A-Za-z0-9_]+" \
+    "${file}" 2>/dev/null \
+    | sed -E 's/.*[[:space:]]([A-Za-z0-9_]+)$/\1/' \
+    | awk 'NF && !seen[$0]++' \
+    | head -n 12 \
+    || true
+}
+
+# Repair mutation brief: mechanical context for Aider (alvo body state).
+# Complements FORENSICS HANDOFF — does not restate demand free-text.
+# Args: [handover_path] [repo_root]
+aegis_format_mutation_brief_section() {
+  local handover="${1-}"
+  local root="${2:-.}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local alvos_json tokens_nl done_line
+  alvos_json="$(
+    jq -c '
+      (.artifact_snapshot.operational_context.repair_candidates // []) as $c
+      | if ($c | length) > 0 then [$c[].id | select(type == "string" and length > 0)]
+        else
+          [.artifact_snapshot.operational_context.demand_anchors.seed_targets[]?
+            | select(type == "string" and length > 0)][0:1]
+        end
+      | unique
+    ' "${handover}" 2>/dev/null || printf '[]'
+  )"
+  if ! printf '%s' "${alvos_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  tokens_nl="$(
+    jq -r '
+      (.artifact_snapshot.operational_context.demand_anchors.dense_tokens // [])[]?
+    ' "${handover}" 2>/dev/null || true
+  )"
+  if [[ -z "${tokens_nl}" ]] && declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    tokens_nl="$(aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}")"
+  fi
+
+  done_line="$(
+    jq -r '
+      (.artifact_snapshot.operational_context.demand_anchors.done_when // [])
+      | map(select(type == "string" and length > 0))
+      | if length > 0 then join(" | ") else empty end
+    ' "${handover}" 2>/dev/null || true
+  )"
+
+  local path probe state exports_line full
+  {
+    echo "=== MUTATION BRIEF (runtime) ==="
+    echo
+    echo "Edit plan for loaded targets. One demand → one minimal sufficient change."
+    echo
+    while IFS= read -r path; do
+      [[ -n "${path}" ]] || continue
+      full="${root%/}/${path}"
+      full="${full#./}"
+      if declare -f aegis_discovery_probe_path >/dev/null 2>&1; then
+        probe="$(aegis_discovery_probe_path "${path}" "${tokens_nl}" "${root}")"
+      else
+        probe="unknown"
+      fi
+      case "${probe}" in
+        missing)
+          state="missing on disk — create only if operator-named"
+          ;;
+        present_no_hits)
+          state="exists; demand tokens not in content yet (add the demand export)"
+          ;;
+        present_hits:*)
+          state="exists; related symbols: ${probe#present_hits:} — confirm edit vs already-satisfied"
+          ;;
+        *)
+          state="probe inconclusive — read file before editing"
+          ;;
+      esac
+      exports_line="$(
+        aegis_list_file_exports "${full}" \
+          | paste -sd ', ' - 2>/dev/null || true
+      )"
+      [[ -n "${exports_line}" ]] || exports_line="(none)"
+      echo "FILE: ${path}"
+      echo "STATE: ${state}"
+      echo "EXPORTS NOW: ${exports_line}"
+      echo
+    done < <(printf '%s' "${alvos_json}" | jq -r '.[]?' | head -n 3)
+
+    echo "RULES:"
+    echo "- Mutate only the FILE(s) above (and operator-named net-new if any)."
+    echo "- Prefer exactly one new export matching the ALVO reason; no parallel APIs."
+    echo "- Do not invent features absent from DEMAND / ALVO reason."
+    if [[ -n "${done_line}" ]]; then
+      echo "- DONE WHEN: ${done_line}"
+    fi
+    echo
+  }
+}
+
+# True if handover carries at least one forensics repair_candidate id.
+aegis_handover_has_repair_alvo() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 1
+  jq -e '
+    [.artifact_snapshot.operational_context.repair_candidates[]?.id
+      | select(type == "string" and length > 0)]
+    | length > 0
+  ' "${handover}" >/dev/null 2>&1
+}
+
 # ---------------------------------------------------------
 # Mechanical discovery / forensics (default — no LLM)
 # ---------------------------------------------------------

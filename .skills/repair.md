@@ -10,6 +10,14 @@ On a **local feedback iteration** (handover from rejected validation with `repai
 - UNION: operator-named paths in the investigation input.
 - Mutate **only** files loaded into the chat. No new files unless the demand names a net-new path.
 
+## RUNTIME MUTATION BRIEF
+Before editing, the runtime injects a mechanical **MUTATION BRIEF** (not model prose):
+- FILE + content probe state (missing / no demand tokens / related symbols)
+- EXPORTS NOW on that file
+- RULES: one demand → one minimal change; one new export preferred; no invent features
+
+Prefer this brief + FORENSICS HANDOFF over free-text invention.
+
 ## CONSTRAINTS
 1. Minimal sufficient mutation — no speculative features or refactors.
 2. **One demand → one change**: if the operator asks for one conversion/behavior, add exactly one function or edit — do not ship parallel variants (`Foo` + `FooExact`, etc.) unless both are named.

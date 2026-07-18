@@ -862,6 +862,22 @@ main() {
     export AEGIS_FORENSICS_USE_LLM
   fi
 
+  # Repair with a clear forensics ALVO does not need repo-wide search noise.
+  if [[ "${AEGIS_MODE}" == "repair" ]] \
+    && declare -f aegis_handover_has_repair_alvo >/dev/null 2>&1 \
+    && aegis_handover_has_repair_alvo \
+      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"; then
+    local -a _re_filtered=()
+    local _re
+    for _re in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+      [[ "${_re}" == "filesystem.search_symbol" ]] && continue
+      _re_filtered+=("${_re}")
+    done
+    AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${_re_filtered[@]}")
+    aegis_log "repair_evidence: omitted search_symbol (forensics ALVO present)"
+    unset _re _re_filtered
+  fi
+
   # Rank so materialize + budget exposure hit anchors/content before noise.
   prioritize_evidence_entries
   prepare_execution_state
