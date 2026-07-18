@@ -568,8 +568,11 @@ validate_runtime_environment() {
   declare -p AEGIS_MODE_EVIDENCE_PROFILE >/dev/null 2>&1 \
     || aegis_fatal "missing_evidence_profile_registry"
 
-  [[ -f "${AEGIS_SKILL_FILE}" ]] \
-    || aegis_fatal "missing_skill_contract"
+  # Discovery is runtime-mechanical only — no model skill contract required.
+  if [[ "${AEGIS_MODE}" != "discovery" ]]; then
+    [[ -f "${AEGIS_SKILL_FILE}" ]] \
+      || aegis_fatal "missing_skill_contract"
+  fi
 
   [[ -n "${AEGIS_EXECUTION_ENGINES[$AEGIS_MODE]:-}" ]] \
     || aegis_fatal "unknown_mode"

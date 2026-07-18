@@ -87,7 +87,7 @@ cat .harness/runtime/last_outcome.json | jq .
 
 **Forensics.** Mechanical `{id, reason}`; multi-seed ranked by content probes; LLM only on true ambiguity. Search only on LLM residual path.
 
-**Repair.** Prompt stack: `AGENTS.md` preamble → `.skills/repair.md` → DEMAND ANCHORS → optional REPAIR FEEDBACK → FORENSICS HANDOFF → MUTATION BRIEF → investigation → jail → recency. Rails: scope, lint, tsc/smoke, **intent gates** (demand tokens in `+` lines, max new exports). Soft intent may soft-accept with `intent_violations` stamp → validation can reject as `demand_mismatch` and re-enter local repair. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
+**Repair.** Prompt stack (no policy echo): `AGENTS.md` → **skill** (policy) → DEMAND ANCHORS / FEEDBACK / ALVO / BRIEF (data) → investigation → **jail** (path list) → whole-format rules if needed → thin close cue. Rails: scope, lint, tsc/smoke, **intent gates** (tokens in `+` lines, max new exports). Soft intent may soft-accept with `intent_violations` → validation `demand_mismatch` re-entry. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
 
 **Flags (common)**
 

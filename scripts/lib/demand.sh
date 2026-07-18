@@ -762,11 +762,10 @@ aegis_format_mutation_brief_section() {
     ' "${handover}" 2>/dev/null || true
   )"
 
+  # Data only — edit policy lives in .skills/repair.md (avoid prompt echo).
   local path probe state exports_line full
   {
     echo "=== MUTATION BRIEF (runtime) ==="
-    echo
-    echo "Edit plan for loaded targets. One demand → one minimal sufficient change."
     echo
     while IFS= read -r path; do
       [[ -n "${path}" ]] || continue
@@ -802,14 +801,10 @@ aegis_format_mutation_brief_section() {
       echo
     done < <(printf '%s' "${alvos_json}" | jq -r '.[]?' | head -n 3)
 
-    echo "RULES:"
-    echo "- Mutate only the FILE(s) above (and operator-named net-new if any)."
-    echo "- Prefer exactly one new export matching the ALVO reason; no parallel APIs."
-    echo "- Do not invent features absent from DEMAND / ALVO reason."
     if [[ -n "${done_line}" ]]; then
-      echo "- DONE WHEN: ${done_line}"
+      echo "DONE WHEN: ${done_line}"
+      echo
     fi
-    echo
   }
 }
 

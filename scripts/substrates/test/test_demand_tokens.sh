@@ -581,8 +581,9 @@ printf '%s' "${brief}" | grep -q 'FILE: src/index.ts' \
   || fail "mutation_brief_missing_file: ${brief}"
 printf '%s' "${brief}" | grep -q 'EXPORTS NOW:' \
   || fail "mutation_brief_missing_exports: ${brief}"
-printf '%s' "${brief}" | grep -q 'one new export\|One demand' \
-  || fail "mutation_brief_missing_rules: ${brief}"
+printf '%s' "${brief}" | grep -q 'STATE:' \
+  || fail "mutation_brief_missing_state: ${brief}"
+# Policy rules live in .skills/repair.md — brief is FILE/STATE/EXPORTS (+ DONE WHEN) only.
 aegis_handover_has_repair_alvo "${tmp_fh}" \
   || fail "handover_should_report_repair_alvo"
 rm -f "${tmp_fh}"

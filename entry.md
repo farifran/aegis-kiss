@@ -21,7 +21,7 @@
 | Uma história mecânica: prompt (linhas) + capability (JSON) + handover | `aegis_materialize_demand_anchors_json` |
 | Structured goal/targets/done_when | mesmo helper |
 | Forensics handoff = só ALVO/reason (sem duplicar TOKENS) | `aegis_format_forensics_handoff_section` |
-| Repair: MUTATION BRIEF (exports + probe + one-change) | `aegis_format_mutation_brief_section` |
+| Repair: MUTATION BRIEF data-only (FILE/STATE/EXPORTS; policy no skill) | `aegis_format_mutation_brief_section` |
 | Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
 | Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |
@@ -542,7 +542,7 @@ Cada fase deve manter testes shell de contrato (parser, tetos, isolamento de can
 - `scripts/runtime/promote_validated_candidate.sh` — `git apply` (sem commit automático)  
 - `scripts/capabilities/git/*` — status/diff evidence  
 - `scripts/substrates/aider_substrate.sh` — mutation, scope, preflight fix taxonomy  
-- `.skills/discovery.md` — contrato/docs/audit only (sem path LLM)
+- discovery — **sem** `.skills/discovery.md`; runtime-only (`aegis_build_mechanical_discovery_json`)
 - `.skills/forensics.md` — contrato + LLM residual (ambiguidade)
 - `.skills/repair.md` — skill injectado no Aider (fonte única; sem DISTILLED paralelo)  
 

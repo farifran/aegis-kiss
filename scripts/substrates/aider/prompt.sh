@@ -93,14 +93,11 @@ mutation_prompt_file_jail() {
   if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
     target_list="$(printf -- '- %s\n' "${prompt_targets[@]}")"
   fi
+  # Path list is the corrective power; skill owns edit policy.
   cat <<EOF
-FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
-The ONLY files you may edit are the ones already loaded into this chat:
+FILE JAIL — edit ONLY these loaded files:
 ${target_list}
-You are FORBIDDEN from adding files to the chat.
-Never ask for, request, suggest, or reference additional files to be added or edited.
-File paths that appear inside the capability evidence payloads are READ-ONLY CONTEXT, not an invitation to open or edit them.
-If the required change seems to involve a file that is not loaded, do NOT add it: apply the closest sufficient change within the loaded files only.
+Do not add files to the chat. Paths in evidence are read-only. If a needed path is not listed, change only within the list above.
 EOF
 }
 
@@ -129,6 +126,7 @@ mutation_prompt_anti_truncation() {
 "
     done
   fi
+  # Format-only: policy (TS, one-export, demand) lives in the skill contract.
   cat <<EOF
 CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
 Your reply MUST emit one filename + fenced block per target file (in any order):
@@ -137,13 +135,8 @@ ${shape_blocks}
 Rules:
 - Use each filename EXACTLY as written above.
 - Write the complete file content — never placeholders like '// ...' or '... rest of file'.
-- Do NOT copy any code from this prompt's instructions or evidence; write only the code the task requires.
-- If a file is currently a stub or empty (net-new), replace it with the full implementation the task demands.
-- TypeScript (NodeNext): relative imports MUST use the .js extension (e.g. from './mod.js').
-- TypeScript: keep export names that existing importers already use unless the demand renames them.
-- TypeScript: new top-level functions use \`export function\` (not a bare unexported function) unless the demand forbids export.
-- TypeScript: prefer strict, compilable code — explicit types, BigInt for high-precision counters when demanded, no any unless unavoidable.
-- Implement ONLY what the investigation input demands. Do not create or keep unrelated modules.
+- Do NOT copy code from this prompt's instructions or evidence.
+- Empty/stub loaded targets: write the full implementation the demand needs.
 
 If you use placeholders or omit code, the parser will fail and your changes will be discarded.
 EOF
@@ -154,19 +147,11 @@ mutation_prompt_resolve_mode_copy() {
   local label_file="$1"
   local instructions_file="$2"
 
-  printf '%s' "Investigation input (operator mutation demand — single demand, apply once):" \
+  # Default = first-pass repair. Policy lives in the skill; this is only the close cue.
+  printf '%s' "Investigation input (operator mutation demand):" \
     > "${label_file}"
   cat > "${instructions_file}" <<'EOF'
-Apply the minimal sufficient mutation described in the investigation input ONCE.
-If the demand names one conversion or one behavior, implement exactly one function/change — not a family of variants.
-TypeScript/JavaScript: new top-level functions SHOULD be `export function` (importable API), not a bare function, unless the demand forbids export.
-Honor direction: "A para B" / "A to B" means convert A→B (e.g. terabitsToMegabits), never the inverse.
-Do NOT redeclare existing exports. Append one new function only when needed.
-Mutate ONLY the loaded target file(s). Never create or edit other paths.
-Preserve runtime sovereignty, protocol integrity, and containment integrity.
-Do not introduce speculative changes beyond what is explicitly requested.
-Do not add explanations or narration.
-Apply the change and stop.
+Apply the investigation input to the loaded target file(s) once. Follow the skill contract. Edits only — stop.
 EOF
 
   # Local repair feedback: fix only structured violations inside authorized_scopes.
@@ -292,12 +277,6 @@ assemble_mutation_prompt() {
   skill_contract="$(mutation_prompt_skill_contract "${prompt_targets[@]:-}")"
   pocket_section="$(mutation_prompt_pocket_map_section "${prompt_targets[@]:-}")"
 
-  local recency_anchor=""
-  # Repair only — restating in optimize would invite re-implementation.
-  if [[ "${AEGIS_MODE}" == "repair" ]]; then
-    recency_anchor="YOUR TASK NOW: apply the single investigation demand stated above to the loaded target file(s) only. One minimal sufficient change — do not invent a second parallel API or duplicate the same conversion."
-  fi
-
   local demand_anchors_section=""
   if declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
     demand_anchors_section="$(aegis_format_demand_anchors_section)"
@@ -333,6 +312,9 @@ assemble_mutation_prompt() {
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
 
+  # Ownership (no policy echo):
+  #   skill = edit policy | anchors/ALVO/BRIEF/feedback = instance data
+  #   jail = path list | anti-truncation = whole format only | mode_instructions = close cue
   cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
@@ -358,9 +340,7 @@ ${file_jail_instructions}
 
 ${anti_truncation_instructions:+${anti_truncation_instructions}
 
-}${recency_anchor}
-
-${mode_instructions}
+}${mode_instructions}
 EOF
 
   # Whole-prompt path obfuscation: every source above (skill contract,

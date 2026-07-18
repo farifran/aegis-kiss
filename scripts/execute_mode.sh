@@ -66,8 +66,11 @@ validate_executor_inputs() {
     [[ -n "${!name:-}" ]] || aegis_fatal "${fatal_tag}"
   done
 
-  [[ -f "${AEGIS_SKILL_FILE}" ]] \
-    || aegis_fatal "missing_skill_contract"
+  # Discovery never loads a skill into a model; file is optional docs only.
+  if [[ "${AEGIS_MODE}" != "discovery" ]]; then
+    [[ -f "${AEGIS_SKILL_FILE}" ]] \
+      || aegis_fatal "missing_skill_contract"
+  fi
 
   [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" ]] \
     || aegis_fatal "missing_epistemic_handover"
@@ -740,8 +743,7 @@ execute_substrate() {
 
   local substrate_output
 
-  # Discovery is always mechanical (no LLM path). Skill .md is contract/docs
-  # only — never loaded into a model for this mode.
+  # Discovery is always mechanical (no LLM, no skill file required).
   if [[ "${AEGIS_MODE}" == "discovery" ]]; then
     declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1 \
       || aegis_fatal "discovery_mechanical_unavailable"

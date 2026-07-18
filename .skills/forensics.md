@@ -58,8 +58,8 @@ Runtime injects: `mode`, `evidence_refs`, **`handover_attention`**, demand-ancho
   "status": "interpreted|inconclusive",
   "repair_candidates": [
     {
-      "id": "src/index.ts",
-      "reason": "Demand: convert terabits to megabits (one new export)"
+      "id": "<repo-relative path from anchors or operator-named only>",
+      "reason": "Demand: <tokens or X→Y> (one change)"
     }
   ]
 }
@@ -68,7 +68,7 @@ Runtime injects: `mode`, `evidence_refs`, **`handover_attention`**, demand-ancho
 | Field | Role |
 |-------|------|
 | `status` | `interpreted` if ≥1 candidate; `inconclusive` if none |
-| `repair_candidates[].id` | Repo-relative path (anchor-scoped) |
+| `repair_candidates[].id` | **Copy** a path from anchors / operator-named — never invent or default a path (no fixed file like a barrel `index`) |
 | `repair_candidates[].reason` | Short demand-aligned reason |
 
 ### Net-new

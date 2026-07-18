@@ -3,7 +3,7 @@
 Models emit only the minimal cognitive fields for the active skill **when the LLM substrate runs**.  
 The runtime injects identity, evidence, candidates, and attention. Do not re-emit runtime-owned fields.
 
-**Discovery is always mechanical** (no LLM). **Forensics** is mechanical by default; LLM only on multi-seed probe tie / force. Skill `.md` files are contracts (and LLM prompts only where a model still runs).
+**Discovery is always mechanical** (no LLM, **no** `.skills/discovery.md`). **Forensics** is mechanical by default; LLM only on multi-seed probe tie / force. Other skill `.md` files are contracts (and LLM prompts only where a model still runs).
 
 | Mode | Who produces the body (default) | Model emits (if any) | Runtime injects / owns |
 |---|---|---|---|

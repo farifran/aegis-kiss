@@ -40,9 +40,8 @@ array_contains() {
 
 # Match the field as a whole token so substrings ("verdicts",
 # "refindings") and formatting tricks cannot satisfy the audit.
-# Grep mode-contract fields in .skills/<mode>.md.
-# Note: discovery/forensics mechanical paths do not load skill content;
-# these declarations still gate LLM residual schemas + pipeline continuity.
+# Grep mode-contract fields in .skills/<mode>.md (LLM residual schemas).
+# Discovery has no skill file — mechanical path lives in scripts/lib/demand.sh.
 skill_declares() {
   local skill_file="$1"
   local field="$2"
@@ -50,6 +49,15 @@ skill_declares() {
   [[ -f "${skill_file}" ]] || return 1
 
   grep -Eq "(^|[^[:alnum:]_])${field}([^[:alnum:]_]|$)" "${skill_file}"
+}
+
+# Discovery is runtime-only: builder + emitter + execute_mode short-circuit.
+discovery_mechanical_path_ok() {
+  grep -Eq 'aegis_build_mechanical_discovery_json' scripts/lib/demand.sh \
+    && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/lib/demand.sh \
+    && grep -Eq 'required_evidence' scripts/lib/demand.sh \
+    && grep -Eq 'observations' scripts/lib/demand.sh \
+    && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/execute_mode.sh
 }
 
 # Mutation target resolution lives in the aider module split (targets.sh),
@@ -257,12 +265,9 @@ verdict() {
 }
 
 check_discovery_to_forensics() {
-  # Minimal discovery contract (model emits) + runtime routing fields
-  # named in the skill + forensics candidates + handover evidence +
-  # deterministic content anchors so Forensics is not content-blind.
-  skill_declares ".skills/discovery.md" "required_evidence" \
-    && skill_declares ".skills/discovery.md" "observations" \
-    && skill_declares ".skills/discovery.md" "handover_attention" \
+  # Discovery: mechanical runtime only (no .skills/discovery.md).
+  # Forensics: skill residual schema + handover/anchors evidence.
+  discovery_mechanical_path_ok \
     && skill_declares ".skills/forensics.md" "repair_candidates" \
     && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
     && array_contains "runtime.demand_anchors" "${AEGIS_FORENSICS_EVIDENCE[@]}" \

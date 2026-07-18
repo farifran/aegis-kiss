@@ -135,30 +135,26 @@ assemble_preflight_fix_prompt() {
   local standing=""
   [[ -f "${standing_rules}" ]] && standing="$(cat "${standing_rules}")"
 
+  # Diagnostics + standing rules own the fix; scope listed once (no jail echo).
   cat > "${prompt_file}" << EOF
-You are fixing a preflight failure after a prior mutation attempt inside Aegis Harness.
+Preflight fix after a mutation attempt.
 
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
 
-HARD SCOPE: edit ONLY these files (never create or touch other paths):
+Edit ONLY:
 ${target_list}
 If a prior edit introduced duplicate exports, remove the duplicate — do not redeclare existing names.
 
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
 
-Diagnostics by class (fix ONLY these; do not expand scope):
+Diagnostics (fix ONLY these):
 
 ${taxonomy_block}
 ${standing}
 
-FILE ACCESS CONSTRAINTS (NON-NEGOTIABLE):
-The ONLY files you may edit are:
-${target_list}
-You are FORBIDDEN from adding files to the chat.
-
-YOUR TASK NOW: edit the loaded files so every listed diagnostic is resolved.
+Resolve every listed diagnostic. Edits only — stop.
 EOF
 
   if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then
@@ -392,30 +388,24 @@ assemble_intent_fix_prompt() {
     )"
   fi
 
+  # Skill is not re-injected on intent fix — violations + scope are the corrective power.
+  # Keep only intent-specific rails (tokens / over-export); not a full skill echo.
   cat > "${prompt_file}" << EOF
-You are fixing a demand-intent mismatch after a prior mutation inside Aegis Harness.
+Intent mismatch fix after a mutation.
 
 Mode: ${AEGIS_MODE}
 Execution ID: ${AEGIS_EXECUTION_ID}
 
-HARD SCOPE: edit ONLY these files:
+Edit ONLY:
 ${target_list}
 
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
 
-${handoff_line}
-Intent violations (fix ONLY these):
+${handoff_line}Violations (fix ONLY these):
 $(printf '%s\n' "${diagnostics}" | sed 's/^/- /')
 
-Rules:
-- One demand → one minimal change; prefer exactly one new export matching the ALVO reason.
-- Remove parallel/extra exports (Foo + FooExact, power helpers, etc.).
-- Added lines must reflect demand tokens / directed conversion from the reason.
-- Do not invent features absent from DEMAND / ALVO reason.
-- Keep the surface compiling; do not expand scope.
-
-YOUR TASK NOW: rewrite the loaded target so every intent violation above is resolved.
+Resolve every violation: demand tokens/direction in added lines; at most one demand-aligned export; no parallel APIs. Edits only — stop.
 EOF
 
   if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then

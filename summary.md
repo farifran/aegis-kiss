@@ -72,7 +72,7 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 
 | Skill | Loaded into model? |
 |---|---|
-| `discovery.md` | **No** — contract / docs / audit only |
+| *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
 | `repair.md` / `optimize.md` | **Yes** — always injected by Aider (`cat` skill file) |
 | `adversarial.md` / `validation.md` | **Yes** — raw substrate |
@@ -136,7 +136,7 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Forensics body | `aegis_build_mechanical_forensics_json`; multi-seed via `aegis_forensics_discriminate_seeds` |
 | Forensics LLM? | `aegis_forensics_needs_llm` (`AEGIS_FORENSICS_LLM=auto\|0\|1`) |
 | Search scope | `aegis_search_symbol_pathspecs` + `git grep` |
-| Repair prompt extras | FORENSICS HANDOFF, MUTATION BRIEF, REPAIR FEEDBACK |
+| Repair prompt extras | ALVO / BRIEF (data) / FEEDBACK; skill owns policy (no recency echo) |
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`) |
 | demand_mismatch | soft-accept → `intent_violations` on artifact → validation reject + local re-repair |
