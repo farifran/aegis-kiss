@@ -822,6 +822,63 @@ aegis_handover_has_repair_alvo() {
   ' "${handover}" >/dev/null 2>&1
 }
 
+# Optimize: show the Repair candidate delta as instance data (not policy).
+# Handover must be post-repair (mode=repair, diff + files_changed).
+# Args: [handover_path]  Env: AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES (default 12000)
+aegis_format_repair_result_section() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local files_line diff_body max_bytes trunc_note=""
+  : "${AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES:=12000}"
+  max_bytes="${AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES}"
+
+  files_line="$(
+    jq -r '
+      .artifact_snapshot as $snap
+      | select($snap.mode == "repair")
+      | ($snap.operational_context.files_changed // [])
+      | map(select(type == "string" and length > 0))
+      | if length == 0 then empty else join(", ") end
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${files_line}" ]] || return 0
+
+  diff_body="$(
+    jq -r '
+      .artifact_snapshot as $snap
+      | select($snap.mode == "repair")
+      | ($snap.operational_context.diff // empty)
+      | select(type == "string" and length > 0 and . != "(no changes)")
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${diff_body}" ]] || return 0
+
+  if [[ "${#diff_body}" -gt "${max_bytes}" ]]; then
+    trunc_note="[AEGIS][REPAIR_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
+    diff_body="${diff_body:0:${max_bytes}}"
+  fi
+
+  {
+    echo "=== REPAIR RESULT (runtime) ==="
+    echo
+    echo "Repair already applied on the surface. Refine against this delta only — do not re-implement the demand."
+    echo
+    echo "files_changed: ${files_line}"
+    echo
+    echo "diff:"
+    printf '%s\n' "${diff_body}"
+    if [[ -n "${trunc_note}" ]]; then
+      echo
+      echo "${trunc_note}"
+    fi
+    echo
+  }
+}
+
 # Local re-repair feedback from rejected validation (demand_mismatch + others).
 aegis_format_repair_feedback_section() {
   local handover="${1-}"

@@ -27,7 +27,6 @@
 #
 # Env:
 #   AEGIS_LINT_PROJECT_TSC=0  disable project tsc delta (syntax-only TS)
-#   AEGIS_MODE=optimize       skips project tsc (already gated in repair)
 #
 # Exit 0  = edit structurally sound, aider finalizes immediately.
 # Exit !0 = diagnostics feed aider's bounded internal reflection.
@@ -79,7 +78,6 @@ lint_tsc_project_delta() {
 
   [[ "${AEGIS_LINT_PROJECT_TSC:-1}" == "0" \
     || "${AEGIS_LINT_PROJECT_TSC:-1}" == "false" ]] && return 0
-  [[ "${AEGIS_MODE:-}" == "optimize" ]] && return 0
 
   tsconfig=""
   if [[ -f "tsconfig.json" ]]; then
@@ -127,7 +125,6 @@ lint_tsc_project_delta() {
 lint_tsc_single_file() {
   local target="$1"
   local tsc_bin
-  [[ "${AEGIS_MODE:-}" == "optimize" ]] && return 0
   tsc_bin=""
   if tsc_bin="$(resolve_local_bin tsc)"; then
     "${tsc_bin}" --noEmit --noResolve --skipLibCheck --pretty false \
@@ -152,10 +149,10 @@ case "${TARGET_FILE}" in
   *.ts|*.tsx)
     # Prefer project tsc delta (errors on THIS file only) so Aider's
     # auto-lint loop sees real type/import failures, not just parse.
+    # Same tsc rails as repair (including optimize refine path).
     if [[ -f "tsconfig.json" || -f "./tsconfig.json" ]] \
       && [[ "${AEGIS_LINT_PROJECT_TSC:-1}" != "0" ]] \
       && [[ "${AEGIS_LINT_PROJECT_TSC:-1}" != "false" ]] \
-      && [[ "${AEGIS_MODE:-}" != "optimize" ]] \
       && resolve_local_bin tsc >/dev/null 2>&1; then
       lint_tsc_project_delta "${TARGET_FILE}" || exit $?
     else

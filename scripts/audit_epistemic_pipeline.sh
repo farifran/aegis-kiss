@@ -280,15 +280,19 @@ check_forensics_to_repair() {
 }
 
 check_repair_to_optimize() {
-  candidate_materializer_consumes "diff" \
-    && candidate_materializer_consumes "files_changed" \
-    && mutation_resolver_consumes "files_changed"
+  # Optimize is advisory (raw): skill declares plan fields; engine is raw.
+  skill_declares ".skills/optimize.md" "can_improve" \
+    && skill_declares ".skills/optimize.md" "no_improvement_needed" \
+    && skill_declares ".skills/optimize.md" "improvements" \
+    && grep -Eq '\["optimize"\]="raw"' .harness/config.sh
 }
 
 check_optimize_to_adversarial() {
   array_contains "filesystem.read:epistemic_handover" "${AEGIS_ADVERSARIAL_EVIDENCE[@]}" \
     && skill_declares ".skills/adversarial.md" "diff" \
-    && skill_declares ".skills/adversarial.md" "files_changed"
+    && skill_declares ".skills/adversarial.md" "files_changed" \
+    && grep -Eq 'AEGIS_JQ_ENRICH_OPTIMIZE' scripts/lib/artifact_protocol.sh \
+    && grep -Eq 'candidate_result' scripts/lib/artifact_protocol.sh
 }
 
 check_adversarial_to_validation() {

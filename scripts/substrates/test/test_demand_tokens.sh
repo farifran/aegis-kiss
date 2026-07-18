@@ -635,6 +635,41 @@ if declare -f collect_mutation_intent_violations >/dev/null 2>&1; then
   fi
 fi
 
+# Optimize: REPAIR RESULT section (repair diff as instance data)
+tmp_rr="$(mktemp)"
+jq -n '{
+  artifact_snapshot: {
+    mode: "repair",
+    investigation_input: "terabits to megabits",
+    generated_at: "2026-07-18T00:00:00Z",
+    operational_context: {
+      diff: "diff --git a/src/conv.ts b/src/conv.ts\n+++ b/src/conv.ts\n+export function terabitsToMegabits(t: number): number { return t * 1048576; }\n",
+      files_changed: ["src/conv.ts"]
+    }
+  },
+  epistemic_state: {
+    next_attention_targets: ["src/conv.ts"],
+    attention_scope: "mutation_applied",
+    attention_reason: "ATTENTION_REASON_REPAIR"
+  }
+}' > "${tmp_rr}"
+rr_sec="$(aegis_format_repair_result_section "${tmp_rr}")"
+printf '%s' "${rr_sec}" | grep -q 'REPAIR RESULT' \
+  || fail "repair_result_section_missing_header: ${rr_sec}"
+printf '%s' "${rr_sec}" | grep -q 'files_changed: src/conv.ts' \
+  || fail "repair_result_missing_files: ${rr_sec}"
+printf '%s' "${rr_sec}" | grep -q 'terabitsToMegabits' \
+  || fail "repair_result_missing_diff_body: ${rr_sec}"
+printf '%s' "${rr_sec}" | grep -q 'do not re-implement' \
+  || fail "repair_result_missing_refine_cue: ${rr_sec}"
+# truncation path
+export AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES=40
+rr_trunc="$(aegis_format_repair_result_section "${tmp_rr}")"
+printf '%s' "${rr_trunc}" | grep -q 'REPAIR_DIFF_TRUNCATED' \
+  || fail "repair_result_should_truncate: ${rr_trunc}"
+unset AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES
+rm -f "${tmp_rr}"
+
 # R3: repair_feedback section + validation demand_mismatch merge shape
 tmp_rf="$(mktemp)"
 jq -n '{

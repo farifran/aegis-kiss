@@ -32,9 +32,12 @@ mutation_targets_from_handover_contract() {
     return 0
   fi
 
-  if [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    mutation_jq_lines "${handover}" \
-      '.artifact_snapshot.operational_context.files_changed[]? // empty'
+  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
+    # Optimize can_improve → repair refine (same feedback shape).
+    mutation_jq_lines "${handover}" '
+      (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes // [])[]?,
+      (.artifact_snapshot.operational_context.repair_feedback.violations // [])[]?.target_files[]?
+    '
     return 0
   fi
 }
@@ -116,9 +119,9 @@ mutation_targets_assert_contract_nonempty() {
     && [[ "${count}" -eq 0 ]]; then
     aegis_fatal "missing_repair_feedback_authorized_scopes"
   fi
-  if [[ "${handover_mode}" == "repair" ]] && [[ "${AEGIS_MODE}" == "optimize" ]] \
+  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "repair" ]] \
     && [[ "${count}" -eq 0 ]]; then
-    aegis_fatal "missing_repair_files_changed"
+    aegis_fatal "missing_optimize_improve_authorized_scopes"
   fi
 }
 

@@ -109,26 +109,42 @@ main() {
     aegis_log "Mutation targets: ${mutation_targets[*]}"
   fi
 
-  # Optimize short-circuit: small repair diffs skip a second LLM pass.
+  # Optimize: post-repair surface is the baseline. Ask Aider whether a safe
+  # refine exists; if the surface is unchanged, passthrough repair → next mode
+  # (no re-preflight). If improved, same mutation rails as repair (lint+tools).
   local diff_content=""
+  local optimize_baseline_diff=""
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    : "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
-    : "${AEGIS_OPTIMIZE_LLM:=0}"
-    local baseline_diff baseline_lines
-    baseline_diff="$(capture_worktree_diff)"
-    baseline_lines="$(printf '%s\n' "${baseline_diff}" | wc -l | tr -d ' ')"
-    if [[ -z "${baseline_diff}" ]]; then
+    optimize_baseline_diff="$(capture_worktree_diff)"
+    if [[ -z "${optimize_baseline_diff}" ]]; then
       rollback_execution_surface
       aegis_fatal "empty_diff: optimize surface has no repair candidate applied"
     fi
-    if [[ "${AEGIS_OPTIMIZE_LLM}" != "1" ]] \
-      && [[ "${baseline_lines}" -le "${AEGIS_OPTIMIZE_MIN_LINES}" ]]; then
-      aegis_log "optimize_shortcircuit: repair diff is ${baseline_lines} lines (≤ ${AEGIS_OPTIMIZE_MIN_LINES}); forwarding without LLM (AEGIS_OPTIMIZE_LLM=1 to force refine)"
-      emit_mutation_artifact "${baseline_diff}"
-      aegis_log "Aider mutation substrate completed (optimize short-circuit)"
+
+    # AEGIS_OPTIMIZE_LLM:
+    #   1|true|yes (default) — always ask the model
+    #   0|false|no           — passthrough repair without LLM
+    #   auto                 — passthrough when repair diff is very small
+    : "${AEGIS_OPTIMIZE_LLM:=1}"
+    : "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
+    local _opt_llm _opt_lines
+    _opt_llm="$(printf '%s' "${AEGIS_OPTIMIZE_LLM}" | tr '[:upper:]' '[:lower:]')"
+    _opt_lines="$(printf '%s\n' "${optimize_baseline_diff}" | wc -l | tr -d ' ')"
+
+    if [[ "${_opt_llm}" == "0" || "${_opt_llm}" == "false" || "${_opt_llm}" == "no" ]]; then
+      aegis_log "optimize_passthrough: AEGIS_OPTIMIZE_LLM=${AEGIS_OPTIMIZE_LLM} — repair candidate → next mode"
+      emit_mutation_artifact "${optimize_baseline_diff}"
+      aegis_log "Aider mutation substrate completed (optimize passthrough)"
       return 0
     fi
-    aegis_log "optimize_llm_refine: lines=${baseline_lines} AEGIS_OPTIMIZE_LLM=${AEGIS_OPTIMIZE_LLM}"
+    if [[ "${_opt_llm}" == "auto" ]] \
+      && [[ "${_opt_lines}" -le "${AEGIS_OPTIMIZE_MIN_LINES}" ]]; then
+      aegis_log "optimize_passthrough: auto short-circuit (${_opt_lines}≤${AEGIS_OPTIMIZE_MIN_LINES} lines) — repair candidate → next mode"
+      emit_mutation_artifact "${optimize_baseline_diff}"
+      aegis_log "Aider mutation substrate completed (optimize passthrough)"
+      return 0
+    fi
+    aegis_log "optimize_ask: can repair be improved? (baseline ${_opt_lines} lines, LLM=${AEGIS_OPTIMIZE_LLM})"
   fi
 
   local resolved_edit_format
@@ -158,6 +174,18 @@ main() {
     aegis_fatal "mutation_scope_violation: after primary mutation"
   fi
 
+  # Optimize no-op: surface still equals post-repair → forward repair, skip
+  # tools re-run (already green from repair) and continue pipeline.
+  if [[ "${AEGIS_MODE}" == "optimize" ]] \
+    && [[ -n "${optimize_baseline_diff}" ]] \
+    && [[ "${diff_content}" == "${optimize_baseline_diff}" ]]; then
+    aegis_log "optimize_no_change: repair already optimal — passthrough to next mode"
+    emit_mutation_artifact "${optimize_baseline_diff}"
+    aegis_log "Aider mutation substrate completed (optimize no_optimization_needed)"
+    return 0
+  fi
+
+  # Improved (or primary repair): same Aider tool rails as repair.
   diff_content="$(
     run_mutation_preflight_with_fix_attempts \
       "${resolved_edit_format}" \

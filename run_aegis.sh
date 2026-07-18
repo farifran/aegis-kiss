@@ -108,6 +108,29 @@ next_mode() {
   printf '%s\n' "$(aegis_next_in_sequence "$1" "${PIPELINES[mutation]}")"
 }
 
+# True when runtime internal feedback already advanced the handover past
+# the mode we just ran (e.g. optimize can_improve → repair → … → validation
+# inside one process). Prevents re-running adversarial/validation.
+pipeline_handover_past_mode() {
+  local just_ran="$1"
+  [[ -f "${HANDOVER_FILE}" ]] || return 1
+  local hmode
+  hmode="$(jq -r '.artifact_snapshot.mode // empty' "${HANDOVER_FILE}" 2>/dev/null || true)"
+  [[ -n "${hmode}" ]] || return 1
+  [[ "${hmode}" != "${just_ran}" ]] || return 1
+
+  local seq="${PIPELINES[$PIPELINE]:-}"
+  [[ -n "${seq}" ]] || return 1
+  local m idx_ran=-1 idx_h=-1 i=0
+  for m in ${seq}; do
+    if [[ "${m}" == "${just_ran}" ]]; then idx_ran="${i}"; fi
+    if [[ "${m}" == "${hmode}" ]]; then idx_h="${i}"; fi
+    i=$((i + 1))
+  done
+  [[ "${idx_ran}" -ge 0 && "${idx_h}" -ge 0 ]] || return 1
+  [[ "${idx_h}" -gt "${idx_ran}" ]]
+}
+
 resolve_resume() {
 
   [[ -f "${HANDOVER_FILE}" ]] || {
@@ -737,6 +760,13 @@ main() {
           break
         fi
       done
+      break
+    fi
+
+    # Internal feedback consumed downstream modes in this process.
+    if pipeline_handover_past_mode "${mode}"; then
+      echo "[RUN] Handover already at $(jq -r '.artifact_snapshot.mode' "${HANDOVER_FILE}" 2>/dev/null) after ${mode} (internal feedback) — skipping remainder."
+      mark_remaining_skipped
       break
     fi
 

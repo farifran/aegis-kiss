@@ -858,76 +858,84 @@ readonly AEGIS_JQ_ENRICH_FORENSICS='
 
 readonly AEGIS_JQ_ENRICH_OPTIMIZE='
   | (
-      # Carry intent_violations from repair soft-accept through the stack.
-      def with_intent($c):
-        $c
-        | .intent_violations = (
-            .intent_violations
-            // $prev_candidate.intent_violations
-            // []
-          );
-      if ((.diff | type == "string")
-            and ((.diff | length) > 0)
-            and (.diff != "(no changes)")
-            and (.files_changed | type == "array")
-            and ((.files_changed | length) > 0))
-      then with_intent({
-          source_mode: "optimize",
-          diff: .diff,
-          files_changed: .files_changed,
-          intent_violations: (.intent_violations // [])
-        })
-      elif ((.candidate_result.diff | type == "string")
-            and ((.candidate_result.diff | length) > 0)
-            and (.candidate_result.diff != "(no changes)")
-            and (.candidate_result.files_changed | type == "array")
-            and ((.candidate_result.files_changed | length) > 0))
-      then with_intent(.candidate_result | .source_mode = "optimize")
-      else
-        with_intent(
-          $prev_candidate
-          // {source_mode: "optimize", diff: "(no changes)", files_changed: [], intent_violations: []}
-        )
-      end
-    ) as $raw_cand
-  | (
-      added_export_names($raw_cand.diff) as $opt_exports
-      | added_export_names($prev_candidate.diff // "") as $repair_exports
-      | ($opt_exports - $repair_exports) as $novel
-      | if ($novel | length) == 0 then $raw_cand
-        elif any($novel[]; . as $n
-          | ($investigation_input // "") | test("\\b\($n)\\b"; "i"))
-        then $raw_cand
-        else (
-          ($prev_candidate // $raw_cand)
-          | .source_mode = "optimize"
-          | .intent_violations = (
-              .intent_violations
-              // $raw_cand.intent_violations
-              // []
-            )
-        )
-        end
+      ($prev_candidate // {})
+      | .source_mode = "optimize"
+      | .intent_violations = (.intent_violations // [])
     ) as $cand
+  | (($cand.files_changed // []) | map(select(type == "string" and length > 0))) as $allowed
   | (
-      ($prev_candidate.diff // "") as $prev_diff
-      | if ($cand.diff == $prev_diff)
-           and ($cand.files_changed == ($prev_candidate.files_changed // []))
-        then "no_optimization_needed"
-        elif (.status == "no_optimization_needed" or .status == "unoptimized")
-             and ($cand.diff == $prev_diff or $prev_diff == "")
-        then "no_optimization_needed"
-        else "optimized"
+      [
+        (.improvements // [])[]?
+        | select(type == "object")
+        | . as $imp
+        | (
+            [($imp.target_files // [])[]?
+              | select(type == "string" and length > 0)
+              | select(. as $p | any($allowed[]; . == $p or ($p | startswith(. + "/")) or (. | startswith($p + "/"))))
+            ]
+          ) as $tf
+        | select(($tf | length) > 0)
+        | select((($imp.change // "") | type == "string") and (($imp.change // "") | length) > 0)
+        | select((($imp.why_safe // "") | type == "string") and (($imp.why_safe // "") | length) > 0)
+        | {
+            target_files: $tf,
+            change: $imp.change,
+            why_safe: $imp.why_safe
+          }
+      ][0:3]
+    ) as $valid_imps
+  | (
+      (.status // "") as $raw_st
+      | if ($raw_st == "can_improve") and (($valid_imps | length) > 0) then "can_improve"
+        elif ($raw_st == "no_improvement_needed") or ($raw_st == "no_optimization_needed")
+             or ($raw_st == "unoptimized") or ($raw_st == "optimized" and ($valid_imps | length) == 0)
+        then "no_improvement_needed"
+        elif ($valid_imps | length) > 0 then "can_improve"
+        else "no_improvement_needed"
         end
     ) as $opt_status
   | .status = $opt_status
+  | .basis = (
+      if ((.basis // "") | type == "string" and length > 0) then .basis
+      elif $opt_status == "can_improve" then "optimize: actionable improvements for repair"
+      else "optimize: no safe improvement"
+      end
+    )
+  | .improvements = (if $opt_status == "can_improve" then $valid_imps else [] end)
   | .candidate_result = $cand
-  | .diff = $cand.diff
-  | .files_changed = $cand.files_changed
+  | .diff = ($cand.diff // "")
+  | .files_changed = ($cand.files_changed // [])
   | .intent_violations = ($cand.intent_violations // [])
+  | (
+      if $opt_status == "can_improve" then
+        .repair_feedback = {
+          authorized_scopes: (
+            [$valid_imps[].target_files[]?] | unique
+          ),
+          violations: [
+            $valid_imps[]
+            | {
+                origin: "optimize_improve",
+                severity: "low",
+                target_files: .target_files,
+                structural_reason: (
+                  "OPTIMIZE: " + .change
+                  + " (safe: " + .why_safe + ")"
+                ),
+                evidence_refs: ["optimize.improvements"]
+              }
+          ]
+        }
+      else del(.repair_feedback) end
+    )
   | .handover_attention = {
-      next_attention_targets: (.candidate_result.files_changed // []),
-      attention_scope: "mutation_applied",
+      next_attention_targets: (
+        if $opt_status == "can_improve" then
+          ([.repair_feedback.authorized_scopes[]?] | unique)
+        else (.candidate_result.files_changed // [])
+        end
+      ),
+      attention_scope: (if $opt_status == "can_improve" then "optimize_feedback" else "mutation_applied" end),
       attention_reason: $attention_reason
     }
 '

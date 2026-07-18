@@ -22,6 +22,7 @@
 | Structured goal/targets/done_when | mesmo helper |
 | Forensics handoff = só ALVO/reason (sem duplicar TOKENS) | `aegis_format_forensics_handoff_section` |
 | Repair: MUTATION BRIEF data-only (FILE/STATE/EXPORTS; policy no skill) | `aegis_format_mutation_brief_section` |
+| Optimize advisory → repair or passthrough | raw + `AEGIS_JQ_ENRICH_OPTIMIZE` + `optimize_improve_loop_should_fire` |
 | Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
 | Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |

@@ -332,9 +332,9 @@ declare -Ar AEGIS_EXECUTION_ENGINES=(
   ["validation"]="raw"
   ["adversarial"]="raw"
   ["repair"]="aider"
-  # Optimize is a real mutation pass: recognize the Repair result on a
-  # disposable surface and refine it (or leave it) under the same rails.
-  ["optimize"]="aider"
+  # Optimize is advisory only (raw LLM): recommend safe refinements or
+  # no_improvement_needed; mutation stays in Repair if can_improve.
+  ["optimize"]="raw"
 )
 
 # =========================================================
@@ -507,13 +507,10 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "test.run"
 )
 
-# Optimize: recognize Repair result on surface — do not re-bind demand.
-# Handover carries diff/files_changed; tools confirm surface soundness.
+# Optimize (advisory): judge Repair via handover (+ REPAIR RESULT in prompt).
+# No mutation surface; do not re-bind demand anchors as a second repair.
 declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
   "filesystem.read:epistemic_handover"
-  "git.status"
-  "typescript.check"
-  "eslint.check"
 )
 
 declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(

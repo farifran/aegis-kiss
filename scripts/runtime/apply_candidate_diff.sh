@@ -16,18 +16,29 @@ candidate_fatal() {
 [[ -d "${EXECUTION_SURFACE}" ]] \
   || candidate_fatal "missing_execution_surface"
 
+# Repair handover: operational_context.diff. Optimize→repair refine:
+# candidate_result holds the prior Repair patch.
 jq -e '
-  .artifact_snapshot.mode == "repair"
-  and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0)
-  and (
-    .artifact_snapshot.operational_context.files_changed
-    | type == "array"
-    and length > 0
-    and all(
-      type == "string"
-      and length > 0
-      and startswith("/") == false
-      and (split("/") | index("..")) == null
+  (
+    .artifact_snapshot.mode == "repair"
+    and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0)
+    and (
+      .artifact_snapshot.operational_context.files_changed
+      | type == "array" and length > 0
+      and all(type == "string" and length > 0
+        and startswith("/") == false
+        and (split("/") | index("..")) == null)
+    )
+  ) or (
+    .artifact_snapshot.mode == "optimize"
+    and (.artifact_snapshot.operational_context.candidate_result.diff
+      | type == "string" and length > 0 and . != "(no changes)")
+    and (
+      .artifact_snapshot.operational_context.candidate_result.files_changed
+      | type == "array" and length > 0
+      and all(type == "string" and length > 0
+        and startswith("/") == false
+        and (split("/") | index("..")) == null)
     )
   )
 ' "${HANDOVER_FILE}" >/dev/null 2>&1 \
@@ -44,9 +55,20 @@ cleanup() {
 
 trap cleanup EXIT
 
-jq -r '.artifact_snapshot.operational_context.diff' "${HANDOVER_FILE}" > "${diff_file}"
-jq -r '.artifact_snapshot.operational_context.files_changed[]' "${HANDOVER_FILE}" \
-  | sort -u > "${expected_files}"
+jq -r '
+  if .artifact_snapshot.mode == "optimize" then
+    .artifact_snapshot.operational_context.candidate_result.diff
+  else
+    .artifact_snapshot.operational_context.diff
+  end
+' "${HANDOVER_FILE}" > "${diff_file}"
+jq -r '
+  if .artifact_snapshot.mode == "optimize" then
+    .artifact_snapshot.operational_context.candidate_result.files_changed[]?
+  else
+    .artifact_snapshot.operational_context.files_changed[]?
+  end
+' "${HANDOVER_FILE}" | sort -u > "${expected_files}"
 
 git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" \
   || candidate_fatal "candidate_diff_check_failed"

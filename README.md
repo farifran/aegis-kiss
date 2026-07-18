@@ -72,7 +72,8 @@ cat .harness/runtime/last_outcome.json | jq .
 |---|---|
 | **discovery** | Runtime mechanical only (**no LLM**) |
 | **forensics** | Mechanical by default; LLM if multi-seed probes **tie** or `AEGIS_FORENSICS_LLM=1` |
-| **repair / optimize** | Aider (bounded mutation) |
+| **repair** | Aider (bounded mutation) |
+| **optimize** | Raw LLM (advise only → repair re-entry or passthrough) |
 | **adversarial / validation** | Raw LLM + runtime tribunal gates |
 
 ---
@@ -98,6 +99,9 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_MUTATION_INTENT_FIX_ATTEMPTS` | Aider demand-correction retries (default **3**, separate from tools) |
 | `AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS` | tsc/test/smoke fix retries (default 2) |
 | `AEGIS_MUTATION_MAX_NEW_EXPORTS` | Over-delivery cap (default 1) |
+| `AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES` | Cap on REPAIR RESULT diff in optimize prompt (default 12000) |
+| `AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS` | Max optimize→repair refine loops (default **1**) |
+| `AEGIS_OPTIMIZE_REPAIR_LOOP=true\|false` | Enable can_improve → repair re-entry (default true) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 
 **Operational memory:** capability payloads · epistemic handover · git only.

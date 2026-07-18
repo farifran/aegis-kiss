@@ -18,7 +18,7 @@ raw_mode_minimal_artifact_instructions() {
       printf '%s' "DISCOVERY IS RUNTIME-ONLY: do not invent discovery JSON. If you see this prompt, the harness mis-routed; emit {\"observations\":[],\"rationale\":\"runtime_only\",\"required_evidence\":[]}."
       ;;
     optimize)
-      printf '%s' "MINIMAL OPTIMIZE ARTIFACT: emit ONLY {\"status\": \"optimized|unoptimized|no_optimization_needed\", \"notes\": \"...\", \"candidate_result\": {\"diff\": \"...\", \"files_changed\": [\"...\"]}}. The runtime injects mode, evidence_refs, and handover_attention — do NOT emit them."
+      printf '%s' "MINIMAL OPTIMIZE (advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Prefer no_improvement_needed if unsure. can_improve only with 1-3 items: target_files exact from REPAIR RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff/candidate_result/mode. Full contract: skill file."
       ;;
     adversarial)
       printf '%s' "MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' ONLY for defects proven by (a) in-scope tool failures on files_changed, or (b) a logic error whose description quotes the EXACT added expression from the candidate diff. If tools pass for mutation files, prefer status 'verified' with findings []. NEVER invent an 'actual implementation' that is not a full +line of the diff. The runtime tribunal will downgrade fabricated quotes. Do NOT emit mode/candidate_result/handover_attention."
@@ -234,6 +234,13 @@ assemble_bounded_capability_context() {
       aegis_format_tribunal_summary_section
     fi
 
+    # Optimize: Repair delta to judge (advise only — no second mutation here).
+    if [[ "${AEGIS_MODE}" == "optimize" ]] \
+      && declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
+      aegis_format_repair_result_section \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+    fi
+
     echo "=== INVESTIGATION INPUT ==="
     echo
     printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
@@ -277,6 +284,9 @@ resolve_raw_max_tokens() {
       ;;
     validation)
       effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION:-512}"
+      ;;
+    optimize)
+      effective_max_tokens="${AEGIS_RAW_SUBSTRATE_MAX_TOKENS_OPTIMIZE:-768}"
       ;;
   esac
   printf '%s' "${effective_max_tokens}"

@@ -64,7 +64,7 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 | `discovery` | **runtime mechanical only** (no LLM) | Gaps over anchors/probes → `observations` / `rationale` / `required_evidence` |
 | `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `repair_candidates[{id,reason}]` |
 | `repair` | aider | Bounded mutation from candidates + MUTATION BRIEF |
-| `optimize` | aider | Refine candidate on disposable surface (short-circuit if small) |
+| `optimize` | **raw** (advise only) | Strict plan or `no_improvement_needed`; **can_improve** → re-enter **repair** once; else passthrough → adversarial |
 | `adversarial` | raw LLM | Falsify candidate assumptions |
 | `validation` | raw LLM + tribunal gates | Verdict; `repair_feedback` / `demand_mismatch` on reject |
 
@@ -74,7 +74,8 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 |---|---|
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
-| `repair.md` / `optimize.md` | **Yes** — always injected by Aider (`cat` skill file) |
+| `repair.md` | **Yes** — Aider mutation |
+| `optimize.md` | **Yes** — raw LLM advise-only (JSON plan; no edits) |
 | `adversarial.md` / `validation.md` | **Yes** — raw substrate |
 
 Field ownership: `.skills/field_ownership.md`.

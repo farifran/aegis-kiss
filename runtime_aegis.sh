@@ -236,6 +236,12 @@ AEGIS_REPAIR_ATTEMPT_COUNT=0
 : "${AEGIS_REPAIR_FEEDBACK_LOOP:=true}"
 export AEGIS_MAX_REPAIR_ATTEMPTS
 export AEGIS_REPAIR_FEEDBACK_LOOP
+# Optimize advisory → one Repair refine pass (cap 1; no infinite loop).
+AEGIS_OPTIMIZE_REPAIR_COUNT=0
+: "${AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS:=1}"
+: "${AEGIS_OPTIMIZE_REPAIR_LOOP:=true}"
+export AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS
+export AEGIS_OPTIMIZE_REPAIR_LOOP
 
 apply_default_investigation_input() {
   export AEGIS_INVESTIGATION_INPUT="${AEGIS_DEFAULT_INVESTIGATION_INPUT}"
@@ -477,6 +483,20 @@ validate_mode_preconditions() {
            and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")'
         return 0
       fi
+      # Optimize advisory → repair refine (can_improve + repair_feedback).
+      if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -gt 0 ]]; then
+        assert_handover_precondition \
+          "precondition_failed_optimize_improve_feedback_missing_or_invalid" \
+          '.artifact_snapshot != null
+           and .artifact_snapshot.mode == "optimize"
+           and .artifact_snapshot.operational_context.status == "can_improve"
+           and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+           and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
+           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")
+           and (.artifact_snapshot.operational_context.candidate_result.diff
+                | type == "string" and length > 0 and . != "(no changes)")'
+        return 0
+      fi
       assert_handover_precondition \
         "precondition_failed_forensics_artifact_missing_or_invalid" \
         '.artifact_snapshot != null
@@ -646,17 +666,19 @@ prepare_execution_surface() {
 }
 
 materialize_preceding_mutation_candidate() {
-
-  if [[ "${AEGIS_MODE}" != "optimize" ]] || ! mode_requires_execution_surface; then
-    return
+  # Repair refine after optimize: re-apply Repair candidate, then Aider
+  # applies only optimize_feedback improvements on that surface.
+  if [[ "${AEGIS_MODE}" == "repair" ]] \
+    && [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -gt 0 ]] \
+    && mode_requires_execution_surface; then
+    aegis_log "Materializing Repair candidate for optimize→repair refine..."
+    bash scripts/runtime/apply_candidate_diff.sh \
+      "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
+      "${AEGIS_EXECUTION_SURFACE_PATH}" \
+      || aegis_fatal "failed_to_materialize_repair_candidate_for_optimize_refine"
+    return 0
   fi
-
-  aegis_log "Materializing Repair candidate for Optimize..."
-
-  bash scripts/runtime/apply_candidate_diff.sh \
-    "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-    "${AEGIS_EXECUTION_SURFACE_PATH}" \
-    || aegis_fatal "failed_to_materialize_repair_candidate"
+  return 0
 }
 
 # =========================================================
@@ -970,6 +992,45 @@ repair_feedback_loop_should_fire() {
   return 0
 }
 
+# Optimize advisory can_improve → one local Repair refine (not rediscovery).
+optimize_improve_loop_should_fire() {
+  [[ "${AEGIS_OPTIMIZE_REPAIR_LOOP}" == "true" ]] || return 1
+  [[ "${AEGIS_MODE}" == "optimize" ]] || return 1
+
+  local status
+  status="$(
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
+      | jq -r '.status // empty' 2>/dev/null
+  )"
+  [[ "${status}" == "can_improve" ]] || return 1
+
+  if ! printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" | jq -e '
+      (.repair_feedback | type == "object")
+      and (.repair_feedback.violations | type == "array" and length > 0)
+      and (.repair_feedback.authorized_scopes | type == "array" and length > 0)
+    ' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -ge "${AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS}" ]]; then
+    aegis_warn "optimize_improve_cap: already refined once — continuing with candidate (no further optimize→repair)"
+    return 1
+  fi
+
+  AEGIS_OPTIMIZE_REPAIR_COUNT=$((AEGIS_OPTIMIZE_REPAIR_COUNT + 1))
+  aegis_warn "Optimize can_improve — LOCAL repair refine ${AEGIS_OPTIMIZE_REPAIR_COUNT}/${AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS}"
+
+  if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+    jq -cn \
+      --argjson attempt "${AEGIS_OPTIMIZE_REPAIR_COUNT}" \
+      --argjson max "${AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS}" \
+      '{kind:"optimize_improve",attempt:$attempt,max:$max}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  fi
+
+  return 0
+}
+
 # Downstream progression for feedback iterations: a re-entered repair
 # must roll forward through the entire optimization and verification
 # stack. Terminal state is validation — success is only ever reached
@@ -989,6 +1050,15 @@ main() {
 
   while :; do
     run_mode_pipeline
+
+    # Optimize advisory: can_improve → repair refine once, then continue
+    # repair → optimize → … (optimize will no-op/cap on second visit).
+    if optimize_improve_loop_should_fire; then
+      AEGIS_PROMOTED_ARTIFACT_PAYLOAD=""
+      AEGIS_FEEDBACK_PIPELINE_ACTIVE="true"
+      set_active_mode "repair"
+      continue
+    fi
 
     # A rejected fresh validation verdict re-enters the mutation stack
     # (or aborts fatally at the attempt ceiling).

@@ -154,15 +154,23 @@ mutation_prompt_resolve_mode_copy() {
 Apply the investigation input to the loaded target file(s) once. Follow the skill contract. Edits only — stop.
 EOF
 
-  # Local repair feedback: fix only structured violations inside authorized_scopes.
+  # Local repair feedback: validation reject OR optimize can_improve plan.
   if [[ "${AEGIS_MODE}" == "repair" ]] \
     && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" ]] \
     && jq -e '
-        .artifact_snapshot.mode == "validation"
-        and .artifact_snapshot.operational_context.verdict == "rejected"
-        and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+        (.artifact_snapshot.mode == "validation"
+          and .artifact_snapshot.operational_context.verdict == "rejected"
+          and (.artifact_snapshot.operational_context.repair_feedback | type == "object"))
+        or
+        (.artifact_snapshot.mode == "optimize"
+          and .artifact_snapshot.operational_context.status == "can_improve"
+          and (.artifact_snapshot.operational_context.repair_feedback | type == "object"))
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1; then
-    local feedback_summary
+    local feedback_summary feedback_mode
+    feedback_mode="$(
+      jq -r '.artifact_snapshot.mode // empty' \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
+    )"
     feedback_summary="$(
       jq -r '
         .artifact_snapshot.operational_context.repair_feedback as $rf
@@ -176,8 +184,21 @@ EOF
             )
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" 2>/dev/null || true
     )"
-    printf '%s' "Original investigation input (repair feedback iteration — fix only listed violations):" > "${label_file}"
-    cat > "${instructions_file}" <<EOF
+    if [[ "${feedback_mode}" == "optimize" ]]; then
+      printf '%s' "Original investigation input (optimize refine — demand already applied on surface):" > "${label_file}"
+      cat > "${instructions_file}" <<EOF
+CRITICAL — OPTIMIZE REFINE (no rediscovery):
+Repair is ALREADY applied on this workspace. Apply ONLY the optimize improvements below inside authorized_scopes.
+Do NOT re-implement the whole demand. Do NOT expand scope. Do NOT strip Repair features.
+Emit edits only — no narration.
+
+${feedback_summary}
+
+Apply the listed refinements and stop.
+EOF
+    else
+      printf '%s' "Original investigation input (repair feedback iteration — fix only listed violations):" > "${label_file}"
+      cat > "${instructions_file}" <<EOF
 CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
 A prior validation REJECTED the candidate. Fix ONLY the structured violations below inside authorized_scopes.
 Do NOT re-implement the whole demand from scratch unless a violation requires it.
@@ -189,22 +210,7 @@ ${feedback_summary}
 
 Apply the minimal fix and stop.
 EOF
-  fi
-
-  if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    printf '%s' "Original investigation input (already applied by Repair — do NOT re-implement):" > "${label_file}"
-    cat > "${instructions_file}" <<'EOF'
-CRITICAL — OPTIMIZE MODE (recognize → refine):
-1. The Repair candidate is ALREADY applied on this workspace. Read the loaded files as the post-Repair truth.
-2. First recognize what changed relative to the demand: which behavior Repair introduced and where.
-3. Then apply ONLY safe, functionality-preserving improvements inside the loaded files:
-   - remove redundancy / dead code introduced by Repair
-   - tighten types, naming, and local structure without changing behavior
-   - collapse obvious duplication
-4. If the post-Repair code is already minimal and correct, make NO edits and stop.
-5. Forbidden: re-implementing the investigation demand from scratch; removing Repair features; new files; renames; speculative features; narration.
-Simplify in place or leave unchanged. Stop.
-EOF
+    fi
   fi
 }
 
@@ -283,9 +289,11 @@ assemble_mutation_prompt() {
   fi
 
   # Repair: forensics handoff + mutation brief + optional validation feedback.
+  # Optimize: repair-result delta (instance data — what to refine).
   local forensics_handoff_section=""
   local mutation_brief_section=""
   local repair_feedback_section=""
+  local repair_result_section=""
   if [[ "${AEGIS_MODE}" == "repair" ]]; then
     if declare -f aegis_format_repair_feedback_section >/dev/null 2>&1; then
       repair_feedback_section="$(
@@ -307,13 +315,19 @@ assemble_mutation_prompt() {
       )"
       unset _brief_root
     fi
+  elif [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    if declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
+      repair_result_section="$(
+        aegis_format_repair_result_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+      )"
+    fi
   fi
 
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
 
   # Ownership (no policy echo):
-  #   skill = edit policy | anchors/ALVO/BRIEF/feedback = instance data
+  #   skill = edit policy | anchors/ALVO/BRIEF/feedback/repair-result = instance data
   #   jail = path list | anti-truncation = whole format only | mode_instructions = close cue
   cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
@@ -331,7 +345,7 @@ ${pocket_section}
 
 ---
 
-${demand_anchors_section}${repair_feedback_section}${forensics_handoff_section}${mutation_brief_section}${input_label}
+${demand_anchors_section}${repair_feedback_section}${forensics_handoff_section}${mutation_brief_section}${repair_result_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---
