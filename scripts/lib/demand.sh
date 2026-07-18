@@ -210,6 +210,20 @@ aegis_search_symbol_pathspecs() {
   printf '%s\n' "${specs}"
 }
 
+# Resolve + export AEGIS_SEARCH_SYMBOL_PATHSPECS for the search handler.
+aegis_export_search_symbol_pathspecs() {
+  if ! declare -f aegis_search_symbol_pathspecs >/dev/null 2>&1; then
+    return 0
+  fi
+  AEGIS_SEARCH_SYMBOL_PATHSPECS="$(
+    aegis_search_symbol_pathspecs \
+      "${1-${AEGIS_INVESTIGATION_INPUT:-}}" \
+      "${2-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}" \
+      "${3-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
+  )"
+  export AEGIS_SEARCH_SYMBOL_PATHSPECS
+}
+
 # ---------------------------------------------------------
 # Section extract (optional ## Headers)
 # ---------------------------------------------------------
@@ -699,13 +713,14 @@ aegis_format_forensics_handoff_section() {
 # Mechanical modes only project that object — no re-ranking.
 #
 # Discovery: content-aware gap projection (probe each path).
-# Forensics: {id, reason} candidates; multi operator-named → one each;
-#            else first seed only (Alvo Único).
+# Forensics: {id, reason}; multi named → one each; else Alvo Único
+#   (1 seed, or multi-seed unique probe winner, else first seed if forced).
 # AEGIS_DISCOVERY_LLM=1  → force discovery LLM
 # AEGIS_FORENSICS_LLM:
-#   auto (default) — LLM only when multi-seed and no operator-named
+#   auto (default) — LLM only on multi-seed probe tie / no signal
 #   1|llm          — always LLM
 #   0|mechanical   — always mechanical
+# Search evidence: LLM path only (see execute_mode + ensure_search).
 #
 # Call shape (execute_mode): text, payload_dir, handover
 # (materialize itself takes text, handover, payload_dir).
