@@ -148,6 +148,68 @@ aegis_demand_search_query() {
   printf '%s' "${query}"
 }
 
+# Pathspecs for filesystem.search_symbol (newline-separated, repo-relative).
+# Mechanical only — never invents paths:
+#   1. operator-named source paths in demand text
+#   2. handover next_attention_targets
+#   3. live attention_seed payload (if present)
+#   4. if still empty and ./src exists → "src" (product root default)
+# Empty stdout → search_symbol falls back to SEARCH_ROOT (usually ".").
+aegis_search_symbol_pathspecs() {
+  local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
+  local payload_dir handover
+  local specs path
+
+  if [[ "$#" -ge 2 ]]; then
+    payload_dir="$2"
+  else
+    payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+  fi
+  if [[ "$#" -ge 3 ]]; then
+    handover="$3"
+  else
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+  fi
+
+  specs="$(
+    {
+      if declare -f aegis_extract_operator_named_paths >/dev/null 2>&1; then
+        aegis_extract_operator_named_paths "${text}"
+      fi
+      if [[ -n "${handover}" && -f "${handover}" ]]; then
+        jq -r '.epistemic_state.next_attention_targets[]? // empty' \
+          "${handover}" 2>/dev/null || true
+      fi
+      if [[ -n "${payload_dir}" \
+        && -f "${payload_dir}/runtime_attention_seed.json" ]]; then
+        jq -r '.payload.attention_targets[]? // empty' \
+          "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || true
+      fi
+    } | sed 's|^filesystem\.read:||; s|^\./||' \
+      | awk 'NF && $0 !~ /^\// && $0 !~ /\.\./ { print }' \
+      | awk '!seen[$0]++'
+  )"
+
+  # Keep path-like tokens only (file/dir), drop free-text noise.
+  specs="$(
+    while IFS= read -r path; do
+      [[ -n "${path}" ]] || continue
+      if [[ "${path}" == *.* || "${path}" == */* || -e "${path}" ]]; then
+        printf '%s\n' "${path}"
+      fi
+    done <<< "${specs}"
+  )"
+
+  if [[ -z "${specs}" ]]; then
+    # Product default: confine demand search to src/ when present.
+    if [[ -d "src" ]]; then
+      printf 'src\n'
+    fi
+    return 0
+  fi
+  printf '%s\n' "${specs}"
+}
+
 # ---------------------------------------------------------
 # Section extract (optional ## Headers)
 # ---------------------------------------------------------

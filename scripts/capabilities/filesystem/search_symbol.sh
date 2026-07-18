@@ -81,11 +81,47 @@ readonly _TOKEN_SEP="${AEGIS_DEMAND_TOKEN_SEP:-;;}"
 # Prefer git grep over tracked files (same universe as layer0 census):
 # orders of magnitude faster than grep -R on trees with node_modules /
 # local venvs. Fallback: recursive grep with harness excludes.
+#
+# Pathspecs (optional): AEGIS_SEARCH_SYMBOL_PATHSPECS newline-separated,
+# repo-relative (or relative to SEARCH_ROOT). When set, search only those
+# targets — forensics/repair should not scan harness docs/scripts.
 _use_git_grep=0
 if command -v git >/dev/null 2>&1 \
   && git -C "${SEARCH_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   _use_git_grep=1
 fi
+
+# Build git pathspec list under SEARCH_ROOT (default: whole root).
+_PATHSPEC_ARGS=()
+_PATHSPECS_JSON="[]"
+if [[ -n "${AEGIS_SEARCH_SYMBOL_PATHSPECS:-}" ]]; then
+  _root_norm="${SEARCH_ROOT#./}"
+  [[ -n "${_root_norm}" ]] || _root_norm="."
+  while IFS= read -r _ps; do
+    [[ -n "${_ps}" ]] || continue
+    _ps="${_ps#./}"
+    if [[ "${_root_norm}" != "." ]]; then
+      # Keep only pathspecs under SEARCH_ROOT; rewrite relative to it.
+      if [[ "${_ps}" == "${_root_norm}" ]]; then
+        _ps="."
+      elif [[ "${_ps}" == "${_root_norm}/"* ]]; then
+        _ps="${_ps#"${_root_norm}/"}"
+      else
+        continue
+      fi
+    fi
+    _PATHSPEC_ARGS+=("${_ps}")
+  done <<< "${AEGIS_SEARCH_SYMBOL_PATHSPECS}"
+  unset _ps _root_norm
+fi
+if [[ "${#_PATHSPEC_ARGS[@]}" -eq 0 ]]; then
+  _PATHSPEC_ARGS=(".")
+fi
+_PATHSPECS_JSON="$(
+  printf '%s\n' "${_PATHSPEC_ARGS[@]}" \
+    | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
+    || printf '["."]'
+)"
 
 _grep_fixed_into() {
   local pattern="$1"
@@ -99,30 +135,41 @@ _grep_fixed_into() {
       -n -i -F -I \
       -C "${CONTEXT_LINES}" \
       -- "${pattern}" \
-      -- . \
+      -- "${_PATHSPEC_ARGS[@]}" \
       >> "${out}" 2>/dev/null || true
     return 0
   fi
 
-  grep -Rni \
-    -F \
-    -C "${CONTEXT_LINES}" \
-    --exclude-dir=node_modules \
-    --exclude-dir=.git \
-    --exclude-dir=.harness \
-    --exclude-dir=.skills \
-    --exclude-dir=scripts \
-    --exclude-dir=.venv \
-    --exclude-dir=.venv-mlx \
-    --exclude-dir=dist \
-    --exclude-dir=build \
-    --exclude-dir=coverage \
-    --exclude='*.lock' \
-    --exclude='*.log' \
-    -- \
-    "${pattern}" \
-    "${SEARCH_ROOT}" \
-    >> "${out}" || true
+  # Non-git fallback: search each pathspec under SEARCH_ROOT.
+  local _target
+  for _target in "${_PATHSPEC_ARGS[@]}"; do
+    if [[ "${_target}" == "." ]]; then
+      _target="${SEARCH_ROOT}"
+    else
+      _target="${SEARCH_ROOT%/}/${_target}"
+    fi
+    [[ -e "${_target}" ]] || continue
+    grep -Rni \
+      -F \
+      -C "${CONTEXT_LINES}" \
+      --exclude-dir=node_modules \
+      --exclude-dir=.git \
+      --exclude-dir=.harness \
+      --exclude-dir=.skills \
+      --exclude-dir=scripts \
+      --exclude-dir=.venv \
+      --exclude-dir=.venv-mlx \
+      --exclude-dir=dist \
+      --exclude-dir=build \
+      --exclude-dir=coverage \
+      --exclude='*.lock' \
+      --exclude='*.log' \
+      -- \
+      "${pattern}" \
+      "${_target}" \
+      >> "${out}" || true
+  done
+  unset _target
 }
 
 # Line count helper (macOS wc pads spaces).
@@ -199,6 +246,7 @@ TMP_PAYLOAD_FILE="$(aegis_mktemp)"
 jq -n \
   --arg query "${QUERY}" \
   --arg search_root "${SEARCH_ROOT}" \
+  --argjson pathspecs "${_PATHSPECS_JSON}" \
   --argjson max_match_lines "${MAX_MATCH_LINES}" \
   --argjson context_lines "${CONTEXT_LINES}" \
   --argjson total_matches "${MATCH_COUNT}" \
@@ -209,6 +257,7 @@ jq -n \
   '{
     query: $query,
     search_root: $search_root,
+    pathspecs: $pathspecs,
     total_matches: $total_matches,
     exposed_lines: $exposed_lines,
     context_lines: $context_lines,

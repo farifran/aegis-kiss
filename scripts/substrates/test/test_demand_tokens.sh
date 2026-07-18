@@ -111,6 +111,26 @@ echo "${search_json}" | jq -e '
 ' >/dev/null \
   || fail "search_symbol_multi_token_payload_invalid: ${search_json}"
 
+# --- search_symbol pathspecs confine to mechanical targets (not harness) ---
+ps="$(aegis_search_symbol_pathspecs "edit src/index.ts convert terabits" "" "")"
+printf '%s\n' "${ps}" | grep -qx 'src/index.ts' \
+  || fail "pathspecs_should_include_operator_named: ${ps}"
+# no anchors → product default src/
+ps_default="$(aegis_search_symbol_pathspecs "the and for para como" "" "")"
+printf '%s\n' "${ps_default}" | grep -qx 'src' \
+  || fail "pathspecs_empty_anchors_default_src: ${ps_default}"
+# scoped search must not pull matches from scripts/docs when pathspec is src only
+scoped_json="$(
+  AEGIS_SEARCH_SYMBOL_PATHSPECS=$'src/index.ts\n' \
+    bash scripts/capabilities/filesystem/search_symbol.sh "terabit" . 2>/dev/null
+)" || fail "search_symbol_scoped_exit"
+echo "${scoped_json}" | jq -e '
+  .success == true
+  and (.payload.pathspecs | index("src/index.ts")) != null
+  and ((.payload.matches | test("scripts/|entry\\.md|README"; "i")) | not)
+' >/dev/null \
+  || fail "search_symbol_should_stay_on_target: ${scoped_json}"
+
 # --- discovery enrich: invent-on-disk required_evidence dropped when seed set ---
 # shellcheck disable=SC1091
 source "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh"

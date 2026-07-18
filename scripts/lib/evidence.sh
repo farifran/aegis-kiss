@@ -159,6 +159,22 @@ materialize_capability_payloads() {
             }'
         )"
       else
+        # Scope search_symbol to mechanical attention targets (not whole tree).
+        if [[ "${capability}" == "filesystem.search_symbol" ]] \
+          && declare -f aegis_search_symbol_pathspecs >/dev/null 2>&1; then
+          AEGIS_SEARCH_SYMBOL_PATHSPECS="$(
+            aegis_search_symbol_pathspecs \
+              "${AEGIS_INVESTIGATION_INPUT:-}" \
+              "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+              "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+          )"
+          export AEGIS_SEARCH_SYMBOL_PATHSPECS
+          if [[ -n "${AEGIS_SEARCH_SYMBOL_PATHSPECS}" ]]; then
+            aegis_log "search_symbol_pathspecs: $(
+              printf '%s' "${AEGIS_SEARCH_SYMBOL_PATHSPECS}" | tr '\n' ' '
+            )"
+          fi
+        fi
         payload_output="$(
           invoke_capability_handler \
             "${handler}" \
