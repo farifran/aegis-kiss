@@ -5,7 +5,7 @@ Models emit only the minimal cognitive fields for the active skill. The runtime 
 | Mode | Model emits | Runtime injects / owns |
 |---|---|---|
 | discovery | `observations`, `rationale`, `required_evidence` (mechanical by default; LLM only if `AEGIS_DISCOVERY_LLM=1`) | `mode`, evidence identity, `investigation_scope`, `attention_targets`, handover routing; path clamp + mechanical rationale |
-| forensics | `status`, `repair_candidates[{id,reason}]` (mechanical by default; LLM only if `AEGIS_FORENSICS_LLM=1`) | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates (alvo + reason) |
+| forensics | `status`, `repair_candidates[{id,reason}]` (mechanical; LLM if ambiguous or `AEGIS_FORENSICS_LLM=1`) | `mode`, `evidence_refs`, `handover_attention`, read anchors, demand-anchor gates (alvo + reason) |
 | repair / optimize | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention; same read anchors as forensics |
 | adversarial | `status`, `findings[]` | `mode`, `candidate_result` (from optimize), `handover_attention`, tribunal gates, read anchors |
 | validation | `verdict`, `basis` | `mode`, `validated_candidate`, `findings` (from adversarial), `handover_attention`, tribunal / `repair_feedback` |

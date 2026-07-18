@@ -753,23 +753,30 @@ execute_substrate() {
     aegis_warn "discovery_mechanical_failed — falling back to LLM substrate"
   fi
 
-  # Forensics default: mechanical alvo+reason from anchors + content probes.
-  # Force model path only with AEGIS_FORENSICS_LLM=1.
+  # Forensics: mechanical unless aegis_forensics_needs_llm (multi-seed auto,
+  # or AEGIS_FORENSICS_LLM=1). Force mechanical with =0.
   if [[ "${AEGIS_MODE}" == "forensics" ]] \
-    && [[ "${AEGIS_FORENSICS_LLM:-0}" != "1" ]] \
-    && declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1; then
-    substrate_output="$(
-      aegis_emit_mechanical_forensics_substrate \
-        "${AEGIS_INVESTIGATION_INPUT:-}" \
-        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
-    )" || substrate_output=""
-    if [[ -n "${substrate_output}" ]]; then
-      aegis_log "forensics_mechanical: skipped LLM (anchor+probe candidates)"
-      AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-      return 0
+    && declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1 \
+    && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
+    if ! aegis_forensics_needs_llm \
+      "${AEGIS_INVESTIGATION_INPUT:-}" \
+      "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"; then
+      substrate_output="$(
+        aegis_emit_mechanical_forensics_substrate \
+          "${AEGIS_INVESTIGATION_INPUT:-}" \
+          "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
+      )" || substrate_output=""
+      if [[ -n "${substrate_output}" ]]; then
+        aegis_log "forensics_mechanical: skipped LLM (unambiguous anchors)"
+        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+        return 0
+      fi
+      aegis_warn "forensics_mechanical_failed — falling back to LLM substrate"
+    else
+      aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force"
     fi
-    aegis_warn "forensics_mechanical_failed — falling back to LLM substrate"
   fi
 
   case "${AEGIS_EXECUTION_ENGINE}" in

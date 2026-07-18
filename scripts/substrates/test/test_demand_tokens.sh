@@ -453,7 +453,10 @@ jq -n '{
   payload: { attention_targets: ["src/index.ts"] }
 }' > "${for_pd}/runtime_attention_seed.json"
 for_mech="$(aegis_build_mechanical_forensics_json "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" "")"
-rm -rf "${for_pd}"
+# auto: single seed must NOT request LLM
+if aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
+  fail "forensics_auto_should_be_mechanical_on_single_seed"
+fi
 echo "${for_mech}" | jq -e '
   .status == "interpreted"
   and (.repair_candidates | length) == 1
@@ -463,13 +466,34 @@ echo "${for_mech}" | jq -e '
 ' >/dev/null \
   || fail "mechanical_forensics_shape: ${for_mech}"
 
-# forensics empty anchors → inconclusive
+# multi-seed, no operator-named → ambiguous → needs LLM
+jq -n '{
+  success: true,
+  payload: { attention_targets: ["src/index.ts", "src/ui/fake_import.ts"] }
+}' > "${for_pd}/runtime_attention_seed.json"
+if ! aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
+  fail "forensics_auto_should_need_llm_on_multi_seed"
+fi
+# force mechanical
+if AEGIS_FORENSICS_LLM=0 aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
+  fail "forensics_llm=0_should_force_mechanical"
+fi
+# force LLM
+if ! AEGIS_FORENSICS_LLM=1 aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
+  fail "forensics_llm=1_should_force_llm"
+fi
+rm -rf "${for_pd}"
+
+# forensics empty anchors → inconclusive + no LLM (do not invent paths)
 for_empty="$(aegis_build_mechanical_forensics_json "the and for para como" "" "")"
 echo "${for_empty}" | jq -e '
   .status == "inconclusive"
   and (.repair_candidates | length) == 0
 ' >/dev/null \
   || fail "mechanical_forensics_empty: ${for_empty}"
+if aegis_forensics_needs_llm "the and for para como" "" ""; then
+  fail "forensics_empty_anchors_should_not_use_llm"
+fi
 
 # forensics handoff section for repair
 tmp_fh="$(mktemp)"

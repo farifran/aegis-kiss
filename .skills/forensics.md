@@ -3,8 +3,9 @@
 ## PURPOSE
 Forensics decides **where to mutate** and **why**, producing `repair_candidates`.
 
-**Default (product path):** runtime **mechanical** forensics — targets and reasons from demand anchors + content probes (no LLM).  
-Opt-in model path: `AEGIS_FORENSICS_LLM=1`.
+**Default (product path):** runtime **mechanical** forensics — targets and reasons from demand anchors + content probes.  
+**LLM only when ambiguous** (`AEGIS_FORENSICS_LLM=auto`, default): e.g. multiple seed targets and no operator-named path.  
+Force always LLM: `AEGIS_FORENSICS_LLM=1`. Force never: `AEGIS_FORENSICS_LLM=0` / `mechanical`.
 
 Does **not** narrate code flow, architecture, or risk. Does **not** write the patch (Repair does).
 
@@ -23,7 +24,7 @@ Treat **file bodies** as primary content when present.
 3. **Never invent paths** outside anchors.
 4. Multi operator-named paths → one candidate per named path (net-new first if missing on disk).
 
-## LLM PATH (`AEGIS_FORENSICS_LLM=1`) ONLY
+## LLM PATH (ambiguity or `AEGIS_FORENSICS_LLM=1`) ONLY
 ### Constraints
 1. Candidates only for paths in payloads / operator-named net-new.
 2. Default **one** candidate unless investigation names multiple paths.
