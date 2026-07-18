@@ -25,3 +25,7 @@ export function bytesToGigabits(bytes: number): number {
 export function bytesToPentabits(bytes: number): number {
   return bytesToBits(bytes) / (1024 * 1024 * 1024 * 1024);
 }
+
+export function megabytesToPentabits(megabytes: number): number {
+  return megabytes * 1024 * 1024 * 1024 * 1024;
+}
