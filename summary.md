@@ -157,7 +157,7 @@ Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/subst
 | `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.  
-Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh`, `static_gate.sh`.  
+Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh` (per-edit: prettier/eslint/static + **project tsc delta** on the edited file so Aider’s auto-lint loop sees real TS errors; baseline debt ignored), `static_gate.sh`.  
 Aider: `scripts/substrates/aider/{targets,prompt,invoke,preflight}.sh`.
 
 ---

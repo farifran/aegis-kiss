@@ -125,6 +125,55 @@ if ! (
   fail "lint_gate_failed_without_prettier_eslint"
 fi
 
+# --- lint gate: project tsc delta (errors only on the edited file) ---
+# Requires repo-local tsc + a minimal tsconfig on the fixture surface.
+if [[ -x "${AEGIS_TEST_ROOT}/node_modules/.bin/tsc" ]] || command -v tsc >/dev/null 2>&1; then
+  mkdir -p "${test_tmp}/delta/src"
+  cat > "${test_tmp}/delta/tsconfig.json" <<'JSON'
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
+JSON
+  cat > "${test_tmp}/delta/src/ok.ts" <<'EOF'
+export function ok(x: number): number {
+  return x + 1;
+}
+EOF
+  cat > "${test_tmp}/delta/src/bad.ts" <<'EOF'
+export function bad(x: number): string {
+  return x;
+}
+EOF
+  # Link repo node_modules so tsc resolves (same pattern as mutation surfaces).
+  if [[ -d "${AEGIS_TEST_ROOT}/node_modules" ]]; then
+    ln -sfn "${AEGIS_TEST_ROOT}/node_modules" "${test_tmp}/delta/node_modules"
+  fi
+  export AEGIS_MODE="repair"
+  export AEGIS_LINT_PROJECT_TSC=1
+  # Editing the clean file must pass even when baseline debt exists in bad.ts.
+  if ! (
+    cd "${test_tmp}/delta"
+    bash "${AEGIS_TEST_ROOT}/${LINT}" "src/ok.ts" 2>/dev/null
+  ); then
+    fail "lint_gate_tsc_delta_blocked_on_baseline_debt"
+  fi
+  # Editing the broken file must fail so Aider's loop sees the diagnostic.
+  if (
+    cd "${test_tmp}/delta"
+    bash "${AEGIS_TEST_ROOT}/${LINT}" "src/bad.ts" 2>/dev/null
+  ); then
+    fail "lint_gate_tsc_delta_missed_target_error"
+  fi
+fi
+
 # --- workspace mode rejects dirty tree ---
 if bash "${GATE}" --workspace "${test_tmp}/src" 2>/dev/null; then
   fail "workspace_mode_accepted_violations"
