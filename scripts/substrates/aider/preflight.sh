@@ -173,94 +173,243 @@ EOF
   fi
 }
 
-# Soft gate: dense demand tokens should appear in added mutation lines.
-# Default: warn only. Set AEGIS_DEMAND_TOKEN_PREFLIGHT=hard to fail.
-assert_demand_tokens_in_mutation_diff() {
+# ---------------------------------------------------------
+# Mutation intent gates (repair) — demand fidelity on the diff
+# ---------------------------------------------------------
+# AEGIS_MUTATION_INTENT_PREFLIGHT:
+#   soft (default) — fail preflight to trigger fix retry; if still dirty
+#                    after max attempts, warn and allow (tsc already green)
+#   hard           — fail until clean; exhaust → fatal
+#   off            — warn only, never fail
+# AEGIS_MUTATION_MAX_NEW_EXPORTS (default 1) — over-delivery cap on +exports
+# AEGIS_DEMAND_TOKEN_PREFLIGHT=hard — legacy alias for intent hard on tokens
+#   (prefer AEGIS_MUTATION_INTENT_PREFLIGHT)
+
+# Added-line body of a unified diff (lowercase optional via caller).
+_mutation_diff_added_lines() {
+  printf '%s\n' "${1-}" \
+    | grep -E '^\+' \
+    | grep -vE '^\+\+\+' \
+    || true
+}
+
+# Count new export function/const declarations in added lines.
+count_diff_added_exports() {
+  local added n
+  added="$(_mutation_diff_added_lines "${1-}")"
+  [[ -n "${added}" ]] || {
+    printf '0'
+    return 0
+  }
+  n="$(
+    printf '%s\n' "${added}" \
+      | grep -Eic \
+        'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]' \
+      || true
+  )"
+  n="$(printf '%s' "${n}" | tr -d '[:space:]')"
+  [[ -n "${n}" ]] || n=0
+  printf '%s' "${n}"
+}
+
+# Collect intent violations into AEGIS_MUTATION_INTENT_DIAGNOSTICS (newline).
+# Exit 0 = clean. Exit 1 = has violations (caller applies soft/hard policy).
+collect_mutation_intent_violations() {
   local diff_content="${1-}"
+  AEGIS_MUTATION_INTENT_DIAGNOSTICS=""
+  export AEGIS_MUTATION_INTENT_DIAGNOSTICS
   [[ -n "${diff_content}" ]] || return 0
   [[ "${AEGIS_MODE:-}" == "repair" ]] || return 0
 
-  if ! declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
-    return 0
-  fi
+  local -a violations=()
+  local added tokens token hit=0 token_list
+  local export_n max_exports
 
-  local tokens token hit=0
-  tokens="$(aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}")"
-  [[ -n "${tokens}" ]] || return 0
-
-  local added
-  added="$(
-    printf '%s\n' "${diff_content}" \
-      | grep -E '^\+' \
-      | grep -vE '^\+\+\+' \
-      | tr '[:upper:]' '[:lower:]' \
-      || true
-  )"
+  added="$(_mutation_diff_added_lines "${diff_content}")"
   [[ -n "${added}" ]] || return 0
 
-  while IFS= read -r token; do
-    [[ -n "${token}" ]] || continue
-    [[ "${#token}" -ge 4 ]] || continue
-    if printf '%s' "${added}" | grep -Fqi -- "${token}"; then
-      hit=1
-      break
+  # --- dense demand tokens must appear in +lines ---
+  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    tokens="$(aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}")"
+    if [[ -n "${tokens}" ]]; then
+      hit=0
+      while IFS= read -r token; do
+        [[ -n "${token}" ]] || continue
+        [[ "${#token}" -ge 4 ]] || continue
+        if printf '%s' "${added}" | grep -Fqi -- "${token}"; then
+          hit=1
+          break
+        fi
+      done <<< "${tokens}"
+      if [[ "${hit}" -eq 0 ]]; then
+        token_list="$(printf '%s' "${tokens}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        violations+=("demand_tokens: none of [${token_list}] appear in added lines — align the edit with the demand/ALVO reason")
+      fi
     fi
-  done <<< "${tokens}"
+  fi
 
-  if [[ "${hit}" -eq 1 ]]; then
+  # --- over-delivery: too many new exports ---
+  : "${AEGIS_MUTATION_MAX_NEW_EXPORTS:=1}"
+  max_exports="${AEGIS_MUTATION_MAX_NEW_EXPORTS}"
+  export_n="$(count_diff_added_exports "${diff_content}")"
+  if [[ "${export_n}" -gt "${max_exports}" ]]; then
+    violations+=("over_export: ${export_n} new exports in diff (max ${max_exports}) — keep one demand-aligned export; remove parallels")
+  fi
+
+  if [[ "${#violations[@]}" -eq 0 ]]; then
     return 0
   fi
 
-  local token_list
-  token_list="$(printf '%s' "${tokens}" | tr '\n' ' ')"
-  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-soft}" == "hard" ]]; then
-    aegis_warn "demand_token_preflight_miss (hard): none of [${token_list}] in added lines"
-    return 1
+  AEGIS_MUTATION_INTENT_DIAGNOSTICS="$(printf '%s\n' "${violations[@]}")"
+  export AEGIS_MUTATION_INTENT_DIAGNOSTICS
+  return 1
+}
+
+# Policy wrapper: maps soft/hard/off → pass/fail for the preflight loop.
+# Exit 0 = do not block. Exit 1 = intent failure (retry or hard-fail).
+assert_mutation_intent_gates() {
+  local diff_content="${1-}"
+  local mode
+
+  # Legacy: AEGIS_DEMAND_TOKEN_PREFLIGHT=hard upgrades intent to hard.
+  mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
+  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
+    mode="hard"
   fi
-  aegis_warn "demand_token_preflight_miss: none of [${token_list}] appear in added diff lines"
+
+  if ! collect_mutation_intent_violations "${diff_content}"; then
+    case "$(printf '%s' "${mode}" | tr '[:upper:]' '[:lower:]')" in
+      off|0|false|no|warn)
+        aegis_warn "mutation_intent (warn-only): ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
+        return 0
+        ;;
+      hard|soft|retry|*)
+        aegis_warn "mutation_intent: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
+        return 1
+        ;;
+    esac
+  fi
   return 0
+}
+
+# Legacy name: warn-only unless hard mode is set. Prefer assert_mutation_intent_gates.
+assert_demand_tokens_in_mutation_diff() {
+  local diff_content="${1-}"
+  if [[ "${AEGIS_MUTATION_INTENT_PREFLIGHT:-}" == "hard" ]] \
+    || [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
+    assert_mutation_intent_gates "${diff_content}"
+    return $?
+  fi
+  if ! collect_mutation_intent_violations "${diff_content}"; then
+    aegis_warn "demand_token_preflight_miss: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
+  fi
+  return 0
+}
+
+# Fix prompt when intent gates fail (tsc already green).
+assemble_intent_fix_prompt() {
+  local prompt_file="$1"
+  local resolved_edit_format="$2"
+  shift 2
+  local prompt_targets=("$@")
+  local target_list diagnostics handoff_line
+
+  target_list="$(printf -- '- %s\n' "${prompt_targets[@]:-}")"
+  diagnostics="${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-"(intent mismatch)"}"
+  handoff_line=""
+  if declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
+    handoff_line="$(
+      aegis_format_forensics_handoff_section \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" 2>/dev/null || true
+    )"
+  fi
+
+  cat > "${prompt_file}" << EOF
+You are fixing a demand-intent mismatch after a prior mutation inside Aegis Harness.
+
+Mode: ${AEGIS_MODE}
+Execution ID: ${AEGIS_EXECUTION_ID}
+
+HARD SCOPE: edit ONLY these files:
+${target_list}
+
+Original demand:
+${AEGIS_INVESTIGATION_INPUT}
+
+${handoff_line}
+Intent violations (fix ONLY these):
+$(printf '%s\n' "${diagnostics}" | sed 's/^/- /')
+
+Rules:
+- One demand → one minimal change; prefer exactly one new export matching the ALVO reason.
+- Remove parallel/extra exports (Foo + FooExact, power helpers, etc.).
+- Added lines must reflect demand tokens / directed conversion from the reason.
+- Do not invent features absent from DEMAND / ALVO reason.
+- Keep the surface compiling; do not expand scope.
+
+YOUR TASK NOW: rewrite the loaded target so every intent violation above is resolved.
+EOF
+
+  if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then
+    {
+      echo ""
+      echo "WHOLE-FILE FORMAT — one block per file:"
+      local t
+      for t in "${prompt_targets[@]}"; do
+        printf '%s\n```\n<entire content of %s>\n```\n\n' "${t}" "${t}"
+      done
+    } >> "${prompt_file}"
+  fi
 }
 
 run_mutation_preflight() {
 
   local preflight_script="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_preflight.sh"
+  # AEGIS_MUTATION_PREFLIGHT_LAST: tools | intent | ok  (for fix-prompt routing)
+  AEGIS_MUTATION_PREFLIGHT_LAST="ok"
 
   if [[ ! -f "${preflight_script}" ]]; then
-    aegis_warn "mutation_preflight_script_missing — skipping"
-    return 0
+    aegis_warn "mutation_preflight_script_missing — skipping tools; intent only"
+  else
+    aegis_log "Running one-shot mutation preflight (typescript.check + test.run + smoke.import)..."
+
+    local changed_files=""
+    local surface_diff=""
+    surface_diff="$(capture_worktree_diff)"
+    changed_files="$(
+      list_mutation_changed_paths "${surface_diff}"
+    )"
+
+    if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
+      AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
+      AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
+      AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
+      bash "${preflight_script}" \
+        "${AEGIS_EXECUTION_SURFACE_PATH}" \
+        "${AIDER_CAPABILITY_PAYLOAD_DIR}"; then
+      AEGIS_MUTATION_PREFLIGHT_LAST="tools"
+      export AEGIS_MUTATION_PREFLIGHT_LAST
+      return 1
+    fi
   fi
 
-  aegis_log "Running one-shot mutation preflight (typescript.check + test.run + smoke.import)..."
-
-  # Surface the mutation file set so preflight can ignore pre-existing
-  # typescript debt outside the candidate (baseline pollution), and so
-  # smoke.import only loads model-authored paths (not node_modules residue).
-  local changed_files=""
   local surface_diff=""
   surface_diff="$(capture_worktree_diff)"
-  changed_files="$(
-    list_mutation_changed_paths "${surface_diff}"
-  )"
-
-  # Return status only — caller owns rollback / fix-retry policy.
-  if ! AEGIS_SUBSTRATE_ROOT="${AEGIS_AIDER_SUBSTRATE_ROOT}" \
-    AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
-    AEGIS_MUTATION_PREFLIGHT="${AEGIS_MUTATION_PREFLIGHT:-true}" \
-    AEGIS_PREFLIGHT_CHANGED_FILES="${changed_files}" \
-    bash "${preflight_script}" \
-      "${AEGIS_EXECUTION_SURFACE_PATH}" \
-      "${AIDER_CAPABILITY_PAYLOAD_DIR}"; then
+  if ! assert_mutation_intent_gates "${surface_diff}"; then
+    AEGIS_MUTATION_PREFLIGHT_LAST="intent"
+    export AEGIS_MUTATION_PREFLIGHT_LAST
     return 1
   fi
 
-  assert_demand_tokens_in_mutation_diff "${surface_diff}"
+  AEGIS_MUTATION_PREFLIGHT_LAST="ok"
+  export AEGIS_MUTATION_PREFLIGHT_LAST
+  return 0
 }
 
 # Preflight with bounded model fix retries. Prints the final surface diff
-# on stdout (for artifact emission). First failure keeps the worktree so
-# the model can repair compile errors; exhausted attempts abort+rollback.
-# Default two fix attempts: floor models often need a second compile pass
-# on multi-file net-new work (export shape + NodeNext import extension).
+# on stdout (for artifact emission). Tools failures use taxonomy fix prompt;
+# intent failures use demand-alignment fix prompt. Soft intent may pass after
+# exhausting retries (tsc green); hard intent / tools still fatal.
 #
 # Usage: diff="$(run_mutation_preflight_with_fix_attempts <edit_format> [targets...])"
 run_mutation_preflight_with_fix_attempts() {
@@ -272,6 +421,13 @@ run_mutation_preflight_with_fix_attempts() {
   local preflight_attempt=0
   local max_preflight_attempts=$((AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS + 1))
   local diff_content=""
+  local intent_mode
+
+  intent_mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
+  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
+    intent_mode="hard"
+  fi
+  intent_mode="$(printf '%s' "${intent_mode}" | tr '[:upper:]' '[:lower:]')"
 
   while true; do
     if run_mutation_preflight; then
@@ -281,30 +437,41 @@ run_mutation_preflight_with_fix_attempts() {
     preflight_attempt=$((preflight_attempt + 1))
     if [[ "${preflight_attempt}" -ge "${max_preflight_attempts}" ]] \
       || [[ "${#mutation_targets[@]}" -eq 0 ]]; then
+      # Soft intent only: accept diff after retries if tools are green.
+      if [[ "${AEGIS_MUTATION_PREFLIGHT_LAST:-}" == "intent" ]] \
+        && [[ "${intent_mode}" == "soft" || "${intent_mode}" == "retry" ]]; then
+        aegis_warn "mutation_intent_soft_accept: still dirty after ${preflight_attempt} attempt(s) — emitting with warnings"
+        break
+      fi
       rollback_execution_surface
-      aegis_fatal "mutation_preflight_failed"
+      aegis_fatal "mutation_preflight_failed:${AEGIS_MUTATION_PREFLIGHT_LAST:-unknown}"
     fi
 
-    aegis_warn "mutation_preflight_failed — fix attempt ${preflight_attempt}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
+    aegis_warn "mutation_preflight_failed (${AEGIS_MUTATION_PREFLIGHT_LAST:-?}) — fix attempt ${preflight_attempt}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
 
     local fix_prompt
     fix_prompt="$(aider_mktemp)"
-    assemble_preflight_fix_prompt \
-      "${fix_prompt}" \
-      "${resolved_edit_format}" \
-      "${mutation_targets[@]}"
+    if [[ "${AEGIS_MUTATION_PREFLIGHT_LAST:-}" == "intent" ]]; then
+      assemble_intent_fix_prompt \
+        "${fix_prompt}" \
+        "${resolved_edit_format}" \
+        "${mutation_targets[@]}"
+    else
+      assemble_preflight_fix_prompt \
+        "${fix_prompt}" \
+        "${resolved_edit_format}" \
+        "${mutation_targets[@]}"
+    fi
 
     invoke_aider "${fix_prompt}" "${resolved_edit_format}" "${mutation_targets[@]}"
 
     diff_content="$(capture_worktree_diff)"
     if [[ -z "${diff_content}" ]]; then
       rollback_execution_surface
-      # Empty after fix: keep looping if attempts remain.
       aegis_warn "empty_diff after preflight fix attempt — continuing if retries left"
       continue
     fi
 
-    # Scope violation on fix: already rolled back by assert; retry or exhaust.
     if ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
       aegis_warn "mutation_scope_violation on preflight fix — retry remaining attempts"
       continue

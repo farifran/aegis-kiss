@@ -595,4 +595,37 @@ if declare -f assert_demand_tokens_in_mutation_diff >/dev/null 2>&1; then
     || fail "token_preflight_should_pass_when_token_in_diff"
 fi
 
+# Intent gates: tokens + over-export (used by repair preflight retry)
+if declare -f collect_mutation_intent_violations >/dev/null 2>&1; then
+  if collect_mutation_intent_violations "${bad_diff:-}"; then
+    fail "intent_should_flag_missing_demand_tokens"
+  fi
+  printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" | grep -q 'demand_tokens' \
+    || fail "intent_diag_should_mention_tokens: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+
+  if ! collect_mutation_intent_violations "${good_diff:-}"; then
+    fail "intent_should_pass_aligned_export: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+  fi
+
+  over_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToGigabits(t: number): number { return t; }\n+export function terabitsToGigabitsExact(t: number): number { return t; }\n'
+  if collect_mutation_intent_violations "${over_diff}"; then
+    fail "intent_should_flag_over_export"
+  fi
+  printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" | grep -q 'over_export' \
+    || fail "intent_diag_should_mention_over_export: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+
+  n_exp="$(count_diff_added_exports "${over_diff}")"
+  [[ "${n_exp}" == "2" ]] || fail "export_count_expected_2: ${n_exp}"
+
+  # soft gate fails (for retry); hard also fails
+  if AEGIS_MUTATION_INTENT_PREFLIGHT=soft assert_mutation_intent_gates "${over_diff}"; then
+    fail "soft_intent_gate_should_fail_to_trigger_retry"
+  fi
+  if AEGIS_MUTATION_INTENT_PREFLIGHT=off assert_mutation_intent_gates "${over_diff}"; then
+    : # warn-only pass
+  else
+    fail "off_intent_gate_should_not_block"
+  fi
+fi
+
 echo "[AEGIS][TEST] demand tokens passed"

@@ -24,7 +24,7 @@
 | Repair: MUTATION BRIEF (exports + probe + one-change) | `aegis_format_mutation_brief_section` |
 | Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
-| Preflight soft token↔diff | `assert_demand_tokens_in_mutation_diff` |
+| Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |
 | Profiles lean: forensics sem git.status; optimize/adversarial sem demand_anchors | config evidence profiles |
 
 ### Ainda proposta (não implementado)

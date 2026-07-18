@@ -31,4 +31,5 @@ Prefer this brief + FORENSICS HANDOFF over free-text invention.
 ## SUCCESS
 - Demand (or listed violations) satisfied on the loaded targets.
 - Surface passes mutation preflight (tsc / tests / smoke) when preflight is enabled.
+- **Intent gates** (repair): dense demand tokens in `+` lines; at most `AEGIS_MUTATION_MAX_NEW_EXPORTS` (default 1) new exports. Soft default retries once/twice then may warn-and-accept; `AEGIS_MUTATION_INTENT_PREFLIGHT=hard` refuses dirty intent.
 - Lint gate accepts the edit (no explicit any / empty-catch / eval / undeclared imports).
