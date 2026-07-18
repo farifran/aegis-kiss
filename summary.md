@@ -60,14 +60,14 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 
 | Mode | Engine | Role |
 |---|---|---|
-| `discovery` | raw LLM | Observe investigation state; Layer 0 priors |
-| `forensics` | raw LLM | Interpret evidence → repair candidates |
+| `discovery` | runtime mechanical | Gaps over anchors/probes (no LLM) |
+| `forensics` | mechanical default; raw LLM if multi-seed tie | `repair_candidates[{id,reason}]` |
 | `repair` | aider | Bounded mutation from candidates |
 | `optimize` | aider | Refine candidate on disposable surface |
 | `adversarial` | raw LLM | Falsify candidate assumptions |
 | `validation` | raw LLM | Tribunal verdict on findings + handover |
 
-Contracts: `.skills/<mode>.md`. Field ownership: `.skills/field_ownership.md`.
+Contracts: `.skills/<mode>.md` (discovery = docs/audit only). Field ownership: `.skills/field_ownership.md`.
 
 ---
 
