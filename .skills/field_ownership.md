@@ -5,7 +5,7 @@ Models emit only the minimal cognitive fields for the active skill. The runtime 
 | Mode | Model emits | Runtime injects / owns |
 |---|---|---|
 | discovery | `observations`, `rationale`, `required_evidence` | `mode`, evidence identity, `investigation_scope`, `attention_targets`, handover routing |
-| forensics | `status`, `repair_candidates[{id,reason}]` | `mode`, `evidence_refs` on candidates, `handover_attention`, **deterministic `filesystem.read` anchors** (operator-named paths + attention targets) |
+| forensics | `status`, `repair_candidates[{id,reason}]` | `mode`, `evidence_refs` on candidates, `handover_attention`, **deterministic `filesystem.read` anchors**, **demand-anchor gates** (single seed/named alvo; rewrite reason if it ignores dense tokens) |
 | repair / optimize | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention; same read anchors as forensics |
 | adversarial | `status`, `findings[]` | `mode`, `candidate_result` (from optimize), `handover_attention`, tribunal gates, read anchors |
 | validation | `verdict`, `basis` | `mode`, `validated_candidate`, `findings` (from adversarial), `handover_attention`, tribunal / `repair_feedback` |

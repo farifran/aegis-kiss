@@ -68,7 +68,7 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 
 **Demand tokens:** free-text investigation input is tokenized once (`aegis_demand_tokens` / dense filter) to bind `filesystem.search_symbol` (multi-token fixed-string via `;;`, never ERE) and Layer 0 content resonance (`git grep -l` on dense tokens only). Generic stems like `bytes` do not flood search/hot files. Discovery `required_evidence` is clamped to operator-named paths ∪ Layer0 seed (not arbitrary on-disk invent).
 
-**Demand anchors:** runtime projects a mechanical JSON block (`aegis_materialize_demand_anchors_json`) into every raw/aider prompt, into capability `runtime.demand_anchors`, and into `operational_context.demand_anchors` on handover — operator paths, dense tokens, search query, seed targets, content resonance. Evidence entries are re-ranked so anchors and `filesystem.read` seeds survive context budget before search/git/tools. Modes must not re-tokenize free-text to invent anchors.
+**Demand anchors:** runtime projects a mechanical JSON block (`aegis_materialize_demand_anchors_json`) into every raw/aider prompt, into capability `runtime.demand_anchors`, and into `operational_context.demand_anchors` on handover — operator paths, dense tokens, search query, seed targets, content resonance. Evidence entries are re-ranked so layer0 → attention_seed → demand_anchors, then reads before search/git/tools. **Forensics exit gate:** when a single seed/operator path exists, candidates collapse to that alvo; `reason` is rewritten to `Demand: <dense tokens>` unless it already cites a dense token. Modes must not re-tokenize free-text to invent anchors.
 
 **Operational memory (only three surfaces):** capability payloads, epistemic handover, git.
 

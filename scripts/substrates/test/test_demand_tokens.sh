@@ -136,6 +136,7 @@ ctx_disc="$(
     --argjson operator_named_paths '[]' \
     --argjson existing_paths '["src/index.ts","src/ui/fake_import.ts"]' \
     --argjson tools_gate '{}' \
+    --argjson demand_anchors '{}' \
     '{
       evidence_refs: $evidence_refs,
       observed_payloads: $observed_payloads,
@@ -146,7 +147,8 @@ ctx_disc="$(
       seed_conditions: $seed_conditions,
       operator_named_paths: $operator_named_paths,
       existing_paths: $existing_paths,
-      tools_gate: $tools_gate
+      tools_gate: $tools_gate,
+      demand_anchors: $demand_anchors
     }'
 )"
 enriched="$(enrich_cognitive_artifact "${raw_disc}" "${ctx_disc}")"
@@ -195,23 +197,89 @@ AEGIS_ACTIVE_EVIDENCE_ENTRIES=(
   "filesystem.read:epistemic_handover"
 )
 prioritize_evidence_entries
-[[ "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[0]}" == "runtime.demand_anchors" ]] \
-  || fail "priority_first_should_be_demand_anchors: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
-# layer0 must precede attention_seed (predecessor payload dependency)
+# layer0 → attention_seed → demand_anchors (seed predecessor + seed-aware anchors)
 _l0_pos=-1
 _seed_pos=-1
+_da_pos=-1
 _i=0
 for _e in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
   [[ "${_e}" == "runtime.layer0_facts" ]] && _l0_pos="${_i}"
   [[ "${_e}" == "runtime.attention_seed" ]] && _seed_pos="${_i}"
+  [[ "${_e}" == "runtime.demand_anchors" ]] && _da_pos="${_i}"
   _i=$((_i + 1))
 done
 [[ "${_l0_pos}" -ge 0 && "${_seed_pos}" -ge 0 && "${_l0_pos}" -lt "${_seed_pos}" ]] \
   || fail "priority_layer0_before_attention_seed: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
+[[ "${_seed_pos}" -ge 0 && "${_da_pos}" -ge 0 && "${_seed_pos}" -lt "${_da_pos}" ]] \
+  || fail "priority_attention_seed_before_demand_anchors: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
 _last_idx=$((${#AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]} - 1))
 [[ "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[_last_idx]}" == "git.status" ]] \
   || fail "priority_git_should_be_last: ${AEGIS_ACTIVE_EVIDENCE_ENTRIES[*]}"
 unset _last_idx _l0_pos _seed_pos _i _e
+
+# --- forensics enrich: rewrite hallucinated reason + force seed alvo ---
+export AEGIS_MODE="forensics"
+export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
+raw_for='{
+  "status": "interpreted",
+  "repair_candidates": [
+    {"id": "src/index.ts", "reason": "Request: add power function."},
+    {"id": "src/ui/fake_import.ts", "reason": "also maybe"}
+  ]
+}'
+ctx_for="$(
+  jq -n \
+    --argjson evidence_refs '["runtime.demand_anchors","filesystem.read:src/index.ts"]' \
+    --argjson observed_payloads '["runtime_demand_anchors.json"]' \
+    --argjson prev_candidate 'null' \
+    --argjson prev_findings 'null' \
+    --argjson seed_scope '{"scope_type":"layer0","scope_targets":["src/index.ts"],"scope_confidence":"high"}' \
+    --argjson seed_targets '["src/index.ts"]' \
+    --argjson seed_conditions '[]' \
+    --argjson operator_named_paths '[]' \
+    --argjson existing_paths '["src/index.ts","src/ui/fake_import.ts"]' \
+    --argjson tools_gate '{}' \
+    --argjson demand_anchors "$(aegis_materialize_demand_anchors_json "${AEGIS_INVESTIGATION_INPUT}" "" "")" \
+    '{
+      evidence_refs: $evidence_refs,
+      observed_payloads: $observed_payloads,
+      prev_candidate: $prev_candidate,
+      prev_findings: $prev_findings,
+      seed_scope: $seed_scope,
+      seed_targets: $seed_targets,
+      seed_conditions: $seed_conditions,
+      operator_named_paths: $operator_named_paths,
+      existing_paths: $existing_paths,
+      tools_gate: $tools_gate,
+      demand_anchors: $demand_anchors
+    }'
+)"
+enriched_for="$(enrich_cognitive_artifact "${raw_for}" "${ctx_for}")"
+echo "${enriched_for}" | jq -e '
+  (.repair_candidates | length) == 1
+  and .repair_candidates[0].id == "src/index.ts"
+  and (.repair_candidates[0].reason | test("power"; "i") | not)
+  and (
+    (.repair_candidates[0].reason | test("terabit"; "i"))
+    or (.repair_candidates[0].reason | test("gigabit"; "i"))
+    or (.repair_candidates[0].reason | test("convers"; "i"))
+    or (.repair_candidates[0].reason | startswith("Demand:"))
+  )
+' >/dev/null \
+  || fail "forensics_should_bind_reason_and_single_seed: ${enriched_for}"
+
+# reason that already cites a dense token is preserved
+raw_ok='{
+  "status": "interpreted",
+  "repair_candidates": [
+    {"id": "src/index.ts", "reason": "add terabitsToGigabits helper"}
+  ]
+}'
+enriched_ok="$(enrich_cognitive_artifact "${raw_ok}" "${ctx_for}")"
+echo "${enriched_ok}" | jq -e '
+  .repair_candidates[0].reason == "add terabitsToGigabits helper"
+' >/dev/null \
+  || fail "forensics_should_keep_token_aligned_reason: ${enriched_ok}"
 
 # --- demand_anchors mechanical projection ---
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Megabits para bytes"

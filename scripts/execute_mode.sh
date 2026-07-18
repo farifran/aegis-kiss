@@ -199,9 +199,9 @@ augment_evidence_profile_from_anchors() {
 
 # Rank evidence entries so budget cuts hit low-signal first.
 # Lower rank number = higher priority (materialize + expose first).
-#   10 demand_anchors
-#   18 layer0_facts  (must precede attention_seed — predecessor payload)
-#   20 attention_seed
+#   15 layer0_facts  (must precede attention_seed — predecessor payload)
+#   18 attention_seed
+#   20 demand_anchors (after seed so seed_targets can be filled)
 #   30 filesystem.read (content seeds + handover)
 #   40 search_symbol
 #   50 git
@@ -212,9 +212,9 @@ _evidence_entry_priority_rank() {
   local entry="$1"
   local capability="${entry%%:*}"
   case "${capability}" in
-    runtime.demand_anchors) echo 10 ;;
-    runtime.layer0_facts) echo 18 ;;
-    runtime.attention_seed) echo 20 ;;
+    runtime.layer0_facts) echo 15 ;;
+    runtime.attention_seed) echo 18 ;;
+    runtime.demand_anchors) echo 20 ;;
     filesystem.read) echo 30 ;;
     filesystem.search_symbol) echo 40 ;;
     git.status|git.diff) echo 50 ;;

@@ -531,14 +531,17 @@ readonly AEGIS_JQ_ENRICH_LIB='
     | unique;
 
   # Collapse multi-candidate forensics when operator named 0–1 paths.
-  def prefer_alvo_unico($cands; $named):
+  # $seed (Layer0/attention) participates when named is empty/single.
+  def prefer_alvo_unico($cands; $named; $seed):
     if ($named | length) >= 2 then $cands
     elif ($cands | length) <= 1 then $cands
     else
       (if ($named | length) == 1 then
         ($cands | map(select(.id == $named[0])) | .[0:1])
-       else [] end) as $named_hit
-      | if ($named_hit | length) > 0 then $named_hit
+       elif ($seed | length) == 1 then
+        ($cands | map(select(.id == $seed[0])) | .[0:1])
+       else [] end) as $anchor_hit
+      | if ($anchor_hit | length) > 0 then $anchor_hit
         else
           ($cands
             | map(select(.id | test("(^|/)index\\.(ts|tsx|js|jsx)$")))
@@ -546,6 +549,49 @@ readonly AEGIS_JQ_ENRICH_LIB='
           | if ($entry | length) > 0 then $entry else $cands[0:1] end
         end
     end;
+
+  # Dense-token gate for forensics reasons (models invent "add power function").
+  def reason_mentions_tokens($reason; $tokens):
+    (($reason // "") | ascii_downcase) as $r
+    | ($tokens | length) > 0
+      and any($tokens[]; . as $t | ($t | length) >= 4 and ($r | contains($t)));
+
+  def mechanical_demand_reason($tokens; $inv):
+    if ($tokens | length) > 0 then
+      "Demand: " + ($tokens | .[0:3] | join(" "))
+    else
+      ((($inv // "") | gsub("\\s+"; " ") | gsub("^ +| +$"; ""))[0:72]) as $s
+      | if ($s | length) > 0 then "Demand: " + $s else "unspecified demand" end
+    end;
+
+  def bind_forensics_reasons($cands; $tokens; $inv):
+    $cands
+    | map(
+        if reason_mentions_tokens(.reason; $tokens) then .
+        else . + {reason: mechanical_demand_reason($tokens; $inv)}
+        end
+      );
+
+  # When a single mechanical alvo exists (named or seed), force that id —
+  # model path invent / stale reasons cannot expand or divert the target.
+  def force_single_anchor_candidate($cands; $named; $seed; $tokens; $inv; $evidence_refs):
+    (if ($named | length) == 1 then $named[0]
+     elif ($named | length) == 0 and ($seed | length) == 1 then $seed[0]
+     else null end) as $alvo
+    | if $alvo == null then $cands
+      else
+        ([$cands[] | select(.id == $alvo)][0] // null) as $hit
+        | [{
+            id: $alvo,
+            reason: (
+              if $hit != null and reason_mentions_tokens($hit.reason; $tokens)
+              then $hit.reason
+              else mechanical_demand_reason($tokens; $inv)
+              end
+            ),
+            evidence_refs: $evidence_refs
+          }]
+      end;
 
   # Drop invent-net-new candidates; remap empty set onto primary scope path.
   def clamp_forensics_scope($cands; $scope; $evidence_refs):
@@ -635,6 +681,8 @@ readonly AEGIS_JQ_ENRICH_HEAD='
   | $ctx.operator_named_paths as $operator_named_paths
   | $ctx.existing_paths as $existing_paths
   | $ctx.tools_gate as $tools_gate
+  | ($ctx.demand_anchors // {}) as $demand_anchors
+  | (($demand_anchors.dense_tokens // []) | map(ascii_downcase)) as $dense_tokens
   | .mode = $mode
   | .evidence_refs = $evidence_refs
   | .observed_payloads = (.observed_payloads // $observed_payloads)
@@ -711,8 +759,18 @@ readonly AEGIS_JQ_ENRICH_FORENSICS='
         })
       | unique_by(.id)
       | clamp_forensics_scope(.; $forensics_scope; $evidence_refs)
-      | prefer_alvo_unico(.; $operator_named_paths)
+      | prefer_alvo_unico(.; $operator_named_paths; $seed_targets)
+      | force_single_anchor_candidate(
+          .; $operator_named_paths; $seed_targets;
+          $dense_tokens; $investigation_input; $evidence_refs
+        )
+      | bind_forensics_reasons(.; $dense_tokens; $investigation_input)
     )
+  # Empty model output + mechanical alvo → still interpreted for repair.
+  | if ((.repair_candidates | length) > 0)
+         and ((.status == "inconclusive") or (.status == null))
+    then .status = "interpreted"
+    else . end
   | .handover_attention = {
       next_attention_targets: (
         if .status == "interpreted"
@@ -970,6 +1028,39 @@ load_artifact_enrichment_context() {
     existing_paths_json="[]"
   fi
 
+  # Mechanical demand anchors for forensics reason/alvo gates (and other modes).
+  local demand_anchors_json="{}"
+  local anchors_payload="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}/runtime_demand_anchors.json"
+  if [[ -f "${anchors_payload}" ]]; then
+    demand_anchors_json="$(
+      jq -c '.payload.demand_anchors // .payload // {}' "${anchors_payload}" 2>/dev/null || printf '{}'
+    )"
+  fi
+  if ! printf '%s' "${demand_anchors_json}" | jq -e 'type == "object" and has("dense_tokens")' >/dev/null 2>&1; then
+    if declare -f aegis_materialize_demand_anchors_json >/dev/null 2>&1; then
+      demand_anchors_json="$(
+        aegis_materialize_demand_anchors_json \
+          "${AEGIS_INVESTIGATION_INPUT:-}" \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}" \
+          "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+          2>/dev/null || printf '{}'
+      )"
+    fi
+  fi
+  if ! printf '%s' "${demand_anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    demand_anchors_json="{}"
+  fi
+  # Prefer seed_targets already loaded from attention_seed when anchors lack them.
+  if printf '%s' "${seed_targets_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    demand_anchors_json="$(
+      printf '%s' "${demand_anchors_json}" | jq -c \
+        --argjson seed "${seed_targets_json}" \
+        'if ((.seed_targets // []) | length) == 0
+         then .seed_targets = $seed | .seed_source = (.seed_source // "attention_seed")
+         else . end'
+    )"
+  fi
+
   local tribunal_files_json="[]"
   tribunal_files_json="$(
     printf '%s' "${prev_candidate_json}" \
@@ -990,6 +1081,7 @@ load_artifact_enrichment_context() {
     --argjson operator_named_paths "${operator_named_paths_json}" \
     --argjson existing_paths "${existing_paths_json}" \
     --argjson tools_gate "${tools_gate_json}" \
+    --argjson demand_anchors "${demand_anchors_json}" \
     '{
       evidence_refs: $evidence_refs,
       observed_payloads: $observed_payloads,
@@ -1000,7 +1092,8 @@ load_artifact_enrichment_context() {
       seed_conditions: $seed_conditions,
       operator_named_paths: $operator_named_paths,
       existing_paths: $existing_paths,
-      tools_gate: $tools_gate
+      tools_gate: $tools_gate,
+      demand_anchors: $demand_anchors
     }'
 }
 
