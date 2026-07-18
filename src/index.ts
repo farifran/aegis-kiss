@@ -1,3 +1,3 @@
-export function kilobitsToBits(kilobits: number): number {
-  return kilobits * 1024;
+export function kilobytesToBits(kilobytes: number): number {
+  return kilobytes * 1024;
 }
