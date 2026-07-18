@@ -173,10 +173,14 @@ EOF
 # Mutation intent gates (repair) — demand fidelity on the diff
 # ---------------------------------------------------------
 # AEGIS_MUTATION_INTENT_PREFLIGHT:
-#   soft (default) — fail preflight to trigger fix retry; if still dirty
-#                    after max attempts, warn and allow (tsc already green)
-#   hard           — fail until clean; exhaust → fatal
+#   soft (default) — Aider intent-fix retries first; only after exhausting
+#                    AEGIS_MUTATION_INTENT_FIX_ATTEMPTS (and ≥1 fix when
+#                    targets exist) soft-accept + intent_violations stamp
+#   hard           — same retries; exhaust → fatal (no soft-accept)
 #   off            — warn only, never fail
+# AEGIS_MUTATION_INTENT_FIX_ATTEMPTS (default 3) — demand-correction budget
+#   for floor models (separate from tools preflight fixes)
+# AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS (default 2) — tsc/test/smoke fixes
 # AEGIS_MUTATION_MAX_NEW_EXPORTS (default 1) — over-delivery cap on +exports
 # AEGIS_DEMAND_TOKEN_PREFLIGHT=hard — legacy alias for intent hard on tokens
 #   (prefer AEGIS_MUTATION_INTENT_PREFLIGHT)
@@ -371,25 +375,44 @@ assert_demand_tokens_in_mutation_diff() {
 }
 
 # Fix prompt when intent gates fail (tsc already green).
+# Skill is not re-injected — violations + instance data drive the fix (P2).
 assemble_intent_fix_prompt() {
   local prompt_file="$1"
   local resolved_edit_format="$2"
   shift 2
   local prompt_targets=("$@")
-  local target_list diagnostics handoff_line
+  local target_list diagnostics handoff_line anchors_line brief_line tokens_line
 
   target_list="$(printf -- '- %s\n' "${prompt_targets[@]:-}")"
   diagnostics="${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-"(intent mismatch)"}"
   handoff_line=""
+  anchors_line=""
+  brief_line=""
+  tokens_line=""
+
   if declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
     handoff_line="$(
       aegis_format_forensics_handoff_section \
         "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" 2>/dev/null || true
     )"
   fi
+  if declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
+    anchors_line="$(aegis_format_demand_anchors_section 2>/dev/null || true)"
+  fi
+  if declare -f aegis_format_mutation_brief_section >/dev/null 2>&1; then
+    brief_line="$(
+      aegis_format_mutation_brief_section \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" \
+        "${AEGIS_EXECUTION_SURFACE_PATH:-.}" 2>/dev/null || true
+    )"
+  fi
+  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    tokens_line="$(
+      aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}" 2>/dev/null \
+        | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    )"
+  fi
 
-  # Skill is not re-injected on intent fix — violations + scope are the corrective power.
-  # Keep only intent-specific rails (tokens / over-export); not a full skill echo.
   cat > "${prompt_file}" << EOF
 Intent mismatch fix after a mutation.
 
@@ -401,11 +424,13 @@ ${target_list}
 
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
-
-${handoff_line}Violations (fix ONLY these):
+${tokens_line:+
+MUST appear in added lines (tokens): ${tokens_line}
+}
+${anchors_line}${handoff_line}${brief_line}Violations (fix ONLY these):
 $(printf '%s\n' "${diagnostics}" | sed 's/^/- /')
 
-Resolve every violation: demand tokens/direction in added lines; at most one demand-aligned export; no parallel APIs. Edits only — stop.
+Resolve every violation: put demand tokens/direction in the changed code; at most one demand-aligned export; no parallel APIs. Edits only — stop.
 EOF
 
   if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then
@@ -467,9 +492,13 @@ run_mutation_preflight() {
 }
 
 # Preflight with bounded model fix retries. Prints the final surface diff
-# on stdout (for artifact emission). Tools failures use taxonomy fix prompt;
-# intent failures use demand-alignment fix prompt. Soft intent may pass after
-# exhausting retries (tsc green); hard intent / tools still fatal.
+# on stdout (for artifact emission).
+#
+# P2 (floor models / demand fidelity):
+#   - separate budgets: tools vs intent fixes
+#   - intent gets more Aider correction chances by default
+#   - soft-accept only after intent budget exhausted AND ≥1 intent fix
+#     when mutation targets exist (no early give-up)
 #
 # Usage: diff="$(run_mutation_preflight_with_fix_attempts <edit_format> [targets...])"
 run_mutation_preflight_with_fix_attempts() {
@@ -478,10 +507,13 @@ run_mutation_preflight_with_fix_attempts() {
   local mutation_targets=("$@")
 
   : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=2}"
-  local preflight_attempt=0
-  local max_preflight_attempts=$((AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS + 1))
+  : "${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS:=3}"
+  local tools_fix_count=0
+  local intent_fix_count=0
+  local check_index=0
   local diff_content=""
   local intent_mode
+  local fix_prompt fix_phase
 
   intent_mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
   if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
@@ -490,49 +522,78 @@ run_mutation_preflight_with_fix_attempts() {
   intent_mode="$(printf '%s' "${intent_mode}" | tr '[:upper:]' '[:lower:]')"
 
   while true; do
-    AEGIS_MUTATION_PREFLIGHT_ATTEMPT="${preflight_attempt}"
+    AEGIS_MUTATION_PREFLIGHT_ATTEMPT="${check_index}"
     export AEGIS_MUTATION_PREFLIGHT_ATTEMPT
     if run_mutation_preflight; then
       break
     fi
 
-    preflight_attempt=$((preflight_attempt + 1))
-    if [[ "${preflight_attempt}" -ge "${max_preflight_attempts}" ]] \
-      || [[ "${#mutation_targets[@]}" -eq 0 ]]; then
-      # Soft intent only: accept diff after retries if tools are green.
-      # Stamp soft-accept so emit_mutation_artifact can attach intent_violations
-      # → validation rejects with repair_feedback.demand_mismatch (R3).
-      if [[ "${AEGIS_MUTATION_PREFLIGHT_LAST:-}" == "intent" ]] \
+    fix_phase="${AEGIS_MUTATION_PREFLIGHT_LAST:-tools}"
+    check_index=$((check_index + 1))
+
+    # --- no targets: cannot invoke Aider fix ---
+    if [[ "${#mutation_targets[@]}" -eq 0 ]]; then
+      if [[ "${fix_phase}" == "intent" ]] \
         && [[ "${intent_mode}" == "soft" || "${intent_mode}" == "retry" ]]; then
-        aegis_warn "mutation_intent_soft_accept: still dirty after ${preflight_attempt} attempt(s) — emitting with intent_violations stamp"
+        aegis_warn "mutation_intent_soft_accept: no targets to fix — emitting with intent_violations stamp"
         AEGIS_MUTATION_INTENT_SOFT_ACCEPTED=1
         export AEGIS_MUTATION_INTENT_SOFT_ACCEPTED
-        # Re-collect diagnostics on final diff for the stamp.
         diff_content="$(capture_worktree_diff)"
         collect_mutation_intent_violations "${diff_content}" || true
         record_mutation_intent_metric "soft_accept" \
-          "${preflight_attempt}" \
+          "${check_index}" \
           "$(count_diff_added_exports "${diff_content}")" \
           "intent"
         break
       fi
       rollback_execution_surface
-      aegis_fatal "mutation_preflight_failed:${AEGIS_MUTATION_PREFLIGHT_LAST:-unknown}"
+      aegis_fatal "mutation_preflight_failed:${fix_phase}:no_targets"
     fi
 
-    aegis_warn "mutation_preflight_failed (${AEGIS_MUTATION_PREFLIGHT_LAST:-?}) — fix attempt ${preflight_attempt}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
-
-    local fix_prompt fix_phase
-    fix_phase="${AEGIS_MUTATION_PREFLIGHT_LAST:-tools}"
-    record_mutation_intent_metric "fix_attempt" \
-      "${preflight_attempt}" "" "${fix_phase}"
-    fix_prompt="$(aider_mktemp)"
+    # --- budget exhausted for this phase ---
     if [[ "${fix_phase}" == "intent" ]]; then
+      if [[ "${intent_fix_count}" -ge "${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS}" ]]; then
+        # Soft: only after real Aider demand-correction attempts (P2).
+        if [[ "${intent_mode}" == "soft" || "${intent_mode}" == "retry" ]] \
+          && [[ "${intent_fix_count}" -ge 1 ]]; then
+          aegis_warn "mutation_intent_soft_accept: still dirty after ${intent_fix_count} intent fix(es) — emitting with intent_violations stamp"
+          AEGIS_MUTATION_INTENT_SOFT_ACCEPTED=1
+          export AEGIS_MUTATION_INTENT_SOFT_ACCEPTED
+          diff_content="$(capture_worktree_diff)"
+          collect_mutation_intent_violations "${diff_content}" || true
+          record_mutation_intent_metric "soft_accept" \
+            "${intent_fix_count}" \
+            "$(count_diff_added_exports "${diff_content}")" \
+            "intent"
+          break
+        fi
+        rollback_execution_surface
+        aegis_fatal "mutation_preflight_failed:intent"
+      fi
+    else
+      if [[ "${tools_fix_count}" -ge "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}" ]]; then
+        rollback_execution_surface
+        aegis_fatal "mutation_preflight_failed:tools"
+      fi
+    fi
+
+    # --- schedule one Aider fix ---
+    if [[ "${fix_phase}" == "intent" ]]; then
+      intent_fix_count=$((intent_fix_count + 1))
+      aegis_warn "mutation_intent_fix ${intent_fix_count}/${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS}"
+      record_mutation_intent_metric "fix_attempt" \
+        "${intent_fix_count}" "" "intent"
+      fix_prompt="$(aider_mktemp)"
       assemble_intent_fix_prompt \
         "${fix_prompt}" \
         "${resolved_edit_format}" \
         "${mutation_targets[@]}"
     else
+      tools_fix_count=$((tools_fix_count + 1))
+      aegis_warn "mutation_tools_fix ${tools_fix_count}/${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS}"
+      record_mutation_intent_metric "fix_attempt" \
+        "${tools_fix_count}" "" "tools"
+      fix_prompt="$(aider_mktemp)"
       assemble_preflight_fix_prompt \
         "${fix_prompt}" \
         "${resolved_edit_format}" \

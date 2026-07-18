@@ -87,14 +87,16 @@ cat .harness/runtime/last_outcome.json | jq .
 
 **Forensics.** Mechanical `{id, reason}`; multi-seed ranked by content probes; LLM only on true ambiguity. Search only on LLM residual path.
 
-**Repair.** Prompt stack (no policy echo): `AGENTS.md` → **skill** (policy) → DEMAND ANCHORS / FEEDBACK / ALVO / BRIEF (data) → investigation → **jail** (path list) → whole-format rules if needed → thin close cue. Rails: Aider **auto-lint** (file eslint/prettier/static + **project tsc delta** on the edited file) → post-diff scope → preflight tsc/test/smoke → **intent gates**. Soft intent may soft-accept with `intent_violations` → validation `demand_mismatch` re-entry. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
+**Repair.** Prompt stack (no policy echo): `AGENTS.md` → **skill** (policy) → DEMAND ANCHORS / FEEDBACK / ALVO / BRIEF (data) → investigation → **jail** (path list) → whole-format rules if needed → thin close cue. Rails: Aider **auto-lint** (file eslint/prettier/static + **project tsc delta**) → post-diff scope → preflight tsc/test/smoke → **intent gates** with dedicated Aider fix budget (default 3) before soft-accept + `intent_violations` / validation `demand_mismatch`. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
 
 **Flags (common)**
 
 | Flag | Meaning |
 |---|---|
 | `AEGIS_FORENSICS_LLM=auto\|0\|1` | Forensics LLM residual (default auto) |
-| `AEGIS_MUTATION_INTENT_PREFLIGHT=soft\|hard\|off` | Intent gate policy (default soft) |
+| `AEGIS_MUTATION_INTENT_PREFLIGHT=soft\|hard\|off` | Intent gate policy (default soft: fix first, soft-accept only after intent budget) |
+| `AEGIS_MUTATION_INTENT_FIX_ATTEMPTS` | Aider demand-correction retries (default **3**, separate from tools) |
+| `AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS` | tsc/test/smoke fix retries (default 2) |
 | `AEGIS_MUTATION_MAX_NEW_EXPORTS` | Over-delivery cap (default 1) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 

@@ -138,7 +138,7 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Search scope | `aegis_search_symbol_pathspecs` + `git grep` |
 | Repair prompt extras | ALVO / BRIEF (data) / FEEDBACK; skill owns policy (no recency echo) |
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
-| Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`) |
+| Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_mismatch | soft-accept → `intent_violations` on artifact → validation reject + local re-repair |
 
 Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
