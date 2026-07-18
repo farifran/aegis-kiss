@@ -15,17 +15,17 @@
 
 | File | Role |
 |---|---|
-| `AGENTS.md` | Cognition constitution (4 rules) |
+| `AGENTS.md` | Cognition constitution (4 rules); injected as preamble on LLM/Aider paths |
 | `.harness/00_architecture_core.md` | Epistemic doctrine (modes as cognition layers) |
 | `README.md` | Operator setup, quick start, test entrypoints |
-| `entry.md` | **Proposal only** — demand protocol via GitHub Issues (not implemented) |
+| `entry.md` | Demand protocol notes + operator map (evolving) |
 | `.skills/field_ownership.md` | Model vs runtime field ownership |
 
 ---
 
 ## One sentence
 
-Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; they emit framed JSON artifacts; git is the only durable memory; deep graph extractors / `structural.builder` are **gone**.
+Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; discovery/forensics default to **mechanical** bodies; repair mutates under jail + intent rails; git is the only durable memory.
 
 ---
 
@@ -38,10 +38,11 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
        │                  │                      │
        │                  │              capability_payloads/
        │                  │                      │
-       │                  ├── raw_llm.sh      (readonly modes)
+       │                  ├── mechanical (discovery always; forensics if clear)
+       │                  ├── raw_llm.sh      (forensics residual, adversarial, validation)
        │                  └── aider_substrate (repair / optimize)
        │                              │
-       │                         JSON artifact
+       │                         framed JSON artifact
        │                              │
        └── outcome (human + metrics + last_outcome.json)
                   handover promote / cleanup
@@ -49,9 +50,9 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 
 | Entrypoint | Owns |
 |---|---|
-| `run_aegis.sh` | Operator CLI, pipelines (`mutation` / `readonly`), timing report, run-level outcome |
-| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke |
-| `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; ships full `AGENTS.md` as preamble |
+| `run_aegis.sh` | Operator CLI, pipelines (`mutation` / `readonly`), timing report, run-level outcome, `pipeline_metrics.jsonl` |
+| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, repair-feedback re-entry |
+| `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; loads full `AGENTS.md` as preamble |
 | `.harness/config.sh` | Modes, handlers, evidence profiles, budgets, provider defaults |
 
 ---
@@ -60,14 +61,23 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 
 | Mode | Engine | Role |
 |---|---|---|
-| `discovery` | runtime mechanical | Gaps over anchors/probes (no LLM) |
-| `forensics` | mechanical default; raw LLM if multi-seed tie | `repair_candidates[{id,reason}]` |
-| `repair` | aider | Bounded mutation from candidates |
-| `optimize` | aider | Refine candidate on disposable surface |
+| `discovery` | **runtime mechanical only** (no LLM) | Gaps over anchors/probes → `observations` / `rationale` / `required_evidence` |
+| `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `repair_candidates[{id,reason}]` |
+| `repair` | aider | Bounded mutation from candidates + MUTATION BRIEF |
+| `optimize` | aider | Refine candidate on disposable surface (short-circuit if small) |
 | `adversarial` | raw LLM | Falsify candidate assumptions |
-| `validation` | raw LLM | Tribunal verdict on findings + handover |
+| `validation` | raw LLM + tribunal gates | Verdict; `repair_feedback` / `demand_mismatch` on reject |
 
-Contracts: `.skills/<mode>.md` (discovery = docs/audit only). Field ownership: `.skills/field_ownership.md`.
+**Skills (`.skills/<mode>.md`):**
+
+| Skill | Loaded into model? |
+|---|---|
+| `discovery.md` | **No** — contract / docs / audit only |
+| `forensics.md` | **Yes** only on LLM residual path |
+| `repair.md` / `optimize.md` | **Yes** — always injected by Aider (`cat` skill file) |
+| `adversarial.md` / `validation.md` | **Yes** — raw substrate |
+
+Field ownership: `.skills/field_ownership.md`.
 
 ---
 
@@ -79,11 +89,12 @@ Handlers under `scripts/capabilities/`, registered only in `.harness/config.sh`.
 |---|---|
 | `filesystem.list_tree` | `filesystem/list_tree.sh` |
 | `filesystem.read` | `filesystem/read_file.sh` |
-| `filesystem.search_symbol` | `filesystem/search_symbol.sh` |
+| `filesystem.search_symbol` | `filesystem/search_symbol.sh` (`git grep` + pathspecs) |
 | `git.status` | `git/git_status.sh` |
 | `git.diff` | `git/git_diff.sh` |
 | `runtime.layer0_facts` | `runtime/layer0_facts.sh` |
 | `runtime.attention_seed` | `runtime/attention_seed.sh` |
+| `runtime.demand_anchors` | `runtime/demand_anchors.sh` |
 | `typescript.check` | `typescript_check.sh` |
 | `eslint.check` | `eslint_check.sh` |
 | `test.run` | `test_runner.sh` |
@@ -97,20 +108,40 @@ Shared emit: `scripts/capabilities/_emit.sh`. Manifest: `generate_manifest.sh`.
 
 ## Evidence profiles (product path)
 
-Discovery is **Layer 0 only**:
+Config lists a base set; execute_mode **re-ranks** and may **omit** search when not needed.
 
-| Mode | Evidence (config names) |
+| Mode | Base evidence (config) | Runtime notes |
+|---|---|---|
+| discovery | `demand_anchors`, `list_tree`, handover, `layer0_facts`, `attention_seed` | Always mechanical body |
+| forensics | `demand_anchors`, handover, `search_symbol` | **Search omitted** if mechanical; + `filesystem.read` anchors |
+| repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
+| optimize | handover, git.status, tsc, eslint | Lean |
+| adversarial | handover, tsc, eslint, test | No demand search |
+| validation | handover only | Tribunal; may reject on `intent_violations` |
+
+**Authorization:** operator-named paths, `required_evidence`, Layer 0 / attention seed — not import graphs.
+
+Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
+
+---
+
+## Demand → mechanical cognition (core)
+
+| Concern | Implementation |
 |---|---|
-| discovery | `list_tree`, handover read, `layer0_facts`, `attention_seed` |
-| forensics | `search_symbol`, `git.status`, handover; **+ runtime `filesystem.read` anchors** (operator paths + attention, cap) |
-| adversarial | `search_symbol`, handover, tsc, eslint, test |
-| validation | handover only (tribunal) |
-| repair | search, handover, git, tsc, eslint, test |
-| optimize | handover, git.status, tsc, eslint |
+| Issue body | `--issue N` via `gh` (`demand.sh`) |
+| Tokens / dense / multi-F search | `aegis_demand_tokens`, `aegis_demand_dense_tokens`, `;;` sep |
+| Anchors | `aegis_materialize_demand_anchors_json` (seed: handover > attention_seed > layer0) |
+| Discovery body | `aegis_build_mechanical_discovery_json` + `aegis_discovery_probe_path` |
+| Forensics body | `aegis_build_mechanical_forensics_json`; multi-seed via `aegis_forensics_discriminate_seeds` |
+| Forensics LLM? | `aegis_forensics_needs_llm` (`AEGIS_FORENSICS_LLM=auto\|0\|1`) |
+| Search scope | `aegis_search_symbol_pathspecs` + `git grep` |
+| Repair prompt extras | FORENSICS HANDOFF, MUTATION BRIEF, REPAIR FEEDBACK |
+| Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
+| Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`) |
+| demand_mismatch | soft-accept → `intent_violations` on artifact → validation reject + local re-repair |
 
-**Authorization after cut:** operator-named paths, `required_evidence`, and Layer 0 attention — not import/reference graphs.
-
-Cacheable (stable) capabilities: `list_tree`, `layer0_facts`, `attention_seed`.
+Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
 
 ---
 
@@ -118,18 +149,16 @@ Cacheable (stable) capabilities: `list_tree`, `layer0_facts`, `attention_seed`.
 
 | File | Role |
 |---|---|
-| `scripts/lib/common.sh` | Logging, path helpers, `aegis_next_in_sequence`, isolation, `measure` |
-| `scripts/lib/artifact_protocol.sh` | Validate / enrich artifacts; shared jq enrich lib + per-mode bodies |
-| `scripts/lib/evidence.sh` | Evidence materialization / selection |
-| `scripts/lib/epistemic_handover.sh` | Handover read/write helpers |
-| `scripts/lib/run_outcome.sh` | Human `AEGIS OUTCOME`, metrics JSONL, `last_outcome.json` |
-| `scripts/lib/demand.sh` | Issue fetch (`gh`), soft structured-demand normalize, path safety, demand tokens + **demand_anchors** (prompt + handover + capability) |
-| `scripts/capabilities/runtime/demand_anchors.sh` | Capability envelope for mechanical demand projection |
+| `scripts/lib/common.sh` | Logging, path helpers, `measure` (+ timing metrics) |
+| `scripts/lib/artifact_protocol.sh` | Validate / enrich; forensics gates; validation `repair_feedback` |
+| `scripts/lib/evidence.sh` | Materialize / select payloads; late `search_symbol` for forensics LLM |
+| `scripts/lib/epistemic_handover.sh` | Handover read/write |
+| `scripts/lib/run_outcome.sh` | Human outcome, metrics JSONL, `last_outcome.json` |
+| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs |
 
-Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.
-
+Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.  
 Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh`, `static_gate.sh`.  
-Prompt templates: `scripts/substrates/prompts/`.
+Aider: `scripts/substrates/aider/{targets,prompt,invoke,preflight}.sh`.
 
 ---
 
@@ -139,15 +168,15 @@ Prompt templates: `scripts/substrates/prompts/`.
 2. **`.harness/runtime/epistemic_handover.json`** — incomplete attention, not truth
 3. **git** — only durable memory
 
-Also produced (not memory): `pipeline_metrics.jsonl`, `last_outcome.json` (gitignored), fatal marker.
+Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `last_outcome.json` (gitignored), fatal marker.
 
 ---
 
 ## Isolation and secrets
 
-- Capability children run under **`env -i`** via `run_with_isolated_base_env`.
-- `local.env` loads only when **`AEGIS_LOAD_LOCAL_ENV=1`** (entrypoints), never into capability children.
-- Observation layer never needs provider credentials; cognition substrates do.
+- Capability / cognition children run under **`env -i`** via `run_with_isolated_base_env`.
+- `local.env` loads only when **`AEGIS_LOAD_LOCAL_ENV=1`** (entrypoints).
+- Aider whitelist includes `AEGIS_METRICS_FILE` and intent policy knobs so repair metrics actually land in jsonl.
 
 ---
 
@@ -155,30 +184,28 @@ Also produced (not memory): `pipeline_metrics.jsonl`, `last_outcome.json` (gitig
 
 ```text
 .
-├── AGENTS.md
+├── AGENTS.md                 # constitution → preamble
 ├── README.md                 # operator entry
 ├── summary.md                # this map
-├── entry.md                  # proposal only
+├── entry.md                  # demand notes + map
 ├── run_aegis.sh
 ├── runtime_aegis.sh
 ├── package.json              # aegis:test / aegis:test:fast
-├── .skills/                  # mode contracts + field_ownership
+├── .skills/                  # mode contracts (repair injected into Aider)
 ├── .harness/
-│   ├── config.sh             # topology SoT
+│   ├── config.sh
 │   ├── 00_architecture_core.md
-│   └── runtime/              # ephemeral (handover, payloads, surfaces)
+│   └── runtime/              # handover, metrics, payloads, surfaces
 └── scripts/
     ├── execute_mode.sh
-    ├── lib/
-    ├── capabilities/         # handlers above only
+    ├── lib/                  # demand, evidence, artifact_protocol, …
+    ├── capabilities/
     ├── runtime/              # promote / apply
     └── substrates/
-        ├── raw_llm.sh           # entry
-        ├── raw/                 # workspace, prompt, provider, artifact
-        ├── aider_substrate.sh   # entry
-        ├── aider/               # targets, prompt, invoke, preflight
+        ├── raw_llm.sh / raw/
+        ├── aider_substrate.sh / aider/
         ├── prompts/
-        └── test/             # contract suite
+        └── test/
 ```
 
 `src/` is the **mutation playground**, not the harness runtime.
@@ -189,16 +216,18 @@ Also produced (not memory): `pipeline_metrics.jsonl`, `last_outcome.json` (gitig
 
 | Command | Scope |
 |---|---|
-| `npm run aegis:test:fast` | Contracts that stay green without full LLM matrix (capabilities, runtime, secrets, authority, static gate, outcome, scope, constitutional) |
-| `npm run aegis:test` | Full shell suite chained in `package.json` |
+| `npm run aegis:test:fast` | Contracts without full LLM matrix |
+| `npm run aegis:test` | Full shell suite |
 | `npm run aegis:sanity` | tsc + eslint + static enforce |
 
-Individual harnesses live under `scripts/substrates/test/`.
+Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent, metrics shape).
 
 ---
 
 ## Status notes
 
-- **Deep topology cut complete:** Layer 0 + fine only; no `structural_builder`, no `structural_context` on handover snapshots (exact keys: mode, investigation_input, generated_at, operational_context).
-- **Docs role:** this file is the living map; README stays operator-facing; `entry.md` is future demand protocol, not current behavior.
+- **Deep topology cut complete** — Layer 0 + attention; no structural builder.
+- **Discovery is runtime-only** — no `AEGIS_DISCOVERY_LLM`; mechanical fail is fatal.
+- **Forensics** — mechanical + probe discrimination; search only on LLM residual.
+- **Repair** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
 - Prefer hardening and KISS reduction over new architectural surfaces.

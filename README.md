@@ -2,7 +2,7 @@
 
 Bounded, deterministic AI execution runtime. The runtime owns orchestration and evidence; modes only reason from exposed capability payloads and emit protocol-framed JSON. Git is the only persistent memory.
 
-Constitution: `AGENTS.md`. Living repository map: **`summary.md`**. Epistemic doctrine: `.harness/00_architecture_core.md`. Demand-protocol **proposal** (not product): `entry.md`.
+Constitution: `AGENTS.md`. Living repository map: **`summary.md`**. Epistemic doctrine: `.harness/00_architecture_core.md`. Operator notes / demand map: `entry.md`.
 
 ---
 
@@ -11,7 +11,7 @@ Constitution: `AGENTS.md`. Living repository map: **`summary.md`**. Epistemic do
 - `bash`, `git`, `jq`, `curl`, `python3`
 - Node / npm (verify + tests)
 - `ast-grep` (via npm / static gate)
-- `aider` (optional; mutation modes)
+- `aider` (mutation modes)
 - OpenAI-compatible endpoint (`OPENAI_API_BASE`, `OPENAI_API_KEY`)
 
 ---
@@ -22,25 +22,26 @@ Constitution: `AGENTS.md`. Living repository map: **`summary.md`**. Epistemic do
 export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
 export OPENAI_API_KEY="..."
 
-# Full pipeline driver (readonly or mutation)
-./run_aegis.sh discovery "inspect runtime handover boundary"
-./run_aegis.sh mutation "fix the failing gate in src/"
+# Prefer a clean worktree on mutation targets (or promotion may refuse dirty files)
+git status
 
-# Single mode via runtime
+# Full pipelines
+./run_aegis.sh --fresh --pipeline mutation "funções de conversão, como bytes para Megabits"
+./run_aegis.sh --fresh --pipeline readonly "inspect demand anchors"
+
+# Single mode
 bash runtime_aegis.sh discovery "inspect runtime handover boundary"
-bash runtime_aegis.sh discovery --issue 123
+bash runtime_aegis.sh forensics --issue 123
 ```
 
-Provider smoke (optional):
+Optional secrets: `.harness/local.env` (loaded when `AEGIS_LOAD_LOCAL_ENV=1`; never into capability children). Local MLX: `.harness/local.env.mlx` + `scripts/start_mlx_server.sh` (do not mix with cloud env in the same shell).
+
+After a run:
 
 ```bash
-curl "$OPENAI_API_BASE/chat/completions" \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"meta/llama-3.3-70b-instruct","messages":[{"role":"user","content":"Reply only with OK"}],"temperature":0}'
+jq -c 'select(.kind=="intent")' .harness/runtime/pipeline_metrics.jsonl
+cat .harness/runtime/last_outcome.json | jq .
 ```
-
-Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `AEGIS_LOAD_LOCAL_ENV=1`; never injected into capability children).
 
 ---
 
@@ -48,35 +49,58 @@ Optional secrets for local entrypoints: `.harness/local.env` (loaded only when `
 
 | Layer | Responsibility |
 |---|---|
-| `AGENTS.md` | Constitutional rules for cognition |
-| `run_aegis.sh` | Operator pipeline + run outcome |
-| `runtime_aegis.sh` | Lifecycle, surfaces, handover promote |
-| `scripts/execute_mode.sh` | Protocol VM (envelope, evidence, substrate, validate) |
-| `scripts/substrates/raw_llm.sh` | Readonly cognition |
-| `scripts/substrates/aider_substrate.sh` | Bounded mutation |
-| `scripts/capabilities/*` | Authority handlers → evidence payloads |
+| `AGENTS.md` | Constitution; loaded as preamble on raw/Aider prompts |
+| `run_aegis.sh` | Operator pipeline + outcome + metrics file |
+| `runtime_aegis.sh` | Lifecycle, surfaces, handover, repair-feedback re-entry |
+| `scripts/execute_mode.sh` | Envelope, evidence, substrate, validate/enrich |
+| `scripts/lib/demand.sh` | Demand, tokens, anchors, mechanical discovery/forensics, briefs |
+| `scripts/substrates/aider/*` | Mutation: targets, prompt, invoke, intent preflight |
+| `scripts/capabilities/*` | Evidence handlers |
 | `.harness/config.sh` | Modes, handlers, evidence profiles |
-| `.skills/*.md` | Mode contracts (discovery: docs/audit only; forensics: + LLM residual when used) |
+| `.skills/*.md` | Mode contracts (discovery = docs only; repair = always injected into Aider) |
 
-**Modes:** readonly — `discovery`, `forensics`, `adversarial`, `validation`. Mutation — `repair`, `optimize`.
+**Pipelines**
 
-**Discovery evidence (product path):** `list_tree` + handover + Layer 0 facts + attention seed. Graph extractors and `structural.builder` were removed; scope uses operator paths, `required_evidence`, and Layer 0 attention.
+| Pipeline | Modes |
+|---|---|
+| `mutation` (default) | discovery → forensics → repair → optimize → adversarial → validation |
+| `readonly` | discovery → forensics |
 
-**Demand:** `--issue N` fetches the real GitHub issue body via `gh` (not a placeholder). Optional markdown headers (`## Goal`, `## Targets`, …) get a short structured head; free-text still works. Operator-named paths are path-safety checked.
+**Mode engines (product path)**
 
-**Forensics+ content seeds:** the runtime materializes `filesystem.read` for operator-named paths and attention targets (cap `AEGIS_DETERMINISTIC_READ_MAX`) so content does not depend solely on Discovery requesting it.
+| Mode | Who produces the body |
+|---|---|
+| **discovery** | Runtime mechanical only (**no LLM**) |
+| **forensics** | Mechanical by default; LLM if multi-seed probes **tie** or `AEGIS_FORENSICS_LLM=1` |
+| **repair / optimize** | Aider (bounded mutation) |
+| **adversarial / validation** | Raw LLM + runtime tribunal gates |
 
-**Demand tokens:** free-text investigation input is tokenized once (`aegis_demand_tokens` / dense filter) to bind `filesystem.search_symbol` (multi-token fixed-string via `;;`, never ERE) and Layer 0 content resonance (`git grep -l` on dense tokens only). Generic stems like `bytes` do not flood search/hot files. Discovery `required_evidence` is clamped to operator-named paths ∪ Layer0 seed (not arbitrary on-disk invent).
+---
 
-**Demand anchors:** one mechanical story — `aegis_materialize_demand_anchors_json` → prompt (human lines only), capability payload (nested JSON), handover. Structured demands add `goal` / `targets_header` / `done_when`. Evidence rank: layer0 → seed → anchors → reads → search/tools. **Discovery** is always mechanical (path missing / token hits / no hits; no LLM). **Forensics** is mechanical by default; LLM only when multi-seed probes cannot pick a winner (`AEGIS_FORENSICS_LLM=auto`) or force `=1`. Search evidence is forensics LLM-path only. **Repair** sees FORENSICS HANDOFF + MUTATION BRIEF (+ REPAIR FEEDBACK on re-entry). **Intent gates** on the diff with soft retry; soft-accept stamps `intent_violations` so validation rejects with `demand_mismatch` and local re-repair. Hard: `AEGIS_MUTATION_INTENT_PREFLIGHT=hard`. **Adversarial/optimize** lean. **Validation** TRIBUNAL SUMMARY.
+## Product behavior (current)
 
-**Operational memory (only three surfaces):** capability payloads, epistemic handover, git.
+**Demand.** `--issue N` loads the real GitHub issue via `gh`. Free-text or optional `## Goal` / `## Targets` / … headers. Operator-named paths are path-safety checked.
 
-Details, file map, and capability table: **`summary.md`**. Field ownership (model vs runtime): `.skills/field_ownership.md`.
+**Tokens & search.** Dense tokens bind multi-token fixed-string search (`;;`, never ERE) and Layer 0 content resonance (`git grep`). `search_symbol` uses pathspecs (anchors / `src`) and is **omitted** on mechanical forensics and on repair when a forensics ALVO exists.
 
-### Prompt layout
+**Discovery.** Always mechanical: path missing / token hits / no hits. Fail → fatal (no LLM fallthrough).
 
-Stable head (constitution, skill, stable manifest) + volatile tail (investigation, execution identity) for prefix-cache friendliness. No cache-management state inside the harness.
+**Forensics.** Mechanical `{id, reason}`; multi-seed ranked by content probes; LLM only on true ambiguity. Search only on LLM residual path.
+
+**Repair.** Prompt stack: `AGENTS.md` preamble → `.skills/repair.md` → DEMAND ANCHORS → optional REPAIR FEEDBACK → FORENSICS HANDOFF → MUTATION BRIEF → investigation → jail → recency. Rails: scope, lint, tsc/smoke, **intent gates** (demand tokens in `+` lines, max new exports). Soft intent may soft-accept with `intent_violations` stamp → validation can reject as `demand_mismatch` and re-enter local repair. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
+
+**Flags (common)**
+
+| Flag | Meaning |
+|---|---|
+| `AEGIS_FORENSICS_LLM=auto\|0\|1` | Forensics LLM residual (default auto) |
+| `AEGIS_MUTATION_INTENT_PREFLIGHT=soft\|hard\|off` | Intent gate policy (default soft) |
+| `AEGIS_MUTATION_MAX_NEW_EXPORTS` | Over-delivery cap (default 1) |
+| `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
+
+**Operational memory:** capability payloads · epistemic handover · git only.
+
+Full map and tables: **`summary.md`**. Field ownership: **`.skills/field_ownership.md`**.
 
 ---
 
@@ -88,11 +112,8 @@ npm run aegis:test        # full shell suite
 npm run aegis:sanity      # tsc + eslint + static enforce
 ```
 
-Examples of individual harnesses:
-
 ```bash
-bash scripts/substrates/test/test_capabilities.sh
-bash scripts/substrates/test/test_constitutional_invariants.sh
+bash scripts/substrates/test/test_demand_tokens.sh   # tokens, mechanical modes, intent, metrics
 bash scripts/substrates/test/test_readonly_modes.sh
 ```
 
@@ -103,7 +124,7 @@ bash scripts/substrates/test/test_readonly_modes.sh
 - **Runtime sovereignty** — orchestration stays outside the model
 - **Capability authority** — modes do not self-authorize
 - **Evidence discipline** — no invented repository state
-- **KISS** — no hidden memory, no assistant-style repo inheritance
+- **KISS** — mechanical defaults where the contract is deterministic
 - **Protocol artifacts** — framed JSON, mechanically validated
 
 ---
