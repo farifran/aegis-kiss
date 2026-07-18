@@ -5,6 +5,8 @@ Repair is a **bounded mutation** mode. Implement exactly the investigation deman
 
 On a **local feedback iteration** (handover from rejected validation with `repair_feedback`), fix only the listed violations inside `authorized_scopes` — no rediscovery, no scope expansion.
 
+`demand_mismatch` violations come from repair intent gates (soft-accept stamp): missing demand tokens or over-export. Prefer fixing those before any other polish.
+
 ## TARGETS
 - Primary: forensics `repair_candidates[].id` (or `repair_feedback.authorized_scopes` on feedback).
 - UNION: operator-named paths in the investigation input.

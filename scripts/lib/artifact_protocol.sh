@@ -858,20 +858,36 @@ readonly AEGIS_JQ_ENRICH_FORENSICS='
 
 readonly AEGIS_JQ_ENRICH_OPTIMIZE='
   | (
+      # Carry intent_violations from repair soft-accept through the stack.
+      def with_intent($c):
+        $c
+        | .intent_violations = (
+            .intent_violations
+            // $prev_candidate.intent_violations
+            // []
+          );
       if ((.diff | type == "string")
             and ((.diff | length) > 0)
             and (.diff != "(no changes)")
             and (.files_changed | type == "array")
             and ((.files_changed | length) > 0))
-      then { source_mode: "optimize", diff: .diff, files_changed: .files_changed }
+      then with_intent({
+          source_mode: "optimize",
+          diff: .diff,
+          files_changed: .files_changed,
+          intent_violations: (.intent_violations // [])
+        })
       elif ((.candidate_result.diff | type == "string")
             and ((.candidate_result.diff | length) > 0)
             and (.candidate_result.diff != "(no changes)")
             and (.candidate_result.files_changed | type == "array")
             and ((.candidate_result.files_changed | length) > 0))
-      then (.candidate_result | .source_mode = "optimize")
+      then with_intent(.candidate_result | .source_mode = "optimize")
       else
-        ($prev_candidate // {source_mode: "optimize", diff: "(no changes)", files_changed: []})
+        with_intent(
+          $prev_candidate
+          // {source_mode: "optimize", diff: "(no changes)", files_changed: [], intent_violations: []}
+        )
       end
     ) as $raw_cand
   | (
@@ -882,7 +898,15 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
         elif any($novel[]; . as $n
           | ($investigation_input // "") | test("\\b\($n)\\b"; "i"))
         then $raw_cand
-        else ($prev_candidate // $raw_cand | .source_mode = "optimize")
+        else (
+          ($prev_candidate // $raw_cand)
+          | .source_mode = "optimize"
+          | .intent_violations = (
+              .intent_violations
+              // $raw_cand.intent_violations
+              // []
+            )
+        )
         end
     ) as $cand
   | (
@@ -900,6 +924,7 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
   | .candidate_result = $cand
   | .diff = $cand.diff
   | .files_changed = $cand.files_changed
+  | .intent_violations = ($cand.intent_violations // [])
   | .handover_attention = {
       next_attention_targets: (.candidate_result.files_changed // []),
       attention_scope: "mutation_applied",
@@ -955,10 +980,18 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
        .verdict = "rejected" | .basis = ["invalid_candidate_diff_shape"]
      else . end)
   | (.findings | blocking_findings_of) as $blocking_findings
+  | ((.validated_candidate.intent_violations // []) | length) as $intent_n
   | (if (
        ((.basis // []) | index("empty_mutation_candidate") != null)
        or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
      ) then .
+     elif ($intent_n > 0) then
+       # Soft-accepted demand mismatch from repair intent gates → reject + feedback.
+       .verdict = "rejected"
+       | .basis = (
+           ((.basis // []) + ["demand_mismatch"])
+           | unique
+         )
      elif ($blocking_findings | length) == 0 then
        .verdict = "accepted"
        | .basis = ["tribunal: no blocking findings after evidence gates"]
@@ -981,8 +1014,8 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
      end)
   | (if (.verdict // "") == "rejected" then
        ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
-       | .repair_feedback = {
-           violations: [
+       | (
+           [
              $blocking_findings[]
              | {
                  origin: (.type // "unspecified"),
@@ -991,7 +1024,33 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                  structural_reason: (.description // ""),
                  evidence_refs: (.evidence_refs // [])
                }
-           ],
+           ]
+           + [
+               (.validated_candidate.intent_violations // [])[]
+               | if type == "object" then
+                   {
+                     origin: (.origin // "demand_mismatch"),
+                     severity: (.severity // "high"),
+                     target_files: (
+                       if ((.target_files // []) | length) > 0 then .target_files
+                       else $scopes end
+                     ),
+                     structural_reason: (.structural_reason // .description // ""),
+                     evidence_refs: (.evidence_refs // ["mutation.intent"])
+                   }
+                 else
+                   {
+                     origin: "demand_mismatch",
+                     severity: "high",
+                     target_files: $scopes,
+                     structural_reason: tostring,
+                     evidence_refs: ["mutation.intent"]
+                   }
+                 end
+             ]
+         ) as $all_violations
+       | .repair_feedback = {
+           violations: $all_violations,
            authorized_scopes: $scopes
          }
      else del(.repair_feedback) end)
@@ -1045,11 +1104,24 @@ load_artifact_enrichment_context() {
             // (if ($snap.operational_context.diff | type == "string") then
                  {
                    diff: $snap.operational_context.diff,
-                   files_changed: ($snap.operational_context.files_changed // [])
+                   files_changed: ($snap.operational_context.files_changed // []),
+                   intent_violations: (
+                     $snap.operational_context.intent_violations
+                     // $snap.intent_violations
+                     // []
+                   )
                  }
                else null end)
            )
-           | if . != null then .source_mode = "optimize" else . end),
+           | if . != null then
+               .source_mode = "optimize"
+               | .intent_violations = (
+                   .intent_violations
+                   // $snap.operational_context.intent_violations
+                   // $snap.intent_violations
+                   // []
+                 )
+             else . end),
           ($snap.operational_context.findings // $snap.findings // null)
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}" 2>/dev/null
     )

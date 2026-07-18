@@ -628,4 +628,86 @@ if declare -f collect_mutation_intent_violations >/dev/null 2>&1; then
   fi
 fi
 
+# R3: repair_feedback section + validation demand_mismatch merge shape
+tmp_rf="$(mktemp)"
+jq -n '{
+  artifact_snapshot: {
+    mode: "validation",
+    operational_context: {
+      verdict: "rejected",
+      repair_feedback: {
+        authorized_scopes: ["src/index.ts"],
+        violations: [
+          {
+            origin: "demand_mismatch",
+            severity: "high",
+            target_files: ["src/index.ts"],
+            structural_reason: "over_export: 2 new exports"
+          }
+        ]
+      }
+    }
+  },
+  epistemic_state: {
+    next_attention_targets: ["src/index.ts"],
+    attention_scope: "validation_result",
+    attention_reason: "test"
+  }
+}' > "${tmp_rf}"
+rf_sec="$(aegis_format_repair_feedback_section "${tmp_rf}")"
+printf '%s' "${rf_sec}" | grep -q 'REPAIR FEEDBACK' \
+  || fail "repair_feedback_section_missing: ${rf_sec}"
+printf '%s' "${rf_sec}" | grep -q 'demand_mismatch' \
+  || fail "repair_feedback_should_list_demand_mismatch: ${rf_sec}"
+printf '%s' "${rf_sec}" | grep -q 'src/index.ts' \
+  || fail "repair_feedback_should_list_scope: ${rf_sec}"
+rm -f "${tmp_rf}"
+
+# validation enrich forces reject when candidate carries intent_violations
+val_raw='{"verdict":"accepted","basis":[],"findings":[]}'
+prev_cand_json="$(
+  jq -nc '{
+    source_mode: "optimize",
+    diff: "diff --git a/src/index.ts b/src/index.ts\n+++ b/src/index.ts\n+export function power(): void {}",
+    files_changed: ["src/index.ts"],
+    intent_violations: [
+      {
+        origin: "demand_mismatch",
+        severity: "high",
+        target_files: ["src/index.ts"],
+        structural_reason: "demand_tokens: missing",
+        evidence_refs: ["mutation.intent"]
+      }
+    ]
+  }'
+)"
+val_ctx="$(
+  jq -nc --argjson prev "${prev_cand_json}" '{
+    evidence_refs: [],
+    observed_payloads: [],
+    prev_candidate: $prev,
+    prev_findings: [],
+    seed_scope: {scope_type:"none",scope_targets:[],scope_confidence:"none"},
+    seed_targets: [],
+    seed_conditions: [],
+    operator_named_paths: [],
+    existing_paths: ["src/index.ts"],
+    tools_gate: {mutation_clean: true, typescript_errors_in_scope: [], eslint_errors_in_scope: []},
+    demand_anchors: {}
+  }'
+)"
+# shellcheck disable=SC1091
+source "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh" 2>/dev/null || true
+if declare -f enrich_cognitive_artifact >/dev/null 2>&1; then
+  export AEGIS_MODE="validation"
+  val_out="$(enrich_cognitive_artifact "${val_raw}" "${val_ctx}")"
+  echo "${val_out}" | jq -e '
+    .verdict == "rejected"
+    and ((.basis | index("demand_mismatch")) != null)
+    and (.repair_feedback.violations | map(.origin) | index("demand_mismatch") != null)
+    and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
+  ' >/dev/null \
+    || fail "validation_should_reject_intent_violations: ${val_out}"
+fi
+
 echo "[AEGIS][TEST] demand tokens passed"

@@ -326,10 +326,16 @@ assemble_mutation_prompt() {
     demand_anchors_section="$(aegis_format_demand_anchors_section)"
   fi
 
-  # Repair: surface forensics alvo/reason + mechanical mutation brief.
+  # Repair: forensics handoff + mutation brief + optional validation feedback.
   local forensics_handoff_section=""
   local mutation_brief_section=""
+  local repair_feedback_section=""
   if [[ "${AEGIS_MODE}" == "repair" ]]; then
+    if declare -f aegis_format_repair_feedback_section >/dev/null 2>&1; then
+      repair_feedback_section="$(
+        aegis_format_repair_feedback_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+      )"
+    fi
     if declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
       forensics_handoff_section="$(
         aegis_format_forensics_handoff_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
@@ -366,7 +372,7 @@ ${pocket_section}
 
 ---
 
-${demand_anchors_section}${forensics_handoff_section}${mutation_brief_section}${input_label}
+${demand_anchors_section}${repair_feedback_section}${forensics_handoff_section}${mutation_brief_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---

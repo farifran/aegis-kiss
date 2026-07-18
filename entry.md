@@ -25,6 +25,7 @@
 | Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
 | Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |
+| Soft-accept → `intent_violations` → validation `demand_mismatch` feedback | stamp + `repair_feedback` + `aegis_format_repair_feedback_section` |
 | Profiles lean: forensics sem git.status; optimize/adversarial sem demand_anchors | config evidence profiles |
 
 ### Ainda proposta (não implementado)

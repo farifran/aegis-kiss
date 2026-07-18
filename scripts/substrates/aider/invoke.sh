@@ -404,17 +404,43 @@ emit_mutation_artifact() {
   local attention_reason
   attention_reason="ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')"
 
+  # Soft-accepted intent misses → structured stamp for validation feedback (R3).
+  local intent_violations_json="[]"
+  if [[ "${AEGIS_MUTATION_INTENT_SOFT_ACCEPTED:-0}" == "1" ]] \
+    && [[ -n "${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-}" ]]; then
+    intent_violations_json="$(
+      printf '%s\n' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" \
+        | awk 'NF' \
+        | jq -R -s -c --argjson files "${files_changed}" '
+            split("\n")
+            | map(select(length > 0))
+            | map({
+                origin: "demand_mismatch",
+                severity: "high",
+                target_files: $files,
+                structural_reason: .,
+                evidence_refs: ["mutation.intent"]
+              })
+          ' 2>/dev/null || printf '[]'
+    )"
+  fi
+  if ! printf '%s' "${intent_violations_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    intent_violations_json="[]"
+  fi
+
   jq -n \
     --arg mode "${AEGIS_MODE}" \
     --arg execution_id "${AEGIS_EXECUTION_ID}" \
     --arg attention_reason "${attention_reason}" \
     --rawfile diff "${diff_tmp}" \
     --argjson files_changed "${files_changed}" \
+    --argjson intent_violations "${intent_violations_json}" \
     '{
       mode: $mode,
       execution_id: $execution_id,
       diff: $diff,
       files_changed: $files_changed,
+      intent_violations: $intent_violations,
       handover_attention: {
         next_attention_targets: $files_changed,
         attention_scope: "mutation_applied",

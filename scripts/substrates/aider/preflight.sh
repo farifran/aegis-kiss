@@ -438,9 +438,16 @@ run_mutation_preflight_with_fix_attempts() {
     if [[ "${preflight_attempt}" -ge "${max_preflight_attempts}" ]] \
       || [[ "${#mutation_targets[@]}" -eq 0 ]]; then
       # Soft intent only: accept diff after retries if tools are green.
+      # Stamp soft-accept so emit_mutation_artifact can attach intent_violations
+      # → validation rejects with repair_feedback.demand_mismatch (R3).
       if [[ "${AEGIS_MUTATION_PREFLIGHT_LAST:-}" == "intent" ]] \
         && [[ "${intent_mode}" == "soft" || "${intent_mode}" == "retry" ]]; then
-        aegis_warn "mutation_intent_soft_accept: still dirty after ${preflight_attempt} attempt(s) — emitting with warnings"
+        aegis_warn "mutation_intent_soft_accept: still dirty after ${preflight_attempt} attempt(s) — emitting with intent_violations stamp"
+        AEGIS_MUTATION_INTENT_SOFT_ACCEPTED=1
+        export AEGIS_MUTATION_INTENT_SOFT_ACCEPTED
+        # Re-collect diagnostics on final diff for the stamp.
+        diff_content="$(capture_worktree_diff)"
+        collect_mutation_intent_violations "${diff_content}" || true
         break
       fi
       rollback_execution_surface

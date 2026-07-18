@@ -827,6 +827,46 @@ aegis_handover_has_repair_alvo() {
   ' "${handover}" >/dev/null 2>&1
 }
 
+# Local re-repair feedback from rejected validation (demand_mismatch + others).
+aegis_format_repair_feedback_section() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local lines
+  lines="$(
+    jq -r '
+      .artifact_snapshot as $snap
+      | select($snap.mode == "validation")
+      | ($snap.operational_context.repair_feedback // empty) as $rf
+      | select($rf | type == "object")
+      | ($rf.violations // []) as $v
+      | select(($v | length) > 0)
+      | "=== REPAIR FEEDBACK (runtime) ===",
+        "",
+        "Fix ONLY these violations inside authorized scopes. No rediscovery.",
+        (
+          ($rf.authorized_scopes // []) as $s
+          | if ($s | length) > 0 then "SCOPES: " + ($s | join(", ")) else empty end
+        ),
+        (
+          $v[]
+          | "- [\(.origin // "unspecified")] \(.structural_reason // .description // "")"
+            + (
+                if ((.target_files // []) | length) > 0
+                then " @ " + (.target_files | join(", "))
+                else "" end
+              )
+        ),
+        ""
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${lines}" ]] || return 0
+  printf '%s\n' "${lines}"
+}
+
 # ---------------------------------------------------------
 # Mechanical discovery / forensics (default — no LLM)
 # ---------------------------------------------------------
