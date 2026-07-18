@@ -1,1 +1,0 @@
-{"status":"FAILED","pipeline_status":"FAILED","total_seconds":275,"modes":[{"mode":"discovery","status":"ok","seconds":2},{"mode":"forensics","status":"ok","seconds":2},{"mode":"repair","status":"ok","seconds":259},{"mode":"optimize","status":"ok","seconds":4},{"mode":"adversarial","status":"ok","seconds":6},{"mode":"validation","status":"failed","seconds":2}]}
