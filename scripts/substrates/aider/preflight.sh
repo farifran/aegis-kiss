@@ -267,6 +267,16 @@ collect_mutation_intent_violations() {
 
 # Append one intent metric line to AEGIS_METRICS_FILE (jsonl), if set.
 # result: pass | fail | warn_only | soft_accept | fix_attempt
+# Resolve intent policy once: AEGIS_MUTATION_INTENT_PREFLIGHT, with legacy
+# AEGIS_DEMAND_TOKEN_PREFLIGHT=hard as an upgrade to hard.
+resolve_intent_preflight_mode() {
+  local mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
+  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
+    mode="hard"
+  fi
+  printf '%s' "$(printf '%s' "${mode}" | tr '[:upper:]' '[:lower:]')"
+}
+
 # optional: attempt (0-based check index), export_n, phase (tools|intent)
 record_mutation_intent_metric() {
   local result="${1:-}"
@@ -278,10 +288,7 @@ record_mutation_intent_metric() {
   [[ -n "${result}" ]] || return 0
   [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
 
-  policy="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
-  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
-    policy="hard"
-  fi
+  policy="$(resolve_intent_preflight_mode)"
 
   violations_json="[]"
   if [[ -n "${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-}" ]]; then
@@ -331,16 +338,11 @@ assert_mutation_intent_gates() {
   local diff_content="${1-}"
   local mode export_n
 
-  # Legacy: AEGIS_DEMAND_TOKEN_PREFLIGHT=hard upgrades intent to hard.
-  mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
-  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
-    mode="hard"
-  fi
-
+  mode="$(resolve_intent_preflight_mode)"
   export_n="$(count_diff_added_exports "${diff_content}")"
 
   if ! collect_mutation_intent_violations "${diff_content}"; then
-    case "$(printf '%s' "${mode}" | tr '[:upper:]' '[:lower:]')" in
+    case "${mode}" in
       off|0|false|no|warn)
         aegis_warn "mutation_intent (warn-only): ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
         record_mutation_intent_metric "warn_only" \
@@ -357,20 +359,6 @@ assert_mutation_intent_gates() {
   fi
   record_mutation_intent_metric "pass" \
     "${AEGIS_MUTATION_PREFLIGHT_ATTEMPT:-0}" "${export_n}" "intent"
-  return 0
-}
-
-# Legacy name: warn-only unless hard mode is set. Prefer assert_mutation_intent_gates.
-assert_demand_tokens_in_mutation_diff() {
-  local diff_content="${1-}"
-  if [[ "${AEGIS_MUTATION_INTENT_PREFLIGHT:-}" == "hard" ]] \
-    || [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
-    assert_mutation_intent_gates "${diff_content}"
-    return $?
-  fi
-  if ! collect_mutation_intent_violations "${diff_content}"; then
-    aegis_warn "demand_token_preflight_miss: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS//$'\n'/; }"
-  fi
   return 0
 }
 
@@ -515,11 +503,7 @@ run_mutation_preflight_with_fix_attempts() {
   local intent_mode
   local fix_prompt fix_phase
 
-  intent_mode="${AEGIS_MUTATION_INTENT_PREFLIGHT:-soft}"
-  if [[ "${AEGIS_DEMAND_TOKEN_PREFLIGHT:-}" == "hard" ]]; then
-    intent_mode="hard"
-  fi
-  intent_mode="$(printf '%s' "${intent_mode}" | tr '[:upper:]' '[:lower:]')"
+  intent_mode="$(resolve_intent_preflight_mode)"
 
   while true; do
     AEGIS_MUTATION_PREFLIGHT_ATTEMPT="${check_index}"

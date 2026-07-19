@@ -1251,21 +1251,6 @@ aegis_record_validation_metric() {
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
 
-# Map free-text intent diagnostics / legacy origins → stable code.
-# Codes: demand_tokens | over_export | path_scope | done_when | empty_diff | demand
-aegis_violation_code_from_text() {
-  local text="${1-}"
-  case "$(printf '%s' "${text}" | tr '[:upper:]' '[:lower:]')" in
-    demand_tokens:*|*"demand_tokens"*|demand_mismatch) printf 'demand_tokens' ;;
-    over_export:*|*"over_export"*|*"too many"*"export"*) printf 'over_export' ;;
-    path_scope:*|*"path_scope"*|*"files_changed"*) printf 'path_scope' ;;
-    done_when:*|*"done_when"*) printf 'done_when' ;;
-    empty_diff:*|*"empty"*"diff"*) printf 'empty_diff' ;;
-    demand_alignment) printf 'demand_tokens' ;;
-    *) printf 'demand' ;;
-  esac
-}
-
 # New export names from unified-diff +lines (function/const only).
 # Prints one name per line (may be empty).
 aegis_diff_added_export_names() {

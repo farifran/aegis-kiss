@@ -225,11 +225,8 @@ export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION
 : "${AEGIS_MAX_REPAIR_ATTEMPTS:=2}"
 : "${AEGIS_REPAIR_FEEDBACK_LOOP:=true}"
 
-# Optimize short-circuit: when the Repair surface diff has at most this
-# many lines, skip the second LLM and forward the candidate (set
-# AEGIS_OPTIMIZE_LLM=1 to always run a refine pass).
-: "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
-: "${AEGIS_OPTIMIZE_LLM:=0}"
+# Optimize engine is raw (not aider). Live short-circuit knobs live in
+# demand.sh: AEGIS_OPTIMIZE_TRIVIAL_SKIP / MAX_LINES / MAX_FILES.
 
 # Validation is a deterministic tribunal (enrich + alignment). Default
 # skips the raw LLM; set AEGIS_VALIDATION_LLM=1 only for residual/debug.
@@ -241,8 +238,6 @@ export AEGIS_PROVIDER_CONNECT_TIMEOUT
 export AEGIS_PROVIDER_RESPONSE_TIMEOUT
 export AEGIS_MAX_REPAIR_ATTEMPTS
 export AEGIS_REPAIR_FEEDBACK_LOOP
-export AEGIS_OPTIMIZE_MIN_LINES
-export AEGIS_OPTIMIZE_LLM
 export AEGIS_VALIDATION_LLM
 
 # =========================================================

@@ -829,22 +829,11 @@ execute_substrate() {
     fi
   fi
 
-  # Forensics: AEGIS_FORENSICS_USE_LLM set once in main (evidence + substrate).
+  # Forensics: AEGIS_FORENSICS_USE_LLM is set once in main before materialize.
   # Search omitted on mechanical evidence path; re-materialize on LLM fallthrough.
   if [[ "${AEGIS_MODE}" == "forensics" ]] \
     && declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1; then
-    local _forensics_llm="${AEGIS_FORENSICS_USE_LLM:-}"
-    if [[ -z "${_forensics_llm}" ]] \
-      && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
-      if aegis_forensics_needs_llm \
-        "${AEGIS_INVESTIGATION_INPUT:-}" \
-        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"; then
-        _forensics_llm=1
-      else
-        _forensics_llm=0
-      fi
-    fi
+    local _forensics_llm="${AEGIS_FORENSICS_USE_LLM:-0}"
 
     if [[ "${_forensics_llm}" != "1" ]]; then
       substrate_output="$(
@@ -915,6 +904,19 @@ main() {
   resolve_evidence_profile
   augment_evidence_profile_from_handover
   augment_evidence_profile_from_anchors
+  # Drop a capability id from the active evidence list (in-place).
+  omit_active_evidence_entry() {
+    local drop="${1-}"
+    local -a kept=()
+    local e
+    [[ -n "${drop}" ]] || return 0
+    for e in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+      [[ "${e}" == "${drop}" ]] && continue
+      kept+=("${e}")
+    done
+    AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${kept[@]}")
+  }
+
   # Decide forensics path once (evidence profile + substrate share the flag).
   # Mechanical path does not consume search_symbol — omit before materialize.
   AEGIS_FORENSICS_USE_LLM=""
@@ -928,15 +930,8 @@ main() {
       aegis_log "forensics_evidence: keep search_symbol (LLM path)"
     else
       AEGIS_FORENSICS_USE_LLM=0
-      local -a _fe_filtered=()
-      local _fe
-      for _fe in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-        [[ "${_fe}" == "filesystem.search_symbol" ]] && continue
-        _fe_filtered+=("${_fe}")
-      done
-      AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${_fe_filtered[@]}")
+      omit_active_evidence_entry "filesystem.search_symbol"
       aegis_log "forensics_evidence: omitted search_symbol (mechanical path)"
-      unset _fe _fe_filtered
     fi
     export AEGIS_FORENSICS_USE_LLM
   fi
@@ -946,15 +941,8 @@ main() {
     && declare -f aegis_handover_has_repair_alvo >/dev/null 2>&1 \
     && aegis_handover_has_repair_alvo \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"; then
-    local -a _re_filtered=()
-    local _re
-    for _re in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-      [[ "${_re}" == "filesystem.search_symbol" ]] && continue
-      _re_filtered+=("${_re}")
-    done
-    AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${_re_filtered[@]}")
+    omit_active_evidence_entry "filesystem.search_symbol"
     aegis_log "repair_evidence: omitted search_symbol (forensics ALVO present)"
-    unset _re _re_filtered
   fi
 
   # Rank so materialize + budget exposure hit anchors/content before noise.

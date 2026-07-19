@@ -79,12 +79,6 @@ mutation_resolver_consumes() {
     || grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/substrates/aider/invoke.sh
 }
 
-candidate_materializer_consumes() {
-  local field="$1"
-
-  grep -Eq "\\.${field}([^[:alnum:]_]|$)" scripts/runtime/apply_candidate_diff.sh
-}
-
 # Runtime-owned content seeds for forensics+ (operator paths + attention).
 runtime_seeds_deterministic_reads() {
   grep -Eq 'augment_evidence_profile_from_anchors' scripts/execute_mode.sh \

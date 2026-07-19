@@ -588,29 +588,21 @@ aegis_handover_has_repair_alvo "${tmp_fh}" \
   || fail "handover_should_report_repair_alvo"
 rm -f "${tmp_fh}"
 
-# demand token preflight soft miss
+# Intent gates: tokens + over-export (used by repair preflight retry)
 export AEGIS_MODE="repair"
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
 # shellcheck disable=SC1091
 source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh" 2>/dev/null || true
-if declare -f assert_demand_tokens_in_mutation_diff >/dev/null 2>&1; then
-  bad_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function power(x: number): number { return x; }\n'
-  assert_demand_tokens_in_mutation_diff "${bad_diff}" \
-    || fail "soft_token_preflight_should_warn_not_fail"
-  good_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToGigabits(t: number): number { return t * 1024; }\n'
-  assert_demand_tokens_in_mutation_diff "${good_diff}" \
-    || fail "token_preflight_should_pass_when_token_in_diff"
-fi
-
-# Intent gates: tokens + over-export (used by repair preflight retry)
+bad_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function power(x: number): number { return x; }\n'
+good_diff=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToGigabits(t: number): number { return t * 1024; }\n'
 if declare -f collect_mutation_intent_violations >/dev/null 2>&1; then
-  if collect_mutation_intent_violations "${bad_diff:-}"; then
+  if collect_mutation_intent_violations "${bad_diff}"; then
     fail "intent_should_flag_missing_demand_tokens"
   fi
   printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" | grep -q 'demand_tokens' \
     || fail "intent_diag_should_mention_tokens: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
 
-  if ! collect_mutation_intent_violations "${good_diff:-}"; then
+  if ! collect_mutation_intent_violations "${good_diff}"; then
     fail "intent_should_pass_aligned_export: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
   fi
 
