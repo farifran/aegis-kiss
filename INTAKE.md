@@ -185,6 +185,20 @@ On "Leia INTAKE.md" or SPEC/OK/EDIT/OUT/SHIP/…: follow INTAKE.md. SPEC shows i
 
 ---
 
+## Marco 8B (o que funciona no Aegis sem subir o modelo)
+
+Problemas que **não** se resolvem com modelo maior quando o harness/demand falha:
+
+| Problema | Fix mínimo |
+|----------|------------|
+| `package.json` → path fantasma `package.js` | regex com `\b`; paths só de `## Targets` |
+| Issue monstro multi-ficheiro | **1 issue = 1 ficheiro / 1 intenção** |
+| Acceptance em prosa | tokens que aparecem no diff |
+| Reexport NodeNext + smoke | smoke cria symlink `.js`→`.ts` temporário |
+| Out of scope a nomear paths | **não** listar paths em Out of scope |
+
+**Prova de marco (Llama 3.1 8B):** issue **#5** criou `src/tokenBucket.ts`; issue **#6** reexportou em `src/index.ts`. A issue **#4** monstro falhou — mesma capacidade, demand errada.
+
 ## 0. O que este ficheiro gere (e o que não gere)
 
 ### 0.1 Gere aqui (kit nativo)
