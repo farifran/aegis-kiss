@@ -41,12 +41,32 @@ aegis_fatal() {
 # ---------------------------------------------------------
 # Shared by mutation target resolution and artifact authorization.
 # grep -oE and jq match() must stay byte-equivalent on this pattern.
-readonly AEGIS_SOURCE_PATH_RE='[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)'
+# Word-boundary after extension so "package.json" does NOT match as "package.js".
+readonly AEGIS_SOURCE_PATH_RE='[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)\b'
 
 # Newline-separated unique paths; strips leading ./. Empty text → no lines.
+# Structured demand (## Targets present with body): only scrape that section so
+# Change/Acceptance/Out of scope do not invent ghost paths (tokenBucket.js).
 aegis_extract_operator_named_paths() {
   local text="${1-}"
+  local scope=""
   [[ -n "${text}" ]] || return 0
+  if printf '%s\n' "${text}" | command grep -qE '^## Targets[[:space:]]*$'; then
+    scope="$(
+      printf '%s\n' "${text}" | awk '
+        BEGIN { p = 0 }
+        /^## / {
+          if (p) { exit }
+          if ($0 == "## Targets") { p = 1; next }
+          next
+        }
+        p { print }
+      '
+    )"
+    if [[ -n "$(printf '%s' "${scope}" | tr -d '[:space:]')" ]]; then
+      text="${scope}"
+    fi
+  fi
   printf '%s' "${text}" \
     | command grep -oE "${AEGIS_SOURCE_PATH_RE}" 2>/dev/null \
     | command sed 's|^\./||' \

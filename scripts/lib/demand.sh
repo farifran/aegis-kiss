@@ -417,8 +417,20 @@ aegis_materialize_demand_anchors_json() {
   local seed_source="none"
   local resonance_json="[]"
 
+  # Structured demands: paths only from ## Targets (not Change/Acceptance/
+  # Out of scope where "tokenBucket.js" / "package.json" create false paths).
   if declare -f aegis_extract_operator_named_paths_json >/dev/null 2>&1; then
-    operator_json="$(aegis_extract_operator_named_paths_json "${text}")"
+    if aegis_demand_is_structured "${text}"; then
+      local targets_only
+      targets_only="$(aegis_demand_md_section "Targets" "${text}")"
+      if [[ -n "$(printf '%s' "${targets_only}" | tr -d '[:space:]')" ]]; then
+        operator_json="$(aegis_extract_operator_named_paths_json "${targets_only}")"
+      else
+        operator_json="$(aegis_extract_operator_named_paths_json "${text}")"
+      fi
+    else
+      operator_json="$(aegis_extract_operator_named_paths_json "${text}")"
+    fi
   else
     operator_json="[]"
   fi

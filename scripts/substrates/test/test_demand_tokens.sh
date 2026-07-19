@@ -199,6 +199,14 @@ echo "${enriched_named}" | jq -e '
 ' >/dev/null \
   || fail "operator_named_must_survive_enrich: ${enriched_named}"
 
+# package.json must not be scraped as package.js (extension word-boundary).
+_pkg_paths="$(aegis_extract_operator_named_paths "deps live in package.json; edit src/tokenBucket.ts")"
+echo "${_pkg_paths}" | grep -qx 'src/tokenBucket.ts' \
+  || fail "expected src/tokenBucket.ts in: ${_pkg_paths}"
+echo "${_pkg_paths}" | grep -q 'package\.js' \
+  && fail "package.json must not yield package.js: ${_pkg_paths}"
+unset _pkg_paths
+
 # --- prioritize_evidence_entries ranks anchors/reads before search/git ---
 # shellcheck disable=SC1091
 source <(

@@ -256,6 +256,25 @@ run_smoke_import_changed() {
   local rel_path abs_path rc out
   local results_json="[]"
 
+  # NodeNext sources import "./foo.js" while the surface only has foo.ts.
+  # tsc resolves that; raw node strip-types does not. Temporary .js → .ts
+  # symlinks for smoke only — remove before return so scope gate ignores them.
+  local -a _smoke_js_links=()
+  local _ts _js
+  while IFS= read -r _ts; do
+    [[ -n "${_ts}" ]] || continue
+    _js="${_ts%.ts}.js"
+    if [[ ! -e "${_js}" ]]; then
+      if ln -s "$(basename "${_ts}")" "${_js}" 2>/dev/null; then
+        _smoke_js_links+=("${_js}")
+      fi
+    fi
+  done < <(
+    find "${SURFACE_PATH}" \( -name '*.ts' -o -name '*.tsx' \) \
+      ! -path '*/node_modules/*' 2>/dev/null || true
+  )
+  unset _ts _js
+
   for rel_path in "${smoke_files[@]}"; do
     abs_path="${SURFACE_PATH}/${rel_path}"
     if [[ ! -f "${abs_path}" ]]; then
@@ -295,6 +314,10 @@ import(pathToFileURL(target).href)
 
     if [[ "${rc}" -eq 97 ]]; then
       preflight_warn "smoke.import: surface unreachable"
+      local _link
+      for _link in "${_smoke_js_links[@]+"${_smoke_js_links[@]}"}"; do
+        [[ -L "${_link}" ]] && rm -f "${_link}" 2>/dev/null || true
+      done
       printf 'skipped'
       return 0
     fi
@@ -321,6 +344,13 @@ import(pathToFileURL(target).href)
       )"
     fi
   done
+
+  # Drop ephemeral NodeNext smoke symlinks (must not appear as mutations).
+  local _link
+  for _link in "${_smoke_js_links[@]+"${_smoke_js_links[@]}"}"; do
+    [[ -L "${_link}" ]] && rm -f "${_link}" 2>/dev/null || true
+  done
+  unset _link _smoke_js_links
 
   jq -n \
     --arg execution_id "${AEGIS_EXECUTION_ID}" \
