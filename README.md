@@ -110,7 +110,8 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES` | Diff line cap for trivial skip (default 24) |
 | `AEGIS_VALIDATION_LLM=0\|1` | Validation LLM residual (default **0**: mechanical tribunal only) |
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES` | File count cap for trivial skip (default 1) |
-| `AEGIS_CANDIDATE_TOOLS_STAMP_DIR` | Where repair stamps tsc/test/eslint for adversarial reuse |
+| `AEGIS_CANDIDATE_TOOLS_STAMP_DIR` | Where repair stamps tsc/test/eslint for adversarial reuse (removed when the run finishes) |
+| `AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP` | Drop stamp after pipeline/standalone finish (default **true**) |
 | `AEGIS_ALIGNMENT_GATE=true\|false` | Validation minimal demand-alignment proof on final candidate (default true) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 

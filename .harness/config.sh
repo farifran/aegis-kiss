@@ -252,10 +252,14 @@ export AEGIS_VALIDATION_LLM
 : "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE:=true}"
 : "${AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV:=true}"
 : "${AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS:=true}"
+# Drop repair→adversarial tool stamp after the run finishes (default true).
+# Kept across modes while AEGIS_PIPELINE_DRIVER=1; removed by run_aegis at end.
+: "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:=true}"
 
 export AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS
+export AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP
 
 # =========================================================
 # EVIDENCE BUDGETS

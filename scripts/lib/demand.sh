@@ -921,6 +921,20 @@ aegis_candidate_tools_stamp_dir() {
   printf '%s' "${AEGIS_CANDIDATE_TOOLS_STAMP_DIR:-.harness/runtime/candidate_tools_stamp}"
 }
 
+# Drop stamp after a finished run (not between modes of a pipeline driver).
+# Safe: only removes a path that resolves under candidate_tools_stamp.
+aegis_remove_candidate_tools_stamp() {
+  local stamp_dir
+  stamp_dir="$(aegis_candidate_tools_stamp_dir)"
+  [[ -n "${stamp_dir}" ]] || return 0
+  case "${stamp_dir}" in
+    *candidate_tools_stamp*) ;;
+    *) return 0 ;;
+  esac
+  [[ -e "${stamp_dir}" ]] || return 0
+  rm -rf "${stamp_dir}" 2>/dev/null || true
+}
+
 aegis_hash_candidate_diff() {
   local diff_content="${1-}"
   local h

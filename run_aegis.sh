@@ -26,6 +26,19 @@ source "scripts/lib/common.sh"
 source "scripts/lib/run_outcome.sh"
 AEGIS_LOG_TAG="RUN"
 
+# Repair stamps tools for adversarial reuse during the pipeline.
+# Drop after the orchestrator exits (success, fail, halt, or signal).
+aegis_run_remove_candidate_tools_stamp() {
+  if [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" == "0" ]] \
+    || [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" == "false" ]]; then
+    return 0
+  fi
+  rm -rf \
+    "${AEGIS_CANDIDATE_TOOLS_STAMP_DIR:-.harness/runtime/candidate_tools_stamp}" \
+    2>/dev/null || true
+}
+trap aegis_run_remove_candidate_tools_stamp EXIT
+
 usage() {
   cat <<'EOF'
 Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
@@ -820,6 +833,7 @@ main() {
   done
 
   show_final_report
+  # candidate_tools_stamp removed by EXIT trap (aegis_run_remove_candidate_tools_stamp)
 
   if [[ "${PIPELINE_STATUS}" == "FAILED" ]]; then
     exit 1

@@ -344,6 +344,18 @@ cleanup_runtime() {
     remove_runtime_owned_capability_surfaces
   fi
 
+  # Candidate tools stamp (repair → adversarial reuse):
+  # - Pipeline driver (run_aegis): KEEP across modes; run_aegis drops it
+  #   after the full pipeline finishes.
+  # - Standalone runtime: this process IS the whole run → drop when done.
+  if [[ "${AEGIS_PIPELINE_DRIVER:-0}" != "1" ]] \
+    && [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" != "0" ]] \
+    && [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" != "false" ]]; then
+    if declare -f aegis_remove_candidate_tools_stamp >/dev/null 2>&1; then
+      aegis_remove_candidate_tools_stamp
+    fi
+  fi
+
   # Outcome projection: exactly one kind:"outcome" per logical run.
   # When AEGIS_PIPELINE_DRIVER=1, run_aegis.sh owns the projection at
   # show_final_report — cleanup stays silent (no double-emit / no mode spam).

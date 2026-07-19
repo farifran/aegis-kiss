@@ -14,6 +14,7 @@
 .harness/runtime/last_outcome.json
 .harness/runtime/pipeline_metrics.jsonl
 .harness/runtime/evidence_cache/
+.harness/runtime/candidate_tools_stamp/
 .harness/runtime/capability_env/
 .harness/runtime/capability_payloads/
 
