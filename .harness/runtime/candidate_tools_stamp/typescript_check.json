@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "capability": "typescript.check",
+  "classification": "readonly",
+  "execution_id": "1784425524-71623",
+  "generated_at": "2026-07-19T01:45:39Z",
+  "payload": {
+    "status": "passed",
+    "errors": []
+  },
+  "error": null
+}

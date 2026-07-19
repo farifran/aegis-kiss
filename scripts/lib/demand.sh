@@ -1118,6 +1118,28 @@ aegis_format_candidate_result_section() {
   }
 }
 
+# files_changed for the mutation candidate on a handover (optimize/repair shapes).
+# Prints JSON array. Empty array when handover missing or unreadable.
+aegis_handover_candidate_files_changed_json() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  if [[ -z "${handover}" || ! -f "${handover}" ]]; then
+    printf '[]'
+    return 0
+  fi
+  jq -c '
+    .artifact_snapshot as $s
+    | (
+        if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
+        else $s.operational_context.files_changed
+              // $s.operational_context.candidate_result.files_changed
+        end
+      ) // []
+  ' "${handover}" 2>/dev/null || printf '[]'
+}
+
 # Mutation-scoped tools summary for adversarial (from current payload dir).
 aegis_format_adversarial_tools_summary_section() {
   local payload_dir="${1:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
@@ -1127,19 +1149,8 @@ aegis_format_adversarial_tools_summary_section() {
   fi
   [[ -n "${payload_dir}" && -d "${payload_dir}" ]] || return 0
 
-  local files_json="[]"
-  if [[ -n "${handover}" && -f "${handover}" ]]; then
-    files_json="$(
-      jq -c '
-        .artifact_snapshot as $s
-        | (
-            if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
-            else $s.operational_context.files_changed // $s.operational_context.candidate_result.files_changed
-            end
-          ) // []
-      ' "${handover}" 2>/dev/null || printf '[]'
-    )"
-  fi
+  local files_json
+  files_json="$(aegis_handover_candidate_files_changed_json "${handover}")"
 
   if ! declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
     return 0
@@ -1191,58 +1202,15 @@ aegis_format_adversarial_tools_summary_section() {
   }
 }
 
-# Mechanical adversarial artifact when tools already prove mutation unclean.
-# Args: tools_gate_json
+# Mechanical adversarial when tools already prove mutation unclean: skip LLM only.
+# Findings are built solely by AEGIS_JQ_ENRICH_ADVERSARIAL from tools_gate (no dual map).
+# Args: tools_gate_json (must be object; caller gates on mutation_clean=false)
 aegis_emit_mechanical_adversarial_from_tools_gate() {
   local gate_json="${1-}"
   if ! printf '%s' "${gate_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
     return 1
   fi
-  local body
-  body="$(
-    printf '%s' "${gate_json}" | jq -c '
-      def ts_findings:
-        [(.typescript_errors_in_scope // [])[]
-          | {
-              type: "tool_failure",
-              severity: "high",
-              description: ("typescript " + (.file // "?") + ":" + ((.line // 0)|tostring) + ": " + (.message // tostring)),
-              supported_by_evidence: true,
-              evidence_refs: ["typescript.check"],
-              target_files: ([.file] | map(select(type == "string" and length > 0))),
-              fix: ("Fix TypeScript error in " + (.file // "mutation file") + ": " + (.message // "see typescript.check"))
-            }];
-      def es_findings:
-        [(.eslint_errors_in_scope // [])[]
-          | {
-              type: "tool_failure",
-              severity: "medium",
-              description: ("eslint " + (.file // "?") + ": " + (.message // tostring)),
-              supported_by_evidence: true,
-              evidence_refs: ["eslint.check"],
-              target_files: ([.file] | map(select(type == "string" and length > 0))),
-              fix: ("Fix eslint issue in " + (.file // "mutation file") + ": " + (.message // "see eslint.check"))
-            }];
-      def test_findings:
-        if (.test_status // "") == "failed" then
-          [{
-            type: "tool_failure",
-            severity: "high",
-            description: "test.run failed on candidate surface",
-            supported_by_evidence: true,
-            evidence_refs: ["test.run"],
-            target_files: [],
-            fix: "Make test.run pass for the mutation files_changed"
-          }]
-        else [] end;
-      (ts_findings + es_findings + test_findings) as $f
-      | {
-          status: (if ($f | length) > 0 then "challenged" else "verified" end),
-          findings: $f
-        }
-    '
-  )" || return 1
-  aegis_emit_framed_json_artifact "${body}"
+  aegis_emit_framed_json_artifact '{"status":"challenged","findings":[]}'
 }
 
 # Minimal proof: final candidate still looks aligned with the demand.

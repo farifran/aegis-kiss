@@ -77,10 +77,7 @@ You must:
 You must emit the output in this exact format:
 
 ${AEGIS_ARTIFACT_BEGIN_MARKER}
-{
-  "mode": "${AEGIS_MODE}",
-  ...
-}
+{ ... only the mode skill's minimal fields — runtime injects mode/candidate/attention ... }
 ${AEGIS_ARTIFACT_END_MARKER}
 
 The payload MUST:
@@ -89,8 +86,9 @@ The payload MUST:
 - contain no prose, no conversational explanations, no markdown notes.
 - have the opening brace '{' of the JSON object immediately on the line after ${AEGIS_ARTIFACT_BEGIN_MARKER}.
 - have the closing brace '}' of the JSON object immediately on the line before ${AEGIS_ARTIFACT_END_MARKER}.
+- NOT re-emit runtime-owned fields (mode, candidate_result, handover_attention, evidence_refs) unless the skill explicitly requires them.
 
-The investigation input is provided under the "=== INVESTIGATION INPUT ===" header of the user message. Execution identity is provided under the "=== EXECUTION IDENTITY ===" header of the user message.
+Investigation input and execution identity are under the matching headers in the user message (see skill for how to use them).
 EOF
 }
 
@@ -224,8 +222,8 @@ assemble_bounded_capability_context() {
     echo
     # Mechanical demand projection — before free-text so floor models
     # bind to operator paths / dense tokens / seed without re-parsing prose.
-    # Optimize: omit anchors (demand already closed by Repair; avoids 2nd-repair drift).
-    if [[ "${AEGIS_MODE}" != "optimize" ]] \
+    # Optimize / adversarial: omit anchors (demand closed; falsify candidate only).
+    if [[ "${AEGIS_MODE}" != "optimize" && "${AEGIS_MODE}" != "adversarial" ]] \
       && declare -f aegis_format_demand_anchors_section >/dev/null 2>&1; then
       aegis_format_demand_anchors_section
     fi
@@ -266,6 +264,12 @@ assemble_bounded_capability_context() {
       echo "=== INVESTIGATION INPUT (closed — already satisfied by Repair) ==="
       echo
       echo "Do not re-open or re-implement this demand. Judge REPAIR RESULT only."
+      echo
+      printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
+    elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then
+      echo "=== INVESTIGATION INPUT (context only — falsify CANDIDATE) ==="
+      echo
+      echo "Do not re-implement the demand. Falsify CANDIDATE RESULT + TOOLS SUMMARY only."
       echo
       printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
     else

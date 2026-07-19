@@ -945,6 +945,7 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
     }
 '
 
+# Sole source of tool→finding maps for adversarial (mechanical emit is thin; enrich fills).
 readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
   | .status = (.status // "challenged")
   | .candidate_result = ($prev_candidate // .candidate_result)

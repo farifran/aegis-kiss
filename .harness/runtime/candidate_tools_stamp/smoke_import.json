@@ -1,0 +1,17 @@
+{
+  "capability": "smoke.import",
+  "classification": "readonly",
+  "execution_id": "1784425524-71623",
+  "payload": {
+    "status": "passed",
+    "failures": 0,
+    "results": [
+      {
+        "file": "src/index.ts",
+        "status": "passed"
+      }
+    ]
+  },
+  "error": null,
+  "success": true
+}

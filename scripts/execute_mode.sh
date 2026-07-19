@@ -946,18 +946,14 @@ main() {
     && declare -f build_tribunal_tools_gate >/dev/null 2>&1 \
     && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
     local _adv_files _adv_gate _adv_clean _adv_out
-    _adv_files="$(
-      jq -c '
-        .artifact_snapshot as $s
-        | (
-            if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
-            else $s.operational_context.files_changed
-                  // $s.operational_context.candidate_result.files_changed
-            end
-          ) // []
-      ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}" 2>/dev/null \
-        || printf '[]'
-    )"
+    if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
+      _adv_files="$(
+        aegis_handover_candidate_files_changed_json \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+      )"
+    else
+      _adv_files="[]"
+    fi
     _adv_gate="$(build_tribunal_tools_gate "${_adv_files}")"
     _adv_clean="$(
       printf '%s' "${_adv_gate}" | jq -r '.mutation_clean // true' 2>/dev/null || printf 'true'

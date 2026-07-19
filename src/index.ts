@@ -5,3 +5,7 @@ export function kilobytesToBits(kilobytes: number): number {
 export function megabytesToBits(megabytes: number): number {
   return megabytes * 1024 * 1024 * 8;
 }
+
+export function megabytesToKilobits(megabytes: number): number {
+  return megabytes * 1024;
+}
