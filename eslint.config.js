@@ -38,7 +38,6 @@ export default [
       "dist/**",
       "coverage/**",
       "build/**",
-      ".venv-mlx/**",
 
       ".harness/runtime/**",
       ".harness/artifacts/**",

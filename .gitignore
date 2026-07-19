@@ -87,10 +87,6 @@ __pycache__/
 .npm/
 .aider*
 
-# Local MLX inference
-.venv-mlx/
-.harness/local.env.mlx
-
 # macOS
 .DS_Store
 **/.DS_Store

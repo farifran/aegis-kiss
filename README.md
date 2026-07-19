@@ -34,7 +34,7 @@ bash runtime_aegis.sh discovery "inspect runtime handover boundary"
 bash runtime_aegis.sh forensics --issue 123
 ```
 
-Optional secrets: `.harness/local.env` (loaded when `AEGIS_LOAD_LOCAL_ENV=1`; never into capability children). Local MLX: `.harness/local.env.mlx` + `scripts/start_mlx_server.sh` (do not mix with cloud env in the same shell).
+Optional secrets: `.harness/local.env` (loaded when `AEGIS_LOAD_LOCAL_ENV=1`; never into capability children).
 
 After a run:
 

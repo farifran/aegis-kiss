@@ -36,7 +36,7 @@ readonly AEGIS_ROOT_DIR="$(
 # Provider credentials (gitignored). Opt-in via AEGIS_LOAD_LOCAL_ENV=1 so
 # isolated capability children that re-source config under env -i never pull
 # secrets from disk. Entry points (runtime/executor/raw) set the flag.
-# Also skip when AEGIS_SKIP_LOCAL_ENV=1 (local MLX) or test-key sentinels.
+# Also skip when AEGIS_SKIP_LOCAL_ENV=1 or test-key sentinels.
 if [[ "${AEGIS_LOAD_LOCAL_ENV:-0}" == "1" ]] \
   && [[ "${AEGIS_SKIP_LOCAL_ENV:-0}" != "1" ]] \
   && [[ -f "${AEGIS_ROOT_DIR}/.harness/local.env" ]] \
@@ -188,8 +188,8 @@ export AEGIS_MUTATION_GIT_DIR
 # Deterministic decode for JSON/code artifacts (small models: less variance).
 : "${AEGIS_RAW_SUBSTRATE_TEMPERATURE:=0}"
 # Prefer provider-side JSON object mode when supported. On HTTP 400 the
-# raw provider strips response_format once and continues (MLX/local
-# servers often lack the field). Set to 0 to never send it.
+# raw provider strips response_format once and continues (some OpenAI-
+# compatible endpoints lack the field). Set to 0 to never send it.
 : "${AEGIS_RAW_JSON_OBJECT_FORMAT:=1}"
 # Session/process cache: set to 0 after a provider rejects response_format.
 : "${AEGIS_RAW_JSON_OBJECT_FORMAT_SUPPORTED:=1}"

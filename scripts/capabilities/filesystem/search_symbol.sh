@@ -158,7 +158,6 @@ _grep_fixed_into() {
       --exclude-dir=.skills \
       --exclude-dir=scripts \
       --exclude-dir=.venv \
-      --exclude-dir=.venv-mlx \
       --exclude-dir=dist \
       --exclude-dir=build \
       --exclude-dir=coverage \
