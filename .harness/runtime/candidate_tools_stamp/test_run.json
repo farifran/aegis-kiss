@@ -2,8 +2,8 @@
   "success": true,
   "capability": "test.run",
   "classification": "readonly",
-  "execution_id": "1784427283-85694",
-  "generated_at": "2026-07-19T02:14:56Z",
+  "execution_id": "1784429152-12936",
+  "generated_at": "2026-07-19T02:46:06Z",
   "payload": {
     "status": "passed",
     "summary": "No candidate unit tests configured."
