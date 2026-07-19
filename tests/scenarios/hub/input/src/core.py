@@ -1,1 +1,0 @@
-def shared(): pass
