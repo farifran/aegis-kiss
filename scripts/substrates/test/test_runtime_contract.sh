@@ -16,6 +16,7 @@ assert_manifest_uses_filesystem_read_only() {
     ([.modes[].capabilities[].capability] | index("runtime.read_epistemic_handover") == null)
     and ([.modes[].evidence_capabilities[]] | index("runtime.read_epistemic_handover") == null)
     and (.modes.discovery.evidence_capabilities == [
+      "runtime.demand_anchors",
       "filesystem.list_tree",
       "filesystem.read",
       "runtime.layer0_facts",

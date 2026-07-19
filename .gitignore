@@ -90,3 +90,11 @@ __pycache__/
 # Local MLX inference
 .venv-mlx/
 .harness/local.env.mlx
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# editor/agent local
+.claude/
+.claude_lessons.md

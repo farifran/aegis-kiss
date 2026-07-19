@@ -65,11 +65,12 @@ actual="$(
     | jq -s -c '.'
 )"
 
+# Forensics base profile (config) + required_evidence reads from handover.
 expected="$(
   jq -n -c '[
-    "filesystem.search_symbol",
-    "git.status",
+    "runtime.demand_anchors",
     "filesystem.read:epistemic_handover",
+    "filesystem.search_symbol",
     "filesystem.read:src/index.ts",
     "filesystem.read:src/ui/index.ts"
   ]'

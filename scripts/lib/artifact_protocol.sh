@@ -499,7 +499,7 @@ build_tribunal_tools_gate() {
 # MINIMAL COGNITIVE ARTIFACT ENRICHMENT
 #
 # Models emit minimal cognitive fields; runtime injects mode, evidence,
-# candidates, attention (see .skills/field_ownership.md).
+# candidates, attention (runtime-owned fields).
 #
 #   load_artifact_enrichment_context → enrich_cognitive_artifact (per-mode)
 #   → rewrite_substrate_output_with_artifact → normalize_substrate_output

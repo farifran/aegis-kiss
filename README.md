@@ -2,7 +2,7 @@
 
 Bounded, deterministic AI execution runtime. The runtime owns orchestration and evidence; modes only reason from exposed capability payloads and emit protocol-framed JSON. Git is the only persistent memory.
 
-Constitution: `AGENTS.md`. Living repository map: **`summary.md`**. Epistemic doctrine: `.harness/00_architecture_core.md`. Operator notes / demand map: `entry.md`.
+Constitution: `AGENTS.md` (loaded as LLM/Aider preamble). Mode contracts: `.skills/<mode>.md`.
 
 ---
 
@@ -116,8 +116,6 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 
 **Operational memory:** capability payloads · epistemic handover · git only.
-
-Full map and tables: **`summary.md`**. Field ownership: **`.skills/field_ownership.md`**.
 
 ---
 

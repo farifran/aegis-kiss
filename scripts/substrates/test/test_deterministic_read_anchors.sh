@@ -64,9 +64,11 @@ actual="$(
 # src/index.ts appears in investigation + attention → one entry.
 # src/feature/widget.ts is operator-named net-new.
 # src/ui/fake_import.ts from required_evidence.
+# Forensics base profile: demand_anchors + read + search_symbol (no git.status).
+# Anchors append operator/attention/required filesystem.read entries.
 for must in \
+  "runtime.demand_anchors" \
   "filesystem.search_symbol" \
-  "git.status" \
   "filesystem.read:epistemic_handover" \
   "filesystem.read:src/ui/fake_import.ts" \
   "filesystem.read:src/index.ts" \

@@ -281,7 +281,8 @@ env_violations="$(
       "AEGIS_FILE_CONTENT_MAX_BYTES",
       "AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES",
       "AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES",
-      "AEGIS_SEARCH_SYMBOL_CONTEXT_LINES"
+      "AEGIS_SEARCH_SYMBOL_CONTEXT_LINES",
+      "AEGIS_SEARCH_SYMBOL_PATHSPECS"
     ] as $whitelist
     | .payload.env_names - $whitelist
     | .[]
