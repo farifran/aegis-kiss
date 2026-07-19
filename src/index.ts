@@ -18,4 +18,5 @@ export function converterMegabytesToPetabits(megabytes: number): number {
   return megabytes * 8 / (1024 * 1024 * 1024);
 }
 
-export { TokenBucket } from "./tokenBucket.js";
+export { TokenBucket, encodeBucketStatus } from "./tokenBucket.js";
+export type { TokenBucketConfig } from "./tokenBucket.js";
