@@ -28,14 +28,24 @@ AEGIS_LOG_TAG="RUN"
 
 # Repair stamps tools for adversarial reuse during the pipeline.
 # Drop after the orchestrator exits (success, fail, halt, or signal).
+# Path jail: only remove dirs whose path contains candidate_tools_stamp and
+# no ".." segments — never rm -rf an arbitrary AEGIS_CANDIDATE_TOOLS_STAMP_DIR.
 aegis_run_remove_candidate_tools_stamp() {
   if [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" == "0" ]] \
     || [[ "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:-true}" == "false" ]]; then
     return 0
   fi
-  rm -rf \
-    "${AEGIS_CANDIDATE_TOOLS_STAMP_DIR:-.harness/runtime/candidate_tools_stamp}" \
-    2>/dev/null || true
+  local stamp_dir="${AEGIS_CANDIDATE_TOOLS_STAMP_DIR:-.harness/runtime/candidate_tools_stamp}"
+  [[ -n "${stamp_dir}" ]] || return 0
+  case "${stamp_dir}" in
+    *..*) return 0 ;;
+  esac
+  case "${stamp_dir}" in
+    *candidate_tools_stamp*) ;;
+    *) return 0 ;;
+  esac
+  [[ -e "${stamp_dir}" ]] || return 0
+  rm -rf "${stamp_dir}" 2>/dev/null || true
 }
 trap aegis_run_remove_candidate_tools_stamp EXIT
 

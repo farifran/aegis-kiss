@@ -979,12 +979,17 @@ main() {
         aegis_emit_mechanical_adversarial_from_tools_gate "${_adv_gate}"
       )" || _adv_out=""
       if [[ -n "${_adv_out}" ]]; then
+        # Thin body ({status,findings:[]}); enrich injects mode, candidate,
+        # tool findings, evidence_refs, attention — same post-path as
+        # execute_substrate early returns (validation/optimize mechanical).
+        # Skipping normalize here fatals artifact_mode_mismatch / contract.
         aegis_log "adversarial_mechanical: tools dirty — skip LLM (reuse stamp when hash matched)"
         AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
         if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
           jq -cn '{kind:"adversarial",result:"mechanical_tools_challenged"}' \
             >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
         fi
+        normalize_substrate_output
         measure "executor_artifact_validation" validate_artifact
         emit_output
         return 0

@@ -442,4 +442,100 @@ grep -q '99' "${AEGIS_TEST_GH_OUT}.num" || fail "issue_comment_wrong_number"
 grep -q 'SUCCESS' "${AEGIS_TEST_GH_OUT}.body" || fail "issue_comment_missing_success"
 grep -q 'task: 3' "${AEGIS_TEST_GH_OUT}.body" || fail "issue_comment_missing_task"
 
+# ---------------------------------------------------------------------
+# Adversarial mechanical short-circuit must enrich before validate.
+# Thin emit is {status,findings:[]}; enrich injects tool findings + mode.
+# execute_mode early path previously skipped normalize → contract fatal.
+# ---------------------------------------------------------------------
+
+declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1 \
+  || fail "missing_aegis_emit_mechanical_adversarial_from_tools_gate"
+
+# Static lock: mechanical dirty-tools path calls normalize before validate.
+_adv_block="$(
+  awk '
+    /adversarial_mechanical: tools dirty/ { on=1 }
+    on { print }
+    on && /return 0/ { exit }
+  ' "${AEGIS_TEST_ROOT}/scripts/execute_mode.sh"
+)"
+printf '%s' "${_adv_block}" | grep -q 'normalize_substrate_output' \
+  || fail "adversarial_mechanical_path_missing_normalize_substrate_output"
+# normalize must appear before validate_artifact in that block
+_norm_line="$(printf '%s\n' "${_adv_block}" | grep -n 'normalize_substrate_output' | head -1 | cut -d: -f1)"
+_val_line="$(printf '%s\n' "${_adv_block}" | grep -n 'validate_artifact' | head -1 | cut -d: -f1)"
+[[ -n "${_norm_line}" && -n "${_val_line}" && "${_norm_line}" -lt "${_val_line}" ]] \
+  || fail "adversarial_mechanical_normalize_must_precede_validate"
+
+dirty_gate='{
+  "mutation_clean": false,
+  "typescript_status": "ok",
+  "eslint_status": "skipped",
+  "test_status": "failed",
+  "typescript_errors_in_scope": [],
+  "eslint_errors_in_scope": []
+}'
+mech_adv_out="$(aegis_emit_mechanical_adversarial_from_tools_gate "${dirty_gate}")" \
+  || fail "mechanical_adversarial_emit_failed"
+mech_adv_body="$(
+  printf '%s' "${mech_adv_out}" \
+    | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER:-AEGIS_ARTIFACT_BEGIN}/,/${AEGIS_ARTIFACT_END_MARKER:-AEGIS_ARTIFACT_END}/p" \
+    | sed -e "1d" -e "\$d"
+)"
+# Thin body intentionally lacks mode / candidate_result (enrich owns them).
+printf '%s' "${mech_adv_body}" | jq -e '
+  .status == "challenged"
+  and (.findings | type == "array" and length == 0)
+  and (.mode | not)
+' >/dev/null \
+  || fail "mechanical_adversarial_thin_body_shape: ${mech_adv_body}"
+
+adv_ctx="$(
+  jq -nc --arg diff "${soma_diff}" --argjson gate "${dirty_gate}" '{
+    evidence_refs: ["test.run"],
+    observed_payloads: ["test_run.json"],
+    prev_candidate: {
+      source_mode: "optimize",
+      diff: $diff,
+      files_changed: ["src/index.ts"]
+    },
+    prev_findings: [],
+    seed_scope: {scope_type:"none",scope_targets:[],scope_confidence:"none"},
+    seed_targets: [],
+    seed_conditions: [],
+    operator_named_paths: [],
+    existing_paths: ["src/index.ts"],
+    tools_gate: $gate,
+    demand_anchors: {dense_tokens:["soma"],operator_named_paths:[],seed_targets:["src/index.ts"],done_when:[]},
+    alignment_gate: {aligned: true, violations: []}
+  }'
+)"
+export AEGIS_MODE="adversarial"
+adv_enriched="$(enrich_cognitive_artifact "${mech_adv_body}" "${adv_ctx}")"
+echo "${adv_enriched}" | jq -e '
+  .mode == "adversarial"
+  and .status == "challenged"
+  and (.candidate_result.source_mode == "optimize")
+  and (.candidate_result.files_changed | index("src/index.ts") != null)
+  and (.findings | map(select(.type == "tool_failure")) | length) > 0
+  and (.evidence_refs | type == "array")
+  and (.handover_attention | type == "object")
+' >/dev/null \
+  || fail "mechanical_adversarial_enrich_should_inject_tool_findings: ${adv_enriched}"
+
+# Stamp path jail: refuse non-stamp and traversal dirs (no data-loss rm).
+stamp_probe="${test_tmp}/not_a_stamp_dir"
+mkdir -p "${stamp_probe}"
+AEGIS_CANDIDATE_TOOLS_STAMP_DIR="${stamp_probe}" \
+  aegis_remove_candidate_tools_stamp
+[[ -d "${stamp_probe}" ]] \
+  || fail "stamp_jail_deleted_non_stamp_dir"
+
+stamp_trav="${test_tmp}/candidate_tools_stamp/../escape_probe"
+mkdir -p "${test_tmp}/escape_probe"
+AEGIS_CANDIDATE_TOOLS_STAMP_DIR="${stamp_trav}" \
+  aegis_remove_candidate_tools_stamp
+[[ -d "${test_tmp}/escape_probe" ]] \
+  || fail "stamp_jail_allowed_dotdot_traversal"
+
 echo "[PASS] Adversarial to Validation contract, mechanical tribunal, and promotion"

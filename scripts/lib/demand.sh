@@ -922,11 +922,14 @@ aegis_candidate_tools_stamp_dir() {
 }
 
 # Drop stamp after a finished run (not between modes of a pipeline driver).
-# Safe: only removes a path that resolves under candidate_tools_stamp.
+# Safe: only removes a path that contains candidate_tools_stamp and no "..".
 aegis_remove_candidate_tools_stamp() {
   local stamp_dir
   stamp_dir="$(aegis_candidate_tools_stamp_dir)"
   [[ -n "${stamp_dir}" ]] || return 0
+  case "${stamp_dir}" in
+    *..*) return 0 ;;
+  esac
   case "${stamp_dir}" in
     *candidate_tools_stamp*) ;;
     *) return 0 ;;
