@@ -162,8 +162,32 @@ materialize_capability_payloads() {
     cache_hit=0
     cache_path=""
 
+    # Adversarial: reuse tsc/eslint/test stamped after green repair when
+    # candidate diff hash is unchanged (optimize passthrough / no refine).
+    if [[ "${cache_hit}" -eq 0 ]] \
+      && [[ "${AEGIS_MODE:-}" == "adversarial" ]] \
+      && [[ "${capability}" == "typescript.check" \
+        || "${capability}" == "eslint.check" \
+        || "${capability}" == "test.run" ]] \
+      && declare -f aegis_try_reuse_stamped_tool_payload >/dev/null 2>&1 \
+      && declare -f aegis_handover_candidate_diff_hash >/dev/null 2>&1; then
+      local _cand_hash=""
+      _cand_hash="$(
+        aegis_handover_candidate_diff_hash \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}" \
+          2>/dev/null || true
+      )"
+      if [[ -n "${_cand_hash}" ]] \
+        && aegis_try_reuse_stamped_tool_payload \
+          "${capability}" "${payload_path}" "${_cand_hash}"; then
+        cache_hit=1
+      fi
+      unset _cand_hash
+    fi
+
     # Intra-pipeline cache: skip re-running deterministic Layer 0 work.
-    if [[ "${AEGIS_EVIDENCE_CACHE_ENABLED:-true}" == "true" ]] \
+    if [[ "${cache_hit}" -eq 0 ]] \
+      && [[ "${AEGIS_EVIDENCE_CACHE_ENABLED:-true}" == "true" ]] \
       && capability_is_cacheable "${capability}" \
       && [[ -d "${AEGIS_EVIDENCE_CACHE_DIR:-}" ]]; then
       cache_path="${AEGIS_EVIDENCE_CACHE_DIR}/$(evidence_cache_key "${capability}" "${capability_argument}").json"

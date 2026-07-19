@@ -116,9 +116,9 @@ Config lists a base set; execute_mode **re-ranks** and may **omit** search when 
 | discovery | `demand_anchors`, `list_tree`, handover, `layer0_facts`, `attention_seed` | Always mechanical body |
 | forensics | `demand_anchors`, handover, `search_symbol` | **Search omitted** if mechanical; + `filesystem.read` anchors |
 | repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
-| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; max 1 improvement; 2nd pass mechanical |
-| adversarial | handover, tsc, eslint, test | No demand search |
-| validation | handover only | Tribunal; may reject on `intent_violations` |
+| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; trivial-skip / max 1 improve / metrics `kind:optimize` |
+| adversarial | handover, tsc, eslint, test | **Reuses** repair tool stamp when candidate hash matches; else re-runs; mechanical findings if tools dirty |
+| validation | handover only | Tribunal + **alignment gate** (tokens/paths/exports/done_when); may reject `demand_alignment` |
 
 **Authorization:** operator-named paths, `required_evidence`, Layer 0 / attention seed — not import graphs.
 

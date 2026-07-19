@@ -105,6 +105,11 @@ cat .harness/runtime/last_outcome.json | jq .
 | `OPENAI_MODEL_OPTIMIZE` | Model for optimize raw (default = readonly cognition) |
 | `AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS` | Max optimize→repair refine loops (default **1**); 2nd optimize is mechanical no-LLM passthrough |
 | `AEGIS_OPTIMIZE_REPAIR_LOOP=true\|false` | Enable can_improve → repair re-entry (default true) |
+| `AEGIS_OPTIMIZE_TRIVIAL_SKIP=true\|false` | Skip optimize LLM when repair is small/clean (default true) |
+| `AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES` | Diff line cap for trivial skip (default 24) |
+| `AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES` | File count cap for trivial skip (default 1) |
+| `AEGIS_CANDIDATE_TOOLS_STAMP_DIR` | Where repair stamps tsc/test/eslint for adversarial reuse |
+| `AEGIS_ALIGNMENT_GATE=true\|false` | Validation minimal demand-alignment proof on final candidate (default true) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 
 **Operational memory:** capability payloads · epistemic handover · git only.

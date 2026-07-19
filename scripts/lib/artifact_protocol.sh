@@ -730,6 +730,7 @@ readonly AEGIS_JQ_ENRICH_HEAD='
   | $ctx.existing_paths as $existing_paths
   | $ctx.tools_gate as $tools_gate
   | ($ctx.demand_anchors // {}) as $demand_anchors
+  | ($ctx.alignment_gate // {aligned: true, violations: []}) as $alignment_gate
   | (($demand_anchors.dense_tokens // []) | map(ascii_downcase)) as $dense_tokens
   | .mode = $mode
   | .evidence_refs = $evidence_refs
@@ -948,18 +949,88 @@ readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
   | .status = (.status // "challenged")
   | .candidate_result = ($prev_candidate // .candidate_result)
   | (.candidate_result.diff // "") as $cand_diff
+  | (.candidate_result.files_changed // []) as $cand_files
   | diff_added_exprs($cand_diff) as $added_exprs
-  | .findings = (.findings // [] | map(
-      .supported_by_evidence = (.supported_by_evidence // false)
-      | .evidence_refs = (.evidence_refs // $evidence_refs)
-      | gate_finding_quotes($added_exprs; $cand_diff; "full")
-      | if ($tools_gate.mutation_clean == true)
-           and (.type == "logic_bug" or .type == "contract_violation")
-           and ((.evidence_refs // []) | map(tostring) | any(test("typescript|eslint|test\\.run")))
-           and (($tools_gate.typescript_errors_in_scope // []) | length) == 0
-        then .supported_by_evidence = false | .severity = "info"
-        else . end
-    ))
+  | (
+      [
+        ($tools_gate.typescript_errors_in_scope // [])[]
+        | {
+            type: "tool_failure",
+            severity: "high",
+            description: ("typescript " + (.file // "?") + ":" + ((.line // 0)|tostring) + ": " + (.message // tostring)),
+            supported_by_evidence: true,
+            evidence_refs: ["typescript.check"],
+            target_files: ([.file] | map(select(type == "string" and length > 0))),
+            fix: ("Fix TypeScript error in " + (.file // "mutation file") + ": " + (.message // "see typescript.check"))
+          }
+      ]
+      + [
+        ($tools_gate.eslint_errors_in_scope // [])[]
+        | {
+            type: "tool_failure",
+            severity: "medium",
+            description: ("eslint " + (.file // "?") + ": " + (.message // tostring)),
+            supported_by_evidence: true,
+            evidence_refs: ["eslint.check"],
+            target_files: ([.file] | map(select(type == "string" and length > 0))),
+            fix: ("Fix eslint issue in " + (.file // "mutation file") + ": " + (.message // "see eslint.check"))
+          }
+      ]
+      + (
+          if ($tools_gate.test_status // "") == "failed" then
+            [{
+              type: "tool_failure",
+              severity: "high",
+              description: "test.run failed on candidate surface",
+              supported_by_evidence: true,
+              evidence_refs: ["test.run"],
+              target_files: $cand_files,
+              fix: "Make test.run pass for the mutation files_changed"
+            }]
+          else [] end
+        )
+      + (
+          if (($cand_diff // "")
+              | split("\n")
+              | map(select(startswith("+") and (startswith("+++") | not)))
+              | map(select(test(":[[:space:]]*any\\b|as[[:space:]]+any\\b|@ts-ignore|@ts-expect-error")))
+              | length) > 0
+          then
+            [{
+              type: "contract_violation",
+              severity: "medium",
+              description: "candidate adds any / @ts-ignore / @ts-expect-error in +lines",
+              supported_by_evidence: true,
+              evidence_refs: ["candidate.diff"],
+              target_files: $cand_files,
+              fix: "Remove any / @ts-ignore / @ts-expect-error from the mutation; use explicit types"
+            }]
+          else [] end
+        )
+    ) as $mech_findings
+  | .findings = (
+      ($mech_findings + (.findings // []))
+      | map(
+          .supported_by_evidence = (.supported_by_evidence // false)
+          | .evidence_refs = (.evidence_refs // $evidence_refs)
+          | .target_files = (
+              if ((.target_files // []) | length) > 0 then .target_files
+              else $cand_files end
+            )
+          | .fix = (
+              if ((.fix // null) | type == "string") then .fix else null end
+            )
+          | gate_finding_quotes($added_exprs; $cand_diff; "full")
+          | if ($tools_gate.mutation_clean == true)
+               and (.type == "logic_bug" or .type == "contract_violation")
+               and ((.evidence_refs // []) | map(tostring) | any(test("typescript|eslint|test\\.run")))
+               and (($tools_gate.typescript_errors_in_scope // []) | length) == 0
+            then .supported_by_evidence = false | .severity = "info"
+            else . end
+        )
+      | group_by(.description // "")
+      | map(.[0])
+    )
   | ((.findings | blocking_findings_of) | length) as $blocking
   | if ($tools_gate.mutation_clean == true) and ($blocking == 0) then
       .status = "verified"
@@ -993,6 +1064,8 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
      else . end)
   | (.findings | blocking_findings_of) as $blocking_findings
   | ((.validated_candidate.intent_violations // []) | length) as $intent_n
+  # Note: jq // treats false as missing — use == false explicitly.
+  | ($alignment_gate.aligned == false) as $align_fail
   | (if (
        ((.basis // []) | index("empty_mutation_candidate") != null)
        or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
@@ -1002,6 +1075,13 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
        .verdict = "rejected"
        | .basis = (
            ((.basis // []) + ["demand_mismatch"])
+           | unique
+         )
+     elif $align_fail then
+       # Minimal proof: candidate still looks aligned with the demand.
+       .verdict = "rejected"
+       | .basis = (
+           ((.basis // []) + ["demand_alignment"])
            | unique
          )
      elif ($blocking_findings | length) == 0 then
@@ -1032,8 +1112,17 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
              | {
                  origin: (.type // "unspecified"),
                  severity: (.severity // "unspecified"),
-                 target_files: $scopes,
-                 structural_reason: (.description // ""),
+                 target_files: (
+                   if ((.target_files // []) | length) > 0 then .target_files
+                   else $scopes end
+                 ),
+                 structural_reason: (
+                   if ((.fix // "") | type == "string" and length > 0) then
+                     "ADVERSARIAL: " + .fix
+                     + (if ((.description // "") | length) > 0
+                        then " | " + .description else "" end)
+                   else (.description // "") end
+                 ),
                  evidence_refs: (.evidence_refs // [])
                }
            ]
@@ -1060,12 +1149,32 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                    }
                  end
              ]
+           + (
+               if $align_fail then
+                 [
+                   ($alignment_gate.violations // [])[]
+                   | {
+                       origin: "demand_alignment",
+                       severity: "high",
+                       target_files: (
+                         if ((.target_files // []) | length) > 0 then .target_files
+                         else $scopes end
+                       ),
+                       structural_reason: (
+                         "ALIGNMENT: " + ((.fix // .reason // .code // "align candidate with demand"))
+                       ),
+                       evidence_refs: ["validation.alignment"]
+                     }
+                 ]
+               else [] end
+             )
          ) as $all_violations
        | .repair_feedback = {
            violations: $all_violations,
            authorized_scopes: $scopes
          }
      else del(.repair_feedback) end)
+  | .alignment_gate = $alignment_gate
   | .handover_attention = {
       next_attention_targets: (.validated_candidate.files_changed // []),
       attention_scope: "validation_result",
@@ -1227,6 +1336,31 @@ load_artifact_enrichment_context() {
   local tools_gate_json
   tools_gate_json="$(build_tribunal_tools_gate "${tribunal_files_json}")"
 
+  # Validation: minimal demand-alignment proof on the final candidate.
+  local alignment_gate_json='{"aligned":true,"violations":[]}'
+  if [[ "${AEGIS_MODE}" == "validation" ]] \
+    && [[ "${AEGIS_ALIGNMENT_GATE:-true}" != "0" ]] \
+    && [[ "${AEGIS_ALIGNMENT_GATE:-true}" != "false" ]] \
+    && declare -f aegis_candidate_alignment_gate >/dev/null 2>&1; then
+    local _align_diff
+    _align_diff="$(
+      printf '%s' "${prev_candidate_json}" \
+        | jq -r '.diff // empty' 2>/dev/null || true
+    )"
+    alignment_gate_json="$(
+      aegis_candidate_alignment_gate \
+        "${_align_diff}" \
+        "${tribunal_files_json}" \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${demand_anchors_json}" \
+        2>/dev/null || printf '%s' '{"aligned":true,"violations":[]}'
+    )"
+    if ! printf '%s' "${alignment_gate_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      alignment_gate_json='{"aligned":true,"violations":[]}'
+    fi
+    unset _align_diff
+  fi
+
   jq -n \
     --argjson evidence_refs "${evidence_refs_json}" \
     --argjson observed_payloads "${observed_payloads_json}" \
@@ -1239,6 +1373,7 @@ load_artifact_enrichment_context() {
     --argjson existing_paths "${existing_paths_json}" \
     --argjson tools_gate "${tools_gate_json}" \
     --argjson demand_anchors "${demand_anchors_json}" \
+    --argjson alignment_gate "${alignment_gate_json}" \
     '{
       evidence_refs: $evidence_refs,
       observed_payloads: $observed_payloads,
@@ -1250,7 +1385,8 @@ load_artifact_enrichment_context() {
       operator_named_paths: $operator_named_paths,
       existing_paths: $existing_paths,
       tools_gate: $tools_gate,
-      demand_anchors: $demand_anchors
+      demand_anchors: $demand_anchors,
+      alignment_gate: $alignment_gate
     }'
 }
 

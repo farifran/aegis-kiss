@@ -1029,6 +1029,10 @@ optimize_improve_loop_should_fire() {
       '{kind:"optimize_improve",attempt:$attempt,max:$max}' \
       >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
   fi
+  if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+    aegis_record_optimize_metric "can_improve_reentry" \
+      "attempt=${AEGIS_OPTIMIZE_REPAIR_COUNT}"
+  fi
 
   return 0
 }

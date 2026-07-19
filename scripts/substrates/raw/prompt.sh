@@ -21,7 +21,7 @@ raw_mode_minimal_artifact_instructions() {
       printf '%s' "MINIMAL OPTIMIZE (advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Prefer no_improvement_needed if unsure. can_improve only with 1-3 items: target_files exact from REPAIR RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff/candidate_result/mode. Full contract: skill file."
       ;;
     adversarial)
-      printf '%s' "MINIMAL ADVERSARIAL ARTIFACT: emit ONLY {\"status\": \"challenged|verified\", \"findings\": [{\"type\": \"...\", \"severity\": \"...\", \"description\": \"...\", \"supported_by_evidence\": true|false, \"evidence_refs\": [\"...\"]}]}. Set status to 'challenged' ONLY for defects proven by (a) in-scope tool failures on files_changed, or (b) a logic error whose description quotes the EXACT added expression from the candidate diff. If tools pass for mutation files, prefer status 'verified' with findings []. NEVER invent an 'actual implementation' that is not a full +line of the diff. The runtime tribunal will downgrade fabricated quotes. Do NOT emit mode/candidate_result/handover_attention."
+      printf '%s' "MINIMAL ADVERSARIAL: emit ONLY status+findings. challenged only for (a) in-scope tool failures or (b) logic with full +line quote in backticks. Prefer verified+[] when tools clean and no real quote. Include target_files+fix (imperative) so Repair can act. Tools may be reused from repair stamp when candidate hash matches — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
       ;;
     validation)
       printf '%s' "MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
@@ -246,6 +246,19 @@ assemble_bounded_capability_context() {
         aegis_format_repair_file_bodies_section \
           "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}" \
           "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
+      fi
+    fi
+
+    # Adversarial: candidate + mutation-scoped tools summary (reuse stamp when match).
+    if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
+      if declare -f aegis_format_candidate_result_section >/dev/null 2>&1; then
+        aegis_format_candidate_result_section \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+      fi
+      if declare -f aegis_format_adversarial_tools_summary_section >/dev/null 2>&1; then
+        aegis_format_adversarial_tools_summary_section \
+          "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+          "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
       fi
     fi
 

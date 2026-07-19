@@ -893,6 +893,587 @@ aegis_emit_mechanical_optimize_passthrough() {
   aegis_emit_framed_json_artifact "${body}"
 }
 
+# Append kind:"optimize" metric line (shared metrics file).
+# result: trivial_skip | passthrough_after_refine | no_improvement_needed | can_improve
+aegis_record_optimize_metric() {
+  local result="${1-}"
+  local detail="${2-}"
+  [[ -n "${result}" ]] || return 0
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  jq -cn \
+    --arg kind "optimize" \
+    --arg result "${result}" \
+    --arg detail "${detail}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{kind:$kind,result:$result,detail:$detail,at:$at}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
+# =========================================================
+# CANDIDATE TOOLS STAMP (repair → adversarial reuse)
+# =========================================================
+# After a green mutation preflight, stamp tsc/test/(eslint) keyed by
+# candidate diff hash. Adversarial reuses when the candidate diff is
+# unchanged (no pointless re-run). If optimize refined the patch, hash
+# differs → tools re-run.
+
+aegis_candidate_tools_stamp_dir() {
+  printf '%s' "${AEGIS_CANDIDATE_TOOLS_STAMP_DIR:-.harness/runtime/candidate_tools_stamp}"
+}
+
+aegis_hash_candidate_diff() {
+  local diff_content="${1-}"
+  local h
+  h="$(
+    printf '%s' "${diff_content}" \
+      | shasum -a 256 2>/dev/null \
+      | awk '{print $1}'
+  )"
+  if [[ -z "${h}" ]]; then
+    h="$(printf '%s' "${diff_content}" | cksum | awk '{print $1}')"
+  fi
+  printf '%s' "${h}"
+}
+
+# Stamp tool payloads from one or more payload dirs for this candidate hash.
+# Args: <diff_content> <source_mode> [payload_dir ...]
+aegis_stamp_candidate_tools() {
+  local diff_content="${1-}"
+  local source_mode="${2:-repair}"
+  shift 2 || true
+  local -a dirs=("$@")
+  [[ -n "${diff_content}" ]] || return 0
+  [[ "${#dirs[@]}" -gt 0 ]] || return 0
+
+  local stamp_dir hash meta
+  hash="$(aegis_hash_candidate_diff "${diff_content}")"
+  [[ -n "${hash}" ]] || return 0
+  stamp_dir="$(aegis_candidate_tools_stamp_dir)"
+  mkdir -p "${stamp_dir}" 2>/dev/null || return 0
+
+  local name src dest d
+  for name in typescript_check.json test_run.json eslint_check.json smoke_import.json; do
+    dest="${stamp_dir}/${name}"
+    rm -f "${dest}" 2>/dev/null || true
+    for d in "${dirs[@]}"; do
+      [[ -n "${d}" && -d "${d}" ]] || continue
+      src="${d}/${name}"
+      if [[ -f "${src}" ]] && jq empty "${src}" >/dev/null 2>&1; then
+        cp "${src}" "${dest}" 2>/dev/null || true
+        break
+      fi
+    done
+  done
+
+  meta="${stamp_dir}/meta.json"
+  jq -n \
+    --arg hash "${hash}" \
+    --arg source_mode "${source_mode}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{candidate_hash:$hash,source_mode:$source_mode,at:$at}' \
+    > "${meta}" 2>/dev/null || true
+
+  if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+    jq -cn \
+      --arg kind "candidate_tools_stamp" \
+      --arg hash "${hash}" \
+      --arg source_mode "${source_mode}" \
+      '{kind:$kind,candidate_hash:$hash,source_mode:$source_mode}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# If stamp matches want_hash, copy capability payload into dest_path. Exit 0 on reuse.
+# Args: <capability> <dest_payload_path> <want_hash>
+aegis_try_reuse_stamped_tool_payload() {
+  local capability="${1-}"
+  local dest_path="${2-}"
+  local want_hash="${3-}"
+  [[ -n "${capability}" && -n "${dest_path}" && -n "${want_hash}" ]] || return 1
+
+  local stamp_dir meta stamped_hash name src
+  stamp_dir="$(aegis_candidate_tools_stamp_dir)"
+  meta="${stamp_dir}/meta.json"
+  [[ -f "${meta}" ]] || return 1
+  stamped_hash="$(jq -r '.candidate_hash // empty' "${meta}" 2>/dev/null || true)"
+  [[ -n "${stamped_hash}" && "${stamped_hash}" == "${want_hash}" ]] || return 1
+
+  case "${capability}" in
+    typescript.check) name="typescript_check.json" ;;
+    eslint.check) name="eslint_check.json" ;;
+    test.run) name="test_run.json" ;;
+    *) return 1 ;;
+  esac
+  src="${stamp_dir}/${name}"
+  [[ -f "${src}" ]] || return 1
+  jq empty "${src}" >/dev/null 2>&1 || return 1
+
+  if jq \
+    --arg execution_id "${AEGIS_EXECUTION_ID:-stamp-reuse}" \
+    --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP:-}" \
+    '.execution_id = $execution_id | .generated_at = $generated_at' \
+    "${src}" > "${dest_path}" 2>/dev/null; then
+    aegis_log "candidate_tools_reuse: ${capability} (hash=${want_hash:0:12}…)"
+    if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+      jq -cn \
+        --arg kind "candidate_tools_reuse" \
+        --arg capability "${capability}" \
+        --arg hash "${want_hash}" \
+        '{kind:$kind,capability:$capability,candidate_hash:$hash}' \
+        >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  rm -f "${dest_path}" 2>/dev/null || true
+  return 1
+}
+
+# Candidate hash from handover (repair op_ctx or optimize candidate_result).
+aegis_handover_candidate_diff_hash() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 1
+  local diff_body
+  diff_body="$(
+    jq -r '
+      .artifact_snapshot as $s
+      | if $s.mode == "optimize" then
+          $s.operational_context.candidate_result.diff // empty
+        elif $s.mode == "repair" then
+          $s.operational_context.diff // empty
+        else
+          $s.operational_context.candidate_result.diff
+            // $s.operational_context.diff // empty
+        end
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${diff_body}" && "${diff_body}" != "(no changes)" ]] || return 1
+  aegis_hash_candidate_diff "${diff_body}"
+}
+
+# Compact candidate for adversarial prompt (diff + files).
+aegis_format_candidate_result_section() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  : "${AEGIS_ADVERSARIAL_CANDIDATE_DIFF_MAX_BYTES:=12000}"
+  local max_bytes="${AEGIS_ADVERSARIAL_CANDIDATE_DIFF_MAX_BYTES}"
+  local files_line diff_body trunc_note=""
+
+  files_line="$(
+    jq -r '
+      .artifact_snapshot as $s
+      | (
+          if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
+          elif $s.mode == "repair" then $s.operational_context.files_changed
+          else $s.operational_context.candidate_result.files_changed
+                // $s.operational_context.files_changed
+          end
+        ) // []
+      | map(select(type == "string" and length > 0))
+      | if length == 0 then empty else join(", ") end
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${files_line}" ]] || return 0
+
+  diff_body="$(
+    jq -r '
+      .artifact_snapshot as $s
+      | (
+          if $s.mode == "optimize" then $s.operational_context.candidate_result.diff
+          elif $s.mode == "repair" then $s.operational_context.diff
+          else $s.operational_context.candidate_result.diff // $s.operational_context.diff
+          end
+        ) // empty
+      | select(type == "string" and length > 0 and . != "(no changes)")
+    ' "${handover}" 2>/dev/null || true
+  )"
+  [[ -n "${diff_body}" ]] || return 0
+
+  if [[ "${#diff_body}" -gt "${max_bytes}" ]]; then
+    trunc_note="[AEGIS][CANDIDATE_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
+    diff_body="${diff_body:0:${max_bytes}}"
+  fi
+
+  {
+    echo "=== CANDIDATE RESULT (runtime) ==="
+    echo
+    echo "Falsify this candidate only. Quote exact full +lines for logic bugs. Tools may be reused from repair when the candidate hash matches."
+    echo
+    echo "files_changed: ${files_line}"
+    echo
+    echo "diff:"
+    printf '%s\n' "${diff_body}"
+    if [[ -n "${trunc_note}" ]]; then
+      echo
+      echo "${trunc_note}"
+    fi
+    echo
+  }
+}
+
+# Mutation-scoped tools summary for adversarial (from current payload dir).
+aegis_format_adversarial_tools_summary_section() {
+  local payload_dir="${1:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${2-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${payload_dir}" && -d "${payload_dir}" ]] || return 0
+
+  local files_json="[]"
+  if [[ -n "${handover}" && -f "${handover}" ]]; then
+    files_json="$(
+      jq -c '
+        .artifact_snapshot as $s
+        | (
+            if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
+            else $s.operational_context.files_changed // $s.operational_context.candidate_result.files_changed
+            end
+          ) // []
+      ' "${handover}" 2>/dev/null || printf '[]'
+    )"
+  fi
+
+  if ! declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
+    return 0
+  fi
+  local gate
+  # build_tribunal_tools_gate reads AEGIS_CAPABILITY_PAYLOAD_DIR
+  local _saved="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+  export AEGIS_CAPABILITY_PAYLOAD_DIR="${payload_dir}"
+  gate="$(build_tribunal_tools_gate "${files_json}")" || gate="{}"
+  export AEGIS_CAPABILITY_PAYLOAD_DIR="${_saved}"
+
+  local reuse_note=""
+  local stamp_dir meta shash want
+  stamp_dir="$(aegis_candidate_tools_stamp_dir)"
+  meta="${stamp_dir}/meta.json"
+  if [[ -f "${meta}" ]]; then
+    shash="$(jq -r '.candidate_hash // empty' "${meta}" 2>/dev/null || true)"
+    want="$(aegis_handover_candidate_diff_hash "${handover}" 2>/dev/null || true)"
+    if [[ -n "${shash}" && -n "${want}" && "${shash}" == "${want}" ]]; then
+      reuse_note="tools_source: reused_from_repair_stamp (candidate hash match)"
+    else
+      reuse_note="tools_source: fresh_run (candidate changed or no stamp)"
+    fi
+  else
+    reuse_note="tools_source: fresh_run (no stamp)"
+  fi
+
+  {
+    echo "=== TOOLS SUMMARY (mutation-scoped) ==="
+    echo
+    echo "${reuse_note}"
+    printf '%s\n' "${gate}" | jq -r '
+      "mutation_clean: \(.mutation_clean // true)",
+      "typescript: \(.typescript_status // "skipped") (in_scope_errors=\((.typescript_errors_in_scope // [])|length))",
+      "eslint: \(.eslint_status // "skipped") (in_scope_errors=\((.eslint_errors_in_scope // [])|length))",
+      "test: \(.test_status // "skipped")",
+      (
+        (.typescript_errors_in_scope // [])[0:5]
+        | map("- ts \(.file // "?"):\(.line // "?"): \(.message // .)")
+        | .[]?
+      ),
+      (
+        (.eslint_errors_in_scope // [])[0:5]
+        | map("- eslint \(.file // "?"):\(.line // "?"): \(.message // .)")
+        | .[]?
+      )
+    ' 2>/dev/null || echo "(tools summary unavailable)"
+    echo
+  }
+}
+
+# Mechanical adversarial artifact when tools already prove mutation unclean.
+# Args: tools_gate_json
+aegis_emit_mechanical_adversarial_from_tools_gate() {
+  local gate_json="${1-}"
+  if ! printf '%s' "${gate_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    return 1
+  fi
+  local body
+  body="$(
+    printf '%s' "${gate_json}" | jq -c '
+      def ts_findings:
+        [(.typescript_errors_in_scope // [])[]
+          | {
+              type: "tool_failure",
+              severity: "high",
+              description: ("typescript " + (.file // "?") + ":" + ((.line // 0)|tostring) + ": " + (.message // tostring)),
+              supported_by_evidence: true,
+              evidence_refs: ["typescript.check"],
+              target_files: ([.file] | map(select(type == "string" and length > 0))),
+              fix: ("Fix TypeScript error in " + (.file // "mutation file") + ": " + (.message // "see typescript.check"))
+            }];
+      def es_findings:
+        [(.eslint_errors_in_scope // [])[]
+          | {
+              type: "tool_failure",
+              severity: "medium",
+              description: ("eslint " + (.file // "?") + ": " + (.message // tostring)),
+              supported_by_evidence: true,
+              evidence_refs: ["eslint.check"],
+              target_files: ([.file] | map(select(type == "string" and length > 0))),
+              fix: ("Fix eslint issue in " + (.file // "mutation file") + ": " + (.message // "see eslint.check"))
+            }];
+      def test_findings:
+        if (.test_status // "") == "failed" then
+          [{
+            type: "tool_failure",
+            severity: "high",
+            description: "test.run failed on candidate surface",
+            supported_by_evidence: true,
+            evidence_refs: ["test.run"],
+            target_files: [],
+            fix: "Make test.run pass for the mutation files_changed"
+          }]
+        else [] end;
+      (ts_findings + es_findings + test_findings) as $f
+      | {
+          status: (if ($f | length) > 0 then "challenged" else "verified" end),
+          findings: $f
+        }
+    '
+  )" || return 1
+  aegis_emit_framed_json_artifact "${body}"
+}
+
+# Minimal proof: final candidate still looks aligned with the demand.
+# Prints JSON: {aligned:bool, violations:[{code,reason,fix,target_files}]}
+# Args: <diff_content> [files_changed_json] [investigation_input] [anchors_json]
+aegis_candidate_alignment_gate() {
+  local diff_content="${1-}"
+  local files_json="${2:-[]}"
+  local text="${3-${AEGIS_INVESTIGATION_INPUT:-}}"
+  local anchors_json="${4-}"
+
+  if [[ -z "${diff_content}" || "${diff_content}" == "(no changes)" ]]; then
+    jq -nc '{
+      aligned: false,
+      violations: [{
+        code: "empty_diff",
+        reason: "alignment: candidate diff is empty",
+        fix: "Produce a non-empty mutation that implements the demand",
+        target_files: []
+      }]
+    }'
+    return 0
+  fi
+
+  if ! printf '%s' "${files_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    files_json="[]"
+  fi
+
+  local -a violations=()
+  local added tokens token hit=0 token_list export_n max_exports
+  local named_json seed_json done_json path hit_path
+
+  added="$(
+    printf '%s\n' "${diff_content}" \
+      | grep -E '^\+' \
+      | grep -vE '^\+\+\+' \
+      || true
+  )"
+
+  # --- dense demand tokens in +lines (same spirit as repair intent) ---
+  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    tokens="$(aegis_demand_dense_tokens "${text}")"
+    if [[ -n "${tokens}" ]]; then
+      hit=0
+      while IFS= read -r token; do
+        [[ -n "${token}" ]] || continue
+        [[ "${#token}" -ge 4 ]] || continue
+        if printf '%s' "${added}" | grep -Fqi -- "${token}"; then
+          hit=1
+          break
+        fi
+      done <<< "${tokens}"
+      if [[ "${hit}" -eq 0 ]]; then
+        token_list="$(printf '%s' "${tokens}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        violations+=("$(
+          jq -nc --arg tl "${token_list}" '{
+            code: "demand_tokens",
+            reason: ("alignment: none of demand tokens [" + $tl + "] appear in candidate +lines"),
+            fix: ("Put demand tokens from [" + $tl + "] into the changed code (name or body)"),
+            target_files: []
+          }'
+        )")
+      fi
+    fi
+  fi
+
+  # --- over-export ---
+  : "${AEGIS_MUTATION_MAX_NEW_EXPORTS:=1}"
+  max_exports="${AEGIS_MUTATION_MAX_NEW_EXPORTS}"
+  if declare -f count_diff_added_exports >/dev/null 2>&1; then
+    export_n="$(count_diff_added_exports "${diff_content}")"
+  else
+    export_n="$(
+      printf '%s\n' "${added}" \
+        | grep -Eic \
+          'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]' \
+        || true
+    )"
+    export_n="$(printf '%s' "${export_n}" | tr -d '[:space:]')"
+    [[ -n "${export_n}" ]] || export_n=0
+  fi
+  if [[ "${export_n}" -gt "${max_exports}" ]]; then
+    violations+=("$(
+      jq -nc --argjson n "${export_n}" --argjson max "${max_exports}" '{
+        code: "over_export",
+        reason: ("alignment: " + ($n|tostring) + " new exports in candidate (max " + ($max|tostring) + ")"),
+        fix: "Keep one demand-aligned export; remove parallel APIs",
+        target_files: []
+      }'
+    )")
+  fi
+
+  # --- path intersection when demand names paths or seed targets exist ---
+  if [[ -z "${anchors_json}" ]] || ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    if declare -f aegis_materialize_demand_anchors_json >/dev/null 2>&1; then
+      anchors_json="$(
+        aegis_materialize_demand_anchors_json "${text}" "" "" 2>/dev/null || printf '{}'
+      )"
+    else
+      anchors_json="{}"
+    fi
+  fi
+  named_json="$(printf '%s' "${anchors_json}" | jq -c '.operator_named_paths // []' 2>/dev/null || printf '[]')"
+  seed_json="$(printf '%s' "${anchors_json}" | jq -c '.seed_targets // []' 2>/dev/null || printf '[]')"
+  done_json="$(printf '%s' "${anchors_json}" | jq -c '.done_when // []' 2>/dev/null || printf '[]')"
+
+  local expected_paths
+  expected_paths="$(
+    jq -nc --argjson n "${named_json}" --argjson s "${seed_json}" \
+      '($n + $s) | unique | map(select(type == "string" and length > 0))'
+  )"
+  if printf '%s' "${expected_paths}" | jq -e 'length > 0' >/dev/null 2>&1 \
+    && printf '%s' "${files_json}" | jq -e 'length > 0' >/dev/null 2>&1; then
+    hit_path="$(
+      jq -nc --argjson exp "${expected_paths}" --argjson got "${files_json}" '
+        def norm: gsub("^\\./"; "");
+        any($got[]?; . as $g | any($exp[];
+          (.|norm) == ($g|norm)
+          or (($g|norm) | startswith((.|norm) + "/"))
+          or ((.|norm) | startswith(($g|norm) + "/"))
+        ))
+      ' 2>/dev/null || printf 'false'
+    )"
+    if [[ "${hit_path}" != "true" ]]; then
+      violations+=("$(
+        jq -nc --argjson exp "${expected_paths}" --argjson got "${files_json}" '{
+          code: "path_scope",
+          reason: ("alignment: files_changed " + ($got|tostring)
+            + " does not intersect demand/seed paths " + ($exp|tostring)),
+          fix: "Mutate a path named in the demand or seed targets",
+          target_files: $got
+        }'
+      )")
+    fi
+  fi
+
+  # --- done_when (soft): if present, at least one phrase appears in +lines ---
+  if printf '%s' "${done_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    local done_hit=0 done_item done_list
+    while IFS= read -r done_item; do
+      [[ -n "${done_item}" ]] || continue
+      [[ "${#done_item}" -ge 3 ]] || continue
+      if printf '%s' "${added}" | grep -Fqi -- "${done_item}"; then
+        done_hit=1
+        break
+      fi
+    done < <(printf '%s' "${done_json}" | jq -r '.[]? | select(type == "string")')
+    if [[ "${done_hit}" -eq 0 ]]; then
+      done_list="$(printf '%s' "${done_json}" | jq -r 'map(select(type=="string")) | join(" | ")' 2>/dev/null || true)"
+      violations+=("$(
+        jq -nc --arg dl "${done_list}" '{
+          code: "done_when",
+          reason: ("alignment: none of done_when phrases appear in +lines: " + $dl),
+          fix: ("Reflect done_when in the change: " + $dl),
+          target_files: []
+        }'
+      )")
+    fi
+  fi
+
+  if [[ "${#violations[@]}" -eq 0 ]]; then
+    jq -nc '{aligned: true, violations: []}'
+    if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+      jq -cn '{kind:"alignment",result:"pass"}' \
+        >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
+  local vjson
+  vjson="$(printf '%s\n' "${violations[@]}" | jq -s -c '.')"
+  jq -nc --argjson v "${vjson}" '{aligned: false, violations: $v}'
+  if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+    jq -cn --argjson v "${vjson}" \
+      '{kind:"alignment",result:"fail",violations:$v}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# True when Repair candidate is small/clean enough to skip optimize LLM.
+# Heuristic: ≤N files, ≤M diff lines, no explicit any in added lines.
+aegis_optimize_repair_is_trivial() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 1
+
+  : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES:=1}"
+  : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES:=24}"
+
+  local n_files n_lines has_any
+  n_files="$(
+    jq -r '
+      .artifact_snapshot as $s
+      | select($s.mode == "repair")
+      | [($s.operational_context.files_changed // [])[]?
+          | select(type == "string" and length > 0)]
+      | length
+    ' "${handover}" 2>/dev/null || printf '0'
+  )"
+  [[ "${n_files}" -ge 1 ]] || return 1
+  [[ "${n_files}" -le "${AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES}" ]] || return 1
+
+  n_lines="$(
+    jq -r '
+      .artifact_snapshot as $s
+      | select($s.mode == "repair")
+      | ($s.operational_context.diff // "")
+      | select(type == "string" and length > 0 and . != "(no changes)")
+    ' "${handover}" 2>/dev/null \
+      | wc -l | tr -d ' '
+  )"
+  [[ -n "${n_lines}" && "${n_lines}" -ge 1 ]] || return 1
+  [[ "${n_lines}" -le "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES}" ]] || return 1
+
+  # Non-trivial if added lines introduce explicit any / as any.
+  has_any="$(
+    jq -r '
+      .artifact_snapshot.operational_context.diff // empty
+    ' "${handover}" 2>/dev/null \
+      | grep -E '^\+' \
+      | grep -vE '^\+\+\+' \
+      | grep -Eiq '(:[[:space:]]*any\b|as[[:space:]]+any\b|@ts-ignore|@ts-expect-error)' \
+      && printf '1' || printf '0'
+  )"
+  [[ "${has_any}" == "0" ]] || return 1
+  return 0
+}
+
 # Post-Repair file bodies for optimize (apply candidate on temp copies of HEAD).
 # Args: [handover_path] [repo_root]
 # Env: AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES (default 8000 per file)

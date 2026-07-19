@@ -448,6 +448,16 @@ emit_mutation_artifact() {
       }
     }' > "${artifact_tmp}"
 
+  # Stamp post-preflight tools for adversarial reuse when candidate hash matches.
+  if declare -f aegis_stamp_candidate_tools >/dev/null 2>&1; then
+    aegis_stamp_candidate_tools \
+      "$(cat "${diff_tmp}")" \
+      "${AEGIS_MODE}" \
+      "${AIDER_CAPABILITY_PAYLOAD_DIR:-}" \
+      "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+      || true
+  fi
+
   echo "${AEGIS_ARTIFACT_BEGIN_MARKER}"
   cat "${artifact_tmp}"
   echo "${AEGIS_ARTIFACT_END_MARKER}"

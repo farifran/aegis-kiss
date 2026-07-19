@@ -188,6 +188,29 @@ mark_remaining_skipped() {
   done
 }
 
+# Modes between just_ran (exclusive) and end_mode (inclusive) ran inside
+# the just_ran process as internal feedback — not as outer orchestrator steps.
+mark_modes_nested_after() {
+  local just_ran="$1"
+  local end_mode="$2"
+  local seq="${PIPELINES[$PIPELINE]:-}"
+  local m past=0
+  [[ -n "${end_mode}" ]] || return 0
+  for m in ${seq}; do
+    if [[ "${m}" == "${just_ran}" ]]; then
+      past=1
+      continue
+    fi
+    if [[ "${past}" -eq 1 ]]; then
+      if [[ -z "${MODE_STATUS[$m]:-}" ]]; then
+        MODE_STATUS["${m}"]="nested"
+        MODE_TIMINGS["${m}"]="${MODE_TIMINGS[$m]:-}"
+      fi
+      [[ "${m}" == "${end_mode}" ]] && break
+    fi
+  done
+}
+
 clear_operator_breadcrumbs() {
   rm -f "${LAST_FATAL_FILE}" 2>/dev/null || true
 
@@ -433,18 +456,33 @@ show_final_report() {
     timing="${MODE_TIMINGS[$mode]:-}"
     case "${status}" in
       ok) mark="✓" ;;
+      nested) mark="↳" ;;
       failed) mark="✗" ;;
       halted) mark="◼" ;;
       *) mark="—" ;;
     esac
 
-    if [[ -n "${timing}" ]]; then
+    if [[ "${status}" == "nested" ]]; then
+      printf "  %-12s %s  %s\n" "${mode}" "${mark}" "nested (ran in prior feedback)"
+    elif [[ -n "${timing}" ]]; then
       printf "  %-12s %s  %ss\n" "${mode}" "${mark}" "${timing}"
       total=$((total + timing))
     else
       printf "  %-12s %s  %s\n" "${mode}" "${mark}" "${status}"
     fi
   done
+
+  # Optimize metrics (if any) — clarifies can_improve vs trivial skip vs LLM.
+  if [[ -f "${METRICS_FILE}" ]] \
+    && grep -q '"kind":"optimize"' "${METRICS_FILE}" 2>/dev/null; then
+    echo
+    echo "Optimize:"
+    jq -r '
+      select(.kind == "optimize")
+      | "  - \(.result)"
+        + (if (.detail // "") != "" then " (\(.detail))" else "" end)
+    ' "${METRICS_FILE}" 2>/dev/null | tail -n 8 || true
+  fi
 
   echo
   echo "Total: ${total}s"
@@ -765,8 +803,12 @@ main() {
 
     # Internal feedback consumed downstream modes in this process.
     if pipeline_handover_past_mode "${mode}"; then
-      echo "[RUN] Handover already at $(jq -r '.artifact_snapshot.mode' "${HANDOVER_FILE}" 2>/dev/null) after ${mode} (internal feedback) — skipping remainder."
+      local _hmode
+      _hmode="$(jq -r '.artifact_snapshot.mode // empty' "${HANDOVER_FILE}" 2>/dev/null || true)"
+      echo "[RUN] Handover already at ${_hmode} after ${mode} (internal feedback) — not re-running remainder."
+      mark_modes_nested_after "${mode}" "${_hmode}"
       mark_remaining_skipped
+      unset _hmode
       break
     fi
 
