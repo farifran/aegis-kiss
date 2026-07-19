@@ -1,3 +1,7 @@
+export function converterKilobitsToGigabytes(kilobits: number): number {
+  return kilobits * 8 / (1024 * 1024 * 1024);
+}
+
 export function converterBitsToBytes(bits: number): number {
   return bits / 8;
 }
