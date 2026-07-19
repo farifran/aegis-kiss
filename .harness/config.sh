@@ -231,6 +231,10 @@ export AEGIS_RAW_SUBSTRATE_MAX_TOKENS_VALIDATION
 : "${AEGIS_OPTIMIZE_MIN_LINES:=24}"
 : "${AEGIS_OPTIMIZE_LLM:=0}"
 
+# Validation is a deterministic tribunal (enrich + alignment). Default
+# skips the raw LLM; set AEGIS_VALIDATION_LLM=1 only for residual/debug.
+: "${AEGIS_VALIDATION_LLM:=0}"
+
 export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
 export AEGIS_PROVIDER_CONNECT_TIMEOUT
@@ -239,6 +243,7 @@ export AEGIS_MAX_REPAIR_ATTEMPTS
 export AEGIS_REPAIR_FEEDBACK_LOOP
 export AEGIS_OPTIMIZE_MIN_LINES
 export AEGIS_OPTIMIZE_LLM
+export AEGIS_VALIDATION_LLM
 
 # =========================================================
 # CLEANUP POLICY
@@ -489,6 +494,7 @@ declare -ar AEGIS_FORENSICS_EVIDENCE=(
 # the typed adversarial findings and the deterministic handover state.
 # Build/test/lint evidence belongs to the adversarial falsification stage,
 # NOT here — admitting it would make the verdict probabilistic.
+# Default substrate is mechanical (AEGIS_VALIDATION_LLM=0); LLM is opt-in.
 declare -ar AEGIS_VALIDATION_EVIDENCE=(
   "filesystem.read:epistemic_handover"
 )

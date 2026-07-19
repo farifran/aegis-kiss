@@ -12,7 +12,7 @@ The runtime injects identity, evidence, candidates, and attention. Do not re-emi
 | repair | Model (Aider edits) | file edits only (aider format) | mutation artifact: `mode`, `diff`, `files_changed`, attention, optional `intent_violations`; MUTATION BRIEF / REPAIR FEEDBACK (validation or optimize) |
 | optimize | Model (raw JSON, **no edits**) | `status`, `basis`, `improvements[{target_files,change,why_safe}]` | always `candidate_result` from Repair; valid `can_improve` → `repair_feedback` for re-entry; else passthrough |
 | adversarial | Model (+ mechanical tools findings) | `status`, `findings[{type,severity,description,evidence_refs,target_files?,fix?}]` | `mode`, `candidate_result`, `handover_attention`, tribunal; tools **reused** from repair stamp when candidate hash matches |
-| validation | Model + tribunal | `verdict`, `basis` | `mode`, `validated_candidate`, `findings`, `handover_attention`, `repair_feedback` (incl. `demand_mismatch` / **`demand_alignment`**), `alignment_gate` |
+| validation | **Runtime mechanical** (default); LLM only if `AEGIS_VALIDATION_LLM=1` | `verdict`, `basis` (LLM path only; ignored by tribunal) | `mode`, `validated_candidate`, `findings`, `handover_attention`, `repair_feedback` (stable origins: `demand_tokens` / `over_export` / `path_scope` / `done_when`), `alignment_gate`, **final verdict** (`tribunal:*` basis) |
 
 **Demand:** investigation input is runtime-materialized (`scripts/lib/demand.sh`). Modes never rewrite demand. Runtime projects **`demand_anchors`** into prompts, capability, and handover.
 

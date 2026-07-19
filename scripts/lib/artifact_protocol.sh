@@ -118,6 +118,21 @@ normalize_weak_model_artifact_status() {
         ')"
       fi
       ;;
+    validation)
+      # LLM residual path only: inject missing arrays so enrich can rewrite.
+      artifact="$(echo "${artifact}" | jq '
+        .findings = (if (.findings | type) == "array" then .findings else [] end)
+        | .basis = (
+            if (.basis | type) == "array" then .basis
+            elif (.basis | type) == "string" and (.basis | length) > 0 then [.basis]
+            else [] end
+          )
+        | .verdict = (
+            if (.verdict == "accepted" or .verdict == "rejected") then .verdict
+            else "rejected" end
+          )
+      ' 2>/dev/null || printf '%s' "${artifact}")"
+      ;;
   esac
 
   printf '%s' "${artifact}"
@@ -1045,6 +1060,10 @@ readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
     }
 '
 
+# Validation tribunal — sole authority for verdict.
+# Stable codes: demand_tokens|over_export|path_scope|done_when|empty_diff|
+# empty_mutation_candidate|invalid_candidate_diff_shape|blocking_finding|accepted
+# Tools re-check is intentionally omitted (adversarial stamps tool findings).
 readonly AEGIS_JQ_ENRICH_VALIDATION='
   | .validated_candidate = ($prev_candidate // .validated_candidate)
   | (.validated_candidate.diff // "") as $cand_diff
@@ -1054,56 +1073,81 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
       | map(gate_finding_quotes($added_exprs; $cand_diff; "soft"))
     )
   | .basis = (.basis // [] | if type == "string" then [.] else . end)
-  | (if (
+  # Normalize intent stamps → stable origin codes (legacy demand_mismatch).
+  # jq: chained `def` without `|` between definitions.
+  | def intent_origin($v):
+      if ($v | type) != "object" then
+        (tostring | if test("^over_export") then "over_export"
+          elif test("^demand_tokens") then "demand_tokens"
+          else "demand_tokens" end)
+      else
+        ($v.origin // "") as $o
+        | ($v.structural_reason // $v.description // "") as $r
+        | if ($o == "demand_tokens" or $o == "over_export"
+              or $o == "path_scope" or $o == "done_when"
+              or $o == "empty_diff") then $o
+          elif ($o == "demand_mismatch" or $o == "demand_alignment"
+                or $o == "demand") then
+            (if ($r | test("(?i)^over_export|over_export:")) then "over_export"
+             elif ($r | test("(?i)^path_scope|path_scope:")) then "path_scope"
+             elif ($r | test("(?i)^done_when|done_when:")) then "done_when"
+             else "demand_tokens" end)
+          elif ($r | test("(?i)^over_export|over_export:")) then "over_export"
+          elif ($r | test("(?i)^demand_tokens|demand_tokens:")) then "demand_tokens"
+          else "demand_tokens" end
+      end;
+    def align_origin($v):
+      ($v.code // $v.origin // "demand_tokens") as $c
+      | if ($c == "demand_alignment" or $c == "demand_mismatch") then "demand_tokens"
+        elif ($c == "demand_tokens" or $c == "over_export"
+              or $c == "path_scope" or $c == "done_when"
+              or $c == "empty_diff") then $c
+        else "demand_tokens" end;
+    def tribunal_basis($codes):
+      ([$codes[]? | select(type == "string" and length > 0)
+        | if startswith("tribunal:") then . else "tribunal:" + . end]
+       | unique);
+    (if (
        (((.validated_candidate.diff // "") | gsub("[[:space:]]"; "")) | length) == 0
        or ((.validated_candidate.diff // "") == "(no changes)")
        or (((.validated_candidate.files_changed // []) | length) == 0)
      ) then
-       .verdict = "rejected" | .basis = ["empty_mutation_candidate"]
+       .verdict = "rejected" | .basis = tribunal_basis(["empty_mutation_candidate"])
      elif (((.validated_candidate.diff // "") | test("(?m)^\\+\\+\\+ b/")) | not) then
-       .verdict = "rejected" | .basis = ["invalid_candidate_diff_shape"]
+       .verdict = "rejected" | .basis = tribunal_basis(["invalid_candidate_diff_shape"])
      else . end)
   | (.findings | blocking_findings_of) as $blocking_findings
-  | ((.validated_candidate.intent_violations // []) | length) as $intent_n
+  | [
+      (.validated_candidate.intent_violations // [])[]?
+      | intent_origin(.)
+    ] as $intent_codes
+  | (($intent_codes | length) > 0) as $intent_fail
   # Note: jq // treats false as missing — use == false explicitly.
   | ($alignment_gate.aligned == false) as $align_fail
+  | [
+      ($alignment_gate.violations // [])[]?
+      | align_origin(.)
+    ] as $align_codes
   | (if (
-       ((.basis // []) | index("empty_mutation_candidate") != null)
-       or ((.basis // []) | index("invalid_candidate_diff_shape") != null)
+       ((.basis // []) | map(sub("^tribunal:"; ""))
+         | (index("empty_mutation_candidate") != null
+            or index("invalid_candidate_diff_shape") != null))
      ) then .
-     elif ($intent_n > 0) then
-       # Soft-accepted demand mismatch from repair intent gates → reject + feedback.
+     elif $intent_fail then
        .verdict = "rejected"
-       | .basis = (
-           ((.basis // []) + ["demand_mismatch"])
-           | unique
-         )
+       | .basis = tribunal_basis($intent_codes)
      elif $align_fail then
-       # Minimal proof: candidate still looks aligned with the demand.
        .verdict = "rejected"
-       | .basis = (
-           ((.basis // []) + ["demand_alignment"])
-           | unique
+       | .basis = tribunal_basis(
+           if ($align_codes | length) > 0 then $align_codes
+           else ["demand_tokens"] end
          )
      elif ($blocking_findings | length) == 0 then
        .verdict = "accepted"
-       | .basis = ["tribunal: no blocking findings after evidence gates"]
-     elif ($tools_gate.mutation_clean == false) then
-       .verdict = "rejected"
-       | .basis = (
-           if (($tools_gate.typescript_errors_in_scope // []) | length) > 0 then
-             ["tribunal: typescript errors in mutation files"]
-           elif (($tools_gate.eslint_errors_in_scope // []) | length) > 0 then
-             ["tribunal: eslint errors in mutation files"]
-           else ["tribunal: mutation-scoped tool failure"] end
-         )
+       | .basis = tribunal_basis(["accepted"])
      else
        .verdict = "rejected"
-       | .basis = (
-           if ((.basis // []) | length) > 0 then .basis
-           else [$blocking_findings[0].description // "blocking adversarial finding"]
-           end
-         )
+       | .basis = tribunal_basis(["blocking_finding"])
      end)
   | (if (.verdict // "") == "rejected" then
        ((.validated_candidate.files_changed // []) | map(select(type == "string"))) as $scopes
@@ -1111,7 +1155,7 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
            [
              $blocking_findings[]
              | {
-                 origin: (.type // "unspecified"),
+                 origin: (.type // "blocking_finding"),
                  severity: (.severity // "unspecified"),
                  target_files: (
                    if ((.target_files // []) | length) > 0 then .target_files
@@ -1131,7 +1175,7 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                (.validated_candidate.intent_violations // [])[]
                | if type == "object" then
                    {
-                     origin: (.origin // "demand_mismatch"),
+                     origin: intent_origin(.),
                      severity: (.severity // "high"),
                      target_files: (
                        if ((.target_files // []) | length) > 0 then .target_files
@@ -1142,7 +1186,7 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                    }
                  else
                    {
-                     origin: "demand_mismatch",
+                     origin: intent_origin(.),
                      severity: "high",
                      target_files: $scopes,
                      structural_reason: tostring,
@@ -1155,7 +1199,7 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                  [
                    ($alignment_gate.violations // [])[]
                    | {
-                       origin: "demand_alignment",
+                       origin: align_origin(.),
                        severity: "high",
                        target_files: (
                          if ((.target_files // []) | length) > 0 then .target_files
@@ -1168,6 +1212,9 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                      }
                  ]
                else [] end
+             )
+           | unique_by(
+               (.origin // "") + "|" + (.structural_reason // "")
              )
          ) as $all_violations
        | .repair_feedback = {

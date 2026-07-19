@@ -5,6 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 test_tmp="$(mktemp -d)"
 repo="${test_tmp}/repo"
 artifact_file="${test_tmp}/validation.json"
+metrics_file="${test_tmp}/metrics.jsonl"
 
 test_cleanup_extra() {
   rm -rf "${test_tmp}"
@@ -32,8 +33,243 @@ edit_diff_restore() {
   git -C "${repo}" restore src/index.ts
 }
 
+# Valid unified diff shape for tribunal (+++ b/ required).
+make_soma_diff() {
+  cat <<'EOF'
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1 +1,2 @@
+-export {};
++export const soma = (a: number, b: number): number => a + b;
+EOF
+}
+
 backup_epistemic_handover
 start_mock_curl_provider
+
+# shellcheck disable=SC1091
+source "${AEGIS_TEST_ROOT}/scripts/lib/common.sh"
+# shellcheck disable=SC1091
+source "${AEGIS_TEST_ROOT}/scripts/lib/demand.sh"
+# shellcheck disable=SC1091
+source "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh"
+
+# ---------------------------------------------------------------------
+# Mechanical emit + tribunal enrich (no runtime / no workspace mutate)
+# ---------------------------------------------------------------------
+
+declare -f aegis_emit_mechanical_validation_substrate >/dev/null 2>&1 \
+  || fail "missing_aegis_emit_mechanical_validation_substrate"
+
+mech_out="$(aegis_emit_mechanical_validation_substrate)" \
+  || fail "mechanical_validation_emit_failed"
+printf '%s' "${mech_out}" | grep -q "${AEGIS_ARTIFACT_BEGIN_MARKER:-AEGIS_ARTIFACT_BEGIN}" \
+  || fail "mechanical_validation_missing_begin_marker"
+mech_body="$(
+  printf '%s' "${mech_out}" \
+    | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER:-AEGIS_ARTIFACT_BEGIN}/,/${AEGIS_ARTIFACT_END_MARKER:-AEGIS_ARTIFACT_END}/p" \
+    | sed -e "1d" -e "\$d"
+)"
+printf '%s' "${mech_body}" | jq -e '
+  .verdict == "accepted"
+  and (.basis | type == "array")
+  and (.findings | type == "array")
+' >/dev/null \
+  || fail "mechanical_validation_body_shape: ${mech_body}"
+
+soma_diff="$(make_soma_diff)"
+prev_cand_json="$(
+  jq -nc --arg diff "${soma_diff}" '{
+    source_mode: "optimize",
+    diff: $diff,
+    files_changed: ["src/index.ts"],
+    intent_violations: []
+  }'
+)"
+val_ctx="$(
+  jq -nc --argjson prev "${prev_cand_json}" '{
+    evidence_refs: ["filesystem.read:epistemic_handover"],
+    observed_payloads: [],
+    prev_candidate: $prev,
+    prev_findings: [],
+    seed_scope: {scope_type:"none",scope_targets:[],scope_confidence:"none"},
+    seed_targets: [],
+    seed_conditions: [],
+    operator_named_paths: [],
+    existing_paths: ["src/index.ts"],
+    tools_gate: {
+      mutation_clean: true,
+      typescript_status: "skipped",
+      eslint_status: "skipped",
+      test_status: "skipped",
+      typescript_errors_in_scope: [],
+      eslint_errors_in_scope: []
+    },
+    demand_anchors: {
+      dense_tokens: ["soma"],
+      operator_named_paths: [],
+      seed_targets: ["src/index.ts"],
+      done_when: []
+    },
+    alignment_gate: {aligned: true, violations: []}
+  }'
+)"
+export AEGIS_MODE="validation"
+val_accept="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx}")"
+echo "${val_accept}" | jq -e '
+  .verdict == "accepted"
+  and (.validated_candidate.files_changed | index("src/index.ts") != null)
+  and ((.repair_feedback | not) or .repair_feedback == null)
+' >/dev/null \
+  || fail "mechanical_tribunal_should_accept: ${val_accept}"
+
+# intent_violations stamp → reject + demand_mismatch feedback
+prev_intent="$(
+  jq -nc --arg diff "${soma_diff}" '{
+    source_mode: "optimize",
+    diff: $diff,
+    files_changed: ["src/index.ts"],
+    intent_violations: [{
+      origin: "demand_mismatch",
+      severity: "high",
+      target_files: ["src/index.ts"],
+      structural_reason: "demand_tokens: missing",
+      evidence_refs: ["mutation.intent"]
+    }]
+  }'
+)"
+val_ctx_intent="$(
+  printf '%s' "${val_ctx}" | jq -c --argjson prev "${prev_intent}" \
+    '.prev_candidate = $prev'
+)"
+val_reject="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_intent}")"
+echo "${val_reject}" | jq -e '
+  .verdict == "rejected"
+  and (.basis | map(test("demand_tokens")) | any)
+  and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
+  and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
+' >/dev/null \
+  || fail "mechanical_tribunal_should_reject_intent: ${val_reject}"
+
+# alignment_gate fail → stable origin demand_tokens
+val_ctx_align="$(
+  printf '%s' "${val_ctx}" | jq -c '
+    .alignment_gate = {
+      aligned: false,
+      violations: [{
+        code: "demand_tokens",
+        reason: "alignment: none of demand tokens appear",
+        fix: "Put demand tokens into the change",
+        target_files: ["src/index.ts"]
+      }]
+    }
+  '
+)"
+val_align="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_align}")"
+echo "${val_align}" | jq -e '
+  .verdict == "rejected"
+  and (.basis | map(test("demand_tokens")) | any)
+  and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
+' >/dev/null \
+  || fail "mechanical_tribunal_should_reject_alignment: ${val_align}"
+
+# Accept when export name carries demand token (no literal in body required)
+export_token_diff="$(
+  cat <<'EOF'
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1 +1,2 @@
+-export {};
++export function terabitsToMegabits(t: number): number { return t * 1000; }
+EOF
+)"
+prev_export="$(
+  jq -nc --arg diff "${export_token_diff}" '{
+    source_mode: "optimize",
+    diff: $diff,
+    files_changed: ["src/index.ts"],
+    intent_violations: []
+  }'
+)"
+# alignment_gate pass simulated after export-name hit
+val_ctx_export="$(
+  jq -nc --argjson prev "${prev_export}" '{
+    evidence_refs: ["filesystem.read:epistemic_handover"],
+    observed_payloads: [],
+    prev_candidate: $prev,
+    prev_findings: [],
+    seed_scope: {scope_type:"none",scope_targets:[],scope_confidence:"none"},
+    seed_targets: ["src/index.ts"],
+    seed_conditions: [],
+    operator_named_paths: [],
+    existing_paths: ["src/index.ts"],
+    tools_gate: {mutation_clean: true, typescript_errors_in_scope: [], eslint_errors_in_scope: []},
+    demand_anchors: {dense_tokens: ["terabits"], seed_targets: ["src/index.ts"]},
+    alignment_gate: {aligned: true, violations: []}
+  }'
+)"
+val_export="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_export}")"
+echo "${val_export}" | jq -e '
+  .verdict == "accepted"
+  and (.basis | map(test("accepted")) | any)
+' >/dev/null \
+  || fail "mechanical_tribunal_should_accept_export_token: ${val_export}"
+
+# Live alignment gate: export name matches dense token
+if declare -f aegis_candidate_alignment_gate >/dev/null 2>&1; then
+  align_live="$(
+    AEGIS_INVESTIGATION_INPUT="funções de conversão terabits para megabits" \
+      aegis_candidate_alignment_gate \
+        "${export_token_diff}" \
+        '["src/index.ts"]' \
+        "funções de conversão terabits para megabits" \
+        '{"seed_targets":["src/index.ts"],"operator_named_paths":[],"done_when":[]}'
+  )"
+  echo "${align_live}" | jq -e '.aligned == true' >/dev/null \
+    || fail "alignment_export_name_should_pass: ${align_live}"
+
+  bad_diff="$(
+    cat <<'EOF'
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1 +1,2 @@
+-export {};
++export function power(x: number): number { return x; }
+EOF
+  )"
+  align_bad="$(
+    aegis_candidate_alignment_gate \
+      "${bad_diff}" \
+      '["src/index.ts"]' \
+      "funções de conversão terabits para megabits" \
+      '{"seed_targets":["src/index.ts"],"operator_named_paths":[],"done_when":[]}'
+  )"
+  echo "${align_bad}" | jq -e '
+    .aligned == false
+    and (.violations | map(.code) | index("demand_tokens") != null)
+  ' >/dev/null \
+    || fail "alignment_should_reject_unrelated_export: ${align_bad}"
+
+  align_path="$(
+    aegis_candidate_alignment_gate \
+      "${export_token_diff}" \
+      '["src/other.ts"]' \
+      "terabits conversion in src/index.ts" \
+      '{"seed_targets":["src/index.ts"],"operator_named_paths":["src/index.ts"],"done_when":[]}'
+  )"
+  echo "${align_path}" | jq -e '
+    .aligned == false
+    and (.violations | map(.code) | index("path_scope") != null)
+  ' >/dev/null \
+    || fail "alignment_should_reject_path_scope: ${align_path}"
+fi
+
+# ---------------------------------------------------------------------
+# Runtime: bad handover still fails; good reject path is mechanical
+# ---------------------------------------------------------------------
 
 mkdir -p "${repo}/src"
 printf 'export {};\n' > "${repo}/src/index.ts"
@@ -76,6 +312,62 @@ validation_status=$?
 set -e
 [[ "${validation_status}" -ne 0 ]] \
   || fail "validation_accepted_mismatched_candidate"
+
+# Mechanical end-to-end reject (intent stamp) without repair re-entry / promote.
+: > "${metrics_file}"
+jq -n --arg diff "${soma_diff}" '
+  {
+    artifact_snapshot: {
+      mode: "adversarial",
+      investigation_input: "adicione uma funcao soma",
+      operational_context: {
+        candidate_result: {
+          source_mode: "optimize",
+          diff: $diff,
+          files_changed: ["src/index.ts"],
+          intent_violations: [{
+            origin: "demand_mismatch",
+            severity: "high",
+            target_files: ["src/index.ts"],
+            structural_reason: "demand_tokens: missing",
+            evidence_refs: ["mutation.intent"]
+          }]
+        },
+        findings: [],
+        evidence_refs: ["filesystem.read:epistemic_handover"]
+      }
+    },
+    epistemic_state: {
+      next_attention_targets: ["src/index.ts"],
+      attention_scope: "bounded falsification",
+      attention_reason: "challenge completed"
+    }
+  }
+' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+
+set +e
+AEGIS_REPAIR_FEEDBACK_LOOP=false \
+AEGIS_VALIDATION_LLM=0 \
+AEGIS_METRICS_FILE="${metrics_file}" \
+AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
+  bash runtime_aegis.sh validation >"${test_tmp}/val_mech.out" 2>"${test_tmp}/val_mech.err"
+mech_rc=$?
+set -e
+[[ "${mech_rc}" -eq 0 ]] \
+  || fail "mechanical_validation_runtime_failed: $(cat "${test_tmp}/val_mech.err")"
+grep -q "validation_mechanical" "${test_tmp}/val_mech.err" \
+  || fail "mechanical_validation_log_missing: $(cat "${test_tmp}/val_mech.err")"
+jq -e 'select(.kind=="validation" and .result=="mechanical")' "${metrics_file}" >/dev/null \
+  || fail "mechanical_validation_metric_missing: $(cat "${metrics_file}")"
+jq -e 'select(.kind=="validation" and .result=="rejected")' "${metrics_file}" >/dev/null \
+  || fail "mechanical_validation_reject_metric_missing: $(cat "${metrics_file}")"
+# Artifact in handover / stdout should be rejected demand_mismatch
+artifact_out="$(extract_first_artifact_payload "$(cat "${test_tmp}/val_mech.out")")"
+echo "${artifact_out}" | jq -e '
+  .verdict == "rejected"
+  and (.basis | map(test("demand_tokens")) | any)
+' >/dev/null \
+  || fail "mechanical_runtime_reject_artifact: ${artifact_out}"
 
 write_accepted_artifact "${diff_content}"
 
@@ -150,4 +442,4 @@ grep -q '99' "${AEGIS_TEST_GH_OUT}.num" || fail "issue_comment_wrong_number"
 grep -q 'SUCCESS' "${AEGIS_TEST_GH_OUT}.body" || fail "issue_comment_missing_success"
 grep -q 'task: 3' "${AEGIS_TEST_GH_OUT}.body" || fail "issue_comment_missing_task"
 
-echo "[PASS] Adversarial to Validation contract and promotion"
+echo "[PASS] Adversarial to Validation contract, mechanical tribunal, and promotion"

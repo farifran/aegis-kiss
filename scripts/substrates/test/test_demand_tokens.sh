@@ -699,8 +699,8 @@ jq -n '{
 rf_sec="$(aegis_format_repair_feedback_section "${tmp_rf}")"
 printf '%s' "${rf_sec}" | grep -q 'REPAIR FEEDBACK' \
   || fail "repair_feedback_section_missing: ${rf_sec}"
-printf '%s' "${rf_sec}" | grep -q 'demand_mismatch' \
-  || fail "repair_feedback_should_list_demand_mismatch: ${rf_sec}"
+printf '%s' "${rf_sec}" | grep -qE 'demand_mismatch|demand_tokens' \
+  || fail "repair_feedback_should_list_demand_code: ${rf_sec}"
 printf '%s' "${rf_sec}" | grep -q 'src/index.ts' \
   || fail "repair_feedback_should_list_scope: ${rf_sec}"
 rm -f "${tmp_rf}"
@@ -735,7 +735,8 @@ val_ctx="$(
     operator_named_paths: [],
     existing_paths: ["src/index.ts"],
     tools_gate: {mutation_clean: true, typescript_errors_in_scope: [], eslint_errors_in_scope: []},
-    demand_anchors: {}
+    demand_anchors: {},
+    alignment_gate: {aligned: true, violations: []}
   }'
 )"
 # shellcheck disable=SC1091
@@ -745,8 +746,12 @@ if declare -f enrich_cognitive_artifact >/dev/null 2>&1; then
   val_out="$(enrich_cognitive_artifact "${val_raw}" "${val_ctx}")"
   echo "${val_out}" | jq -e '
     .verdict == "rejected"
-    and ((.basis | index("demand_mismatch")) != null)
-    and (.repair_feedback.violations | map(.origin) | index("demand_mismatch") != null)
+    and (
+      (.basis | index("tribunal:demand_tokens") != null)
+      or (.basis | index("demand_tokens") != null)
+      or (.basis | map(test("demand_tokens")) | any)
+    )
+    and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
     and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
   ' >/dev/null \
     || fail "validation_should_reject_intent_violations: ${val_out}"

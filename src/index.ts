@@ -9,3 +9,7 @@ export function megabytesToBits(megabytes: number): number {
 export function megabytesToKilobits(megabytes: number): number {
   return megabytes * 1024;
 }
+
+export function pentabytesToKilobits(pentabytes: number): number {
+  return pentabytes * 1024 * 1024 * 1024 * 1024;
+}

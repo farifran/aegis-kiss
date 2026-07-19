@@ -66,7 +66,7 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 | `repair` | aider | Bounded mutation from candidates + MUTATION BRIEF |
 | `optimize` | **raw** (advise only) | Strict plan or `no_improvement_needed`; **can_improve** → re-enter **repair** once; else passthrough → adversarial |
 | `adversarial` | raw LLM | Falsify candidate assumptions |
-| `validation` | raw LLM + tribunal gates | Verdict; `repair_feedback` / `demand_mismatch` on reject |
+| `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `repair_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
 
 **Skills (`.skills/<mode>.md`):**
 
@@ -76,7 +76,8 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 | `forensics.md` | **Yes** only on LLM residual path |
 | `repair.md` | **Yes** — Aider mutation |
 | `optimize.md` | **Yes** — raw LLM advise-only (JSON plan; no edits) |
-| `adversarial.md` / `validation.md` | **Yes** — raw substrate |
+| `adversarial.md` | **Yes** — raw substrate (unless tools-dirty mechanical) |
+| `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
 
 Field ownership: `.skills/field_ownership.md`.
 
@@ -118,7 +119,7 @@ Config lists a base set; execute_mode **re-ranks** and may **omit** search when 
 | repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
 | optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; trivial-skip / max 1 improve / metrics `kind:optimize` |
 | adversarial | handover, tsc, eslint, test | **Reuses** repair tool stamp when candidate hash matches; else re-runs; mechanical findings if tools dirty |
-| validation | handover only | Tribunal + **alignment gate** (tokens/paths/exports/done_when); may reject `demand_alignment` |
+| validation | handover only | **Mechanical tribunal** + **alignment gate** (tokens↔export names, paths, exports, done_when); stable `tribunal:*` basis; no LLM by default |
 
 **Authorization:** operator-named paths, `required_evidence`, Layer 0 / attention seed — not import graphs.
 
@@ -140,7 +141,7 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Repair prompt extras | ALVO / BRIEF (data) / FEEDBACK; skill owns policy (no recency echo) |
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
-| demand_mismatch | soft-accept → `intent_violations` on artifact → validation reject + local re-repair |
+| demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
 
 Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
 

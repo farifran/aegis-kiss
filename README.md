@@ -74,7 +74,8 @@ cat .harness/runtime/last_outcome.json | jq .
 | **forensics** | Mechanical by default; LLM if multi-seed probes **tie** or `AEGIS_FORENSICS_LLM=1` |
 | **repair** | Aider (bounded mutation) |
 | **optimize** | Raw LLM (advise only → repair re-entry or passthrough) |
-| **adversarial / validation** | Raw LLM + runtime tribunal gates |
+| **adversarial** | Raw LLM + runtime tribunal (mechanical when tools dirty) |
+| **validation** | **Mechanical tribunal** by default (`AEGIS_VALIDATION_LLM=0`); LLM opt-in |
 
 ---
 
@@ -88,7 +89,7 @@ cat .harness/runtime/last_outcome.json | jq .
 
 **Forensics.** Mechanical `{id, reason}`; multi-seed ranked by content probes; LLM only on true ambiguity. Search only on LLM residual path.
 
-**Repair.** Prompt stack (no policy echo): `AGENTS.md` → **skill** (policy) → DEMAND ANCHORS / FEEDBACK / ALVO / BRIEF (data) → investigation → **jail** (path list) → whole-format rules if needed → thin close cue. Rails: Aider **auto-lint** (file eslint/prettier/static + **project tsc delta**) → post-diff scope → preflight tsc/test/smoke → **intent gates** with dedicated Aider fix budget (default 3) before soft-accept + `intent_violations` / validation `demand_mismatch`. Metrics: `kind:"intent"` in `pipeline_metrics.jsonl`.
+**Repair.** Prompt stack (no policy echo): `AGENTS.md` → **skill** (policy) → DEMAND ANCHORS / FEEDBACK / ALVO / BRIEF (data) → investigation → **jail** (path list) → whole-format rules if needed → thin close cue. Rails: Aider **auto-lint** (file eslint/prettier/static + **project tsc delta**) → post-diff scope → preflight tsc/test/smoke → **intent gates** with dedicated Aider fix budget (default 3) before soft-accept + `intent_violations` / validation tribunal codes (`demand_tokens`, `over_export`, …). Metrics: `kind:"intent"` / `kind:"alignment"` / `kind:"validation"` in `pipeline_metrics.jsonl`.
 
 **Flags (common)**
 
@@ -107,6 +108,7 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_OPTIMIZE_REPAIR_LOOP=true\|false` | Enable can_improve → repair re-entry (default true) |
 | `AEGIS_OPTIMIZE_TRIVIAL_SKIP=true\|false` | Skip optimize LLM when repair is small/clean (default true) |
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES` | Diff line cap for trivial skip (default 24) |
+| `AEGIS_VALIDATION_LLM=0\|1` | Validation LLM residual (default **0**: mechanical tribunal only) |
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES` | File count cap for trivial skip (default 1) |
 | `AEGIS_CANDIDATE_TOOLS_STAMP_DIR` | Where repair stamps tsc/test/eslint for adversarial reuse |
 | `AEGIS_ALIGNMENT_GATE=true\|false` | Validation minimal demand-alignment proof on final candidate (default true) |

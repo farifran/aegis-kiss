@@ -44,10 +44,7 @@ assert_manifest_contract() {
       "test.run"
     ])
     and (.modes.optimize.evidence_capabilities == [
-      "filesystem.read",
-      "git.status",
-      "typescript.check",
-      "eslint.check"
+      "filesystem.read"
     ])
   ' >/dev/null || fail "invalid_manifest_contract"
 }

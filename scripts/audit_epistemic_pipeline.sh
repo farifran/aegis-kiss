@@ -60,6 +60,15 @@ discovery_mechanical_path_ok() {
     && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/execute_mode.sh
 }
 
+# Validation is tribunal-only by default (mechanical emit + enrich ladder).
+validation_mechanical_path_ok() {
+  grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/lib/demand.sh \
+    && grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/execute_mode.sh \
+    && grep -Eq 'AEGIS_JQ_ENRICH_VALIDATION' scripts/lib/artifact_protocol.sh \
+    && grep -Eq 'aegis_candidate_alignment_gate' scripts/lib/demand.sh \
+    && grep -Eq 'AEGIS_VALIDATION_LLM' .harness/config.sh
+}
+
 # Mutation target resolution lives in the aider module split (targets.sh),
 # not only in the thin aider_substrate.sh entrypoint.
 mutation_resolver_consumes() {
@@ -299,7 +308,8 @@ check_adversarial_to_validation() {
   array_contains "filesystem.read:epistemic_handover" "${AEGIS_VALIDATION_EVIDENCE[@]}" \
     && skill_declares ".skills/adversarial.md" "findings" \
     && skill_declares ".skills/validation.md" "findings" \
-    && skill_declares ".skills/validation.md" "verdict"
+    && skill_declares ".skills/validation.md" "verdict" \
+    && validation_mechanical_path_ok
 }
 
 main() {

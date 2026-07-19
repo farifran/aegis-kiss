@@ -26,7 +26,7 @@
 | Repair com ALVO omite search_symbol | `aegis_handover_has_repair_alvo` + execute_mode |
 | Scrub “operator named” falso no discovery | enrich discovery |
 | Repair intent gates (tokens + over-export) + fix retry | `assert_mutation_intent_gates` / `assemble_intent_fix_prompt` |
-| Soft-accept → `intent_violations` → validation `demand_mismatch` feedback | stamp + `repair_feedback` + `aegis_format_repair_feedback_section` |
+| Soft-accept → `intent_violations` → validation tribunal codes (`demand_tokens` / `over_export` / …) | stamp + `repair_feedback` + `aegis_format_repair_feedback_section` |
 | Intent metrics jsonl (`pass`/`fail`/`soft_accept`/`fix_attempt`) | `record_mutation_intent_metric` → `AEGIS_METRICS_FILE` |
 | Profiles lean: forensics sem git.status; optimize handover-only + sem demand anchors no prompt | config + raw/prompt |
 

@@ -405,6 +405,7 @@ emit_mutation_artifact() {
   attention_reason="ATTENTION_REASON_$(printf '%s' "${AEGIS_MODE}" | tr '[:lower:]' '[:upper:]')"
 
   # Soft-accepted intent misses → structured stamp for validation feedback (R3).
+  # origin uses stable codes (demand_tokens|over_export|…) not umbrella labels.
   local intent_violations_json="[]"
   if [[ "${AEGIS_MUTATION_INTENT_SOFT_ACCEPTED:-0}" == "1" ]] \
     && [[ -n "${AEGIS_MUTATION_INTENT_DIAGNOSTICS:-}" ]]; then
@@ -414,13 +415,23 @@ emit_mutation_artifact() {
         | jq -R -s -c --argjson files "${files_changed}" '
             split("\n")
             | map(select(length > 0))
-            | map({
-                origin: "demand_mismatch",
-                severity: "high",
-                target_files: $files,
-                structural_reason: .,
-                evidence_refs: ["mutation.intent"]
-              })
+            | map(
+                . as $line
+                | (
+                    if ($line | test("^over_export")) then "over_export"
+                    elif ($line | test("^demand_tokens")) then "demand_tokens"
+                    elif ($line | test("^path_scope")) then "path_scope"
+                    elif ($line | test("^done_when")) then "done_when"
+                    else "demand_tokens" end
+                  ) as $code
+                | {
+                    origin: $code,
+                    severity: "high",
+                    target_files: $files,
+                    structural_reason: $line,
+                    evidence_refs: ["mutation.intent"]
+                  }
+              )
           ' 2>/dev/null || printf '[]'
     )"
   fi

@@ -759,6 +759,34 @@ execute_substrate() {
     return 0
   fi
 
+  # Validation is a deterministic tribunal by default (no LLM).
+  # Enrich rewrites verdict/candidate/findings/repair_feedback from
+  # handover + alignment gate. Opt-in LLM: AEGIS_VALIDATION_LLM=1.
+  if [[ "${AEGIS_MODE}" == "validation" ]]; then
+    local _val_llm="${AEGIS_VALIDATION_LLM:-0}"
+    case "$(printf '%s' "${_val_llm}" | tr '[:upper:]' '[:lower:]')" in
+      1|true|yes|on|llm)
+        aegis_log "validation_llm: AEGIS_VALIDATION_LLM force (skill loaded)"
+        ;;
+      *)
+        declare -f aegis_emit_mechanical_validation_substrate >/dev/null 2>&1 \
+          || aegis_fatal "validation_mechanical_unavailable"
+        substrate_output="$(
+          aegis_emit_mechanical_validation_substrate
+        )" || substrate_output=""
+        [[ -n "${substrate_output}" ]] \
+          || aegis_fatal "validation_mechanical_failed"
+        aegis_log "validation_mechanical: tribunal-only (no LLM)"
+        if declare -f aegis_record_validation_metric >/dev/null 2>&1; then
+          aegis_record_validation_metric "mechanical" "tribunal"
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+        return 0
+        ;;
+    esac
+    unset _val_llm
+  fi
+
   # Optimize mechanical paths (no LLM): after refine, or trivial repair.
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
     if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT:-0}" -ge 1 ]]; then
@@ -986,6 +1014,31 @@ main() {
     aider) measure "executor_artifact_validation" validate_mutation_artifact ;;
     *)     measure "executor_artifact_validation" validate_artifact           ;;
   esac
+
+  # Validation: record tribunal verdict after enrich (mechanical or LLM path).
+  if [[ "${AEGIS_MODE}" == "validation" ]] \
+    && declare -f aegis_record_validation_metric >/dev/null 2>&1; then
+    local _val_verdict _val_basis
+    _val_verdict="$(
+      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
+        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
+        | sed -e "1d" -e "\$d" \
+        | jq -r '.verdict // empty' 2>/dev/null || true
+    )"
+    _val_basis="$(
+      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
+        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
+        | sed -e "1d" -e "\$d" \
+        | jq -r '(.basis // []) | if type == "array" then join("; ") else tostring end' \
+          2>/dev/null || true
+    )"
+    case "${_val_verdict}" in
+      accepted|rejected|insufficient)
+        aegis_record_validation_metric "${_val_verdict}" "${_val_basis:0:160}"
+        ;;
+    esac
+    unset _val_verdict _val_basis
+  fi
 
   # Optimize LLM path: record final enrich status (mechanical paths record earlier).
   if [[ "${AEGIS_MODE}" == "optimize" ]] \

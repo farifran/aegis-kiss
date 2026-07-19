@@ -1213,8 +1213,120 @@ aegis_emit_mechanical_adversarial_from_tools_gate() {
   aegis_emit_framed_json_artifact '{"status":"challenged","findings":[]}'
 }
 
+# Mechanical validation: tribunal (enrich) owns the real verdict.
+# Model path is opt-in via AEGIS_VALIDATION_LLM=1. Placeholder fields are
+# overwritten by AEGIS_JQ_ENRICH_VALIDATION (candidate, findings, verdict).
+aegis_emit_mechanical_validation_substrate() {
+  aegis_emit_framed_json_artifact \
+    '{"verdict":"accepted","basis":[],"findings":[]}'
+}
+
+# Append kind:"validation" metric line.
+# result: mechanical | llm | accepted | rejected | …
+aegis_record_validation_metric() {
+  local result="${1-}"
+  local detail="${2-}"
+  [[ -n "${result}" ]] || return 0
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  jq -cn \
+    --arg kind "validation" \
+    --arg result "${result}" \
+    --arg detail "${detail}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{kind:$kind,result:$result,detail:$detail,at:$at}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
+# Map free-text intent diagnostics / legacy origins → stable code.
+# Codes: demand_tokens | over_export | path_scope | done_when | empty_diff | demand
+aegis_violation_code_from_text() {
+  local text="${1-}"
+  case "$(printf '%s' "${text}" | tr '[:upper:]' '[:lower:]')" in
+    demand_tokens:*|*"demand_tokens"*|demand_mismatch) printf 'demand_tokens' ;;
+    over_export:*|*"over_export"*|*"too many"*"export"*) printf 'over_export' ;;
+    path_scope:*|*"path_scope"*|*"files_changed"*) printf 'path_scope' ;;
+    done_when:*|*"done_when"*) printf 'done_when' ;;
+    empty_diff:*|*"empty"*"diff"*) printf 'empty_diff' ;;
+    demand_alignment) printf 'demand_tokens' ;;
+    *) printf 'demand' ;;
+  esac
+}
+
+# New export names from unified-diff +lines (function/const only).
+# Prints one name per line (may be empty).
+aegis_diff_added_export_names() {
+  local diff_content="${1-}"
+  local added
+  added="$(
+    printf '%s\n' "${diff_content}" \
+      | grep -E '^\+' \
+      | grep -vE '^\+\+\+' \
+      || true
+  )"
+  [[ -n "${added}" ]] || return 0
+  printf '%s\n' "${added}" \
+    | grep -Ei \
+      'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]' \
+    | sed -E \
+      -e 's/^.*export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\2/' \
+      -e 's/^.*export[[:space:]]+const[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\1/' \
+    | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' \
+    | awk '!seen[$0]++' \
+    || true
+}
+
+# CamelCase / snake_case → lower tokens (one per line) for export↔demand match.
+aegis_split_ident_tokens() {
+  local name="${1-}"
+  [[ -n "${name}" ]] || return 0
+  printf '%s\n' "${name}" \
+    | sed -E 's/([a-z0-9])([A-Z])/\1 \2/g; s/_+/ /g; s/-+/ /g' \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -s '[:space:]' '\n' \
+    | awk 'length >= 3 { print }' \
+    || true
+}
+
+# True (exit 0) when any demand token hits +lines, export names, or ident stems.
+aegis_alignment_tokens_hit() {
+  local added="${1-}"
+  local tokens_nl="${2-}"
+  local export_names_nl="${3-}"
+  local token ename stem haystack
+
+  haystack="$(
+    printf '%s\n' "${added}"
+    printf '%s\n' "${export_names_nl}"
+    while IFS= read -r ename; do
+      [[ -n "${ename}" ]] || continue
+      aegis_split_ident_tokens "${ename}"
+    done <<< "${export_names_nl}"
+  )"
+
+  while IFS= read -r token; do
+    [[ -n "${token}" ]] || continue
+    [[ "${#token}" -ge 4 ]] || continue
+    if printf '%s' "${haystack}" | grep -Fqi -- "${token}"; then
+      return 0
+    fi
+    # export name contains token or token contains export stem (≥4)
+    while IFS= read -r ename; do
+      [[ -n "${ename}" ]] || continue
+      if printf '%s' "${ename}" | grep -Fqi -- "${token}"; then
+        return 0
+      fi
+      if [[ "${#ename}" -ge 4 ]] \
+        && printf '%s' "${token}" | grep -Fqi -- "${ename}"; then
+        return 0
+      fi
+    done <<< "${export_names_nl}"
+  done <<< "${tokens_nl}"
+  return 1
+}
+
 # Minimal proof: final candidate still looks aligned with the demand.
 # Prints JSON: {aligned:bool, violations:[{code,reason,fix,target_files}]}
+# Origin codes are stable (demand_tokens|over_export|path_scope|done_when|empty_diff).
 # Args: <diff_content> [files_changed_json] [investigation_input] [anchors_json]
 aegis_candidate_alignment_gate() {
   local diff_content="${1-}"
@@ -1240,8 +1352,8 @@ aegis_candidate_alignment_gate() {
   fi
 
   local -a violations=()
-  local added tokens token hit=0 token_list export_n max_exports
-  local named_json seed_json done_json path hit_path
+  local added tokens token_list export_n max_exports export_names
+  local named_json seed_json done_json hit_path
 
   added="$(
     printf '%s\n' "${diff_content}" \
@@ -1249,33 +1361,7 @@ aegis_candidate_alignment_gate() {
       | grep -vE '^\+\+\+' \
       || true
   )"
-
-  # --- dense demand tokens in +lines (same spirit as repair intent) ---
-  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
-    tokens="$(aegis_demand_dense_tokens "${text}")"
-    if [[ -n "${tokens}" ]]; then
-      hit=0
-      while IFS= read -r token; do
-        [[ -n "${token}" ]] || continue
-        [[ "${#token}" -ge 4 ]] || continue
-        if printf '%s' "${added}" | grep -Fqi -- "${token}"; then
-          hit=1
-          break
-        fi
-      done <<< "${tokens}"
-      if [[ "${hit}" -eq 0 ]]; then
-        token_list="$(printf '%s' "${tokens}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-        violations+=("$(
-          jq -nc --arg tl "${token_list}" '{
-            code: "demand_tokens",
-            reason: ("alignment: none of demand tokens [" + $tl + "] appear in candidate +lines"),
-            fix: ("Put demand tokens from [" + $tl + "] into the changed code (name or body)"),
-            target_files: []
-          }'
-        )")
-      fi
-    fi
-  fi
+  export_names="$(aegis_diff_added_export_names "${diff_content}")"
 
   # --- over-export ---
   : "${AEGIS_MUTATION_MAX_NEW_EXPORTS:=1}"
@@ -1284,12 +1370,8 @@ aegis_candidate_alignment_gate() {
     export_n="$(count_diff_added_exports "${diff_content}")"
   else
     export_n="$(
-      printf '%s\n' "${added}" \
-        | grep -Eic \
-          'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]' \
-        || true
+      printf '%s\n' "${export_names}" | awk 'NF' | wc -l | tr -d '[:space:]'
     )"
-    export_n="$(printf '%s' "${export_n}" | tr -d '[:space:]')"
     [[ -n "${export_n}" ]] || export_n=0
   fi
   if [[ "${export_n}" -gt "${max_exports}" ]]; then
@@ -1347,13 +1429,37 @@ aegis_candidate_alignment_gate() {
     fi
   fi
 
-  # --- done_when (soft): if present, at least one phrase appears in +lines ---
+  # --- dense demand tokens: +lines, export names, camelCase/snake stems ---
+  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+    tokens="$(aegis_demand_dense_tokens "${text}")"
+    if [[ -n "${tokens}" ]]; then
+      if ! aegis_alignment_tokens_hit "${added}" "${tokens}" "${export_names}"; then
+        token_list="$(printf '%s' "${tokens}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        violations+=("$(
+          jq -nc --arg tl "${token_list}" '{
+            code: "demand_tokens",
+            reason: ("alignment: none of demand tokens [" + $tl
+              + "] appear in +lines or export names"),
+            fix: ("Put demand tokens from [" + $tl
+              + "] into the export name or body"),
+            target_files: []
+          }'
+        )")
+      fi
+    fi
+  fi
+
+  # --- done_when (soft): if present, phrase in +lines or export names ---
   if printf '%s' "${done_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     local done_hit=0 done_item done_list
     while IFS= read -r done_item; do
       [[ -n "${done_item}" ]] || continue
       [[ "${#done_item}" -ge 3 ]] || continue
       if printf '%s' "${added}" | grep -Fqi -- "${done_item}"; then
+        done_hit=1
+        break
+      fi
+      if printf '%s' "${export_names}" | grep -Fqi -- "${done_item}"; then
         done_hit=1
         break
       fi
@@ -1551,7 +1657,7 @@ aegis_format_repair_file_bodies_section() {
   rm -rf "${tmp}" 2>/dev/null || true
 }
 
-# Local re-repair feedback from rejected validation (demand_mismatch + others).
+# Local re-repair feedback from rejected validation (stable tribunal codes).
 aegis_format_repair_feedback_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
