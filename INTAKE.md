@@ -13,6 +13,178 @@
 
 ---
 
+## Fluxo default (KISS) — o que o operador usa no dia a dia
+
+### Pedido normal
+
+```text
+Leia INTAKE.md
+SPEC <pedido micro>
+```
+
+(Se a rule do projeto já carrega `INTAKE.md`, basta `SPEC <pedido>`.)
+
+### O que o assistente faz com **SPEC** (contrato obrigatório)
+
+1. **Draft** da issue (§2) a partir do pedido.  
+2. **Mostra o body completo** da issue no chat (Goal, Targets, Tasks, Change, Acceptance, Out of scope, Constraints).  
+3. **Pergunta uma vez**, de forma curta:
+
+   > Alterar a issue? Responde **EDIT** + texto, ou **OK** / **não** / **GO** para seguir.
+
+4. **Se o operador disser que não quer alterar** (`OK`, `não`, `GO`, `sim executa`, `lgtm`, …) → **executa automaticamente a cadeia**:
+
+   ```text
+   OPEN → READY → HAND → RUN
+   ```
+
+   ou seja: cria a issue no GitHub, labels, branch `aegis/issue-N`, corre
+
+   `./run_aegis.sh --fresh --pipeline mutation --issue N`
+
+   (com `unset GITHUB_TOKEN` se o token de ambiente for inválido).
+
+5. **Se o operador disser EDIT** (ou colar correções) → atualiza o draft, **volta ao passo 2–3** (mostra de novo + pergunta). Não corre Aegis até OK.
+
+6. **Depois do RUN** (sem o operador pedir mais verbos, se shell/resultado disponíveis):
+
+   - Resume **OUT** (≤5 linhas).  
+   - Se **SUCCESS** e acceptance ok no tree → propõe ou faz **SHIP** (commit + `[x]`) conforme permissão; se ambíguo, pergunta só: `SHIP #N t1?`.
+
+### Diagrama
+
+```text
+SPEC <pedido>
+    │
+    ▼
+ mostra issue draft
+    │
+    ▼
+ "Alterar?" ──EDIT──► corrige draft ──┐
+    │ OK / não / GO                  │
+    ▼                                │
+ OPEN → READY → HAND → RUN ◄─────────┘
+    │
+    ▼
+ OUT → (SHIP se SUCCESS)
+```
+
+### Respostas do operador após o draft
+
+| Diz | Assistente faz |
+|-----|----------------|
+| `OK` / `não` / `GO` / `lgtm` / `executa` | Cadeia auto: OPEN→READY→HAND→RUN |
+| `EDIT …` ou lista de mudanças | Atualiza draft, mostra outra vez, pergunta de novo |
+| `STOP` | Para; não cria issue nem corre Aegis |
+| `RO` (em vez de mutation) | Igual, mas HAND/RUN em **readonly** |
+
+### Acceptance no draft (evita falha do alignment)
+
+No SPEC, Acceptance deve ser **tokens curtos** que aparecem no código/diff, não prosa:
+
+```markdown
+## Acceptance
+- converterMegabytesToKilobits
+- 1024 * 8
+```
+
+Não: “is exported from src/index.ts with typed number…”.
+
+### Pré-requisitos da cadeia auto
+
+- `gh` autenticado (`gh auth status`); se falhar OPEN → reportar e parar.  
+- `unset GITHUB_TOKEN` se token de ambiente inválido.  
+- Worktree: avisar se targets dirty; não mutar `src/` à mão durante RUN.  
+- Durante RUN: Scout **não** edita targets.
+
+---
+
+## Vocabulário reservado
+
+### Entrada
+
+```text
+Leia INTAKE.md
+SPEC <pedido>
+```
+
+Pós-run / casos especiais: verbos finos abaixo.
+
+### Verbos (default vs avançado)
+
+| Verbo | Uso | Significa |
+|-------|-----|-----------|
+| **`SPEC`** | **Default** | Draft → mostra issue → pergunta alterar? → se não, **OPEN→READY→HAND→RUN** (+ OUT/SHIP se possível) |
+| **`EDIT`** | Após SPEC | Só reescreve o draft; não executa |
+| **`OK`** / **`GO`** | Após SPEC | Confirma draft sem mudanças → dispara cadeia auto |
+| **`STOP`** | Qualquer momento | Cancela cadeia pendente |
+| **`OUT`** | Pós-run | Resume outcome/diff (≤5 linhas) |
+| **`SHIP`** | Pós-SUCCESS | Commit §5 + task `[x]` |
+| **`NEXT`** | Multi-task | Próxima `[ ]` + HAND/RUN `--fresh` |
+| **`FIX`** | Falha | Diagnóstico demand vs patch; re-SPEC/re-run ou fix jailed |
+| **`POL`** | Pós-SHIP | Polish + `polish: issue#N…` |
+| **`RO`** | Em vez de mutation | Readonly (sonda) |
+| **`OPEN`** **`READY`** **`HAND`** **`RUN`** | **Avançado / debug** | Passos manuais; no fluxo default o **SPEC+OK** já os encadeia |
+
+### Argumentos
+
+| Token | Significado |
+|-------|-------------|
+| `#N` | Issue N |
+| `tK` | Task K (ex. `t2`) |
+| `@path` | Forçar target no SPEC |
+
+### Exemplos
+
+**Dia a dia (preferido):**
+
+```text
+Leia INTAKE.md
+SPEC megabytes→kilobits em src/index.ts
+```
+
+Assistente mostra issue e pergunta. Operador:
+
+```text
+OK
+```
+
+→ issue no GitHub + Aegis corre sozinho.
+
+**Com edição:**
+
+```text
+SPEC …
+→ (vê draft)
+EDIT Acceptance só: nomeDaFuncao
+→ (vê draft de novo)
+OK
+```
+
+**Pós-run manual:**
+
+```text
+OUT
+SHIP #2 t1
+```
+
+### Regras de interpretação
+
+1. **SPEC sem texto** → pedir o pedido numa frase; não inventar.  
+2. **SPEC+OK** = autorização completa para criar issue e correr mutation (não pedir OPEN/READY/HAND/RUN à parte).  
+3. Verbo desconhecido → perguntar.  
+4. Sem `gh` / auth → mostrar draft, explicar bloqueio OPEN; oferecer free-text RUN só se o operador pedir.  
+5. Durante RUN: **proibido** editar targets.  
+6. Respostas curtas; o body da issue no SPEC pode ser o único bloco longo.
+
+### Rule do projeto (opcional)
+
+```text
+On "Leia INTAKE.md" or SPEC/OK/EDIT/OUT/SHIP/…: follow INTAKE.md. SPEC shows issue draft, asks once to edit; if user declines, auto OPEN→READY→HAND→RUN. Scout only during RUN.
+```
+
+---
+
 ## 0. O que este ficheiro gere (e o que não gere)
 
 ### 0.1 Gere aqui (kit nativo)
@@ -23,7 +195,7 @@
 | Progresso (task list `[ ]`/`[x]`) | Mesma issue | **Scout / humano** |
 | Labels de prontidão | GitHub labels | Scout / humano |
 | Código “o que o software é” | git commits (§5) | Scout / humano / opt-in harness |
-| Handoff para executar | CLI `./run_aegis.sh --issue N` | Operador (± Scout imprime o comando) |
+| Handoff + execução | CLI `./run_aegis.sh --issue N` | **Scout após SPEC+OK** (cadeia auto); operador pode RUN à mão |
 | Prova curta de run | comentário issue (opt-in) + `last_outcome` local | Aegis (opt-in) / Scout |
 | Branch de trabalho | git branch | Scout / humano |
 | Diagnóstico pós-falha | chat + issue edit se demand má | Scout |
@@ -426,102 +598,73 @@ Cosmético trivial → IDE. Design aberto → só chat. Épico → partir issues
 
 ---
 
-## 7. Utilização prática com o assistente
+## 7. Utilização prática
 
-### 7.1 Como “ligar” este ficheiro
-
-No início da sessão (ou na rule do projeto), o humano (ou a rule fixa) diz:
-
-> Segue `INTAKE.md` neste repositório. És o Scout: issues, task list, commits e handoff Aegis — não o executor do harness.
-
-**Cursor:** rule/project doc apontando a `INTAKE.md`.  
-**Claude Code:** CLAUDE.md / instrução de sessão: “Read and follow INTAKE.md”.  
-**Não** coloques o texto inteiro no `AGENTS.md` (esse é para o LLM *dentro* do Aegis).
-
-### 7.2 Frases úteis do operador → resposta esperada do Scout
-
-| Operador diz | Scout faz |
-|--------------|-----------|
-| “Quero X no código” | Explora → draft issue §2 → pede confirmação → `gh issue create` |
-| “Prepara o Aegis para a #42” | `gh issue view 42` → valida schema/labels → imprime comando run + `git status` |
-| “A run da #42 passou” | Lê outcome/diff → commit §5 se preciso → marca task `[x]` → propõe próxima |
-| “A run falhou” | Diagnóstico demand vs patch → edita issue **ou** re-run; não dual-write |
-| “Continua a issue #42” | `git log --grep=issue#42` + `gh issue view` → próxima `[ ]` → handoff `--fresh` |
-| “Só explora, não mutes” | Readonly Aegis ou só leitura no IDE; sem promote |
-| “Fecha a #42” | Verifica Goal + todos `[x]` + commits → `gh issue close 42` se ok |
-
-### 7.3 Sessão tipo (fim a fim)
+### 7.1 Default (2 mensagens)
 
 ```text
-1. Humano: "Preciso de converter bits→bytes em src/"
-2. Scout: lê INTAKE + src → draft issue
-3. Humano: "ok, cria"
-4. Scout: gh issue create → #42 ; labels ; branch aegis/issue-42
-5. Scout: imprime
-     ./run_aegis.sh --fresh --pipeline mutation --issue 42
-6. Humano (outro terminal): corre Aegis  [Scout espera]
-7. Humano: "acabou, vê o outcome"
-8. Scout: last_outcome + diff → commit aegis: issue#42 … → [x] task
-9. Scout: se há task 2, propõe nova run --fresh; senão close issue
+Leia INTAKE.md
+SPEC <pedido>
 ```
 
-### 7.4 O que o assistente deve abrir em cada fase
+```text
+OK
+```
 
-| Fase | Ler |
-|------|-----|
-| Intake | `INTAKE.md` §2–3, código relevante (read-only) |
-| Pré-run | issue via `gh`, `git status`, labels |
-| Pós-run | `last_outcome.json`, metrics, `git diff`, §5 commits, §3 tasks |
-| Nova sessão | `INTAKE.md` (se rule não carregar), `git log --grep=issue#N`, `gh issue view N` |
+→ issue criada + Aegis mutation + OUT (+ SHIP se possível).
 
-### 7.5 Anti-padrões (assistente)
+### 7.2 Com edição
 
-- Mutar `src/` enquanto Aegis corre no mesmo branch  
-- Marcar todas as tasks `[x]` de uma vez “para limpar”  
-- Commit monólito no fim de 5 tasks  
-- Guardar plano só no chat e não na issue  
-- Criar `DEMANDS.md` / `.harness/demands/`  
-- Misturar cloud keys no body da issue  
-- Tratar soft-accept como done sem olhar acceptance  
+```text
+SPEC <pedido>
+→ draft
+EDIT <mudanças>
+→ draft novo
+OK
+```
+
+### 7.3 Anti-padrões
+
+- Pedir OPEN/READY/HAND/RUN à mão no fluxo normal (o **OK** já encadeia)  
+- Mutar `src/` durante RUN  
+- Acceptance em prosa longa (quebra alignment)  
+- Plano só no chat sem issue  
+- Store `demands/`
 
 ---
 
 ## 8. Checklist rápido
 
-**Antes**
+**Fluxo SPEC (default)**
 
-- [ ] Goal / Targets / Tasks / Acceptance / Out of scope  
-- [ ] Issue `#N` no GitHub  
-- [ ] Labels: sem `blocked`; idealmente `ready` + `operator-confirmed`  
-- [ ] Branch `aegis/issue-N` ; `git status` limpo nos targets  
-
-**Handoff**
-
-- [ ] `./run_aegis.sh --fresh --pipeline mutation --issue N`  
-- [ ] Scout **não** edita targets durante a run  
+- [ ] `SPEC <pedido>` → draft mostrado  
+- [ ] Operador: EDIT ou OK  
+- [ ] Se OK: OPEN→READY→HAND→RUN automático  
+- [ ] Acceptance com tokens curtos  
+- [ ] Scout **não** edita targets durante RUN  
 
 **Depois**
 
-- [ ] Outcome + métricas + diff  
-- [ ] Commit `aegis: issue#N task#K …` (+ trailers) se sem auto-commit  
-- [ ] Checkbox da task → `[x]` (§3)  
-- [ ] Comentário curto opcional  
-- [ ] Próxima task com `--fresh` ou `gh issue close`  
+- [ ] OUT  
+- [ ] SHIP se SUCCESS (`aegis: issue#N…` + `[x]`)  
+- [ ] Sem `package.js` / paths fantasmas se Constraints mencionarem package.json 
 
 ---
 
-## 9. Mapa de secções (para o assistente)
+## 9. Mapa de secções
 
 | § | Conteúdo |
 |---|----------|
+| **Fluxo default** | **SPEC → mostra issue → OK? → auto OPEN…RUN** |
+| **Vocabulário** | Verbos (default vs avançado) |
 | 0 | O que este ficheiro gere / não gere |
 | 1 | Papéis |
 | 2 | Formato da issue |
-| 3 | **Task list — dono + `gh`** |
+| 3 | Task list — dono + `gh` |
 | 4 | Labels e branch |
 | 5 | Commits como memória |
 | 6 | Handoff Aegis e ciclo de vida |
-| 7 | **Utilização prática com o assistente** |
+| 7 | Utilização prática |
 | 8 | Checklist |
 | 9 | Este índice |
 
