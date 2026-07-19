@@ -17,3 +17,5 @@ export function converterBitsToBytesExact(bits: number): number {
 export function converterMegabytesToPetabits(megabytes: number): number {
   return megabytes * 8 / (1024 * 1024 * 1024);
 }
+
+export { TokenBucket } from "./tokenBucket.js";
