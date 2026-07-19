@@ -13,3 +13,7 @@ export function converterMegabitsToGigabytes(megabits: number): number {
 export function converterBitsToBytesExact(bits: number): number {
   return Math.floor(bits / 8);
 }
+
+export function converterMegabytesToPetabits(megabytes: number): number {
+  return megabytes * 8 / (1024 * 1024 * 1024);
+}
