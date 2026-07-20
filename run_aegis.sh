@@ -69,6 +69,9 @@ Options:
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Fetch GitHub issue #N (title+body via gh) as demand
+  --task K             Scope demand to checklist task K (1-based) of the
+                       issue body; keeps issue Goal/Targets/Constraints as
+                       context and omits other tasks. Sets AEGIS_ISSUE_TASK.
   --from-fit PATH      fit.json or directory from fit_check --emit-micros
   --unit N             Run proposed_units[N].demand from --from-fit
   --force-apply        Operator override: on the FINAL executed mode of a
@@ -106,6 +109,7 @@ FRESH_INVESTIGATION=false
 UNTIL=""
 FORCE_APPLY=false
 ISSUE_NUMBER=""
+ISSUE_TASK=""
 INVESTIGATION_INPUT=""
 declare -a POSITIONAL=()
 
@@ -388,6 +392,9 @@ run_mode() {
   fi
   if [[ -n "${ISSUE_NUMBER}" ]]; then
     cmd+=("--issue" "${ISSUE_NUMBER}")
+  fi
+  if [[ -n "${ISSUE_TASK}" ]]; then
+    cmd+=("--task" "${ISSUE_TASK}")
   fi
   if [[ -n "${INVESTIGATION_INPUT}" ]]; then
     cmd+=("${INVESTIGATION_INPUT}")
@@ -744,6 +751,12 @@ parse_cli() {
         ISSUE_NUMBER="$1"
         ;;
 
+      --task)
+        shift
+        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing task value" >&2; exit 1; }
+        ISSUE_TASK="$1"
+        ;;
+
       --from-fit)
         shift
         [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing --from-fit path" >&2; exit 1; }
@@ -830,14 +843,39 @@ main() {
       exit 1
     }
     ISSUE_NUMBER=""
+    ISSUE_TASK=""
     FRESH_INVESTIGATION=true
     echo "[RUN] from_fit unit=${unit_idx} title=$(printf '%s' "${FIT_CHECK_JSON}" | jq -r --argjson i "${unit_idx}" '.proposed_units[$i].title // "?"')"
   elif [[ -n "${ISSUE_NUMBER}" ]]; then
     INVESTIGATION_INPUT=""
+    if [[ -n "${ISSUE_TASK}" ]]; then
+      if ! [[ "${ISSUE_TASK}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[RUN][FATAL] invalid_task_number: ${ISSUE_TASK}" >&2
+        exit 1
+      fi
+      export AEGIS_ISSUE_NUMBER="${ISSUE_NUMBER}"
+      export AEGIS_ISSUE_TASK="${ISSUE_TASK}"
+    else
+      export AEGIS_ISSUE_NUMBER="${ISSUE_NUMBER}"
+      unset AEGIS_ISSUE_TASK 2>/dev/null || true
+    fi
   elif [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
     INVESTIGATION_INPUT="${POSITIONAL[*]}"
+    if [[ -n "${ISSUE_TASK}" ]]; then
+      if ! [[ "${ISSUE_TASK}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[RUN][FATAL] invalid_task_number: ${ISSUE_TASK}" >&2
+        exit 1
+      fi
+      export AEGIS_ISSUE_TASK="${ISSUE_TASK}"
+    fi
   else
     INVESTIGATION_INPUT="Analyze repository"
+  fi
+
+  if [[ -n "${ISSUE_TASK}" ]] && [[ -z "${ISSUE_NUMBER}" ]] \
+    && [[ -z "${FROM_FIT}" ]] && [[ "${#POSITIONAL[@]}" -eq 0 ]]; then
+    echo "[RUN][FATAL] task_requires_issue_or_demand" >&2
+    exit 1
   fi
 
   check_dependencies

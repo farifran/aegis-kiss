@@ -86,7 +86,7 @@ cat .harness/runtime/last_outcome.json | jq .
 
 ## Product behavior (current)
 
-**Demand.** `--issue N` loads the real GitHub issue via `gh`. Free-text or optional `## Goal` / `## Targets` / … headers. Operator-named paths are path-safety checked.
+**Demand.** `--issue N` loads the real GitHub issue via `gh`. Optional `--task K` scopes to checklist item K while keeping issue-level Goal/Targets/Constraints as context (other tasks omitted). Free-text or `## Goal` / `## Targets` / … headers. Operator-named paths are path-safety checked.
 
 **Tokens & search.** Dense tokens bind multi-token fixed-string search (`;;`, never ERE) and Layer 0 content resonance (`git grep`). `search_symbol` uses pathspecs (anchors / `src`) and is **omitted** on mechanical forensics and on repair when a forensics ALVO exists.
 

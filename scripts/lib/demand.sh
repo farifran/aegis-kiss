@@ -296,8 +296,12 @@ aegis_normalize_demand_text() {
     return 0
   }
 
-  # Idempotent: already materialised structured demand.
+  # Idempotent: already materialised structured or task-scoped demand.
   if printf '%s' "${text}" | head -n 1 | grep -qx 'Demand (structured):'; then
+    printf '%s' "${text}"
+    return 0
+  fi
+  if printf '%s' "${text}" | head -n 1 | grep -qE '^AEGIS_DEMAND '; then
     printf '%s' "${text}"
     return 0
   fi
@@ -375,11 +379,186 @@ aegis_fetch_issue_demand() {
   printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
 }
 
+# ---------------------------------------------------------
+# Task-scoped demand (issue global context + micro-task)
+# ---------------------------------------------------------
+# ## Tasks checklist items (order preserved). One title per line.
+# Matches "- [ ] …" / "- [x] …" (GitHub task list).
+aegis_demand_task_titles() {
+  local text="${1-}"
+  local section
+  section="$(aegis_demand_md_section "Tasks" "${text}")"
+  [[ -n "$(printf '%s' "${section}" | tr -d '[:space:]')" ]] || return 0
+  printf '%s\n' "${section}" \
+    | sed -nE 's/^[[:space:]]*[-*][[:space:]]+\[([ xX])\][[:space:]]+//p' \
+    | sed -E 's/[[:space:]]+$//' \
+    | awk 'NF'
+}
+
+aegis_demand_task_count() {
+  local text="${1-}"
+  local n=0
+  while IFS= read -r _; do
+    n=$((n + 1))
+  done < <(aegis_demand_task_titles "${text}")
+  printf '%s' "${n}"
+}
+
+# 1-based task title; empty if missing.
+aegis_demand_task_title_at() {
+  local text="${1-}"
+  local k="${2-}"
+  local i=0
+  local line
+  [[ "${k}" =~ ^[1-9][0-9]*$ ]] || return 0
+  while IFS= read -r line; do
+    i=$((i + 1))
+    if [[ "${i}" -eq "${k}" ]]; then
+      printf '%s' "${line}"
+      return 0
+    fi
+  done < <(aegis_demand_task_titles "${text}")
+  return 0
+}
+
+aegis_demand_short_sha() {
+  local payload="${1-}"
+  local h=""
+  if command -v shasum >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | shasum -a 256 2>/dev/null | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | sha256sum 2>/dev/null | awk '{print $1}')"
+  elif command -v md5 >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | md5 -q 2>/dev/null || true)"
+  fi
+  if [[ -n "${h}" ]]; then
+    printf '%s' "${h:0:12}"
+  else
+    printf 'unknown'
+  fi
+}
+
+# Fatal helper for demand-layer errors (works outside full runtime too).
+aegis_demand_fatal() {
+  local code="$1"
+  if declare -f aegis_fatal >/dev/null 2>&1; then
+    aegis_fatal "${code}"
+  fi
+  echo "[AEGIS][DEMAND][FATAL] ${code}" >&2
+  exit 1
+}
+
+# Materialize investigation input for task K of an issue-shaped document.
+#
+# Global issue context is kept (Goal → ISSUE_CONTEXT, Targets, Change,
+# Acceptance, Out of scope, Constraints). Other tasks and Notes are omitted.
+# Task title becomes the unit GOAL so modes focus on one micro-op.
+#
+# Args: <issue_doc> <task_k> [issue_number]
+aegis_materialize_task_scoped_demand() {
+  local text="${1-}"
+  local task_k="${2-}"
+  local issue_n="${3:-${AEGIS_ISSUE_NUMBER:-}}"
+  local n title
+  local goal_s targets_s acceptance_s change_s oos_s constraints_s
+  local targets_raw acceptance_raw change_raw oos_raw constraints_raw
+  local sha head slim
+
+  [[ -n "$(printf '%s' "${text}" | tr -d '[:space:]')" ]] \
+    || aegis_demand_fatal "demand_empty"
+  [[ "${task_k}" =~ ^[1-9][0-9]*$ ]] \
+    || aegis_demand_fatal "demand_task_invalid:${task_k}"
+
+  n="$(aegis_demand_task_count "${text}")"
+  if [[ "${n}" -eq 0 ]]; then
+    aegis_demand_fatal "demand_task_list_empty"
+  fi
+  if [[ "${task_k}" -gt "${n}" ]]; then
+    aegis_demand_fatal "demand_task_missing:${task_k}/${n}"
+  fi
+
+  title="$(aegis_demand_task_title_at "${text}" "${task_k}")"
+  [[ -n "$(printf '%s' "${title}" | tr -d '[:space:]')" ]] \
+    || aegis_demand_fatal "demand_task_empty:${task_k}"
+
+  goal_s="$(aegis_demand_flatten_section "$(aegis_demand_md_section "Goal" "${text}")")"
+  targets_raw="$(aegis_demand_md_section "Targets" "${text}")"
+  targets_s="$(aegis_demand_flatten_section "${targets_raw}")"
+  acceptance_raw="$(aegis_demand_md_section "Acceptance" "${text}")"
+  acceptance_s="$(aegis_demand_flatten_section "${acceptance_raw}")"
+  change_raw="$(aegis_demand_md_section "Change" "${text}")"
+  change_s="$(aegis_demand_flatten_section "${change_raw}")"
+  oos_raw="$(aegis_demand_md_section "Out of scope" "${text}")"
+  oos_s="$(aegis_demand_flatten_section "${oos_raw}")"
+  constraints_raw="$(aegis_demand_md_section "Constraints" "${text}")"
+  constraints_s="$(aegis_demand_flatten_section "${constraints_raw}")"
+
+  # Prefer global Change; else the task title is the change statement.
+  if [[ -z "$(printf '%s' "${change_s}" | tr -d '[:space:]')" ]]; then
+    change_s="${title}"
+    change_raw="- ${title}"
+  fi
+
+  sha="$(
+    aegis_demand_short_sha \
+      "issue=${issue_n};task=${task_k};title=${title};goal=${goal_s};targets=${targets_s};change=${change_s};acceptance=${acceptance_s};oos=${oos_s};constraints=${constraints_s}"
+  )"
+  export AEGIS_DEMAND_SHA="${sha}"
+
+  head="AEGIS_DEMAND issue:${issue_n:-?} task:${task_k} sha:${sha}"
+  head+=$'\n'
+  [[ -n "${goal_s}" ]] && head+=$'\n'"ISSUE_CONTEXT: ${goal_s}"
+  head+=$'\n'"GOAL: ${title}"
+  [[ -n "${targets_s}" ]] && head+=$'\n'"TARGETS: ${targets_s}"
+  head+=$'\n'"CHANGE: ${change_s}"
+  [[ -n "${acceptance_s}" ]] && head+=$'\n'"ACCEPTANCE: ${acceptance_s}"
+  [[ -n "${oos_s}" ]] && head+=$'\n'"OUT_OF_SCOPE: ${oos_s}"
+  [[ -n "${constraints_s}" ]] && head+=$'\n'"CONSTRAINTS: ${constraints_s}"
+
+  # Slim structured body for anchors/path extraction — no task list, no Notes.
+  slim="## Goal"$'\n'"${title}"$'\n'
+  if [[ -n "${goal_s}" ]]; then
+    slim+=$'\n'"## Issue context"$'\n'"${goal_s}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${targets_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Targets"$'\n'"${targets_raw}"$'\n'
+  fi
+  slim+=$'\n'"## Change"$'\n'"${change_raw}"$'\n'
+  if [[ -n "$(printf '%s' "${acceptance_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Acceptance"$'\n'"${acceptance_raw}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${oos_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Out of scope"$'\n'"${oos_raw}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${constraints_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Constraints"$'\n'"${constraints_raw}"$'\n'
+  fi
+
+  printf '%s\n\n---\n\n%s' "${head}" "${slim}"
+}
+
 # Full pipeline: optional issue fetch already done → normalize + safety.
+# When AEGIS_ISSUE_TASK is set, scopes to that checklist item while keeping
+# issue-level Goal/Targets/Constraints as context (other tasks omitted).
 aegis_materialize_investigation_input() {
   local text="${1-}"
   local normalized
-  normalized="$(aegis_normalize_demand_text "${text}")"
+  local task_k="${AEGIS_ISSUE_TASK:-}"
+
+  # Already task-scoped (idempotent).
+  if printf '%s' "${text}" | head -n 1 | grep -qE '^AEGIS_DEMAND '; then
+    normalized="${text}"
+  elif [[ -n "${task_k}" ]]; then
+    normalized="$(
+      aegis_materialize_task_scoped_demand \
+        "${text}" \
+        "${task_k}" \
+        "${AEGIS_ISSUE_NUMBER:-}"
+    )"
+  else
+    normalized="$(aegis_normalize_demand_text "${text}")"
+  fi
+
   aegis_demand_assert_paths_safe "${normalized}"
   printf '%s' "${normalized}"
 }

@@ -108,6 +108,103 @@ printf '%s' "${issue_mat}" | grep -q 'Goal: Ship widget' \
 
 rm -rf "${MOCK_BIN}"
 
+# --- task-scoped demand: global issue context + one checklist task ---
+multi_issue="$(cat <<'EOF'
+# Issue #42: Token bucket
+
+## Goal
+Token bucket in src/tokenBucket.ts reexported by src/index.ts.
+
+## Targets
+- src/tokenBucket.ts
+- src/index.ts
+
+## Tasks
+- [ ] Create src/tokenBucket.ts with public consume/refill API
+- [x] Reexport public API from src/index.ts
+- [ ] Add unit smoke for consume
+
+## Change
+- Add tokenBucket module
+- Reexport from index
+
+## Acceptance
+- Public API exists without any
+- index reexports symbols
+
+## Out of scope
+- e2e tests; drive-by refactors
+
+## Constraints
+- no any; NodeNext .js relative imports
+
+## Notes
+Internal only — must not appear in task-scoped demand
+EOF
+)"
+
+[[ "$(aegis_demand_task_count "${multi_issue}")" == "3" ]] \
+  || fail "task_count_expected_3"
+[[ "$(aegis_demand_task_title_at "${multi_issue}" 1)" == "Create src/tokenBucket.ts with public consume/refill API" ]] \
+  || fail "task_1_title_wrong"
+[[ "$(aegis_demand_task_title_at "${multi_issue}" 2)" == "Reexport public API from src/index.ts" ]] \
+  || fail "task_2_title_wrong"
+
+scoped="$(aegis_materialize_task_scoped_demand "${multi_issue}" 1 42)"
+printf '%s' "${scoped}" | head -n 1 | grep -qE '^AEGIS_DEMAND issue:42 task:1 sha:' \
+  || fail "missing_aegis_demand_header: $(printf '%s' "${scoped}" | head -n 1)"
+printf '%s' "${scoped}" | grep -q 'ISSUE_CONTEXT:.*Token bucket' \
+  || fail "missing_issue_context_global_goal"
+printf '%s' "${scoped}" | grep -q 'GOAL: Create src/tokenBucket.ts' \
+  || fail "missing_task_goal"
+printf '%s' "${scoped}" | grep -q 'TARGETS:.*src/tokenBucket.ts' \
+  || fail "missing_global_targets_in_head"
+printf '%s' "${scoped}" | grep -q 'CONSTRAINTS:.*no any' \
+  || fail "missing_global_constraints"
+printf '%s' "${scoped}" | grep -q '## Targets' \
+  || fail "missing_slim_targets_section"
+# Other tasks and Notes must not leak into the scoped demand body.
+printf '%s' "${scoped}" | grep -q 'Add unit smoke for consume' \
+  && fail "other_task_leaked_into_scoped_demand"
+printf '%s' "${scoped}" | grep -qi 'Internal only' \
+  && fail "notes_leaked_into_scoped_demand"
+printf '%s' "${scoped}" | grep -q '## Tasks' \
+  && fail "tasks_section_should_be_omitted"
+
+# Env-driven materialize path
+export AEGIS_ISSUE_NUMBER=42
+export AEGIS_ISSUE_TASK=2
+scoped_env="$(aegis_materialize_investigation_input "${multi_issue}")"
+printf '%s' "${scoped_env}" | grep -q 'task:2' \
+  || fail "env_task_not_applied"
+printf '%s' "${scoped_env}" | grep -q 'GOAL: Reexport public API from src/index.ts' \
+  || fail "env_task_goal_wrong"
+# Idempotent when already AEGIS_DEMAND
+scoped_twice="$(aegis_materialize_investigation_input "${scoped_env}")"
+[[ "${scoped_twice}" == "${scoped_env}" ]] \
+  || fail "task_scoped_not_idempotent"
+unset AEGIS_ISSUE_TASK AEGIS_ISSUE_NUMBER AEGIS_DEMAND_SHA
+
+# Fatal: task out of range
+set +e
+trap '' ERR
+miss_out="$(aegis_materialize_task_scoped_demand "${multi_issue}" 9 42 2>&1)"
+miss_rc=$?
+set -e
+[[ "${miss_rc}" -ne 0 ]] || fail "out_of_range_task_should_fatal"
+printf '%s' "${miss_out}" | grep -q 'demand_task_missing' \
+  || fail "out_of_range_token_missing: ${miss_out}"
+
+# Fatal: no task list
+set +e
+trap '' ERR
+empty_tasks_out="$(aegis_materialize_task_scoped_demand "${structured}" 1 1 2>&1)"
+empty_tasks_rc=$?
+set -e
+[[ "${empty_tasks_rc}" -ne 0 ]] || fail "empty_task_list_should_fatal"
+printf '%s' "${empty_tasks_out}" | grep -q 'demand_task_list_empty' \
+  || fail "empty_task_list_token_missing: ${empty_tasks_out}"
+
 # --- skills must not advertise removed deep topology surfaces ---
 if grep -REn 'structural_context|node_index|structural\.builder|AEGIS_DISCOVERY_DEPTH' \
   .skills/ >/dev/null 2>&1; then
