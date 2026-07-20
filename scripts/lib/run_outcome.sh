@@ -91,6 +91,10 @@ aegis_classify_reason() {
       class="mutation"
       next_step="Preflight (tsc/test/smoke) falhou na surface; leia payloads em capability_payloads e corrija o candidate"
       ;;
+    failed_to_materialize_repair_candidate_for_optimize_refine)
+      class="mutation"
+      next_step="Optimize can_improve re-entry falhou ao reaplicar o candidate no worktree; confira apply_candidate_diff (diff vs HEAD) ou desative refine com AEGIS_OPTIMIZE_REPAIR_LOOP=false"
+      ;;
     max_repair_attempts_exceeded)
       class="budget"
       next_step="Teto do loop de repair; leia findings no handover, refine a demanda ou aumente AEGIS_MAX_REPAIR_ATTEMPTS"

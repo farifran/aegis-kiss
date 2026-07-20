@@ -183,9 +183,12 @@ seed_demand() {
   exit 2
 }
 
-# Fit review: optional auto-fix for free-text; issues stay check-only.
+# Fit review. Sets AEGIS_LOOP_FIT_BLOCK=1 when mutation must not run.
+# Monster demands: prefer proposed_units[0] (one target), re-check; never
+# burn a full mutation on a still-blocked demand.
 review_fit() {
   local iter="$1"
+  AEGIS_LOOP_FIT_BLOCK=0
   [[ "${DO_FIT}" == "1" || "${DO_FIT}" == "true" ]] || return 0
 
   local fit_json fit_rc=0
@@ -201,35 +204,55 @@ review_fit() {
   model_fit="$(printf '%s' "${fit_json}" | jq -r '.model_fit // "?"' 2>/dev/null || echo '?')"
   log_line "fit iter=${iter} allowed=${allowed} score=${score} model_fit=${model_fit}"
 
-  if [[ "${fit_rc}" -ne 0 || "${allowed}" != "true" ]]; then
-    # Prefer fixed_demand or first proposed unit if auto-fix on.
+  if [[ "${fit_rc}" -eq 0 && "${allowed}" == "true" ]]; then
     if [[ "${AUTO_FIX}" == "1" || "${AUTO_FIX}" == "true" ]]; then
-      local fixed unit0
+      local fixed
       fixed="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty' 2>/dev/null || true)"
-      unit0="$(printf '%s' "${fit_json}" | jq -r '.proposed_units[0].demand // empty' 2>/dev/null || true)"
       if [[ -n "$(printf '%s' "${fixed}" | tr -d '[:space:]')" ]]; then
-        printf '%s\n' "${fixed}" > "${LOOP_DEMAND}"
-        log_line "improve fit: applied fixed_demand"
-        return 0
-      fi
-      if [[ -n "$(printf '%s' "${unit0}" | tr -d '[:space:]')" ]]; then
-        printf '%s\n' "${unit0}" > "${LOOP_DEMAND}"
-        log_line "improve fit: applied proposed_units[0]"
-        return 0
+        if ! cmp -s <(printf '%s' "${fixed}") "${LOOP_DEMAND}" 2>/dev/null; then
+          printf '%s\n' "${fixed}" > "${LOOP_DEMAND}"
+          log_line "improve fit: refreshed fixed_demand"
+        fi
       fi
     fi
-    log_line "fit blocked and no auto-fix available — continue with current demand (may fail run)"
-  elif [[ "${AUTO_FIX}" == "1" || "${AUTO_FIX}" == "true" ]]; then
-    local fixed
-    fixed="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty' 2>/dev/null || true)"
-    if [[ -n "$(printf '%s' "${fixed}" | tr -d '[:space:]')" ]]; then
-      # Only replace if materially different and still allowed.
-      if ! cmp -s <(printf '%s' "${fixed}") "${LOOP_DEMAND}" 2>/dev/null; then
-        printf '%s\n' "${fixed}" > "${LOOP_DEMAND}"
-        log_line "improve fit: refreshed fixed_demand"
-      fi
-    fi
+    return 0
   fi
+
+  # Blocked: auto-narrow to first micro unit when available (KISS).
+  if [[ "${AUTO_FIX}" == "1" || "${AUTO_FIX}" == "true" ]]; then
+    local unit0 fixed
+    unit0="$(printf '%s' "${fit_json}" | jq -r '.proposed_units[0].demand // empty' 2>/dev/null || true)"
+    fixed="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty' 2>/dev/null || true)"
+    # Prefer unit0 over fixed_demand — fixed may still be multi-intent.
+    if [[ -n "$(printf '%s' "${unit0}" | tr -d '[:space:]')" ]]; then
+      printf '%s\n' "${unit0}" > "${LOOP_DEMAND}"
+      log_line "improve fit: applied proposed_units[0] (monster split)"
+    elif [[ -n "$(printf '%s' "${fixed}" | tr -d '[:space:]')" ]]; then
+      printf '%s\n' "${fixed}" > "${LOOP_DEMAND}"
+      log_line "improve fit: applied fixed_demand"
+    else
+      log_line "fit blocked and no unit/fixed to apply"
+      AEGIS_LOOP_FIT_BLOCK=1
+      return 0
+    fi
+
+    # Re-check after narrow.
+    fit_rc=0
+    fit_json="$(
+      bash "${ROOT}/scripts/fit_check_demand.sh" "${LOOP_DEMAND}" 2>"${LOOP_DIR}/fit_${iter}_after.err"
+    )" || fit_rc=$?
+    printf '%s\n' "${fit_json}" > "${LOOP_DIR}/fit_${iter}_after.json" 2>/dev/null || true
+    allowed="$(printf '%s' "${fit_json}" | jq -r '.run_allowed // false' 2>/dev/null || echo false)"
+    log_line "fit after-narrow allowed=${allowed}"
+    if [[ "${fit_rc}" -ne 0 || "${allowed}" != "true" ]]; then
+      log_line "fit still blocked after narrow — skip mutation run"
+      AEGIS_LOOP_FIT_BLOCK=1
+    fi
+    return 0
+  fi
+
+  log_line "fit blocked and auto-fix off — skip mutation run"
+  AEGIS_LOOP_FIT_BLOCK=1
 }
 
 run_aegis_once() {
@@ -238,7 +261,10 @@ run_aegis_once() {
   log_line "run iter=${iter} pipeline=mutation --fresh"
 
   set +e
-  # Full mutation only — never lite.
+  # Full mutation only. Loop is automation: allow promote to reset dirty
+  # targets to HEAD (otherwise a dirty worktree masks all later stresses).
+  # Operator manual runs keep default refuse-dirty unless they set the env.
+  AEGIS_PROMOTION_RESET_DIRTY="${AEGIS_PROMOTION_RESET_DIRTY:-true}" \
   bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation \
     "$(cat "${LOOP_DEMAND}")" \
     >"${logf}" 2>&1
@@ -342,6 +368,14 @@ improve_demand() {
         echo "- Keep single-file target; simplify Change template."
         echo "- Avoid any / stubs; name exports exactly as Acceptance tokens."
         echo "- Do not expand scope beyond Targets."
+        ;;
+      fit)
+        echo "- One path under ## Targets; ≤2 open tasks."
+        echo "- Use fit proposed_units: one micro demand per file."
+        ;;
+      promotion)
+        echo "- Ensure worktree targets are clean (or rely on loop RESET_DIRTY)."
+        echo "- files_changed must match paths in the unified diff."
         ;;
       scope)
         echo "- Align Targets paths with files that must change."
@@ -635,6 +669,22 @@ while [[ "${iter}" -lt "${MAX}" ]]; do
   log_line "======== iteration ${iter}/${MAX} ========"
 
   review_fit "${iter}"
+
+  if [[ "${AEGIS_LOOP_FIT_BLOCK:-0}" == "1" ]]; then
+    AEGIS_LOOP_STATUS="FAILED"
+    AEGIS_LOOP_CLASS="fit"
+    AEGIS_LOOP_REASON="fit_check_blocked"
+    AEGIS_LOOP_NEXT="Split into micros (fit proposed_units) or narrow Targets to 1 path"
+    log_line "skip run: fit blocked"
+    capture_iteration_insight "${iter}" 1 "STOP_FIT"
+    write_state "${iter}" "STOP_FIT"
+    # Still try improve demand for next iter if budget remains
+    if [[ "${iter}" -ge "${MAX}" ]]; then
+      break
+    fi
+    improve_demand "${iter}"
+    continue
+  fi
 
   run_rc=0
   run_aegis_once "${iter}" || run_rc=$?

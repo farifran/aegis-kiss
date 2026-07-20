@@ -686,10 +686,14 @@ materialize_preceding_mutation_candidate() {
     && [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -gt 0 ]] \
     && mode_requires_execution_surface; then
     aegis_log "Materializing Repair candidate for optimize→repair refine..."
-    bash scripts/runtime/apply_candidate_diff.sh \
+    if ! bash scripts/runtime/apply_candidate_diff.sh \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
-      "${AEGIS_EXECUTION_SURFACE_PATH}" \
-      || aegis_fatal "failed_to_materialize_repair_candidate_for_optimize_refine"
+      "${AEGIS_EXECUTION_SURFACE_PATH}"; then
+      # Do not abort the whole pipeline: keep candidate and skip refine edits.
+      # Stress data: mechanical can_improve + apply fail left runs dead.
+      aegis_warn "optimize_refine_materialize_failed — continuing without re-applying prior candidate (repair refine may no-op)"
+      return 0
+    fi
     return 0
   fi
   return 0
