@@ -95,7 +95,115 @@ Não: “is exported from src/index.ts with typed number…”.
 - `gh` autenticado (`gh auth status`); se falhar OPEN → reportar e parar.  
 - `unset GITHUB_TOKEN` se token de ambiente inválido.  
 - Worktree: avisar se targets dirty; não mutar `src/` à mão durante RUN.  
-- Durante RUN: Scout **não** edita targets.
+- Durante RUN: Scout **não** edita targets.  
+- **Fit check** (recomendado antes de OK/RUN): ver secção **Fit check** abaixo.
+
+---
+
+## Fit check — cabe nos rails / no modelo? Como se ajusta?
+
+Ferramenta: `scripts/fit_check_demand.sh` (+ lib `scripts/lib/fit_check.sh`).
+
+```bash
+# stdin ou ficheiro
+bash scripts/fit_check_demand.sh < demand.md
+bash scripts/fit_check_demand.sh --issue 4
+bash scripts/fit_check_demand.sh --write-fixed /tmp/fixed.md < demand.md
+
+# bloquear mutation se não couber
+AEGIS_FIT_CHECK=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
+```
+
+Stdout = JSON `aegis.fit_check.v1`. Exit `0` se `run_allowed`, senão `1`.
+
+### Como o ajuste funciona (importante)
+
+Há **três camadas** — não é “mágica que reescreve o mundo”:
+
+```text
+                    demand original
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │ 1. AUTO-FIX (sempre)  │  reescreve markdown na memória
+              │    → fixed_demand     │  NÃO abre issue sozinho
+              └──────────┬────────────┘
+                         │
+                         ▼
+              ┌───────────────────────┐
+              │ 2. AVALIAR            │  rails_ok + score modelo
+              │    run_allowed?       │
+              └──────────┬────────────┘
+                         │
+           ┌─────────────┼─────────────┐
+           ▼             ▼             ▼
+        RUN ok      PROPOR SPLIT    BLOQUEAR
+                    (needs_operator)
+```
+
+#### 1) O que o sistema **ajusta sozinho** (`auto_fixes_applied` → `fixed_demand`)
+
+| Auto-fix | O que faz |
+|-----------|-----------|
+| `wrap_free_text_to_structured` | Free-text → esqueleto `## Goal/Targets/Tasks/…` |
+| `tokenize_acceptance` | Linhas de Acceptance longas/prosa → tokens curtos (identificadores do Change/Goal) |
+| `neutralize_package_js_prose` | Menções a `package.js` que não são target → prosa neutra |
+
+**Limite:** isto só mexe no **texto da demand**. Não edita o GitHub Issue até o Scout fazer `gh issue edit`. Em free-text + `AEGIS_FIT_CHECK=1`, o `run_aegis` pode **usar** o `fixed_demand` na run.
+
+#### 2) O que o sistema **só propõe** (`proposed_units`) — operador decide
+
+| Situação | Proposta |
+|----------|----------|
+| `targets_count > 1` | Uma micro-unidade por path em `## Targets` |
+| create + reexport no mesmo bundle | Duas unidades sequenciais (create → reexport) |
+| `model_fit=poor` / score alto | Split; **não** corre mutation |
+
+O operador (ou Scout com **OK** por micro) cria issues e corre **uma a uma**.  
+**Não** há multi-RUN automático em background (de propósito — KISS + custo).
+
+#### 3) O que **nunca** é automático
+
+| Nunca auto | Porquê |
+|------------|--------|
+| Correctness do algoritmo (clamp vs `%`) | Rails não “entendem” domínio |
+| Review de produto | Humano |
+| Trocar o modelo | Política do operador (marco 8B = split, não upgrade) |
+
+### Campos do JSON (leitura rápida)
+
+| Campo | Significado |
+|-------|-------------|
+| `rails_ok` | Passou checks mecânicos (targets, tasks, estrutura) |
+| `model_fit` | `ok` \| `marginal` \| `poor` (heurística 8B) |
+| `score` | 0–10 risco (maior = pior) |
+| `run_allowed` | Podes ir a OPEN/RUN? |
+| `fixed_demand` | Demand após auto-fixes |
+| `proposed_units` | Micros sugeridos se não couber |
+| `auto_fixes_applied` | O que já foi reescrito |
+| `how_adjust_works` | Eco deste contrato (para o Scout) |
+
+### Integração no fluxo SPEC
+
+```text
+SPEC <pedido>
+  → (Scout) fit_check no draft
+  → mostra fixed_demand + blockers/proposed_units
+  → se run_allowed: pergunta OK como hoje → OPEN→RUN
+  → se !run_allowed: mostra micros; operador OK por micro (SPEC/OPEN cada um)
+```
+
+### Exemplos
+
+```bash
+# Cabe (como issue #5)
+bash scripts/fit_check_demand.sh --issue 5
+# → run_allowed=true
+
+# Não cabe (como issue #4 monstro)
+bash scripts/fit_check_demand.sh --issue 4
+# → run_allowed=false, proposed_units=[...]
+```
 
 ---
 

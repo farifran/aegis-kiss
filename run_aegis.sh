@@ -772,6 +772,31 @@ main() {
 
   check_dependencies
 
+  # Optional demand fit gate (rails + weak-model budget). Scout / CI:
+  #   AEGIS_FIT_CHECK=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
+  # Free-text: auto-fixed demand may replace INVESTIGATION_INPUT.
+  # Issue bodies: check only — edit GitHub if blocked. See fit_check_demand.sh.
+  if [[ "${AEGIS_FIT_CHECK:-0}" == "1" || "${AEGIS_FIT_CHECK:-0}" == "true" ]] \
+    && [[ "${PIPELINE}" == "mutation" ]] \
+    && [[ "${RESUME}" != "true" ]]; then
+    local fit_json fit_rc=0
+    if [[ -n "${ISSUE_NUMBER}" ]]; then
+      fit_json="$(bash scripts/fit_check_demand.sh --issue "${ISSUE_NUMBER}" 2>/tmp/aegis_fit_err.txt)" || fit_rc=$?
+    else
+      fit_json="$(printf '%s' "${INVESTIGATION_INPUT}" | bash scripts/fit_check_demand.sh 2>/tmp/aegis_fit_err.txt)" || fit_rc=$?
+      if [[ "${fit_rc}" -eq 0 ]]; then
+        INVESTIGATION_INPUT="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand')"
+      fi
+    fi
+    if [[ "${fit_rc}" -ne 0 ]]; then
+      echo "[RUN][FATAL] fit_check_blocked — demand does not fit rails/model budget" >&2
+      [[ -f /tmp/aegis_fit_err.txt ]] && cat /tmp/aegis_fit_err.txt >&2 || true
+      printf '%s\n' "${fit_json}" | jq '{run_allowed,model_fit,score,blockers,warnings,proposed_units,auto_fixes_applied}' 2>/dev/null || true
+      exit 1
+    fi
+    echo "[RUN] fit_check ok model_fit=$(printf '%s' "${fit_json}" | jq -r '.model_fit') score=$(printf '%s' "${fit_json}" | jq -r '.score')"
+  fi
+
   if $RESUME; then
     resolve_resume
   else
