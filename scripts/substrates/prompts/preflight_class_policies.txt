@@ -1,3 +1,4 @@
+syntax|Parse/structure error. Do not nest export function/const/class inside another class. Top-level exports only; free functions AFTER the class. Close all braces; whole file must parse.
 any|Remove any/as any/@ts-ignore. Use precise types or unknown + narrowing. Never silence the checker.
 import|Relative imports: NodeNext .js extension (from './mod.js'). Only package.json deps or Node builtins. Builtins are globals — do not import them as npm packages.
 type|Fix signatures and conversions. Prefer smallest correct type fix. Do not add any.

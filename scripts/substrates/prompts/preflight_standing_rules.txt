@@ -2,4 +2,6 @@ Standing rules (all classes):
 - No `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`.
 - NodeNext relative imports use explicit .js extension.
 - Do not invent npm packages; language builtins are globals.
+- Never nest `export function` / `export const` inside a class — module-level only, after the class.
+- Never edit or create files outside the Edit ONLY list (no "helpful" index.ts fixes).
 - Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.

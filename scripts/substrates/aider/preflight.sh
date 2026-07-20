@@ -11,8 +11,16 @@ classify_preflight_diagnostic_line() {
   lower="$(printf '%s' "${line}" | tr '[:upper:]' '[:lower:]')"
 
   case "${lower}" in
+    *'syntaxerror'*|*'unexpected token'*|*'unexpected eof'*|*'invalid_typescript'*|*'invalid typescript'*|*'expected * for generator'*|*'expected ;'*|*'missing }'*|*'missing {'*)
+      printf 'syntax'
+      ;;
     smoke\ *|*'smoke.'*)
-      printf 'runtime_load'
+      # Smoke may wrap a SyntaxError — prefer syntax when message says so.
+      if printf '%s' "${lower}" | grep -qE 'syntaxerror|unexpected token|unexpected eof'; then
+        printf 'syntax'
+      else
+        printf 'runtime_load'
+      fi
       ;;
     *'as any'*|*': any'*|*'unexpected any'*|*'no-explicit-any'*|*'ts7006'*|*'implicitly has an "any"'*|*"implicitly has an 'any'"*|*'@ts-ignore'*|*'@ts-expect-error'*|*'ts-nocheck'*)
       printf 'any'
@@ -76,7 +84,7 @@ assemble_preflight_fix_prompt() {
   local smoke_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/smoke_import.json"
   local standing_rules="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/prompts/preflight_standing_rules.txt"
 
-  local -a lines_any=() lines_import=() lines_type=() lines_runtime=() lines_other=()
+  local -a lines_any=() lines_import=() lines_type=() lines_runtime=() lines_syntax=() lines_other=()
   local raw_line class
 
   if [[ -f "${tsc_payload}" ]]; then
@@ -87,6 +95,7 @@ assemble_preflight_fix_prompt() {
         any) lines_any+=("${raw_line}") ;;
         import) lines_import+=("${raw_line}") ;;
         runtime_load) lines_runtime+=("${raw_line}") ;;
+        syntax) lines_syntax+=("${raw_line}") ;;
         type) lines_type+=("${raw_line}") ;;
         *) lines_other+=("${raw_line}") ;;
       esac
@@ -102,18 +111,24 @@ assemble_preflight_fix_prompt() {
   if [[ -f "${smoke_payload}" ]]; then
     while IFS= read -r raw_line; do
       [[ -n "${raw_line}" ]] || continue
-      lines_runtime+=("${raw_line}")
+      class="$(classify_preflight_diagnostic_line "${raw_line}")"
+      case "${class}" in
+        syntax) lines_syntax+=("${raw_line}") ;;
+        *) lines_runtime+=("${raw_line}") ;;
+      esac
     done < <(
       jq -r '
         (.payload.results // [])
         | .[]?
         | select(.status == "failed")
-        | "smoke \(.file // "?"): \(.detail // "load failed" | .[0:240])"
+        | "smoke \(.file // "?"): \(.detail // "load failed" | .[0:400])"
       ' "${smoke_payload}" 2>/dev/null || true
     )
   fi
 
   local taxonomy_block=""
+  taxonomy_block+="$(preflight_format_class_block \
+    "[syntax] Parse / structure" "$(preflight_class_policy syntax)" "${lines_syntax[@]:-}")"
   taxonomy_block+="$(preflight_format_class_block \
     "[any] Type escapes" "$(preflight_class_policy any)" "${lines_any[@]:-}")"
   taxonomy_block+="$(preflight_format_class_block \
@@ -135,6 +150,15 @@ assemble_preflight_fix_prompt() {
   local standing=""
   [[ -f "${standing_rules}" ]] && standing="$(cat "${standing_rules}")"
 
+  # Hard constraints block — reduces weak-model scope escape / nested export.
+  local hard_block=""
+  hard_block+="HARD CONSTRAINTS (non-negotiable):"$'\n'
+  hard_block+="- Edit ONLY the files listed under Edit ONLY. Never create or modify other paths."$'\n'
+  hard_block+="- Do NOT nest export function / export const / export class inside a class body."$'\n'
+  hard_block+="- Free functions: place AFTER the class closing brace at module top level."$'\n'
+  hard_block+="- Whole file must parse as valid TypeScript (balanced braces, no truncated EOF)."$'\n'
+  hard_block+="- NodeNext: relative imports use .js extension; do not invent packages."$'\n'
+
   # Diagnostics + standing rules own the fix; scope listed once (no jail echo).
   cat > "${prompt_file}" << EOF
 Preflight fix after a mutation attempt.
@@ -146,6 +170,7 @@ Edit ONLY:
 ${target_list}
 If a prior edit introduced duplicate exports, remove the duplicate — do not redeclare existing names.
 
+${hard_block}
 Original demand:
 ${AEGIS_INVESTIGATION_INPUT}
 
@@ -154,7 +179,7 @@ Diagnostics (fix ONLY these):
 ${taxonomy_block}
 ${standing}
 
-Resolve every listed diagnostic. Edits only — stop.
+Resolve every listed diagnostic. Stay inside Edit ONLY files. Edits only — stop.
 EOF
 
   if [[ "${resolved_edit_format}" == "whole" && "${#prompt_targets[@]}" -gt 0 ]]; then
@@ -595,6 +620,22 @@ run_mutation_preflight_with_fix_attempts() {
 
     if ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
       aegis_warn "mutation_scope_violation on preflight fix — retry remaining attempts"
+      # Next tools fix should restate jail: write a stub diagnostics payload.
+      if [[ -n "${AIDER_CAPABILITY_PAYLOAD_DIR:-}" ]]; then
+        jq -nc \
+          --arg targets "$(printf '%s ' "${mutation_targets[@]:-}")" \
+          '{
+            payload: {
+              errors: [{
+                file: "scope",
+                line: 0,
+                message: ("SCOPE: edits left authorized targets [" + $targets
+                  + "]. Revert unauthorized files; put all code only in listed paths. "
+                  + "Do not create index.ts or other helpers to fix imports.")
+              }]
+            }
+          }' > "${AIDER_CAPABILITY_PAYLOAD_DIR}/typescript_check.json" 2>/dev/null || true
+      fi
       continue
     fi
   done
