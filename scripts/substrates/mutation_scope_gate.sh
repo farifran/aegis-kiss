@@ -36,6 +36,45 @@ mutation_scope_norm_path() {
   printf '%s' "${p}"
 }
 
+# Ephemeral / non-model paths that must never fail the hard scope gate.
+# - operational noise (.aider*, node_modules, .DS_Store)
+# - NodeNext smoke twins: foo.js when foo.ts (or foo.tsx) is authorized
+# - foo.js symlink residue when AEGIS_EXECUTION_SURFACE_PATH is set
+mutation_scope_is_ephemeral() {
+  local candidate="$1"
+  local authorized_blob="${2:-}"
+  local line stem surface
+
+  candidate="$(mutation_scope_norm_path "${candidate}")"
+  [[ -n "${candidate}" ]] || return 0
+
+  case "${candidate}" in
+    node_modules|node_modules/*|*/node_modules|*/node_modules/*) return 0 ;;
+    .aiderignore|.aider*|.DS_Store|*/.DS_Store) return 0 ;;
+  esac
+
+  case "${candidate}" in
+    *.js)
+      stem="${candidate%.js}"
+      while IFS= read -r line; do
+        [[ -n "${line}" ]] || continue
+        line="$(mutation_scope_norm_path "${line}")"
+        if [[ "${line}" == "${stem}.ts" || "${line}" == "${stem}.tsx" ]]; then
+          return 0
+        fi
+      done <<< "${authorized_blob}"
+      surface="${AEGIS_EXECUTION_SURFACE_PATH:-}"
+      if [[ -n "${surface}" && -L "${surface}/${candidate}" ]]; then
+        if [[ -f "${surface}/${stem}.ts" || -f "${surface}/${stem}.tsx" ]]; then
+          return 0
+        fi
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
 # Returns 0 if $1 is authorized by the newline list in $2 (exact match).
 mutation_scope_is_authorized() {
   local candidate="$1"
@@ -43,6 +82,11 @@ mutation_scope_is_authorized() {
   local line
 
   [[ -n "${candidate}" ]] || return 0
+  candidate="$(mutation_scope_norm_path "${candidate}")"
+
+  if mutation_scope_is_ephemeral "${candidate}" "${authorized_blob}"; then
+    return 0
+  fi
 
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
@@ -70,11 +114,13 @@ mutation_scope_check() {
     [[ -n "${path}" ]] || continue
     path="$(mutation_scope_norm_path "${path}")"
     [[ -n "${path}" ]] || continue
+    if mutation_scope_is_ephemeral "${path}" "${authorized_blob}"; then
+      continue
+    fi
     if ! mutation_scope_is_authorized "${path}" "${authorized_blob}"; then
       offenders+=("${path}")
     fi
   done <<< "${changed_blob}"
-
   if [[ "${#offenders[@]}" -eq 0 ]]; then
     return 0
   fi

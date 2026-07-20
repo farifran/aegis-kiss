@@ -39,6 +39,19 @@ echo "${offenders}" | grep -qx 'src/evil.ts' \
 echo "${offenders}" | grep -q 'src/a.ts' \
   && fail "authorized_path_listed_as_offender"
 
+# --- NodeNext twin: authorized .ts covers ephemeral .js ---
+if ! mutation_scope_check $'src/tokenBucket.ts\n' $'src/tokenBucket.ts\nsrc/tokenBucket.js\n'; then
+  fail "js_twin_of_authorized_ts_should_pass"
+fi
+offenders=""
+if offenders="$(mutation_scope_check $'src/index.ts\n' $'src/index.js\nsrc/evil.js\n')"; then
+  fail "unrelated_js_should_fail"
+fi
+echo "${offenders}" | grep -qx 'src/evil.js' \
+  || fail "evil_js_not_listed: ${offenders}"
+echo "${offenders}" | grep -q 'src/index.js' \
+  && fail "index_js_twin_listed_as_offender: ${offenders}"
+
 # --- CLI wrapper ---
 auth_f="$(mktemp)"
 chg_f="$(mktemp)"

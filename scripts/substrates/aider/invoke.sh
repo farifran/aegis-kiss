@@ -287,12 +287,28 @@ capture_worktree_diff() {
 }
 
 # Operational residue on the disposable surface is not mutation authority.
-# Preflight may symlink node_modules; aider may drop .aiderignore — neither
-# is a model-authored path and must not trip the hard scope gate.
+# Preflight may symlink node_modules; aider may drop .aiderignore; NodeNext
+# smoke may leave foo.js → foo.ts twins — none are model-authored paths.
 mutation_path_is_operational_noise() {
-  case "${1:-}" in
+  local p="${1:-}"
+  p="${p#./}"
+  case "${p}" in
     node_modules|node_modules/*|*/node_modules|*/node_modules/*) return 0 ;;
     .aiderignore|.aider*|.DS_Store|*/.DS_Store) return 0 ;;
+  esac
+  # Smoke / NodeNext twin: *.js symlink (or path) beside same-stem *.ts on surface.
+  case "${p}" in
+    *.js)
+      local stem="${p%.js}"
+      local surface="${AEGIS_EXECUTION_SURFACE_PATH:-.}"
+      if [[ -L "${surface}/${p}" ]] \
+        && { [[ -f "${surface}/${stem}.ts" ]] || [[ -f "${surface}/${stem}.tsx" ]]; }; then
+        return 0
+      fi
+      # Also ignore untracked .js when authorized twin .ts exists in the same dir
+      # and the .js is only a symlink residue (checked above) — if regular file,
+      # keep it so real model-authored .js still trips scope when unauthorized.
+      ;;
   esac
   return 1
 }

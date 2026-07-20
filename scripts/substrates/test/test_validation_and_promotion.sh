@@ -265,6 +265,42 @@ EOF
     and (.violations | map(.code) | index("path_scope") != null)
   ' >/dev/null \
     || fail "alignment_should_reject_path_scope: ${align_path}"
+
+  # done_when prose must pass when identifier tokens hit +lines
+  prose_diff="$(
+    cat <<'EOF'
+diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts
+--- a/src/tokenBucket.ts
++++ b/src/tokenBucket.ts
+@@ -0,0 +1,3 @@
++export class TokenBucket {
++  consume(bits: bigint): boolean { return true; }
++}
+EOF
+  )"
+  align_prose="$(
+    aegis_candidate_alignment_gate \
+      "${prose_diff}" \
+      '["src/tokenBucket.ts"]' \
+      $'## Goal\nTokenBucket\n## Targets\n- src/tokenBucket.ts\n## Acceptance\n- TokenBucket is exported from src/tokenBucket.ts with typed consume\n' \
+      '{"seed_targets":[],"operator_named_paths":["src/tokenBucket.ts"],"dense_tokens":["tokenbucket","consume"],"done_when":["TokenBucket is exported from src/tokenBucket.ts with typed consume"]}'
+  )"
+  echo "${align_prose}" | jq -e '.aligned == true' >/dev/null \
+    || fail "alignment_done_when_prose_should_pass_on_tokens: ${align_prose}"
+
+  # done_when with zero token overlap still fails
+  align_prose_miss="$(
+    aegis_candidate_alignment_gate \
+      "${prose_diff}" \
+      '["src/tokenBucket.ts"]' \
+      "unrelated demand" \
+      '{"seed_targets":[],"operator_named_paths":["src/tokenBucket.ts"],"dense_tokens":[],"done_when":["CompletelyUnrelatedSymbolXYZ must exist"]}'
+  )"
+  echo "${align_prose_miss}" | jq -e '
+    .aligned == false
+    and (.violations | map(.code) | index("done_when") != null)
+  ' >/dev/null \
+    || fail "alignment_done_when_should_still_fail_when_no_tokens: ${align_prose_miss}"
 fi
 
 # ---------------------------------------------------------------------

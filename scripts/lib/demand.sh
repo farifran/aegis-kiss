@@ -1463,28 +1463,59 @@ aegis_candidate_alignment_gate() {
     fi
   fi
 
-  # --- done_when (soft): if present, phrase in +lines or export names ---
+  # --- done_when (soft): match identifier tokens from phrases, not full prose ---
+  # Prose like "TokenBucket is exported from src/index.ts" must pass when
+  # +lines contain TokenBucket / index.ts — not the whole sentence.
   if printf '%s' "${done_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-    local done_hit=0 done_item done_list
+    local done_hit=0 done_item done_list done_tokens_nl=""
+    local done_tok
     while IFS= read -r done_item; do
       [[ -n "${done_item}" ]] || continue
       [[ "${#done_item}" -ge 3 ]] || continue
-      if printf '%s' "${added}" | grep -Fqi -- "${done_item}"; then
-        done_hit=1
-        break
+      # Full short bullet still matches (legacy + simple tokens).
+      if [[ "${#done_item}" -le 48 ]] \
+        && ! printf '%s' "${done_item}" | grep -qiE '[[:space:]](is|from|with|should|must|that|the)[[:space:]]'; then
+        if printf '%s' "${added}" | grep -Fqi -- "${done_item}"; then
+          done_hit=1
+          break
+        fi
+        if printf '%s' "${export_names}" | grep -Fqi -- "${done_item}"; then
+          done_hit=1
+          break
+        fi
       fi
-      if printf '%s' "${export_names}" | grep -Fqi -- "${done_item}"; then
-        done_hit=1
-        break
-      fi
+      # Extract code-like tokens / path basenames from the phrase.
+      while IFS= read -r done_tok; do
+        [[ -n "${done_tok}" ]] || continue
+        [[ "${#done_tok}" -ge 3 ]] || continue
+        done_tokens_nl+="${done_tok}"$'\n'
+      done < <(
+        {
+          printf '%s\n' "${done_item}" \
+            | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
+          printf '%s\n' "${done_item}" \
+            | command grep -oE "${AEGIS_SOURCE_PATH_RE:-[A-Za-z0-9_./-]+\\.(ts|tsx|js|jsx|mjs|cjs)\\b}" 2>/dev/null \
+            | command sed 's|.*/||' || true
+          # bare numbers like 1024 that often appear in formulas
+          printf '%s\n' "${done_item}" \
+            | command grep -oE '[0-9]{3,}' 2>/dev/null || true
+        } | sort -u
+      )
     done < <(printf '%s' "${done_json}" | jq -r '.[]? | select(type == "string")')
+
+    if [[ "${done_hit}" -eq 0 && -n "${done_tokens_nl}" ]]; then
+      if aegis_alignment_tokens_hit "${added}" "${done_tokens_nl}" "${export_names}"; then
+        done_hit=1
+      fi
+    fi
+
     if [[ "${done_hit}" -eq 0 ]]; then
       done_list="$(printf '%s' "${done_json}" | jq -r 'map(select(type=="string")) | join(" | ")' 2>/dev/null || true)"
       violations+=("$(
         jq -nc --arg dl "${done_list}" '{
           code: "done_when",
-          reason: ("alignment: none of done_when phrases appear in +lines: " + $dl),
-          fix: ("Reflect done_when in the change: " + $dl),
+          reason: ("alignment: none of done_when tokens/phrases appear in +lines: " + $dl),
+          fix: ("Put done_when identifiers (not full prose) into the change: " + $dl),
           target_files: []
         }'
       )")
