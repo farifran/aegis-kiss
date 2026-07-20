@@ -277,6 +277,13 @@ review_outcome() {
   [[ -n "${class}" && "${class}" != "null" ]] || class="unknown"
   [[ -n "${next}" && "${next}" != "null" ]] || next="inspecione stderr da run"
 
+  # SUCCESS is not an unknown failure class — keep learning tables clean.
+  if [[ "${status}" == "SUCCESS" ]]; then
+    class="ok"
+    [[ -n "${reason}" ]] || reason="—"
+    next="—"
+  fi
+
   AEGIS_LOOP_STATUS="${status}"
   AEGIS_LOOP_REASON="${reason}"
   AEGIS_LOOP_CLASS="${class}"
@@ -447,9 +454,10 @@ capture_iteration_insight() {
   mech_tags="$(
     {
       [[ -f "${logf}" ]] || exit 0
-      grep -E 'optimize_mechanical|adversarial_mechanical|adversarial_llm|validation_mechanical|forensics_mechanical|forensics_llm|optimize_passthrough|optimize_mechanical_clean' \
+      # Prefer executor log lines only (avoid JSON "basis" noise).
+      grep -E '\[AEGIS\]\[EXECUTOR\] (optimize_mechanical|adversarial_mechanical|adversarial_llm|validation_mechanical|forensics_mechanical|forensics_llm|optimize_passthrough)' \
         "${logf}" 2>/dev/null \
-        | sed -E 's/.*\[AEGIS\](\[[A-Z_]+\])?[[:space:]]*//' \
+        | sed -E 's/.*\[AEGIS\]\[EXECUTOR\][[:space:]]*//' \
         | head -n 40
     } | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]'
   )"
@@ -569,30 +577,37 @@ write_insights_digest() {
     echo
     echo "Use evidence above. Prefer **runtime rails** over more LLM. Reject ideas that reintroduce lite/shortcuts."
     echo
-    # Heuristic bullets from patterns
     if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
-      local has_preflight has_precond has_budget has_contract has_halt has_intent
-      has_preflight="$(jq -s 'any(.[]; (.reason_code//"")|test("preflight|mutation_preflight"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
-      has_precond="$(jq -s 'any(.[]; (.reason_code//"")|test("precondition_"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
-      has_budget="$(jq -s 'any(.[]; .reason_class=="budget")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
-      has_contract="$(jq -s 'any(.[]; .reason_class=="contract")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
-      has_halt="$(jq -s 'any(.[]; .reason_class=="epistemic_halt")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
-      has_intent="$(jq -s 'any(.[]; (.metrics_by_kind.intent//{})|length>0)' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      local all_ok has_preflight has_precond has_budget has_contract has_halt has_intent has_mech_v has_mech_i
+      all_ok="$(jq -s 'all(.[]; .status=="SUCCESS" or .reason_class=="ok")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      if [[ "${all_ok}" == "true" ]]; then
+        echo "- **Clean SUCCESS path** — no failure-class hypotheses. Keep demand micro-template; optional: log residual LLM usage rates across future loops."
+        echo "- Tags show mechanical stages fired; only revisit greps if product bugs slip past similar runs."
+      else
+        has_preflight="$(jq -s 'any(.[]; (.reason_code//"")|test("preflight|mutation_preflight"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_precond="$(jq -s 'any(.[]; (.reason_code//"")|test("precondition_"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_budget="$(jq -s 'any(.[]; .reason_class=="budget")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_contract="$(jq -s 'any(.[]; .reason_class=="contract")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_halt="$(jq -s 'any(.[]; .reason_class=="epistemic_halt")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_intent="$(jq -s 'any(.[]; ((.metrics_by_kind.intent//{})|keys|length)>0 and .status!="SUCCESS")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_mech_v="$(jq -s 'any(.[]; any(.mechanical_log_tags[]?; test("verified clean")))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+        has_mech_i="$(jq -s 'any(.[]; any(.mechanical_log_tags[]?; test("optimize_mechanical:")))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
 
-      [[ "${has_preflight}" == "true" ]] && echo "- **preflight failures**: strengthen tools-fix prompts or mechanical preflight classes — not more optimize LLM."
-      [[ "${has_precond}" == "true" ]] && echo "- **precondition gaps**: mode handoff contract incomplete — fix runtime preconditions/enrich, not demand poetry."
-      [[ "${has_budget}" == "true" ]] && echo "- **repair budget exhausted**: repair_feedback quality or intent soft-accept thrashing — tighten feedback codes / can_improve gate."
-      [[ "${has_contract}" == "true" ]] && echo "- **artifact contract**: skill min-output vs enrich mismatch — densify skill or strengthen mechanical emit."
-      [[ "${has_halt}" == "true" ]] && echo "- **forensics halt**: discovery/forensics anchors weak — improve path extraction / seed, not adversarial."
-      [[ "${has_intent}" == "true" ]] && echo "- **intent metrics present**: review soft_accept vs fail rates in iter_*/pipeline_metrics.jsonl."
-      echo "- If **mechanical_verified** dominates adversarial and bugs still ship: add greps (acceptance/body), not multi-agent."
-      echo "- If **mechanical_improve** never fires but code has any/stubs: scan regex gap."
-      echo "- If SUCCESS only after demand shrink: fit_check / INTAKE templates — harness demand rails, not model upgrade alone."
+        [[ "${has_preflight}" == "true" ]] && echo "- **preflight failures**: strengthen tools-fix prompts or mechanical preflight classes — not more optimize LLM."
+        [[ "${has_precond}" == "true" ]] && echo "- **precondition gaps**: mode handoff contract incomplete — fix runtime preconditions/enrich, not demand poetry."
+        [[ "${has_budget}" == "true" ]] && echo "- **repair budget exhausted**: repair_feedback quality or intent thrashing — tighten feedback codes / can_improve gate."
+        [[ "${has_contract}" == "true" ]] && echo "- **artifact contract**: skill min-output vs enrich mismatch — densify skill or strengthen mechanical emit."
+        [[ "${has_halt}" == "true" ]] && echo "- **forensics halt**: discovery/forensics anchors weak — improve path extraction / seed, not adversarial."
+        [[ "${has_intent}" == "true" ]] && echo "- **intent on failed runs**: review soft_accept vs fail in iter_*/pipeline_metrics.jsonl."
+        [[ "${has_mech_v}" == "true" ]] && echo "- **mechanical_verified** on a failed loop: greps/tools may be insufficient for this failure class — inspect failed_mode."
+        [[ "${has_mech_i}" == "true" ]] && echo "- **optimize_mechanical improve** fired: check whether re-repair converged or looped."
+        echo "- If SUCCESS only after demand shrink: fit_check / INTAKE templates — demand rails, not model upgrade alone."
+      fi
     fi
     echo
     echo "## Assistant checklist (after LOOP)"
     echo
-    echo "1. Read this file + \`insights.jsonl\` + last failing \`iter_N/run\` tail."
+    echo "1. Read this file + \`insights.jsonl\` + last failing \`iter_N\` artifacts if any."
     echo "2. Separate **demand smell** (micro/SPEC) vs **harness smell** (precondition, preflight, feedback, greps)."
     echo "3. Propose ≤3 KISS harness changes with evidence from classes/tags above."
     echo "4. Do **not** propose mutation_lite or skipping optimize/adversarial."
