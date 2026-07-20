@@ -18,18 +18,19 @@ test_cleanup_extra() {
 
 write_repair_handover() {
   local diff="$1"
-  jq -n --arg diff "${diff}" '
+  local files_json="${2:-[\"src/index.ts\"]}"
+  jq -n --arg diff "${diff}" --argjson files "${files_json}" '
     {
       artifact_snapshot: {
         mode: "repair",
         operational_context: {
           diff: $diff,
-          files_changed: ["src/index.ts"],
+          files_changed: $files,
           intent_violations: []
         }
       },
       epistemic_state: {
-        next_attention_targets: ["src/index.ts"],
+        next_attention_targets: $files,
         attention_scope: "mutation_applied",
         attention_reason: "test"
       }
@@ -181,6 +182,51 @@ printf '%s' "${findings_game}" | jq -e '
   and any(.[]; .description | test("SymbolX|Acceptance"))
 ' >/dev/null \
   || fail "export_like_token_as_param_should_still_fail: ${findings_game}"
+
+# --- class method + BigInt global satisfy export-like / language tokens ---
+printf '%s\n' \
+  'export class TokenBucket {' \
+  '  constructor(config: number) { this.n = BigInt(config); }' \
+  '  public encodeState(): number { return 1; }' \
+  '  public consume(): boolean { return true; }' \
+  '  private n: bigint = 0n;' \
+  '}' \
+  > "${test_tmp}/src/tokenBucket.ts"
+write_repair_handover "$(cat <<'EOF'
+diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts
+--- /dev/null
++++ b/src/tokenBucket.ts
+@@ -0,0 +1,5 @@
++export class TokenBucket {
++  constructor(c: number) { this.n = BigInt(c); }
++  public encodeState(): number { return 1; }
++  public consume(): boolean { return true; }
++  private n: bigint = 0n;
++}
+EOF
+)" '["src/tokenBucket.ts"]'
+demand_tb="$(cat <<'EOF'
+## Goal
+TokenBucket with encodeState and BigInt
+
+## Targets
+- src/tokenBucket.ts
+
+## Acceptance
+- TokenBucket
+- encodeState
+- consume
+- BigInt
+EOF
+)"
+findings_tb="$(
+  aegis_mechanical_adversarial_diff_scan "${handover}" "${demand_tb}" "${test_tmp}"
+)"
+printf '%s' "${findings_tb}" | jq -e '
+  type == "array"
+  and (all(.[]; (.description | test("Acceptance identifiers missing") | not)))
+' >/dev/null \
+  || fail "class_method_and_bigint_should_satisfy_acceptance: ${findings_tb}"
 
 # --- residual LLM policy ---
 declare -f aegis_adversarial_should_use_llm >/dev/null \

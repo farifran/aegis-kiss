@@ -397,18 +397,21 @@ ${detail}
 - Scope note: ${note:-single-target micro unit}
 EOC
     )"
-    # Acceptance: module tokens + short parent idents that are not other basenames.
+    # Acceptance: module tokens + parent Acceptance idents only (no hardcoded
+    # BigInt/encodeState — those false-positive as "export-like" when methods
+    # or language globals are the real intent).
     acc_block="$(
       {
         printf '%s\n' "${primary_base}"
         printf '%s\n' "${primary_pascal}"
-        printf '%s\n' "BigInt"
-        printf '%s\n' "consume"
-        printf '%s\n' "encodeState"
         aegis_fit_md_section "Acceptance" "${parent}" \
           | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
           | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
-      } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 6
+      } | awk 'NF && !seen[$0]++ {
+          low=tolower($0)
+          if (low=="export" || low=="import" || low=="class" || low=="function") next
+          print "- " $0
+        }' | head -n 6
     )"
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"

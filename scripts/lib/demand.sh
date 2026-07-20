@@ -1962,11 +1962,26 @@ aegis_candidate_files_corpus() {
   )
 }
 
+# Language / Web API globals — presence in body is enough (not export bindings).
+aegis_acceptance_token_is_language_global() {
+  local tok="${1-}"
+  case "$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')" in
+    bigint|promise|map|set|date|error|array|object|json|math|symbol|number|string|boolean|regexp|weakmap|weakset|proxy|reflect|intl|buffer|uint8array|arraybuffer|dataview|url|console)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # API-like tokens (PascalCase / CamelCase / long) must be public exports,
 # not only a parameter name (stress B gaming: MustExistSymbolXYZ as param).
 aegis_acceptance_token_is_export_like() {
   local tok="${1-}"
   [[ -n "${tok}" ]] || return 1
+  # Built-ins are never "must export".
+  if aegis_acceptance_token_is_language_global "${tok}"; then
+    return 1
+  fi
   # Has internal capital (Camel/Pascal) or long identifier.
   [[ "${tok}" =~ [a-z][A-Z] || "${tok}" =~ ^[A-Z][a-zA-Z0-9]+[A-Z] || "${#tok}" -ge 16 ]] \
     && return 0
@@ -1974,14 +1989,25 @@ aegis_acceptance_token_is_export_like() {
   return 1
 }
 
-# Hit if token appears as export function/const/class/type/{ Tok }.
+# Hit if token appears as export function/const/class/type/{ Tok }, or as a
+# class/object method declaration (public encodeState(), encodeState(): …).
+# Param-only gaming (SymbolX: number) does not match method form (needs '(').
 aegis_acceptance_export_hit() {
   local tok="${1-}"
   local corpus="${2-}"
   # Escape tok for basic ERE (idents only expected).
-  printf '%s\n' "${corpus}" | grep -Eiq \
+  if printf '%s\n' "${corpus}" | grep -Eiq \
     "export[[:space:]]+(async[[:space:]]+)?(function|const|class|type|interface|enum)[[:space:]]+${tok}[[:space:](;=]|export[[:space:]]*\{[^}]*\b${tok}\b" \
-    2>/dev/null
+    2>/dev/null; then
+    return 0
+  fi
+  # Method / property function on class or object literal.
+  if printf '%s\n' "${corpus}" | grep -Eiq \
+    "(^|[[:space:];{])((public|private|protected|static|async|readonly|abstract|override)[[:space:]]+)*${tok}[[:space:]]*(\(|:[[:space:]]*\(|:[[:space:]]*function)" \
+    2>/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 # True (0) when every acceptance ident is satisfied in corpus.
