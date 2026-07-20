@@ -1542,6 +1542,47 @@ aegis_candidate_alignment_gate() {
   return 0
 }
 
+# Diff text from handover for repair (op.diff) or optimize (candidate_result).
+aegis_handover_mutation_diff() {
+  local handover="${1-}"
+  [[ -n "${handover}" && -f "${handover}" ]] || return 1
+  jq -r '
+    .artifact_snapshot as $s
+    | if $s.mode == "repair" then
+        ($s.operational_context.diff // empty)
+      else
+        ($s.operational_context.candidate_result.diff
+          // $s.operational_context.diff // empty)
+      end
+  ' "${handover}" 2>/dev/null
+}
+
+# files_changed JSON array for repair or optimize candidate.
+aegis_handover_mutation_files_json() {
+  local handover="${1-}"
+  [[ -n "${handover}" && -f "${handover}" ]] || { printf '[]'; return 0; }
+  jq -c '
+    .artifact_snapshot as $s
+    | if $s.mode == "repair" then
+        [($s.operational_context.files_changed // [])[]?
+          | select(type == "string" and length > 0)]
+      else
+        [($s.operational_context.candidate_result.files_changed
+            // $s.operational_context.files_changed // [])[]?
+          | select(type == "string" and length > 0)]
+      end
+  ' "${handover}" 2>/dev/null || printf '[]'
+}
+
+# Added unified-diff lines only (no +++ headers).
+aegis_diff_added_lines() {
+  local diff_content="${1-}"
+  printf '%s\n' "${diff_content}" \
+    | grep -E '^\+' \
+    | grep -vE '^\+\+\+' \
+    || true
+}
+
 # True when Repair candidate is small/clean enough to skip optimize LLM.
 # Heuristic: ≤N files, ≤M diff lines, no explicit any in added lines.
 aegis_optimize_repair_is_trivial() {
@@ -1554,43 +1595,190 @@ aegis_optimize_repair_is_trivial() {
   : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES:=1}"
   : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES:=24}"
 
-  local n_files n_lines has_any
+  local n_files n_lines has_any diff_content
   n_files="$(
-    jq -r '
-      .artifact_snapshot as $s
-      | select($s.mode == "repair")
-      | [($s.operational_context.files_changed // [])[]?
-          | select(type == "string" and length > 0)]
-      | length
-    ' "${handover}" 2>/dev/null || printf '0'
+    printf '%s' "$(aegis_handover_mutation_files_json "${handover}")" \
+      | jq -r 'length' 2>/dev/null || printf '0'
   )"
   [[ "${n_files}" -ge 1 ]] || return 1
   [[ "${n_files}" -le "${AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES}" ]] || return 1
 
-  n_lines="$(
-    jq -r '
-      .artifact_snapshot as $s
-      | select($s.mode == "repair")
-      | ($s.operational_context.diff // "")
-      | select(type == "string" and length > 0 and . != "(no changes)")
-    ' "${handover}" 2>/dev/null \
-      | wc -l | tr -d ' '
-  )"
+  diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
+  [[ -n "${diff_content}" && "${diff_content}" != "(no changes)" ]] || return 1
+
+  n_lines="$(printf '%s\n' "${diff_content}" | wc -l | tr -d ' ')"
   [[ -n "${n_lines}" && "${n_lines}" -ge 1 ]] || return 1
   [[ "${n_lines}" -le "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES}" ]] || return 1
 
   # Non-trivial if added lines introduce explicit any / as any.
   has_any="$(
-    jq -r '
-      .artifact_snapshot.operational_context.diff // empty
-    ' "${handover}" 2>/dev/null \
-      | grep -E '^\+' \
-      | grep -vE '^\+\+\+' \
+    aegis_diff_added_lines "${diff_content}" \
       | grep -Eiq '(:[[:space:]]*any\b|as[[:space:]]+any\b|@ts-ignore|@ts-expect-error)' \
       && printf '1' || printf '0'
   )"
   [[ "${has_any}" == "0" ]] || return 1
   return 0
+}
+
+# Senior-equivalent greps on Repair delta: at most one mechanical improve.
+# Prints JSON {target_files,change,why_safe,code} or empty string.
+aegis_mechanical_optimize_scan() {
+  local handover="${1-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || return 0
+
+  local diff_content files_json primary added
+  diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
+  files_json="$(aegis_handover_mutation_files_json "${handover}")"
+  [[ -n "${diff_content}" && "${diff_content}" != "(no changes)" ]] || return 0
+
+  primary="$(
+    printf '%s' "${files_json}" \
+      | jq -r 'map(select(type=="string" and length>0))[0] // empty' 2>/dev/null || true
+  )"
+  [[ -n "${primary}" ]] || return 0
+
+  added="$(aegis_diff_added_lines "${diff_content}")"
+  [[ -n "${added}" ]] || return 0
+
+  # 1) Explicit any / suppressions in new lines (types hygiene).
+  if printf '%s\n' "${added}" \
+    | grep -Eiq '(:[[:space:]]*any\b|as[[:space:]]+any\b|@ts-ignore|@ts-expect-error)'; then
+    jq -nc --arg f "${primary}" '{
+      target_files: [$f],
+      change: (
+        "In " + $f
+        + ", remove explicit any / as any / @ts-ignore / @ts-expect-error introduced in the Repair diff; use concrete types or proper narrowing."
+      ),
+      why_safe: "Types-only edit; preserves runtime behavior when any was already type-erased.",
+      code: "any_in_added_lines"
+    }'
+    return 0
+  fi
+
+  # 2) Stub / unfinished markers left in the delivery.
+  if printf '%s\n' "${added}" \
+    | grep -Eiq \
+      '(TODO|FIXME|XXX|not[[:space:]]+implemented|throw[[:space:]]+new[[:space:]]+Error\([[:space:]]*["'\'']not implemented)'; then
+    jq -nc --arg f "${primary}" '{
+      target_files: [$f],
+      change: (
+        "In " + $f
+        + ", replace TODO/FIXME/not-implemented stubs introduced in the Repair diff with the real demanded implementation (or remove dead stub paths)."
+      ),
+      why_safe: "Removes incomplete delivery; does not expand scope beyond files_changed.",
+      code: "stub_in_added_lines"
+    }'
+    return 0
+  fi
+
+  return 0
+}
+
+# Emit optimize can_improve from one mechanical improvement object.
+aegis_emit_mechanical_optimize_can_improve() {
+  local improvement_json="${1-}"
+  local code
+  code="$(printf '%s' "${improvement_json}" | jq -r '.code // "mechanical"' 2>/dev/null || printf 'mechanical')"
+  local body
+  body="$(
+    jq -nc \
+      --argjson imp "${improvement_json}" \
+      --arg basis "optimize_mechanical:${code}" \
+      '{
+        status: "can_improve",
+        basis: $basis,
+        improvements: [{
+          target_files: $imp.target_files,
+          change: $imp.change,
+          why_safe: $imp.why_safe
+        }]
+      }'
+  )" || return 1
+  aegis_emit_framed_json_artifact "${body}"
+}
+
+# Mechanical adversarial findings from candidate +lines (tools already clean).
+# Prints JSON array of findings (may be empty []).
+aegis_mechanical_adversarial_diff_scan() {
+  local handover="${1-}"
+  local investigation="${2-}"
+  if [[ -z "${handover}" ]]; then
+    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+  fi
+  [[ -n "${handover}" && -f "${handover}" ]] || { printf '[]'; return 0; }
+
+  local diff_content files_json primary added
+  diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
+  files_json="$(aegis_handover_mutation_files_json "${handover}")"
+  primary="$(
+    printf '%s' "${files_json}" \
+      | jq -r 'map(select(type=="string" and length>0))[0] // "unknown"' 2>/dev/null || printf 'unknown'
+  )"
+  added="$(aegis_diff_added_lines "${diff_content}")"
+
+  local -a findings=()
+
+  # Stub / unfinished delivery in added lines.
+  if [[ -n "${added}" ]] && printf '%s\n' "${added}" \
+    | grep -Eiq \
+      '(TODO|FIXME|not[[:space:]]+implemented|throw[[:space:]]+new[[:space:]]+Error\([[:space:]]*["'\'']not implemented)'; then
+    findings+=(
+      "$(
+        jq -nc --arg f "${primary}" '{
+          type: "contract_violation",
+          severity: "high",
+          description: "Candidate adds TODO/FIXME/not-implemented stub in added lines",
+          supported_by_evidence: true,
+          evidence_refs: ["candidate.diff"],
+          target_files: [$f],
+          fix: ("In " + $f + ", implement or remove stub paths left in the Repair/optimize candidate.")
+        }'
+      )"
+    )
+  fi
+
+  # Explicit any as contract smell when tools are otherwise clean.
+  if [[ -n "${added}" ]] && printf '%s\n' "${added}" \
+    | grep -Eiq '(:[[:space:]]*any\b|as[[:space:]]+any\b)'; then
+    findings+=(
+      "$(
+        jq -nc --arg f "${primary}" '{
+          type: "contract_violation",
+          severity: "medium",
+          description: "Candidate introduces explicit any in added lines",
+          supported_by_evidence: true,
+          evidence_refs: ["candidate.diff"],
+          target_files: [$f],
+          fix: ("In " + $f + ", replace explicit any with concrete types on lines added by the candidate.")
+        }'
+      )"
+    )
+  fi
+
+  # Unused: investigation reserved for future acceptance-bullet scans.
+  : "${investigation:=}"
+
+  if [[ "${#findings[@]}" -eq 0 ]]; then
+    printf '[]'
+    return 0
+  fi
+  # At most 2 mechanical findings (precision over volume).
+  printf '%s\n' "${findings[@]:0:2}" | jq -s -c '.'
+}
+
+aegis_emit_mechanical_adversarial_findings() {
+  local findings_json="${1-[]}"
+  if ! printf '%s' "${findings_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    return 1
+  fi
+  local body
+  body="$(
+    jq -nc --argjson f "${findings_json}" '{status:"challenged",findings:$f}'
+  )" || return 1
+  aegis_emit_framed_json_artifact "${body}"
 }
 
 # Post-Repair file bodies for optimize (apply candidate on temp copies of HEAD).

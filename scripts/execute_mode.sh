@@ -787,8 +787,11 @@ execute_substrate() {
     unset _val_llm
   fi
 
-  # Optimize mechanical paths (no LLM): after refine, or trivial repair.
+  # Optimize mechanical paths (no LLM): refine cap, senior greps, then trivial.
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
+    local _opt_handover
+    _opt_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+
     if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT:-0}" -ge 1 ]]; then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
@@ -806,27 +809,54 @@ execute_substrate() {
       AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
       return 0
     fi
-    # Trivial repair: small clean diff — skip advisory LLM.
+
+    # Senior-equivalent greps on Repair delta (any/stubs) → at most one improve.
+    if declare -f aegis_mechanical_optimize_scan >/dev/null 2>&1 \
+      && declare -f aegis_emit_mechanical_optimize_can_improve >/dev/null 2>&1; then
+      local _opt_imp
+      _opt_imp="$(aegis_mechanical_optimize_scan "${_opt_handover}" 2>/dev/null || true)"
+      if [[ -n "${_opt_imp}" ]] \
+        && printf '%s' "${_opt_imp}" | jq -e 'type == "object" and (.change|type=="string")' >/dev/null 2>&1; then
+        substrate_output="$(
+          aegis_emit_mechanical_optimize_can_improve "${_opt_imp}"
+        )" || substrate_output=""
+        [[ -n "${substrate_output}" ]] \
+          || aegis_fatal "optimize_mechanical_improve_failed"
+        aegis_log "optimize_mechanical: $(
+          printf '%s' "${_opt_imp}" | jq -r '.code // "improve"' 2>/dev/null || echo improve
+        ) — no LLM"
+        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+          aegis_record_optimize_metric "mechanical_improve" \
+            "$(printf '%s' "${_opt_imp}" | jq -r '.code // empty' 2>/dev/null || true)"
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+        unset _opt_imp
+        return 0
+      fi
+      unset _opt_imp
+    fi
+
+    # Small clean diff: stage still runs (audit basis), no advisory LLM.
     if [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "0" ]] \
       && [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "false" ]] \
       && declare -f aegis_optimize_repair_is_trivial >/dev/null 2>&1 \
-      && aegis_optimize_repair_is_trivial \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"; then
+      && aegis_optimize_repair_is_trivial "${_opt_handover}"; then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
       substrate_output="$(
         aegis_emit_mechanical_optimize_passthrough \
-          "optimize_trivial_skip"
+          "optimize_mechanical_clean"
       )" || substrate_output=""
       [[ -n "${substrate_output}" ]] \
-        || aegis_fatal "optimize_trivial_skip_failed"
-      aegis_log "optimize_trivial_skip: repair candidate small/clean — no LLM"
+        || aegis_fatal "optimize_mechanical_clean_failed"
+      aegis_log "optimize_mechanical_clean: no greppable issues — no LLM"
       if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-        aegis_record_optimize_metric "trivial_skip" "mechanical"
+        aegis_record_optimize_metric "mechanical_clean" "trivial"
       fi
       AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
       return 0
     fi
+    unset _opt_handover
   fi
 
   # Forensics: AEGIS_FORENSICS_USE_LLM is set once in main before materialize.
@@ -956,17 +986,13 @@ main() {
   enforce_context_token_budget
   materialize_selected_manifest
 
-  # Adversarial KISS: tools already dirty on mutation files → mechanical
-  # challenged findings (no LLM). Reused repair stamps feed the gate.
+  # Adversarial mechanical (no LLM): (1) tools dirty (2) greppable diff smells.
   if [[ "${AEGIS_MODE}" == "adversarial" ]] \
-    && declare -f build_tribunal_tools_gate >/dev/null 2>&1 \
-    && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
-    local _adv_files _adv_gate _adv_clean _adv_out
+    && declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
+    local _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
+    _adv_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
     if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
-      _adv_files="$(
-        aegis_handover_candidate_files_changed_json \
-          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
-      )"
+      _adv_files="$(aegis_handover_candidate_files_changed_json "${_adv_handover}")"
     else
       _adv_files="[]"
     fi
@@ -974,15 +1000,13 @@ main() {
     _adv_clean="$(
       printf '%s' "${_adv_gate}" | jq -r '.mutation_clean // true' 2>/dev/null || printf 'true'
     )"
-    if [[ "${_adv_clean}" == "false" ]]; then
+    if [[ "${_adv_clean}" == "false" ]] \
+      && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
       _adv_out="$(
         aegis_emit_mechanical_adversarial_from_tools_gate "${_adv_gate}"
       )" || _adv_out=""
       if [[ -n "${_adv_out}" ]]; then
-        # Thin body ({status,findings:[]}); enrich injects mode, candidate,
-        # tool findings, evidence_refs, attention — same post-path as
-        # execute_substrate early returns (validation/optimize mechanical).
-        # Skipping normalize here fatals artifact_mode_mismatch / contract.
+        # Thin body; enrich injects tool findings + candidate.
         aegis_log "adversarial_mechanical: tools dirty — skip LLM (reuse stamp when hash matched)"
         AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
         if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
@@ -995,7 +1019,37 @@ main() {
         return 0
       fi
     fi
-    unset _adv_files _adv_gate _adv_clean _adv_out
+
+    # Tools clean: senior greps on candidate +lines (stubs / explicit any).
+    if [[ "${_adv_clean}" == "true" ]] \
+      && declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
+      && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
+      _adv_diff_findings="$(
+        aegis_mechanical_adversarial_diff_scan \
+          "${_adv_handover}" \
+          "${AEGIS_INVESTIGATION_INPUT:-}"
+      )" || _adv_diff_findings="[]"
+      if printf '%s' "${_adv_diff_findings}" \
+        | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        _adv_out="$(
+          aegis_emit_mechanical_adversarial_findings "${_adv_diff_findings}"
+        )" || _adv_out=""
+        if [[ -n "${_adv_out}" ]]; then
+          aegis_log "adversarial_mechanical: diff smells — skip LLM"
+          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
+          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+            jq -cn --argjson n "$(printf '%s' "${_adv_diff_findings}" | jq 'length')" \
+              '{kind:"adversarial",result:"mechanical_diff_challenged",findings:$n}' \
+              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+          fi
+          normalize_substrate_output
+          measure "executor_artifact_validation" validate_artifact
+          emit_output
+          return 0
+        fi
+      fi
+    fi
+    unset _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
   fi
 
   measure "executor_execute_substrate" execute_substrate
@@ -1051,11 +1105,14 @@ main() {
     )"
     case "${_opt_status}" in
       can_improve|no_improvement_needed)
-        # Avoid double-count mechanical bases already recorded.
-        if [[ "${_opt_basis}" != "optimize_passthrough_after_refine" \
-          && "${_opt_basis}" != "optimize_trivial_skip" ]]; then
-          aegis_record_optimize_metric "${_opt_status}" "${_opt_basis:0:120}"
-        fi
+        # Avoid double-count mechanical bases already recorded at emit.
+        case "${_opt_basis}" in
+          optimize_passthrough_after_refine|optimize_trivial_skip|optimize_mechanical_clean|optimize_mechanical:*)
+            ;;
+          *)
+            aegis_record_optimize_metric "${_opt_status}" "${_opt_basis:0:120}"
+            ;;
+        esac
         ;;
     esac
     unset _opt_status _opt_basis

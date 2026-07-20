@@ -74,8 +74,8 @@ cat .harness/runtime/last_outcome.json | jq .
 | **discovery** | Runtime mechanical only (**no LLM**) |
 | **forensics** | Mechanical by default; LLM if multi-seed probes **tie** or `AEGIS_FORENSICS_LLM=1` |
 | **repair** | Aider (bounded mutation) |
-| **optimize** | Raw LLM (advise only → repair re-entry or passthrough) |
-| **adversarial** | Raw LLM + runtime tribunal (mechanical when tools dirty) |
+| **optimize** | Mechanical greps first (any/stubs → 1 improve); else LLM advise or clean passthrough |
+| **adversarial** | Mechanical tools dirty + diff greps (stubs/any); else LLM falsify; tribunal enrich |
 | **validation** | **Mechanical tribunal** by default (`AEGIS_VALIDATION_LLM=0`); LLM opt-in |
 
 ---
