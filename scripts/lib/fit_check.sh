@@ -265,17 +265,19 @@ aegis_fit_wrap_free_text() {
 
 # Build a runnable micro demand markdown for one unit.
 # Args: parent_demand, title, note, targets_json_array
+#
+# KISS (stress data): do NOT copy the parent multi-file Change/Acceptance —
+# that caused scope_violation when unit0 still said "implement everything"
+# and listed TokenBucket* tokens while Targets was a single path.
 aegis_fit_unit_demand_md() {
   local parent="${1-}"
   local title="${2-}"
   local note="${3-}"
   local targets_json="${4:-[]}"
-  local parent_goal parent_change parent_acc parent_constraints
-  local targets_block acc_block
+  local parent_goal parent_constraints
+  local targets_block acc_block primary primary_base
 
-  parent_goal="$(aegis_fit_md_section "Goal" "${parent}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-200)"
-  parent_change="$(aegis_fit_md_section "Change" "${parent}")"
-  parent_acc="$(aegis_fit_md_section "Acceptance" "${parent}")"
+  parent_goal="$(aegis_fit_md_section "Goal" "${parent}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-160)"
   parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
   [[ -n "${parent_goal}" ]] || parent_goal="${title}"
 
@@ -284,30 +286,26 @@ aegis_fit_unit_demand_md() {
   )"
   [[ -n "${targets_block}" ]] || targets_block="- src/"
 
+  primary="$(
+    printf '%s' "${targets_json}" \
+      | jq -r 'map(select(type=="string" and length>0))[0] // "src/index.ts"' 2>/dev/null \
+      || printf 'src/index.ts'
+  )"
+  primary_base="$(printf '%s' "${primary}" | sed -E 's|.*/||; s/\.[^.]+$//')"
+
+  # Acceptance: path basename + filename only (not whole parent token soup).
   acc_block="$(
     {
+      printf '%s\n' "${primary_base}"
       printf '%s' "${targets_json}" | jq -r '.[]? | split("/") | last' 2>/dev/null || true
-      printf '%s\n' "${parent_acc}" \
-        | sed -E 's/^[[:space:]]*[-*][[:space:]]*//' \
-        | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null \
-        | head -n 6 || true
-    } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 8
+    } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 4
   )"
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
-  local change_snip
-  change_snip="$(printf '%s\n' "${parent_change}" | head -n 12)"
-  [[ -n "$(printf '%s' "${change_snip}" | tr -d '[:space:]')" ]] \
-    || change_snip="- Implement ${title}"
-
-  local constraints_snip
-  constraints_snip="$(printf '%s\n' "${parent_constraints}" | head -n 6)"
-  [[ -n "$(printf '%s' "${constraints_snip}" | tr -d '[:space:]')" ]] \
-    || constraints_snip="- no any"$'\n'"- KISS"
-
   cat <<EOF
 ## Goal
-${title} — ${parent_goal}
+Single-file micro: ${title}.
+Edit only \`${primary}\`. Ignore other modules from the parent demand.
 
 ## Targets
 ${targets_block}
@@ -316,9 +314,11 @@ ${targets_block}
 - [ ] Task 1 — ${title}
 
 ## Change
-${change_snip}
+- Create or update ONLY \`${primary}\`.
+- Minimal stub or API that belongs in this file alone (export at least one named symbol).
+- Do not create or modify any other path.
+- Do not implement sibling modules in this run.
 - Scope note: ${note:-single-target micro unit}
-- Edit ONLY the Targets paths above. Do not create or modify other files.
 
 ## Acceptance
 ${acc_block}
@@ -328,10 +328,14 @@ ${acc_block}
 - network
 - UI
 - e2e
+- package.json unless listed in Targets
+- multi-file stacks
 
 ## Constraints
-${constraints_snip}
+- no any
+- KISS
 - single target micro unit only
+- NodeNext .js imports if this file imports siblings
 EOF
 }
 

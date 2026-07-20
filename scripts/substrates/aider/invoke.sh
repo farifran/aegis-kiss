@@ -296,6 +296,20 @@ mutation_path_is_operational_noise() {
     node_modules|node_modules/*|*/node_modules|*/node_modules/*) return 0 ;;
     .aiderignore|.aider*|.DS_Store|*/.DS_Store) return 0 ;;
   esac
+  # Aider sometimes leaves untracked prose blobs as "filenames" (stress:
+  # "Here is the updated file content"). Not real paths — ignore for scope.
+  if [[ "${p}" == *" "* ]] || [[ "${p}" == *":"* ]]; then
+    return 0
+  fi
+  if [[ ! "${p}" =~ ^[A-Za-z0-9_./@+-]+$ ]]; then
+    return 0
+  fi
+  # Require source-ish extension or a directory slash (paths like src/foo.ts).
+  case "${p}" in
+    *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.json|*.md|*.sh|*.css|*.html) ;;
+    */*) ;;
+    *) return 0 ;;
+  esac
   # Smoke / NodeNext twin: *.js symlink (or path) beside same-stem *.ts on surface.
   case "${p}" in
     *.js)

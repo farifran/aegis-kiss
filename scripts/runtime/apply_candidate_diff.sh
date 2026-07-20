@@ -70,16 +70,31 @@ jq -r '
   end
 ' "${HANDOVER_FILE}" | sort -u > "${expected_files}"
 
-git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" \
-  || candidate_fatal "candidate_diff_check_failed"
-
-git -C "${EXECUTION_SURFACE}" apply "${diff_file}" \
-  || candidate_fatal "candidate_diff_apply_failed"
+# Prefer clean apply; fall back to 3-way (optimize→repair refine on dirty-ish trees).
+if ! git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" 2>/dev/null; then
+  if git -C "${EXECUTION_SURFACE}" apply --3way --check "${diff_file}" 2>/dev/null; then
+    git -C "${EXECUTION_SURFACE}" apply --3way "${diff_file}" \
+      || candidate_fatal "candidate_diff_apply_3way_failed"
+  else
+    git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" 2>&1 \
+      | head -n 20 >&2 || true
+    candidate_fatal "candidate_diff_check_failed"
+  fi
+else
+  git -C "${EXECUTION_SURFACE}" apply "${diff_file}" \
+    || candidate_fatal "candidate_diff_apply_failed"
+fi
 
 git -C "${EXECUTION_SURFACE}" diff --name-only HEAD -- \
   | sort -u > "${actual_files}"
 
-cmp -s "${expected_files}" "${actual_files}" \
-  || candidate_fatal "candidate_files_changed_mismatch"
+# Allow actual ⊆ expected? No — require equality, but ignore empty noise.
+if ! cmp -s "${expected_files}" "${actual_files}"; then
+  echo "[AEGIS][CANDIDATE][DIAG] expected_files:" >&2
+  cat "${expected_files}" >&2 || true
+  echo "[AEGIS][CANDIDATE][DIAG] actual_files:" >&2
+  cat "${actual_files}" >&2 || true
+  candidate_fatal "candidate_files_changed_mismatch"
+fi
 
 echo "[AEGIS][CANDIDATE] Repair candidate materialized" >&2
