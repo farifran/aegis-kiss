@@ -23,6 +23,72 @@ rollback_execution_surface() {
   )
 }
 
+# Revert only paths outside the authorized jail. Keeps valid primary
+# mutation work when a preflight fix leaks into sibling files (e.g. index.ts).
+# Args: authorized target paths...
+revert_unauthorized_surface_paths() {
+  local -a authorized=("$@")
+  local surface="${AEGIS_EXECUTION_SURFACE_PATH:-}"
+  local git_dir="${AEGIS_MUTATION_GIT_DIR:-}"
+  [[ -n "${surface}" && -d "${surface}" ]] || return 0
+  [[ -n "${git_dir}" ]] || return 0
+
+  local authorized_blob
+  authorized_blob="$(printf '%s\n' "${authorized[@]}")"
+
+  local scope_lib="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/mutation_scope_gate.sh"
+  if [[ -f "${scope_lib}" ]]; then
+    # shellcheck disable=SC1090
+    source "${scope_lib}"
+  fi
+
+  local path norm
+  local -a offenders=()
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    path="${path#./}"
+    if declare -f mutation_scope_is_authorized >/dev/null 2>&1; then
+      if mutation_scope_is_authorized "${path}" "${authorized_blob}"; then
+        continue
+      fi
+    else
+      local ok=0 a
+      for a in "${authorized[@]+"${authorized[@]}"}"; do
+        a="${a#./}"
+        [[ "${path}" == "${a}" ]] && { ok=1; break; }
+      done
+      [[ "${ok}" -eq 1 ]] && continue
+    fi
+    offenders+=("${path}")
+  done < <(
+    (
+      cd "${surface}" || exit 0
+      git --git-dir="${git_dir}" --work-tree=. status --porcelain -uall 2>/dev/null \
+        | awk '{print substr($0,4)}' \
+        | sed 's/^"//; s/"$//'
+    )
+  )
+
+  [[ "${#offenders[@]}" -gt 0 ]] || return 0
+
+  aegis_warn "Reverting unauthorized surface paths only: $(printf '%s ' "${offenders[@]}")"
+  (
+    cd "${surface}" || exit 0
+    local o
+    for o in "${offenders[@]}"; do
+      # Tracked: restore. Untracked net-new leak: delete.
+      if git --git-dir="${git_dir}" --work-tree=. ls-files --error-unmatch -- "${o}" \
+        >/dev/null 2>&1; then
+        git --git-dir="${git_dir}" --work-tree=. checkout -- "${o}" >/dev/null 2>&1 || true
+      else
+        rm -f -- "${o}" >/dev/null 2>&1 || true
+        # Drop empty parent dirs created by leak (best-effort, stay under surface).
+        rmdir "$(dirname -- "${o}")" >/dev/null 2>&1 || true
+      fi
+    done
+  )
+}
+
 # =========================================================
 # EDIT FORMAT RESOLUTION
 # =========================================================
@@ -399,9 +465,25 @@ assert_mutation_diff_scope() {
     offender_csv="$(printf '%s\n' "${offenders}" | paste -sd ',' - | sed 's/,/, /g')"
     aegis_warn "mutation_scope_violation offenders: ${offender_csv}"
     aegis_warn "authorized targets were: $(printf '%s ' "${authorized_targets[@]}")"
-    rollback_execution_surface
-    # Soft return — callers decide fatal vs preflight-fix retry.
-    return 1
+    # Keep authorized jail work (primary + prior good edits). Full surface
+    # rollback here caused empty_diff after preflight when a tools-fix
+    # leaked into index.ts and wiped the valid tokenBucket mutation.
+    revert_unauthorized_surface_paths "${authorized_targets[@]}"
+
+    # Re-evaluate after partial revert.
+    diff_content="$(capture_worktree_diff 2>/dev/null || true)"
+    changed_blob="$(list_mutation_changed_paths "${diff_content}")"
+    if [[ -z "$(printf '%s' "${changed_blob}" | sed '/^$/d')" ]]; then
+      aegis_warn "mutation_scope_violation: no authorized changes remain after strip"
+      return 1
+    fi
+    if ! offenders="$(mutation_scope_check "${authorized_blob}" "${changed_blob}")"; then
+      aegis_warn "mutation_scope_violation: residual offenders after strip — full rollback"
+      rollback_execution_surface
+      return 1
+    fi
+    aegis_warn "mutation_scope_violation: stripped offenders; kept authorized jail work"
+    return 0
   fi
 
   aegis_log "mutation_scope_gate: ok ($(printf '%s\n' "${changed_blob}" | sed '/^$/d' | wc -l | tr -d ' ') path(s) within authorized set)"
