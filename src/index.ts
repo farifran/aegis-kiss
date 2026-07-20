@@ -1,1 +1,3 @@
-export {};
+export function MustExistSymbolXYZ(): number {
+  return 1;
+}

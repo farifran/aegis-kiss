@@ -157,7 +157,7 @@ printf '%s' "${findings_acc}" | jq -e '
 ' >/dev/null \
   || fail "acceptance_missing_should_challenge: ${findings_acc}"
 
-# --- acceptance hit when body has the name ---
+# --- acceptance hit when body exports the name ---
 printf 'export function SymbolX(): void {}\nexport const helperThing = 1;\n' \
   > "${test_tmp}/src/index.ts"
 findings_hit="$(
@@ -169,6 +169,18 @@ printf '%s' "${findings_hit}" | jq -e '
   and (all(.[]; (.description | test("Acceptance identifiers missing") | not)))
 ' >/dev/null \
   || fail "acceptance_present_should_not_flag_missing: ${findings_hit}"
+
+# --- gaming: PascalCase token only as param name → still missing ---
+printf 'export function plainHelper(SymbolX: number): number { return SymbolX; }\n' \
+  > "${test_tmp}/src/index.ts"
+findings_game="$(
+  aegis_mechanical_adversarial_diff_scan "${handover}" "${demand_acc}" "${test_tmp}"
+)"
+printf '%s' "${findings_game}" | jq -e '
+  type == "array" and length >= 1
+  and any(.[]; .description | test("SymbolX|Acceptance"))
+' >/dev/null \
+  || fail "export_like_token_as_param_should_still_fail: ${findings_game}"
 
 # --- residual LLM policy ---
 declare -f aegis_adversarial_should_use_llm >/dev/null \

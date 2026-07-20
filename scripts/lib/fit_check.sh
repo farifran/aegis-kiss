@@ -292,11 +292,17 @@ aegis_fit_unit_demand_md() {
       || printf 'src/index.ts'
   )"
   primary_base="$(printf '%s' "${primary}" | sed -E 's|.*/||; s/\.[^.]+$//')"
+  # PascalCase form (tokenBucket → TokenBucket) for export-like acceptance.
+  primary_pascal="$(
+    printf '%s' "${primary_base}" \
+      | awk '{ if (length($0)>0) print toupper(substr($0,1,1)) substr($0,2) }'
+  )"
 
-  # Acceptance: path basename + filename only (not whole parent token soup).
+  # Acceptance: basename (+ PascalCase) only — not parent multi-file token soup.
   acc_block="$(
     {
       printf '%s\n' "${primary_base}"
+      printf '%s\n' "${primary_pascal}"
       printf '%s' "${targets_json}" | jq -r '.[]? | split("/") | last' 2>/dev/null || true
     } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 4
   )"

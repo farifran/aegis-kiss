@@ -1783,8 +1783,31 @@ aegis_candidate_files_corpus() {
   )
 }
 
-# True (0) when every acceptance ident appears in corpus (case-insensitive).
-# If no idents extracted → success (nothing to check). Prints missing tokens to stdout.
+# API-like tokens (PascalCase / CamelCase / long) must be public exports,
+# not only a parameter name (stress B gaming: MustExistSymbolXYZ as param).
+aegis_acceptance_token_is_export_like() {
+  local tok="${1-}"
+  [[ -n "${tok}" ]] || return 1
+  # Has internal capital (Camel/Pascal) or long identifier.
+  [[ "${tok}" =~ [a-z][A-Z] || "${tok}" =~ ^[A-Z][a-zA-Z0-9]+[A-Z] || "${#tok}" -ge 16 ]] \
+    && return 0
+  [[ "${tok}" =~ ^[A-Z][A-Za-z0-9]{5,}$ ]] && return 0
+  return 1
+}
+
+# Hit if token appears as export function/const/class/type/{ Tok }.
+aegis_acceptance_export_hit() {
+  local tok="${1-}"
+  local corpus="${2-}"
+  # Escape tok for basic ERE (idents only expected).
+  printf '%s\n' "${corpus}" | grep -Eiq \
+    "export[[:space:]]+(async[[:space:]]+)?(function|const|class|type|interface|enum)[[:space:]]+${tok}[[:space:](;=]|export[[:space:]]*\{[^}]*\b${tok}\b" \
+    2>/dev/null
+}
+
+# True (0) when every acceptance ident is satisfied in corpus.
+# Export-like tokens require an export binding; others need substring presence.
+# Prints missing tokens to stdout on failure.
 aegis_acceptance_missing_in_corpus() {
   local investigation="${1-}"
   local corpus="${2-}"
@@ -1795,8 +1818,14 @@ aegis_acceptance_missing_in_corpus() {
   local tok
   while IFS= read -r tok; do
     [[ -n "${tok}" ]] || continue
-    if ! printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
-      missing="${missing}${tok}"$'\n'
+    if aegis_acceptance_token_is_export_like "${tok}"; then
+      if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
+        missing="${missing}${tok}"$'\n'
+      fi
+    else
+      if ! printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+        missing="${missing}${tok}"$'\n'
+      fi
     fi
   done <<< "${tokens_nl}"
 
@@ -1885,7 +1914,7 @@ aegis_mechanical_adversarial_diff_scan() {
             supported_by_evidence: true,
             evidence_refs: ["candidate.diff", "files_changed.body"],
             target_files: [$f],
-            fix: ("In " + $f + ", ensure Acceptance names appear in the delivered code: " + $m)
+            fix: ("In " + $f + ", export Acceptance API names (export function/const/class), not only as params: " + $m)
           }'
         )"
       )
