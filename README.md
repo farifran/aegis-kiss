@@ -30,6 +30,10 @@ git status
 ./run_aegis.sh --fresh --pipeline mutation --issue N
 ./run_aegis.sh --fresh --pipeline readonly "inspect demand anchors"
 
+# Demand loop: demand → fit → run → review → improve demand → repeat
+./run_aegis_loop.sh --issue N --max 3
+./run_aegis_loop.sh --demand-file demand.md --max 3
+
 # Single mode
 bash runtime_aegis.sh discovery "inspect runtime handover boundary"
 bash runtime_aegis.sh forensics --issue 123

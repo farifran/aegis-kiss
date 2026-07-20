@@ -77,6 +77,45 @@ SPEC <pedido>
 | `EDIT …` ou lista de mudanças | Atualiza draft, mostra outra vez, pergunta de novo |
 | `STOP` | Para; não cria issue nem corre Aegis |
 | `RO` (em vez de mutation) | Igual, mas HAND/RUN em **readonly** |
+| `LOOP` | Após OPEN (ou com demand pronta): `./run_aegis_loop.sh --issue N` — ver **Demand loop** abaixo |
+
+### Demand loop (demanda → Aegis → revisão → melhora → repetir)
+
+Orquestração **fora** dos modes (Scout/operador). Não corta optimize/adversarial.
+
+```text
+seed demand
+    │
+    ▼
+┌─ fit review (opcional auto-fix / micro) ──┐
+│            ▼                               │
+│   run_aegis --fresh --pipeline mutation    │
+│            ▼                               │
+│   review last_outcome (status/class/next)  │
+│            ▼                               │
+│   SUCCESS? ──yes──► STOP (SHIP)            │
+│            │ no                            │
+│   stop class (env/provider/bug)? ──yes──► STOP
+│            │ no                            │
+│   improve demand (LOOP FEEDBACK + next_step)
+│            │                               │
+└────────────┴──── max iters ────────────────┘
+```
+
+```bash
+# Issue
+./run_aegis_loop.sh --issue N --max 3
+
+# Ficheiro / free-text
+./run_aegis_loop.sh --demand-file /tmp/demand.md --max 3
+./run_aegis_loop.sh --max 2 "micro demand text…"
+
+# Sem fit check
+./run_aegis_loop.sh --no-fit --issue N
+```
+
+Artefactos: `.harness/runtime/loop/demand.md`, `state.json`, `loop.jsonl`, `run_*.log`.  
+Melhora = apêndice `## LOOP FEEDBACK` na demand (não edita `src/` à mão).
 
 ### Acceptance no draft (evita falha do alignment)
 

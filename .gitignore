@@ -17,6 +17,7 @@
 .harness/runtime/candidate_tools_stamp/
 .harness/runtime/capability_env/
 .harness/runtime/capability_payloads/
+.harness/runtime/loop/
 
 .harness/runtime/*.tmp
 .harness/runtime/*.bak
