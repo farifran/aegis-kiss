@@ -2125,18 +2125,32 @@ aegis_mechanical_adversarial_diff_scan() {
       aegis_acceptance_missing_in_corpus "${investigation}" "${corpus}" 2>/dev/null
     )" || accept_rc=$?
     if [[ "${accept_rc}" -ne 0 && -n "${missing_nl}" ]]; then
-      local miss_list
+      local miss_list fix_hint
       miss_list="$(printf '%s\n' "${missing_nl}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      # Language globals (BigInt) need body usage; export-like need export/method.
+      fix_hint="$(
+        printf '%s\n' "${missing_nl}" | while IFS= read -r mt; do
+          [[ -n "${mt}" ]] || continue
+          if aegis_acceptance_token_is_language_global "${mt}"; then
+            printf 'use %s in the implementation (e.g. %s(Date.now()) / 0n), not as export; ' "${mt}" "${mt}"
+          elif aegis_acceptance_token_is_export_like "${mt}"; then
+            printf 'export class/function %s or public %s() method; ' "${mt}" "${mt}"
+          else
+            printf 'include identifier %s in the candidate body; ' "${mt}"
+          fi
+        done
+      )"
+      [[ -n "${fix_hint}" ]] || fix_hint="Add missing Acceptance identifiers to ${primary}: ${miss_list}"
       findings+=(
         "$(
-          jq -nc --arg f "${primary}" --arg m "${miss_list}" '{
+          jq -nc --arg f "${primary}" --arg m "${miss_list}" --arg fix "${fix_hint}" '{
             type: "contract_violation",
             severity: "high",
             description: ("Acceptance identifiers missing from candidate body: " + $m),
             supported_by_evidence: true,
             evidence_refs: ["candidate.diff", "files_changed.body"],
             target_files: [$f],
-            fix: ("In " + $f + ", export Acceptance API names (export function/const/class), not only as params: " + $m)
+            fix: ("In " + $f + ", " + $fix)
           }'
         )"
       )
