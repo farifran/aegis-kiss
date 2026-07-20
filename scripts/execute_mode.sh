@@ -1020,14 +1020,21 @@ main() {
       fi
     fi
 
-    # Tools clean: senior greps on candidate +lines (stubs / explicit any).
+    # Tools clean: greps on +lines/bodies (stubs, any, acceptance names).
     if [[ "${_adv_clean}" == "true" ]] \
       && declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
       && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
+      local _adv_root="."
+      if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
+        _adv_root="${AEGIS_EXECUTION_SURFACE}"
+      elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
+        _adv_root="${AEGIS_EXECUTION_TARGET_PATH}"
+      fi
       _adv_diff_findings="$(
         aegis_mechanical_adversarial_diff_scan \
           "${_adv_handover}" \
-          "${AEGIS_INVESTIGATION_INPUT:-}"
+          "${AEGIS_INVESTIGATION_INPUT:-}" \
+          "${_adv_root}"
       )" || _adv_diff_findings="[]"
       if printf '%s' "${_adv_diff_findings}" \
         | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
@@ -1035,7 +1042,7 @@ main() {
           aegis_emit_mechanical_adversarial_findings "${_adv_diff_findings}"
         )" || _adv_out=""
         if [[ -n "${_adv_out}" ]]; then
-          aegis_log "adversarial_mechanical: diff smells — skip LLM"
+          aegis_log "adversarial_mechanical: diff/body smells — skip LLM"
           AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
           if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
             jq -cn --argjson n "$(printf '%s' "${_adv_diff_findings}" | jq 'length')" \
@@ -1048,6 +1055,31 @@ main() {
           return 0
         fi
       fi
+
+      # Residual LLM only when risk warrants it (auto size / force).
+      # Small clean candidates: verified mechanically — stage still ran.
+      if declare -f aegis_adversarial_should_use_llm >/dev/null 2>&1 \
+        && declare -f aegis_emit_mechanical_adversarial_verified >/dev/null 2>&1 \
+        && ! aegis_adversarial_should_use_llm "${_adv_handover}"; then
+        _adv_out="$(
+          aegis_emit_mechanical_adversarial_verified "mechanical_verified_clean"
+        )" || _adv_out=""
+        if [[ -n "${_adv_out}" ]]; then
+          aegis_log "adversarial_mechanical: verified clean (LLM residual skipped)"
+          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
+          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+            jq -cn '{kind:"adversarial",result:"mechanical_verified"}' \
+              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+          fi
+          normalize_substrate_output
+          measure "executor_artifact_validation" validate_artifact
+          emit_output
+          return 0
+        fi
+      else
+        aegis_log "adversarial_llm: residual falsification (clean tools/greps, risk or force)"
+      fi
+      unset _adv_root
     fi
     unset _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
   fi

@@ -1700,17 +1700,125 @@ aegis_emit_mechanical_optimize_can_improve() {
   aegis_emit_framed_json_artifact "${body}"
 }
 
-# Mechanical adversarial findings from candidate +lines (tools already clean).
+# Short identifiers from Acceptance / done_when (senior: "names that must show up").
+# Prints one token per line (may be empty).
+aegis_acceptance_ident_tokens() {
+  local text="${1-}"
+  [[ -n "${text}" ]] || return 0
+
+  local anchors done_raw=""
+  if declare -f aegis_materialize_demand_anchors_json >/dev/null 2>&1; then
+    anchors="$(
+      aegis_materialize_demand_anchors_json "${text}" "" "" 2>/dev/null || printf '{}'
+    )"
+    done_raw="$(
+      printf '%s' "${anchors}" \
+        | jq -r '(.done_when // [])[]?' 2>/dev/null || true
+    )"
+  fi
+  if [[ -z "${done_raw}" ]] && declare -f aegis_demand_md_section >/dev/null 2>&1; then
+    done_raw="$(
+      aegis_demand_md_section "Acceptance" "${text}" 2>/dev/null \
+        | sed -E 's/^[[:space:]]*[-*][[:space:]]*//; s/^[[:space:]]*[0-9]+[.)][[:space:]]*//' \
+        || true
+    )"
+  fi
+  [[ -n "${done_raw}" ]] || return 0
+
+  local line tok
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    # Whole bullet is a single identifier.
+    if [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      printf '%s\n' "${line}"
+      continue
+    fi
+    # Extract CamelCase / snake identifiers (len ≥ 4).
+    while IFS= read -r tok; do
+      [[ -n "${tok}" ]] || continue
+      [[ "${#tok}" -ge 4 && "${#tok}" -le 48 ]] || continue
+      case "$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')" in
+        string|number|boolean|export|const|class|function|return|import|type|async|await|true|false|null|undefined|files|target|change|scope|rules|write|valid|entire|using|same|body|block|never|other|network|single|private|inside|above|shape|assign|should|must|when|done|with|from|into|this|that) continue ;;
+      esac
+      printf '%s\n' "${tok}"
+    done < <(
+      printf '%s\n' "${line}" \
+        | grep -Eo '[A-Za-z_][A-Za-z0-9_]{3,}' \
+        || true
+    )
+  done <<< "${done_raw}" \
+    | awk 'NF && !seen[$0]++' \
+    | head -n 12
+}
+
+# Corpus for acceptance: +lines of diff + on-disk bodies of files_changed.
+# Senior: open the final files, not only the green hunks.
+aegis_candidate_files_corpus() {
+  local files_json="${1:-[]}"
+  local diff_content="${2-}"
+  local root="${3:-.}"
+
+  local added
+  added="$(aegis_diff_added_lines "${diff_content}")"
+  printf '%s\n' "${added}"
+
+  local rel path
+  while IFS= read -r rel; do
+    [[ -n "${rel}" ]] || continue
+    for path in \
+      "${root%/}/${rel}" \
+      "${rel}" \
+      "./${rel}"
+    do
+      if [[ -f "${path}" && -r "${path}" ]]; then
+        # Cap per file to keep scans cheap.
+        head -c 100000 "${path}" 2>/dev/null || true
+        printf '\n'
+        break
+      fi
+    done
+  done < <(
+    printf '%s' "${files_json}" \
+      | jq -r '.[]? | select(type=="string" and length>0)' 2>/dev/null || true
+  )
+}
+
+# True (0) when every acceptance ident appears in corpus (case-insensitive).
+# If no idents extracted → success (nothing to check). Prints missing tokens to stdout.
+aegis_acceptance_missing_in_corpus() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  local tokens_nl missing=""
+  tokens_nl="$(aegis_acceptance_ident_tokens "${investigation}")"
+  [[ -n "${tokens_nl}" ]] || return 0
+
+  local tok
+  while IFS= read -r tok; do
+    [[ -n "${tok}" ]] || continue
+    if ! printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+      missing="${missing}${tok}"$'\n'
+    fi
+  done <<< "${tokens_nl}"
+
+  if [[ -z "${missing}" ]]; then
+    return 0
+  fi
+  printf '%s' "${missing}" | awk 'NF'
+  return 1
+}
+
+# Mechanical adversarial findings from candidate +lines / bodies (tools clean).
 # Prints JSON array of findings (may be empty []).
 aegis_mechanical_adversarial_diff_scan() {
   local handover="${1-}"
   local investigation="${2-}"
+  local root="${3:-.}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
   fi
   [[ -n "${handover}" && -f "${handover}" ]] || { printf '[]'; return 0; }
 
-  local diff_content files_json primary added
+  local diff_content files_json primary added corpus
   diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
   files_json="$(aegis_handover_mutation_files_json "${handover}")"
   primary="$(
@@ -1718,6 +1826,7 @@ aegis_mechanical_adversarial_diff_scan() {
       | jq -r 'map(select(type=="string" and length>0))[0] // "unknown"' 2>/dev/null || printf 'unknown'
   )"
   added="$(aegis_diff_added_lines "${diff_content}")"
+  corpus="$(aegis_candidate_files_corpus "${files_json}" "${diff_content}" "${root}")"
 
   local -a findings=()
 
@@ -1758,8 +1867,30 @@ aegis_mechanical_adversarial_diff_scan() {
     )
   fi
 
-  # Unused: investigation reserved for future acceptance-bullet scans.
-  : "${investigation:=}"
+  # Acceptance idents missing from final body (+lines ∪ on-disk files_changed).
+  local missing_nl="" accept_rc=0
+  if [[ -n "${investigation}" ]]; then
+    missing_nl="$(
+      aegis_acceptance_missing_in_corpus "${investigation}" "${corpus}" 2>/dev/null
+    )" || accept_rc=$?
+    if [[ "${accept_rc}" -ne 0 && -n "${missing_nl}" ]]; then
+      local miss_list
+      miss_list="$(printf '%s\n' "${missing_nl}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      findings+=(
+        "$(
+          jq -nc --arg f "${primary}" --arg m "${miss_list}" '{
+            type: "contract_violation",
+            severity: "high",
+            description: ("Acceptance identifiers missing from candidate body: " + $m),
+            supported_by_evidence: true,
+            evidence_refs: ["candidate.diff", "files_changed.body"],
+            target_files: [$f],
+            fix: ("In " + $f + ", ensure Acceptance names appear in the delivered code: " + $m)
+          }'
+        )"
+      )
+    fi
+  fi
 
   if [[ "${#findings[@]}" -eq 0 ]]; then
     printf '[]'
@@ -1779,6 +1910,53 @@ aegis_emit_mechanical_adversarial_findings() {
     jq -nc --argjson f "${findings_json}" '{status:"challenged",findings:$f}'
   )" || return 1
   aegis_emit_framed_json_artifact "${body}"
+}
+
+# Tools+greps+acceptance clean: stage still runs (verified), no residual LLM.
+aegis_emit_mechanical_adversarial_verified() {
+  local basis="${1:-mechanical_verified}"
+  local body
+  body="$(
+    jq -nc --arg b "${basis}" '{
+      status: "verified",
+      findings: [],
+      basis: $b
+    }'
+  )" || return 1
+  aegis_emit_framed_json_artifact "${body}"
+}
+
+# Whether adversarial residual LLM should run (tools/greps already clean).
+# Env AEGIS_ADVERSARIAL_LLM: auto|0|1 (default auto).
+# auto: LLM only when candidate is "large" (lines/files thresholds).
+aegis_adversarial_should_use_llm() {
+  local handover="${1-}"
+  local flag
+  flag="$(printf '%s' "${AEGIS_ADVERSARIAL_LLM:-auto}" | tr '[:upper:]' '[:lower:]')"
+  case "${flag}" in
+    0|false|no|off|mechanical)
+      return 1
+      ;;
+    1|true|yes|always|llm)
+      return 0
+      ;;
+  esac
+
+  # auto
+  : "${AEGIS_ADVERSARIAL_LLM_MAX_LINES:=48}"
+  : "${AEGIS_ADVERSARIAL_LLM_MAX_FILES:=1}"
+  local diff_content files_json n_lines n_files
+  diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
+  files_json="$(aegis_handover_mutation_files_json "${handover}")"
+  n_files="$(printf '%s' "${files_json}" | jq -r 'length' 2>/dev/null || printf '0')"
+  n_lines="$(printf '%s\n' "${diff_content}" | wc -l | tr -d ' ')"
+  [[ "${n_files}" =~ ^[0-9]+$ ]] || n_files=0
+  [[ "${n_lines}" =~ ^[0-9]+$ ]] || n_lines=0
+  if [[ "${n_files}" -gt "${AEGIS_ADVERSARIAL_LLM_MAX_FILES}" ]] \
+    || [[ "${n_lines}" -gt "${AEGIS_ADVERSARIAL_LLM_MAX_LINES}" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 # Post-Repair file bodies for optimize (apply candidate on temp copies of HEAD).

@@ -108,6 +108,9 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_MAX_OPTIMIZE_REPAIR_ATTEMPTS` | Max optimize→repair refine loops (default **1**); 2nd optimize is mechanical no-LLM passthrough |
 | `AEGIS_OPTIMIZE_REPAIR_LOOP=true\|false` | Enable can_improve → repair re-entry (default true) |
 | `AEGIS_OPTIMIZE_TRIVIAL_SKIP=true\|false` | Skip optimize LLM when repair is small/clean (default true) |
+| `AEGIS_ADVERSARIAL_LLM=auto\|0\|1` | Residual adversarial LLM when tools/greps clean (`auto`: only if large diff; default **auto**) |
+| `AEGIS_ADVERSARIAL_LLM_MAX_LINES` | auto threshold: lines above this force LLM residual (default 48) |
+| `AEGIS_ADVERSARIAL_LLM_MAX_FILES` | auto threshold: files above this force LLM residual (default 1) |
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES` | Diff line cap for trivial skip (default 24) |
 | `AEGIS_VALIDATION_LLM=0\|1` | Validation LLM residual (default **0**: mechanical tribunal only) |
 | `AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES` | File count cap for trivial skip (default 1) |

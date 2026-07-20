@@ -898,6 +898,14 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
         | select((.change | length) >= 24)
         | select(.change | test("(?i)\\b(add|remove|delete|give|inline|collapse|replace|use|set|fix|strip|drop|type|explicit|return|export|unused|local|duplicate|rename|convert|extract)\\b"))
         | select((.change | test("(?i)^(improve|clean\\s*up|cleanup|refactor|consider|maybe|make it|prettier|more idiomatic|better)\\b")) | not)
+        # Senior gate: change must name an allowed path (or its basename).
+        | select(
+            any($tf[];
+              . as $p
+              | ($imp.change | index($p) != null)
+                or ($imp.change | index(($p | split("/") | last)) != null)
+            )
+          )
         | {
             target_files: $tf,
             change: .change,
