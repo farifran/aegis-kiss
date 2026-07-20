@@ -56,10 +56,16 @@ Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
 Pipelines:
   (default)            mutation: discovery -> forensics -> repair
                        -> optimize -> adversarial -> validation
+  mutation_lite        discovery -> forensics -> repair -> validation
+                       (no optimize/adversarial; good for weak models)
   readonly             discovery -> forensics
 
+  Env: AEGIS_MUTATION_LITE=1|true  force lite when pipeline is mutation
+       AEGIS_MUTATION_LITE=auto    lite if fit_check score is low (needs
+                                   AEGIS_FIT_CHECK=1) and targets_count<=1
+
 Options:
-  --pipeline NAME      Select pipeline by name (mutation|readonly)
+  --pipeline NAME      mutation|mutation_lite|readonly
   --resume             Continue from the mode after the last
                        .harness/runtime/epistemic_handover.json snapshot
   --fresh              Start a new investigation: wipe handover (and
@@ -91,9 +97,12 @@ EOF
 declare -A PIPELINES=(
   [readonly]="discovery forensics"
   [mutation]="discovery forensics repair optimize adversarial validation"
+  [mutation_lite]="discovery forensics repair validation"
 )
 
 PIPELINE="mutation"
+# Last fit-check JSON (optional); used by AEGIS_MUTATION_LITE=auto
+FIT_CHECK_JSON=""
 TARGET=""
 RESUME=false
 FRESH_INVESTIGATION=false
@@ -120,15 +129,56 @@ require() {
   }
 }
 
+pipeline_is_mutation_family() {
+  case "${PIPELINE}" in
+    mutation|mutation_lite) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 check_dependencies() {
   require jq
   require git
-  [[ "${PIPELINE}" != "mutation" ]] || require aider
+  if pipeline_is_mutation_family; then
+    require aider
+  fi
 }
 
-# Successor from authoritative PIPELINES[mutation] order.
+# Successor in the active pipeline order (mutation vs mutation_lite).
 next_mode() {
-  printf '%s\n' "$(aegis_next_in_sequence "$1" "${PIPELINES[mutation]}")"
+  printf '%s\n' "$(aegis_next_in_sequence "$1" "${PIPELINES[$PIPELINE]}")"
+}
+
+# Apply AEGIS_MUTATION_LITE / auto after optional fit check.
+maybe_apply_mutation_lite() {
+  local flag="${AEGIS_MUTATION_LITE:-0}"
+  [[ "${PIPELINE}" == "mutation" ]] || return 0
+
+  case "${flag}" in
+    1|true|yes|lite)
+      PIPELINE="mutation_lite"
+      echo "[RUN] mutation_lite enabled (AEGIS_MUTATION_LITE=${flag})"
+      return 0
+      ;;
+    auto)
+      if [[ -n "${FIT_CHECK_JSON}" ]]; then
+        local score tc
+        score="$(printf '%s' "${FIT_CHECK_JSON}" | jq -r '.score // 99' 2>/dev/null || echo 99)"
+        tc="$(printf '%s' "${FIT_CHECK_JSON}" | jq -r '.targets_count // 99' 2>/dev/null || echo 99)"
+        local max_score="${AEGIS_MUTATION_LITE_MAX_SCORE:-2}"
+        if [[ "${score}" =~ ^[0-9]+$ && "${tc}" =~ ^[0-9]+$ ]] \
+          && [[ "${score}" -le "${max_score}" ]] \
+          && [[ "${tc}" -le 1 ]]; then
+          PIPELINE="mutation_lite"
+          echo "[RUN] mutation_lite auto (fit score=${score} targets=${tc} max_score=${max_score})"
+        else
+          echo "[RUN] mutation_lite auto skipped (score=${score} targets=${tc})"
+        fi
+      else
+        echo "[RUN] mutation_lite auto skipped (no fit_check JSON; set AEGIS_FIT_CHECK=1)"
+      fi
+      ;;
+  esac
 }
 
 # True when runtime internal feedback already advanced the handover past
@@ -777,7 +827,7 @@ main() {
   # Free-text: auto-fixed demand may replace INVESTIGATION_INPUT.
   # Issue bodies: check only — edit GitHub if blocked. See fit_check_demand.sh.
   if [[ "${AEGIS_FIT_CHECK:-0}" == "1" || "${AEGIS_FIT_CHECK:-0}" == "true" ]] \
-    && [[ "${PIPELINE}" == "mutation" ]] \
+    && pipeline_is_mutation_family \
     && [[ "${RESUME}" != "true" ]]; then
     local fit_json fit_rc=0
     if [[ -n "${ISSUE_NUMBER}" ]]; then
@@ -794,8 +844,11 @@ main() {
       printf '%s\n' "${fit_json}" | jq '{run_allowed,model_fit,score,blockers,warnings,proposed_units,auto_fixes_applied}' 2>/dev/null || true
       exit 1
     fi
+    FIT_CHECK_JSON="${fit_json}"
     echo "[RUN] fit_check ok model_fit=$(printf '%s' "${fit_json}" | jq -r '.model_fit') score=$(printf '%s' "${fit_json}" | jq -r '.score')"
   fi
+
+  maybe_apply_mutation_lite
 
   if $RESUME; then
     resolve_resume

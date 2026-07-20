@@ -205,6 +205,23 @@ bash scripts/fit_check_demand.sh --issue 4
 # → run_allowed=false, proposed_units=[...]
 ```
 
+### Mutation lite (pipeline curto)
+
+Para micros / 8B, evita optimize + adversarial:
+
+```bash
+# Explícito
+./run_aegis.sh --fresh --pipeline mutation_lite --issue N
+
+# Ou forçar quando o default é mutation
+AEGIS_MUTATION_LITE=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
+
+# Auto: só se AEGIS_FIT_CHECK=1 e score baixo + 1 target
+AEGIS_FIT_CHECK=1 AEGIS_MUTATION_LITE=auto ./run_aegis.sh --fresh --pipeline mutation --issue N
+```
+
+Ordem lite: `discovery → forensics → repair → validation`.
+
 ---
 
 ## Vocabulário reservado

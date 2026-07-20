@@ -27,6 +27,9 @@ git status
 
 # Full pipelines
 ./run_aegis.sh --fresh --pipeline mutation "funções de conversão, como bytes para Megabits"
+# Lite (no optimize/adversarial) — better for small models / micro-issues
+AEGIS_MUTATION_LITE=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
+# or: ./run_aegis.sh --fresh --pipeline mutation_lite --issue N
 ./run_aegis.sh --fresh --pipeline readonly "inspect demand anchors"
 
 # Single mode
