@@ -115,6 +115,39 @@ main() {
     aegis_fatal "optimize_uses_raw_engine_not_aider"
   fi
 
+  # optimize→repair refine could not re-apply the prior candidate on the
+  # disposable surface. Re-emit that candidate; do not invoke Aider on HEAD
+  # (would replace the pipeline candidate with an incomplete/wrong patch).
+  if [[ "${AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE:-0}" == "1" ]]; then
+    local prev_diff=""
+    local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+    if [[ -n "${handover}" && -f "${handover}" ]]; then
+      prev_diff="$(
+        jq -r '
+          .artifact_snapshot as $s
+          | if $s.mode == "optimize" then
+              $s.operational_context.candidate_result.diff // empty
+            elif $s.mode == "repair" then
+              $s.operational_context.diff // empty
+            else
+              $s.operational_context.candidate_result.diff
+                // $s.operational_context.diff // empty
+            end
+        ' "${handover}" 2>/dev/null || true
+      )"
+    fi
+    if [[ -z "${prev_diff}" || "${prev_diff}" == "(no changes)" ]]; then
+      aegis_fatal "repair_passthrough_missing_previous_candidate"
+    fi
+    aegis_log "repair_passthrough: materialize failed — re-emitting previous candidate (no refine)"
+    # Do not wipe candidate_tools_stamp (hash still matches previous green run).
+    export AEGIS_SKIP_CANDIDATE_TOOLS_STAMP=1
+    emit_mutation_artifact "${prev_diff}"
+    unset AEGIS_SKIP_CANDIDATE_TOOLS_STAMP 2>/dev/null || true
+    aegis_log "Aider mutation substrate completed (previous-candidate passthrough)"
+    return 0
+  fi
+
   local diff_content=""
   local resolved_edit_format
   resolved_edit_format="$(resolve_aider_edit_format "${mutation_targets[@]:-}")"

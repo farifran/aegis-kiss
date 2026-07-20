@@ -490,7 +490,10 @@ emit_mutation_artifact() {
     }' > "${artifact_tmp}"
 
   # Stamp post-preflight tools for adversarial reuse when candidate hash matches.
-  if declare -f aegis_stamp_candidate_tools >/dev/null 2>&1; then
+  # Skip when re-emitting a previous candidate after failed refine materialize
+  # (no preflight ran; wiping the stamp would force a false tools re-run gap).
+  if [[ "${AEGIS_SKIP_CANDIDATE_TOOLS_STAMP:-0}" != "1" ]] \
+    && declare -f aegis_stamp_candidate_tools >/dev/null 2>&1; then
     aegis_stamp_candidate_tools \
       "$(cat "${diff_tmp}")" \
       "${AEGIS_MODE}" \

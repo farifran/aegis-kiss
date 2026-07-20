@@ -689,11 +689,15 @@ materialize_preceding_mutation_candidate() {
     if ! bash scripts/runtime/apply_candidate_diff.sh \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}"; then
-      # Do not abort the whole pipeline: keep candidate and skip refine edits.
-      # Stress data: mechanical can_improve + apply fail left runs dead.
-      aegis_warn "optimize_refine_materialize_failed — continuing without re-applying prior candidate (repair refine may no-op)"
+      # Soft-fail the refine re-entry without killing the pipeline — but do NOT
+      # run Aider on a clean surface (that would drop the prior candidate from
+      # the artifact). Aider substrate re-emits the previous candidate.
+      # Stress data: mechanical can_improve + apply fail left runs dead when fatal.
+      aegis_warn "optimize_refine_materialize_failed — keeping previous candidate (no repair refine on empty surface)"
+      export AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE=1
       return 0
     fi
+    unset AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE 2>/dev/null || true
     return 0
   fi
   return 0
