@@ -1,4 +1,4 @@
-# Estratégias para Otimização do Aegis com Modelos Menores (8B)
+entry.md# Estratégias para Otimização do Aegis com Modelos Menores (8B)
 
 Este documento reúne caminhos e técnicas para melhorar a confiabilidade, a precisão e a taxa de sucesso do pipeline do Aegis Harness quando operando com modelos de linguagem menores (como o Llama-3.1-8b-instruct). As soluções são categorizadas pelo nível de intervenção e acompanhadas por considerações de integração para uma adoção paulatina.
 
