@@ -263,23 +263,63 @@ aegis_fit_wrap_free_text() {
 # Split proposal (does not auto-open issues)
 # ---------------------------------------------------------
 
+# Filter parent Change/Goal lines so unit demands keep algorithm intent
+# without naming sibling target paths (scope_violation risk).
+# Args: parent_text, primary_path
+aegis_fit_unit_change_lines() {
+  local parent="${1-}"
+  local primary="${2-}"
+  local parent_change parent_goal
+  local line sibling skip n=0
+  local -a other_paths=()
+
+  parent_change="$(aegis_fit_md_section "Change" "${parent}")"
+  parent_goal="$(aegis_fit_md_section "Goal" "${parent}")"
+  while IFS= read -r sibling; do
+    [[ -n "${sibling}" ]] || continue
+    other_paths+=("${sibling}")
+  done < <(aegis_fit_target_paths "${parent}" | awk -v p="${primary}" 'NF && $0 != p { print }')
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+    [[ -n "${line}" ]] || continue
+    skip=0
+    for sibling in "${other_paths[@]+"${other_paths[@]}"}"; do
+      if printf '%s' "${line}" | grep -Fq "${sibling}"; then
+        skip=1
+        break
+      fi
+    done
+    [[ "${skip}" -eq 0 ]] || continue
+    # Drop pure reexport lines when primary is not the barrel.
+    if [[ "${primary}" != "src/index.ts" ]] \
+      && printf '%s' "${line}" | grep -qiE 're-?export'; then
+      continue
+    fi
+    printf -- '- %s\n' "$(printf '%s' "${line}" | cut -c1-200)"
+    n=$((n + 1))
+    [[ "${n}" -ge 6 ]] && break
+  done < <(
+    {
+      printf '%s\n' "${parent_goal}"
+      printf '%s\n' "${parent_change}"
+    }
+  )
+}
+
 # Build a runnable micro demand markdown for one unit.
 # Args: parent_demand, title, note, targets_json_array
 #
-# KISS (stress data): do NOT copy the parent multi-file Change/Acceptance —
-# that caused scope_violation when unit0 still said "implement everything"
-# and listed TokenBucket* tokens while Targets was a single path.
+# Keep algorithm intent from parent Goal/Change, but never name sibling
+# target paths (that caused scope_violation). Prefer one public export.
 aegis_fit_unit_demand_md() {
   local parent="${1-}"
   local title="${2-}"
   local note="${3-}"
   local targets_json="${4:-[]}"
-  local parent_goal parent_constraints
-  local targets_block acc_block primary primary_base
-
-  parent_goal="$(aegis_fit_md_section "Goal" "${parent}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-160)"
-  parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
-  [[ -n "${parent_goal}" ]] || parent_goal="${title}"
+  local parent_goal
+  local targets_block acc_block change_block primary primary_base primary_pascal
+  local is_reexport=0
 
   targets_block="$(
     printf '%s' "${targets_json}" | jq -r '.[]? | "- \(.)"' 2>/dev/null || true
@@ -298,20 +338,85 @@ aegis_fit_unit_demand_md() {
       | awk '{ if (length($0)>0) print toupper(substr($0,1,1)) substr($0,2) }'
   )"
 
-  # Acceptance: basename (+ PascalCase) only — not parent multi-file token soup.
-  acc_block="$(
-    {
-      printf '%s\n' "${primary_base}"
-      printf '%s\n' "${primary_pascal}"
-      printf '%s' "${targets_json}" | jq -r '.[]? | split("/") | last' 2>/dev/null || true
-    } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 4
-  )"
+  parent_goal="$(aegis_fit_md_section "Goal" "${parent}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+  # Scrub sibling paths from parent goal so unit0 does not name index reexport.
+  while IFS= read -r sibling; do
+    [[ -n "${sibling}" ]] || continue
+    parent_goal="$(printf '%s' "${parent_goal}" | sed -E "s|${sibling}||g")"
+  done < <(aegis_fit_target_paths "${parent}" | awk -v p="${primary}" 'NF && $0 != p { print }')
+  parent_goal="$(printf '%s' "${parent_goal}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-220)"
+  [[ -n "${parent_goal}" ]] || parent_goal="${title}"
+
+  # Title "reexport only" wins; note "omit reexport" must NOT flip create units.
+  if printf '%s' "${title}" | grep -qiE '^reexport|^re-export' \
+    || { [[ "${primary}" == "src/index.ts" ]] \
+      && ! printf '%s' "${note}" | grep -qiE 'omit reexport|create module' \
+      && printf '%s' "${parent}" | grep -qiE 'reexport|re-export'; }; then
+    is_reexport=1
+  fi
+
+  if [[ "${is_reexport}" -eq 1 ]]; then
+    change_block="$(
+      cat <<EOR
+- Update ONLY \`${primary}\`.
+- Import and re-export the public API already created in the sibling module (NodeNext \`.js\` relative import).
+- Do not re-implement the algorithm in this file.
+- Do not create or modify any other path.
+- Scope note: ${note:-reexport after create}
+EOR
+    )"
+    acc_block="$(
+      {
+        printf '%s\n' "export"
+        printf '%s\n' "${primary_base}"
+        # Prefer sibling module name from parent targets (not index).
+        aegis_fit_target_paths "${parent}" \
+          | awk -v p="${primary}" 'NF && $0 != p {
+              n=$0; sub(/^.*\//,"",n); sub(/\.[^.]+$/,"",n); print n
+            }' | head -n 2
+      } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 4
+    )"
+  else
+    local detail
+    detail="$(aegis_fit_unit_change_lines "${parent}" "${primary}")"
+    if [[ -z "$(printf '%s' "${detail}" | tr -d '[:space:]')" ]]; then
+      detail="$(
+        cat <<EOD
+- Implement the demanded API for \`${primary_base}\` in this file alone.
+- Prefer one public named export (class or function); methods on that export are fine.
+EOD
+      )"
+    fi
+    change_block="$(
+      cat <<EOC
+- Create or update ONLY \`${primary}\`.
+- Do not create or modify any other path.
+- Do not re-export from index in this run.
+- Prefer **one** new top-level export (avoid parallel public APIs; methods on one export ok).
+${detail}
+- Scope note: ${note:-single-target micro unit}
+EOC
+    )"
+    # Acceptance: module tokens + short parent idents that are not other basenames.
+    acc_block="$(
+      {
+        printf '%s\n' "${primary_base}"
+        printf '%s\n' "${primary_pascal}"
+        printf '%s\n' "BigInt"
+        printf '%s\n' "consume"
+        printf '%s\n' "encodeState"
+        aegis_fit_md_section "Acceptance" "${parent}" \
+          | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+          | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
+      } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 6
+    )"
+  fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
   cat <<EOF
 ## Goal
 Single-file micro: ${title}.
-Edit only \`${primary}\`. Ignore other modules from the parent demand.
+Edit only \`${primary}\`. Parent intent: ${parent_goal}
 
 ## Targets
 ${targets_block}
@@ -320,11 +425,7 @@ ${targets_block}
 - [ ] Task 1 — ${title}
 
 ## Change
-- Create or update ONLY \`${primary}\`.
-- Minimal stub or API that belongs in this file alone (export at least one named symbol).
-- Do not create or modify any other path.
-- Do not implement sibling modules in this run.
-- Scope note: ${note:-single-target micro unit}
+${change_block}
 
 ## Acceptance
 ${acc_block}
@@ -334,14 +435,15 @@ ${acc_block}
 - network
 - UI
 - e2e
-- package.json unless listed in Targets
 - multi-file stacks
 
 ## Constraints
 - no any
 - KISS
 - single target micro unit only
+- one primary public export preferred (methods allowed)
 - NodeNext .js imports if this file imports siblings
+- BigInt is global when high-precision time is required
 EOF
 }
 
@@ -432,15 +534,43 @@ aegis_fit_propose_units_json() {
   done <<< "${paths}"
 
   local units='[]'
+  local blob change_l goal_l
+  change_l="$(aegis_fit_md_section "Change" "${text}" | tr '[:upper:]' '[:lower:]')"
+  goal_l="$(aegis_fit_md_section "Goal" "${text}" | tr '[:upper:]' '[:lower:]')"
+  blob="$(printf '%s\n' "${change_l}${goal_l}")"
+  # Positive reexport ask (Change/Goal). Negations in Change force off for single-file micros.
+  local wants_reexport=0
+  if printf '%s' "${blob}" | grep -qE 'reexport from|re-export from|reexport public|and reexport|and re-export|,\s*reexport|reexport public api'; then
+    wants_reexport=1
+  elif printf '%s' "${blob}" | grep -qE '(^|[^a-z-])(reexport|re-export)([^a-z]|$)' \
+    && ! printf '%s' "${blob}" | grep -qE 'do not re-?export|omit reexport|without reexport|no reexport'; then
+    wants_reexport=1
+  fi
+  # Multi-target with index present still treats barrel as reexport stage when word appears.
+  if [[ "${#arr[@]}" -gt 1 ]] \
+    && printf '%s\n' "${arr[@]}" | grep -qx 'src/index.ts' \
+    && printf '%s' "${blob}" | grep -qE 'reexport|re-export'; then
+    wants_reexport=1
+  fi
+
   if [[ "${#arr[@]}" -le 1 ]]; then
+    # Single-path micros that already say "do not re-export" must not re-split.
+    if printf '%s' "${change_l}" | grep -qE 'do not re-?export|omit reexport|without reexport'; then
+      printf '[]'
+      return 0
+    fi
     # Single path: still may split create vs reexport heuristics from Change text
-    local change
-    change="$(aegis_fit_md_section "Change" "${text}")$(aegis_fit_md_section "Goal" "${text}")"
-    if printf '%s' "${change}" | grep -qiE 'reexport|re-export' \
-      && printf '%s' "${change}" | grep -qiE 'create|new file|tokenBucket|module'; then
+    if [[ "${wants_reexport}" -eq 1 ]] \
+      && printf '%s' "${blob}" | grep -qE 'create|new file|tokenbucket|module'; then
+      local mod="${arr[0]:-src/}"
+      # If the only target is already index, create still uses that path then reexport is same — skip split.
+      if [[ "${mod}" == "src/index.ts" ]]; then
+        printf '[]'
+        return 0
+      fi
       units="$(
         jq -cn \
-          --arg t "${arr[0]:-src/}" \
+          --arg t "${mod}" \
           '[
             {title:"create module only", targets:[$t], note:"omit reexport"},
             {title:"reexport only", targets:["src/index.ts"], note:"after create succeeds"}
@@ -451,12 +581,29 @@ aegis_fit_propose_units_json() {
       return 0
     fi
   else
-    # One unit per target path
+    # One unit per target path. Order: create modules first, barrel reexport last.
+    # Alphabetical path extract often yields src/index.ts before modules — wrong for RUN order.
     units="$(
-      jq -cn --arg paths "$(printf '%s\n' "${arr[@]}")" '
-        ($paths | split("\n") | map(select(length>0))) as $p
-        | [ $p[] | {title: ("mutate " + .), targets: [.], note: "single-target micro unit"} ]
-      '
+      jq -cn \
+        --arg paths "$(printf '%s\n' "${arr[@]}")" \
+        --argjson rx "${wants_reexport}" \
+        '
+        ($paths | split("\n") | map(select(length>0))) as $raw
+        | ($raw | map(select(. != "src/index.ts"))) as $mods
+        | ($raw | map(select(. == "src/index.ts"))) as $idx
+        | ($mods + $idx) as $p
+        | [
+            $p[]
+            | . as $t
+            | if ($t == "src/index.ts" and $rx == 1) then
+                {title: "reexport only", targets: [$t], note: "after create succeeds"}
+              elif ($t == "src/index.ts") then
+                {title: ("mutate " + $t), targets: [$t], note: "single-target micro unit"}
+              else
+                {title: ("create " + $t), targets: [$t], note: "create module only; omit reexport"}
+              end
+          ]
+        '
     )"
   fi
 
