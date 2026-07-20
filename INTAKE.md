@@ -81,7 +81,12 @@ SPEC <pedido>
 
 ### Demand loop (demanda → Aegis → revisão → melhora → repetir)
 
-Orquestração **fora** dos modes (Scout/operador). Não corta optimize/adversarial.
+Orquestração **fora** dos modes (Scout/operador **e o assistente**). Não corta optimize/adversarial.
+
+**Dois objectivos:**
+
+1. **Convergir a demand** (micro, tokens, scope) até SUCCESS ou esgotar iters.  
+2. **Gerar evidência para repensar o harness** — o assistente **lê** `insights.md` e separa *demand smell* vs *harness smell*.
 
 ```text
 seed demand
@@ -91,31 +96,40 @@ seed demand
 │            ▼                               │
 │   run_aegis --fresh --pipeline mutation    │
 │            ▼                               │
-│   review last_outcome (status/class/next)  │
+│   review last_outcome + capture insight    │
 │            ▼                               │
-│   SUCCESS? ──yes──► STOP (SHIP)            │
+│   SUCCESS? ──yes──► STOP + insights.md     │
 │            │ no                            │
-│   stop class (env/provider/bug)? ──yes──► STOP
+│   stop class (env/provider/bug)? ──yes──► STOP + insights
 │            │ no                            │
-│   improve demand (LOOP FEEDBACK + next_step)
+│   improve demand (LOOP FEEDBACK)           │
 │            │                               │
-└────────────┴──── max iters ────────────────┘
+└────────────┴──── max iters → insights.md ──┘
 ```
 
 ```bash
-# Issue
 ./run_aegis_loop.sh --issue N --max 3
-
-# Ficheiro / free-text
 ./run_aegis_loop.sh --demand-file /tmp/demand.md --max 3
 ./run_aegis_loop.sh --max 2 "micro demand text…"
-
-# Sem fit check
 ./run_aegis_loop.sh --no-fit --issue N
 ```
 
-Artefactos: `.harness/runtime/loop/demand.md`, `state.json`, `loop.jsonl`, `run_*.log`.  
-Melhora = apêndice `## LOOP FEEDBACK` na demand (não edita `src/` à mão).
+Artefactos em `.harness/runtime/loop/`:
+
+| Ficheiro | Uso |
+|----------|-----|
+| `demand.md` | demanda viva + LOOP FEEDBACK |
+| `insights.jsonl` | 1 registo/iter (status, modes, metrics, tags mecânicos) |
+| `insights.md` | digest + hipóteses de harness (checklist do assistente) |
+| `iter_N/` | cópia outcome + metrics da iteração |
+| `run_N.log` | log completo da run |
+
+**Depois do LOOP, o assistente deve:**
+
+1. Ler `insights.md` + `insights.jsonl`.  
+2. Classificar falhas: demand (SPEC/micro) vs harness (precondition, preflight, feedback, greps).  
+3. Propor ≤3 mudanças KISS no harness **com evidência** — ou só ajustar INTAKE se for só demand.  
+4. **Não** propor saltar optimize/adversarial.
 
 ### Acceptance no draft (evita falha do alignment)
 

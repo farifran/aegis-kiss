@@ -2,11 +2,17 @@
 # =========================================================
 # AEGIS DEMAND LOOP (operator / Scout orchestration)
 # =========================================================
-# demand → (fit review) → run_aegis full mutation → review
-#        → improve demand → repeat
+# Dual purpose:
+#   1) Converge a demand via: fit → full mutation → review → improve demand
+#   2) Capture telemetry so the assistant can rethink harness improvements
+#      (not only reword the demand).
 #
-# Does NOT live inside mode cognition. Does NOT skip optimize/
-# adversarial. Reuses run_aegis.sh + fit_check + last_outcome.
+# Does NOT live inside mode cognition. Does NOT skip optimize/adversarial.
+# Reuses run_aegis.sh + fit_check + last_outcome + pipeline_metrics.jsonl.
+#
+# After a loop, read:
+#   .harness/runtime/loop/insights.jsonl   # one record per iteration
+#   .harness/runtime/loop/insights.md      # human digest + harness hypotheses
 #
 # Usage:
 #   ./run_aegis_loop.sh --issue N [--max 3]
@@ -35,8 +41,9 @@ usage() {
   cat <<'EOF'
 Usage: ./run_aegis_loop.sh [options] [free-text demand…]
 
-  demand → fit review → run_aegis (full mutation) → review outcome
-         → improve demand → repeat
+  demand → fit → full mutation → review → improve demand → repeat
+
+  Also writes insights for harness learning (assistant reads insights.md).
 
 Options:
   --issue N           Seed demand from GitHub issue
@@ -52,7 +59,9 @@ Env:
   AEGIS_LOOP_STOP_CLASSES=environment,provider,harness_bug
 
 Always uses: ./run_aegis.sh --fresh --pipeline mutation
-Artifacts: .harness/runtime/loop/{demand.md,state.json,loop.jsonl,run_*.log}
+Artifacts: .harness/runtime/loop/
+  demand.md state.json loop.jsonl run_*.log
+  insights.jsonl insights.md   ← harness learning digest
 EOF
 }
 
@@ -112,6 +121,9 @@ LOOP_DIR="${RUNTIME_DIR}/loop"
 LOOP_DEMAND="${LOOP_DIR}/demand.md"
 LOOP_LOG="${LOOP_DIR}/loop.jsonl"
 LOOP_STATE="${LOOP_DIR}/state.json"
+LOOP_INSIGHTS_JSONL="${LOOP_DIR}/insights.jsonl"
+LOOP_INSIGHTS_MD="${LOOP_DIR}/insights.md"
+METRICS_FILE="${RUNTIME_DIR}/pipeline_metrics.jsonl"
 OUTCOME_FILE="${RUNTIME_DIR}/last_outcome.json"
 FATAL_FILE="${RUNTIME_DIR}/last_fatal"
 
@@ -368,6 +380,7 @@ write_state() {
     --arg reason "${AEGIS_LOOP_REASON:-}" \
     --arg next "${AEGIS_LOOP_NEXT:-}" \
     --arg demand "${LOOP_DEMAND}" \
+    --arg insights "${LOOP_INSIGHTS_MD}" \
     --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     '{
       schema: "aegis.loop.v1",
@@ -378,12 +391,221 @@ write_state() {
       reason_code: $reason,
       next_step: $next,
       demand_file: $demand,
+      insights_md: $insights,
       at: $at
     }' > "${LOOP_STATE}" 2>/dev/null || true
 }
 
+# Snapshot one iteration for harness learning (machine-readable).
+capture_iteration_insight() {
+  local iter="$1"
+  local run_rc="${2:-0}"
+  local decision="${3:-}"
+
+  local demand_bytes demand_sha modes_json total_s=""
+  demand_bytes="$(wc -c < "${LOOP_DEMAND}" | tr -d ' ')"
+  demand_sha="$(
+    shasum -a 256 "${LOOP_DEMAND}" 2>/dev/null | awk '{print $1}' \
+      || cksum "${LOOP_DEMAND}" | awk '{print $1}'
+  )"
+
+  modes_json="[]"
+  total_s=""
+  if [[ -f "${OUTCOME_FILE}" ]]; then
+    modes_json="$(jq -c '.modes // []' "${OUTCOME_FILE}" 2>/dev/null || printf '[]')"
+    total_s="$(jq -r '.total_seconds // empty' "${OUTCOME_FILE}" 2>/dev/null || true)"
+  fi
+
+  # Compact metrics histogram from this run's pipeline_metrics (best-effort).
+  local metrics_summary="{}"
+  if [[ -f "${METRICS_FILE}" ]]; then
+    metrics_summary="$(
+      jq -s -c '
+        group_by(.kind // "other")
+        | map({
+            key: (.[0].kind // "other"),
+            value: (
+              group_by(.result // .status // "n/a")
+              | map({key: (.[0].result // .[0].status // "n/a"), value: length})
+              | from_entries
+            )
+          })
+        | from_entries
+      ' "${METRICS_FILE}" 2>/dev/null || printf '{}'
+    )"
+  fi
+
+  local fit_score="" fit_allowed=""
+  if [[ -f "${LOOP_DIR}/fit_${iter}.json" ]]; then
+    fit_score="$(jq -r '.score // empty' "${LOOP_DIR}/fit_${iter}.json" 2>/dev/null || true)"
+    fit_allowed="$(jq -r '.run_allowed // empty' "${LOOP_DIR}/fit_${iter}.json" 2>/dev/null || true)"
+  fi
+
+  # Grep log for mechanical vs LLM path tags (signals for harness design).
+  local logf="${LOOP_DIR}/run_${iter}.log"
+  local mech_tags
+  mech_tags="$(
+    {
+      [[ -f "${logf}" ]] || exit 0
+      grep -E 'optimize_mechanical|adversarial_mechanical|adversarial_llm|validation_mechanical|forensics_mechanical|forensics_llm|optimize_passthrough|optimize_mechanical_clean' \
+        "${logf}" 2>/dev/null \
+        | sed -E 's/.*\[AEGIS\](\[[A-Z_]+\])?[[:space:]]*//' \
+        | head -n 40
+    } | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]'
+  )"
+
+  local failed_mode=""
+  failed_mode="$(
+    printf '%s' "${modes_json}" \
+      | jq -r '[.[] | select(.status != "ok" and .status != null)] | last | .mode // empty' \
+      2>/dev/null || true
+  )"
+
+  jq -nc \
+    --argjson iter "${iter}" \
+    --argjson run_rc "${run_rc}" \
+    --arg decision "${decision}" \
+    --arg status "${AEGIS_LOOP_STATUS:-}" \
+    --arg class "${AEGIS_LOOP_CLASS:-}" \
+    --arg reason "${AEGIS_LOOP_REASON:-}" \
+    --arg next "${AEGIS_LOOP_NEXT:-}" \
+    --argjson modes "${modes_json}" \
+    --arg total_seconds "${total_s}" \
+    --argjson demand_bytes "${demand_bytes:-0}" \
+    --arg demand_sha "${demand_sha}" \
+    --argjson metrics "${metrics_summary}" \
+    --argjson mech_tags "${mech_tags}" \
+    --arg fit_score "${fit_score}" \
+    --arg fit_allowed "${fit_allowed}" \
+    --arg failed_mode "${failed_mode}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{
+      schema: "aegis.loop.insight.v1",
+      iter: $iter,
+      decision: $decision,
+      run_rc: $run_rc,
+      status: $status,
+      reason_class: $class,
+      reason_code: $reason,
+      next_step: $next,
+      failed_mode: $failed_mode,
+      total_seconds: (if $total_seconds == "" then null else ($total_seconds|tonumber) end),
+      modes: $modes,
+      demand_bytes: $demand_bytes,
+      demand_sha: $demand_sha,
+      fit_score: (if $fit_score == "" then null else $fit_score end),
+      fit_allowed: (if $fit_allowed == "" then null else $fit_allowed end),
+      metrics_by_kind: $metrics,
+      mechanical_log_tags: $mech_tags,
+      at: $at
+    }' >> "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || true
+
+  # Per-iter copy of outcome + metrics for offline analysis
+  mkdir -p "${LOOP_DIR}/iter_${iter}"
+  [[ -f "${OUTCOME_FILE}" ]] && cp "${OUTCOME_FILE}" "${LOOP_DIR}/iter_${iter}/last_outcome.json" 2>/dev/null || true
+  [[ -f "${METRICS_FILE}" ]] && cp "${METRICS_FILE}" "${LOOP_DIR}/iter_${iter}/pipeline_metrics.jsonl" 2>/dev/null || true
+  [[ -f "${LOOP_DIR}/fit_${iter}.json" ]] && cp "${LOOP_DIR}/fit_${iter}.json" "${LOOP_DIR}/iter_${iter}/fit.json" 2>/dev/null || true
+}
+
+# Human + assistant digest: patterns that may justify harness changes.
+write_insights_digest() {
+  local final="${1:-UNKNOWN}"
+  local iters="${2:-0}"
+
+  {
+    echo "# Aegis loop insights (harness learning)"
+    echo
+    echo "Generated for the **assistant / Scout** after a demand loop."
+    echo "Purpose: improve **the harness**, not only reword the demand."
+    echo
+    echo "| | |"
+    echo "|--|--|"
+    echo "| final | \`${final}\` |"
+    echo "| iterations | ${iters} |"
+    echo "| demand | \`${LOOP_DEMAND}\` |"
+    echo "| machine log | \`${LOOP_INSIGHTS_JSONL}\` |"
+    echo
+    echo "## Per-iteration summary"
+    echo
+    echo "| iter | status | class | reason | failed_mode | decision |"
+    echo "|------|--------|-------|--------|-------------|----------|"
+    if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
+      jq -r '
+        [.iter, .status, .reason_class, (.reason_code//"—"), (.failed_mode//"—"), .decision]
+        | @tsv
+      ' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null \
+        | while IFS=$'\t' read -r i st cl rs fm dec; do
+            echo "| ${i} | ${st} | ${cl} | \`${rs}\` | ${fm} | ${dec} |"
+          done
+    fi
+    echo
+    echo "## Frequency (reason_class)"
+    echo
+    if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
+      jq -s -r '
+        group_by(.reason_class // "unknown")
+        | map("- **\(.[0].reason_class // "unknown")**: \(length)")
+        | .[]
+      ' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo "- (none)"
+    fi
+    echo
+    echo "## Mechanical / LLM path tags (from run logs)"
+    echo
+    if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
+      jq -s -r '
+        [.[].mechanical_log_tags[]?] | group_by(.) | map("- `\(.[0])` ×\(length)") | .[]?
+      ' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo "- (none captured)"
+    fi
+    echo
+    echo "## Metrics kinds seen"
+    echo
+    if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
+      jq -s -r '
+        [.[].metrics_by_kind | keys[]] | unique | map("- \(.)") | .[]?
+      ' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo "- (none)"
+    fi
+    echo
+    echo "## Hypotheses for harness improvement (devil filter)"
+    echo
+    echo "Use evidence above. Prefer **runtime rails** over more LLM. Reject ideas that reintroduce lite/shortcuts."
+    echo
+    # Heuristic bullets from patterns
+    if [[ -f "${LOOP_INSIGHTS_JSONL}" ]]; then
+      local has_preflight has_precond has_budget has_contract has_halt has_intent
+      has_preflight="$(jq -s 'any(.[]; (.reason_code//"")|test("preflight|mutation_preflight"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      has_precond="$(jq -s 'any(.[]; (.reason_code//"")|test("precondition_"))' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      has_budget="$(jq -s 'any(.[]; .reason_class=="budget")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      has_contract="$(jq -s 'any(.[]; .reason_class=="contract")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      has_halt="$(jq -s 'any(.[]; .reason_class=="epistemic_halt")' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+      has_intent="$(jq -s 'any(.[]; (.metrics_by_kind.intent//{})|length>0)' "${LOOP_INSIGHTS_JSONL}" 2>/dev/null || echo false)"
+
+      [[ "${has_preflight}" == "true" ]] && echo "- **preflight failures**: strengthen tools-fix prompts or mechanical preflight classes — not more optimize LLM."
+      [[ "${has_precond}" == "true" ]] && echo "- **precondition gaps**: mode handoff contract incomplete — fix runtime preconditions/enrich, not demand poetry."
+      [[ "${has_budget}" == "true" ]] && echo "- **repair budget exhausted**: repair_feedback quality or intent soft-accept thrashing — tighten feedback codes / can_improve gate."
+      [[ "${has_contract}" == "true" ]] && echo "- **artifact contract**: skill min-output vs enrich mismatch — densify skill or strengthen mechanical emit."
+      [[ "${has_halt}" == "true" ]] && echo "- **forensics halt**: discovery/forensics anchors weak — improve path extraction / seed, not adversarial."
+      [[ "${has_intent}" == "true" ]] && echo "- **intent metrics present**: review soft_accept vs fail rates in iter_*/pipeline_metrics.jsonl."
+      echo "- If **mechanical_verified** dominates adversarial and bugs still ship: add greps (acceptance/body), not multi-agent."
+      echo "- If **mechanical_improve** never fires but code has any/stubs: scan regex gap."
+      echo "- If SUCCESS only after demand shrink: fit_check / INTAKE templates — harness demand rails, not model upgrade alone."
+    fi
+    echo
+    echo "## Assistant checklist (after LOOP)"
+    echo
+    echo "1. Read this file + \`insights.jsonl\` + last failing \`iter_N/run\` tail."
+    echo "2. Separate **demand smell** (micro/SPEC) vs **harness smell** (precondition, preflight, feedback, greps)."
+    echo "3. Propose ≤3 KISS harness changes with evidence from classes/tags above."
+    echo "4. Do **not** propose mutation_lite or skipping optimize/adversarial."
+    echo "5. If only demand was wrong: update INTAKE examples; no code change required."
+    echo
+  } > "${LOOP_INSIGHTS_MD}"
+
+  log_line "insights written: ${LOOP_INSIGHTS_MD}"
+}
+
 # ----- main -----
 : > "${LOOP_LOG}"
+: > "${LOOP_INSIGHTS_JSONL}"
 seed_demand
 
 AEGIS_LOOP_STATUS=""
@@ -407,25 +629,31 @@ while [[ "${iter}" -lt "${MAX}" ]]; do
   if [[ "${AEGIS_LOOP_STATUS}" == "SUCCESS" ]]; then
     final_status="SUCCESS"
     log_line "SUCCESS on iter=${iter}"
+    capture_iteration_insight "${iter}" "${run_rc}" "SUCCESS"
     write_state "${iter}" "SUCCESS"
     break
   fi
 
   if class_is_stop "${AEGIS_LOOP_CLASS}"; then
     log_line "stop class=${AEGIS_LOOP_CLASS} (not auto-retryable)"
+    capture_iteration_insight "${iter}" "${run_rc}" "STOP_${AEGIS_LOOP_CLASS}"
     write_state "${iter}" "STOP_${AEGIS_LOOP_CLASS}"
     break
   fi
 
   if [[ "${iter}" -ge "${MAX}" ]]; then
     log_line "max iterations reached"
+    capture_iteration_insight "${iter}" "${run_rc}" "MAX_ITER"
     write_state "${iter}" "MAX_ITER"
     break
   fi
 
+  capture_iteration_insight "${iter}" "${run_rc}" "CONTINUE"
   improve_demand "${iter}"
   write_state "${iter}" "CONTINUE"
 done
+
+write_insights_digest "${final_status}" "${iter}"
 
 echo
 echo "══════════════════════════════"
@@ -439,8 +667,13 @@ echo "Reason:    ${AEGIS_LOOP_REASON:-—}"
 echo "Next:      ${AEGIS_LOOP_NEXT:-—}"
 echo "Demand:    ${LOOP_DEMAND}"
 echo "State:     ${LOOP_STATE}"
+echo "Insights:  ${LOOP_INSIGHTS_MD}"
+echo "JSONL:     ${LOOP_INSIGHTS_JSONL}"
 echo "Log:       ${LOOP_LOG}"
 echo "══════════════════════════════"
+echo
+echo "Assistant: read Insights and propose harness KISS fixes if patterns are harness smells."
+echo
 
 if [[ "${final_status}" == "SUCCESS" ]]; then
   exit 0

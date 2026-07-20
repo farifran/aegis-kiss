@@ -35,5 +35,11 @@ grep -q 'LOOP FEEDBACK' "${loop_sh}" \
   || fail "loop_must_improve_demand_with_feedback"
 grep -q 'fit_check_demand' "${loop_sh}" \
   || fail "loop_must_use_fit_check"
+grep -q 'insights.jsonl\|LOOP_INSIGHTS' "${loop_sh}" \
+  || fail "loop_must_write_insights_for_harness_learning"
+grep -q 'capture_iteration_insight\|write_insights_digest' "${loop_sh}" \
+  || fail "loop_must_capture_iteration_insights"
+grep -q 'harness' "${loop_sh}" \
+  || fail "loop_docs_must_mention_harness_learning"
 
 echo "[PASS] aegis demand loop surface"
