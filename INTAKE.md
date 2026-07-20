@@ -205,32 +205,30 @@ bash scripts/fit_check_demand.sh --issue 4
 # → run_allowed=false, proposed_units=[...]
 ```
 
-### Mutation lite (pipeline curto)
+### Pipeline de mutation (único caminho de garantia)
 
-Para micros / 8B, evita optimize + adversarial:
+Aegis **sempre** percorre o stack completo em mutation:
+
+`discovery → forensics → repair → optimize → adversarial → validation`
+
+Pedidos pequenos sem essas garantias → assistente no IDE, não Aegis.  
+Modelo fraco (ex. 8B) é **piso de qualidade** dos modes, não motivo para saltar optimize/adversarial.
 
 ```bash
-# Explícito
-./run_aegis.sh --fresh --pipeline mutation_lite --issue N
-
-# Ou forçar quando o default é mutation
-AEGIS_MUTATION_LITE=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
-
-# Auto: só se AEGIS_FIT_CHECK=1 e score baixo + 1 target
-AEGIS_FIT_CHECK=1 AEGIS_MUTATION_LITE=auto ./run_aegis.sh --fresh --pipeline mutation --issue N
+./run_aegis.sh --fresh --pipeline mutation --issue N
+# ou default mutation:
+./run_aegis.sh --fresh --issue N
 ```
-
-Ordem lite: `discovery → forensics → repair → validation`.
 
 ### Emit micros + correr uma unidade (`--from-fit --unit`)
 
-Quando o monstro não cabe, gera ficheiros e corre **uma** micro de cada vez (sem multi-run autónomo):
+Quando o monstro não cabe, gera ficheiros e corre **uma** micro de cada vez (full mutation por unidade):
 
 ```bash
 # 1) Split → dir com fit.json + unit-0.md, unit-1.md, …
 bash scripts/fit_check_demand.sh --emit-micros /tmp/aegis-micros --issue 4
 
-# 2) Correr só a unidade 0 (free-text demand; default mutation_lite)
+# 2) Correr só a unidade 0 (free-text demand; pipeline mutation completo)
 ./run_aegis.sh --fresh --from-fit /tmp/aegis-micros --unit 0
 
 # 3) Depois da SUCCESS, unidade 1
@@ -327,7 +325,10 @@ On "Leia INTAKE.md" or SPEC/OK/EDIT/OUT/SHIP/…: follow INTAKE.md. SPEC shows i
 
 ---
 
-## Marco 8B (o que funciona no Aegis sem subir o modelo)
+## Marco 8B (piso de qualidade — full pipeline)
+
+O 8B é o **limite inferior** de sucesso com o **mesmo** pipeline de mutation (inclui optimize + adversarial).  
+Não se corta stages para “ajudar” o modelo: melhora-se demand, rails e skills.
 
 Problemas que **não** se resolvem com modelo maior quando o harness/demand falha:
 
@@ -339,7 +340,7 @@ Problemas que **não** se resolvem com modelo maior quando o harness/demand falh
 | Reexport NodeNext + smoke | smoke cria symlink `.js`→`.ts` temporário |
 | Out of scope a nomear paths | **não** listar paths em Out of scope |
 
-**Prova de marco (Llama 3.1 8B):** issue **#5** criou `src/tokenBucket.ts`; issue **#6** reexportou em `src/index.ts`. A issue **#4** monstro falhou — mesma capacidade, demand errada.
+**Prova de marco (Llama 3.1 8B):** micros bem formatadas no stack de exemplo (ex. issues TokenBucket). A issue monstro multi-ficheiro falha — mesma capacidade, demand errada.
 
 ## 0. O que este ficheiro gere (e o que não gere)
 

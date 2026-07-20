@@ -56,16 +56,10 @@ Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
 Pipelines:
   (default)            mutation: discovery -> forensics -> repair
                        -> optimize -> adversarial -> validation
-  mutation_lite        discovery -> forensics -> repair -> validation
-                       (no optimize/adversarial; good for weak models)
   readonly             discovery -> forensics
 
-  Env: AEGIS_MUTATION_LITE=1|true  force lite when pipeline is mutation
-       AEGIS_MUTATION_LITE=auto    lite if fit_check score is low (needs
-                                   AEGIS_FIT_CHECK=1) and targets_count<=1
-
 Options:
-  --pipeline NAME      mutation|mutation_lite|readonly
+  --pipeline NAME      mutation|readonly
   --resume             Continue from the mode after the last
                        .harness/runtime/epistemic_handover.json snapshot
   --fresh              Start a new investigation: wipe handover (and
@@ -76,8 +70,7 @@ Options:
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Fetch GitHub issue #N (title+body via gh) as demand
   --from-fit PATH      fit.json or directory from fit_check --emit-micros
-  --unit N             Run proposed_units[N].demand from --from-fit (implies
-                       free-text demand; default mutation_lite)
+  --unit N             Run proposed_units[N].demand from --from-fit
   --force-apply        Operator override: on the FINAL executed mode of a
                        partial run (e.g. with --until optimize), promote the
                        candidate diff into the working directory even without
@@ -89,7 +82,8 @@ Options:
 Any mode failure aborts the remaining pipeline. Intelligent early-exit
 halts mutation after forensics when status is inconclusive or no
 repair_candidates exist (no wasted repair/optimize LLM). Rejected
-validation re-enters a local repair feedback loop (no rediscovery).
+validation re-enters a local repair feedback loop (no rediscovery):
+repair -> optimize -> adversarial -> validation.
 
 The final report always shows per-mode status/timings, stage budget
 share, hot timing spans, verdict, structured repair feedback (when
@@ -100,11 +94,9 @@ EOF
 declare -A PIPELINES=(
   [readonly]="discovery forensics"
   [mutation]="discovery forensics repair optimize adversarial validation"
-  [mutation_lite]="discovery forensics repair validation"
 )
 
 PIPELINE="mutation"
-# Last fit-check JSON (optional); used by AEGIS_MUTATION_LITE=auto
 FIT_CHECK_JSON=""
 FROM_FIT=""
 FIT_UNIT=""
@@ -134,56 +126,16 @@ require() {
   }
 }
 
-pipeline_is_mutation_family() {
-  case "${PIPELINE}" in
-    mutation|mutation_lite) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 check_dependencies() {
   require jq
   require git
-  if pipeline_is_mutation_family; then
+  if [[ "${PIPELINE}" == "mutation" ]]; then
     require aider
   fi
 }
 
-# Successor in the active pipeline order (mutation vs mutation_lite).
 next_mode() {
   printf '%s\n' "$(aegis_next_in_sequence "$1" "${PIPELINES[$PIPELINE]}")"
-}
-
-# Apply AEGIS_MUTATION_LITE / auto after optional fit check.
-maybe_apply_mutation_lite() {
-  local flag="${AEGIS_MUTATION_LITE:-0}"
-  [[ "${PIPELINE}" == "mutation" ]] || return 0
-
-  case "${flag}" in
-    1|true|yes|lite)
-      PIPELINE="mutation_lite"
-      echo "[RUN] mutation_lite enabled (AEGIS_MUTATION_LITE=${flag})"
-      return 0
-      ;;
-    auto)
-      if [[ -n "${FIT_CHECK_JSON}" ]]; then
-        local score tc
-        score="$(printf '%s' "${FIT_CHECK_JSON}" | jq -r '.score // 99' 2>/dev/null || echo 99)"
-        tc="$(printf '%s' "${FIT_CHECK_JSON}" | jq -r '.targets_count // 99' 2>/dev/null || echo 99)"
-        local max_score="${AEGIS_MUTATION_LITE_MAX_SCORE:-2}"
-        if [[ "${score}" =~ ^[0-9]+$ && "${tc}" =~ ^[0-9]+$ ]] \
-          && [[ "${score}" -le "${max_score}" ]] \
-          && [[ "${tc}" -le 1 ]]; then
-          PIPELINE="mutation_lite"
-          echo "[RUN] mutation_lite auto (fit score=${score} targets=${tc} max_score=${max_score})"
-        else
-          echo "[RUN] mutation_lite auto skipped (score=${score} targets=${tc})"
-        fi
-      else
-        echo "[RUN] mutation_lite auto skipped (no fit_check JSON; set AEGIS_FIT_CHECK=1)"
-      fi
-      ;;
-  esac
 }
 
 # True when runtime internal feedback already advanced the handover past
@@ -744,6 +696,17 @@ parse_cli() {
         shift
         [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing pipeline value" >&2; exit 1; }
         PIPELINE="$1"
+        case "${PIPELINE}" in
+          mutation|readonly) ;;
+          mutation_lite)
+            echo "[RUN][FATAL] mutation_lite_removed — use full mutation (optimize+adversarial are part of Aegis guarantees)" >&2
+            exit 1
+            ;;
+          *)
+            echo "[RUN][FATAL] unknown_pipeline: ${PIPELINE} (mutation|readonly)" >&2
+            exit 1
+            ;;
+        esac
         ;;
 
       --until)
@@ -868,12 +831,6 @@ main() {
     }
     ISSUE_NUMBER=""
     FRESH_INVESTIGATION=true
-    # Prefer lite for micro units unless user already chose another pipeline.
-    if [[ "${PIPELINE}" == "mutation" && "${AEGIS_MUTATION_LITE:-}" != "0" ]]; then
-      if [[ -z "${AEGIS_MUTATION_LITE:-}" || "${AEGIS_MUTATION_LITE}" == "auto" ]]; then
-        export AEGIS_MUTATION_LITE=1
-      fi
-    fi
     echo "[RUN] from_fit unit=${unit_idx} title=$(printf '%s' "${FIT_CHECK_JSON}" | jq -r --argjson i "${unit_idx}" '.proposed_units[$i].title // "?"')"
   elif [[ -n "${ISSUE_NUMBER}" ]]; then
     INVESTIGATION_INPUT=""
@@ -885,12 +842,12 @@ main() {
 
   check_dependencies
 
-  # Optional demand fit gate (rails + weak-model budget). Scout / CI:
+  # Optional demand fit gate (rails + model budget). Scout / CI:
   #   AEGIS_FIT_CHECK=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
   # Free-text: auto-fixed demand may replace INVESTIGATION_INPUT.
   # Issue bodies: check only — edit GitHub if blocked. See fit_check_demand.sh.
   if [[ "${AEGIS_FIT_CHECK:-0}" == "1" || "${AEGIS_FIT_CHECK:-0}" == "true" ]] \
-    && pipeline_is_mutation_family \
+    && [[ "${PIPELINE}" == "mutation" ]] \
     && [[ "${RESUME}" != "true" ]]; then
     local fit_json fit_rc=0
     if [[ -n "${ISSUE_NUMBER}" ]]; then
@@ -909,14 +866,6 @@ main() {
     fi
     FIT_CHECK_JSON="${fit_json}"
     echo "[RUN] fit_check ok model_fit=$(printf '%s' "${fit_json}" | jq -r '.model_fit') score=$(printf '%s' "${fit_json}" | jq -r '.score')"
-  fi
-
-  maybe_apply_mutation_lite
-
-  # Runtime feedback loop (repair re-entry) keys off pipeline name.
-  export AEGIS_PIPELINE="${PIPELINE}"
-  if [[ "${PIPELINE}" == "mutation_lite" ]]; then
-    export AEGIS_MUTATION_LITE=1
   fi
 
   if $RESUME; then

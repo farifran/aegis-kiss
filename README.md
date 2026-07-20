@@ -25,11 +25,9 @@ export OPENAI_API_KEY="..."
 # Prefer a clean worktree on mutation targets (or promotion may refuse dirty files)
 git status
 
-# Full pipelines
+# Full mutation (always: repair → optimize → adversarial → validation)
 ./run_aegis.sh --fresh --pipeline mutation "funções de conversão, como bytes para Megabits"
-# Lite (no optimize/adversarial) — better for small models / micro-issues
-AEGIS_MUTATION_LITE=1 ./run_aegis.sh --fresh --pipeline mutation --issue N
-# or: ./run_aegis.sh --fresh --pipeline mutation_lite --issue N
+./run_aegis.sh --fresh --pipeline mutation --issue N
 ./run_aegis.sh --fresh --pipeline readonly "inspect demand anchors"
 
 # Single mode

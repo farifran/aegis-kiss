@@ -535,31 +535,13 @@ validate_mode_preconditions() {
          and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})"
       ;;
     validation)
-      # Full mutation: adversarial hands off findings + candidate.
-      # mutation_lite: repair (or optimize if present) hands off candidate
-      # without adversarial findings — treat missing findings as empty array ok
-      # when mode is repair/optimize with a non-empty candidate.
+      # Always after adversarial: findings array + candidate continuity.
       assert_handover_precondition \
         "precondition_failed_findings_missing_or_invalid" \
         ".artifact_snapshot != null
-         and (
-           (
-             .artifact_snapshot.mode == \"adversarial\"
-             and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
-             and (.artifact_snapshot.operational_context.findings | type == \"array\")
-           )
-           or (
-             .artifact_snapshot.mode == \"optimize\"
-             and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
-           )
-           or (
-             .artifact_snapshot.mode == \"repair\"
-             and (.artifact_snapshot.operational_context.diff
-                  | type == \"string\" and length > 0 and . != \"(no changes)\")
-             and (.artifact_snapshot.operational_context.files_changed
-                  | type == \"array\" and length > 0)
-           )
-         )"
+         and .artifact_snapshot.mode == \"adversarial\"
+         and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
+         and (.artifact_snapshot.operational_context.findings | type == \"array\")"
       ;;
   esac
 }
@@ -1068,28 +1050,11 @@ optimize_improve_loop_should_fire() {
   return 0
 }
 
-# Downstream progression for feedback iterations: a re-entered repair
-# must roll forward through the verification stack for this pipeline.
-# Full mutation: repair → optimize → adversarial → validation.
-# mutation_lite: repair → validation only (no optimize/adversarial).
-# Terminal success is only an explicit "accepted" from fresh validation.
+# Downstream progression for feedback iterations: re-entered repair rolls
+# through the full verification stack. Terminal success is only an
+# explicit "accepted" from a fresh validation pass.
 AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
-
-# Resolved once per process (pipeline name or AEGIS_MUTATION_LITE flag).
-aegis_resolve_feedback_mode_sequence() {
-  local pipeline="${AEGIS_PIPELINE:-}"
-  local lite_flag
-  lite_flag="$(printf '%s' "${AEGIS_MUTATION_LITE:-0}" | tr '[:upper:]' '[:lower:]')"
-  if [[ "${pipeline}" == "mutation_lite" ]] \
-    || [[ "${lite_flag}" == "1" ]] \
-    || [[ "${lite_flag}" == "true" ]]; then
-    printf '%s' "repair validation"
-  else
-    printf '%s' "repair optimize adversarial validation"
-  fi
-}
-
-AEGIS_FEEDBACK_MODE_SEQUENCE="$(aegis_resolve_feedback_mode_sequence)"
+readonly AEGIS_FEEDBACK_MODE_SEQUENCE="repair optimize adversarial validation"
 
 next_feedback_pipeline_mode() {
   aegis_next_in_sequence "${AEGIS_MODE}" "${AEGIS_FEEDBACK_MODE_SEQUENCE}"
