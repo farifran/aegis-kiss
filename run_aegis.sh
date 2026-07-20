@@ -75,6 +75,9 @@ Options:
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Fetch GitHub issue #N (title+body via gh) as demand
+  --from-fit PATH      fit.json or directory from fit_check --emit-micros
+  --unit N             Run proposed_units[N].demand from --from-fit (implies
+                       free-text demand; default mutation_lite)
   --force-apply        Operator override: on the FINAL executed mode of a
                        partial run (e.g. with --until optimize), promote the
                        candidate diff into the working directory even without
@@ -103,6 +106,8 @@ declare -A PIPELINES=(
 PIPELINE="mutation"
 # Last fit-check JSON (optional); used by AEGIS_MUTATION_LITE=auto
 FIT_CHECK_JSON=""
+FROM_FIT=""
+FIT_UNIT=""
 TARGET=""
 RESUME=false
 FRESH_INVESTIGATION=false
@@ -776,6 +781,18 @@ parse_cli() {
         ISSUE_NUMBER="$1"
         ;;
 
+      --from-fit)
+        shift
+        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing --from-fit path" >&2; exit 1; }
+        FROM_FIT="$1"
+        ;;
+
+      --unit)
+        shift
+        [[ $# -gt 0 ]] || { echo "[RUN][FATAL] missing --unit index" >&2; exit 1; }
+        FIT_UNIT="$1"
+        ;;
+
       -*)
         echo "[RUN][FATAL] unknown argument: $1" >&2
         exit 1
@@ -812,7 +829,53 @@ main() {
   }
 
   # Resolve investigation input priority
-  if [[ -n "${ISSUE_NUMBER}" ]]; then
+  if [[ -n "${FROM_FIT}" ]]; then
+    local fit_path="${FROM_FIT}"
+    if [[ -d "${FROM_FIT}" ]]; then
+      fit_path="${FROM_FIT}/fit.json"
+    fi
+    [[ -f "${fit_path}" ]] || {
+      echo "[RUN][FATAL] from_fit_missing: ${fit_path}" >&2
+      exit 1
+    }
+    FIT_CHECK_JSON="$(cat "${fit_path}")"
+    local unit_idx="${FIT_UNIT:-0}"
+    if ! [[ "${unit_idx}" =~ ^[0-9]+$ ]]; then
+      echo "[RUN][FATAL] unit_not_integer: ${unit_idx}" >&2
+      exit 1
+    fi
+    local n_units
+    n_units="$(printf '%s' "${FIT_CHECK_JSON}" | jq '.proposed_units | length' 2>/dev/null || echo 0)"
+    if [[ "${unit_idx}" -ge "${n_units}" ]]; then
+      echo "[RUN][FATAL] unit_out_of_range: ${unit_idx} (have ${n_units})" >&2
+      exit 1
+    fi
+    INVESTIGATION_INPUT="$(
+      printf '%s' "${FIT_CHECK_JSON}" \
+        | jq -r --argjson i "${unit_idx}" '.proposed_units[$i].demand // empty'
+    )"
+    if [[ -z "$(printf '%s' "${INVESTIGATION_INPUT}" | tr -d '[:space:]')" ]]; then
+      # Fallback to unit-N.md beside fit.json
+      local unit_md
+      unit_md="$(dirname "${fit_path}")/unit-${unit_idx}.md"
+      if [[ -f "${unit_md}" ]]; then
+        INVESTIGATION_INPUT="$(cat "${unit_md}")"
+      fi
+    fi
+    [[ -n "$(printf '%s' "${INVESTIGATION_INPUT}" | tr -d '[:space:]')" ]] || {
+      echo "[RUN][FATAL] from_fit_unit_empty: ${unit_idx}" >&2
+      exit 1
+    }
+    ISSUE_NUMBER=""
+    FRESH_INVESTIGATION=true
+    # Prefer lite for micro units unless user already chose another pipeline.
+    if [[ "${PIPELINE}" == "mutation" && "${AEGIS_MUTATION_LITE:-}" != "0" ]]; then
+      if [[ -z "${AEGIS_MUTATION_LITE:-}" || "${AEGIS_MUTATION_LITE}" == "auto" ]]; then
+        export AEGIS_MUTATION_LITE=1
+      fi
+    fi
+    echo "[RUN] from_fit unit=${unit_idx} title=$(printf '%s' "${FIT_CHECK_JSON}" | jq -r --argjson i "${unit_idx}" '.proposed_units[$i].title // "?"')"
+  elif [[ -n "${ISSUE_NUMBER}" ]]; then
     INVESTIGATION_INPUT=""
   elif [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
     INVESTIGATION_INPUT="${POSITIONAL[*]}"

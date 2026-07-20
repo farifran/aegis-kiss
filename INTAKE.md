@@ -222,6 +222,23 @@ AEGIS_FIT_CHECK=1 AEGIS_MUTATION_LITE=auto ./run_aegis.sh --fresh --pipeline mut
 
 Ordem lite: `discovery → forensics → repair → validation`.
 
+### Emit micros + correr uma unidade (`--from-fit --unit`)
+
+Quando o monstro não cabe, gera ficheiros e corre **uma** micro de cada vez (sem multi-run autónomo):
+
+```bash
+# 1) Split → dir com fit.json + unit-0.md, unit-1.md, …
+bash scripts/fit_check_demand.sh --emit-micros /tmp/aegis-micros --issue 4
+
+# 2) Correr só a unidade 0 (free-text demand; default mutation_lite)
+./run_aegis.sh --fresh --from-fit /tmp/aegis-micros --unit 0
+
+# 3) Depois da SUCCESS, unidade 1
+./run_aegis.sh --fresh --from-fit /tmp/aegis-micros --unit 1
+```
+
+Cada `unit-N.md` é uma demand estruturada (1 target). O operador confirma a sequência; o harness **não** dispara N runs em paralelo.
+
 ---
 
 ## Vocabulário reservado

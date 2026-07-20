@@ -7,6 +7,11 @@
 #   bash scripts/fit_check_demand.sh path/to.md
 #   bash scripts/fit_check_demand.sh --issue N
 #   bash scripts/fit_check_demand.sh --write-fixed out.md < demand.md
+#   bash scripts/fit_check_demand.sh --emit-micros DIR [--issue N | file | stdin]
+#        → DIR/fit.json + DIR/unit-0.md … unit-N.md (each unit has .demand)
+#
+# Then run one micro without manual issue edit:
+#   ./run_aegis.sh --fresh --from-fit DIR --unit 0
 #
 # Exit:
 #   0  run_allowed == true
@@ -27,10 +32,11 @@ source "${ROOT}/scripts/lib/fit_check.sh"
 AEGIS_LOG_TAG="FIT"
 
 usage() {
-  sed -n '2,18p' "$0"
+  sed -n '2,22p' "$0"
 }
 
 WRITE_FIXED=""
+EMIT_MICROS=""
 ISSUE=""
 INPUT_FILE=""
 
@@ -42,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --write-fixed)
       WRITE_FIXED="${2:-}"
+      shift 2
+      ;;
+    --emit-micros)
+      EMIT_MICROS="${2:-}"
       shift 2
       ;;
     --issue)
@@ -97,6 +107,13 @@ if [[ -n "${WRITE_FIXED}" ]]; then
   echo "[AEGIS][FIT] wrote_fixed:${WRITE_FIXED}" >&2
 fi
 
+if [[ -n "${EMIT_MICROS}" ]]; then
+  RESULT="$(aegis_fit_emit_micros "${RESULT}" "${EMIT_MICROS}")"
+  nprop="$(printf '%s' "${RESULT}" | jq '.proposed_units | length')"
+  echo "[AEGIS][FIT] emit_micros dir=${EMIT_MICROS} units=${nprop}" >&2
+  echo "[AEGIS][FIT] run one unit: ./run_aegis.sh --fresh --from-fit ${EMIT_MICROS} --unit 0" >&2
+fi
+
 # Human summary on stderr; machine JSON on stdout
 {
   echo "[AEGIS][FIT] rails_ok=$(printf '%s' "${RESULT}" | jq -r '.rails_ok')"
@@ -111,12 +128,11 @@ fi
   nprop="$(printf '%s' "${RESULT}" | jq '.proposed_units | length')"
   if [[ "${nprop}" -gt 0 ]]; then
     echo "[AEGIS][FIT] proposed_units (${nprop}):"
-    printf '%s' "${RESULT}" | jq -r '.proposed_units[] | "  - \(.title) targets=\(.targets|join(","))"'
+    printf '%s' "${RESULT}" | jq -r '.proposed_units[] | "  - [\(.index // 0)] \(.title) targets=\(.targets|join(","))"'
   fi
 } >&2
 
 printf '%s\n' "${RESULT}"
-
 if printf '%s' "${RESULT}" | jq -e '.run_allowed == true' >/dev/null 2>&1; then
   exit 0
 fi

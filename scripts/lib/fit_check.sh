@@ -263,6 +263,154 @@ aegis_fit_wrap_free_text() {
 # Split proposal (does not auto-open issues)
 # ---------------------------------------------------------
 
+# Build a runnable micro demand markdown for one unit.
+# Args: parent_demand, title, note, targets_json_array
+aegis_fit_unit_demand_md() {
+  local parent="${1-}"
+  local title="${2-}"
+  local note="${3-}"
+  local targets_json="${4:-[]}"
+  local parent_goal parent_change parent_acc parent_constraints
+  local targets_block acc_block
+
+  parent_goal="$(aegis_fit_md_section "Goal" "${parent}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-200)"
+  parent_change="$(aegis_fit_md_section "Change" "${parent}")"
+  parent_acc="$(aegis_fit_md_section "Acceptance" "${parent}")"
+  parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
+  [[ -n "${parent_goal}" ]] || parent_goal="${title}"
+
+  targets_block="$(
+    printf '%s' "${targets_json}" | jq -r '.[]? | "- \(.)"' 2>/dev/null || true
+  )"
+  [[ -n "${targets_block}" ]] || targets_block="- src/"
+
+  acc_block="$(
+    {
+      printf '%s' "${targets_json}" | jq -r '.[]? | split("/") | last' 2>/dev/null || true
+      printf '%s\n' "${parent_acc}" \
+        | sed -E 's/^[[:space:]]*[-*][[:space:]]*//' \
+        | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null \
+        | head -n 6 || true
+    } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 8
+  )"
+  [[ -n "${acc_block}" ]] || acc_block="- done"
+
+  local change_snip
+  change_snip="$(printf '%s\n' "${parent_change}" | head -n 12)"
+  [[ -n "$(printf '%s' "${change_snip}" | tr -d '[:space:]')" ]] \
+    || change_snip="- Implement ${title}"
+
+  local constraints_snip
+  constraints_snip="$(printf '%s\n' "${parent_constraints}" | head -n 6)"
+  [[ -n "$(printf '%s' "${constraints_snip}" | tr -d '[:space:]')" ]] \
+    || constraints_snip="- no any"$'\n'"- KISS"
+
+  cat <<EOF
+## Goal
+${title} — ${parent_goal}
+
+## Targets
+${targets_block}
+
+## Tasks
+- [ ] Task 1 — ${title}
+
+## Change
+${change_snip}
+- Scope note: ${note:-single-target micro unit}
+- Edit ONLY the Targets paths above. Do not create or modify other files.
+
+## Acceptance
+${acc_block}
+
+## Out of scope
+- other source files
+- network
+- UI
+- e2e
+
+## Constraints
+${constraints_snip}
+- single target micro unit only
+EOF
+}
+
+# Enrich proposed_units[] with full .demand markdown for each unit.
+aegis_fit_enrich_units_with_demand() {
+  local parent="${1-}"
+  local units_json="${2:-[]}"
+  local n i title note targets_json demand
+  n="$(printf '%s' "${units_json}" | jq 'length' 2>/dev/null || echo 0)"
+  [[ "${n}" =~ ^[0-9]+$ ]] || { printf '%s' '[]'; return 0; }
+  [[ "${n}" -gt 0 ]] || { printf '%s' '[]'; return 0; }
+
+  local acc='[]'
+  for ((i = 0; i < n; i++)); do
+    title="$(printf '%s' "${units_json}" | jq -r --argjson i "${i}" '.[$i].title // "unit"')"
+    note="$(printf '%s' "${units_json}" | jq -r --argjson i "${i}" '.[$i].note // ""')"
+    targets_json="$(printf '%s' "${units_json}" | jq -c --argjson i "${i}" '.[$i].targets // []')"
+    demand="$(aegis_fit_unit_demand_md "${parent}" "${title}" "${note}" "${targets_json}")"
+    acc="$(
+      jq -cn \
+        --argjson acc "${acc}" \
+        --argjson i "${i}" \
+        --argjson unit "$(printf '%s' "${units_json}" | jq -c --argjson i "${i}" '.[$i]')" \
+        --arg demand "${demand}" \
+        '$acc + [($unit + {index:$i, demand:$demand})]'
+    )"
+  done
+  printf '%s' "${acc}"
+}
+
+# Write fit.json + unit-N.md under dir. Args: fit_json, out_dir
+aegis_fit_emit_micros() {
+  local fit_json="${1-}"
+  local out_dir="${2-}"
+  local n i demand path
+  [[ -n "${out_dir}" ]] || return 1
+  mkdir -p "${out_dir}"
+
+  # Ensure units carry demand bodies
+  local units parent
+  parent="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // .original_demand // empty')"
+  units="$(printf '%s' "${fit_json}" | jq -c '.proposed_units // []')"
+  if [[ "$(printf '%s' "${units}" | jq 'map(has("demand")) | all' 2>/dev/null)" != "true" ]]; then
+    units="$(aegis_fit_enrich_units_with_demand "${parent}" "${units}")"
+    fit_json="$(
+      jq -cn --argjson fit "${fit_json}" --argjson units "${units}" \
+        '$fit + {proposed_units: $units}'
+    )"
+  fi
+
+  n="$(printf '%s' "${fit_json}" | jq '.proposed_units | length')"
+  if [[ "${n}" -eq 0 ]]; then
+    # No split needed — still emit unit-0 from fixed_demand for --from-fit UX.
+    demand="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
+    fit_json="$(
+      jq -cn --argjson fit "${fit_json}" --arg demand "${demand}" '
+        $fit + {
+          proposed_units: [{
+            index: 0,
+            title: "fixed_demand",
+            targets: [],
+            note: "no split required",
+            demand: $demand
+          }]
+        }
+      '
+    )"
+    n=1
+  fi
+
+  printf '%s\n' "${fit_json}" > "${out_dir}/fit.json"
+  for ((i = 0; i < n; i++)); do
+    demand="$(printf '%s' "${fit_json}" | jq -r --argjson i "${i}" '.proposed_units[$i].demand // empty')"
+    path="${out_dir}/unit-${i}.md"
+    printf '%s\n' "${demand}" > "${path}"
+  done
+  printf '%s' "${fit_json}"
+}
+
 aegis_fit_propose_units_json() {
   local text="${1-}"
   local paths
@@ -273,31 +421,37 @@ aegis_fit_propose_units_json() {
     arr+=("${p}")
   done <<< "${paths}"
 
+  local units='[]'
   if [[ "${#arr[@]}" -le 1 ]]; then
     # Single path: still may split create vs reexport heuristics from Change text
     local change
     change="$(aegis_fit_md_section "Change" "${text}")$(aegis_fit_md_section "Goal" "${text}")"
     if printf '%s' "${change}" | grep -qiE 'reexport|re-export' \
       && printf '%s' "${change}" | grep -qiE 'create|new file|tokenBucket|module'; then
-      jq -cn \
-        --arg t "${arr[0]:-src/}" \
-        '[
-          {title:"create module only", targets:[$t], note:"omit reexport"},
-          {title:"reexport only", targets:["src/index.ts"], note:"after create succeeds"}
-        ]'
+      units="$(
+        jq -cn \
+          --arg t "${arr[0]:-src/}" \
+          '[
+            {title:"create module only", targets:[$t], note:"omit reexport"},
+            {title:"reexport only", targets:["src/index.ts"], note:"after create succeeds"}
+          ]'
+      )"
+    else
+      printf '[]'
       return 0
     fi
-    printf '[]'
-    return 0
+  else
+    # One unit per target path
+    units="$(
+      jq -cn --arg paths "$(printf '%s\n' "${arr[@]}")" '
+        ($paths | split("\n") | map(select(length>0))) as $p
+        | [ $p[] | {title: ("mutate " + .), targets: [.], note: "single-target micro unit"} ]
+      '
+    )"
   fi
 
-  # One unit per target path
-  jq -cn --arg paths "$(printf '%s\n' "${arr[@]}")" '
-    ($paths | split("\n") | map(select(length>0))) as $p
-    | [ $p[] | {title: ("mutate " + .), targets: [.], note: "single-target micro unit"} ]
-  '
+  aegis_fit_enrich_units_with_demand "${text}" "${units}"
 }
-
 # ---------------------------------------------------------
 # Main: evaluate + fix → JSON on stdout
 # ---------------------------------------------------------

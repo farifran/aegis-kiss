@@ -99,4 +99,17 @@ fi
 jq -e '.run_allowed == false' /tmp/aegis_fit_out2.json >/dev/null \
   || fail "cli_monster_json"
 
+# --- emit-micros writes fit.json + unit-N.md with demand ---
+micro_dir="$(mktemp -d)"
+printf '%s' "${monster}" | bash "${AEGIS_TEST_ROOT}/scripts/fit_check_demand.sh" \
+  --emit-micros "${micro_dir}" >/tmp/aegis_fit_emit.json 2>/tmp/aegis_fit_emit.err || true
+[[ -f "${micro_dir}/fit.json" ]] || fail "emit_missing_fit_json"
+n_units="$(jq '.proposed_units | length' "${micro_dir}/fit.json")"
+[[ "${n_units}" -ge 1 ]] || fail "emit_no_units: ${n_units}"
+[[ -f "${micro_dir}/unit-0.md" ]] || fail "emit_missing_unit0"
+grep -q '## Goal' "${micro_dir}/unit-0.md" || fail "unit0_not_structured"
+jq -e '.proposed_units[0].demand | type == "string" and length > 20' "${micro_dir}/fit.json" >/dev/null \
+  || fail "unit0_demand_missing"
+rm -rf "${micro_dir}"
+
 echo "OK test_fit_check"
