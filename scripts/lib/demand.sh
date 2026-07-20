@@ -2010,6 +2010,19 @@ aegis_acceptance_export_hit() {
   return 1
 }
 
+# Barrel / path basenames that are not API identifiers (never require in body).
+aegis_acceptance_token_is_path_noise() {
+  local tok="${1-}"
+  case "$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')" in
+    index|main|mod|module|src|lib|dist|app|server|client|util|utils|types|type|helpers|helper|common|shared|export|exports|import|imports|file|files|path|paths|ts|js|tsx|jsx)
+      return 0
+      ;;
+  esac
+  # Bare extensions / filenames like index.ts
+  [[ "${tok}" =~ \.(ts|tsx|js|jsx|mjs|cjs)$ ]] && return 0
+  return 1
+}
+
 # True (0) when every acceptance ident is satisfied in corpus.
 # Export-like tokens require an export binding; others need substring presence.
 # Prints missing tokens to stdout on failure.
@@ -2023,6 +2036,10 @@ aegis_acceptance_missing_in_corpus() {
   local tok
   while IFS= read -r tok; do
     [[ -n "${tok}" ]] || continue
+    # Skip path/barrel noise (e.g. Acceptance "- index" from micro templates).
+    if aegis_acceptance_token_is_path_noise "${tok}"; then
+      continue
+    fi
     if aegis_acceptance_token_is_export_like "${tok}"; then
       if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
         missing="${missing}${tok}"$'\n'

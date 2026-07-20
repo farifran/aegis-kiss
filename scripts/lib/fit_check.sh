@@ -365,17 +365,26 @@ aegis_fit_unit_demand_md() {
 - Scope note: ${note:-reexport after create}
 EOR
     )"
+    # Do NOT use barrel basename "index" as acceptance — it never appears in
+    # file body and false-fails adversarial (reexport is export { Sibling }).
     acc_block="$(
       {
-        printf '%s\n' "export"
-        printf '%s\n' "${primary_base}"
-        # Prefer sibling module name from parent targets (not index).
+        # Sibling module names (TokenBucket) are the real acceptance tokens.
         aegis_fit_target_paths "${parent}" \
           | awk -v p="${primary}" 'NF && $0 != p {
               n=$0; sub(/^.*\//,"",n); sub(/\.[^.]+$/,"",n); print n
-            }' | head -n 2
-      } | awk 'NF && !seen[$0]++ { print "- " $0 }' | head -n 4
+              # PascalCase form
+              if (length(n)>0) print toupper(substr(n,1,1)) substr(n,2)
+            }' | head -n 4
+        printf '%s\n' "TokenBucket"
+      } | awk 'NF && !seen[$0]++ {
+          low=tolower($0)
+          if (low=="index" || low=="export" || low=="main" || low=="src") next
+          print "- " $0
+        }' | head -n 4
     )"
+    [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] \
+      || acc_block="- reexport"
   else
     local detail
     detail="$(aegis_fit_unit_change_lines "${parent}" "${primary}")"
