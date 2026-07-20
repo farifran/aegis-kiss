@@ -26,11 +26,13 @@ set -e
 printf '%s' "${out}" | grep -q 'need --issue\|demand-file\|free-text' \
   || fail "missing_seed_message: ${out}"
 
-# Script is orchestration only — does not define mutation_lite
-grep -q 'mutation_lite' "${loop_sh}" \
-  && fail "loop_must_not_reference_mutation_lite"
+# Script is orchestration only — must run full mutation, not enable lite.
+grep -Eq 'pipeline[[:space:]]+mutation_lite|AEGIS_MUTATION_LITE=1|--pipeline mutation_lite' "${loop_sh}" \
+  && fail "loop_must_not_enable_mutation_lite"
 grep -q 'run_aegis.sh' "${loop_sh}" \
   || fail "loop_must_invoke_run_aegis"
+grep -q '\-\-pipeline mutation' "${loop_sh}" \
+  || fail "loop_must_use_full_mutation_pipeline"
 grep -q 'LOOP FEEDBACK' "${loop_sh}" \
   || fail "loop_must_improve_demand_with_feedback"
 grep -q 'fit_check_demand' "${loop_sh}" \
