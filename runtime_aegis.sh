@@ -1069,13 +1069,27 @@ optimize_improve_loop_should_fire() {
 }
 
 # Downstream progression for feedback iterations: a re-entered repair
-# must roll forward through the entire optimization and verification
-# stack. Terminal state is validation — success is only ever reached
-# through an explicit "accepted" verdict from a fresh validation pass.
+# must roll forward through the verification stack for this pipeline.
+# Full mutation: repair → optimize → adversarial → validation.
+# mutation_lite: repair → validation only (no optimize/adversarial).
+# Terminal success is only an explicit "accepted" from fresh validation.
 AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
 
-# Authoritative feedback progression (re-entered repair → validation).
-readonly AEGIS_FEEDBACK_MODE_SEQUENCE="repair optimize adversarial validation"
+# Resolved once per process (pipeline name or AEGIS_MUTATION_LITE flag).
+aegis_resolve_feedback_mode_sequence() {
+  local pipeline="${AEGIS_PIPELINE:-}"
+  local lite_flag
+  lite_flag="$(printf '%s' "${AEGIS_MUTATION_LITE:-0}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${pipeline}" == "mutation_lite" ]] \
+    || [[ "${lite_flag}" == "1" ]] \
+    || [[ "${lite_flag}" == "true" ]]; then
+    printf '%s' "repair validation"
+  else
+    printf '%s' "repair optimize adversarial validation"
+  fi
+}
+
+AEGIS_FEEDBACK_MODE_SEQUENCE="$(aegis_resolve_feedback_mode_sequence)"
 
 next_feedback_pipeline_mode() {
   aegis_next_in_sequence "${AEGIS_MODE}" "${AEGIS_FEEDBACK_MODE_SEQUENCE}"

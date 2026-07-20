@@ -913,6 +913,12 @@ main() {
 
   maybe_apply_mutation_lite
 
+  # Runtime feedback loop (repair re-entry) keys off pipeline name.
+  export AEGIS_PIPELINE="${PIPELINE}"
+  if [[ "${PIPELINE}" == "mutation_lite" ]]; then
+    export AEGIS_MUTATION_LITE=1
+  fi
+
   if $RESUME; then
     resolve_resume
   else

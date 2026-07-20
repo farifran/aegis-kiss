@@ -619,6 +619,8 @@ aegis/issue-<N>-task-<K>    # opcional se quiseres PR por task
 ```
 
 ```bash
+# Base na ponta do produto (main atualizado ou última aegis/issue-* mergeada).
+# Não criar em main stale — imports de módulos ainda não no trunk falham.
 git switch -c aegis/issue-42
 # worktree limpo nos targets antes da run
 git status

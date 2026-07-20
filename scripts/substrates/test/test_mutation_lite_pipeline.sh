@@ -31,8 +31,7 @@ grep -q 'AEGIS_MUTATION_LITE_MAX_SCORE' "${run_sh}" \
 # Precondition / continuity must accept repair→validation (lite handoff).
 # Structural greps only here; behavioral coverage lives in
 # test_mutation_lite_validation_handoff.sh.
-grep -q 'mutation_lite: repair' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
-  || grep -q 'mutation_lite' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
+grep -q 'mutation_lite' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
   || fail "runtime_missing_mutation_lite_validation_comment"
 grep -q 'source_mode = "optimize"' \
   "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh" \
@@ -40,5 +39,34 @@ grep -q 'source_mode = "optimize"' \
 grep -q 'operational_context.diff' \
   "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh" \
   || fail "artifact_protocol_missing_repair_diff_fallback"
+
+# Feedback re-entry after rejected validation: lite must NOT walk
+# optimize/adversarial. Resolver lives in runtime_aegis.sh.
+grep -q 'aegis_resolve_feedback_mode_sequence' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
+  || fail "feedback_sequence_resolver_missing"
+
+resolver_src="$(
+  sed -n '/^aegis_resolve_feedback_mode_sequence()/,/^}/p' \
+    "${AEGIS_TEST_ROOT}/runtime_aegis.sh"
+)"
+[[ -n "${resolver_src}" ]] || fail "could_not_extract_feedback_resolver"
+
+lite_seq="$(
+  AEGIS_PIPELINE=mutation_lite AEGIS_MUTATION_LITE=1 \
+    bash --noprofile --norc -c "${resolver_src}"$'\n'"aegis_resolve_feedback_mode_sequence"
+)"
+[[ "${lite_seq}" == "repair validation" ]] \
+  || fail "lite_feedback_sequence_wrong: ${lite_seq}"
+
+full_seq="$(
+  AEGIS_PIPELINE=mutation AEGIS_MUTATION_LITE=0 \
+    bash --noprofile --norc -c "${resolver_src}"$'\n'"aegis_resolve_feedback_mode_sequence"
+)"
+[[ "${full_seq}" == "repair optimize adversarial validation" ]] \
+  || fail "full_feedback_sequence_wrong: ${full_seq}"
+
+# Driver exports pipeline name into runtime children.
+grep -q 'export AEGIS_PIPELINE=' "${run_sh}" \
+  || fail "run_aegis_missing_export_AEGIS_PIPELINE"
 
 echo "[PASS] mutation_lite pipeline"
