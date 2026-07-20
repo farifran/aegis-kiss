@@ -347,6 +347,17 @@ aegis_fetch_issue_demand() {
     exit 1
   }
 
+  # Pipeline re-enters runtime per mode; cache avoids mid-run gh flakes
+  # (seen as issue_fetch_failed on late modes after discovery succeeded).
+  local cache_dir cache_file
+  cache_dir="${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}/issue_cache"
+  cache_file="${cache_dir}/issue_${issue_number}.md"
+  if [[ -f "${cache_file}" && -s "${cache_file}" ]] \
+    && [[ "${AEGIS_ISSUE_CACHE_REFRESH:-0}" != "1" ]]; then
+    cat "${cache_file}"
+    return 0
+  fi
+
   if ! command -v gh >/dev/null 2>&1; then
     if declare -f aegis_fatal >/dev/null 2>&1; then
       aegis_fatal "missing_gh_for_issue_fetch"
@@ -356,13 +367,22 @@ aegis_fetch_issue_demand() {
   fi
 
   if ! json="$(
-    gh issue view "${issue_number}" --json title,body 2>/dev/null
+    env -u GITHUB_TOKEN gh issue view "${issue_number}" --json title,body 2>/dev/null
   )"; then
-    if declare -f aegis_fatal >/dev/null 2>&1; then
-      aegis_fatal "issue_fetch_failed:${issue_number}"
+    # One retry without env -u (some setups only have GITHUB_TOKEN).
+    if ! json="$(
+      gh issue view "${issue_number}" --json title,body 2>/dev/null
+    )"; then
+      if [[ -f "${cache_file}" && -s "${cache_file}" ]]; then
+        cat "${cache_file}"
+        return 0
+      fi
+      if declare -f aegis_fatal >/dev/null 2>&1; then
+        aegis_fatal "issue_fetch_failed:${issue_number}"
+      fi
+      echo "[AEGIS][DEMAND][FATAL] issue_fetch_failed:${issue_number}" >&2
+      exit 1
     fi
-    echo "[AEGIS][DEMAND][FATAL] issue_fetch_failed:${issue_number}" >&2
-    exit 1
   fi
 
   title="$(printf '%s' "${json}" | jq -r '.title // empty')"
@@ -376,7 +396,10 @@ aegis_fetch_issue_demand() {
     exit 1
   fi
 
-  printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
+  mkdir -p "${cache_dir}" 2>/dev/null || true
+  {
+    printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
+  } | tee "${cache_file}" 2>/dev/null || printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
 }
 
 # ---------------------------------------------------------
