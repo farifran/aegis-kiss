@@ -13,10 +13,15 @@ export class TokenBucketPlan {
   }
 
   simulate(items: PlanItem[]): PlanResult {
-    const sorted = [...items].sort((a, b) => (a.atMs < b.atMs ? -1 : a.atMs > b.atMs ? 1 : 0));
+    const sorted = [...items].sort((a, b) => {
+      if (a.atMs < b.atMs) return -1;
+      if (a.atMs > b.atMs) return 1;
+      return 0;
+    });
     const decisions: GateDecision[] = [];
     for (const it of sorted) {
-      decisions.push(this.gate.tryConsume(it.bits, it.priority));
+      // Offline batch: drive the gate clock from item.atMs (not wall clock).
+      decisions.push(this.gate.tryConsume(it.bits, it.priority, it.atMs));
     }
     const allAllowed = decisions.every((d) => d.allowed);
     return { items: sorted, decisions, allAllowed };

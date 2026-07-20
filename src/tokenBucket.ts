@@ -7,7 +7,8 @@ export class TokenBucket {
   private rateBitsPerMs: bigint;
   private capacityBits: bigint;
   private tokens: bigint;
-  private lastMs: bigint;
+  /** null = never observed a clock tick (do not use 0n — valid offline epoch). */
+  private lastMs: bigint | null;
 
   constructor(config: TokenBucketConfig) {
     this.rateBitsPerMs = BigInt(
@@ -18,11 +19,11 @@ export class TokenBucket {
         ? config.capacityBits
         : this.rateBitsPerMs * 1000n;
     this.tokens = this.capacityBits;
-    this.lastMs = 0n;
+    this.lastMs = null;
   }
 
   private refill(nowMs: bigint): void {
-    if (this.lastMs === 0n) {
+    if (this.lastMs === null) {
       this.lastMs = nowMs;
       return;
     }

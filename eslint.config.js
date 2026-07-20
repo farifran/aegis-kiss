@@ -41,7 +41,10 @@ export default [
 
       ".harness/runtime/**",
       ".harness/artifacts/**",
-      ".harness/worktrees/**"
+      ".harness/worktrees/**",
+
+      // Product unit tests (node:test + tsx); excluded from tsconfig project.
+      "src/**/*.test.ts"
     ]
   },
 

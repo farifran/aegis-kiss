@@ -28,4 +28,17 @@ grep -q 'maybe_apply_mutation_lite' "${run_sh}" \
 grep -q 'AEGIS_MUTATION_LITE_MAX_SCORE' "${run_sh}" \
   || fail "lite_max_score_missing"
 
+# Precondition / continuity must accept repair→validation (lite handoff).
+# Structural greps only here; behavioral coverage lives in
+# test_mutation_lite_validation_handoff.sh.
+grep -q 'mutation_lite: repair' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
+  || grep -q 'mutation_lite' "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
+  || fail "runtime_missing_mutation_lite_validation_comment"
+grep -q 'source_mode = "optimize"' \
+  "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh" \
+  || fail "artifact_protocol_missing_candidate_synthesis"
+grep -q 'operational_context.diff' \
+  "${AEGIS_TEST_ROOT}/scripts/lib/artifact_protocol.sh" \
+  || fail "artifact_protocol_missing_repair_diff_fallback"
+
 echo "[PASS] mutation_lite pipeline"

@@ -22,8 +22,9 @@ export class TokenBucketGate {
     return Math.min(Math.max(p, 0), 63);
   }
 
-  tryConsume(bits: bigint, priority: number): GateDecision {
-    const now = BigInt(Date.now());
+  /** Optional nowMs enables offline/deterministic simulation (Plan). */
+  tryConsume(bits: bigint, priority: number, nowMs?: bigint): GateDecision {
+    const now = nowMs !== undefined ? nowMs : BigInt(Date.now());
     const pr = this.clampPriority(priority);
     const allowed = this.bucket.consume(bits, now);
     const base = this.bucket.statusMask(now);
