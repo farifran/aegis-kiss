@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EpistemicHandoverContract",
+  "description": "Schema definition of the transient epistemic handover tracking investigation attention and snapshot between modes.",
+  "x-contract-metadata": {
+    "semantics": "Transporta o estado de atenção transiente, metas, prioridades de investigação e hipóteses de um modo de execução para o seguinte.",
+    "producer": "Substratos de Cognição (Discovery, Forensics, etc.) do Runtime.",
+    "consumers": ["Próximo modo de cognição e o próprio Runtime para validação."],
+    "immutability": "Mutável entre modos (cada modo atualiza o handover); imutável para persistência (não é promovido ao Git).",
+    "lifecycle": "Inicializado no começo da investigação; evolui a cada modo; destruído no encerramento do ciclo da tarefa."
+  },
+  "type": "object",
+  "properties": {
+    "artifact_snapshot": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "investigation_input": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "structural_context": {
+          "type": "object",
+          "properties": {
+            "topology_index": {
+              "type": "object"
+            },
+            "topology_summary": {
+              "type": "string"
+            },
+            "ranked_targets": {
+              "type": "array"
+            },
+            "bridge_data": {
+              "type": "object"
+            },
+            "boundary_data": {
+              "type": "object"
+            },
+            "hotspot_data": {
+              "type": "object"
+            },
+            "entrypoints": {
+              "type": "array"
+            },
+            "evidence_summary": {
+              "type": "array"
+            },
+            "unresolved_references": {
+              "type": "array"
+            },
+            "observed_request_alignment": {
+              "type": "object"
+            },
+            "suggested_evidence_priorities": {
+              "type": "array"
+            },
+            "gap_counts": {
+              "type": "object"
+            }
+          }
+        },
+        "operational_context": {
+          "type": "object"
+        }
+      },
+      "required": ["mode", "investigation_input", "generated_at", "structural_context", "operational_context"]
+    },
+    "epistemic_state": {
+      "type": "object",
+      "properties": {
+        "next_attention_targets": {
+          "type": "array"
+        },
+        "attention_scope": {
+          "type": "string"
+        },
+        "attention_reason": {
+          "type": "string"
+        }
+      },
+      "required": ["next_attention_targets", "attention_scope", "attention_reason"]
+    }
+  },
+  "required": ["artifact_snapshot", "epistemic_state"]
+}

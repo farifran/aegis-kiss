@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutionContextContract",
+  "description": "Schema of the Execution Context passed across the boundary from Bootstrap to Runtime.",
+  "x-contract-metadata": {
+    "semantics": "Define o conjunto de variáveis de ambiente autorizadas que passam pela fronteira (Execution Boundary) para inicializar a execução de uma tarefa específica no Runtime.",
+    "producer": "Bootstrap (run_aegis.sh)",
+    "consumers": ["Runtime (runtime_aegis.sh)"],
+    "immutability": "Imutável durante o ciclo de vida da execução de uma única tarefa.",
+    "lifecycle": "Gerado na chamada do subprocesso do Runtime para cada tarefa; deixa de existir quando o subprocesso é encerrado."
+  },
+  "type": "object",
+  "properties": {
+    "AEGIS_INVESTIGATION_INPUT": {
+      "description": "Active task description from the Engineering Plan.",
+      "type": "string"
+    },
+    "AEGIS_EXECUTION_TARGET_PATH": {
+      "description": "Physical path to the isolated task workspace.",
+      "type": "string"
+    },
+    "OPENAI_API_KEY": {
+      "description": "Provider API Key.",
+      "type": "string"
+    },
+    "OPENAI_API_BASE": {
+      "description": "Provider API Base URL.",
+      "type": "string"
+    }
+  },
+  "required": ["AEGIS_INVESTIGATION_INPUT", "AEGIS_EXECUTION_TARGET_PATH"],
+  "additionalProperties": true
+}
