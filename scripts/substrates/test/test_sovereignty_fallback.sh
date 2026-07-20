@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 
+# =========================================================
+# Runtime sovereignty vs provider network
+# =========================================================
+# Discovery is mechanical (no LLM) — must succeed with a dead provider.
+# LLM residual modes (forensics with AEGIS_FORENSICS_LLM=1) must fail
+# deterministically on network error without corrupting handover schema.
+#
+# (Historical: this suite expected discovery itself to fail on network.
+# That contract is obsolete after mechanical discovery.)
+
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 backup_epistemic_handover
 
-# We set up an invalid API base so that raw_llm.sh fails to connect and raises provider_retry_limit_exceeded.
 export OPENAI_API_BASE="http://127.0.0.1:54321"
 export OPENAI_API_KEY="aegis-test-key"
 export OPENAI_MODEL_READONLY_COGNITION="aegis-test-model"
@@ -12,9 +21,8 @@ export AEGIS_PROVIDER_CONNECT_TIMEOUT=1
 export AEGIS_PROVIDER_RESPONSE_TIMEOUT=1
 export AEGIS_PROVIDER_MAX_RETRIES=1
 export AEGIS_PROVIDER_RETRY_DELAY=0
-
-# Ensure payloads are preserved after failure so we can verify them
 export AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS=false
+export AEGIS_INVESTIGATION_INPUT="identify highest-value investigation structure"
 
 epistemic_handover_schema_filter() {
   cat <<'EOF'
@@ -47,33 +55,52 @@ and (
 EOF
 }
 
-echo "[AEGIS][TEST] Running discovery with failing provider..."
+# Fresh investigation boundary
+rm -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
+
+echo "[AEGIS][TEST] Mechanical discovery must succeed with dead provider..."
 
 set +e
-bash runtime_aegis.sh discovery
-status=$?
+bash runtime_aegis.sh discovery >/dev/null 2>"${AEGIS_TEST_ROOT}/.harness/runtime/sov_discovery.err"
+discovery_status=$?
 set -e
 
-if [[ "${status}" -eq 0 ]]; then
-  fail "discovery_should_have_failed_due_to_network_error"
-fi
+[[ "${discovery_status}" -eq 0 ]] \
+  || fail "mechanical_discovery_should_succeed_without_provider (status=${discovery_status})"
 
-echo "[AEGIS][TEST] Discovery failed as expected with status ${status}. Verifying handover fallback..."
+[[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
+  || fail "missing_handover_after_mechanical_discovery"
 
-if [[ ! -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]]; then
-  fail "missing_handover_file_after_discovery_failure"
-fi
-
-# Assert schema validity
 jq -e "$(epistemic_handover_schema_filter)" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-  || fail "invalid_handover_schema_after_discovery_failure"
+  || fail "invalid_handover_schema_after_mechanical_discovery"
 
-# Assert null snapshot and default epistemic state
+jq -e '.artifact_snapshot.mode == "discovery"' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+  || fail "discovery_snapshot_missing_after_mechanical_run"
+
+echo "[AEGIS][TEST] Discovery ok offline. Forcing forensics LLM with dead provider..."
+
+set +e
+AEGIS_FORENSICS_LLM=1 \
+  bash runtime_aegis.sh forensics >/dev/null 2>"${AEGIS_TEST_ROOT}/.harness/runtime/sov_forensics.err"
+forensics_status=$?
+set -e
+
+[[ "${forensics_status}" -ne 0 ]] \
+  || fail "forensics_llm_should_have_failed_due_to_network_error"
+
+# Prior mechanical discovery must remain schema-valid (no half-written junk).
+[[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE}" ]] \
+  || fail "missing_handover_file_after_forensics_provider_failure"
+
+jq -e "$(epistemic_handover_schema_filter)" "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
+  || fail "invalid_handover_schema_after_forensics_provider_failure"
+
+# Failure must not promote a partial forensics snapshot; keep last good mode.
 jq -e '
-  .artifact_snapshot == null
-  and .epistemic_state.next_attention_targets == []
-  and .epistemic_state.attention_scope == "none"
+  .artifact_snapshot != null
+  and .artifact_snapshot.mode == "discovery"
 ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1 \
-  || fail "handover_does_not_contain_fallback_reason"
+  || fail "provider_failure_overwrote_or_cleared_last_good_discovery_snapshot"
 
-echo "[AEGIS][TEST] Sovereignty fallback promotion verified successfully."
+echo "[AEGIS][TEST] Sovereignty verified: mechanical offline + LLM network fail without schema corruption."
+echo "[PASS] sovereignty fallback (mechanical discovery + LLM residual network fail)"

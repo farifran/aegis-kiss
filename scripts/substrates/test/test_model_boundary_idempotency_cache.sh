@@ -118,13 +118,31 @@ assert_prompt_prefix_stability() {
 
   start_capturing_mock_curl
 
+  # Discovery is mechanical (no provider). Seed handover, then force the
+  # forensics LLM residual twice so two request bodies are captured for
+  # prefix-stability comparison.
   bash runtime_aegis.sh discovery "${FIXED_INVESTIGATION_INPUT}" \
     >/dev/null 2>&1 \
-    || fail "first_discovery_run_failed"
+    || fail "seed_discovery_run_failed"
 
+  # Drop any accidental captures from non-mechanical paths (should be 0).
+  rm -f "${REQUEST_CAPTURE_DIR}"/request_*.json
+
+  AEGIS_FORENSICS_LLM=1 \
+    bash runtime_aegis.sh forensics \
+    >/dev/null 2>&1 \
+    || fail "first_forensics_llm_run_failed"
+
+  # Reset snapshot to post-discovery so the second forensics run is a
+  # peer (same mode entry), not a re-entry on forensics output.
   bash runtime_aegis.sh discovery "${FIXED_INVESTIGATION_INPUT}" \
     >/dev/null 2>&1 \
-    || fail "second_discovery_run_failed"
+    || fail "reseed_discovery_run_failed"
+
+  AEGIS_FORENSICS_LLM=1 \
+    bash runtime_aegis.sh forensics \
+    >/dev/null 2>&1 \
+    || fail "second_forensics_llm_run_failed"
 
   local captured=()
   while IFS= read -r f; do
