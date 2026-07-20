@@ -301,10 +301,38 @@ validate_validation_artifact() {
     aegis_fatal "invalid_validation_artifact_contract"
   fi
 
+  # Full mutation: adversarial leaves candidate_result + findings.
+  # mutation_lite: repair leaves diff/files_changed only — synthesize the
+  # same envelope enrich uses (source_mode=optimize) so continuity holds.
   local previous_candidate
   previous_candidate="$(
-    jq -c '.artifact_snapshot.operational_context.candidate_result // empty' \
-      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    jq -c '
+      .artifact_snapshot as $snap
+      | (
+          $snap.operational_context.candidate_result
+          // $snap.candidate_result
+          // (if ($snap.operational_context.diff | type == "string") then
+               {
+                 diff: $snap.operational_context.diff,
+                 files_changed: ($snap.operational_context.files_changed // []),
+                 intent_violations: (
+                   $snap.operational_context.intent_violations
+                   // $snap.intent_violations
+                   // []
+                 )
+               }
+             else null end)
+        )
+      | if . != null then
+          .source_mode = "optimize"
+          | .intent_violations = (
+              .intent_violations
+              // $snap.operational_context.intent_violations
+              // $snap.intent_violations
+              // []
+            )
+        else empty end
+    ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
   )"
 
   [[ -n "${previous_candidate}" ]] \
@@ -316,14 +344,18 @@ validate_validation_artifact() {
     "${previous_candidate}" \
     "validation_candidate_mismatch"
 
+  # mutation_lite has no adversarial pass — empty findings is valid.
   local previous_findings
   previous_findings="$(
-    jq -c '.artifact_snapshot.operational_context.findings // empty' \
-      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
+    jq -c '
+      .artifact_snapshot.operational_context.findings
+      // .artifact_snapshot.findings
+      // []
+    ' "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT}"
   )"
-
-  [[ -n "${previous_findings}" ]] \
-    || aegis_fatal "missing_findings"
+  if [[ -z "${previous_findings}" ]]; then
+    previous_findings='[]'
+  fi
 
   # Core identity only: the runtime tribunal may downgrade
   # supported_by_evidence / severity when quotations contradict the

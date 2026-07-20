@@ -535,12 +535,31 @@ validate_mode_preconditions() {
          and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})"
       ;;
     validation)
+      # Full mutation: adversarial hands off findings + candidate.
+      # mutation_lite: repair (or optimize if present) hands off candidate
+      # without adversarial findings — treat missing findings as empty array ok
+      # when mode is repair/optimize with a non-empty candidate.
       assert_handover_precondition \
         "precondition_failed_findings_missing_or_invalid" \
         ".artifact_snapshot != null
-         and .artifact_snapshot.mode == \"adversarial\"
-         and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
-         and (.artifact_snapshot.operational_context.findings | type == \"array\")"
+         and (
+           (
+             .artifact_snapshot.mode == \"adversarial\"
+             and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
+             and (.artifact_snapshot.operational_context.findings | type == \"array\")
+           )
+           or (
+             .artifact_snapshot.mode == \"optimize\"
+             and (${AEGIS_JQ_HANDOVER_CANDIDATE_RESULT})
+           )
+           or (
+             .artifact_snapshot.mode == \"repair\"
+             and (.artifact_snapshot.operational_context.diff
+                  | type == \"string\" and length > 0 and . != \"(no changes)\")
+             and (.artifact_snapshot.operational_context.files_changed
+                  | type == \"array\" and length > 0)
+           )
+         )"
       ;;
   esac
 }
