@@ -1,6 +1,14 @@
-// Seed: names present; missing tryConsume/softExceeded, window module, half-cap rule.
+// All method names present. Holes: no SlidingWindow import; wrong converters;
+// tryConsume/softExceeded/encodeState/peekTokens/consume incomplete.
 
-import { BIT_EMPTY, BIT_PARTIAL, BIT_SATURATED, BIT_CLOCK } from './types.js';
+import {
+  BIT_EMPTY,
+  BIT_PARTIAL,
+  BIT_SATURATED,
+  BIT_CLOCK,
+  BIT_WINDOW_FULL,
+  BIT_SOFT,
+} from './types.js';
 
 export class HybridLimiter {
   private capacity: bigint;
@@ -55,10 +63,18 @@ export class HybridLimiter {
     return false;
   }
 
+  public tryConsume(bits: number): boolean {
+    return false;
+  }
+
   public peekTokens(): bigint {
     this.refill();
     this.events.push(this.now());
     return this.tokens;
+  }
+
+  public softExceeded(): boolean {
+    return false;
   }
 
   public encodeState(): number {
@@ -67,6 +83,8 @@ export class HybridLimiter {
     if (this.tokens > 0n && this.tokens < this.capacity) s |= BIT_PARTIAL;
     if (this.tokens === this.capacity) s |= BIT_SATURATED;
     if (this.clockInjected) s |= BIT_CLOCK;
+    void BIT_WINDOW_FULL;
+    void BIT_SOFT;
     return s;
   }
 }

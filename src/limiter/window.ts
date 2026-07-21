@@ -1,4 +1,4 @@
-// Seed: sliding window without clamp, eviction, or clear.
+// All methods named. Holes: no clamp, no eviction, clear is no-op.
 
 export class SlidingWindow {
   private readonly size: number;
@@ -14,5 +14,9 @@ export class SlidingWindow {
 
   public isFull(): boolean {
     return this.events.length === this.size;
+  }
+
+  public clear(): void {
+    return;
   }
 }
