@@ -986,10 +986,15 @@ main() {
   enforce_context_token_budget
   materialize_selected_manifest
 
-  # Adversarial mechanical (no LLM): (1) tools dirty (2) greppable diff smells.
+  # Adversarial mechanical (no LLM):
+  # (1) demand fidelity / diff greps — prefer over tools so domain holes
+  #     are not masked by medium eslint noise
+  # (2) tools dirty
+  # (3) residual LLM / verified
   if [[ "${AEGIS_MODE}" == "adversarial" ]] \
     && declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
     local _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
+    local _adv_root="."
     _adv_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
     if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
       _adv_files="$(aegis_handover_candidate_files_changed_json "${_adv_handover}")"
@@ -1000,6 +1005,42 @@ main() {
     _adv_clean="$(
       printf '%s' "${_adv_gate}" | jq -r '.mutation_clean // true' 2>/dev/null || printf 'true'
     )"
+    if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
+      _adv_root="${AEGIS_EXECUTION_SURFACE}"
+    elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
+      _adv_root="${AEGIS_EXECUTION_TARGET_PATH}"
+    fi
+
+    # Fidelity/diff greps ALWAYS (even when tools dirty) — skip LLM on hit.
+    if declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
+      && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
+      _adv_diff_findings="$(
+        aegis_mechanical_adversarial_diff_scan \
+          "${_adv_handover}" \
+          "${AEGIS_INVESTIGATION_INPUT:-}" \
+          "${_adv_root}"
+      )" || _adv_diff_findings="[]"
+      if printf '%s' "${_adv_diff_findings}" \
+        | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        _adv_out="$(
+          aegis_emit_mechanical_adversarial_findings "${_adv_diff_findings}"
+        )" || _adv_out=""
+        if [[ -n "${_adv_out}" ]]; then
+          aegis_log "adversarial_mechanical: fidelity/diff smells — skip LLM"
+          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
+          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+            jq -cn --argjson n "$(printf '%s' "${_adv_diff_findings}" | jq 'length')" \
+              '{kind:"adversarial",result:"mechanical_diff_challenged",findings:$n}' \
+              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+          fi
+          normalize_substrate_output
+          measure "executor_artifact_validation" validate_artifact
+          emit_output
+          return 0
+        fi
+      fi
+    fi
+
     if [[ "${_adv_clean}" == "false" ]] \
       && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
       _adv_out="$(
@@ -1020,44 +1061,8 @@ main() {
       fi
     fi
 
-    # Tools clean: greps on +lines/bodies (stubs, any, acceptance names).
-    if [[ "${_adv_clean}" == "true" ]] \
-      && declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
-      && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
-      local _adv_root="."
-      if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
-        _adv_root="${AEGIS_EXECUTION_SURFACE}"
-      elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
-        _adv_root="${AEGIS_EXECUTION_TARGET_PATH}"
-      fi
-      _adv_diff_findings="$(
-        aegis_mechanical_adversarial_diff_scan \
-          "${_adv_handover}" \
-          "${AEGIS_INVESTIGATION_INPUT:-}" \
-          "${_adv_root}"
-      )" || _adv_diff_findings="[]"
-      if printf '%s' "${_adv_diff_findings}" \
-        | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-        _adv_out="$(
-          aegis_emit_mechanical_adversarial_findings "${_adv_diff_findings}"
-        )" || _adv_out=""
-        if [[ -n "${_adv_out}" ]]; then
-          aegis_log "adversarial_mechanical: diff/body smells — skip LLM"
-          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
-          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
-            jq -cn --argjson n "$(printf '%s' "${_adv_diff_findings}" | jq 'length')" \
-              '{kind:"adversarial",result:"mechanical_diff_challenged",findings:$n}' \
-              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
-          fi
-          normalize_substrate_output
-          measure "executor_artifact_validation" validate_artifact
-          emit_output
-          return 0
-        fi
-      fi
-
-      # Residual LLM only when risk warrants it (auto size / force).
-      # Small clean candidates: verified mechanically — stage still ran.
+    # Tools + greps clean: residual LLM only when risk warrants it.
+    if [[ "${_adv_clean}" == "true" ]]; then
       if declare -f aegis_adversarial_should_use_llm >/dev/null 2>&1 \
         && declare -f aegis_emit_mechanical_adversarial_verified >/dev/null 2>&1 \
         && ! aegis_adversarial_should_use_llm "${_adv_handover}"; then
@@ -1079,8 +1084,8 @@ main() {
       else
         aegis_log "adversarial_llm: residual falsification (clean tools/greps, risk or force)"
       fi
-      unset _adv_root
     fi
+    unset _adv_root
     unset _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
   fi
 

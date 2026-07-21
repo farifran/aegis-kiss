@@ -63,7 +63,8 @@ export class HybridLimiter {
     return false;
   }
 
-  public tryConsume(bits: number): boolean {
+  public tryConsume(_bits: number): boolean {
+    // Hole: always false (param unused intentionally; underscore satisfies eslint).
     return false;
   }
 

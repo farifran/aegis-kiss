@@ -1876,6 +1876,29 @@ aegis_mechanical_optimize_scan() {
     return 0
   fi
 
+  # 3) Demand fidelity witnesses (Change/ALVO cues → body must show them).
+  # Prefer corpus (final files), not only +lines — seed holes may pre-exist.
+  local inv root corpus_full
+  inv="${AEGIS_INVESTIGATION_INPUT:-}"
+  root="."
+  if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
+    root="${AEGIS_EXECUTION_SURFACE}"
+  elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
+    root="${AEGIS_EXECUTION_TARGET_PATH}"
+  fi
+  if [[ -n "${inv}" ]] && declare -f aegis_mechanical_fidelity_first_improve >/dev/null 2>&1; then
+    corpus_full="$(aegis_candidate_files_corpus "${files_json}" "${diff_content}" "${root}")"
+    local _fid_imp
+    _fid_imp="$(
+      aegis_mechanical_fidelity_first_improve "${inv}" "${corpus_full}" "${files_json}"
+    )" || _fid_imp=""
+    if [[ -n "${_fid_imp}" ]] \
+      && printf '%s' "${_fid_imp}" | jq -e 'type == "object" and (.change|type=="string")' >/dev/null 2>&1; then
+      printf '%s\n' "${_fid_imp}"
+      return 0
+    fi
+  fi
+
   return 0
 }
 
@@ -2081,6 +2104,196 @@ aegis_acceptance_missing_in_corpus() {
   return 1
 }
 
+# Pick a path from files_json that matches a basename fragment (else first path).
+aegis_files_json_pick() {
+  local files_json="${1:-[]}"
+  local needle="${2-}"
+  local fallback
+  fallback="$(
+    printf '%s' "${files_json}" \
+      | jq -r 'map(select(type=="string" and length>0))[0] // empty' 2>/dev/null || true
+  )"
+  if [[ -n "${needle}" ]]; then
+    local hit
+    hit="$(
+      printf '%s' "${files_json}" \
+        | jq -r --arg n "${needle}" \
+          'map(select(type=="string" and (contains($n))))[0] // empty' 2>/dev/null || true
+    )"
+    if [[ -n "${hit}" ]]; then
+      printf '%s' "${hit}"
+      return 0
+    fi
+  fi
+  printf '%s' "${fallback}"
+}
+
+# Demand-cued fidelity witnesses (KISS greps). Only fire when the demand text
+# itself contains the cue — never invent obligations.
+# Prints lines: code<TAB>target_hint<TAB>description<TAB>fix_suffix
+# (target_hint is a basename fragment or empty).
+aegis_demand_fidelity_witness_rows() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  [[ -n "${investigation}" ]] || return 0
+
+  # Helper: one TSV row (tabs between fields).
+  _fid_row() {
+    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"
+  }
+
+  # 1024n factor chain (explicit in demand)
+  if printf '%s' "${investigation}" | grep -Fq '1024n'; then
+    if ! printf '%s' "${corpus}" | grep -Fq '1024n'; then
+      _fid_row "factor_1024" "types" \
+        "Demand requires 1024n in unit conversion; candidate body has no 1024n" \
+        "implement conversion with BigInt(...) * 1024n * 1024n * 8n (not a single magic constant)"
+    fi
+  fi
+
+  # /1000n rate scale
+  if printf '%s' "${investigation}" | grep -Eq '/[[:space:]]*1000n'; then
+    if ! printf '%s' "${corpus}" | grep -Eq '/[[:space:]]*1000n'; then
+      _fid_row "rate_div_1000" "types" \
+        "Demand requires /1000n in rate conversion; candidate body missing it" \
+        "implement rate bits-per-ms with ... * 8n / 1000n"
+    fi
+  fi
+
+  # Must import SlidingWindow / ./window.js
+  if printf '%s' "${investigation}" | grep -Eiq "from ['\"]\\./window\\.js['\"]|import.*SlidingWindow|Must import.*window"; then
+    if ! printf '%s' "${corpus}" | grep -Eq "from[[:space:]]+['\"]\\./window\\.js['\"]"; then
+      _fid_row "import_window" "hybridLimiter" \
+        "Demand requires importing SlidingWindow from ./window.js; no such import in candidate" \
+        "import { SlidingWindow } from './window.js' and use it (do not keep a parallel local array)"
+    fi
+  fi
+
+  # Must call mbToBits (not only define it)
+  if printf '%s' "${investigation}" | grep -Fq 'mbToBits'; then
+    local calls
+    calls="$(
+      printf '%s' "${corpus}" \
+        | grep -E 'mbToBits[[:space:]]*\(' \
+        | grep -vE 'function[[:space:]]+mbToBits|export[[:space:]]+function[[:space:]]+mbToBits' \
+        || true
+    )"
+    if [[ -z "${calls}" ]]; then
+      _fid_row "use_mbToBits" "hybridLimiter" \
+        "Demand requires mbToBits; candidate never calls it" \
+        "set capacity via mbToBits(config.capacityMB) from ./types.js"
+    fi
+  fi
+
+  if printf '%s' "${investigation}" | grep -Fq 'mbpsToBitsPerMs'; then
+    local calls2
+    calls2="$(
+      printf '%s' "${corpus}" \
+        | grep -E 'mbpsToBitsPerMs[[:space:]]*\(' \
+        | grep -vE 'function[[:space:]]+mbpsToBitsPerMs|export[[:space:]]+function[[:space:]]+mbpsToBitsPerMs' \
+        || true
+    )"
+    if [[ -z "${calls2}" ]]; then
+      _fid_row "use_mbpsToBitsPerMs" "hybridLimiter" \
+        "Demand requires mbpsToBitsPerMs; candidate never calls it" \
+        "set rate via mbpsToBitsPerMs(config.rateMBps) from ./types.js"
+    fi
+  fi
+
+  # Non-positive consume guard
+  if printf '%s' "${investigation}" | grep -Eq 'bits[[:space:]]*<=[[:space:]]*0'; then
+    if ! printf '%s' "${corpus}" | grep -Eq 'bits[[:space:]]*<=[[:space:]]*0|bits[[:space:]]*<[[:space:]]*1'; then
+      _fid_row "nonpos_guard" "hybridLimiter" \
+        "Demand requires bits<=0 return false without debit; no such guard in body" \
+        "in consume/tryConsume, if (bits <= 0) return false before debit"
+    fi
+  fi
+
+  # softExceeded half-capacity (tokens * 2n < capacity)
+  if printf '%s' "${investigation}" | grep -Eiq 'softExceeded|half capacity|tokens \* 2n'; then
+    if ! printf '%s' "${corpus}" | grep -Eq '\*[[:space:]]*2n|2n[[:space:]]*\*|/[[:space:]]*2n|>>[[:space:]]*1n'; then
+      _fid_row "half_capacity" "hybridLimiter" \
+        "Demand requires softExceeded half-capacity test (tokens*2n < capacity); missing from body" \
+        "implement softExceeded as window full AND tokens * 2n < capacity"
+    fi
+  fi
+
+  # window size clamp
+  if printf '%s' "${investigation}" | grep -Eiq 'clamp size to|size to ≥ 1|size to >= 1|windowSize.*clamp'; then
+    if ! printf '%s' "${corpus}" | grep -Eq 'size[[:space:]]*<[[:space:]]*1|Math\.max[[:space:]]*\([[:space:]]*1|size[[:space:]]*<=[[:space:]]*0'; then
+      _fid_row "window_clamp" "window" \
+        "Demand requires window size clamped to >=1; no clamp in body" \
+        "in SlidingWindow constructor, clamp size with Math.max(1, size) or equivalent"
+    fi
+  fi
+}
+
+# First fidelity hole as optimize improvement JSON (or empty).
+aegis_mechanical_fidelity_first_improve() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  local files_json="${3:-[]}"
+  local row code hint desc fix_s path
+  row="$(aegis_demand_fidelity_witness_rows "${investigation}" "${corpus}" | head -1)"
+  [[ -n "${row}" ]] || return 0
+  IFS=$'\t' read -r code hint desc fix_s <<<"${row}"
+  path="$(aegis_files_json_pick "${files_json}" "${hint}")"
+  [[ -n "${path}" ]] || path="src/unknown.ts"
+  jq -nc \
+    --arg f "${path}" \
+    --arg c "${code}" \
+    --arg ch "In ${path}, ${fix_s}" \
+    --arg w "Implements a constraint already stated in the investigation Change; stays inside files_changed." \
+    '{
+      target_files: [$f],
+      change: $ch,
+      why_safe: $w,
+      code: ("fidelity_" + $c)
+    }'
+}
+
+# Fidelity holes as adversarial findings JSON array (max 2).
+aegis_mechanical_fidelity_findings_json() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  local files_json="${3:-[]}"
+  local -a items=()
+  local row code hint desc fix_s path n=0
+  while IFS= read -r row; do
+    [[ -n "${row}" ]] || continue
+    IFS=$'\t' read -r code hint desc fix_s <<<"${row}"
+    path="$(aegis_files_json_pick "${files_json}" "${hint}")"
+    [[ -n "${path}" ]] || path="src/unknown.ts"
+    items+=(
+      "$(
+        jq -nc \
+          --arg f "${path}" \
+          --arg d "${desc}" \
+          --arg fix "In ${path}, ${fix_s}" \
+          --arg c "${code}" \
+          '{
+            type: "contract_violation",
+            severity: "high",
+            description: $d,
+            supported_by_evidence: true,
+            evidence_refs: ["files_changed.body", "candidate.diff"],
+            target_files: [$f],
+            fix: $fix,
+            code: ("fidelity_" + $c)
+          }'
+      )"
+    )
+    n=$((n + 1))
+    [[ "${n}" -ge 2 ]] && break
+  done < <(aegis_demand_fidelity_witness_rows "${investigation}" "${corpus}")
+
+  if [[ "${#items[@]}" -eq 0 ]]; then
+    printf '[]'
+    return 0
+  fi
+  printf '%s\n' "${items[@]}" | jq -s -c '.'
+}
+
 # Mechanical adversarial findings from candidate +lines / bodies (tools clean).
 # Prints JSON array of findings (may be empty []).
 aegis_mechanical_adversarial_diff_scan() {
@@ -2139,6 +2352,24 @@ aegis_mechanical_adversarial_diff_scan() {
         }'
       )"
     )
+  fi
+
+  # Demand fidelity witnesses (Change cues → body). Prefer over acceptance-name-only.
+  if [[ -n "${investigation}" ]] \
+    && declare -f aegis_mechanical_fidelity_findings_json >/dev/null 2>&1; then
+    local fid_json
+    fid_json="$(
+      aegis_mechanical_fidelity_findings_json \
+        "${investigation}" "${corpus}" "${files_json}" 2>/dev/null || printf '[]'
+    )"
+    if printf '%s' "${fid_json}" | jq -e 'type=="array" and length>0' >/dev/null 2>&1; then
+      # Prepend fidelity findings (high signal).
+      local fid_item
+      while IFS= read -r fid_item; do
+        [[ -n "${fid_item}" ]] || continue
+        findings+=("${fid_item}")
+      done < <(printf '%s' "${fid_json}" | jq -c '.[]' 2>/dev/null || true)
+    fi
   fi
 
   # Acceptance idents missing from final body (+lines ∪ on-disk files_changed).
