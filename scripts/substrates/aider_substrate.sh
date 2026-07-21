@@ -163,6 +163,22 @@ main() {
 
   diff_content="$(capture_worktree_diff)"
 
+  # Recovery: Aider logged Applied edit but capture is empty (intent-to-add
+  # lost, untracked net-new, or summarizer crash). Re-register targets and retry.
+  if [[ -z "${diff_content}" ]] \
+    && [[ -n "${AEGIS_AIDER_OUTPUT_LOG:-}" && -f "${AEGIS_AIDER_OUTPUT_LOG}" ]] \
+    && grep -q "Applied edit" "${AEGIS_AIDER_OUTPUT_LOG}" 2>/dev/null; then
+    aegis_warn "empty_diff_after_applied_edit — re-intent-to-add targets and recapture"
+    local _t
+    for _t in "${mutation_targets[@]:-}"; do
+      [[ -n "${_t}" && -f "${AEGIS_EXECUTION_SURFACE_PATH}/${_t}" ]] || continue
+      git --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
+        --work-tree="${AEGIS_EXECUTION_SURFACE_PATH}" \
+        add --intent-to-add -- "${_t}" >/dev/null 2>&1 || true
+    done
+    diff_content="$(capture_worktree_diff)"
+  fi
+
   if [[ -z "${diff_content}" ]]; then
     if [[ -n "${AEGIS_AIDER_OUTPUT_LOG:-}" && -f "${AEGIS_AIDER_OUTPUT_LOG}" ]]; then
       echo "[DEBUG] Aider output log:" >&2
