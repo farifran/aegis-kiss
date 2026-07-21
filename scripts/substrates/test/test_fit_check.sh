@@ -77,6 +77,19 @@ echo "${r}" | jq -e '(.proposed_units | length) >= 1 or (.blockers | length) >= 
   || fail "monster_should_split_or_block: ${r}"
 echo "${r}" | jq -e '.auto_fixes_applied | index("tokenize_acceptance") != null' >/dev/null \
   || fail "monster_should_tokenize_acceptance: ${r}"
+# Create module unit must precede barrel reexport (index alphabetically first otherwise).
+echo "${r}" | jq -e '
+  (.proposed_units | length) >= 2
+  and (.proposed_units[0].targets[0] == "src/tokenBucket.ts")
+  and (.proposed_units[-1].targets[0] == "src/index.ts")
+' >/dev/null \
+  || fail "monster_unit_order_create_before_reexport: ${r}"
+# Unit demand must keep algorithm intent (not only "Minimal stub").
+echo "${r}" | jq -e '
+  (.proposed_units[0].demand | test("Token bucket|BigInt|bitmask|offline"; "i"))
+  and ((.proposed_units[0].demand | test("Minimal stub")) | not)
+' >/dev/null \
+  || fail "monster_unit0_keeps_algorithm_intent: $(echo "${r}" | jq -r '.proposed_units[0].demand')"
 
 # --- free-text wraps to structured ---
 r="$(aegis_fit_check_demand "add helper in src/foo.ts for megabits")"

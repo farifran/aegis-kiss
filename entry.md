@@ -30,9 +30,10 @@
 | Intent metrics jsonl (`pass`/`fail`/`soft_accept`/`fix_attempt`) | `record_mutation_intent_metric` → `AEGIS_METRICS_FILE` |
 | Profiles lean: forensics sem git.status; optimize handover-only + sem demand anchors no prompt | config + raw/prompt |
 
-### Ainda proposta (não implementado)
+### Ainda proposta (não implementado no harness)
 
-Wizard de intake, labels GitHub, 1-task-1-pipeline batch, schema fatal completo, `--task K`.
+Wizard CLI nativo, labels enforced na run, batch multi-task, schema fatal completo (tetos `demand_*` na run).  
+**Já coberto noutro sítio:** intake/labels/processo → `INTAKE.md` (Scout); **`--task K`** → runtime (`demand.sh` + CLI).
 
 Este documento regista o acordo conceptual.  
 Se conflitar com código, o **código atual manda**.  

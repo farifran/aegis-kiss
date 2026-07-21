@@ -64,20 +64,23 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Teach-back experiment: tb_two_pass_format
 
-## Teach-back (minimal)
+## Teach-back (two-pass edit)
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+**Pass A — shape:** one public export + method/API names required by demand.  
+**Pass B — teach-back:** re-read Change/ALVO; for each bullet, ensure a witness exists; add only missing witnesses.  
+
+Still one reply of edits (whole file preferred). Passes are mental, not two messages. Edits only.
 
 ## Whole-file reply (required shape)
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+Your reply must be a **whole-file** edit of the target, not empty fences.
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+Valid pattern (structure only — replace body with the real implementation):
 
 ```
-<path/to/target.ts>
+src/tokenBucket.ts
 <<<<<<< SEARCH
 =======
 // full file content here

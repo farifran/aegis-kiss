@@ -64,6 +64,7 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Teach-back experiment: tb_minimal_format
 
 ## Teach-back (minimal)
 
@@ -72,12 +73,12 @@ If blank unfillable → ignore bullet. If fillable → body already does it. Edi
 
 ## Whole-file reply (required shape)
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+Your reply must be a **whole-file** edit of the target, not empty fences.
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+Valid pattern (structure only — replace body with the real implementation):
 
 ```
-<path/to/target.ts>
+src/tokenBucket.ts
 <<<<<<< SEARCH
 =======
 // full file content here

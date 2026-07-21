@@ -64,25 +64,24 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Experimental overlays (matrix: abstract_parallel)
 
-## Teach-back (minimal)
+## Technique: Abstract → concrete
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+1. Lift each demand statement to a **kind** (unit dual, timing, encoding, direction, named op, formula, Change step) — not to a product domain story.  
+2. For each kind, pick one **witness pattern** in code (param+convert, call-time path, bit ops, A→B formula, method, literal).  
+3. Implement witnesses first; fill details second.  
+4. If a statement cannot lift to a kind, ignore it as prose.  
 
-## Whole-file reply (required shape)
+Never invent kinds the demand did not state. Edits only.
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+## Technique: Parallel constraints
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+Do **not** implement the first Acceptance name and stop.
 
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
+1. In one mental pass, collect **all** constraints from Goal + Change + ALVO + FEEDBACK in parallel.  
+2. Draft the **single** public export shape that can host every constraint (class with methods or one function — as demand implies).  
+3. Write the full file so **every** constraint has a witness in the same edit — avoid multi-pass “I’ll add units later”.  
+4. Final scan: any constraint without a line that witnesses it → still not done.  
 
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+One export. No parallel APIs. Edits only.

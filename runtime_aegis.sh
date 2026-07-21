@@ -68,6 +68,7 @@ parse_runtime_cli() {
 
   local cli_mode="discovery"
   local cli_issue_number=""
+  local cli_task_number=""
   local cli_target_path=""
   local cli_investigation_input=""
   local positional_args=()
@@ -95,6 +96,23 @@ parse_runtime_cli() {
           || aegis_fatal "duplicate_issue_argument"
 
         cli_issue_number="${1#--issue=}"
+        ;;
+      --task)
+        shift
+
+        [[ "$#" -gt 0 ]] \
+          || aegis_fatal "missing_task_number"
+
+        [[ -z "${cli_task_number}" ]] \
+          || aegis_fatal "duplicate_task_argument"
+
+        cli_task_number="$1"
+        ;;
+      --task=*)
+        [[ -z "${cli_task_number}" ]] \
+          || aegis_fatal "duplicate_task_argument"
+
+        cli_task_number="${1#--task=}"
         ;;
       --target)
         shift
@@ -137,6 +155,13 @@ parse_runtime_cli() {
     shift
   done
 
+  if [[ -n "${cli_task_number}" ]]; then
+    [[ "${cli_task_number}" =~ ^[1-9][0-9]*$ ]] \
+      || aegis_fatal "invalid_task_number"
+    [[ -n "${cli_issue_number}" || -n "${AEGIS_INVESTIGATION_INPUT:-}" || "${#positional_args[@]}" -gt 0 ]] \
+      || aegis_fatal "task_requires_issue_or_demand"
+  fi
+
   if [[ -n "${cli_issue_number}" ]]; then
     [[ "${cli_issue_number}" =~ ^[0-9]+$ ]] \
       || aegis_fatal "invalid_issue_number"
@@ -146,6 +171,7 @@ parse_runtime_cli() {
 
     # Real body via gh — never the opaque placeholder "issue #N".
     cli_investigation_input="$(aegis_fetch_issue_demand "${cli_issue_number}")"
+    export AEGIS_ISSUE_NUMBER="${cli_issue_number}"
   elif [[ "${#positional_args[@]}" -gt 0 ]]; then
     if [[ -z "${cli_target_path}" ]] && [[ -d "${positional_args[0]}" ]]; then
       cli_target_path="${positional_args[0]}"
@@ -155,7 +181,12 @@ parse_runtime_cli() {
     cli_investigation_input="${positional_args[*]}"
   fi
 
+  if [[ -n "${cli_task_number}" ]]; then
+    export AEGIS_ISSUE_TASK="${cli_task_number}"
+  fi
+
   # Soft-normalize structured markdown + mechanical path safety.
+  # With AEGIS_ISSUE_TASK: task-scoped canónico + issue global context.
   # Free-text demands pass through unchanged (aside from path checks).
   if [[ -n "${cli_investigation_input}" ]]; then
     cli_investigation_input="$(
@@ -689,11 +720,15 @@ materialize_preceding_mutation_candidate() {
     if ! bash scripts/runtime/apply_candidate_diff.sh \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}"; then
-      # Do not abort the whole pipeline: keep candidate and skip refine edits.
-      # Stress data: mechanical can_improve + apply fail left runs dead.
-      aegis_warn "optimize_refine_materialize_failed — continuing without re-applying prior candidate (repair refine may no-op)"
+      # Soft-fail the refine re-entry without killing the pipeline — but do NOT
+      # run Aider on a clean surface (that would drop the prior candidate from
+      # the artifact). Aider substrate re-emits the previous candidate.
+      # Stress data: mechanical can_improve + apply fail left runs dead when fatal.
+      aegis_warn "optimize_refine_materialize_failed — keeping previous candidate (no repair refine on empty surface)"
+      export AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE=1
       return 0
     fi
+    unset AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE 2>/dev/null || true
     return 0
   fi
   return 0

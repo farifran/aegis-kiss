@@ -64,25 +64,15 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Teach-back experiment: tb_change_steps
 
-## Teach-back (minimal)
+## Teach-back (Change steps only)
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+Ignore Acceptance labels for the “done” test.
 
-## Whole-file reply (required shape)
+1. Take only numbered/bulleted **Change** (and ALVO reason if present).  
+2. Rewrite each as silent obligation: `code must <verb> <object>`.  
+3. Implement until every obligation has a line witness in this file.  
+4. Acceptance names must still appear if the demand lists them — as part of those obligations, not instead of them.  
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
-
-Valid pattern (structure only — replace path/body with the real target and implementation):
-
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
-
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+No new files/exports. Edits only.

@@ -64,25 +64,4 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
-
-## Teach-back (minimal)
-
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
-
-## Whole-file reply (required shape)
-
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
-
-Valid pattern (structure only — replace path/body with the real target and implementation):
-
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
-
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+# Experimental overlays (matrix: base)

@@ -613,7 +613,8 @@ run_mutation_preflight_with_fix_attempts() {
 
     diff_content="$(capture_worktree_diff)"
     if [[ -z "${diff_content}" ]]; then
-      rollback_execution_surface
+      # Do NOT full-rollback: prior primary mutation may still be the
+      # only good work; empty fix attempt should not wipe the jail.
       aegis_warn "empty_diff after preflight fix attempt — continuing if retries left"
       continue
     fi

@@ -774,8 +774,16 @@ export AEGIS_ISSUE_COMMENT=1    # opt-in; precisa issue number no env da run
 
 Provider: OpenAI-compatible via env / `.harness/local.env` (sem MLX local no projeto).
 
-**Produto atual:** `--issue N` → `gh issue view` → body inteiro.  
-**Proposto:** `--task K`. Até existir, preferir **issues micro** ou uma task clara por run.
+**Produto actual:**
+
+```bash
+./run_aegis.sh --fresh --pipeline mutation --issue N
+./run_aegis.sh --fresh --pipeline mutation --issue N --task K
+```
+
+- `--issue N` → `gh issue view` → body (soft-normalize se structured).  
+- `--task K` (1-based) → canónico da checklist `## Tasks` **mais contexto global** da issue (`ISSUE_CONTEXT` = Goal, Targets, Change, Acceptance, Out of scope, Constraints). Outras tasks e Notes **não** entram no prompt. Exporta `AEGIS_ISSUE_NUMBER` / `AEGIS_ISSUE_TASK` / `AEGIS_DEMAND_SHA`.  
+- Sem `--task`: body inteiro (ok para issue monotask; multi-task → preferir `--task K` ou issues micro).
 
 ### 6.2 Ciclo de vida de uma issue
 

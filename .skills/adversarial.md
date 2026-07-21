@@ -45,9 +45,18 @@ Precision over volume. Tools clean + no real `+` quote → `verified`, `findings
    → reverse conversion, parallel APIs, nonsense export — **only** if grounded in the diff text (not free-form demand rewrite).  
    → `type: contract_violation`.
 
-4. **Otherwise** → `verified`, `findings: []`.
+4. **Teach-back falsify (demand obligations, not new features)**  
+   → From investigation Change/ALVO/Goal only, silent list: `code must ___`.  
+   → If the candidate body/diff has **no witness** for an obligation the demand **explicitly** stated, emit **one** (prefer at most 1–2) `contract_violation` with:
+     - `description`: which obligation lacks a witness (quote demand phrase briefly + what is missing in body)
+     - `target_files`: ⊆ `files_changed`
+     - `fix`: imperative surgical instruction (Repair-ready)
+   → Do **not** challenge missing unit tests, style, or unstated design wishes.  
+   → If every obligation has a witness → do not invent holes.
 
-**Never:** invent implementation not in the diff; style-only nits; “missing unit tests” as blocking; expand scope beyond `files_changed`; re-open the investigation demand as a new feature list.
+5. **Otherwise** → `verified`, `findings: []`.
+
+**Never:** invent implementation not in the diff; style-only nits; “missing unit tests” as blocking; expand scope beyond `files_changed`; re-open the investigation demand as a new feature list; teach-back invent constraints.
 
 ---
 
@@ -87,8 +96,9 @@ Tribunal downgrades fabricated quotes. Prefer empty findings over weak ones.
 
 - [ ] Only `status` + `findings` (no mode/candidate/handover)  
 - [ ] Every logic claim has a full `+` expression in backticks  
+- [ ] Teach-back findings cite an **explicit** demand obligation + missing witness (not taste)  
 - [ ] Every `target_files` entry is in CANDIDATE `files_changed`  
 - [ ] Each finding has a concrete `fix` when `challenged`  
-- [ ] If tools clean and no quote → `verified` + `[]`  
+- [ ] If tools clean, no quote, and all demand obligations witnessed → `verified` + `[]`  
 
 Then stop.

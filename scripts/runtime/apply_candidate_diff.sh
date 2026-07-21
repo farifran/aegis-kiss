@@ -85,6 +85,13 @@ else
     || candidate_fatal "candidate_diff_apply_failed"
 fi
 
+# 3-way can leave conflict markers while exiting 0 in some cases — refuse.
+# Match start markers only (======= alone appears in legitimate prose).
+if git -C "${EXECUTION_SURFACE}" grep -l -E '^(<<<<<<< |>>>>>>>)' -- \
+  2>/dev/null | grep -q .; then
+  candidate_fatal "candidate_diff_apply_left_conflict_markers"
+fi
+
 git -C "${EXECUTION_SURFACE}" diff --name-only HEAD -- \
   | sort -u > "${actual_files}"
 

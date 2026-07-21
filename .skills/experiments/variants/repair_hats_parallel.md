@@ -64,25 +64,26 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Experimental overlays (matrix: hats_parallel)
 
-## Teach-back (minimal)
+## Technique: Six hats (process only — still no prose reply)
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+Before finishing the edit, run this **silent** pass (do not write hat names into code):
 
-## Whole-file reply (required shape)
+1. **White** — list only **facts** stated in Goal/Change/ALVO/FEEDBACK (units, steps, encodings, direction).  
+2. **Black** — for each fact: “if the body only has Acceptance **names**, what fails?” → missing witness = not done.  
+3. **Yellow** — smallest correct structure that covers every white fact (one export; methods OK).  
+4. **Blue** — order: implement yellow structure → re-check white witnesses → stop.  
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+Skip Red/Green inventiveness. No extra features. Edits only.
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+## Technique: Parallel constraints
 
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
+Do **not** implement the first Acceptance name and stop.
 
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+1. In one mental pass, collect **all** constraints from Goal + Change + ALVO + FEEDBACK in parallel.  
+2. Draft the **single** public export shape that can host every constraint (class with methods or one function — as demand implies).  
+3. Write the full file so **every** constraint has a witness in the same edit — avoid multi-pass “I’ll add units later”.  
+4. Final scan: any constraint without a line that witnesses it → still not done.  
+
+One export. No parallel APIs. Edits only.

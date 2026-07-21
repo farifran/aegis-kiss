@@ -296,8 +296,12 @@ aegis_normalize_demand_text() {
     return 0
   }
 
-  # Idempotent: already materialised structured demand.
+  # Idempotent: already materialised structured or task-scoped demand.
   if printf '%s' "${text}" | head -n 1 | grep -qx 'Demand (structured):'; then
+    printf '%s' "${text}"
+    return 0
+  fi
+  if printf '%s' "${text}" | head -n 1 | grep -qE '^AEGIS_DEMAND '; then
     printf '%s' "${text}"
     return 0
   fi
@@ -343,6 +347,17 @@ aegis_fetch_issue_demand() {
     exit 1
   }
 
+  # Pipeline re-enters runtime per mode; cache avoids mid-run gh flakes
+  # (seen as issue_fetch_failed on late modes after discovery succeeded).
+  local cache_dir cache_file
+  cache_dir="${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}/issue_cache"
+  cache_file="${cache_dir}/issue_${issue_number}.md"
+  if [[ -f "${cache_file}" && -s "${cache_file}" ]] \
+    && [[ "${AEGIS_ISSUE_CACHE_REFRESH:-0}" != "1" ]]; then
+    cat "${cache_file}"
+    return 0
+  fi
+
   if ! command -v gh >/dev/null 2>&1; then
     if declare -f aegis_fatal >/dev/null 2>&1; then
       aegis_fatal "missing_gh_for_issue_fetch"
@@ -352,13 +367,22 @@ aegis_fetch_issue_demand() {
   fi
 
   if ! json="$(
-    gh issue view "${issue_number}" --json title,body 2>/dev/null
+    env -u GITHUB_TOKEN gh issue view "${issue_number}" --json title,body 2>/dev/null
   )"; then
-    if declare -f aegis_fatal >/dev/null 2>&1; then
-      aegis_fatal "issue_fetch_failed:${issue_number}"
+    # One retry without env -u (some setups only have GITHUB_TOKEN).
+    if ! json="$(
+      gh issue view "${issue_number}" --json title,body 2>/dev/null
+    )"; then
+      if [[ -f "${cache_file}" && -s "${cache_file}" ]]; then
+        cat "${cache_file}"
+        return 0
+      fi
+      if declare -f aegis_fatal >/dev/null 2>&1; then
+        aegis_fatal "issue_fetch_failed:${issue_number}"
+      fi
+      echo "[AEGIS][DEMAND][FATAL] issue_fetch_failed:${issue_number}" >&2
+      exit 1
     fi
-    echo "[AEGIS][DEMAND][FATAL] issue_fetch_failed:${issue_number}" >&2
-    exit 1
   fi
 
   title="$(printf '%s' "${json}" | jq -r '.title // empty')"
@@ -372,14 +396,192 @@ aegis_fetch_issue_demand() {
     exit 1
   fi
 
-  printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
+  mkdir -p "${cache_dir}" 2>/dev/null || true
+  {
+    printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
+  } | tee "${cache_file}" 2>/dev/null || printf '# Issue #%s: %s\n\n%s' "${issue_number}" "${title}" "${body}"
+}
+
+# ---------------------------------------------------------
+# Task-scoped demand (issue global context + micro-task)
+# ---------------------------------------------------------
+# ## Tasks checklist items (order preserved). One title per line.
+# Matches "- [ ] …" / "- [x] …" (GitHub task list).
+aegis_demand_task_titles() {
+  local text="${1-}"
+  local section
+  section="$(aegis_demand_md_section "Tasks" "${text}")"
+  [[ -n "$(printf '%s' "${section}" | tr -d '[:space:]')" ]] || return 0
+  printf '%s\n' "${section}" \
+    | sed -nE 's/^[[:space:]]*[-*][[:space:]]+\[([ xX])\][[:space:]]+//p' \
+    | sed -E 's/[[:space:]]+$//' \
+    | awk 'NF'
+}
+
+aegis_demand_task_count() {
+  local text="${1-}"
+  local n=0
+  while IFS= read -r _; do
+    n=$((n + 1))
+  done < <(aegis_demand_task_titles "${text}")
+  printf '%s' "${n}"
+}
+
+# 1-based task title; empty if missing.
+aegis_demand_task_title_at() {
+  local text="${1-}"
+  local k="${2-}"
+  local i=0
+  local line
+  [[ "${k}" =~ ^[1-9][0-9]*$ ]] || return 0
+  while IFS= read -r line; do
+    i=$((i + 1))
+    if [[ "${i}" -eq "${k}" ]]; then
+      printf '%s' "${line}"
+      return 0
+    fi
+  done < <(aegis_demand_task_titles "${text}")
+  return 0
+}
+
+aegis_demand_short_sha() {
+  local payload="${1-}"
+  local h=""
+  if command -v shasum >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | shasum -a 256 2>/dev/null | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | sha256sum 2>/dev/null | awk '{print $1}')"
+  elif command -v md5 >/dev/null 2>&1; then
+    h="$(printf '%s' "${payload}" | md5 -q 2>/dev/null || true)"
+  fi
+  if [[ -n "${h}" ]]; then
+    printf '%s' "${h:0:12}"
+  else
+    printf 'unknown'
+  fi
+}
+
+# Fatal helper for demand-layer errors (works outside full runtime too).
+aegis_demand_fatal() {
+  local code="$1"
+  if declare -f aegis_fatal >/dev/null 2>&1; then
+    aegis_fatal "${code}"
+  fi
+  echo "[AEGIS][DEMAND][FATAL] ${code}" >&2
+  exit 1
+}
+
+# Materialize investigation input for task K of an issue-shaped document.
+#
+# Global issue context is kept (Goal → ISSUE_CONTEXT, Targets, Change,
+# Acceptance, Out of scope, Constraints). Other tasks and Notes are omitted.
+# Task title becomes the unit GOAL so modes focus on one micro-op.
+#
+# Args: <issue_doc> <task_k> [issue_number]
+aegis_materialize_task_scoped_demand() {
+  local text="${1-}"
+  local task_k="${2-}"
+  local issue_n="${3:-${AEGIS_ISSUE_NUMBER:-}}"
+  local n title
+  local goal_s targets_s acceptance_s change_s oos_s constraints_s
+  local targets_raw acceptance_raw change_raw oos_raw constraints_raw
+  local sha head slim
+
+  [[ -n "$(printf '%s' "${text}" | tr -d '[:space:]')" ]] \
+    || aegis_demand_fatal "demand_empty"
+  [[ "${task_k}" =~ ^[1-9][0-9]*$ ]] \
+    || aegis_demand_fatal "demand_task_invalid:${task_k}"
+
+  n="$(aegis_demand_task_count "${text}")"
+  if [[ "${n}" -eq 0 ]]; then
+    aegis_demand_fatal "demand_task_list_empty"
+  fi
+  if [[ "${task_k}" -gt "${n}" ]]; then
+    aegis_demand_fatal "demand_task_missing:${task_k}/${n}"
+  fi
+
+  title="$(aegis_demand_task_title_at "${text}" "${task_k}")"
+  [[ -n "$(printf '%s' "${title}" | tr -d '[:space:]')" ]] \
+    || aegis_demand_fatal "demand_task_empty:${task_k}"
+
+  goal_s="$(aegis_demand_flatten_section "$(aegis_demand_md_section "Goal" "${text}")")"
+  targets_raw="$(aegis_demand_md_section "Targets" "${text}")"
+  targets_s="$(aegis_demand_flatten_section "${targets_raw}")"
+  acceptance_raw="$(aegis_demand_md_section "Acceptance" "${text}")"
+  acceptance_s="$(aegis_demand_flatten_section "${acceptance_raw}")"
+  change_raw="$(aegis_demand_md_section "Change" "${text}")"
+  change_s="$(aegis_demand_flatten_section "${change_raw}")"
+  oos_raw="$(aegis_demand_md_section "Out of scope" "${text}")"
+  oos_s="$(aegis_demand_flatten_section "${oos_raw}")"
+  constraints_raw="$(aegis_demand_md_section "Constraints" "${text}")"
+  constraints_s="$(aegis_demand_flatten_section "${constraints_raw}")"
+
+  # Prefer global Change; else the task title is the change statement.
+  if [[ -z "$(printf '%s' "${change_s}" | tr -d '[:space:]')" ]]; then
+    change_s="${title}"
+    change_raw="- ${title}"
+  fi
+
+  sha="$(
+    aegis_demand_short_sha \
+      "issue=${issue_n};task=${task_k};title=${title};goal=${goal_s};targets=${targets_s};change=${change_s};acceptance=${acceptance_s};oos=${oos_s};constraints=${constraints_s}"
+  )"
+  export AEGIS_DEMAND_SHA="${sha}"
+
+  head="AEGIS_DEMAND issue:${issue_n:-?} task:${task_k} sha:${sha}"
+  head+=$'\n'
+  [[ -n "${goal_s}" ]] && head+=$'\n'"ISSUE_CONTEXT: ${goal_s}"
+  head+=$'\n'"GOAL: ${title}"
+  [[ -n "${targets_s}" ]] && head+=$'\n'"TARGETS: ${targets_s}"
+  head+=$'\n'"CHANGE: ${change_s}"
+  [[ -n "${acceptance_s}" ]] && head+=$'\n'"ACCEPTANCE: ${acceptance_s}"
+  [[ -n "${oos_s}" ]] && head+=$'\n'"OUT_OF_SCOPE: ${oos_s}"
+  [[ -n "${constraints_s}" ]] && head+=$'\n'"CONSTRAINTS: ${constraints_s}"
+
+  # Slim structured body for anchors/path extraction — no task list, no Notes.
+  slim="## Goal"$'\n'"${title}"$'\n'
+  if [[ -n "${goal_s}" ]]; then
+    slim+=$'\n'"## Issue context"$'\n'"${goal_s}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${targets_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Targets"$'\n'"${targets_raw}"$'\n'
+  fi
+  slim+=$'\n'"## Change"$'\n'"${change_raw}"$'\n'
+  if [[ -n "$(printf '%s' "${acceptance_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Acceptance"$'\n'"${acceptance_raw}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${oos_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Out of scope"$'\n'"${oos_raw}"$'\n'
+  fi
+  if [[ -n "$(printf '%s' "${constraints_raw}" | tr -d '[:space:]')" ]]; then
+    slim+=$'\n'"## Constraints"$'\n'"${constraints_raw}"$'\n'
+  fi
+
+  printf '%s\n\n---\n\n%s' "${head}" "${slim}"
 }
 
 # Full pipeline: optional issue fetch already done → normalize + safety.
+# When AEGIS_ISSUE_TASK is set, scopes to that checklist item while keeping
+# issue-level Goal/Targets/Constraints as context (other tasks omitted).
 aegis_materialize_investigation_input() {
   local text="${1-}"
   local normalized
-  normalized="$(aegis_normalize_demand_text "${text}")"
+  local task_k="${AEGIS_ISSUE_TASK:-}"
+
+  # Already task-scoped (idempotent).
+  if printf '%s' "${text}" | head -n 1 | grep -qE '^AEGIS_DEMAND '; then
+    normalized="${text}"
+  elif [[ -n "${task_k}" ]]; then
+    normalized="$(
+      aegis_materialize_task_scoped_demand \
+        "${text}" \
+        "${task_k}" \
+        "${AEGIS_ISSUE_NUMBER:-}"
+    )"
+  else
+    normalized="$(aegis_normalize_demand_text "${text}")"
+  fi
+
   aegis_demand_assert_paths_safe "${normalized}"
   printf '%s' "${normalized}"
 }
@@ -1783,11 +1985,26 @@ aegis_candidate_files_corpus() {
   )
 }
 
+# Language / Web API globals — presence in body is enough (not export bindings).
+aegis_acceptance_token_is_language_global() {
+  local tok="${1-}"
+  case "$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')" in
+    bigint|promise|map|set|date|error|array|object|json|math|symbol|number|string|boolean|regexp|weakmap|weakset|proxy|reflect|intl|buffer|uint8array|arraybuffer|dataview|url|console)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # API-like tokens (PascalCase / CamelCase / long) must be public exports,
 # not only a parameter name (stress B gaming: MustExistSymbolXYZ as param).
 aegis_acceptance_token_is_export_like() {
   local tok="${1-}"
   [[ -n "${tok}" ]] || return 1
+  # Built-ins are never "must export".
+  if aegis_acceptance_token_is_language_global "${tok}"; then
+    return 1
+  fi
   # Has internal capital (Camel/Pascal) or long identifier.
   [[ "${tok}" =~ [a-z][A-Z] || "${tok}" =~ ^[A-Z][a-zA-Z0-9]+[A-Z] || "${#tok}" -ge 16 ]] \
     && return 0
@@ -1795,14 +2012,38 @@ aegis_acceptance_token_is_export_like() {
   return 1
 }
 
-# Hit if token appears as export function/const/class/type/{ Tok }.
+# Hit if token appears as export function/const/class/type/{ Tok }, or as a
+# class/object method declaration (public encodeState(), encodeState(): …).
+# Param-only gaming (SymbolX: number) does not match method form (needs '(').
 aegis_acceptance_export_hit() {
   local tok="${1-}"
   local corpus="${2-}"
   # Escape tok for basic ERE (idents only expected).
-  printf '%s\n' "${corpus}" | grep -Eiq \
+  if printf '%s\n' "${corpus}" | grep -Eiq \
     "export[[:space:]]+(async[[:space:]]+)?(function|const|class|type|interface|enum)[[:space:]]+${tok}[[:space:](;=]|export[[:space:]]*\{[^}]*\b${tok}\b" \
-    2>/dev/null
+    2>/dev/null; then
+    return 0
+  fi
+  # Method / property function on class or object literal.
+  if printf '%s\n' "${corpus}" | grep -Eiq \
+    "(^|[[:space:];{])((public|private|protected|static|async|readonly|abstract|override)[[:space:]]+)*${tok}[[:space:]]*(\(|:[[:space:]]*\(|:[[:space:]]*function)" \
+    2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+# Barrel / path basenames that are not API identifiers (never require in body).
+aegis_acceptance_token_is_path_noise() {
+  local tok="${1-}"
+  case "$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')" in
+    index|main|mod|module|src|lib|dist|app|server|client|util|utils|types|type|helpers|helper|common|shared|export|exports|import|imports|file|files|path|paths|ts|js|tsx|jsx)
+      return 0
+      ;;
+  esac
+  # Bare extensions / filenames like index.ts
+  [[ "${tok}" =~ \.(ts|tsx|js|jsx|mjs|cjs)$ ]] && return 0
+  return 1
 }
 
 # True (0) when every acceptance ident is satisfied in corpus.
@@ -1818,6 +2059,10 @@ aegis_acceptance_missing_in_corpus() {
   local tok
   while IFS= read -r tok; do
     [[ -n "${tok}" ]] || continue
+    # Skip path/barrel noise (e.g. Acceptance "- index" from micro templates).
+    if aegis_acceptance_token_is_path_noise "${tok}"; then
+      continue
+    fi
     if aegis_acceptance_token_is_export_like "${tok}"; then
       if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
         missing="${missing}${tok}"$'\n'
@@ -1903,18 +2148,32 @@ aegis_mechanical_adversarial_diff_scan() {
       aegis_acceptance_missing_in_corpus "${investigation}" "${corpus}" 2>/dev/null
     )" || accept_rc=$?
     if [[ "${accept_rc}" -ne 0 && -n "${missing_nl}" ]]; then
-      local miss_list
+      local miss_list fix_hint
       miss_list="$(printf '%s\n' "${missing_nl}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      # Language globals (BigInt) need body usage; export-like need export/method.
+      fix_hint="$(
+        printf '%s\n' "${missing_nl}" | while IFS= read -r mt; do
+          [[ -n "${mt}" ]] || continue
+          if aegis_acceptance_token_is_language_global "${mt}"; then
+            printf 'use %s in the implementation (e.g. %s(Date.now()) / 0n), not as export; ' "${mt}" "${mt}"
+          elif aegis_acceptance_token_is_export_like "${mt}"; then
+            printf 'export class/function %s or public %s() method; ' "${mt}" "${mt}"
+          else
+            printf 'include identifier %s in the candidate body; ' "${mt}"
+          fi
+        done
+      )"
+      [[ -n "${fix_hint}" ]] || fix_hint="Add missing Acceptance identifiers to ${primary}: ${miss_list}"
       findings+=(
         "$(
-          jq -nc --arg f "${primary}" --arg m "${miss_list}" '{
+          jq -nc --arg f "${primary}" --arg m "${miss_list}" --arg fix "${fix_hint}" '{
             type: "contract_violation",
             severity: "high",
             description: ("Acceptance identifiers missing from candidate body: " + $m),
             supported_by_evidence: true,
             evidence_refs: ["candidate.diff", "files_changed.body"],
             target_files: [$f],
-            fix: ("In " + $f + ", export Acceptance API names (export function/const/class), not only as params: " + $m)
+            fix: ("In " + $f + ", " + $fix)
           }'
         )"
       )

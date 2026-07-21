@@ -64,25 +64,50 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Experimental overlays (matrix: all)
 
-## Teach-back (minimal)
+## Technique: Six hats (process only — still no prose reply)
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+Before finishing the edit, run this **silent** pass (do not write hat names into code):
 
-## Whole-file reply (required shape)
+1. **White** — list only **facts** stated in Goal/Change/ALVO/FEEDBACK (units, steps, encodings, direction).  
+2. **Black** — for each fact: “if the body only has Acceptance **names**, what fails?” → missing witness = not done.  
+3. **Yellow** — smallest correct structure that covers every white fact (one export; methods OK).  
+4. **Blue** — order: implement yellow structure → re-check white witnesses → stop.  
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+Skip Red/Green inventiveness. No extra features. Edits only.
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+## Technique: Abstract → concrete
 
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
+1. Lift each demand statement to a **kind** (unit dual, timing, encoding, direction, named op, formula, Change step) — not to a product domain story.  
+2. For each kind, pick one **witness pattern** in code (param+convert, call-time path, bit ops, A→B formula, method, literal).  
+3. Implement witnesses first; fill details second.  
+4. If a statement cannot lift to a kind, ignore it as prose.  
 
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+Never invent kinds the demand did not state. Edits only.
+
+## Technique: Parallel constraints
+
+Do **not** implement the first Acceptance name and stop.
+
+1. In one mental pass, collect **all** constraints from Goal + Change + ALVO + FEEDBACK in parallel.  
+2. Draft the **single** public export shape that can host every constraint (class with methods or one function — as demand implies).  
+3. Write the full file so **every** constraint has a witness in the same edit — avoid multi-pass “I’ll add units later”.  
+4. Final scan: any constraint without a line that witnesses it → still not done.  
+
+One export. No parallel APIs. Edits only.
+
+## Technique: Pre-mortem (rails vs contract)
+
+Assume this fails review if:
+
+- Acceptance **tokens** appear but Change **constraints** do not; or  
+- Types compile while required **timing/encoding/units/direction** are absent.
+
+Write the body so that pre-mortem cannot fire. If only names would pass rails, keep editing until constraints are witnessed. Edits only.
+
+## Technique: Teach-back (silent)
+
+Before stopping, restate each Change/ALVO bullet as: “code must ___”.  
+If you cannot fill the blank from the demand text, drop that bullet.  
+If you can fill it, the body must already do that. Edits only — no written restatement in the reply.
