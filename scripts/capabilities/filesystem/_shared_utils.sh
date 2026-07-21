@@ -265,38 +265,3 @@ emit_success_payload_file() {
       error: null
     }'
 }
-
-# Wrap extractor output (a JSON document passed as a string) in the
-# standard envelope with payload {target, <key>: <document>}.
-emit_extraction_result() {
-  local payload_key="$1"
-  local target="$2"
-  local extraction_json="$3"
-
-  local tmp
-  tmp="$(aegis_mktemp)"
-  printf '%s' "${extraction_json}" > "${tmp}"
-
-  jq -n \
-    --arg capability "${AEGIS_CAPABILITY_NAME}" \
-    --arg classification "readonly" \
-    --arg execution_id "${AEGIS_EXECUTION_ID:-unknown}" \
-    --arg generated_at "$(aegis_now)" \
-    --arg target "${target}" \
-    --arg key "${payload_key}" \
-    --slurpfile extraction "${tmp}" \
-    '{
-      success: true,
-      capability: $capability,
-      classification: $classification,
-      execution_id: $execution_id,
-      generated_at: $generated_at,
-      payload: {
-        target: $target,
-        ($key): $extraction[0]
-      },
-      error: null
-    }'
-
-  rm -f "${tmp}" >/dev/null 2>&1 || true
-}

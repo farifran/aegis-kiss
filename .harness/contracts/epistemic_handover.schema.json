@@ -1,90 +1,74 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "EpistemicHandoverContract",
-  "description": "Schema definition of the transient epistemic handover tracking investigation attention and snapshot between modes.",
+  "description": "Runtime-owned epistemic handover: incomplete attention between modes. Not durable memory. Mirrors promote_epistemic_handover + audit_handover_state (post deep-topology cut).",
   "x-contract-metadata": {
-    "semantics": "Transporta o estado de atenção transiente, metas, prioridades de investigação e hipóteses de um modo de execução para o seguinte.",
-    "producer": "Substratos de Cognição (Discovery, Forensics, etc.) do Runtime.",
-    "consumers": ["Próximo modo de cognição e o próprio Runtime para validação."],
-    "immutability": "Mutável entre modos (cada modo atualiza o handover); imutável para persistência (não é promovido ao Git).",
-    "lifecycle": "Inicializado no começo da investigação; evolui a cada modo; destruído no encerramento do ciclo da tarefa."
+    "semantics": "Transient attention and mode snapshot from one execution mode to the next.",
+    "producer": "runtime_aegis.sh promote_epistemic_handover (from promoted mode artifact)",
+    "consumers": ["Next mode evidence/prompts", "runtime preconditions"],
+    "immutability": "Mutable between modes; never promoted to git as truth.",
+    "lifecycle": "Init empty at investigation start; updated per mode; discarded when investigation ends."
   },
   "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_snapshot", "epistemic_state"],
   "properties": {
     "artifact_snapshot": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string"
-        },
-        "investigation_input": {
-          "type": "string"
-        },
-        "generated_at": {
-          "type": "string"
-        },
-        "structural_context": {
+      "description": "null before first mode promotes; otherwise exactly four keys (no structural_context / topology).",
+      "oneOf": [
+        { "type": "null" },
+        {
           "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "investigation_input",
+            "generated_at",
+            "operational_context"
+          ],
           "properties": {
-            "topology_index": {
-              "type": "object"
+            "mode": {
+              "type": "string",
+              "minLength": 1
             },
-            "topology_summary": {
-              "type": "string"
+            "investigation_input": {
+              "type": "string",
+              "minLength": 1
             },
-            "ranked_targets": {
-              "type": "array"
+            "generated_at": {
+              "type": "string",
+              "minLength": 1
             },
-            "bridge_data": {
-              "type": "object"
-            },
-            "boundary_data": {
-              "type": "object"
-            },
-            "hotspot_data": {
-              "type": "object"
-            },
-            "entrypoints": {
-              "type": "array"
-            },
-            "evidence_summary": {
-              "type": "array"
-            },
-            "unresolved_references": {
-              "type": "array"
-            },
-            "observed_request_alignment": {
-              "type": "object"
-            },
-            "suggested_evidence_priorities": {
-              "type": "array"
-            },
-            "gap_counts": {
-              "type": "object"
+            "operational_context": {
+              "type": "object",
+              "description": "Mode payload fields (status, summary, candidates, feedback, demand_anchors, …). Open object; audit enforces optional key types when present."
             }
           }
-        },
-        "operational_context": {
-          "type": "object"
         }
-      },
-      "required": ["mode", "investigation_input", "generated_at", "structural_context", "operational_context"]
+      ]
     },
     "epistemic_state": {
       "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next_attention_targets",
+        "attention_scope",
+        "attention_reason"
+      ],
       "properties": {
         "next_attention_targets": {
-          "type": "array"
+          "type": "array",
+          "items": { "type": "string" }
         },
         "attention_scope": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "attention_reason": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
-      },
-      "required": ["next_attention_targets", "attention_scope", "attention_reason"]
+      }
     }
-  },
-  "required": ["artifact_snapshot", "epistemic_state"]
+  }
 }

@@ -16,10 +16,11 @@
 | File | Role |
 |---|---|
 | `AGENTS.md` | Cognition constitution (4 rules); injected as preamble on LLM/Aider paths |
-| `.harness/00_architecture_core.md` | Epistemic doctrine (modes as cognition layers) |
 | `README.md` | Operator setup, quick start, test entrypoints |
-| `entry.md` | Demand protocol notes + operator map (evolving) |
-| `.skills/field_ownership.md` | Model vs runtime field ownership |
+| `INTAKE.md` | Scout/IDE demand playbook (outside mutation runtime) |
+| `entry.md` | Demand protocol design notes (ADR; code wins on conflict) |
+
+Field ownership lives in mode skills (`.skills/*.md`) and runtime enrich — there is no separate ownership doc.
 
 ---
 
@@ -78,8 +79,6 @@ run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
 | `optimize.md` | **Yes** — raw LLM advise-only (JSON plan; no edits) |
 | `adversarial.md` | **Yes** — raw substrate (unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
-
-Field ownership: `.skills/field_ownership.md`.
 
 ---
 
@@ -189,14 +188,15 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── AGENTS.md                 # constitution → preamble
 ├── README.md                 # operator entry
 ├── summary.md                # this map
-├── entry.md                  # demand notes + map
+├── INTAKE.md                 # Scout demand playbook
+├── entry.md                  # demand protocol ADR
 ├── run_aegis.sh
 ├── runtime_aegis.sh
 ├── package.json              # aegis:test / aegis:test:fast
 ├── .skills/                  # mode contracts (repair injected into Aider)
 ├── .harness/
 │   ├── config.sh
-│   ├── 00_architecture_core.md
+│   ├── contracts/            # JSON contracts (handover, manifest, …)
 │   └── runtime/              # handover, metrics, payloads, surfaces
 └── scripts/
     ├── execute_mode.sh
