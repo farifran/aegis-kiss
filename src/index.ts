@@ -1,3 +1,3 @@
-import { TokenBucket } from './tokenBucket.js';
-
-export { TokenBucket };
+export function MustExistSymbolXYZ(): number {
+  return 1;
+}
