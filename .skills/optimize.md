@@ -32,9 +32,21 @@ If REPAIR RESULT is missing/empty → `no_improvement_needed`, `improvements: []
 2. **Only taste/style** (“cleaner”, “more idiomatic”, “prettier”) without a concrete edit? → `no_improvement_needed`  
 3. **Would need** new file, rename/remove public export, **new** public API name not implied by the demand, parallel helper, npm package, or scope outside `files_changed`? → `no_improvement_needed`  
 4. **Would strip** demand-aligned behavior or tokens Repair correctly added? → `no_improvement_needed`  
-5. **Demand fidelity hole** (see class 5 below) — Acceptance/export **names** present, but a **concrete constraint** stated in Goal/Change/ALVO is absent from the post-repair body → may `can_improve` with **one** surgical fix  
+5. **Demand fidelity hole** (see class 5 + teach-back below) — Acceptance/export **names** present, but a **concrete constraint** stated in Goal/Change/ALVO is absent from the post-repair body → may `can_improve` with **one** surgical fix  
 6. **Repair already fidelity-complete and minimal** (constraints witnessed; short clear API)? → `no_improvement_needed`  
 7. **Otherwise**, only if you can write **exactly one** item that passes every gate below → `can_improve`
+
+---
+
+## Teach-back check (silent — JSON only, no file edits)
+
+Do **not** re-implement the demand. Do **not** invent constraints.
+
+1. From investigation **Change / ALVO / Goal** only, form silent obligations: `code must ___`.  
+2. For each obligation, ask: is there a **witness** in POST-REPAIR FILE BODIES (or the REPAIR RESULT diff)?  
+3. If **exactly one** obligation lacks a witness and you can name a surgical fix inside `files_changed` → prefer class **5** (`can_improve`).  
+4. If all obligations have witnesses, or more than one hole, or unsure → `no_improvement_needed` (do not stack multi-hole plans).  
+5. Never teach-back style, architecture, or features the demand did not state.
 
 ---
 
@@ -140,7 +152,8 @@ Runtime clamps paths, drops invalid items, and forces `no_improvement_needed` if
 - [ ] JSON only; only the three top-level fields above  
 - [ ] If `can_improve`, every path copied from REPAIR RESULT `files_changed`  
 - [ ] Each `change` is implementable in one Repair pass without new files/exports  
-- [ ] Fidelity items cite a constraint **present in the investigation text**, not taste  
+- [ ] Fidelity / teach-back items cite a constraint **present in the investigation text**, not taste  
+- [ ] At most **one** missing-obligation hole (teach-back); otherwise no_improvement  
 - [ ] Prefer `no_improvement_needed` over a thin or speculative plan  
 
 Then stop.
