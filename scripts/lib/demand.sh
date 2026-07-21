@@ -1876,8 +1876,7 @@ aegis_mechanical_optimize_scan() {
     return 0
   fi
 
-  # 3) Demand fidelity witnesses (Change/ALVO cues → body must show them).
-  # Prefer corpus (final files), not only +lines — seed holes may pre-exist.
+  # 3) Public surface bloat when demand limits exports (frontier often ships fat-correct).
   local inv root corpus_full
   inv="${AEGIS_INVESTIGATION_INPUT:-}"
   root="."
@@ -1886,8 +1885,22 @@ aegis_mechanical_optimize_scan() {
   elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
     root="${AEGIS_EXECUTION_TARGET_PATH}"
   fi
+  corpus_full="$(aegis_candidate_files_corpus "${files_json}" "${diff_content}" "${root}")"
+  if [[ -n "${inv}" ]] && declare -f aegis_mechanical_surface_first_improve >/dev/null 2>&1; then
+    local _surf_imp
+    _surf_imp="$(
+      aegis_mechanical_surface_first_improve "${inv}" "${corpus_full}" "${files_json}" "${diff_content}"
+    )" || _surf_imp=""
+    if [[ -n "${_surf_imp}" ]] \
+      && printf '%s' "${_surf_imp}" | jq -e 'type == "object" and (.change|type=="string")' >/dev/null 2>&1; then
+      printf '%s\n' "${_surf_imp}"
+      return 0
+    fi
+  fi
+
+  # 4) Demand fidelity witnesses (Change/ALVO cues → body must show them).
+  # Prefer corpus (final files), not only +lines — seed holes may pre-exist.
   if [[ -n "${inv}" ]] && declare -f aegis_mechanical_fidelity_first_improve >/dev/null 2>&1; then
-    corpus_full="$(aegis_candidate_files_corpus "${files_json}" "${diff_content}" "${root}")"
     local _fid_imp
     _fid_imp="$(
       aegis_mechanical_fidelity_first_improve "${inv}" "${corpus_full}" "${files_json}"
@@ -2128,6 +2141,103 @@ aegis_files_json_pick() {
   printf '%s' "${fallback}"
 }
 
+# True when investigation explicitly limits public surface to one export.
+aegis_demand_limits_one_export() {
+  local investigation="${1-}"
+  [[ -n "${investigation}" ]] || return 1
+  printf '%s' "${investigation}" | grep -Eiq \
+    'exactly[[:space:]]+one[[:space:]]+(top-level[[:space:]]+)?export|one[[:space:]]+primary[[:space:]]+public[[:space:]]+export|one[[:space:]]+export:|Only[[:space:]].*one[[:space:]]+export|single[[:space:]]+public[[:space:]]+export|Do[[:space:]]+\*\*not\*\*[[:space:]]+export[[:space:]]+constants'
+}
+
+# Count top-level export declarations in a TS/JS corpus (export function/class/const/type/…).
+aegis_count_top_level_exports() {
+  local corpus="${1-}"
+  printf '%s\n' "${corpus}" \
+    | grep -E '^[[:space:]]*export[[:space:]]+(async[[:space:]]+)?(function|class|const|let|var|type|interface|enum|default)\b|^[[:space:]]*export[[:space:]]*\{' \
+    | grep -cvE 'export[[:space:]]+(type[[:space:]]+)?\{[^}]*\}[[:space:]]*from' \
+    || true
+}
+
+# First surface bloat improvement (multi-export when demand says one).
+# Prints JSON {target_files,change,why_safe,code} or empty.
+aegis_mechanical_surface_first_improve() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  local files_json="${3:-[]}"
+  local diff_content="${4-}"
+  [[ -n "${investigation}" ]] || return 0
+  aegis_demand_limits_one_export "${investigation}" || return 0
+
+  local n primary export_names extras
+  n="$(aegis_count_top_level_exports "${corpus}" | tr -d '[:space:]')"
+  [[ "${n}" =~ ^[0-9]+$ ]] || n=0
+  # Also count +export lines in diff if corpus under-counts empty files.
+  if [[ "${n}" -le 1 && -n "${diff_content}" ]] && declare -f count_diff_added_exports >/dev/null 2>&1; then
+    local dn
+    dn="$(count_diff_added_exports "${diff_content}" 2>/dev/null | tr -d '[:space:]')"
+    [[ "${dn}" =~ ^[0-9]+$ ]] || dn=0
+    if [[ "${dn}" -gt "${n}" ]]; then
+      n="${dn}"
+    fi
+  fi
+  [[ "${n}" -gt 1 ]] || return 0
+
+  primary="$(
+    printf '%s' "${files_json}" \
+      | jq -r 'map(select(type=="string" and length>0))[0] // "src/unknown.ts"' 2>/dev/null || printf 'src/unknown.ts'
+  )"
+  export_names="$(
+    printf '%s\n' "${corpus}" \
+      | grep -Eo 'export[[:space:]]+(async[[:space:]]+)?(function|class|const|let|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
+      | sed -E 's/.*[[:space:]]//' \
+      | awk 'NF && !seen[$0]++' \
+      | head -n 8 \
+      | tr '\n' ',' \
+      | sed 's/,$//'
+  )"
+  [[ -n "${export_names}" ]] || export_names="(multiple exports)"
+  extras="keep only the single demand-named public export; demote or delete the other top-level exports (${export_names})"
+  jq -nc \
+    --arg f "${primary}" \
+    --arg ch "In ${primary}, ${extras}." \
+    --arg w "Demand limits public surface to one export; extras are non-required surface." \
+    --argjson n "${n}" \
+    '{
+      target_files: [$f],
+      change: $ch,
+      why_safe: $w,
+      code: ("surface_over_export_" + ($n|tostring))
+    }'
+}
+
+# Surface findings as adversarial JSON array (max 1).
+aegis_mechanical_surface_findings_json() {
+  local investigation="${1-}"
+  local corpus="${2-}"
+  local files_json="${3:-[]}"
+  local diff_content="${4-}"
+  local imp
+  imp="$(
+    aegis_mechanical_surface_first_improve \
+      "${investigation}" "${corpus}" "${files_json}" "${diff_content}" 2>/dev/null || true
+  )"
+  if [[ -z "${imp}" ]] \
+    || ! printf '%s' "${imp}" | jq -e 'type=="object" and (.change|type=="string")' >/dev/null 2>&1; then
+    printf '[]'
+    return 0
+  fi
+  jq -nc --argjson imp "${imp}" '[{
+    type: "contract_violation",
+    severity: "high",
+    description: ("Demand limits public surface to one export; candidate has multiple: " + ($imp.change // "")),
+    supported_by_evidence: true,
+    evidence_refs: ["files_changed.body", "candidate.diff"],
+    target_files: $imp.target_files,
+    fix: $imp.change,
+    code: ($imp.code // "surface_over_export")
+  }]'
+}
+
 # Demand-cued fidelity witnesses (KISS greps). Only fire when the demand text
 # itself contains the cue — never invent obligations.
 # Prints lines: code<TAB>target_hint<TAB>description<TAB>fix_suffix
@@ -2352,6 +2462,23 @@ aegis_mechanical_adversarial_diff_scan() {
         }'
       )"
     )
+  fi
+
+  # Public surface bloat when demand limits exports (before fidelity greps).
+  if [[ -n "${investigation}" ]] \
+    && declare -f aegis_mechanical_surface_findings_json >/dev/null 2>&1; then
+    local surf_json
+    surf_json="$(
+      aegis_mechanical_surface_findings_json \
+        "${investigation}" "${corpus}" "${files_json}" "${diff_content}" 2>/dev/null || printf '[]'
+    )"
+    if printf '%s' "${surf_json}" | jq -e 'type=="array" and length>0' >/dev/null 2>&1; then
+      local surf_item
+      while IFS= read -r surf_item; do
+        [[ -n "${surf_item}" ]] || continue
+        findings+=("${surf_item}")
+      done < <(printf '%s' "${surf_json}" | jq -c '.[]' 2>/dev/null || true)
+    fi
   fi
 
   # Demand fidelity witnesses (Change cues → body). Prefer over acceptance-name-only.

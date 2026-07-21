@@ -1,0 +1,14 @@
+{
+  "id": "reverse_bug",
+  "description": "Wrong direction (divide instead of multiply) — mechanical surface quiet; LLM adversarial should challenge",
+  "mechanical": {
+    "surface_improve": false,
+    "export_count": 1,
+    "demand_limits_one_export": true,
+    "has_reverse_div_heuristic": true
+  },
+  "skill_expect": {
+    "optimize_status": "can_improve",
+    "adversarial_status": "challenged"
+  }
+}
