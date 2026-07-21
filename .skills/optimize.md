@@ -18,8 +18,8 @@ Emit **JSON only** inside the artifact markers. No markdown fences, no prose out
 ## What you read (later in this prompt)
 
 1. **REPAIR RESULT** — `files_changed` + unified **diff** (primary delta). Judge **this**, not the whole repo.  
-2. **POST-REPAIR FILE BODIES** — file contents **after** applying the Repair diff (when present). Use them to verify types, dead code, and **demand fidelity**.  
-3. Investigation input — the **closed contract**. Do **not** invent features beyond it. You **may** flag when Repair’s body is missing a constraint the investigation **already stated** (fidelity hole).  
+2. **POST-REPAIR FILE BODIES** — file contents **after** applying the Repair diff (when present). Use them to verify types and dead code.  
+3. Investigation input — the **closed contract**. Do **not** invent features beyond it.  
 4. Optional evidence — read-only; never invent paths from it.
 
 If REPAIR RESULT is missing/empty → `no_improvement_needed`, `improvements: []`.
@@ -32,21 +32,8 @@ If REPAIR RESULT is missing/empty → `no_improvement_needed`, `improvements: []
 2. **Only taste/style** (“cleaner”, “more idiomatic”, “prettier”) without a concrete edit? → `no_improvement_needed`  
 3. **Would need** new file, rename/remove public export, **new** public API name not implied by the demand, parallel helper, npm package, or scope outside `files_changed`? → `no_improvement_needed`  
 4. **Would strip** demand-aligned behavior or tokens Repair correctly added? → `no_improvement_needed`  
-5. **Demand fidelity hole** (see class 5 + teach-back below) — Acceptance/export **names** present, but a **concrete constraint** stated in Goal/Change/ALVO is absent from the post-repair body → may `can_improve` with **one** surgical fix  
-6. **Repair already fidelity-complete and minimal** (constraints witnessed; short clear API)? → `no_improvement_needed`  
-7. **Otherwise**, only if you can write **exactly one** item that passes every gate below → `can_improve`
-
----
-
-## Teach-back check (silent — JSON only, no file edits)
-
-Do **not** re-implement the demand. Do **not** invent constraints.
-
-1. From investigation **Change / ALVO / Goal** only, form silent obligations: `code must ___`.  
-2. For each obligation, ask: is there a **witness** in POST-REPAIR FILE BODIES (or the REPAIR RESULT diff)?  
-3. If **exactly one** obligation lacks a witness and you can name a surgical fix inside `files_changed` → prefer class **5** (`can_improve`).  
-4. If all obligations have witnesses, or more than one hole, or unsure → `no_improvement_needed` (do not stack multi-hole plans).  
-5. Never teach-back style, architecture, or features the demand did not state.
+5. **Repair already minimal** (short clear API, no greppable dead code / any in the delta)? → `no_improvement_needed`  
+6. **Otherwise**, only if you can write **exactly one** item that passes every gate below → `can_improve`
 
 ---
 
@@ -57,9 +44,9 @@ Do **not** re-implement the demand. Do **not** invent constraints.
 | Path | Every `target_files[]` is an **exact** path from REPAIR RESULT `files_changed` (copy the string; do not invent) |
 | One file preferred | Prefer a single path per item; never a path not in the diff |
 | `change` | **Imperative, surgical instruction** Repair can apply in one edit pass (see shape below) |
-| `why_safe` | One sentence: why this stays **in demand + in files_changed** (types/dead-code: behavior unchanged; fidelity: implements a constraint the demand already required) |
-| Behavior | Same public export **count/names** unless demand required a named op that was missing as a **method** on the existing export |
-| Scope | Local to Repair’s delta — dead code, types, local simplification, **or one missing stated demand constraint** |
+| `why_safe` | One sentence: why this stays **in demand + in files_changed** (types/dead-code: behavior unchanged) |
+| Behavior | Same public export **count/names** |
+| Scope | Local to Repair’s delta — dead code, types, local simplification only |
 
 ### Valid `change` shape (Repair will see this almost verbatim)
 
@@ -67,8 +54,6 @@ Write as a **command to an editor**, not a review comment:
 
 - Good: `In src/foo.ts, give the Repair export an explicit return type number; remove any.`  
 - Good: `In src/foo.ts, delete the unused helper bar introduced in the Repair diff (no remaining references).`  
-- Good: `In src/foo.ts, implement the demand’s stated unit conversion between the public param and the internal field (same single export; no new file).`  
-- Good: `In src/foo.ts, make encode/state helper match the bit layout described in the demand (same method name).`  
 - Bad: `Improve typing` / `Clean up` / `Consider refactoring` / `Make it better`  
 - Bad: `Add a second public API` / `Move to utils.ts` / invent a constraint the demand never stated
 
@@ -84,15 +69,12 @@ Write as a **command to an editor**, not a review comment:
 
 ## Allowed improvement classes (only these)
 
-Use **only** when clearly justified by REPAIR RESULT + investigation text:
+Use **only** when clearly justified by REPAIR RESULT:
 
 1. **Dead code** — unused locals/helpers **added by Repair**, with no remaining references.  
 2. **Types** — remove `any` / add explicit types / fix obvious type holes **without** changing values or control flow.  
 3. **Local duplication** — collapse copy-paste **in the same file** when equivalence is obvious.  
-4. **Equivalent simplification** — flatter control flow or fewer temps with **identical** results.  
-5. **Demand fidelity hole** — investigation **explicitly** requires a constraint (units, timing, state encoding, conversion direction, named step in Change) and the post-repair body has **no witness** for it, while Acceptance-style names may already appear. One surgical edit **inside** existing export(s)/files_changed only.
-
-**Fidelity hole is not:** “I would design it differently”, extra features, second public export, or constraints not written in the demand.
+4. **Equivalent simplification** — flatter control flow or fewer temps with **identical** results.
 
 Everything else → `no_improvement_needed`.
 
@@ -152,8 +134,6 @@ Runtime clamps paths, drops invalid items, and forces `no_improvement_needed` if
 - [ ] JSON only; only the three top-level fields above  
 - [ ] If `can_improve`, every path copied from REPAIR RESULT `files_changed`  
 - [ ] Each `change` is implementable in one Repair pass without new files/exports  
-- [ ] Fidelity / teach-back items cite a constraint **present in the investigation text**, not taste  
-- [ ] At most **one** missing-obligation hole (teach-back); otherwise no_improvement  
 - [ ] Prefer `no_improvement_needed` over a thin or speculative plan  
 
 Then stop.
