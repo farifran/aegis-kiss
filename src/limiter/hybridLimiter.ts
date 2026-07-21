@@ -1,6 +1,3 @@
-// All method names present. Holes: no SlidingWindow import; wrong converters;
-// tryConsume/softExceeded/encodeState/peekTokens/consume incomplete.
-
 import {
   BIT_EMPTY,
   BIT_PARTIAL,
@@ -64,7 +61,6 @@ export class HybridLimiter {
   }
 
   public tryConsume(_bits: number): boolean {
-    // Hole: always false (param unused intentionally; underscore satisfies eslint).
     return false;
   }
 

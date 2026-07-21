@@ -1,5 +1,3 @@
-// All methods named. Holes: no clamp, no eviction, clear is no-op.
-
 export class SlidingWindow {
   private readonly size: number;
   private events: bigint[] = [];

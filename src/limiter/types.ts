@@ -1,5 +1,3 @@
-// All export names present. Holes: wrong factor chains (magic only).
-
 export const BIT_EMPTY = 1 << 0;
 export const BIT_PARTIAL = 1 << 1;
 export const BIT_SATURATED = 1 << 2;
