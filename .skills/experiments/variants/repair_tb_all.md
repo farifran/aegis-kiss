@@ -64,20 +64,49 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Teach-back experiment: tb_all
 
 ## Teach-back (minimal)
 
 Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
 If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
 
+## Teach-back (Change steps only)
+
+Ignore Acceptance labels for the “done” test.
+
+1. Take only numbered/bulleted **Change** (and ALVO reason if present).  
+2. Rewrite each as silent obligation: `code must <verb> <object>`.  
+3. Implement until every obligation has a line witness in this file.  
+4. Acceptance names must still appear if the demand lists them — as part of those obligations, not instead of them.  
+
+No new files/exports. Edits only.
+
+## Teach-back (witness pairs)
+
+Build a silent list of pairs: `(demand phrase → code witness)`.
+
+- Demand phrase = short quote/paraphrase from Goal/Change/ALVO.  
+- Code witness = concrete construct you will put in the body (method, conversion, bit op, call-time path, formula).  
+
+Do not stop while any pair lacks a witness.  
+Do not invent pairs the demand never stated. Edits only.
+
+## Teach-back (two-pass edit)
+
+**Pass A — shape:** one public export + method/API names required by demand.  
+**Pass B — teach-back:** re-read Change/ALVO; for each bullet, ensure a witness exists; add only missing witnesses.  
+
+Still one reply of edits (whole file preferred). Passes are mental, not two messages. Edits only.
+
 ## Whole-file reply (required shape)
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
+Your reply must be a **whole-file** edit of the target, not empty fences.
 
-Valid pattern (structure only — replace path/body with the real target and implementation):
+Valid pattern (structure only — replace body with the real implementation):
 
 ```
-<path/to/target.ts>
+src/tokenBucket.ts
 <<<<<<< SEARCH
 =======
 // full file content here

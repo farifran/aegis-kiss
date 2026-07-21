@@ -64,25 +64,14 @@ Skip marketing prose. Only **actionable** statements count.
 - Do not rename existing exports unless the demand says so.
 
 ---
+# Teach-back experiment: tb_witness_table
 
-## Teach-back (minimal)
+## Teach-back (witness pairs)
 
-Before stop: for each Change/ALVO bullet, fill “code must ___” from the demand text only.  
-If blank unfillable → ignore bullet. If fillable → body already does it. Edits only.
+Build a silent list of pairs: `(demand phrase → code witness)`.
 
-## Whole-file reply (required shape)
+- Demand phrase = short quote/paraphrase from Goal/Change/ALVO.  
+- Code witness = concrete construct you will put in the body (method, conversion, bit op, call-time path, formula).  
 
-Your reply must be a **whole-file** (or search/replace) edit of the **loaded target**, not empty fences.
-
-Valid pattern (structure only — replace path/body with the real target and implementation):
-
-```
-<path/to/target.ts>
-<<<<<<< SEARCH
-=======
-// full file content here
->>>>>>> REPLACE
-```
-
-Or the aider whole-format for the loaded file.  
-**Never** output an empty `diff` / empty SEARCH/REPLACE. If you cannot edit, output nothing (do not claim success).
+Do not stop while any pair lacks a witness.  
+Do not invent pairs the demand never stated. Edits only.
