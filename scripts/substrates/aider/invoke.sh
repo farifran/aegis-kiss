@@ -262,7 +262,10 @@ invoke_aider() {
   shift 2
   local file_args=("$@")
 
-  local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
+  local mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.harness/.aider.mutation.conf.yml"
+  if [[ ! -f "${mutation_conf}" ]]; then
+    mutation_conf="${AEGIS_AIDER_SUBSTRATE_ROOT}/.aider.mutation.conf.yml"
+  fi
 
   assert_aider_not_stalling_config "${resolved_edit_format}"
 
