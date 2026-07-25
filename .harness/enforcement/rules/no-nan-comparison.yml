@@ -1,0 +1,21 @@
+# =========================================================
+# AEGIS — Essential AST Rule (TypeScript & JavaScript)
+# Comparing directly with NaN using === or == always evaluates to false.
+# Use Number.isNaN(x) instead.
+# =========================================================
+
+id: no-nan-comparison
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Direct comparison with NaN using === or == always returns false. Use Number.isNaN(val) instead.
+
+rule:
+  any:
+    - pattern: $EXPR === NaN
+    - pattern: NaN === $EXPR
+    - pattern: $EXPR == NaN
+    - pattern: NaN == $EXPR

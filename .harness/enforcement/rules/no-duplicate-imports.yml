@@ -1,0 +1,20 @@
+# =========================================================
+# AEGIS — Essential AST Rule (TypeScript & JavaScript)
+# Duplicate import statements from the same module.
+# =========================================================
+
+id: no-duplicate-imports
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Duplicate import from the same module. Combine import specifiers into a single import statement.
+
+rule:
+  pattern: import $$$SPECS1 from '$MODULE'
+  inside:
+    stopBy: end
+    field: body
+    kind: program

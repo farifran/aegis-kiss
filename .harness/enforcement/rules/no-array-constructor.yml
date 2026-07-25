@@ -1,0 +1,19 @@
+# =========================================================
+# AEGIS — Essential AST Rule (TypeScript & JavaScript)
+# Using new Array(...) with variable arguments creates unpredictable sparse arrays.
+# Use array literals [...] or Array.from(...) instead.
+# =========================================================
+
+id: no-array-constructor
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Unpredictable Array constructor. Use array literal syntax [...] or Array.from().
+
+rule:
+  any:
+    - pattern: new Array($$$ARGS)
+    - pattern: Array($$$ARGS)

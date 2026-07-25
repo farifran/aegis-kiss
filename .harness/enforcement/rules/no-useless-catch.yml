@@ -1,0 +1,21 @@
+# =========================================================
+# AEGIS — Essential AST Rule (TypeScript & JavaScript)
+# Catch block that only re-throws the caught error without handling.
+# =========================================================
+
+id: no-useless-catch
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Useless catch clause that only re-throws the error. Remove the redundant try/catch block.
+
+rule:
+  pattern: |
+    try {
+      $$$TRY
+    } catch ($ERR) {
+      throw $ERR;
+    }
