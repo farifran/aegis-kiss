@@ -152,6 +152,12 @@ bash scripts/substrates/test/test_readonly_modes.sh
 
 ---
 
+## Acknowledgments & Credits
+
+Aegis Harness incorporates architectural principles, epistemic handover design, capability manifest patterns, and context budget discipline inspired by **Headroom** ([headroom](https://github.com/headroom)). We gratefully acknowledge Headroom's pioneering work in epistemology-first, bounded runtime engineering for AI agents.
+
+---
+
 ## License
 
 See `LICENSE.md`.
