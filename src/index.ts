@@ -9,3 +9,8 @@ export function gigabytesToMegabytes(gigabytes: number): number {
 export function terabitsToBytes(terabits: number): bigint {
   return BigInt(terabits) * 125000000000n;
 }
+
+// adicione converter terabytess em bytes
+export function terabytesToBytes(terabytes: number): bigint {
+  return BigInt(terabytes) * 1000000000000n;
+}
