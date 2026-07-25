@@ -2,30 +2,20 @@
 # AEGIS HARNESS — MUTATION SUBSTRATE PROFILE
 # =========================================================
 #
-# Version: 1.0
+# Version: 1.1 (Optimized)
 # Layer: Mutation Substrate
 # Status: Operational
 #
 # This configuration is intended for:
-#
 # - automated mutation substrate execution
 # - runtime-governed bounded mutation
 # - non-interactive aider invocation inside git worktrees
 #
 # The runtime owns:
-#
 # - worktree lifecycle
 # - capability exposure
 # - mutation target selection
 # - artifact promotion
-#
-# This profile intentionally:
-#
-# - disables all interactive features
-# - disables git ownership (runtime owns the worktree)
-# - disables shell command suggestions
-# - disables notifications
-# - uses whole-file edit format for deterministic output
 #
 # =========================================================
 
@@ -34,13 +24,9 @@
 # ---------------------------------------------------------
 
 yes-always: true
-
 stream: false
-
 pretty: false
-
 multiline: false
-
 fancy-input: false
 
 # ---------------------------------------------------------
@@ -49,57 +35,51 @@ fancy-input: false
 
 # The runtime owns the worktree lifecycle.
 # Aider must not commit, push, or manage git state.
-
 no-auto-commits: true
-
 dirty-commits: false
+attribute-author: false
+attribute-committer: false
 
 # ---------------------------------------------------------
 # OUTPUT CONTROL
 # ---------------------------------------------------------
 
 show-model-warnings: false
-
 suggest-shell-commands: false
-
 detect-urls: false
-
 notifications: false
+show-diffs: false
+
+# ---------------------------------------------------------
+# LINTER & TEST DELEGATION (Aegis owns preflight gates)
+# ---------------------------------------------------------
+
+auto-lint: false
+auto-test: false
 
 # ---------------------------------------------------------
 # EDITING
 # ---------------------------------------------------------
 
-# edit-format is intentionally NOT set here: the substrate resolves it
-# dynamically per invocation (resolve_aider_edit_format in
-# scripts/substrates/aider_substrate.sh) and the CLI flag is
-# authoritative — a static value would be dead and misleading.
-
 encoding: utf-8
-
 line-endings: lf
 
 # ---------------------------------------------------------
-# CACHE
+# CACHE & PERFORMANCE
 # ---------------------------------------------------------
 
-cache-prompts: false
+# Enable API prompt caching for preambles (AGENTS.md) and skills (.skills/repair.md)
+cache-prompts: true
 
 # ---------------------------------------------------------
 # NON-INTERACTIVE EXIT GUARANTEE
 # ---------------------------------------------------------
 
 # Exit after processing --message-file without entering interactive REPL.
-# Critical: without this, Aider hangs indefinitely on API errors or when
-# stdin is not a terminal.
-
 exit: true
-
-show-model-warnings: false
 
 # ---------------------------------------------------------
 # UPDATE CHECK
 # ---------------------------------------------------------
 
 check-update: false
-
