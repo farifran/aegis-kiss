@@ -13,3 +13,7 @@ export function megabytesToBytes(megabytes: number): number {
 export function bytesToKilobytes(bytes: number): number {
   return bytes / 1024;
 }
+
+export function kilobytesToMegabytes(kilobytes: number): number {
+  return kilobytes / 1024;
+}
