@@ -89,15 +89,13 @@ obfuscate_evidence_paths() {
 # Emit file-jail block for the loaded mutation targets.
 mutation_prompt_file_jail() {
   local -a prompt_targets=("$@")
-  local target_list="(none — mutate only what the investigation input names among the files already in the chat)"
+  local target_list="(none)"
   if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
     target_list="$(printf -- '- %s\n' "${prompt_targets[@]}")"
   fi
-  # Path list is the corrective power; skill owns edit policy.
   cat <<EOF
-FILE JAIL — edit ONLY these loaded files:
+JAIL: Edit ONLY loaded target files:
 ${target_list}
-Do not add files to the chat. Paths in evidence are read-only. If a needed path is not listed, change only within the list above.
 EOF
 }
 
@@ -105,40 +103,10 @@ EOF
 mutation_prompt_anti_truncation() {
   local resolved_edit_format="$1"
   shift
-  local -a prompt_targets=("$@")
-
   [[ "${resolved_edit_format}" == "whole" ]] || return 0
 
-  local shape_blocks=""
-  local shape_target
-  if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
-    shape_blocks="<target file>
-\`\`\`
-<the ENTIRE new content>
-\`\`\`"
-  else
-    for shape_target in "${prompt_targets[@]}"; do
-      shape_blocks+="${shape_target}
-\`\`\`
-<the ENTIRE new content of ${shape_target}, from the very first line to the very last line>
-\`\`\`
-
-"
-    done
-  fi
-  # Format-only: policy (TS, one-export, demand) lives in the skill contract.
   cat <<EOF
-CRITICAL — WHOLE-FILE EDIT FORMAT RULE:
-Your reply MUST emit one filename + fenced block per target file (in any order):
-
-${shape_blocks}
-Rules:
-- Use each filename EXACTLY as written above.
-- Write the complete file content — never placeholders like '// ...' or '... rest of file'.
-- Do NOT copy code from this prompt's instructions or evidence.
-- Empty/stub loaded targets: write the full implementation the demand needs.
-
-If you use placeholders or omit code, the parser will fail and your changes will be discarded.
+FORMAT: Output whole-file code for loaded targets. Never use placeholders ('// ...').
 EOF
 }
 
@@ -255,13 +223,10 @@ assemble_mutation_prompt() {
   shift 2
   local prompt_targets=("$@")
 
-  # Floor-model noise control: with explicit targets already loaded into
-  # the chat, keep only the epistemic handover. Full evidence only in
-  # the no-targets fallback.
-  local capability_evidence
-  if [[ "${#prompt_targets[@]}" -gt 0 ]]; then
-    capability_evidence="$(inject_capability_evidence "epistemic_handover")"
-  else
+  # Capability evidence payloads: formatted sections (demand_anchors, forensics_handoff,
+  # repair_feedback) already carry handover facts. Raw JSON dump is only needed as no-targets fallback.
+  local capability_evidence=""
+  if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
     capability_evidence="$(inject_capability_evidence)"
   fi
 
@@ -332,12 +297,7 @@ assemble_mutation_prompt() {
   cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
-}You are executing inside Aegis Harness in bounded mutation mode.
-
-Mode: ${AEGIS_MODE}
-Execution ID: ${AEGIS_EXECUTION_ID}
-
-(note: repository file paths in this prompt are rendered with the "$(printf '\342\210\225')" division-slash separator — read them as normal repository paths; they are read-only context)
+}[Aegis mode:${AEGIS_MODE}]
 
 ${skill_contract}
 

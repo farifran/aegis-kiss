@@ -37,58 +37,24 @@ assemble_system_prompt() {
   local mode_specific_instructions
   mode_specific_instructions="$(raw_mode_minimal_artifact_instructions)"
 
-  # Byte 0 of the stream is the constitutional preamble — static and
-  # clean so any serving-side prefix cache (including the hosted
-  # provider's automatic layer) reuses the stable prompt head.
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
-}You are executing inside Aegis Harness.
-
-Mode:
-${AEGIS_MODE}
-
-Execution model:
-- protocol oriented
-- bounded cognition
-- capability exposure
-- runtime governed
-- evidence bounded
-- selective capability payload exposure only
-
-The runtime provides one operator-defined investigation input.
-
-You must treat that investigation input as the current investigation demand without distinguishing whether it originated from an issue or an informal prompt.
+}[Aegis mode:${AEGIS_MODE}]
 
 ${mode_specific_instructions}
 
 Skill contract:
-
 $(cat "${SKILL_FILE}")
 
-You must:
-- consume only runtime-selected evidence
-- avoid assumptions
-- avoid hidden repository inheritance
-- avoid architecture redesign
-- emit only JSON
-- remain bounded
+You must: consume runtime-selected evidence, avoid assumptions, emit valid JSON between markers only.
 
-You must emit the output in this exact format:
-
+Format:
 ${AEGIS_ARTIFACT_BEGIN_MARKER}
-{ ... only the mode skill's minimal fields — runtime injects mode/candidate/attention ... }
+{ ... mode fields ... }
 ${AEGIS_ARTIFACT_END_MARKER}
 
-The payload MUST:
-- be a valid JSON object ONLY.
-- contain no HTML tags, no XML tags, no markdown block wrappers (do NOT wrap the JSON in triple-backtick code blocks, do NOT use "json" or "<json>" tag wrappers).
-- contain no prose, no conversational explanations, no markdown notes.
-- have the opening brace '{' of the JSON object immediately on the line after ${AEGIS_ARTIFACT_BEGIN_MARKER}.
-- have the closing brace '}' of the JSON object immediately on the line before ${AEGIS_ARTIFACT_END_MARKER}.
-- NOT re-emit runtime-owned fields (mode, candidate_result, handover_attention, evidence_refs) unless the skill explicitly requires them.
-
-Investigation input and execution identity are under the matching headers in the user message (see skill for how to use them).
+Rules: Valid JSON object only between markers. No prose, no markdown code block wrappers.
 EOF
 }
 
