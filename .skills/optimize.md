@@ -2,6 +2,11 @@
 
 Emit **JSON only** between markers. No prose outside JSON. Do **not** edit files.
 
+## Project Architectural Boundaries
+- **Stack**: Pure Vanilla TypeScript (NodeNext ESM). Zero external dependencies.
+- **Math/Encoding**: Use bitwise / BigInt math for low-level bit operations.
+- **Exports**: Single explicit export per utility module.
+
 ## Mission
 Act as a Senior Principal Architect. Ignore basic styling, formatting, or linting (handled mechanically). Focus **exclusively** on deep code quality and performance:
 
