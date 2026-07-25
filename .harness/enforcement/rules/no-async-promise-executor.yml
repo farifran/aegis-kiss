@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript & JavaScript)
+# Async functions inside Promise constructor cause unhandled rejections.
+# =========================================================
+
+id: no-async-promise-executor
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Async Promise executor functions leak unhandled rejections. Remove async from Promise constructor.
+
+rule:
+  pattern: new Promise(async ($RESOLVE, $REJECT) => $$$BODY)
