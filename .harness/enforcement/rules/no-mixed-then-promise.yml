@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript & JavaScript)
+# Mixing legacy .then() callbacks with async/await.
+# =========================================================
+
+id: no-mixed-then-promise
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Do not mix legacy .then() callbacks with async/await. Use pure await statements for clean control flow.
+
+rule:
+  pattern: $EXPR.then(($RES) => $$$BODY)

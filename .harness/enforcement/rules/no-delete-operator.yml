@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript & JavaScript)
+# The delete operator de-optimizes V8 hidden classes.
+# =========================================================
+
+id: no-delete-operator
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Do not use the delete operator as it de-optimizes V8 hidden classes. Use object destructuring or undefined assignment instead.
+
+rule:
+  pattern: delete $EXPR.$PROP
