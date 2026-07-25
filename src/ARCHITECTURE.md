@@ -7,5 +7,5 @@ Diretrizes exclusivas do projeto alvo (escopo de código e tecnologias).
 * **Ecossistema**: **Zero dependências externas** (apenas runtime nativo).
 
 ## ⚙️ 2. Padrões de Domínio
-* **Cálculos de Dados**: Utilizar `BigInt` ou operadores bitwise para manipulação de bits/bytes.
+* **Cálculos de Dados**: Utilizar `BigInt` ou operadores bitwise para manipulação de bits/bytes. Sempre multiplicar antes de dividir `(tempo * taxa) / escala` para evitar truncamento por zero em divisão inteira.
 * **Encapsulamento**: Exportação única por arquivo de módulo utilitário.
