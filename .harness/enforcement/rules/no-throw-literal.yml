@@ -1,0 +1,19 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript & JavaScript)
+# Throwing string or number literals erases error stack traces.
+# =========================================================
+
+id: no-throw-literal
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Do not throw literal strings or numbers. Always throw an Error instance (throw new Error(...)) to preserve stack traces.
+
+rule:
+  any:
+    - pattern: throw "$STRING"
+    - pattern: "throw '$STRING'"
+    - pattern: throw $NUM
