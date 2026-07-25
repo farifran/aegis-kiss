@@ -1,0 +1,17 @@
+# =========================================================
+# AEGIS — Senior Engineering Rule (TypeScript & JavaScript)
+# Array.prototype.forEach ignores async/await callbacks.
+# Use `for (const item of items)` or `Promise.all(items.map(...))` instead.
+# =========================================================
+
+id: no-async-foreach
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Array.prototype.forEach does not await async callbacks. Use `for...of` or `Promise.all(array.map(...))` to ensure proper async execution.
+
+rule:
+  pattern: $ARR.forEach(async ($ITEM) => $$$BODY)

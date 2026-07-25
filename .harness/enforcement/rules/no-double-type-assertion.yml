@@ -1,0 +1,19 @@
+# =========================================================
+# AEGIS — Senior Engineering Rule (TypeScript)
+# Double type casting (expr as unknown as Type) bypasses type safety.
+# Use explicit type guards or type assertion functions instead.
+# =========================================================
+
+id: no-double-type-assertion
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Double type assertion (as unknown as Type / as any as Type) bypasses TypeScript safety. Use explicit type guards.
+
+rule:
+  any:
+    - pattern: $EXPR as unknown as $TYPE
+    - pattern: $EXPR as any as $TYPE

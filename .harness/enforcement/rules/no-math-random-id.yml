@@ -1,0 +1,17 @@
+# =========================================================
+# AEGIS — Senior Engineering Rule (TypeScript & JavaScript)
+# Math.random() is non-cryptographically secure.
+# Use crypto.randomUUID() or crypto.getRandomValues() instead.
+# =========================================================
+
+id: no-math-random-id
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Math.random() is non-cryptographic and predictable. Use crypto.randomUUID() for secure identifier generation.
+
+rule:
+  pattern: Math.random()
