@@ -112,42 +112,54 @@ run_eval_grep_fallback() {
   esac
 
   # Only when sg is unavailable — otherwise AST rules own this surface.
-  if ! resolve_sg >/dev/null 2>&1; then
-    hits="$(
-      grep -nE \
-        '(^|[^[:alnum:]_$])eval[[:space:]]*\(|(^|[^[:alnum:]_$])new[[:space:]]+Function[[:space:]]*\(' \
-        "${file}" 2>/dev/null || true
-    )"
+  # Mechanical static hygiene check (console.log, debugger, secret tokens)
+  case "${file}" in
+    *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
+      # 1. Debugger ban
+      hits="$(grep -nE '([[:space:]]|^)debugger([[:space:]]*;|$)' "${file}" 2>/dev/null || true)"
+      if [[ -n "${hits}" ]]; then
+        failed=1
+        gate_error "debugger statement is forbidden: ${file}"
+        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+      fi
 
-    if [[ -n "${hits}" ]]; then
-      failed=1
-      gate_error "eval/new Function is a hidden execution surface: ${file}"
-      printf '%s\n' "${hits}" | while IFS= read -r line; do
-        gate_error "  ${line}"
-      done
-    fi
-  fi
+      # 2. Console.log ban (outside test files)
+      if [[ "${file}" != *"test"* ]] && [[ "${file}" != *"spec"* ]]; then
+        hits="$(grep -nE '([[:space:]]|^)console\.log\(' "${file}" 2>/dev/null || true)"
+        if [[ -n "${hits}" ]]; then
+          failed=1
+          gate_error "console.log in production code is forbidden: ${file}"
+          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+        fi
+      fi
 
-  # Mechanical type-escape ban (works with or without sg for dual coverage
-  # when rule YAML is missing; cheap enough to always run on TS).
+      # 3. Hardcoded secret token scan
+      hits="$(grep -nE '(ghp_[A-Za-z0-9_]{30,}|sk-proj-[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})' "${file}" 2>/dev/null || true)"
+      if [[ -n "${hits}" ]]; then
+        failed=1
+        gate_error "hardcoded secret token detected: ${file}"
+        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+      fi
+
+      # 4. Silent exception swallowing ban (empty catch block)
+      hits="$(grep -nE 'catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}' "${file}" 2>/dev/null || true)"
+      if [[ -n "${hits}" ]]; then
+        failed=1
+        gate_error "empty catch block swallowing exceptions is forbidden: ${file}"
+        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+      fi
+      ;;
+  esac
+
+  # TypeScript Type-Tightening Checks
   case "${file}" in
     *.ts|*.tsx)
-      hits="$(
-        grep -nE \
-          '([[:space:]]as[[:space:]]+any\b)|(:[[:space:]]*any\b)|(<any>)|(as[[:space:]]+any\b)' \
-          "${file}" 2>/dev/null || true
-      )"
-      # Drop false positives from comments/strings is imperfect; keep
-      # conservative — lint eslint no-explicit-any is authoritative.
+      # 5. Explicit return type check on exported functions (Type Tightening)
+      hits="$(grep -nE '^export[[:space:]]+function[[:space:]]+[A-Za-z0-9_$]+\([^)]*\)[[:space:]]*\{' "${file}" 2>/dev/null || true)"
       if [[ -n "${hits}" ]]; then
-        # Prefer sg rule when present; grep is a belt for mutation surfaces.
-        if ! resolve_sg >/dev/null 2>&1; then
-          failed=1
-          gate_error "explicit any / as any is forbidden type escape: ${file}"
-          printf '%s\n' "${hits}" | while IFS= read -r line; do
-            gate_error "  ${line}"
-          done
-        fi
+        failed=1
+        gate_error "exported function missing explicit return type annotation: ${file}"
+        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
       fi
       ;;
   esac

@@ -5,3 +5,7 @@ export function MustExistSymbolXYZ(): number {
 export function gigabytesToTerabytes(gigabytes: number): number {
   return gigabytes / 1024;
 }
+
+export function megabytesToBytes(megabytes: number): number {
+  return megabytes * 1024 * 1024;
+}
