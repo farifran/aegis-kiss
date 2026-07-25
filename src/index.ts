@@ -25,3 +25,7 @@ export function megabytesToKilobytes(megabytes: number): number {
 export function megabytesToTerabytes(megabytes: number): number {
   return megabytes / 1024 / 1024;
 }
+
+export function kilobitsToGigabits(kilobits: number): number {
+  return kilobits / 1024 / 1024;
+}
