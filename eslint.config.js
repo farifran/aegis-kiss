@@ -138,7 +138,7 @@ export default [
       // ---------------------------------------------------
 
       "no-console": [
-        "warn",
+        "error",
         {
           allow: ["warn", "error"]
         }
