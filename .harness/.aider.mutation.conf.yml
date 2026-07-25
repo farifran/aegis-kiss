@@ -68,8 +68,8 @@ line-endings: lf
 # CACHE & PERFORMANCE
 # ---------------------------------------------------------
 
-# Enable API prompt caching for preambles (AGENTS.md) and skills (.skills/repair.md)
-cache-prompts: true
+# Disable prompt caching headers that add latency on third-party API providers
+cache-prompts: false
 
 # ---------------------------------------------------------
 # NON-INTERACTIVE EXIT GUARANTEE
