@@ -519,7 +519,7 @@ run_mutation_preflight_with_fix_attempts() {
   shift
   local mutation_targets=("$@")
 
-  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=2}"
+  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=3}"
   : "${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS:=3}"
   local tools_fix_count=0
   local intent_fix_count=0
