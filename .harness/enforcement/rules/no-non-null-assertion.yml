@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript)
+# Non-null assertion operator (!.) erases null check safety.
+# =========================================================
+
+id: no-non-null-assertion
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Non-null assertion (!) erases type safety. Perform explicit null check instead.
+
+rule:
+  pattern: $EXPR!.$PROP

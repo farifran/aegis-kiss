@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (TypeScript)
+# Debugger statements left by LLMs.
+# =========================================================
+
+id: no-debugger-typescript
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Debugger statements hide inside code and pause runtime execution.
+
+rule:
+  pattern: debugger
