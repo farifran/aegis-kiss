@@ -21,3 +21,7 @@ export function converterBytesEmBits(bytes: number): number {
 export function converterBytesEmKilobits(bytes: number): number {
   return bytes * 8 / 1000;
 }
+
+export function converterTerabitsEmPentabits(terabits: number): number {
+  return terabits / 1000;
+}
