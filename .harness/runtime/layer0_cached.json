@@ -1,0 +1,19 @@
+{
+  "target": "src",
+  "entrypoints": [
+    {
+      "file": "src/index.ts",
+      "source": "census_floor"
+    }
+  ],
+  "gaps": [],
+  "import_gravity": [],
+  "hot_files": [
+    {
+      "file": "src/index.ts",
+      "score": 21,
+      "churn": 11,
+      "resonance": 1
+    }
+  ]
+}
