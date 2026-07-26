@@ -11,9 +11,9 @@
   "hot_files": [
     {
       "file": "src/index.ts",
-      "score": 12,
+      "score": 22,
       "churn": 12,
-      "resonance": 0
+      "resonance": 1
     }
   ]
 }
