@@ -5,3 +5,7 @@ export function converter(megabytes: number): number {
 export function converterKilobitsEmBits(kilobits: number): number {
   return kilobits * 1000;
 }
+
+export function converterKilobitsEmGigabits(kilobits: number): number {
+  return kilobits / 1000000;
+}
