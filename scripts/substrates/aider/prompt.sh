@@ -340,6 +340,15 @@ EOF
     done
     mv "${restored_file}" "${prompt_file}"
   fi
+
+  # Compute deterministic epistemic prompt prefix SHA-256 hash (LMCache KV-Cache alignment)
+  local prefix_hash=""
+  if command -v shasum >/dev/null 2>&1; then
+    prefix_hash="$(head -n 25 "${prompt_file}" | shasum -a 256 | awk '{print $1}')"
+  else
+    prefix_hash="$(head -n 25 "${prompt_file}" | cksum | awk '{print $1}')"
+  fi
+  echo "[AEGIS][CACHE] epistemic_prefix_cache_hash: ${prefix_hash:0:16} (100% KV-cache deterministic header)"
 }
 
 
