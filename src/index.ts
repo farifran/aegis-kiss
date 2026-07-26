@@ -13,3 +13,7 @@ export function converterKilobitsEmGigabits(kilobits: number): number {
 export function converterKilobytesEmGigabits(kilobytes: number): number {
   return kilobytes * 0.000008;
 }
+
+export function converterBytesEmBits(bytes: number): number {
+  return bytes * 8;
+}
