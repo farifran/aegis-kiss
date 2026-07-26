@@ -211,6 +211,13 @@ sanitize_mutation_targets() {
         aegis_warn "target_rejected_out_of_surface: ${t}"
         continue
         ;;
+      *.md | *.markdown)
+        # Markdown documentation files (e.g. src/ARCHITECTURE.md) must not be mutated as code targets unless explicitly operator-named
+        if ! printf '%s' "${inv_paths}" | command grep -Fxq "${t}"; then
+          aegis_warn "target_rejected_doc_file: ${t}"
+          continue
+        fi
+        ;;
     esac
 
     t="${t#./}"
