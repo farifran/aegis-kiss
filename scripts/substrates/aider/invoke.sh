@@ -97,9 +97,9 @@ revert_unauthorized_surface_paths() {
 # loops under edit-format=diff. "whole" makes the model re-emit complete
 # file content — reliable, and cheap while the target surface is small.
 # "diff" is used only when re-emitting the targets would exceed the
-# whole-format byte budget. Operator-overridable via
-# AEGIS_AIDER_EDIT_FORMAT / AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES.
-: "${AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES:=49152}"
+# Adaptive edit format threshold: files <= 1024 bytes (~30 lines) use 'whole' (100% prompt cache hit);
+# larger files > 1024 bytes automatically switch to 'udiff' (fast token delta).
+: "${AEGIS_AIDER_WHOLE_FORMAT_MAX_BYTES:=1024}"
 
 resolve_aider_edit_format() {
 
