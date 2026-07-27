@@ -18,6 +18,8 @@
 .harness/runtime/capability_env/
 .harness/runtime/capability_payloads/
 .harness/runtime/loop/
+.harness/runtime/issue_cache/
+.harness/runtime/commit.msg
 
 .harness/runtime/*.tmp
 .harness/runtime/*.bak

@@ -11,9 +11,15 @@
   "hot_files": [
     {
       "file": "src/index.ts",
-      "score": 24,
-      "churn": 14,
-      "resonance": 1
+      "score": 22,
+      "churn": 22,
+      "resonance": 0
+    },
+    {
+      "file": "src/ARCHITECTURE.md",
+      "score": 3,
+      "churn": 3,
+      "resonance": 0
     }
   ]
 }

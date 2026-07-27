@@ -345,7 +345,11 @@ layer0_hot_files() {
   fi
 
   # Churn × path resonance × content resonance.
-  git log --name-only --pretty=format: -n 25 -- . 2>/dev/null \
+  # Pathspec-scoped: 25 commits that touched the target, not 25 commits of
+  # the repository. Without this the window is spent on commits that change
+  # nothing under the evidence target (harness metadata, tooling), and the
+  # churn prior thins out to noise.
+  git log --name-only --pretty=format: -n 25 -- "${TARGET_PATH:-.}" 2>/dev/null \
     | awk 'NF' \
     | grep -Fxf "${CENSUS_FILE:-/dev/null}" \
     | sort | uniq -c | sort -rn \
