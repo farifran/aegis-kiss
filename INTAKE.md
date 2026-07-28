@@ -3,9 +3,16 @@
 **Audiência:** Cursor, Claude Code, humano — **fora** do mutation runtime.  
 **Objetivo:** um sítio operacional com formato da demand, task list, commits, labels e como *usar* este ficheiro na prática.
 
+> **Caminho automatizado:** `./aegis go` faz mecanicamente a cadeia deste
+> ficheiro — draft no schema §2, fit check, issue, run, gate de commit no
+> formato §5 — para o caso micro (uma issue = uma task = um target). Ver
+> [`AEGIS.md`](AEGIS.md). Este playbook continua a valer para issues
+> multi-task escritas à mão e para o que o `go` não cobre.
+
 | Artefacto | Papel |
 |-----------|--------|
 | **Este ficheiro (`INTAKE.md`)** | Contrato do Scout: issue + progresso + commits + handoff |
+| `AEGIS.md` | Regra curta do assistente de código: `./aegis context` e `./aegis go` |
 | `AGENTS.md` | Constituição do LLM *dentro* do Aegis (não misturar) |
 | `entry.md` | Design longo; se divergir do **código**, o código manda |
 | `README.md` | Setup operador / pipelines / flags |

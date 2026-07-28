@@ -1,1 +1,29 @@
-ab3dec6a24606936dad9309c20033910d4bf025e:src:constitutional investigation
+313532d921327db6467ab3aa67449580f59d2cd7:src:Demand (structured):
+Goal: adicionar converterGigabitsEmTerabits a src/index.ts
+Targets: - src/index.ts
+Done when: - converterGigabitsEmTerabits
+Out of scope: - unrelated files - e2e tests - drive-by refactors
+Constraints: - no any / as any / @ts-ignore - NodeNext: .js extension in relative imports - only packages in package.json; builtins are global
+
+---
+
+# Issue #17: adicionar converterGigabitsEmTerabits a src/index.ts
+
+## Goal
+adicionar converterGigabitsEmTerabits a src/index.ts
+
+## Targets
+- src/index.ts
+
+## Acceptance
+- converterGigabitsEmTerabits
+
+## Out of scope
+- unrelated files
+- e2e tests
+- drive-by refactors
+
+## Constraints
+- no any / as any / @ts-ignore
+- NodeNext: .js extension in relative imports
+- only packages in package.json; builtins are global

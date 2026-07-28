@@ -4,6 +4,8 @@ Bounded, deterministic AI execution runtime. The runtime owns orchestration and 
 
 Constitution: `AGENTS.md` (loaded as LLM/Aider preamble). Mode contracts: `.skills/<mode>.md`.
 
+**Usar o Aegis num alvo:** [`GUIA.md`](GUIA.md) (humano) · [`AEGIS.md`](AEGIS.md) (assistente de código).
+
 ---
 
 ## Prerequisites
@@ -22,6 +24,15 @@ Constitution: `AGENTS.md` (loaded as LLM/Aider preamble). Mode contracts: `.skil
 export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
 export OPENAI_API_KEY="..."
 
+# --- Using Aegis on a target (see AEGIS.md) ---
+# Where the target stands: record, pending gate, dirty worktree
+./aegis context
+
+# One issue = one task = one target; ends at a commit gate that is yours
+./aegis go --goal "converter Gigabits em Terabits em src/index.ts" \
+           --target src/index.ts --accept converterGigabitsEmTerabits
+
+# --- Building/testing the harness itself ---
 # Prefer a clean worktree on mutation targets (or promotion may refuse dirty files)
 git status
 

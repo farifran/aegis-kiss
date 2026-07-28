@@ -29,14 +29,19 @@ readonly RUNTIME_DIR="${ROOT}/.harness/runtime"
 readonly OUTCOME_FILE="${RUNTIME_DIR}/last_outcome.json"
 readonly ISSUE_CACHE_DIR="${RUNTIME_DIR}/issue_cache"
 readonly COMMIT_MSG_FILE="${RUNTIME_DIR}/commit.msg"
+readonly DRAFT_FILE="${RUNTIME_DIR}/draft.md"
 
 usage() {
   cat <<'EOF'
 Usage:
   ./aegis context [--target PATH]
-  ./aegis go --goal "<uma frase>" --target <path> [--accept <token>]...
+  ./aegis go "<uma frase>" [--target <path>] [--accept <token>]...
              [--change "<bullet>"]... [--yes]
-  ./aegis go --issue <N> [--target PATH] [--yes]
+  ./aegis go --issue <N> [--yes]
+
+Só o pedido é obrigatório. O target, se não o deres, sai do reconhecimento
+mecânico do repositório; a acceptance sai do pedido quando ele nomeia código.
+No prompt, "e" abre o rascunho no editor para preencheres o que faltar.
 
 context   Onde o alvo está: branch, worktree, e o que o registo de commits
           geridos provou em cada ficheiro (e se ainda lá está).
@@ -45,8 +50,12 @@ context   Onde o alvo está: branch, worktree, e o que o registo de commits
 go        Abre a issue, corre o pipeline de mutation completo e pára no gate
           de commit, que é teu. Um target por go: dois ficheiros são dois go.
           --accept são tokens curtos que têm de aparecer no código, nunca
-          frases; sem eles, são derivados do Goal.
-          --issue N volta a correr uma issue existente em vez de abrir outra.
+          frases. São obrigatórios: são a semente do registo.
+          --issue N volta a correr uma issue existente em vez de abrir outra,
+          e tira o target do ## Targets dela.
+
+Sem TTY o gate não commita: deixa os paths em stage, a mensagem pronta, e
+imprime os dois comandos que faltam (status PENDING_GATE).
 EOF
 }
 
@@ -68,6 +77,32 @@ default_target() {
   fi
 }
 
+# Best guess for the file a goal is about, from the same mechanical Layer 0
+# recognition the pipeline itself uses: churn fused with lexical resonance
+# against the demand tokens. No LLM, no network. Empty when nothing resonates.
+propose_target() {
+  local goal="$1"
+  local scope="$2"
+  AEGIS_INVESTIGATION_INPUT="${goal}" \
+    bash "${ROOT}/scripts/capabilities/runtime/layer0_facts.sh" "${scope}" 2>/dev/null \
+    | jq -r '[.payload.hot_files[]? | select(.resonance == 1)]
+             | sort_by(-.score) | .[0].file // empty' 2>/dev/null \
+    || true
+}
+
+# Code-shaped tokens already present in the goal: camelCase, snake_case, or
+# a bare number like 1000. Prose words are deliberately not eligible — an
+# acceptance token becomes permanent, so it is extracted, never invented.
+derive_accept_tokens() {
+  printf '%s\n' "${1-}" \
+    | tr ' \t,;()[]{}' '\n' \
+    | sed -E 's/[.:!?"'"'"']+$//' \
+    | grep -Ev '/' \
+    | grep -E '([a-z][A-Z]|[a-zA-Z]_[a-zA-Z]|^[0-9]{3,}$)' \
+    | sort -u \
+    || true
+}
+
 # Paths the worktree changed under the target, net-new files included:
 # git diff is blind to untracked files, and a create demand produces
 # exactly that. Porcelain v1 is "XY<space>path", hence cut -c4-.
@@ -81,16 +116,6 @@ target_changes() {
 
 target_is_clean() {
   [[ -z "$(target_changes "$1")" ]]
-}
-
-warn_on_default_branch() {
-  local branch
-  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')"
-  case "${branch}" in
-    main|master)
-      aegis_warn "estás em ${branch}: o commit do gate vai para a branch default"
-      ;;
-  esac
 }
 
 # ---------------------------------------------------------
@@ -128,6 +153,23 @@ cmd_context() {
   fi
 
   printf 'branch: %s · worktree: %s\n' "${branch}" "${dirty}"
+
+  # A gate that never closed is real state, and the first thing whoever
+  # arrives next needs to know. Truthful by construction: a prepared
+  # message whose issue reached the record means the gate is done.
+  if [[ -s "${COMMIT_MSG_FILE}" ]]; then
+    local pending_issue
+    pending_issue="$(
+      awk -F': ' '/^Aegis-Issue:/ { print $2; exit }' "${COMMIT_MSG_FILE}"
+    )"
+    if [[ -n "${pending_issue}" ]] \
+      && ! aegis_record_entries "${target}" | cut -f2 \
+        | grep -qx "${pending_issue}"; then
+      printf 'gate por fechar: issue#%s (%s)\n' \
+        "${pending_issue}" "${COMMIT_MSG_FILE}"
+    fi
+  fi
+
   aegis_record_digest "${target}"
 }
 
@@ -185,6 +227,21 @@ seed_issue_cache() {
     > "${ISSUE_CACHE_DIR}/issue_${issue}.md"
 }
 
+# First path under ## Targets of an issue, from the cache the run seeds
+# or from gh. aegis_extract_operator_named_paths already knows how to
+# read that section without inventing ghost paths.
+issue_target() {
+  local issue="$1"
+  local cache="${ISSUE_CACHE_DIR}/issue_${issue}.md"
+  local body=""
+  if [[ -s "${cache}" ]]; then
+    body="$(cat "${cache}")"
+  else
+    body="$(gh_run issue view "${issue}" --json body -q .body || true)"
+  fi
+  aegis_extract_operator_named_paths "${body}" | head -1
+}
+
 assert_not_blocked() {
   local issue="$1"
   local labels
@@ -228,18 +285,13 @@ cmd_go() {
       --issue)  issue="${2:-}"; shift 2 ;;
       --yes|-y) assume_yes=1; shift ;;
       -h|--help) usage; return 0 ;;
-      *) aegis_fatal "unknown_flag:$1" ;;
+      -*) aegis_fatal "unknown_flag:$1" ;;
+      # A bare sentence is the goal: ./aegis go "converter X em Y"
+      *)
+        [[ -z "${goal}" ]] || aegis_fatal "goal_given_twice"
+        goal="$1"; shift ;;
     esac
   done
-
-  [[ -n "${target}" ]] || target="$(default_target)"
-  target="${target#./}"
-  # A net-new module is a legitimate target (the canonical example is
-  # "Create src/tokenBucket.ts"), so only the parent has to exist.
-  case "${target}" in
-    /*|*..*) aegis_fatal "unsafe_target:${target}" ;;
-  esac
-  [[ -d "$(dirname "${target}")" ]] || aegis_fatal "target_dir_not_found:${target}"
 
   command -v jq >/dev/null 2>&1 || aegis_fatal "missing_jq"
 
@@ -248,24 +300,54 @@ cmd_go() {
     [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "invalid_issue:${issue}"
     command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
     assert_not_blocked "${issue}"
+    # The issue already names its target under ## Targets; asking the
+    # operator to repeat it is a way to repeat it differently.
+    if [[ -z "${target}" ]]; then
+      target="$(issue_target "${issue}")"
+      [[ -n "${target}" ]] || aegis_fatal "issue_has_no_target:${issue}"
+      aegis_log "target da issue: ${target}"
+    fi
     aegis_log "a repetir a issue #${issue}"
   else
     [[ -n "${goal}" ]] || aegis_fatal "missing_goal"
+
+    # Unknown target: let the mechanical recognition propose one. The
+    # draft below is where it gets reviewed, so no extra question here.
+    if [[ -z "${target}" ]]; then
+      target="$(propose_target "${goal}" "$(default_target)")"
+      # Falling back to the directory would only produce a demand that
+      # fit_check rejects for no_targets — better to say so now.
+      [[ -n "${target}" ]] \
+        || aegis_fatal "target_desconhecido — nada ressoou com o goal; dá --target com o ficheiro"
+      aegis_log "target proposto pelo reconhecimento: ${target}"
+    fi
+
     # Acceptance seeds the prompt, the commit record and the regression
-    # rail. Derived from prose it yields words like "por" or "inside",
-    # which would then be protected forever — so it is required.
-    [[ "${#accepts[@]}" -gt 0 ]] \
-      || aegis_fatal "missing_accept — dá --accept com tokens curtos que têm de aparecer no código"
+    # rail. It can be extracted from the goal when the goal already names
+    # code, but never invented: the token becomes permanent.
+    if [[ "${#accepts[@]}" -eq 0 ]]; then
+      local derived
+      derived="$(derive_accept_tokens "${goal}")"
+      if [[ -n "${derived}" ]]; then
+        while IFS= read -r t; do
+          [[ -n "${t}" ]] && accepts+=("${t}")
+        done <<< "${derived}"
+        aegis_log "acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
+      else
+        aegis_fatal "missing_accept — o goal não nomeia código; dá --accept com o nome exacto (ex: --accept converterXEmY)"
+      fi
+    fi
 
     body="$(render_body "${goal}" "${target}")"
 
-    # fit_check owns the verdict and the auto-fixes; go only reads them.
-    local fit_json=""
+    # Show → ask → maybe edit → re-check. fit_check owns the verdict and
+    # the auto-fixes; go only reads them. The editor is the friendly
+    # format: whatever you leave blank you can fill in here.
+    local fit_json="" answer=""
     fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
     if ! printf '%s' "${fit_json}" | jq -e '.schema == "aegis.fit_check.v1"' >/dev/null 2>&1; then
       aegis_fatal "fit_check_failed"
     fi
-
     body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand')"
 
     printf '%s\n\n' "${body}"
@@ -279,21 +361,40 @@ cmd_go() {
       aegis_fatal "demand_does_not_fit — aperta o Goal ou parte em dois go"
     fi
 
-    title="$(printf '%s' "${goal}" | tr '\n' ' ' | cut -c1-72)"
-
     if [[ "${assume_yes}" -ne 1 ]]; then
-      local answer=""
-      printf 'Criar issue e correr? [y/N] '
-      read -r answer || answer=""
-      case "${answer}" in
-        y|Y|yes|s|S|sim) ;;
-        *)
-          aegis_log "cancelado; nada foi criado"
-          emit_result_json "CANCELLED" "" "" "operator_declined"
-          return 1
-          ;;
-      esac
+      while true; do
+        printf 'Criar issue e correr? [y/N/e (editar)] '
+        read -r answer || answer=""
+        case "${answer}" in
+          y|Y|yes|s|S|sim) break ;;
+          e|E|editar)
+            printf '%s' "${body}" > "${DRAFT_FILE}"
+            "${EDITOR:-vi}" "${DRAFT_FILE}" || true
+            body="$(cat "${DRAFT_FILE}")"
+            fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
+            body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
+            [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
+            printf '%s\n\n' "${body}"
+            printf 'fit: run_allowed=%s\n' \
+              "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"
+            printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1 \
+              || aegis_fatal "demand_does_not_fit — o draft editado não cabe"
+            ;;
+          *)
+            aegis_log "cancelado; nada foi criado"
+            emit_result_json "CANCELLED" "" "" "operator_declined"
+            return 1
+            ;;
+        esac
+      done
     fi
+
+    # The demand is the single source of truth for the target: an edited
+    # ## Targets must win over whatever was proposed or passed.
+    target="$(aegis_extract_operator_named_paths "${body}" | head -1)"
+    [[ -n "${target}" ]] || aegis_fatal "demand_sem_target"
+
+    title="$(printf '%s' "${goal}" | tr '\n' ' ' | cut -c1-72)"
 
     command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
     gh_run label create aegis --force >/dev/null 2>&1 \
@@ -302,16 +403,29 @@ cmd_go() {
     local url=""
     url="$(printf '%s' "${body}" | gh_run issue create \
       --title "${title}" --body-file - --label aegis || true)"
-    issue="$(printf '%s' "${url}" | sed -E 's|.*/([0-9]+)[[:space:]]*$|\1|')"
+    # gh may print progress lines before the URL; only the last line is it.
+    # Parsing the whole output would report a created issue as failed, and
+    # the retry would open a second one.
+    issue="$(
+      printf '%s' "${url}" | grep -E '/[0-9]+$' | tail -1 \
+        | sed -E 's|.*/([0-9]+)$|\1|'
+    )"
     [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "issue_create_failed"
     aegis_log "issue #${issue} criada"
 
     seed_issue_cache "${issue}" "${title}" "${body}"
   fi
 
+  # A net-new module is a legitimate target (the canonical example is
+  # "Create src/tokenBucket.ts"), so only the parent has to exist.
+  target="${target#./}"
+  case "${target}" in
+    /*|*..*) aegis_fatal "unsafe_target:${target}" ;;
+  esac
+  [[ -d "$(dirname "${target}")" ]] || aegis_fatal "target_dir_not_found:${target}"
+
   target_is_clean "${target}" \
     || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
-  warn_on_default_branch
 
   set +e
   bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
@@ -345,21 +459,21 @@ cmd_go() {
     return 1
   fi
 
-  # On --issue N the flags are absent; the Acceptance comes from the body
-  # the run already read.
+  # Always from the demand that actually ran, never from the flags: the
+  # draft may have been edited, and the record has to match what was asked.
   local accept_csv summary
-  if [[ "${#accepts[@]}" -gt 0 ]]; then
-    accept_csv="$(printf '%s, ' "${accepts[@]+"${accepts[@]}"}" | sed 's/, $//')"
-  else
-    accept_csv="$(
-      awk '/^## Acceptance$/ { p = 1; next } /^## / { p = 0 } p' \
-        "${ISSUE_CACHE_DIR}/issue_${issue}.md" 2>/dev/null \
-        | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
-        | grep -v '^$' | paste -sd',' - | sed 's/,/, /g'
-    )"
-  fi
+  accept_csv="$(
+    awk '/^## Acceptance$/ { p = 1; next } /^## / { p = 0 } p' \
+      "${ISSUE_CACHE_DIR}/issue_${issue}.md" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | grep -v '^$' | paste -sd',' - | sed 's/,/, /g'
+  )"
+  # No Acceptance means no Aegis-Accept, and a managed commit without it
+  # would not be record at all — a silent hole in the very thing the gate
+  # exists to write. Refuse instead.
+  [[ -n "${accept_csv}" ]] \
+    || aegis_fatal "issue_has_no_acceptance:${issue} — sem tokens não há registo a escrever"
   summary="$(printf '%s' "${accept_csv}" | cut -d',' -f1)"
-  [[ -n "${summary}" ]] || summary="$(printf '%s' "${goal}" | cut -c1-50)"
 
   aegis_record_render_message "${issue}" "${summary}" "${accept_csv}" \
     > "${COMMIT_MSG_FILE}"
@@ -381,7 +495,7 @@ cmd_go() {
   # staged with the message ready and hand over the one command.
   if [[ ! -t 0 ]]; then
     aegis_warn "sem TTY: o gate não commita sozinho"
-    printf '\nPara fechar:\n\n  git commit -e -F %s\n' "${COMMIT_MSG_FILE}"
+    printf '\nPara fechar:\n\n  git commit -e -F "%s"\n' "${COMMIT_MSG_FILE}"
     printf '  gh issue close %s --comment "commit $(git rev-parse --short HEAD)"\n\n' \
       "${issue}"
     emit_result_json "PENDING_GATE" "${issue}" "" "no_tty"

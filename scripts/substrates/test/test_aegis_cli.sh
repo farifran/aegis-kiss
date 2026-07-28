@@ -90,12 +90,49 @@ printf '%s\n' "${draft_out}" | grep -q 'run_allowed=true' \
 printf '%s\n' "${draft_out}" | grep -q '"status":"CANCELLED"' \
   || fail "declining did not emit the CANCELLED result line"
 
-# --- net-new targets: git diff is blind to untracked files ---
-# A create demand produces a file git diff never reports, which once made
-# the gate believe nothing had been promoted.
+# --- acceptance derived from a goal that already names code ---
+set +e
+derived_out="$(
+  printf 'n\n' | "${aegis_cli}" go \
+    "adicionar converterPetabitsEmBits a src/index.ts" \
+    --target src/index.ts 2>&1
+)"
+derived_rc=$?
+set -e
+[[ "${derived_rc}" -ne 0 ]] || fail "declining the prompt should exit non-zero"
+printf '%s\n' "${derived_out}" | grep -qx -- '- converterPetabitsEmBits' \
+  || fail "acceptance not derived from a goal naming code: ${derived_out}"
+printf '%s\n' "${derived_out}" | grep -q 'run_allowed=true' \
+  || fail "derived demand did not pass the fit check"
+
+# --- prose-only goal: refuse instead of inventing a permanent token ---
+set +e
+prose_out="$(
+  "${aegis_cli}" go "converter uma coisa noutra coisa" --target src/index.ts 2>&1
+)"
+prose_rc=$?
+set -e
+[[ "${prose_rc}" -ne 0 ]] || fail "a prose-only goal should not produce acceptance"
+printf '%s\n' "${prose_out}" | grep -q 'missing_accept' \
+  || fail "prose-only goal gave the wrong reason: ${prose_out}"
+
+# --- token shape: extracted, never invented ---
 # shellcheck disable=SC1090
 source "${aegis_cli}"
 
+shape="$(derive_accept_tokens 'adicionar converterBytesEmBits e MAX_SIZE 1024 a src/index.ts por favor')"
+for expected in converterBytesEmBits MAX_SIZE 1024; do
+  printf '%s\n' "${shape}" | grep -Fxq -- "${expected}" \
+    || fail "code-shaped token dropped: ${expected} (got: ${shape//$'\n'/ | })"
+done
+for prose in adicionar por favor e a src/index.ts; do
+  printf '%s\n' "${shape}" | grep -Fxq -- "${prose}" \
+    && fail "prose word became an acceptance token: ${prose}"
+done
+
+# --- net-new targets: git diff is blind to untracked files ---
+# A create demand produces a file git diff never reports, which once made
+# the gate believe nothing had been promoted. (aegis is already sourced.)
 net_new_repo="$(mktemp -d)"
 git -C "${net_new_repo}" init --quiet
 git -C "${net_new_repo}" config user.email "test@aegis.local"

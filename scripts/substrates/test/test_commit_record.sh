@@ -78,7 +78,7 @@ entry_count="$(printf '%s\n' "${entries}" | grep -c . || true)"
 printf '%s\n' "${entries}" | grep -q 'harnessOnlyToken' \
   && fail "construction commit leaked into the target record"
 
-printf '%s\n' "${entries}" | grep -q '	13	converterBytesEmKilobits, 8 / 1000$' \
+printf '%s\n' "${entries}" | grep -q $'\037''13'$'\037''converterBytesEmKilobits, 8 / 1000$' \
   || fail "issue/accept columns not parsed: ${entries}"
 
 # --- pathspec isolation in the other direction ---
@@ -116,6 +116,50 @@ printf '%s\n' "${digest}" | grep -q '✗ converterBytesEmBits' \
   || fail "digest did not flag a proven token that left the file: ${digest}"
 printf '%s\n' "${digest}" | grep -q '✓ converterBytesEmKilobits' \
   || fail "digest wrongly flagged a token that is still present"
+
+# --- record without an issue number (no GitHub in the loop) ---
+# Aegis-Accept is the load-bearing field; Aegis-Issue is a pointer. With
+# the issue absent the middle field is empty, which a tab-separated read
+# would collapse — dropping the tokens and listing nothing.
+printf 'export function legacy(): number { return 1; }
+export function converterBytesEmKilobits(b: number): number { return b * 8 / 1000; }
+export function semIssue(): number { return 2; }
+' > "${repo}/src/index.ts"
+commit_in_repo "$(
+  printf 'aegis: semIssue\n\nAegis-Accept: semIssue\n'
+)" src/index.ts
+
+tokens="$(cd "${repo}" && aegis_record_protected_tokens src/index.ts)"
+printf '%s\n' "${tokens}" | grep -Fxq -- "semIssue" \
+  || fail "record without an issue lost its tokens: ${tokens}"
+
+digest="$(cd "${repo}" && aegis_record_digest src)"
+printf '%s\n' "${digest}" | grep -q '✓ semIssue *(sem issue)' \
+  || fail "digest did not render a record without an issue: ${digest}"
+
+# --- record without Aegis-Issue (no GitHub in the loop) ---
+# Regression: with a tab separator the shell collapses the two delimiters
+# around the empty issue field, every value shifts left, and the digest
+# reports a count with no rows.
+no_issue_repo="$(mktemp -d)"
+git -C "${no_issue_repo}" init --quiet
+git -C "${no_issue_repo}" config user.email "test@aegis.local"
+git -C "${no_issue_repo}" config user.name "Aegis Test"
+mkdir -p "${no_issue_repo}/src"
+printf 'export function somaSegura(): number { return 1; }\n' \
+  > "${no_issue_repo}/src/a.ts"
+git -C "${no_issue_repo}" add -A
+printf 'aegis: somaSegura\n\nAegis-Accept: somaSegura\n' \
+  | git -C "${no_issue_repo}" commit --quiet -F -
+
+no_issue_tokens="$(cd "${no_issue_repo}" && aegis_record_protected_tokens src/a.ts)"
+printf '%s\n' "${no_issue_tokens}" | grep -Fxq 'somaSegura' \
+  || fail "record without Aegis-Issue lost its protected token"
+
+no_issue_digest="$(cd "${no_issue_repo}" && aegis_record_digest src)"
+printf '%s\n' "${no_issue_digest}" | grep -q '✓ somaSegura' \
+  || fail "digest listed no rows for a record without an issue: ${no_issue_digest}"
+rm -rf "${no_issue_repo}"
 
 # --- empty record stays empty (no seeding, no invention) ---
 empty_repo="$(mktemp -d)"

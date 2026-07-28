@@ -34,14 +34,22 @@ fi
 : "${AEGIS_RECORD_MAX_COMMITS:=100}"
 
 # Native git trailer extraction: one process, no body parsing.
-# Emits TSV <short sha> <issue> <accept csv>; commits without
+# Emits <short sha> US <issue> US <accept csv>; commits without
 # Aegis-Accept are dropped (they are not record).
+#
+# The separator is the unit separator (0x1f), not a tab: tab counts as
+# IFS whitespace, so `read` collapses two of them into one and an empty
+# middle field shifts every value left. That is not hypothetical — a
+# record commit with no Aegis-Issue (no GitHub in the loop) has exactly
+# that shape.
+readonly AEGIS_RECORD_US=$'\037'
+
 aegis_record_entries() {
   local scope="${1:-.}"
   git log -n "${AEGIS_RECORD_MAX_COMMITS}" \
-    --format='%h%x09%(trailers:key=Aegis-Issue,valueonly,separator=%x20)%x09%(trailers:key=Aegis-Accept,valueonly,separator=%x2C)' \
+    --format='%h%x1f%(trailers:key=Aegis-Issue,valueonly,separator=%x20)%x1f%(trailers:key=Aegis-Accept,valueonly,separator=%x2C)' \
     -- "${scope}" 2>/dev/null \
-    | awk -F'\t' 'NF >= 3 && $3 != ""' \
+    | awk -F'\037' 'NF >= 3 && $3 != ""' \
     || true
 }
 
@@ -51,7 +59,7 @@ aegis_record_protected_tokens() {
   local path="${1-}"
   [[ -n "${path}" ]] || return 0
   aegis_record_entries "${path}" \
-    | cut -f3 \
+    | cut -d"${AEGIS_RECORD_US}" -f3 \
     | tr ',' '\n' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
     | grep -v '^$' \
@@ -100,14 +108,15 @@ aegis_record_digest() {
 
   # file <tab> token <tab> issue, one row per proven token.
   rows="$(
-    printf '%s\n' "${entries}" | while IFS=$'\t' read -r sha issue accept; do
+    printf '%s\n' "${entries}" \
+      | while IFS="${AEGIS_RECORD_US}" read -r sha issue accept; do
       [[ -n "${sha}" ]] || continue
       local file token
       while IFS= read -r file; do
         [[ -n "${file}" ]] || continue
         while IFS= read -r token; do
           [[ -n "${token}" ]] || continue
-          printf '%s\t%s\t%s\n' "${file}" "${token}" "${issue}"
+          printf '%s\t%s\t%s\n' "${file}" "${token}" "${issue:-—}"
         done < <(
           printf '%s' "${accept}" | tr ',' '\n' \
             | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | grep -v '^$'
@@ -129,7 +138,11 @@ aegis_record_digest() {
       mark='✗'
       missing=$((missing + 1))
     fi
-    printf '  %s %-40s issue#%s\n' "${mark}" "${token}" "${issue}"
+    if [[ "${issue}" == "—" ]]; then
+      printf '  %s %-40s (sem issue)\n' "${mark}" "${token}"
+    else
+      printf '  %s %-40s issue#%s\n' "${mark}" "${token}" "${issue}"
+    fi
   done <<< "${rows}"
 
   [[ "${missing}" -eq 0 ]] \

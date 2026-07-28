@@ -29,3 +29,7 @@ export function converterTerabitsEmPentabits(terabits: number): number {
 export function converterBytesEmMegabits(bytes: number): number {
   return bytes * 8 / 1000000;
 }
+
+export function converterGigabitsEmTerabits(gigabits: number): number {
+  return gigabits / 1000;
+}
