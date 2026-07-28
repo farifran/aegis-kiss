@@ -37,23 +37,44 @@ evidence_repo_state() {
   printf '%s' "${AEGIS_EVIDENCE_REPO_STATE}"
 }
 
+# Which cacheable capabilities actually derive from the repository tree.
+# The key must bind the REAL dependency, not a global state blob: an edit
+# under the evidence target has to invalidate layer0 / list_tree, but must
+# NOT invalidate demand_anchors, which reads only the demand and the
+# handover. attention_seed is listed because it is derived from the
+# layer0_facts payload, so it inherits that dependency transitively.
+capability_depends_on_repo_state() {
+  case "$1" in
+    filesystem.list_tree|runtime.layer0_facts|runtime.attention_seed)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
 # Stable cache key for deterministic, mode-stable evidence payloads.
 # Includes investigation input so Layer 0 / attention_seed never leak
-# across unrelated pipeline demands, and repository state so an entry can
-# never be served for a tree it was not computed from. Those two together
-# are what make the cache safe to keep ACROSS runs: a changed demand or a
-# changed target produces a different key, so a stale hit is impossible.
+# across unrelated pipeline demands, and — for tree-derived capabilities
+# only — repository state, so an entry can never be served for a tree it
+# was not computed from. Those together are what make the cache safe to
+# keep ACROSS runs: a changed demand or a changed target produces a
+# different key, so a stale hit is impossible.
 evidence_cache_key() {
   local capability="$1"
   local capability_argument="$2"
-  local seed
+  local seed repo_state=""
+
+  if capability_depends_on_repo_state "${capability}"; then
+    repo_state="$(evidence_repo_state)"
+  fi
+
   seed="$(
     printf '%s\0%s\0%s\0%s\0%s' \
       "${capability}" \
       "${capability_argument}" \
       "${AEGIS_INVESTIGATION_INPUT:-}" \
       "${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
-      "$(evidence_repo_state)" \
+      "${repo_state}" \
       | shasum -a 256 2>/dev/null \
       | awk '{print $1}'
   )"
