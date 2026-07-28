@@ -28,23 +28,11 @@ fi
 # ---------------------------------------------------------
 
 aegis_fit_md_section() {
-  local heading="$1"
-  local text="${2-}"
-  [[ -n "${text}" ]] || return 0
-  printf '%s\n' "${text}" | awk -v h="## ${heading}" '
-    BEGIN { p = 0 }
-    /^## / {
-      if (p) { exit }
-      if ($0 == h) { p = 1; next }
-      next
-    }
-    p { print }
-  '
+  aegis_demand_md_section "$@"
 }
 
 aegis_fit_is_structured() {
-  local text="${1-}"
-  printf '%s\n' "${text}" | grep -qE '^## (Goal|Targets|Acceptance|Change|Out of scope|Constraints)\s*$'
+  aegis_demand_is_structured "$@"
 }
 
 aegis_fit_open_task_count() {

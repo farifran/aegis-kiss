@@ -44,6 +44,26 @@ aegis_fatal() {
 # Word-boundary after extension so "package.json" does NOT match as "package.js".
 readonly AEGIS_SOURCE_PATH_RE='[A-Za-z0-9_./-]+\.(ts|tsx|js|jsx|mjs|cjs|sh|py)\b'
 
+aegis_demand_md_section() {
+  local heading="$1"
+  local text="${2-}"
+  [[ -n "${text}" ]] || return 0
+  printf '%s\n' "${text}" | command awk -v h="## ${heading}" '
+    BEGIN { p = 0 }
+    /^## / {
+      if (p) { exit }
+      if ($0 == h) { p = 1; next }
+      next
+    }
+    p { print }
+  '
+}
+
+aegis_demand_is_structured() {
+  local text="${1-}"
+  printf '%s\n' "${text}" | command grep -qE '^## (Goal|Targets|Acceptance|Change|Out of scope|Constraints)\s*$'
+}
+
 # Newline-separated unique paths; strips leading ./. Empty text → no lines.
 # Structured demand (## Targets present with body): only scrape that section so
 # Change/Acceptance/Out of scope do not invent ghost paths (tokenBucket.js).
