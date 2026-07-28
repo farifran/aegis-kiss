@@ -687,7 +687,7 @@ aegis_materialize_demand_anchors_json() {
     local from_seed
     from_seed="$(
       jq -c '
-        [.payload.attention_targets[]?
+        [(.payload?.handover_attention?.next_attention_targets? // .payload?.attention_targets? // [])[]?
           | select(type == "string" and length > 0)]
       ' "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || printf '[]'
     )"
@@ -2983,12 +2983,13 @@ aegis_emit_mechanical_discovery_substrate() {
 aegis_forensics_anchor_sets_json() {
   local anchors_json
   anchors_json="$(aegis_mechanical_demand_anchors_json "$@")"
-  jq -n -c --argjson a "${anchors_json}" \
-    '{
-      named: ($a.operator_named_paths // []),
-      seed: ($a.seed_targets // []),
-      dense: ($a.dense_tokens // [])
-    }'
+  printf '%s' "${anchors_json}" | jq -c '
+    {
+      named: (.operator_named_paths // []),
+      seed: (.seed_targets // []),
+      dense: (.dense_tokens // [])
+    }
+  ' 2>/dev/null || printf '{"named":[],"seed":[],"dense":[]}'
 }
 
 # Rank a content probe for multi-seed discrimination (higher = stronger).
@@ -3163,20 +3164,23 @@ aegis_build_mechanical_forensics_json() {
     return 0
   fi
 
+  local tmp_cands
+  tmp_cands="$(mktemp)"
+  printf '[]' > "${tmp_cands}"
+
   while IFS= read -r path; do
     [[ -n "${path}" ]] || continue
     probe="$(aegis_discovery_probe_path "${path}" "${tokens_nl}" ".")"
     reason="$(aegis_forensics_mechanical_reason "${text}" "${path}" "${probe}" "${tokens_nl}")"
-    cands_json="$(
-      jq -n -c \
-        --argjson acc "${cands_json}" \
-        --arg id "${path}" \
-        --arg reason "${reason}" \
-        '$acc + [{id: $id, reason: $reason}]'
-    )"
+    if jq --arg id "${path}" --arg reason "${reason}" '. + [{id: $id, reason: $reason}]' "${tmp_cands}" > "${tmp_cands}.tmp" 2>/dev/null; then
+      mv "${tmp_cands}.tmp" "${tmp_cands}"
+    fi
   done < <(printf '%s' "${paths_json}" | jq -r '.[]?')
 
-  jq -n --argjson cands "${cands_json}" \
+  cands_json="$(cat "${tmp_cands}")"
+  rm -f "${tmp_cands}" "${tmp_cands}.tmp" 2>/dev/null || true
+
+  jq -n --argjson cands "${cands_json:-[]}" \
     '{status: "interpreted", repair_candidates: $cands}'
 }
 

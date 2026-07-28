@@ -337,6 +337,7 @@ layer0_hot_files() {
       # -I skip binary; -F fixed string; bounded by census intersection.
       git grep -l -i -F -I -- "${token}" -- . 2>/dev/null \
         | grep -Fxf "${CENSUS_FILE}" \
+        | grep -vE '\.md$' \
         || true
     done < "${dense_tmp}" \
       | sort -u \
@@ -354,6 +355,7 @@ layer0_hot_files() {
     | grep -Fxf "${CENSUS_FILE:-/dev/null}" \
     | sort | uniq -c | sort -rn \
     | while read -r churn file; do
+        [[ "${file}" != *.md ]] || continue
         local score resonance path_norm base token prefix
         score="${churn}"
         resonance=0
