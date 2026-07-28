@@ -9,3 +9,7 @@ export function converterSemanasEmSegundos(semanas: number): number {
 export function converterDiasEmSegundos(dias: number): number {
   return dias * 86400;
 }
+
+export function converterBytesEmKilobits(bytes: number): number {
+  return bytes * 8 / 1000;
+}
