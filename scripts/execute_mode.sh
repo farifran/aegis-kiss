@@ -212,23 +212,22 @@ augment_evidence_profile_from_anchors() {
 #   70 list_tree
 #   80 other
 _evidence_entry_priority_rank() {
-  local entry="$1"
-  local capability="${entry%%:*}"
+  local capability="${1%%:*}"
   case "${capability}" in
-    runtime.layer0_facts) echo 15 ;;
-    runtime.attention_seed) echo 18 ;;
-    runtime.demand_anchors) echo 20 ;;
-    filesystem.read) echo 30 ;;
-    filesystem.search_symbol) echo 40 ;;
-    git.status|git.diff) echo 50 ;;
-    typescript.check|eslint.check|test.run) echo 60 ;;
-    filesystem.list_tree) echo 70 ;;
-    *) echo 80 ;;
+    runtime.layer0_facts) REPLY=15 ;;
+    runtime.attention_seed) REPLY=18 ;;
+    runtime.demand_anchors) REPLY=20 ;;
+    filesystem.read) REPLY=30 ;;
+    filesystem.search_symbol) REPLY=40 ;;
+    git.status|git.diff) REPLY=50 ;;
+    typescript.check|eslint.check|test.run) REPLY=60 ;;
+    filesystem.list_tree) REPLY=70 ;;
+    *) REPLY=80 ;;
   esac
 }
 
 prioritize_evidence_entries() {
-  local entry rank
+  local entry
   local -a ranked=()
   local -a ordered=()
 
@@ -236,9 +235,8 @@ prioritize_evidence_entries() {
 
   for entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
     [[ -n "${entry}" ]] || continue
-    rank="$(_evidence_entry_priority_rank "${entry}")"
-    # Tab-separated: rank is numeric key; entry may contain spaces rarely.
-    ranked+=("${rank}"$'\t'"${entry}")
+    _evidence_entry_priority_rank "${entry}"
+    ranked+=("${REPLY}"$'\t'"${entry}")
   done
 
   mapfile -t ordered < <(
