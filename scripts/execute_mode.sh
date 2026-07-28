@@ -445,6 +445,8 @@ invoke_raw_substrate() {
     AEGIS_CAPABILITY_MANIFEST_MAX_BYTES="${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES}" \
     AEGIS_ARTIFACT_BEGIN_MARKER="${AEGIS_ARTIFACT_BEGIN_MARKER}" \
     AEGIS_ARTIFACT_END_MARKER="${AEGIS_ARTIFACT_END_MARKER}" \
+    AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE:-}" \
+    AEGIS_PROVIDER_EXTRA_HEADER="${AEGIS_PROVIDER_EXTRA_HEADER:-}" \
     bash scripts/substrates/raw_llm.sh \
       "${model}" \
       "${skill_file}" \
@@ -631,9 +633,23 @@ truncate_payload_for_budget() {
   local pruned_tmp
   pruned_tmp="$(mktemp)"
 
+  # Reversible pruning: the full payload is preserved beside the pruned one
+  # before the body collapses, and the pruned form carries a pointer to it.
+  # Pruning is a CONTEXT decision, not an evidence decision — dropping the
+  # bytes from the prompt must not destroy the evidence the runtime already
+  # gathered. Recovery is runtime/operator-side: Aegis has no tool-calling
+  # loop, so the model cannot request the full payload back mid-turn.
+  local full_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}/.full"
+  local full_path=""
+  if [[ -n "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" ]] \
+    && mkdir -p "${full_dir}" 2>/dev/null; then
+    full_path="${full_dir}/$(basename "${payload_path}")"
+    cp "${payload_path}" "${full_path}" 2>/dev/null || full_path=""
+  fi
+
   # Envelope fields survive; the payload body collapses to a bounded
   # preview so verbose evidence blocks stop dominating the buffer.
-  if jq -c '
+  if jq -c --arg full_path "${full_path}" '
       {
         success,
         capability,
@@ -643,10 +659,14 @@ truncate_payload_for_budget() {
         error
       }
       + {
-        payload: {
-          context_budget_pruned: true,
-          truncated_preview: ((.payload | tojson)[0:1024])
-        }
+        payload: (
+          {
+            context_budget_pruned: true,
+            truncated_preview: ((.payload | tojson)[0:1024])
+          }
+          + (if $full_path == "" then {}
+             else {recoverable_from: $full_path} end)
+        )
       }
     ' "${payload_path}" > "${pruned_tmp}" 2>/dev/null; then
     mv "${pruned_tmp}" "${payload_path}"

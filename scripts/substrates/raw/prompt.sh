@@ -93,15 +93,63 @@ assemble_bounded_manifest() {
 # SELECTIVE CAPABILITY PAYLOAD EXPOSURE
 # =========================================================
 
+# Boundary between the byte-identical prefix and everything that changes
+# per execution. Also the measurement point for the kind:"cache" metric.
+readonly AEGIS_LIVE_ZONE_MARKER="=== LIVE ZONE (everything below changes per execution) ==="
+
+# Report the frozen prefix so its stability is measured, not assumed. A
+# prefix that is genuinely frozen repeats this hash across executions of
+# the same mode; a drifting one shows a new hash every run. Whether the
+# provider exploits the stability is server-side and not observable here.
+emit_raw_prefix_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  [[ -f "${TMP_CAPABILITY_CONTEXT_FILE}" ]] || return 0
+
+  local prefix_file prefix_hash prefix_bytes
+  prefix_file="$(mktemp)"
+  awk -v marker="${AEGIS_LIVE_ZONE_MARKER}" \
+    '$0 == marker { exit } { print }' \
+    "${TMP_CAPABILITY_CONTEXT_FILE}" > "${prefix_file}"
+  prefix_bytes="$(wc -c < "${prefix_file}" | tr -d ' ')"
+  if command -v shasum >/dev/null 2>&1; then
+    prefix_hash="$(shasum -a 256 < "${prefix_file}" | awk '{print $1}')"
+  else
+    prefix_hash="$(cksum < "${prefix_file}" | awk '{print $1}')"
+  fi
+  rm -f "${prefix_file}"
+
+  jq -cn \
+    --arg mode "${AEGIS_MODE:-}" \
+    --arg prefix_hash "${prefix_hash:0:16}" \
+    --argjson prefix_bytes "${prefix_bytes:-0}" \
+    '{kind:"cache",mode:$mode,substrate:"raw",
+      prefix_hash:$prefix_hash,prefix_bytes:$prefix_bytes}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 assemble_bounded_capability_context() {
 
-  # Monotonic token-stacking: segments ordered by decreasing half-life so
-  # the KV-cache prefix survives across executions. Stable segments
-  # (pocket map, stable manifest) at the head; volatile segments
-  # (investigation input, volatile manifest, execution identity) at the
-  # tail, appended after the payload loop. The skill contract lives in
-  # the system prompt (assemble_system_prompt).
+  # FROZEN ZONE / LIVE ZONE split.
+  #
+  # Prefix reuse dies at the first changed byte, so everything above the
+  # AEGIS_LIVE_ZONE_MARKER must be byte-identical for a given (mode,
+  # configuration) — that is the only part a provider-side prefix cache can
+  # ever reuse across executions. The manifest projection qualifies: it is
+  # a deterministic function of mode and config.
+  #
+  # The pocket map does NOT qualify. It switches between full census and
+  # attention-focused form depending on the mode (see generate_pocket_map),
+  # so keeping it at the head — as this function used to — rewrote the very
+  # first bytes on every mode transition and invalidated everything after
+  # it. It now lives below the marker, where churn is free.
   {
+    echo "=== SELECTED CAPABILITY MANIFEST ==="
+    echo
+    cat "${TMP_MANIFEST_FILE}"
+    echo
+    printf '%s\n' "${AEGIS_LIVE_ZONE_MARKER}"
+    echo
+
     if [[ -n "${AEGIS_POCKET_MAP_FILE:-}" ]] && [[ -s "${AEGIS_POCKET_MAP_FILE}" ]]; then
       if head -n 1 "${AEGIS_POCKET_MAP_FILE}" 2>/dev/null \
         | grep -q '^# attention-focused'; then
@@ -114,11 +162,6 @@ assemble_bounded_capability_context() {
       echo
     fi
 
-    echo "=== SELECTED CAPABILITY MANIFEST ==="
-    echo
-    cat "${TMP_MANIFEST_FILE}"
-
-    echo
     echo "=== EXPOSED CAPABILITY PAYLOADS ==="
     echo
     printf 'Exposed capability payload count: %s\n' "${#SELECTED_CAPABILITY_PAYLOAD_PATHS[@]}"
@@ -248,6 +291,8 @@ assemble_bounded_capability_context() {
   } >> "${TMP_CAPABILITY_CONTEXT_FILE}"
 
   aegis_log "Capability payload evidence size bytes: $(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}")"
+
+  emit_raw_prefix_metric
 }
 
 # =========================================================

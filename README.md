@@ -56,6 +56,11 @@ After a run:
 
 ```bash
 jq -c 'select(.kind=="intent")' .harness/runtime/pipeline_metrics.jsonl
+
+# Context cost: per-mode budget + evidence reuse, prompt prefix stability,
+# provider-reported tokens, and one pipeline-wide roll-up
+jq -c 'select(.kind=="cache" or .kind=="tokens")' .harness/runtime/pipeline_metrics.jsonl
+jq -c 'select(.kind=="pipeline_budget")' .harness/runtime/pipeline_metrics.jsonl
 cat .harness/runtime/last_outcome.json | jq .
 ```
 
@@ -134,7 +139,29 @@ cat .harness/runtime/last_outcome.json | jq .
 | `AEGIS_ALIGNMENT_GATE=true\|false` | Validation minimal demand-alignment proof on final candidate (default true) |
 | `AEGIS_PROMOTION_RESET_DIRTY=true` | Allow promote when target worktree is dirty (eval / ops) |
 
+**Context budget (single authority)**
+
+`AEGIS_MAX_CONTEXT_BYTES` (default 32768) is the only context policy number.
+The rendered-prompt backstop (`AEGIS_EVIDENCE_MAX_TOTAL_BYTES`) and the
+handover read ceiling (`AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES`) are derived
+from it. `AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES` is deliberately independent — it
+is a structural validity gate, not a context ceiling, and must stay generous
+because the handover embeds the candidate diff.
+
+| Flag | Meaning |
+|---|---|
+| `AEGIS_MAX_CONTEXT_BYTES` | Context budget; everything else derives from it |
+| `AEGIS_EVIDENCE_CACHE_MAX_AGE_DAYS` | Evidence cache entry expiry (default 7) |
+| `AEGIS_EVIDENCE_CACHE_ENABLED` | Disable cross-run evidence reuse |
+| `AEGIS_PROVIDER_EXTRA_HEADER` | One extra request header, for gateways that resolve upstream by header |
+
+**Metrics:** `kind:"cache"` (per mode: budget, reuse, prefix hash) ·
+`kind:"tokens"` (provider-reported usage) · `kind:"pipeline_budget"` (run
+roll-up) in `pipeline_metrics.jsonl`.
+
 **Operational memory:** capability payloads · epistemic handover · git only.
+The evidence cache is memoization keyed on demand + target + repository
+state, not memory: a hit can only return what recomputing would produce.
 
 ---
 
@@ -165,7 +192,38 @@ bash scripts/substrates/test/test_readonly_modes.sh
 
 ## Acknowledgments & Credits
 
-Aegis Harness incorporates architectural principles, epistemic handover design, capability manifest patterns, and context budget discipline inspired by **Headroom** ([headroom](https://github.com/headroom)), as well as KV-cache / payload reuse mechanisms inspired by **LMCache** ([LMCache](https://github.com/LMCache/LMCache)). We gratefully acknowledge their pioneering work in epistemology-first, bounded runtime engineering and LLM context caching for AI agent systems.
+Two projects shaped how Aegis handles context. The credits below describe
+what was actually taken, and what was not.
+
+**[Headroom](https://github.com/headroomlabs-ai/headroom)** — context
+compression for AI agents. Aegis adapts two of its ideas:
+
+- **Frozen zone / live zone.** Everything above the `LIVE ZONE` marker in the
+  assembled prompt is byte-identical for a given mode and configuration, so a
+  provider-side prefix cache has something stable to reuse. Mode-dependent
+  content (the pocket map) was moved below the marker. Reported as
+  `kind:"cache"` with `substrate:"raw"`.
+- **Reversible pruning (CCR).** Budget pruning preserves the full payload
+  beside the truncated one and records `recoverable_from`. Dropping bytes
+  from the prompt no longer destroys gathered evidence. Aegis has no
+  tool-calling loop, so recovery is runtime/operator-side — the model cannot
+  request the payload back mid-turn as it can with Headroom's `headroom_retrieve`.
+
+Not adapted: SmartCrusher / CodeCompressor / Kompress. Aegis's context is
+dominated by the epistemic handover — a nested document carrying a candidate
+diff — not the repetitive record shapes those compressors target, so the
+headline reduction figures do not transfer.
+
+**[LMCache](https://github.com/LMCache/LMCache)** — KV-cache layer for LLM
+serving. Only its *reuse discipline* transfers, not its mechanisms: KV-cache
+lives inside the inference engine, and Aegis is a client. What Aegis owns is
+payload-level reuse — the evidence cache is keyed on capability, demand,
+target and (for tree-derived capabilities only) repository state, which makes
+entries safe to keep across runs. Budget pruning cuts from the tail of the
+prompt rather than by payload size, so the prefix survives.
+
+Neither project is a dependency; nothing is vendored. We thank both for the
+work these ideas came from.
 
 ---
 

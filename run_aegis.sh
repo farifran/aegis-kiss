@@ -299,7 +299,12 @@ append_pipeline_budget_metric() {
 clear_pipeline_metrics() {
   mkdir -p "$(dirname "${METRICS_FILE}")" 2>/dev/null || true
   : > "${METRICS_FILE}"
-  export AEGIS_METRICS_FILE="${METRICS_FILE}"
+  # Absolute, not relative: the raw substrate runs from a disposable
+  # workspace (substrates/raw/workspace.sh cds into mktemp -d), so a
+  # relative path would append into a tree that is deleted on cleanup.
+  export AEGIS_METRICS_FILE="$(
+    cd "$(dirname "${METRICS_FILE}")" && pwd
+  )/$(basename "${METRICS_FILE}")"
 }
 
 # Post-forensics early-exit. 0 = HALT (status set); 1 = continue.

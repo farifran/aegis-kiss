@@ -23,6 +23,39 @@ request_has_json_object_format() {
     >/dev/null 2>&1
 }
 
+# Provider-reported token usage. This is the ONLY number that reflects what
+# the model actually billed/processed: request_bytes below is measured
+# before the request leaves this process, so it cannot see anything a
+# compressing proxy (or the provider's own prefix cache) does downstream.
+emit_provider_usage_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  [[ -f "${TMP_RESPONSE_FILE}" ]] || return 0
+
+  local request_bytes=0
+  [[ -f "${TMP_REQUEST_FILE}" ]] \
+    && request_bytes="$(wc -c < "${TMP_REQUEST_FILE}" | tr -d ' ')"
+
+  jq -c \
+    --arg mode "${AEGIS_MODE:-}" \
+    --arg model "${MODEL:-}" \
+    --argjson request_bytes "${request_bytes:-0}" \
+    '{
+       kind: "tokens",
+       mode: $mode,
+       model: $model,
+       request_bytes: $request_bytes,
+       prompt_tokens: (.usage.prompt_tokens // null),
+       completion_tokens: (.usage.completion_tokens // null),
+       total_tokens: (.usage.total_tokens // null),
+       cached_prompt_tokens: (
+         .usage.prompt_tokens_details.cached_tokens
+         // .usage.cached_tokens
+         // null
+       )
+     }' "${TMP_RESPONSE_FILE}" \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 execute_provider_request() {
 
   aegis_log "Executing raw cognition substrate..."
@@ -45,6 +78,14 @@ execute_provider_request() {
   local empty_response_max_attempts=3
   local empty_response_backoff
 
+  # Optional single extra request header, for gateways that need one to
+  # resolve the real upstream (e.g. a compressing proxy in front of an
+  # OpenAI-compatible endpoint). Format: "Name: value".
+  local -a extra_headers=()
+  if [[ -n "${AEGIS_PROVIDER_EXTRA_HEADER:-}" ]]; then
+    extra_headers=(-H "${AEGIS_PROVIDER_EXTRA_HEADER}")
+  fi
+
   while [[ "${attempt}" -le "${AEGIS_PROVIDER_MAX_RETRIES}" ]]; do
 
     curl_stats="$(
@@ -59,6 +100,7 @@ execute_provider_request() {
         "${OPENAI_API_BASE}/chat/completions" \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         -H "Content-Type: application/json" \
+        ${extra_headers[@]+"${extra_headers[@]}"} \
         --data @"${TMP_REQUEST_FILE}"
     )"
 
@@ -97,6 +139,7 @@ execute_provider_request() {
           echo "[AEGIS][RAW][WARN] Empty provider response persisted after ${empty_response_max_attempts}/${empty_response_max_attempts} attempts — surfacing terminal failure" >&2
         fi
 
+        emit_provider_usage_metric
         return 0
         ;;
 
