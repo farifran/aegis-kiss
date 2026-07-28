@@ -13,33 +13,19 @@ mutation_jq_lines() {
 # Contract-mandatory seeds from the preceding mode handover (stdout lines).
 mutation_targets_from_handover_contract() {
   local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
-  local handover_mode
-  handover_mode="$(mutation_jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
+  [[ -f "${handover}" ]] || return 0
 
-  if [[ "${handover_mode}" == "forensics" ]]; then
-    mutation_jq_lines "${handover}" \
-      '.artifact_snapshot.operational_context.repair_candidates[]?.id // empty'
-    return 0
-  fi
-
-  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
-    # Local repair feedback: re-enter from rejected validation without
-    # rediscovery. Scope is authorized_scopes (+ violation target_files).
-    mutation_jq_lines "${handover}" '
-      (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes // [])[]?,
-      (.artifact_snapshot.operational_context.repair_feedback.violations // [])[]?.target_files[]?
-    '
-    return 0
-  fi
-
-  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "repair" ]]; then
-    # Optimize can_improve → repair refine (same feedback shape).
-    mutation_jq_lines "${handover}" '
-      (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes // [])[]?,
-      (.artifact_snapshot.operational_context.repair_feedback.violations // [])[]?.target_files[]?
-    '
-    return 0
-  fi
+  jq -r --arg current_mode "${AEGIS_MODE:-}" '
+    .artifact_snapshot as $s
+    | if $s.mode == "forensics" then
+        $s.operational_context.repair_candidates[]?.id // empty
+      elif ($s.mode == "validation" or $s.mode == "optimize") and $current_mode == "repair" then
+        ($s.operational_context.repair_feedback.authorized_scopes // [])[]?,
+        ($s.operational_context.repair_feedback.violations // [])[]?.target_files[]?
+      else
+        empty
+      end
+  ' "${handover}" 2>/dev/null || true
 }
 
 # required_evidence filesystem.read paths from handover (stdout lines).
