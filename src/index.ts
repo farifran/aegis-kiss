@@ -12,3 +12,8 @@ export function converterSemanaEmSegundo(semanas: number): number {
   // 1 Semana = 604800 Segundos
   return semanas * 604800;
 }
+
+export function converterDiasEmSegundo(dias: number): number {
+  // 1 Dia = 86400 Segundos
+  return dias * 86400;
+}
