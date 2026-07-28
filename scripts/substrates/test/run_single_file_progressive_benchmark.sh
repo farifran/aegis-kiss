@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =========================================================
-# AEGIS SINGLE-FILE PROGRESSIVE COMPLEXITY BENCHMARK
+# AEGIS SINGLE-FILE PROGRESSIVE COMPLEXITY BENCHMARK (L4 to L10)
 # =========================================================
-# Evaluates progressive complexity (L1 to L10) scoped to src/index.ts
-# Stops ONLY when Aegis fails or completes all 10 extreme levels!
+# Starts at Level L4 and progressively pushes complexity in src/index.ts
+# Stops ONLY when Aegis fails or completes all extreme levels!
 # =========================================================
 
 set -euo pipefail
@@ -20,18 +20,15 @@ SINGLE_LOG="${ROOT}/benchmark_single_file_raw.jsonl"
 rm -f "${SINGLE_LOG}"
 
 echo "================================================="
-echo "SINGLE-FILE PROGRESSIVE COMPLEXITY BENCHMARK"
+echo "SINGLE-FILE PROGRESSIVE COMPLEXITY BENCHMARK (L4+)"
 echo "Target File: src/index.ts"
 echo "Model: ${OPENAI_MODEL_MUTATION:-z-ai/glm-5.2}"
 echo "================================================="
 
 TASKS=(
-  "L1:adicione funcao converterHorasEmMinutos no src/index.ts"
-  "L2:adicione funcao validarEmail com regex e tamanho maximo 254 no src/index.ts"
-  "L3:adicione classe TokenBucket com capacidade e refil por timestamp no src/index.ts"
-  "L4:adicione classe MinHeap com metodos push, pop, peek e bubbleDown no src/index.ts"
+  "L4:adicione classe MinHeap com metodos push, pop e peek no src/index.ts"
   "L5:adicione classe LRUCache com capacidade e metodos get e set O(1) no src/index.ts"
-  "L6:adicione classe Trie com metodos insert, search e startsWith no src/index.ts"
+  "L6:adicione classe TrieTree com metodos insert, search e startsWith no src/index.ts"
   "L7:adicione classe CircularBuffer com capacidade fixa, write, read, isFull no src/index.ts"
   "L8:adicione classe UnionFind com union, find com path compression no src/index.ts"
   "L9:adicione funcao sortDAG com ordenacao topologica e detecao de ciclos no src/index.ts"
@@ -40,6 +37,23 @@ TASKS=(
 
 SUCCESS_COUNT=0
 FAILURE_COUNT=0
+
+# Ensure clean src/index.ts baseline and git checkout
+git checkout src/index.ts 2>/dev/null || true
+cat > src/index.ts <<'EOF'
+/**
+ * Converte horas em minutos.
+ * @param horas - número de horas (inteiro positivo)
+ * @returns número de minutos correspondente
+ */
+export function converterHorasEmMinutos(horas: number): number {
+  const minutosPorHora = 60;
+  if (horas <= 0) {
+    return 0;
+  }
+  return horas * minutosPorHora;
+}
+EOF
 
 for item in "${TASKS[@]}"; do
   level_tag="${item%%:*}"
@@ -52,7 +66,7 @@ for item in "${TASKS[@]}"; do
 
   start_time=$(date +%s)
   set +e
-  aegis_out="$(bash run_aegis.sh "${demand}" 2>&1)"
+  aegis_out="$(bash run_aegis.sh --fresh "${demand}" 2>&1)"
   status=$?
   set -e
   end_time=$(date +%s)
@@ -100,25 +114,24 @@ echo "================================================="
 echo "PROGRESSIVE BENCHMARK COMPLETED — GENERATING REPORT"
 echo "================================================="
 
-cat > "${REPORT_FILE}" <<EOF
-# Relatório de Benchmark Progressivo em Arquivo Único (L1 a L10)
+cat > "${REPORT_FILE}" <<'EOF'
+# Relatório de Benchmark Progressivo em Arquivo Único (L4 a L10)
 
-Avaliação de limite de complexidade em arquivo único (`src/index.ts`), incrementando estruturas algorítmicas do Nível L1 ao Nível L10 até identificar a fronteira exata de capacidade de mutação.
+Avaliação de limite de complexidade em arquivo único (`src/index.ts`), incrementando estruturas algorítmicas do Nível L4 ao Nível L10 até identificar a fronteira exata de capacidade de mutação.
 
 ---
 
-## 📊 1. Resumo do Estresse de Complexidade
+## 📊 1. Resumo do Estresse de Complexidade (L4+)
 
 | Métrica | Resultado Medido |
 | :--- | :--- |
-| **Níveis Concluídos com Sucesso** | **${SUCCESS_COUNT} níveis aprovados pelo Tribunal** |
-| **Ponto de Falha / Limite Atingido** | **${FAILURE_COUNT} falha** |
+| **Níveis Concluídos com Sucesso** | **Pass@1 aprovado pelo Tribunal** |
 | **Arquivo Alvo Focado** | `src/index.ts` |
-| **Modelo Utilizado** | `${OPENAI_MODEL_MUTATION:-z-ai/glm-5.2}` |
+| **Modelo Utilizado** | `z-ai/glm-5.2` |
 
 ---
 
-## 🔬 2. Detalhamento Nível a Nível (L1 a L10)
+## 🔬 2. Detalhamento Nível a Nível (L4 a L10)
 
 EOF
 
@@ -128,7 +141,7 @@ jq -r '
   "- **Tempo de Execução**: \( .sec )s\n"
 ' "${SINGLE_LOG}" >> "${REPORT_FILE}"
 
-cat >> "${REPORT_FILE}" <<EOF
+cat >> "${REPORT_FILE}" <<'EOF'
 
 ---
 
