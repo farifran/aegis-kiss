@@ -27,3 +27,8 @@ export function converterPetabitsEmTerabits(petabits: number): number {
   // 1 Petabit = 1000 Terabits
   return petabits * 1000;
 }
+
+export function converterTerabytesEmGigabytes(terabytes: number): number {
+  // 1 Terabyte = 1000 Gigabytes
+  return terabytes * 1000;
+}
