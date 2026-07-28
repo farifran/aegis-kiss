@@ -18,8 +18,21 @@ fi
 # CAPABILITY PAYLOADS
 # =========================================================
 
-# Reuse counter for this mode execution — reported as kind:"cache".
+# Reuse accounting for this mode execution — reported as kind:"cache".
+# The byte count is the magnitude a bare hit count cannot express: it says
+# how much evidence was served without recomputing it.
 AEGIS_EVIDENCE_CACHE_HITS=0
+AEGIS_EVIDENCE_CACHE_BYTES=0
+
+record_evidence_cache_hit() {
+  local payload_path="$1"
+  AEGIS_EVIDENCE_CACHE_HITS=$((AEGIS_EVIDENCE_CACHE_HITS + 1))
+  if [[ -f "${payload_path}" ]]; then
+    AEGIS_EVIDENCE_CACHE_BYTES=$((
+      AEGIS_EVIDENCE_CACHE_BYTES + $(wc -c < "${payload_path}" | tr -d ' ')
+    ))
+  fi
+}
 
 # Repository state digest: HEAD plus the dirty status of the evidence
 # target. Memoized per process — one git call per mode, not per capability.
@@ -226,7 +239,7 @@ materialize_capability_payloads() {
         && aegis_try_reuse_stamped_tool_payload \
           "${capability}" "${payload_path}" "${_cand_hash}"; then
         cache_hit=1
-        AEGIS_EVIDENCE_CACHE_HITS=$((AEGIS_EVIDENCE_CACHE_HITS + 1))
+        record_evidence_cache_hit "${payload_path}"
       fi
       unset _cand_hash
     fi
@@ -246,7 +259,7 @@ materialize_capability_payloads() {
           '.execution_id = $execution_id | .generated_at = $generated_at' \
           "${cache_path}" > "${payload_path}"; then
           cache_hit=1
-          AEGIS_EVIDENCE_CACHE_HITS=$((AEGIS_EVIDENCE_CACHE_HITS + 1))
+          record_evidence_cache_hit "${payload_path}"
           aegis_log "evidence_cache_hit: ${capability}"
         else
           rm -f "${payload_path}" 2>/dev/null || true

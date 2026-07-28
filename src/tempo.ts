@@ -13,3 +13,7 @@ export function converterDiasEmSegundos(dias: number): number {
 export function converterBytesEmKilobits(bytes: number): number {
   return bytes * 8 / 1000;
 }
+
+export function converterBitsEmKilobytes(bits: number): number {
+  return bits / 8000;
+}

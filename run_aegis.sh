@@ -270,6 +270,32 @@ prune_pipeline_evidence_cache() {
     -mtime "+${AEGIS_EVIDENCE_CACHE_MAX_AGE_DAYS}" -delete 2>/dev/null || true
 }
 
+# Pipeline-level budget accounting. Each mode enforces its own ceiling with
+# no cumulative view, so a six-mode pipeline spends six times over without
+# anyone summing it. Fold the per-mode kind:"cache" lines into one
+# kind:"pipeline_budget" record at the end of the run.
+append_pipeline_budget_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  [[ -f "${AEGIS_METRICS_FILE}" ]] || return 0
+
+  jq -s -c '
+    map(select(.kind == "cache" and (.substrate | not)))
+    | {
+        kind: "pipeline_budget",
+        modes: length,
+        context_bytes_total: (map(.context_bytes // 0) | add // 0),
+        context_bytes_peak: (map(.context_bytes // 0) | max // 0),
+        ceiling_bytes: (map(.ceiling_bytes // 0) | max // 0),
+        evidence_cache_hits: (map(.evidence_cache_hits // 0) | add // 0),
+        evidence_cache_bytes: (map(.evidence_cache_bytes // 0) | add // 0),
+        budget_pruned_modes: (map(select(.budget_pruned == true)) | length)
+      }
+  ' "${AEGIS_METRICS_FILE}" >> "${AEGIS_METRICS_FILE}.tmp" 2>/dev/null || return 0
+
+  cat "${AEGIS_METRICS_FILE}.tmp" >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  rm -f "${AEGIS_METRICS_FILE}.tmp" 2>/dev/null || true
+}
+
 clear_pipeline_metrics() {
   mkdir -p "$(dirname "${METRICS_FILE}")" 2>/dev/null || true
   : > "${METRICS_FILE}"
@@ -647,6 +673,8 @@ show_final_report() {
     "${outcome_reason}" \
     "${outcome_class}" \
     "${outcome_mode}"
+
+  append_pipeline_budget_metric
 
   # Compact machine-readable summary for operators/CI (gitignored).
   local modes_json="[]"

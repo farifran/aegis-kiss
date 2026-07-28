@@ -712,9 +712,11 @@ emit_context_budget_metric() {
     --argjson context_bytes "$(measure_selected_payload_bytes)" \
     --argjson ceiling_bytes "${AEGIS_MAX_CONTEXT_BYTES}" \
     --argjson evidence_cache_hits "${AEGIS_EVIDENCE_CACHE_HITS:-0}" \
+    --argjson evidence_cache_bytes "${AEGIS_EVIDENCE_CACHE_BYTES:-0}" \
     --argjson budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
     '{kind:"cache",mode:$mode,context_bytes:$context_bytes,
       ceiling_bytes:$ceiling_bytes,evidence_cache_hits:$evidence_cache_hits,
+      evidence_cache_bytes:$evidence_cache_bytes,
       budget_pruned:$budget_pruned}' \
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
