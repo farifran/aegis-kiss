@@ -1,0 +1,51 @@
+{
+  "level": "L1_UNIT",
+  "iter": "1",
+  "demand": "adicione funçao converter Horas em Minutos",
+  "aegis": {
+    "sec": 34,
+    "pass": 100,
+    "in": 2300,
+    "out": 160
+  },
+  "mono": {
+    "sec": 42,
+    "pass": 100,
+    "in": 24800,
+    "out": 450
+  }
+}
+{
+  "level": "L1_UNIT",
+  "iter": "2",
+  "demand": "adicione funçao converter Horas em Minutos",
+  "aegis": {
+    "sec": 22,
+    "pass": 0,
+    "in": 2300,
+    "out": 0
+  },
+  "mono": {
+    "sec": 42,
+    "pass": 100,
+    "in": 24800,
+    "out": 450
+  }
+}
+{
+  "level": "L1_UNIT",
+  "iter": "3",
+  "demand": "adicione funçao converter Horas em Minutos",
+  "aegis": {
+    "sec": 84,
+    "pass": 0,
+    "in": 2300,
+    "out": 0
+  },
+  "mono": {
+    "sec": 42,
+    "pass": 100,
+    "in": 24800,
+    "out": 450
+  }
+}
