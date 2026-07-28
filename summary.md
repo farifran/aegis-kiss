@@ -232,6 +232,11 @@ Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent
 - **Discovery is runtime-only** — no `AEGIS_DISCOVERY_LLM`; mechanical fail is fatal.
 - **Forensics** — mechanical + probe discrimination; search only on LLM residual.
 - **Repair** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
+- **Context ceiling is fixed at 32 KB by decision, not omission.** The bound
+  comes from the task (one issue = one task = one target), not from the model
+  window, so it is deliberately not model-derived. `budget_exceeded: true`
+  reads as *this demand is too large for one execution* — split the demand
+  rather than raise the number.
 - Prefer hardening and KISS reduction over new architectural surfaces.
 
 ---

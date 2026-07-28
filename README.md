@@ -148,6 +148,20 @@ from it. `AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES` is deliberately independent — it
 is a structural validity gate, not a context ceiling, and must stay generous
 because the handover embeds the candidate diff.
 
+**Why fixed, and why 32 KB.** The ceiling is not model-derived on purpose.
+Aegis executes *one issue = one task = one target*, so the bound comes from
+the task, not from the model's window. A demand whose evidence does not fit in
+32 KB is a demand that should be split — which makes `budget_exceeded` a
+scoping signal, not a request to raise the number. Two caveats worth knowing:
+
+- The budgeter measures capability payload JSON. Formatted sections (candidate
+  diff, tools summary, anchors, investigation input) are assembled inside the
+  substrate *after* pruning, so the rendered prompt is larger than
+  `context_bytes` — compare it against `rendered_bytes` in the same metric.
+- The ceiling is advisory. The protected set (handover, demand anchors, content
+  seeds) can exceed it alone; the run proceeds and reports
+  `budget_exceeded: true`.
+
 | Flag | Meaning |
 |---|---|
 | `AEGIS_MAX_CONTEXT_BYTES` | Context budget; everything else derives from it |
