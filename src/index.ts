@@ -32,3 +32,8 @@ export function converterTerabytesEmGigabytes(terabytes: number): number {
   // 1 Terabyte = 1000 Gigabytes
   return terabytes * 1000;
 }
+
+export function converterKilobitsEmPentabits(kilobits: number): number {
+  // 1 Kilobit = 1e-12 Pentabits
+  return kilobits * 1e-12;
+}
