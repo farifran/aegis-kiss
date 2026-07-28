@@ -291,11 +291,30 @@ check_repair_to_optimize() {
 }
 
 check_optimize_to_adversarial() {
+  # The candidate diff / files_changed reach Adversarial as runtime-injected
+  # INSTANCE DATA (CANDIDATE RESULT), not as skill policy — the skill file
+  # therefore does not name them, and grepping it would prove nothing.
+  # Probe the actual injection path instead.
   array_contains "filesystem.read:epistemic_handover" "${AEGIS_ADVERSARIAL_EVIDENCE[@]}" \
-    && skill_declares ".skills/adversarial.md" "diff" \
-    && skill_declares ".skills/adversarial.md" "files_changed" \
+    && runtime_injects_candidate_result_for_adversarial \
+    && grep -Eq 'files_changed' scripts/lib/demand.sh \
     && grep -Eq 'AEGIS_JQ_ENRICH_OPTIMIZE' scripts/lib/artifact_protocol.sh \
     && grep -Eq 'candidate_result' scripts/lib/artifact_protocol.sh
+}
+
+# Adversarial must observe the candidate: the raw prompt assembler has to
+# call the candidate-result formatter inside its adversarial branch.
+runtime_injects_candidate_result_for_adversarial() {
+  local prompt_lib="scripts/substrates/raw/prompt.sh"
+  [[ -f "${prompt_lib}" ]] || return 1
+  declare -F aegis_format_candidate_result_section >/dev/null 2>&1 \
+    || grep -Eq 'aegis_format_candidate_result_section\(\)' scripts/lib/demand.sh \
+    || return 1
+  awk '
+    /AEGIS_MODE.*==.*"adversarial"/ { in_branch = 1 }
+    in_branch && /aegis_format_candidate_result_section/ { found = 1 }
+    END { exit !found }
+  ' "${prompt_lib}"
 }
 
 check_adversarial_to_validation() {

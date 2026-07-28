@@ -24,15 +24,12 @@ done
 [[ -n "${output_file}" ]] || exit 2
 [[ -f "${request_file}" ]] || exit 2
 
+# The raw system prompt marks the mode inline as "[Aegis mode:<mode>]"
+# (scripts/substrates/raw/prompt.sh). Keep this in sync with that marker.
 mode="$(
   jq -r '.messages[0].content // empty' "${request_file}" \
-    | awk '
-        $0 == "Mode:" {
-          getline
-          print
-          exit
-        }
-      '
+    | sed -n 's/.*\[Aegis mode:\([a-z_]*\)\].*/\1/p' \
+    | head -1
 )"
 
 mapfile -t payload_names < <(

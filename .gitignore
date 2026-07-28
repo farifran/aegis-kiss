@@ -28,6 +28,7 @@
 .harness/runtime/*.tmp
 .harness/runtime/*.bak
 .harness/runtime/*.snapshot
+.harness/runtime/*.err
 
 # Local machine secrets/config
 .harness/local.env

@@ -262,7 +262,6 @@ export AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP
 
 : "${AEGIS_EVIDENCE_MAX_FILES:=25}"
 : "${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:=45000}"
-: "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:=150000}"
 : "${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:=100}"
 : "${AEGIS_FILE_CONTENT_MAX_BYTES:=50000}"
 : "${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES:=75000}"
@@ -290,12 +289,21 @@ export AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP
 : "${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:=150000}"
 : "${AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES:=$(( AEGIS_MAX_CONTEXT_BYTES / 2 ))}"
 
-# Per-mode evidence budgets — constitutional guard against prompt explosion.
-# Discovery is bounded to 50KB of evidence (topology snapshot + attention seed).
-# Forensics gets 80KB (needs more context for interpretation).
-# These are enforced by the substrate before the prompt is assembled.
-: "${AEGIS_MAX_DISCOVERY_BYTES:=50000}"
-: "${AEGIS_MAX_FORENSICS_BYTES:=80000}"
+# Rendered prompt backstop — DERIVED, not an independent policy.
+#
+# There is exactly one context budget: AEGIS_MAX_CONTEXT_BYTES, enforced by
+# the budgeter on every mode execution. The raw substrate re-checks the
+# ASSEMBLED PROMPT TEXT, which is the same evidence in a different unit:
+# rendering adds the pocket map, the manifest, section headers and the
+# volatile tail. Measured overhead is ~1.7x the payload JSON sum, so 2x
+# guarantees the renderer never cuts evidence the budgeter already kept —
+# which is exactly what a single shared number would have done.
+#
+# There are no per-mode renderer budgets. Discovery cannot reach this path
+# at all (execute_mode.sh returns mechanically before any substrate), and
+# every other mode reaches it only on a residual LLM branch. Budgeting
+# those separately was three numbers describing one constraint.
+: "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:=$(( AEGIS_MAX_CONTEXT_BYTES * 2 ))}"
 
 export AEGIS_EVIDENCE_MAX_FILES
 export AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES
@@ -306,8 +314,6 @@ export AEGIS_MAX_CONTEXT_BYTES
 export AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES
 export AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES
 export AEGIS_CAPABILITY_MANIFEST_MAX_BYTES
-export AEGIS_MAX_DISCOVERY_BYTES
-export AEGIS_MAX_FORENSICS_BYTES
 
 # =========================================================
 # EVIDENCE CACHE
