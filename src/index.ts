@@ -33,3 +33,7 @@ export function converterBytesEmMegabits(bytes: number): number {
 export function converterGigabitsEmTerabits(gigabits: number): number {
   return gigabits / 1000;
 }
+
+export function converterMesesEmSegundos(meses: number): number {
+  return meses * 2592000;
+}

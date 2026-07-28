@@ -16,7 +16,12 @@ aider_mktemp() {
 
 cleanup_aider_substrate() {
   set +e
+  local main_prompt="${AEGIS_CURRENT_PROMPT_FILE:-}"
   for f in "${_AIDER_TMP_FILES[@]:-}"; do
+    [[ -n "${f}" ]] || continue
+    if [[ -n "${main_prompt}" ]] && [[ "${f}" == "${main_prompt}" ]]; then
+      continue
+    fi
     rm -f "${f}" >/dev/null 2>&1 || true
   done
   set -e

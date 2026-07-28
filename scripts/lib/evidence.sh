@@ -162,6 +162,7 @@ materialize_capability_payloads() {
     )"
 
     payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
+    mkdir -p "$(dirname "${payload_path}")" 2>/dev/null || true
     cache_hit=0
     cache_path=""
 

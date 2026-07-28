@@ -154,10 +154,13 @@ main() {
 
   local prompt_file
   prompt_file="$(aider_mktemp)"
+  export AEGIS_CURRENT_PROMPT_FILE="${prompt_file}"
   assemble_mutation_prompt \
     "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]:-}"
   invoke_aider \
     "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]:-}"
+  rm -f "${prompt_file}" 2>/dev/null || true
+  unset AEGIS_CURRENT_PROMPT_FILE 2>/dev/null || true
 
   aegis_log "Capturing worktree diff..."
 
