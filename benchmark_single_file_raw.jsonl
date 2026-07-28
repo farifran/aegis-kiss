@@ -1,6 +1,0 @@
-{
-  "level": "L4",
-  "demand": "adicione classe MinHeap com metodos push, pop e peek no src/index.ts",
-  "sec": 5,
-  "status": "FAILED"
-}
