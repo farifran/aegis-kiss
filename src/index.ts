@@ -25,3 +25,14 @@ export function converterKilobitsEmPentabytes(kilobits: number): number {
   const bitsPorPentabyte = bytesPorPentabyte * bitsPorByte;
   return (kilobits * bitsPorKilobit) / bitsPorPentabyte;
 }
+
+/**
+ * Converte megabytes em kilobytes.
+ * @param megabytes - número de megabytes (inteiro positivo)
+ * @returns número de kilobytes correspondente
+ */
+export function converterMegabytesEmKilobytes(megabytes: number): number {
+  const bytesPorMegabyte = 1_000_000;
+  const kilobytesPorMegabyte = bytesPorMegabyte / 1_000;
+  return megabytes * kilobytesPorMegabyte;
+}
