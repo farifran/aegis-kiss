@@ -185,6 +185,25 @@ main() {
       cat "${AEGIS_AIDER_OUTPUT_LOG}" >&2
     fi
     rollback_execution_surface
+    # When the provider never let the model answer, the demand is not the
+    # problem: calling it mutation sends the operator (and the loop) off
+    # rewriting a demand that was fine. provider is a stop class.
+    if [[ -n "${AEGIS_AIDER_OUTPUT_LOG:-}" && -f "${AEGIS_AIDER_OUTPUT_LOG}" ]]; then
+      if grep -qiE 'ratelimiterror|rate limited|429|too many requests' \
+        "${AEGIS_AIDER_OUTPUT_LOG}" 2>/dev/null; then
+        aegis_fatal "provider_retry_limit_exceeded"
+      fi
+      if grep -qiE 'authenticationerror|permissiondenied|error code: (401|403)' \
+        "${AEGIS_AIDER_OUTPUT_LOG}" 2>/dev/null; then
+        aegis_fatal "provider_authentication_failure"
+      fi
+      # 404 (model id gone), 5xx, connection errors — anything litellm
+      # reports as a transport/API failure rather than a model answer.
+      if grep -qiE 'litellm\.[A-Za-z]*Error|error code: [0-9]{3}|apiconnectionerror' \
+        "${AEGIS_AIDER_OUTPUT_LOG}" 2>/dev/null; then
+        aegis_fatal "provider_http_failure"
+      fi
+    fi
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 

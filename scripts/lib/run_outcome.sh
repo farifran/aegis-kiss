@@ -124,6 +124,11 @@ aegis_classify_reason() {
       if [[ "${token}" == empty_diff:* ]]; then
         class="mutation"
         next_step="Substrate não produziu mudança; demanda pode já estar satisfeita — confira worktree/git log antes de repetir"
+      elif [[ "${token}" == mutation_artifact_missing_diff_or_files_changed* ]]; then
+        # Substrate ran but emitted no diff/files_changed. Same family as
+        # empty_diff, different emitter; the aider log has the real cause.
+        class="mutation"
+        next_step="Substrate correu sem produzir diff; leia o [DEBUG] Aider output log no stderr antes de mexer na demanda"
       elif [[ "${token}" == *unbound\ variable* ]] \
         || [[ "${token}" == *unbound_variable* ]]; then
         # bash set -u crashes (often no aegis_fatal breadcrumb on older paths)

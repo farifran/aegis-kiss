@@ -18,6 +18,9 @@ fi
 # CAPABILITY PAYLOADS
 # =========================================================
 
+# Reuse counter for this mode execution — reported as kind:"cache".
+AEGIS_EVIDENCE_CACHE_HITS=0
+
 # Stable cache key for deterministic, mode-stable evidence payloads.
 # Includes investigation input so Layer 0 / attention_seed never leak
 # across unrelated pipeline demands.
@@ -181,6 +184,7 @@ materialize_capability_payloads() {
         && aegis_try_reuse_stamped_tool_payload \
           "${capability}" "${payload_path}" "${_cand_hash}"; then
         cache_hit=1
+        AEGIS_EVIDENCE_CACHE_HITS=$((AEGIS_EVIDENCE_CACHE_HITS + 1))
       fi
       unset _cand_hash
     fi
@@ -200,6 +204,7 @@ materialize_capability_payloads() {
           '.execution_id = $execution_id | .generated_at = $generated_at' \
           "${cache_path}" > "${payload_path}"; then
           cache_hit=1
+          AEGIS_EVIDENCE_CACHE_HITS=$((AEGIS_EVIDENCE_CACHE_HITS + 1))
           aegis_log "evidence_cache_hit: ${capability}"
         else
           rm -f "${payload_path}" 2>/dev/null || true

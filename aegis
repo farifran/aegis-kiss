@@ -300,6 +300,10 @@ cmd_go() {
     [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "invalid_issue:${issue}"
     command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
     assert_not_blocked "${issue}"
+    # Drop the cache first: a re-run must pick up an issue edited since the
+    # last attempt, and the target below is read from that same body. The
+    # run refetches and re-seeds, so the demand stays stable within the run.
+    rm -f "${ISSUE_CACHE_DIR}/issue_${issue}.md"
     # The issue already names its target under ## Targets; asking the
     # operator to repeat it is a way to repeat it differently.
     if [[ -z "${target}" ]]; then

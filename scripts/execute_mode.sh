@@ -592,11 +592,17 @@ select_evidence_payloads() {
 # =========================================================
 #
 # Native size guard over the assembled prompt payload buffer: when the
-# selected evidence payloads exceed AEGIS_MAX_CONTEXT_BYTES, lower-
-# priority payloads are truncated (largest first; the epistemic
-# handover read — the failure/candidate context — is never pruned)
-# until the buffer fits. Pruned payloads and the selected manifest are
-# flagged with context_budget_pruned: true.
+# selected evidence payloads exceed AEGIS_MAX_CONTEXT_BYTES, payloads are
+# truncated from the TAIL of the prompt backwards (the epistemic handover
+# read — the failure/candidate context — is never pruned) until the buffer
+# fits. Pruned payloads and the selected manifest are flagged with
+# context_budget_pruned: true.
+#
+# Tail-first, not largest-first: the selected list is already in prompt
+# order (prioritize_evidence_entries), so reversing it cuts the lowest-
+# signal evidence first and leaves the high-signal head intact. Cutting by
+# size instead would destroy a rank-15 anchor merely for being big while
+# rank-70 noise survives — an inversion of the ranking policy above.
 
 : "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
 
@@ -661,9 +667,9 @@ enforce_context_token_budget() {
 
   aegis_warn "Context budget exceeded: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — pruning lower-priority evidence"
 
-  # Prunable payloads, largest first among low-priority evidence.
-  # Protected (never pruned first): demand_anchors, epistemic handover,
-  # and filesystem.read content seeds — these are the mechanical anchors.
+  # Prunable payloads, last-in-prompt first. Protected (never pruned):
+  # demand_anchors, epistemic handover, and filesystem.read content seeds
+  # — these are the mechanical anchors.
   local payload_path
   while IFS= read -r payload_path; do
     [[ -f "${payload_path}" ]] || continue
@@ -677,7 +683,7 @@ enforce_context_token_budget() {
     fi
   done < <(
     printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" \
-      | jq -r '.[]?' \
+      | jq -r 'reverse | .[]?' \
       | while IFS= read -r p; do
           [[ -f "${p}" ]] || continue
           case "${p}" in
@@ -685,10 +691,8 @@ enforce_context_token_budget() {
               continue
               ;;
           esac
-          printf '%s %s\n' "$(wc -c < "${p}" | tr -d ' ')" "${p}"
-        done \
-      | sort -rn \
-      | cut -d' ' -f2-
+          printf '%s\n' "${p}"
+        done
   )
 
   if [[ "${total_bytes}" -gt "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
@@ -696,6 +700,22 @@ enforce_context_token_budget() {
   else
     aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes after pruning"
   fi
+}
+
+# One kind:"cache" line per mode execution — makes evidence reuse and
+# budget pruning observable instead of asserted.
+emit_context_budget_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  jq -cn \
+    --arg mode "${AEGIS_MODE:-}" \
+    --argjson context_bytes "$(measure_selected_payload_bytes)" \
+    --argjson ceiling_bytes "${AEGIS_MAX_CONTEXT_BYTES}" \
+    --argjson evidence_cache_hits "${AEGIS_EVIDENCE_CACHE_HITS:-0}" \
+    --argjson budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
+    '{kind:"cache",mode:$mode,context_bytes:$context_bytes,
+      ceiling_bytes:$ceiling_bytes,evidence_cache_hits:$evidence_cache_hits,
+      budget_pruned:$budget_pruned}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
 
 # =========================================================
@@ -984,6 +1004,7 @@ main() {
   consume_runtime_owned_capability_manifest
   select_evidence_payloads
   enforce_context_token_budget
+  emit_context_budget_metric
   materialize_selected_manifest
 
   # Adversarial mechanical (no LLM):

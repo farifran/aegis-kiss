@@ -417,24 +417,12 @@ layer0_hot_files() {
 # MAIN ASSEMBLY (standard capability envelope)
 # ---------------------------------------------------------
 
+# Caching is NOT done here: runtime.layer0_facts is registered in
+# AEGIS_CACHEABLE_CAPABILITIES, so the intra-pipeline evidence cache
+# (scripts/lib/evidence.sh) owns reuse and keys on the same facts.
 layer0_facts_main() {
 
   require_directory_target "${TARGET_PATH}"
-
-  local git_head_hash
-  git_head_hash="$(git rev-parse HEAD 2>/dev/null || echo "no-git")"
-  local cache_dir="${AEGIS_RUNTIME_DIR:-.harness/runtime}"
-  local cache_hash_file="${cache_dir}/layer0_git.hash"
-  local cached_payload="${cache_dir}/layer0_cached.json"
-
-  if [[ -f "${cache_hash_file}" && -f "${cached_payload}" ]]; then
-    local prev_hash
-    prev_hash="$(cat "${cache_hash_file}" 2>/dev/null || true)"
-    if [[ "${prev_hash}" == "${git_head_hash}:${TARGET_PATH}:${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
-      emit_success_payload_file "${cached_payload}"
-      return 0
-    fi
-  fi
 
   build_layer0_census
 
@@ -456,11 +444,6 @@ layer0_facts_main() {
       import_gravity: $import_gravity,
       hot_files: $hot_files
     }' > "${tmp_payload_file}"
-
-  if [[ -d "${cache_dir}" ]]; then
-    cp "${tmp_payload_file}" "${cached_payload}" 2>/dev/null || true
-    printf '%s' "${git_head_hash}:${TARGET_PATH}:${AEGIS_INVESTIGATION_INPUT:-}" > "${cache_hash_file}" 2>/dev/null || true
-  fi
 
   emit_success_payload_file "${tmp_payload_file}"
 }

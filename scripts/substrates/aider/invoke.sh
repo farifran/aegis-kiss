@@ -386,6 +386,17 @@ capture_worktree_diff() {
     fi
   fi
 
+  # A diff with no "+++" line carries no file content. git emits a bare
+  # header (mode + index, no hunks) for a net-new file the model left
+  # empty — 85 bytes that look like a change and are not one. Returning it
+  # non-empty skips the empty_diff path below (which dumps the aider log)
+  # and surfaces later as mutation_artifact_missing_diff_or_files_changed,
+  # with no evidence of what the model actually said.
+  # Deletions keep a "+++ /dev/null" line, so they are not caught here.
+  if ! printf '%s\n' "${diff_output}" | grep -q '^+++ '; then
+    diff_output=""
+  fi
+
   printf '%s' "${diff_output}"
 }
 

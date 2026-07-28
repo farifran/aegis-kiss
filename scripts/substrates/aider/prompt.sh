@@ -341,14 +341,34 @@ EOF
     mv "${restored_file}" "${prompt_file}"
   fi
 
-  # Compute deterministic epistemic prompt prefix SHA-256 hash (LMCache KV-Cache alignment)
-  local prefix_hash=""
+  # Hash the stable prompt head — everything above the first '---', i.e.
+  # preamble + mode marker + skill contract + pocket map. Instance data
+  # (anchors, ALVO, brief, investigation input) lives below and is expected
+  # to churn. Reported, not asserted: a prefix that is actually stable
+  # repeats this hash across the invocations of one mutation, so the
+  # kind:"cache" metric shows whether prefix reuse is possible at all.
+  # Whether the provider exploits it is server-side and not observable here.
+  local prefix_file prefix_hash prefix_bytes
+  prefix_file="$(aider_mktemp)"
+  awk '/^---$/{exit} {print}' "${prompt_file}" > "${prefix_file}"
+  prefix_bytes="$(wc -c < "${prefix_file}" | tr -d ' ')"
   if command -v shasum >/dev/null 2>&1; then
-    prefix_hash="$(head -n 25 "${prompt_file}" | shasum -a 256 | awk '{print $1}')"
+    prefix_hash="$(shasum -a 256 < "${prefix_file}" | awk '{print $1}')"
   else
-    prefix_hash="$(head -n 25 "${prompt_file}" | cksum | awk '{print $1}')"
+    prefix_hash="$(cksum < "${prefix_file}" | awk '{print $1}')"
   fi
-  echo "[AEGIS][CACHE] epistemic_prefix_cache_hash: ${prefix_hash:0:16} (100% KV-cache deterministic header)"
+
+  aegis_log "prompt_prefix: ${prefix_hash:0:16} (${prefix_bytes} bytes stable head)"
+
+  if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+    jq -cn \
+      --arg mode "${AEGIS_MODE:-}" \
+      --arg prefix_hash "${prefix_hash:0:16}" \
+      --argjson prefix_bytes "${prefix_bytes}" \
+      '{kind:"cache",mode:$mode,substrate:"aider",
+        prefix_hash:$prefix_hash,prefix_bytes:$prefix_bytes}' \
+      >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  fi
 }
 
 

@@ -21,6 +21,9 @@
 .harness/runtime/issue_cache/
 .harness/runtime/commit.msg
 .harness/runtime/draft.md
+.harness/runtime/layer0_cached.json
+.harness/runtime/layer0_git.hash
+.harness/runtime/*.swp
 
 .harness/runtime/*.tmp
 .harness/runtime/*.bak
