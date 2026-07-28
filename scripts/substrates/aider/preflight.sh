@@ -609,7 +609,8 @@ run_mutation_preflight_with_fix_attempts() {
         "${mutation_targets[@]}"
     fi
 
-    invoke_aider "${fix_prompt}" "${resolved_edit_format}" "${mutation_targets[@]}"
+    AEGIS_AIDER_INVOCATION_PHASE="${fix_phase:-fix}" \
+      invoke_aider "${fix_prompt}" "${resolved_edit_format}" "${mutation_targets[@]}"
 
     diff_content="$(capture_worktree_diff)"
     if [[ -z "${diff_content}" ]]; then

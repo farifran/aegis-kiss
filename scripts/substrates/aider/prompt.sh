@@ -170,16 +170,21 @@ ${feedback_summary}
 Apply the listed refinements and stop.
 EOF
     else
+      # Validation path: the violations are already rendered as instance data
+      # by aegis_format_repair_feedback_section (=== REPAIR FEEDBACK ===).
+      # Repeating them here put every violation in the prompt twice — the
+      # close cue points at that section instead of restating it. The
+      # optimize branch above keeps its copy: the runtime section selects on
+      # mode == "validation", so there it is the only rendering.
       printf '%s' "Original investigation input (repair feedback iteration — fix only listed violations):" > "${label_file}"
       cat > "${instructions_file}" <<EOF
 CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
-A prior validation REJECTED the candidate. Fix ONLY the structured violations below inside authorized_scopes.
+A prior validation REJECTED the candidate. Fix ONLY the violations listed under
+=== REPAIR FEEDBACK (runtime) === above, inside the scopes stated there.
 Do NOT re-implement the whole demand from scratch unless a violation requires it.
 Do NOT expand scope beyond authorized_scopes / loaded targets.
 Do NOT add features unrelated to the violations.
 Emit edits only — no narration.
-
-${feedback_summary}
 
 Apply the minimal fix and stop.
 EOF

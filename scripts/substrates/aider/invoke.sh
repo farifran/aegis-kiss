@@ -255,6 +255,47 @@ interpret_aider_exit_status() {
   aegis_fatal "aider_execution_failed"
 }
 
+# Aider owns its own provider calls, so the raw substrate's kind:"tokens"
+# metric never sees repair — the most expensive mode was the only one with
+# no token accounting at all. Aider prints "Tokens: 2.3k sent, 84 received"
+# per invocation; a repair can spend up to 7 of them (1 + intent fixes +
+# preflight fixes), each a cold process resending the whole chat.
+emit_aider_token_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  [[ -n "${AEGIS_AIDER_OUTPUT_LOG:-}" && -f "${AEGIS_AIDER_OUTPUT_LOG}" ]] || return 0
+
+  local line sent received
+  line="$(
+    grep -oE 'Tokens: [0-9.]+k? sent, [0-9.]+k? received' \
+      "${AEGIS_AIDER_OUTPUT_LOG}" 2>/dev/null | tail -1
+  )"
+  [[ -n "${line}" ]] || return 0
+
+  # "2.3k" -> 2300 ; "84" -> 84
+  _expand_k() {
+    local v="$1"
+    if [[ "${v}" == *k ]]; then
+      awk -v n="${v%k}" 'BEGIN{printf "%d", n*1000}'
+    else
+      printf '%s' "${v%.*}"
+    fi
+  }
+  sent="$(_expand_k "$(printf '%s' "${line}" | awk '{print $2}')")"
+  received="$(_expand_k "$(printf '%s' "${line}" | awk '{print $4}')")"
+
+  jq -cn \
+    --arg mode "${AEGIS_MODE:-repair}" \
+    --arg model "${AEGIS_AIDER_MODEL:-}" \
+    --arg phase "${AEGIS_AIDER_INVOCATION_PHASE:-primary}" \
+    --argjson prompt_tokens "${sent:-0}" \
+    --argjson completion_tokens "${received:-0}" \
+    --argjson seconds "${AEGIS_AIDER_LAST_ELAPSED:-0}" \
+    '{kind:"tokens",mode:$mode,substrate:"aider",model:$model,phase:$phase,
+      prompt_tokens:$prompt_tokens,completion_tokens:$completion_tokens,
+      seconds:$seconds}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 invoke_aider() {
 
   local prompt_file="$1"
@@ -327,6 +368,8 @@ invoke_aider() {
   aegis_log "Targets: ${file_args[*]:-<none>}"
 
   run_aider_with_watchdog "${aider_cmd[@]}"
+
+  emit_aider_token_metric
 
   # Jail file is invocation-scoped — never leave it on the surface.
   rm -f "${aiderignore_file}" 2>/dev/null || true
