@@ -37,3 +37,7 @@ export function converterGigabitsEmTerabits(gigabits: number): number {
 export function converterMesesEmSegundos(meses: number): number {
   return meses * 2592000;
 }
+
+export function converterDiasEmSegundos(dias: number): number {
+  return dias * 86400;
+}
