@@ -1,0 +1,6 @@
+id: no-bracket-private-bypass
+message: "Acesso por colchetes literais para propriedades privadas (ex: obj['prop']) é proibido."
+severity: error
+language: typescript
+rule:
+  pattern: $OBJ['$PROP']
