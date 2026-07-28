@@ -28,7 +28,8 @@ aegis_capability_init "filesystem.read"
 
 max_read_bytes="${AEGIS_FILE_CONTENT_MAX_BYTES:-50000}"
 if [[ "$(basename "${TARGET_FILE}")" == "epistemic_handover.json" ]]; then
-  max_read_bytes="${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:-100000}"
+  # Read ceiling, not the validity gate — see .harness/config.sh.
+  max_read_bytes="${AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES:-16384}"
 fi
 readonly MAX_READ_BYTES="${max_read_bytes}"
 

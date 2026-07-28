@@ -257,14 +257,17 @@ clear_operator_breadcrumbs() {
   fi
 }
 
-# Wipe the intra-pipeline evidence cache so modes never reuse payloads
-# from a previous pipeline run (investigation input may have changed).
-clear_pipeline_evidence_cache() {
+# Expire stale evidence cache entries. Wiping is not needed: the cache key
+# binds capability + demand + target + repository state, so an entry from
+# another run can never be served for a different tree or demand. Keeping
+# entries is what lets discovery reuse layer0 / list_tree / attention_seed
+# across runs instead of recomputing them every time.
+: "${AEGIS_EVIDENCE_CACHE_MAX_AGE_DAYS:=7}"
+prune_pipeline_evidence_cache() {
   local cache_dir="${AEGIS_EVIDENCE_CACHE_DIR:-.harness/runtime/evidence_cache}"
-  if [[ -d "${cache_dir}" ]]; then
-    rm -rf "${cache_dir}"
-  fi
   mkdir -p "${cache_dir}" 2>/dev/null || true
+  find "${cache_dir}" -type f -name '*.json' \
+    -mtime "+${AEGIS_EVIDENCE_CACHE_MAX_AGE_DAYS}" -delete 2>/dev/null || true
 }
 
 clear_pipeline_metrics() {
@@ -913,7 +916,7 @@ main() {
   fi
 
   clear_operator_breadcrumbs
-  clear_pipeline_evidence_cache
+  prune_pipeline_evidence_cache
   clear_pipeline_metrics
 
   local mode

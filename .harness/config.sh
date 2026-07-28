@@ -265,8 +265,30 @@ export AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP
 : "${AEGIS_EVIDENCE_MAX_TOTAL_BYTES:=150000}"
 : "${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:=100}"
 : "${AEGIS_FILE_CONTENT_MAX_BYTES:=50000}"
-: "${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:=150000}"
 : "${AEGIS_CAPABILITY_MANIFEST_MAX_BYTES:=75000}"
+
+# Total prompt payload buffer ceiling, enforced by the budgeter in
+# execute_mode.sh. Declared here with the other budgets so the handover
+# read below can be derived from it.
+: "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
+
+# The epistemic handover has TWO independent ceilings, which must not be
+# conflated:
+#
+#   _MAX_BYTES      structural validity gate (lib/epistemic_handover.sh).
+#                   Stays generous: the handover legitimately embeds the
+#                   candidate diff, so it grows with the size of the
+#                   mutation. Rejecting a large-but-valid handover would
+#                   fail the run outright.
+#
+#   _READ_MAX_BYTES how much of it enters the prompt (capabilities/
+#                   filesystem/read_file.sh). The handover read is the one
+#                   payload the budgeter may never prune, so it must fit
+#                   inside the context budget by construction. Half leaves
+#                   room for the other protected evidence (demand anchors
+#                   and content seeds).
+: "${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:=150000}"
+: "${AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES:=$(( AEGIS_MAX_CONTEXT_BYTES / 2 ))}"
 
 # Per-mode evidence budgets — constitutional guard against prompt explosion.
 # Discovery is bounded to 50KB of evidence (topology snapshot + attention seed).
@@ -280,17 +302,22 @@ export AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES
 export AEGIS_EVIDENCE_MAX_TOTAL_BYTES
 export AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES
 export AEGIS_FILE_CONTENT_MAX_BYTES
+export AEGIS_MAX_CONTEXT_BYTES
 export AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES
+export AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES
 export AEGIS_CAPABILITY_MANIFEST_MAX_BYTES
 export AEGIS_MAX_DISCOVERY_BYTES
 export AEGIS_MAX_FORENSICS_BYTES
 
 # =========================================================
-# INTRA-PIPELINE EVIDENCE CACHE
+# EVIDENCE CACHE
 # =========================================================
 # Deterministic, mode-stable payloads (list_tree, layer0, attention_seed)
-# are reused across modes within one pipeline run. Cache is wiped at
-# pipeline start by run_aegis.sh; never treated as cross-run memory.
+# are reused across modes AND across runs. This is memoization of
+# deterministic work, not epistemic memory: the key binds the demand, the
+# target and the repository state (HEAD + dirty digest), so a hit can only
+# ever return what recomputing would produce. Entries expire by age
+# (run_aegis.sh); they are never a source of repository facts on their own.
 
 : "${AEGIS_EVIDENCE_CACHE_DIR:=${AEGIS_ROOT_DIR}/.harness/runtime/evidence_cache}"
 : "${AEGIS_EVIDENCE_CACHE_ENABLED:=true}"

@@ -21,19 +21,39 @@ fi
 # Reuse counter for this mode execution — reported as kind:"cache".
 AEGIS_EVIDENCE_CACHE_HITS=0
 
+# Repository state digest: HEAD plus the dirty status of the evidence
+# target. Memoized per process — one git call per mode, not per capability.
+AEGIS_EVIDENCE_REPO_STATE=""
+evidence_repo_state() {
+  if [[ -z "${AEGIS_EVIDENCE_REPO_STATE}" ]]; then
+    AEGIS_EVIDENCE_REPO_STATE="$(
+      {
+        git rev-parse HEAD 2>/dev/null || echo "no-git"
+        git status --porcelain -- "${AEGIS_EVIDENCE_TARGET_PATH:-.}" 2>/dev/null || true
+      } | shasum -a 256 2>/dev/null | awk '{print $1}'
+    )"
+    AEGIS_EVIDENCE_REPO_STATE="${AEGIS_EVIDENCE_REPO_STATE:-no-state}"
+  fi
+  printf '%s' "${AEGIS_EVIDENCE_REPO_STATE}"
+}
+
 # Stable cache key for deterministic, mode-stable evidence payloads.
 # Includes investigation input so Layer 0 / attention_seed never leak
-# across unrelated pipeline demands.
+# across unrelated pipeline demands, and repository state so an entry can
+# never be served for a tree it was not computed from. Those two together
+# are what make the cache safe to keep ACROSS runs: a changed demand or a
+# changed target produces a different key, so a stale hit is impossible.
 evidence_cache_key() {
   local capability="$1"
   local capability_argument="$2"
   local seed
   seed="$(
-    printf '%s\0%s\0%s\0%s' \
+    printf '%s\0%s\0%s\0%s\0%s' \
       "${capability}" \
       "${capability_argument}" \
       "${AEGIS_INVESTIGATION_INPUT:-}" \
       "${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
+      "$(evidence_repo_state)" \
       | shasum -a 256 2>/dev/null \
       | awk '{print $1}'
   )"

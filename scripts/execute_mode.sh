@@ -401,7 +401,7 @@ invoke_capability_handler() {
     AEGIS_EVIDENCE_TARGET_PATH="${AEGIS_EVIDENCE_TARGET_PATH:-.}" \
     AEGIS_CAPABILITY_PAYLOAD_DIR="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
     AEGIS_POCKET_MAP_FILE="${AEGIS_POCKET_MAP_FILE:-}" \
-    AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES="${AEGIS_EPISTEMIC_HANDOVER_MAX_BYTES:-}" \
+    AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES="${AEGIS_EPISTEMIC_HANDOVER_READ_MAX_BYTES:-}" \
     AEGIS_FILE_CONTENT_MAX_BYTES="${AEGIS_FILE_CONTENT_MAX_BYTES:-}" \
     AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES="${AEGIS_SEARCH_SYMBOL_MAX_MATCH_LINES:-}" \
     AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES="${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-}" \
@@ -604,6 +604,9 @@ select_evidence_payloads() {
 # size instead would destroy a rank-15 anchor merely for being big while
 # rank-70 noise survives — an inversion of the ranking policy above.
 
+# Declared in .harness/config.sh with the other evidence budgets (the
+# handover read ceiling is derived from it). Fallback kept for direct
+# invocations that bypass config.
 : "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
 
 AEGIS_CONTEXT_BUDGET_PRUNED="false"
