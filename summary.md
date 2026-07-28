@@ -233,3 +233,40 @@ Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent
 - **Forensics** — mechanical + probe discrimination; search only on LLM residual.
 - **Repair** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
 - Prefer hardening and KISS reduction over new architectural surfaces.
+
+---
+
+## Open verification — prompt prefix reuse (BLOCKING for context-cost claims)
+
+The context work (tail-first budget pruning, frozen zone / live zone split,
+`kind:"cache"` prefix hashes) all rests on one unproven premise: that the
+provider actually reuses a stable prompt prefix. **That reuse has never been
+observed.**
+
+Measured so far:
+
+| Fact | Value |
+|---|---|
+| Repair frozen head | 2295 B — ~41% of each repair invocation |
+| Raw frozen zone (forensics) | 1512 B, hash stable across runs *and* demands |
+| `cached_prompt_tokens` reported | `null` on every run (NVIDIA `integrate.api.nvidia.com`) |
+
+The current endpoint either has no prefix cache or does not report one, so the
+payoff is unmeasurable here. `emit_provider_usage_metric`
+(`scripts/substrates/raw/provider.sh`) already reads
+`usage.prompt_tokens_details.cached_tokens` / `usage.cached_tokens` — nothing
+to build, only a provider that fills them.
+
+**What to run when one is available** (Anthropic reports
+`cache_read_input_tokens`; OpenAI reports `prompt_tokens_details.cached_tokens`):
+
+```bash
+# same demand twice — the second run should show cached_prompt_tokens > 0
+./run_aegis.sh --fresh --pipeline mutation "<same demand>"
+./run_aegis.sh --fresh --pipeline mutation "<same demand>"
+jq -c 'select(.kind=="tokens")' .harness/runtime/pipeline_metrics.jsonl
+```
+
+Outcome decides whether prefix discipline is load-bearing or decoration. If
+`cached_prompt_tokens` stays 0 with a reporting provider, the frozen-zone work
+is inert and the ordering constraints it imposes can be relaxed.

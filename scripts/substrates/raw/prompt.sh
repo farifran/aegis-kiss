@@ -118,12 +118,22 @@ emit_raw_prefix_metric() {
   fi
   rm -f "${prefix_file}"
 
+  # rendered_bytes is what the model actually receives; the budgeter upstream
+  # only ever saw the capability payload JSON. Formatted sections (candidate
+  # diff, tools summary, anchors, investigation input) are assembled here,
+  # after pruning, so they are invisible to AEGIS_MAX_CONTEXT_BYTES. Report
+  # both so the gap is measurable instead of assumed.
+  local rendered_bytes
+  rendered_bytes="$(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}" | tr -d ' ')"
+
   jq -cn \
     --arg mode "${AEGIS_MODE:-}" \
     --arg prefix_hash "${prefix_hash:0:16}" \
     --argjson prefix_bytes "${prefix_bytes:-0}" \
+    --argjson rendered_bytes "${rendered_bytes:-0}" \
     '{kind:"cache",mode:$mode,substrate:"raw",
-      prefix_hash:$prefix_hash,prefix_bytes:$prefix_bytes}' \
+      prefix_hash:$prefix_hash,prefix_bytes:$prefix_bytes,
+      rendered_bytes:$rendered_bytes}' \
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
 

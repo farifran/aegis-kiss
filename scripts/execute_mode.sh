@@ -610,6 +610,7 @@ select_evidence_payloads() {
 : "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
 
 AEGIS_CONTEXT_BUDGET_PRUNED="false"
+AEGIS_CONTEXT_BUDGET_EXCEEDED="false"
 
 measure_selected_payload_bytes() {
 
@@ -717,6 +718,11 @@ enforce_context_token_budget() {
   )
 
   if [[ "${total_bytes}" -gt "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+    # Advisory, not enforced: the protected set (handover, demand anchors,
+    # content seeds) can exceed the ceiling on its own and the run proceeds.
+    # Surfaced as budget_exceeded so an unmeetable budget is data, not a
+    # warning buried in stderr.
+    AEGIS_CONTEXT_BUDGET_EXCEEDED="true"
     aegis_warn "Context budget still above ceiling after pruning: ${total_bytes} bytes (handover context preserved)"
   else
     aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes after pruning"
@@ -734,10 +740,11 @@ emit_context_budget_metric() {
     --argjson evidence_cache_hits "${AEGIS_EVIDENCE_CACHE_HITS:-0}" \
     --argjson evidence_cache_bytes "${AEGIS_EVIDENCE_CACHE_BYTES:-0}" \
     --argjson budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
+    --argjson budget_exceeded "${AEGIS_CONTEXT_BUDGET_EXCEEDED:-false}" \
     '{kind:"cache",mode:$mode,context_bytes:$context_bytes,
       ceiling_bytes:$ceiling_bytes,evidence_cache_hits:$evidence_cache_hits,
       evidence_cache_bytes:$evidence_cache_bytes,
-      budget_pruned:$budget_pruned}' \
+      budget_pruned:$budget_pruned,budget_exceeded:$budget_exceeded}' \
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
 

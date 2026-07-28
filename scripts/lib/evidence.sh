@@ -166,6 +166,52 @@ aegis_forensics_ensure_search_symbol_payload() {
   return 0
 }
 
+# The candidate diff reaches adversarial and optimize TWICE: once as the
+# formatted CANDIDATE RESULT / REPAIR RESULT section (framed, capped, and
+# carrying an explicit truncation note) and once verbatim inside the raw
+# epistemic handover payload. The formatted rendering is authoritative, so
+# the raw copy collapses to a pointer that states the real byte length.
+#
+# This costs most exactly where it bites: the adversarial LLM only fires on
+# large diffs (AEGIS_ADVERSARIAL_LLM_MAX_LINES), so the duplicate is largest
+# on the one path that pays for it. Two partial copies cut at different
+# ceilings is also worse for the model than one rendering that says where it
+# was truncated.
+dedupe_handover_candidate_diff() {
+  local payload_path="$1"
+
+  case "${AEGIS_MODE:-}" in
+    adversarial|optimize) ;;
+    *) return 0 ;;
+  esac
+  [[ -f "${payload_path}" ]] || return 0
+
+  local deduped_tmp
+  deduped_tmp="$(mktemp)"
+
+  if jq -c '
+      def mark(n): "[AEGIS][DIFF_RENDERED_IN_CANDIDATE_SECTION:\(n) bytes]";
+      def strip_diffs:
+        (if (.artifact_snapshot.operational_context.candidate_result.diff? | type) == "string"
+         then .artifact_snapshot.operational_context.candidate_result.diff =
+                mark(.artifact_snapshot.operational_context.candidate_result.diff | length)
+         else . end)
+        | (if (.artifact_snapshot.operational_context.diff? | type) == "string"
+           then .artifact_snapshot.operational_context.diff =
+                  mark(.artifact_snapshot.operational_context.diff | length)
+           else . end);
+      ((.payload.content | fromjson?) // null) as $h
+      | if $h == null then .
+        else .payload.content = ($h | strip_diffs | tojson) end
+    ' "${payload_path}" > "${deduped_tmp}" 2>/dev/null \
+    && [[ -s "${deduped_tmp}" ]]; then
+    mv "${deduped_tmp}" "${payload_path}"
+  else
+    rm -f "${deduped_tmp}"
+    aegis_warn "handover_diff_dedupe_skipped: ${payload_path}"
+  fi
+}
+
 materialize_capability_payloads() {
 
   aegis_log "Materializing capability payloads..."
@@ -337,6 +383,13 @@ materialize_capability_payloads() {
     # deep metadata survives only for registered attention targets.
     if mode_uses_attention_zoom && capability_is_deep_payload "${capability}"; then
       apply_attention_zoom "${payload_path}" "${attention_targets_json}"
+    fi
+
+    # Drop the candidate diff from the raw handover when the prompt will
+    # render it as a formatted section (see dedupe_handover_candidate_diff).
+    if [[ "${capability}" == "filesystem.read" ]] \
+      && [[ "$(basename "${payload_path}")" == *epistemic_handover* ]]; then
+      dedupe_handover_candidate_diff "${payload_path}"
     fi
 
     # Store only post-validation, post-zoom payloads so consumers match.

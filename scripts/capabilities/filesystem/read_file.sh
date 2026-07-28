@@ -66,6 +66,21 @@ CONTENT_SIZE_BYTES="$(
   wc -c < "${TMP_CONTENT_FILE}"
 )"
 
+# Lossless whitespace reduction for JSON reads. The epistemic handover is
+# stored pretty-printed and is the largest payload in every mode's context;
+# embedding it verbatim spends ~27% of its bytes on indentation the model
+# gains nothing from. Semantics are unchanged, the rendered payloads are
+# already compact (jq -c) so the form is consistent, and compacting BEFORE
+# the byte cap means more real content survives truncation.
+# Non-JSON files are untouched.
+if jq empty "${TMP_CONTENT_FILE}" >/dev/null 2>&1; then
+  _compact_tmp="$(aegis_mktemp)"
+  if jq -c . "${TMP_CONTENT_FILE}" > "${_compact_tmp}" 2>/dev/null \
+    && [[ -s "${_compact_tmp}" ]]; then
+    mv "${_compact_tmp}" "${TMP_CONTENT_FILE}"
+  fi
+fi
+
 bound_file_bytes "${TMP_CONTENT_FILE}" "${MAX_READ_BYTES}" "[AEGIS][TRUNCATED]"
 
 # =========================================================

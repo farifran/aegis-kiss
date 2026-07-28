@@ -17,3 +17,8 @@ export function converterDiasEmSegundo(dias: number): number {
   // 1 Dia = 86400 Segundos
   return dias * 86400;
 }
+
+export function converterTerabitsEmGigabits(terabits: number): number {
+  // 1 Terabit = 1000 Gigabits
+  return terabits * 1000;
+}
