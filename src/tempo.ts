@@ -5,3 +5,7 @@ export function converterSegundosEmMilissegundos(segundos: number): number {
 export function converterSemanasEmSegundos(semanas: number): number {
   return semanas * 604800;
 }
+
+export function converterDiasEmSegundos(dias: number): number {
+  return dias * 86400;
+}
