@@ -2145,6 +2145,9 @@ aegis_files_json_pick() {
 aegis_demand_limits_one_export() {
   local investigation="${1-}"
   [[ -n "${investigation}" ]] || return 1
+  if printf '%s' "${investigation}" | grep -Eiq 'bitmask|função exportada|exportada que|funções exportadas'; then
+    return 1
+  fi
   printf '%s' "${investigation}" | grep -Eiq \
     'exactly[[:space:]]+one[[:space:]]+(top-level[[:space:]]+)?export|one[[:space:]]+primary[[:space:]]+public[[:space:]]+export|one[[:space:]]+export:|Only[[:space:]].*one[[:space:]]+export|single[[:space:]]+public[[:space:]]+export|Do[[:space:]]+\*\*not\*\*[[:space:]]+export[[:space:]]+constants'
 }

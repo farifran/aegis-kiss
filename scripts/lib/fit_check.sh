@@ -422,13 +422,16 @@ EOR
 EOD
       )"
     fi
+    local one_export_note=""
+    if ! printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas'; then
+      one_export_note="- Prefer **one** primary top-level export (class or function). Put methods and helpers inside the main class body, never as secondary top-level exports."$'\n'
+    fi
     change_block="$(
       cat <<EOC
 - Create or update ONLY \`${primary}\`.
 - Do not create or modify any other path.
 - Do not re-export from index in this run.
-- Prefer **one** primary top-level export (class or function). Put methods and helpers inside the main class body, never as secondary top-level exports.
-${detail}
+${one_export_note}${detail}
 - Scope note: ${note:-single-target micro unit}
 EOC
     )"
