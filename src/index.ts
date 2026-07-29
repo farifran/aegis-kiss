@@ -66,3 +66,12 @@ export function calcularIMC(pesoKg: number, alturaM: number): number {
 export function validarTamanhoSenha(senha: string, minLength: number): boolean {
   return senha.length >= minLength;
 }
+
+/**
+ * Formata o valor em moeda BRL.
+ * @param valor - valor a ser formatado
+ * @returns valor formatado em moeda BRL
+ */
+export function formatarMoedaBRL(valor: number): string {
+  return `R$ ${valor.toFixed(2)}`;
+}
