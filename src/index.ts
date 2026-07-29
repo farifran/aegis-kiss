@@ -46,3 +46,13 @@ export function converterHorasEmMinutosInvestigation(horas: number, _investigati
 export function converterFahrenheitEmCelsius(fahrenheit: number): number {
   return (fahrenheit - 32) * 5 / 9;
 }
+
+/**
+ * Calcula o IMC.
+ * @param pesoKg - peso em kg
+ * @param alturaM - altura em metros
+ * @returns IMC
+ */
+export function calcularIMC(pesoKg: number, alturaM: number): number {
+  return pesoKg / (alturaM * alturaM);
+}
