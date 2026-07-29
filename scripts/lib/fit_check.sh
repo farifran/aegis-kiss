@@ -364,10 +364,18 @@ aegis_fit_unit_demand_md() {
   fi
 
   if [[ "${is_reexport}" -eq 1 ]]; then
+    local sib_file sib_pascal
+    sib_file="$(
+      aegis_fit_target_paths "${parent}" \
+        | awk -v p="${primary}" 'NF && $0 != p {
+            n=$0; sub(/^.*\//,"",n); sub(/\.[^.]+$/,"",n); print n; exit
+          }'
+    )"
+    sib_pascal="$(printf '%s' "${sib_file}" | awk '{if (length($0)>0) print toupper(substr($0,1,1)) substr($0,2)}')"
     change_block="$(
       cat <<EOR
 - Update ONLY \`${primary}\`.
-- Import and re-export the public API already created in the sibling module (NodeNext \`.js\` relative import).
+- Import and re-export the public API (e.g. \`export { ${sib_pascal:-Target} } from './${sib_file:-module}.js';\`) already created in the sibling module (NodeNext \`.js\` relative import).
 - Do not re-implement the algorithm in this file.
 - Do not create or modify any other path.
 - Scope note: ${note:-reexport after create}
