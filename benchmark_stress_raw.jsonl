@@ -1,0 +1,16 @@
+{
+  "level": "L3_UNIT",
+  "demand": "adicione APENAS a funçao converterSemanasEmDias(semanas: number): number no src/index.ts",
+  "aegis": {
+    "sec": 28,
+    "pass": 100,
+    "in": 2350,
+    "out": 220
+  },
+  "mono": {
+    "sec": 42,
+    "pass": 100,
+    "in": 24500,
+    "out": 450
+  }
+}
