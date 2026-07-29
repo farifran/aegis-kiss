@@ -76,12 +76,10 @@ revert_unauthorized_surface_paths() {
     cd "${surface}" || exit 0
     local o
     for o in "${offenders[@]}"; do
-      # Tracked: restore. Untracked parent workspace file: restore from parent. Net-new leak: delete.
+      # Tracked: restore. Untracked net-new leak: delete.
       if git --git-dir="${git_dir}" --work-tree=. ls-files --error-unmatch -- "${o}" \
         >/dev/null 2>&1; then
         git --git-dir="${git_dir}" --work-tree=. checkout -- "${o}" >/dev/null 2>&1 || true
-      elif [[ -n "${AEGIS_RUNTIME_ROOT:-}" && -f "${AEGIS_RUNTIME_ROOT}/${o}" ]]; then
-        cp -f "${AEGIS_RUNTIME_ROOT}/${o}" "${surface}/${o}" 2>/dev/null || true
       else
         rm -f -- "${o}" >/dev/null 2>&1 || true
         # Drop empty parent dirs created by leak (best-effort, stay under surface).

@@ -54,22 +54,20 @@ mutation_scope_is_ephemeral() {
   esac
 
   case "${candidate}" in
-    *.js|*.d.ts)
+    *.js)
       stem="${candidate%.js}"
-      stem="${stem%.d}"
-      stem_low="$(printf '%s' "${stem}" | tr '[:upper:]' '[:lower:]')"
       while IFS= read -r line; do
         [[ -n "${line}" ]] || continue
         line="$(mutation_scope_norm_path "${line}")"
-        line_stem="${line%.*}"
-        line_stem_low="$(printf '%s' "${line_stem}" | tr '[:upper:]' '[:lower:]')"
-        if [[ "${line_stem_low}" == "${stem_low}" ]]; then
+        if [[ "${line}" == "${stem}.ts" || "${line}" == "${stem}.tsx" ]]; then
           return 0
         fi
       done <<< "${authorized_blob}"
       surface="${AEGIS_EXECUTION_SURFACE_PATH:-}"
       if [[ -n "${surface}" && -L "${surface}/${candidate}" ]]; then
-        return 0
+        if [[ -f "${surface}/${stem}.ts" || -f "${surface}/${stem}.tsx" ]]; then
+          return 0
+        fi
       fi
       ;;
   esac

@@ -459,13 +459,16 @@ cmd_go() {
   target_is_clean "${target}" \
     || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
 
+  local start_commit=""
+  start_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+
   local auto_micros_present=0
   if [[ -d ".harness/micros_auto" && -f ".harness/micros_auto/unit-0.md" ]]; then
     auto_micros_present=1
   fi
 
   if [[ "${auto_micros_present}" -eq 1 ]]; then
-    local unit_idx=0 unit_file="" u_status=""
+    local unit_idx=0 unit_file="" next_file="" u_status=""
     while true; do
       unit_file=".harness/micros_auto/unit-${unit_idx}.md"
       [[ -f "${unit_file}" ]] || break
@@ -477,12 +480,28 @@ cmd_go() {
       [[ -n "${u_status}" ]] || u_status="$(outcome_field status)"
       if [[ "${u_status}" != "SUCCESS" ]]; then
         aegis_warn "falha na micro-unidade unit-${unit_idx}"
+        if [[ -n "${start_commit}" ]]; then
+          git reset --hard "${start_commit}" >/dev/null 2>&1 || true
+        fi
         emit_result_json "${u_status:-UNKNOWN}" "${issue}" "" "unit_${unit_idx}_failed"
         return 1
       fi
+
+      # Stage current unit's work so the next unit's worktree sees its exports in HEAD
+      next_file=".harness/micros_auto/unit-$((unit_idx + 1)).md"
+      if [[ -f "${next_file}" ]]; then
+        git add -A >/dev/null 2>&1 || true
+        git commit -m "chore(aegis-wip): staging unit-${unit_idx} for next unit" --no-verify >/dev/null 2>&1 || true
+      fi
+
       unit_idx=$((unit_idx + 1))
     done
     rm -rf ".harness/micros_auto"
+
+    # All units complete: soft squash temporary WIP commits back to start_commit
+    if [[ -n "${start_commit}" ]] && [[ "$(git rev-parse HEAD)" != "${start_commit}" ]]; then
+      git reset --soft "${start_commit}" >/dev/null 2>&1 || true
+    fi
   else
     set +e
     bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
