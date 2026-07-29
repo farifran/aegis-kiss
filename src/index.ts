@@ -37,3 +37,12 @@ export function converterHorasEmMinutosInvestigation(horas: number, _investigati
   }
   return horas * minutosPorHora;
 }
+
+/**
+ * Converte fahrenheit para celsius.
+ * @param fahrenheit - temperatura em fahrenheit
+ * @returns temperatura em celsius
+ */
+export function converterFahrenheitEmCelsius(fahrenheit: number): number {
+  return (fahrenheit - 32) * 5 / 9;
+}
