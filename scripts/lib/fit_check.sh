@@ -406,7 +406,7 @@ EOC
           | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
       } | awk 'NF && !seen[$0]++ {
           low=tolower($0)
-          if (low=="export" || low=="import" || low=="class" || low=="function") next
+          if (low=="export" || low=="import" || low=="class" || low=="function" || low=="index" || low=="index.ts") next
           print "- " $0
         }' | head -n 6
     )"
