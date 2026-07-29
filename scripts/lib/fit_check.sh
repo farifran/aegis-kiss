@@ -426,7 +426,7 @@ EOC
           | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
       } | awk 'NF && !seen[$0]++ {
           low=tolower($0)
-          if (low=="export" || low=="import" || low=="class" || low=="function" || low=="index" || low=="index.ts") next
+          if (low=="export" || low=="import" || low=="class" || low=="function" || low=="index" || low=="index.ts" || low=="bigint" || low=="megabytes" || low=="gigabits" || low=="terabits" || low=="kilobits" || low=="petabytes" || low=="number" || low=="string" || low=="boolean") next
           print "- " $0
         }' | head -n 6
     )"

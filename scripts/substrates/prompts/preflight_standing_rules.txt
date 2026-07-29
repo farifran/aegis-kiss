@@ -4,6 +4,6 @@ Standing rules (all classes):
 - Do not invent npm packages; language builtins are globals.
 - Never nest `export function` / `export const` inside a class — module-level only, after the class.
 - Never edit or create files outside the Edit ONLY list (no "helpful" index.ts fixes).
-- Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
+- Prefer the smallest correct fix. Emit whole-file edits for each changed target. Use ONLY the exact relative file path on its own line as the header (e.g. `src/tokenBucket.ts`). Never prefix the filename header with numbers, lists, or prose. No explanations.
 - Complexity guideline: Keep business logic simple (complexity <= 10). For core algorithms, parsers, and SQL builders, prioritize linear cohesion over artificial sub-function splitting.
 
