@@ -76,11 +76,20 @@ revert_unauthorized_surface_paths() {
     cd "${surface}" || exit 0
     local o
     for o in "${offenders[@]}"; do
-      # Tracked: restore. Untracked net-new leak: delete.
+      # Tracked: restore. Untracked net-new leak: delete (after rescuing if prose-prefixed).
       if git --git-dir="${git_dir}" --work-tree=. ls-files --error-unmatch -- "${o}" \
         >/dev/null 2>&1; then
         git --git-dir="${git_dir}" --work-tree=. checkout -- "${o}" >/dev/null 2>&1 || true
       else
+        for a in "${authorized[@]+"${authorized[@]}"}"; do
+          a="${a#./}"
+          if [[ "${o}" == *"${a}"* && -f "${o}" ]]; then
+            if [[ ! -s "${a}" ]]; then
+              aegis_warn "rescuing_prose_prefixed_target_file: '${o}' -> '${a}'"
+              cp "${o}" "${a}" 2>/dev/null || true
+            fi
+          fi
+        done
         rm -f -- "${o}" >/dev/null 2>&1 || true
         # Drop empty parent dirs created by leak (best-effort, stay under surface).
         rmdir "$(dirname -- "${o}")" >/dev/null 2>&1 || true
