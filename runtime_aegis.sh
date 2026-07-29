@@ -704,8 +704,8 @@ prepare_execution_surface() {
     HEAD \
     >/dev/null
 
-  if [[ -d "${AEGIS_WORKSPACE_ROOT}/src" && -d "${AEGIS_EXECUTION_SURFACE_PATH}/src" ]]; then
-    rsync -a --exclude='.git' --exclude='.harness' --exclude='node_modules' "${AEGIS_WORKSPACE_ROOT}/src/" "${AEGIS_EXECUTION_SURFACE_PATH}/src/" 2>/dev/null || true
+  if [[ -d "${AEGIS_RUNTIME_ROOT}/src" && -d "${AEGIS_EXECUTION_SURFACE_PATH}/src" ]]; then
+    rsync -a --exclude='.git' --exclude='.harness' --exclude='node_modules' "${AEGIS_RUNTIME_ROOT}/src/" "${AEGIS_EXECUTION_SURFACE_PATH}/src/" 2>/dev/null || true
   fi
 
   [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
