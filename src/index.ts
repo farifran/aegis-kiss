@@ -56,3 +56,13 @@ export function converterFahrenheitEmCelsius(fahrenheit: number): number {
 export function calcularIMC(pesoKg: number, alturaM: number): number {
   return pesoKg / (alturaM * alturaM);
 }
+
+/**
+ * Valida o tamanho da senha.
+ * @param senha - senha a ser validada
+ * @param minLength - mínimo de caracteres exigidos
+ * @returns true se a senha atende ao requisito de tamanho, false caso contrário
+ */
+export function validarTamanhoSenha(senha: string, minLength: number): boolean {
+  return senha.length >= minLength;
+}
