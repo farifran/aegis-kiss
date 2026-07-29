@@ -1,9 +1,9 @@
 Standing rules (all classes):
 - No `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`.
 - NodeNext relative imports use explicit .js extension.
-- Do not invent npm packages or sibling file imports (e.g. NEVER import BigInt, Math, Date, or JSON from './BigInt.js' or 'big-integer' — BigInt and language builtins are global).
+- Never import JavaScript/TypeScript built-in global primitives or types (e.g. BigInt, Math, Date, JSON, Map, Set, Promise); language built-ins are global.
 - Never nest `export function` / `export const` inside a class — module-level only, after the class.
 - Never edit or create files outside the Edit ONLY list (no "helpful" index.ts fixes).
-- Prefer the smallest correct fix. Emit whole-file edits for each changed target. DO NOT write any introductory text or preamble (e.g. NEVER write "1. Create a new file..." or "Based on..."). Start your response directly with the file header on its own line: `src/tokenBucket.ts`.
+- Prefer the smallest correct fix. Emit whole-file edits for each changed target without introductory prose or preambles. Start directly with the relative target file path on its own line (e.g. `src/filename.ts`).
 - Complexity guideline: Keep business logic simple (complexity <= 10). For core algorithms, parsers, and SQL builders, prioritize linear cohesion over artificial sub-function splitting.
 
