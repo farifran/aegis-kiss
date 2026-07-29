@@ -83,10 +83,11 @@ revert_unauthorized_surface_paths() {
       else
         for a in "${authorized[@]+"${authorized[@]}"}"; do
           a="${a#./}"
-          if [[ "${o}" == *"${a}"* && -f "${o}" ]]; then
+          base_a="$(basename "${a}")"
+          if [[ "${o}" == *"${base_a}"* && -f "${o}" ]]; then
             if [[ ! -s "${a}" ]]; then
               aegis_warn "rescuing_prose_prefixed_target_file: '${o}' -> '${a}'"
-              cp "${o}" "${a}" 2>/dev/null || true
+              cp -f "${o}" "${a}" 2>/dev/null || true
             fi
           fi
         done
