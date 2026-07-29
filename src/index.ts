@@ -93,7 +93,7 @@ export function removerDuplicadosArray(arr: number[]): number[] {
  * @returns true se o limite não foi atingido, false caso contrário
  */
 export function rateLimiterSlidingWindow(timestamps: number[], limit: number, windowMs: number): boolean {
-  // Implementação da função de rate limiting com janela deslizante
-  // ...
-  return true;
+  const agora = Date.now();
+  const dentroDaJanela = timestamps.filter((t) => agora - t <= windowMs);
+  return dentroDaJanela.length <= limit;
 }
