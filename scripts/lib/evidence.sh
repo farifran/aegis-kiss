@@ -368,6 +368,7 @@ materialize_capability_payloads() {
         )"
       fi
 
+      mkdir -p "$(dirname "${payload_path}")"
       printf '%s\n' "${payload_output}" > "${payload_path}"
     fi
 
