@@ -245,6 +245,54 @@ mark_modes_nested_after() {
   done
 }
 
+# Fail fast on a dirty target instead of at the promotion gate.
+#
+# promote_validated_candidate.sh refuses to overwrite a target with
+# uncommitted work — correctly, it must never discard operator changes. But
+# that gate runs LAST, so a worktree left dirty by a previous run costs a
+# whole pipeline (every mode, every provider call) before the refusal.
+#
+# The gate checks the candidate's files_changed, which do not exist yet at
+# this point. The operator-named paths in the demand are the knowable proxy
+# and in practice are the same files. Checking them here turns a multi-minute
+# failure into an immediate one. It cannot be exhaustive: repair may touch a
+# file the demand never named, so the promotion gate stays as the real
+# authority — this only catches the common case early.
+assert_demand_targets_not_dirty() {
+  [[ "${PIPELINE}" == "mutation" ]] || return 0
+  [[ "${AEGIS_PROMOTION_RESET_DIRTY:-false}" != "true" ]] || return 0
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+  local -a dirty=()
+  local path status_line
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    [[ -f "${path}" ]] || continue
+    if ! git diff --quiet HEAD -- "${path}" 2>/dev/null; then
+      status_line="$(git status --short -- "${path}" 2>/dev/null | head -1)"
+      dirty+=("${path} (${status_line:-modified})")
+    fi
+  done < <(aegis_extract_operator_named_paths "${INVESTIGATION_INPUT:-}" 2>/dev/null || true)
+
+  [[ "${#dirty[@]}" -gt 0 ]] || return 0
+
+  local entry
+  for entry in "${dirty[@]}"; do
+    echo "[AEGIS][PIPELINE][FATAL] demand target has uncommitted work: ${entry}" >&2
+  done
+  echo "[AEGIS][PIPELINE] commit or stash it, or re-run with AEGIS_PROMOTION_RESET_DIRTY=true to discard it." >&2
+
+  # Same reason token the promotion gate uses, so the outcome report
+  # classifies an early refusal exactly like a late one. Written as a
+  # breadcrumb rather than raised via aegis_fatal: that exits immediately
+  # and would skip show_final_report, leaving the operator without the
+  # Status/Class/Next block every other failure produces.
+  mkdir -p "$(dirname "${LAST_FATAL_FILE}")" 2>/dev/null || true
+  printf '%s\n' "promotion_target_is_dirty" > "${LAST_FATAL_FILE}" 2>/dev/null || true
+  return 1
+}
+
 clear_operator_breadcrumbs() {
   rm -f "${LAST_FATAL_FILE}" 2>/dev/null || true
 
@@ -948,9 +996,21 @@ main() {
     build_mode_list
   fi
 
+  # Metrics first: the refusal below reports through show_final_report, and
+  # a stale metrics file would make it print the PREVIOUS run's timings.
+  clear_pipeline_metrics
+
+  # Then the dirty-target refusal, still ahead of clear_operator_breadcrumbs
+  # (which drops handovers under --fresh) and of any mode execution.
+  if ! assert_demand_targets_not_dirty; then
+    PIPELINE_STATUS="FAILED"
+    PIPELINE_REASON="demand target has uncommitted work"
+    show_final_report
+    exit 1
+  fi
+
   clear_operator_breadcrumbs
   prune_pipeline_evidence_cache
-  clear_pipeline_metrics
 
   local mode
   local final_mode="${EXECUTION_MODES[${#EXECUTION_MODES[@]}-1]}"

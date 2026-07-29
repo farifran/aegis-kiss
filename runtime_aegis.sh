@@ -515,18 +515,6 @@ validate_mode_preconditions() {
         '.artifact_snapshot != null and .artifact_snapshot.mode == "discovery"'
       ;;
     repair)
-      # Feedback re-entry: rejected validation + structured repair_feedback.
-      if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -gt 0 ]]; then
-        assert_handover_precondition \
-          "precondition_failed_structured_repair_feedback_missing_or_invalid" \
-          '.artifact_snapshot != null
-           and .artifact_snapshot.mode == "validation"
-           and .artifact_snapshot.operational_context.verdict == "rejected"
-           and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
-           and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
-           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")'
-        return 0
-      fi
       # Optimize advisory → repair refine (can_improve + repair_feedback).
       if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -gt 0 ]]; then
         assert_handover_precondition \
@@ -539,6 +527,18 @@ validate_mode_preconditions() {
            and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")
            and (.artifact_snapshot.operational_context.candidate_result.diff
                 | type == "string" and length > 0 and . != "(no changes)")'
+        return 0
+      fi
+      # Feedback re-entry: rejected validation + structured repair_feedback.
+      if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -gt 0 ]]; then
+        assert_handover_precondition \
+          "precondition_failed_structured_repair_feedback_missing_or_invalid" \
+          '.artifact_snapshot != null
+           and .artifact_snapshot.mode == "validation"
+           and .artifact_snapshot.operational_context.verdict == "rejected"
+           and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
+           and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
+           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")'
         return 0
       fi
       assert_handover_precondition \
