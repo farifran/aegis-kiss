@@ -318,15 +318,19 @@ cmd_go() {
   else
     [[ -n "${goal}" ]] || aegis_fatal "missing_goal"
 
-    # Unknown target: let the mechanical recognition propose one. The
-    # draft below is where it gets reviewed, so no extra question here.
+    # Unknown target: extract explicit pathspecs from goal or let mechanical recognition propose one.
     if [[ -z "${target}" ]]; then
-      target="$(propose_target "${goal}" "$(default_target)")"
-      # Falling back to the directory would only produce a demand that
-      # fit_check rejects for no_targets — better to say so now.
-      [[ -n "${target}" ]] \
-        || aegis_fatal "target_desconhecido — nada ressoou com o goal; dá --target com o ficheiro"
-      aegis_log "target proposto pelo reconhecimento: ${target}"
+      local explicit_paths
+      explicit_paths="$(printf '%s' "${goal}" | grep -oE 'src/[A-Za-z0-9_/-]+\.[a-z]+' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true)"
+      if [[ -n "${explicit_paths}" ]]; then
+        target="${explicit_paths}"
+        aegis_log "targets extraídos do goal: ${target}"
+      else
+        target="$(propose_target "${goal}" "$(default_target)")"
+        [[ -n "${target}" ]] \
+          || aegis_fatal "target_desconhecido — nada ressoou com o goal; dá --target com o ficheiro"
+        aegis_log "target proposto pelo reconhecimento: ${target}"
+      fi
     fi
 
     # Acceptance seeds the prompt, the commit record and the regression
