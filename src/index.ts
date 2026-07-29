@@ -1,5 +1,3 @@
-import { avaliarExpressaoAritmetica } from './evaluator.js';
-
-export { avaliarExpressaoAritmetica };
-
-// ... rest of the file content ...
+export { avaliarExpressaoAritmetica } from './evaluator.js';
+export { rateLimiterSlidingWindow } from './rateLimiter.js';
+export { calcularCRC32 } from './crc32.js';
