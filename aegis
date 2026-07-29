@@ -459,9 +459,35 @@ cmd_go() {
   target_is_clean "${target}" \
     || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
 
-  set +e
-  bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
-  set -e
+  local auto_micros_present=0
+  if [[ -d ".harness/micros_auto" && -f ".harness/micros_auto/unit-0.md" ]]; then
+    auto_micros_present=1
+  fi
+
+  if [[ "${auto_micros_present}" -eq 1 ]]; then
+    local unit_idx=0 unit_file="" u_status=""
+    while true; do
+      unit_file=".harness/micros_auto/unit-${unit_idx}.md"
+      [[ -f "${unit_file}" ]] || break
+      aegis_log "executando micro-unidade [unit-${unit_idx}]..."
+      set +e
+      bash "${ROOT}/run_aegis.sh" --fresh --from-fit ".harness/micros_auto" --unit "${unit_idx}"
+      set -e
+      u_status="$(outcome_field pipeline_status)"
+      [[ -n "${u_status}" ]] || u_status="$(outcome_field status)"
+      if [[ "${u_status}" != "SUCCESS" ]]; then
+        aegis_warn "falha na micro-unidade unit-${unit_idx}"
+        emit_result_json "${u_status:-UNKNOWN}" "${issue}" "" "unit_${unit_idx}_failed"
+        return 1
+      fi
+      unit_idx=$((unit_idx + 1))
+    done
+    rm -rf ".harness/micros_auto"
+  else
+    set +e
+    bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
+    set -e
+  fi
 
   local status reason_class reason_code next_step
   status="$(outcome_field pipeline_status)"
