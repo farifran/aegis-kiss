@@ -1,0 +1,9 @@
+id: no-generic-relational-comparison
+message: Relational comparison (< or >) on generic parameters can fail at runtime for complex object keys. Consider passing a custom Comparator function.
+severity: warning
+language: TypeScript
+rule:
+  all:
+    - pattern: $KEY1 < $KEY2
+    - inside:
+        kind: class_declaration
