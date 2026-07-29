@@ -459,6 +459,10 @@ cmd_go() {
   target_is_clean "${target}" \
     || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
 
+  # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees)
+  rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
+  git worktree prune >/dev/null 2>&1 || true
+
   local start_commit=""
   start_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 
