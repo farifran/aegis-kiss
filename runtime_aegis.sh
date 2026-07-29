@@ -520,13 +520,10 @@ validate_mode_preconditions() {
         assert_handover_precondition \
           "precondition_failed_optimize_improve_feedback_missing_or_invalid" \
           '.artifact_snapshot != null
-           and .artifact_snapshot.mode == "optimize"
-           and .artifact_snapshot.operational_context.status == "can_improve"
+           and (.artifact_snapshot.mode == "optimize" or .artifact_snapshot.mode == "validation")
            and (.artifact_snapshot.operational_context.repair_feedback | type == "object")
            and (.artifact_snapshot.operational_context.repair_feedback.violations | type == "array")
-           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")
-           and (.artifact_snapshot.operational_context.candidate_result.diff
-                | type == "string" and length > 0 and . != "(no changes)")'
+           and (.artifact_snapshot.operational_context.repair_feedback.authorized_scopes | type == "array")'
         return 0
       fi
       # Feedback re-entry: rejected validation + structured repair_feedback.

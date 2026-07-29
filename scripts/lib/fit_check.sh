@@ -427,7 +427,7 @@ EOD
 - Create or update ONLY \`${primary}\`.
 - Do not create or modify any other path.
 - Do not re-export from index in this run.
-- Prefer **one** new top-level export (avoid parallel public APIs; methods on one export ok).
+- Prefer **one** primary top-level export (class or function). Put methods and helpers inside the main class body, never as secondary top-level exports.
 ${detail}
 - Scope note: ${note:-single-target micro unit}
 EOC
