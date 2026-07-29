@@ -12,3 +12,4 @@ export {
 } from './queryBuilder.js';
 export { HTTPServer } from './httpServer.js';
 export type { HTTPRequest, HTTPResponse } from './httpServer.js';
+export { EventEmitter, getEventEmitter } from './eventEmitter.js';
