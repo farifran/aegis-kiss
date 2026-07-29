@@ -84,3 +84,16 @@ export function formatarMoedaBRL(valor: number): string {
 export function removerDuplicadosArray(arr: number[]): number[] {
   return [...new Set(arr)];
 }
+
+/**
+ * Função de rate limiting com janela deslizante.
+ * @param timestamps - array de timestamps
+ * @param limit - limite de requisições
+ * @param windowMs - janela de tempo em milissegundos
+ * @returns true se o limite não foi atingido, false caso contrário
+ */
+export function rateLimiterSlidingWindow(timestamps: number[], limit: number, windowMs: number): boolean {
+  // Implementação da função de rate limiting com janela deslizante
+  // ...
+  return true;
+}
