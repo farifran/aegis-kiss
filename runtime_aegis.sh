@@ -704,6 +704,10 @@ prepare_execution_surface() {
     HEAD \
     >/dev/null
 
+  if [[ -d "${AEGIS_WORKSPACE_ROOT}/src" && -d "${AEGIS_EXECUTION_SURFACE_PATH}/src" ]]; then
+    rsync -a --exclude='.git' --exclude='.harness' --exclude='node_modules' "${AEGIS_WORKSPACE_ROOT}/src/" "${AEGIS_EXECUTION_SURFACE_PATH}/src/" 2>/dev/null || true
+  fi
+
   [[ -d "${AEGIS_EXECUTION_SURFACE_PATH}" ]] \
     || aegis_fatal "failed_to_materialize_execution_surface"
 
