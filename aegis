@@ -369,7 +369,16 @@ cmd_go() {
 
     if ! printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1; then
       printf 'blockers: %s\n' "$(printf '%s' "${fit_json}" | jq -r '.blockers | join(", ")')"
-      aegis_fatal "demand_does_not_fit — aperta o Goal ou parte em dois go"
+      aegis_log "demanda complexa detectada — fatiando mecanicamente para micro-unidades..."
+      local micros_dir=".harness/micros_auto"
+      mkdir -p "${micros_dir}"
+      printf '%s\n' "${body}" | bash scripts/fit_check_demand.sh --emit-micros "${micros_dir}" >/dev/null 2>&1 || true
+      if [[ -f "${micros_dir}/unit-0.md" ]]; then
+        aegis_log "iniciando execução automática da unit-0..."
+        exec bash run_aegis.sh --fresh --from-fit "${micros_dir}" --unit 0
+      else
+        aegis_fatal "demand_does_not_fit — aperta o Goal ou parte em dois go"
+      fi
     fi
 
     if [[ "${assume_yes}" -ne 1 ]]; then
