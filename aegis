@@ -102,6 +102,7 @@ derive_accept_tokens() {
     | sed -E 's/[.:!?"'"'"']+$//' \
     | grep -Ev '/' \
     | grep -E '([a-z][A-Z]|[a-zA-Z]_[a-zA-Z]|^[0-9]{3,}$)' \
+    | grep -Ev '^(BigInt|Number|String|Boolean|Array|Object|Promise|Date|Math|JSON|MegaBytes|GigaBits|TeraBits|KiloBits|PetaBytes)$' \
     | sort -u \
     || true
 }
@@ -339,6 +340,16 @@ cmd_go() {
     if [[ "${#accepts[@]}" -eq 0 ]]; then
       local derived
       derived="$(derive_accept_tokens "${goal}")"
+      if [[ -z "${derived}" ]]; then
+        local p path_base
+        for p in ${target}; do
+          path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
+          if [[ "${path_base}" != "index" ]]; then
+            derived="${path_base}"
+            break
+          fi
+        done
+      fi
       if [[ -n "${derived}" ]]; then
         while IFS= read -r t; do
           [[ -n "${t}" ]] && accepts+=("${t}")
@@ -374,8 +385,9 @@ cmd_go() {
       mkdir -p "${micros_dir}"
       printf '%s\n' "${body}" | bash scripts/fit_check_demand.sh --emit-micros "${micros_dir}" >/dev/null 2>&1 || true
       if [[ -f "${micros_dir}/unit-0.md" ]]; then
-        aegis_log "iniciando execução automática da unit-0..."
-        exec bash run_aegis.sh --fresh --from-fit "${micros_dir}" --unit 0
+        aegis_log "fatiamento concluído com sucesso — selecionando unit-0 para execução..."
+        body="$(cat "${micros_dir}/unit-0.md")"
+        fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
       else
         aegis_fatal "demand_does_not_fit — aperta o Goal ou parte em dois go"
       fi

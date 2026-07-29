@@ -20,8 +20,6 @@ Edit only `src/tokenBucket.ts`. Parent intent: Crie um novo arquivo em src/token
 ## Acceptance
 - tokenBucket
 - TokenBucket
-- BigInt
-- MegaBytes
 
 ## Out of scope
 - other source files
