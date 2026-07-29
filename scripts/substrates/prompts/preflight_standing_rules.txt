@@ -5,3 +5,5 @@ Standing rules (all classes):
 - Never nest `export function` / `export const` inside a class — module-level only, after the class.
 - Never edit or create files outside the Edit ONLY list (no "helpful" index.ts fixes).
 - Prefer the smallest correct fix. Emit whole-file edits for each changed target. No explanations.
+- Complexity guideline: Keep business logic simple (complexity <= 10). For core algorithms, parsers, and SQL builders, prioritize linear cohesion over artificial sub-function splitting.
+
