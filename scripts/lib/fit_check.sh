@@ -252,8 +252,12 @@ aegis_fit_wrap_free_text() {
     else
       printf -- '- src/\n'
     fi
-    printf '\n## Tasks\n- [ ] Task 1 — apply demand\n\n'
-    printf '## Change\n- Implement demand in Targets only\n\n'
+    printf '## Change\n'
+    printf '%s' "${text}" | sed 's/\. /\n/g' | while IFS= read -r line; do
+      line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+      [[ -n "${line}" ]] && printf -- '- %s\n' "${line}"
+    done
+    printf '\n'
     printf '## Acceptance\n'
     if [[ -n "${paths}" ]]; then
       while IFS= read -r p; do
@@ -288,6 +292,17 @@ aegis_fit_unit_change_lines() {
     other_paths+=("${sibling}")
   done < <(aegis_fit_target_paths "${parent}" | awk -v p="${primary}" 'NF && $0 != p { print }')
 
+  local raw_lines
+  raw_lines="$(
+    {
+      printf '%s\n' "${parent_goal}"
+      printf '%s\n' "${parent_change}"
+    } | sed '/^$/d'
+  )"
+  if [[ -z "$(printf '%s' "${raw_lines}" | tr -d '[:space:]')" ]]; then
+    raw_lines="$(printf '%s' "${parent}" | sed 's/\. /\n/g' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | sed '/^$/d')"
+  fi
+
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
     [[ -n "${line}" ]] || continue
@@ -306,13 +321,8 @@ aegis_fit_unit_change_lines() {
     fi
     printf -- '- %s\n' "$(printf '%s' "${line}" | cut -c1-200)"
     n=$((n + 1))
-    [[ "${n}" -ge 6 ]] && break
-  done < <(
-    {
-      printf '%s\n' "${parent_goal}"
-      printf '%s\n' "${parent_change}"
-    }
-  )
+    [[ "${n}" -ge 8 ]] && break
+  done <<< "${raw_lines}"
 }
 
 # Build a runnable micro demand markdown for one unit.
