@@ -75,3 +75,12 @@ export function validarTamanhoSenha(senha: string, minLength: number): boolean {
 export function formatarMoedaBRL(valor: number): string {
   return `R$ ${valor.toFixed(2)}`;
 }
+
+/**
+ * Remove duplicados de um array.
+ * @param arr - array a ser processado
+ * @returns array sem duplicados
+ */
+export function removerDuplicadosArray(arr: number[]): number[] {
+  return [...new Set(arr)];
+}
