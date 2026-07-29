@@ -4,3 +4,9 @@ export { calcularCRC32 } from './crc32.js';
 export { dijkstraShortestPath } from './dijkstra.js';
 export { LRUCache } from './lruCache.js';
 export { AVLTree } from './avlTree.js';
+export {
+  SelectQueryBuilder,
+  InsertQueryBuilder,
+  UpdateQueryBuilder,
+  DeleteQueryBuilder,
+} from './queryBuilder.js';
