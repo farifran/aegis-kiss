@@ -38,6 +38,7 @@ Usage:
   ./aegis go "<uma frase>" [--target <path>] [--accept <token>]...
              [--change "<bullet>"]... [--yes]
   ./aegis go --issue <N> [--yes]
+  ./aegis split <tasks/sua_issue.md> [diretorio_saida]
 
 Só o pedido é obrigatório. O target, se não o deres, sai do reconhecimento
 mecânico do repositório; a acceptance sai do pedido quando ele nomeia código.
@@ -53,6 +54,9 @@ go        Abre a issue, corre o pipeline de mutation completo e pára no gate
           frases. São obrigatórios: são a semente do registo.
           --issue N volta a correr uma issue existente em vez de abrir outra,
           e tira o target do ## Targets dela.
+
+split     Divide mecanicamente uma Issue em Markdown em micro-unidades
+          atômicas de 1 target por vez (100% offline, 0 tokens).
 
 Sem TTY o gate não commita: deixa os paths em stage, a mensagem pronta, e
 imprime os dois comandos que faltam (status PENDING_GATE).
@@ -531,12 +535,23 @@ cmd_go() {
   emit_result_json "SUCCESS" "${issue}" "${committed}" ""
 }
 
+cmd_split() {
+  local input="${1:-}"
+  local out_dir="${2:-.harness/micros}"
+  if [[ -z "${input}" ]]; then
+    aegis_fatal "missing_input — uso: ./aegis split tasks/sua_issue.md [output_dir]"
+  fi
+  aegis_log "fatiando issue ${input} para micro-unidades em ${out_dir}..."
+  bash scripts/fit_check_demand.sh --emit-micros "${out_dir}" "${input}"
+}
+
 main() {
   local verb="${1:-}"
   [[ $# -gt 0 ]] && shift || true
   case "${verb}" in
     context) cmd_context "$@" ;;
     go)      cmd_go "$@" ;;
+    split)   cmd_split "$@" ;;
     ""|-h|--help) usage ;;
     *) aegis_fatal "unknown_verb:${verb}" ;;
   esac
