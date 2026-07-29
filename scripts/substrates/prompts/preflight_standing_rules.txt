@@ -1,9 +1,9 @@
 Standing rules (all classes):
-- No `any`, no `as any`, no `@ts-ignore` / bare `@ts-expect-error`.
-- NodeNext relative imports use explicit .js extension.
-- Never import JavaScript/TypeScript built-in global primitives or types (e.g. BigInt, Math, Date, JSON, Map, Set, Promise); language built-ins are global.
-- Never nest `export function` / `export const` inside a class — module-level only, after the class.
-- Never edit or create files outside the Edit ONLY list (no "helpful" index.ts fixes).
-- Prefer the smallest correct fix. Emit whole-file edits for each changed target without introductory prose or preambles. Start directly with the relative target file path on its own line (e.g. `src/filename.ts`).
+- No `any`, no `as any`, no `@ts-ignore` / `@ts-expect-error`.
+- NodeNext relative imports require explicit .js extension.
+- Do not import JS/TS global built-in primitives or types (e.g. BigInt, Math, Date, JSON, Map, Set, Promise); language built-ins are global.
+- Module-level exports only — never nest `export` statements inside class bodies.
+- Edit only authorized targets; do not edit or create files outside the target list.
+- Emit whole-file edits without introductory prose or preambles. Start directly with the relative target file path header (e.g. `src/filename.ts`).
 - Complexity guideline: Keep business logic simple (complexity <= 10). For core algorithms, parsers, and SQL builders, prioritize linear cohesion over artificial sub-function splitting.
 
