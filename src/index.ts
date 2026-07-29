@@ -1,4 +1,17 @@
 /**
+ * Converte semanas em dias.
+ * @param semanas - número de semanas (inteiro positivo)
+ * @returns número de dias correspondente
+ */
+export function converterSemanasEmDias(semanas: number): number {
+  const diasPorSemana = 7;
+  if (semanas <= 0) {
+    return 0;
+  }
+  return semanas * diasPorSemana;
+}
+
+/**
  * Converte horas em minutos.
  * @param horas - número de horas (inteiro positivo)
  * @returns número de minutos correspondente
