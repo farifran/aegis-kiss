@@ -14,14 +14,34 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   exit 1
 fi
 
-# Defaults (override via env before source)
-: "${AEGIS_FIT_MAX_TARGETS:=1}"
-: "${AEGIS_FIT_MAX_OPEN_TASKS:=2}"
-: "${AEGIS_FIT_MAX_ACCEPTANCE_LINE:=48}"
-: "${AEGIS_FIT_MAX_CHANGE_LINES:=24}"
-: "${AEGIS_FIT_MAX_BODY_CHARS:=3500}"
-: "${AEGIS_FIT_POOR_SCORE:=6}"
-: "${AEGIS_FIT_MARGINAL_SCORE:=3}"
+# Model Tier Profiles: compact (8B-14B), mid (32B-70B), frontier (390B+ / Next-Gen)
+: "${AEGIS_MODEL_TIER:=compact}"
+
+if [[ "${AEGIS_MODEL_TIER}" == "frontier" ]]; then
+  : "${AEGIS_FIT_MAX_TARGETS:=5}"
+  : "${AEGIS_FIT_MAX_OPEN_TASKS:=5}"
+  : "${AEGIS_FIT_MAX_ACCEPTANCE_LINE:=96}"
+  : "${AEGIS_FIT_MAX_CHANGE_LINES:=60}"
+  : "${AEGIS_FIT_MAX_BODY_CHARS:=15000}"
+  : "${AEGIS_FIT_POOR_SCORE:=12}"
+  : "${AEGIS_FIT_MARGINAL_SCORE:=6}"
+elif [[ "${AEGIS_MODEL_TIER}" == "mid" ]]; then
+  : "${AEGIS_FIT_MAX_TARGETS:=2}"
+  : "${AEGIS_FIT_MAX_OPEN_TASKS:=3}"
+  : "${AEGIS_FIT_MAX_ACCEPTANCE_LINE:=64}"
+  : "${AEGIS_FIT_MAX_CHANGE_LINES:=36}"
+  : "${AEGIS_FIT_MAX_BODY_CHARS:=7500}"
+  : "${AEGIS_FIT_POOR_SCORE:=9}"
+  : "${AEGIS_FIT_MARGINAL_SCORE:=4}"
+else
+  : "${AEGIS_FIT_MAX_TARGETS:=1}"
+  : "${AEGIS_FIT_MAX_OPEN_TASKS:=2}"
+  : "${AEGIS_FIT_MAX_ACCEPTANCE_LINE:=48}"
+  : "${AEGIS_FIT_MAX_CHANGE_LINES:=24}"
+  : "${AEGIS_FIT_MAX_BODY_CHARS:=3500}"
+  : "${AEGIS_FIT_POOR_SCORE:=6}"
+  : "${AEGIS_FIT_MARGINAL_SCORE:=3}"
+fi
 
 # ---------------------------------------------------------
 # Section helpers (local; demand.sh may also provide these)
