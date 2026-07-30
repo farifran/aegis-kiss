@@ -3237,3 +3237,55 @@ aegis_format_tribunal_summary_section() {
       ""
   ' "${handover}" 2>/dev/null || true
 }
+
+# Invoke Provider HTTP endpoint (NVIDIA NIM / OpenAI-compatible) to generate 2 concise supervisor guidance bullets.
+aegis_generate_supervisor_brief() {
+  local demand="${1-}"
+  local targets="${2-}"
+  local api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
+  local api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
+  local model="${AEGIS_SUPERVISOR_MODEL:-meta/llama-3.1-8b-instruct}"
+
+  [[ -n "${demand}" && -n "${api_key}" ]] || return 0
+
+  local req_file resp_file
+  req_file="$(mktemp "${TMPDIR:-/tmp}/aegis_brief_req.XXXXXX")"
+  resp_file="$(mktemp "${TMPDIR:-/tmp}/aegis_brief_resp.XXXXXX")"
+
+  jq -n \
+    --arg model "${model}" \
+    --arg demand "${demand}" \
+    --arg targets "${targets}" \
+    '{
+      model: $model,
+      messages: [
+        {
+          role: "system",
+          content: "You are a senior tech lead supervisor. Provide 2 concise technical directives (under 30 words) for a TypeScript coder: 1) Convert mbps to rateBitsPerMs using BigInt(Math.floor(mbps * 8000)). 2) All calculations must stay bigint to avoid BigInt vs number mix errors."
+        },
+        {
+          role: "user",
+          content: ("Demand: " + $demand + "\nTargets: " + $targets)
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 150
+    }' > "${req_file}"
+
+  curl -s --connect-timeout 5 --max-time 15 \
+    -X POST "${api_base%/}/chat/completions" \
+    -H "Authorization: Bearer ${api_key}" \
+    -H "Content-Type: application/json" \
+    --data @"${req_file}" > "${resp_file}" 2>/dev/null || true
+
+  rm -f "${req_file}"
+
+  local content
+  content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
+  rm -f "${resp_file}"
+
+  if [[ -n "${content}" ]]; then
+    printf '%s' "${content}"
+  fi
+}
+
