@@ -3238,12 +3238,12 @@ aegis_format_tribunal_summary_section() {
   ' "${handover}" 2>/dev/null || true
 }
 
-# Invoke Provider HTTP endpoint (NVIDIA NIM / OpenAI-compatible) to generate 2 concise supervisor guidance bullets.
+# Invoke Provider HTTP endpoint (GLM 5.2/4.5 or NVIDIA NIM) to generate 2 concise supervisor guidance bullets.
 aegis_generate_supervisor_brief() {
   local demand="${1-}"
   local targets="${2-}"
-  local api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
-  local api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
+  local api_base="${GLM_API_BASE:-${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}}"
+  local api_key="${GLM_API_KEY:-${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}}"
   local model="${AEGIS_SUPERVISOR_MODEL:-meta/llama-3.1-8b-instruct}"
 
   [[ -n "${demand}" && -n "${api_key}" ]] || return 0
