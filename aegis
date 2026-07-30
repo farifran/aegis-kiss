@@ -319,6 +319,9 @@ cmd_go() {
   else
     [[ -n "${goal}" ]] || aegis_fatal "missing_goal"
 
+    # Always clear stale auto micro-unit cache when starting a new goal
+    rm -rf .harness/micros_auto >/dev/null 2>&1 || true
+
     # Unknown target: extract explicit pathspecs from goal or let mechanical recognition propose one.
     if [[ -z "${target}" ]]; then
       local explicit_paths
