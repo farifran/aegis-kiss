@@ -3261,7 +3261,7 @@ aegis_generate_supervisor_brief() {
       messages: [
         {
           role: "system",
-          content: "You are a senior tech lead supervisor. Provide 2 concise technical directives (under 30 words) for a TypeScript coder: 1) Convert mbps to rateBitsPerMs using BigInt(Math.floor(mbps * 8000)). 2) All calculations must stay bigint to avoid BigInt vs number mix errors."
+          content: "You are a senior tech lead supervisor. Do NOT output markdown code blocks. Output ONLY 2 concise bullet points (under 30 words total) for a TypeScript coder: 1. Convert mbps to rateBitsPerMs using BigInt(Math.floor(mbps * 8000)). 2. Keep all tokens/timestamps as native bigint."
         },
         {
           role: "user",
@@ -3269,7 +3269,7 @@ aegis_generate_supervisor_brief() {
         }
       ],
       temperature: 0.1,
-      max_tokens: 150
+      max_tokens: 80
     }' > "${req_file}"
 
   curl -s --connect-timeout 5 --max-time 15 \
