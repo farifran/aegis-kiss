@@ -384,6 +384,27 @@ invoke_aider() {
   # Jail file is invocation-scoped — never leave it on the surface.
   rm -f "${aiderignore_file}" 2>/dev/null || true
 
+  # Rescue TS/JS code block from Aider output log when 8B model omits filename header in whole format
+  if [[ -f "${AEGIS_AIDER_OUTPUT_LOG}" ]] && [[ "${#file_args[@]}" -gt 0 ]]; then
+    local check_diff=""
+    check_diff="$(capture_worktree_diff)"
+    if [[ -z "${check_diff}" ]]; then
+      local rescued_code=""
+      rescued_code="$(
+        sed -n '/```\(typescript\|js\|ts\)\?/,/```/p' "${AEGIS_AIDER_OUTPUT_LOG}" \
+          | grep -v '^```' || true
+      )"
+      if [[ -n "${rescued_code}" ]]; then
+        local primary_target="${file_args[0]#./}"
+        local full_target_path="${AEGIS_EXECUTION_SURFACE_PATH}/${primary_target}"
+        if [[ -f "${full_target_path}" ]]; then
+          aegis_warn "rescuing_unheadered_code_block_from_log: -> '${primary_target}'"
+          printf '%s\n' "${rescued_code}" > "${full_target_path}"
+        fi
+      fi
+    fi
+  fi
+
   interpret_aider_exit_status "${AEGIS_AIDER_LAST_STATUS}" "${AEGIS_AIDER_LAST_ELAPSED}"
 }
 
