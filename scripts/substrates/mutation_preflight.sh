@@ -200,24 +200,70 @@ run_with_timeout() {
 }
 
 # Compact a Node failure stack into one prompt-sized diagnostic line.
-# Drops stack frames, but always keeps the error message: under
+# The error message is always kept and placed first: under
 # --experimental-strip-types Node prints the code frame BEFORE the message,
 # so a plain head -n would cut the diagnostic off and leave only source text.
+# Node-internal frames are dropped, but the first user-code frame is kept —
+# for a top-level throw it carries the only file:line available.
+# Surface-absolute paths are stripped: the coder model only ever addresses
+# surface-relative paths, so the prefix is pure token cost.
 compact_node_failure() {
-  printf '%s\n' "${1-}" \
-    | grep -vE '^[[:space:]]*at[[:space:]]+|^node:internal' \
-    | awk '
-        /^[[:space:]]*$/ { next }
-        /^[A-Za-z_]*(Error|Exception)( \[|:)/ && msg == "" { msg = $0; next }
-        n < 2 { rest = (rest == "" ? $0 : rest " " $0); n++ }
-        END {
-          if (msg != "" && rest != "") print msg " | " rest
-          else if (msg != "") print msg
-          else print rest
-        }
-      ' \
-    | sed 's/[[:space:]]\{2,\}/ /g; s/[[:space:]]*$//' \
-    | head -c 500
+  local raw="${1-}"
+  local root="${2-}"
+  local line=""
+
+  line="$(
+    printf '%s\n' "${raw}" \
+      | awk '
+          /^[[:space:]]*$/  { next }
+          /^node:internal/  { next }
+          /^[[:space:]]*at[[:space:]]/ {
+            if (frame == "" && $0 !~ /node:internal|\(node:|[[:space:]]node:/) {
+              sub(/^[[:space:]]*/, "", $0)
+              frame = $0
+            }
+            next
+          }
+          /^[A-Za-z_]*(Error|Exception)( \[|:)/ && msg == "" { msg = $0; next }
+          n < 2 { rest = (rest == "" ? $0 : rest " " $0); n++ }
+          END {
+            out = msg
+            if (rest  != "") out = (out == "" ? rest  : out " | " rest)
+            if (frame != "") out = (out == "" ? frame : out " | " frame)
+            if (out   == "") out = "no diagnostic output (timeout or crash)"
+            print out
+          }
+        ' \
+      | sed 's/[[:space:]]\{2,\}/ /g; s/[[:space:]]*$//'
+  )" || true
+
+  # Node reports realpaths; the surface may be reached through a symlink,
+  # so strip both spellings. Drop the file:// scheme first, then apply the
+  # LONGEST prefix first — /var/… is a substring of /private/var/… and
+  # stripping it first would splice the remainder into a bogus path.
+  local v1 v2 swap
+  v1="${root%/}"
+  v2="$(cd "${root}" 2>/dev/null && pwd -P)"
+  v2="${v2%/}"
+  if [[ "${#v2}" -gt "${#v1}" ]]; then
+    swap="${v1}"; v1="${v2}"; v2="${swap}"
+  fi
+
+  # Patterns are built into a variable first, never written inline as
+  # "${var}/" — bash 3.2 ends the pattern at a literal / inside the quotes
+  # and splices a stray quote into the result.
+  local scheme='file://'
+  line="${line//"${scheme}"/}"
+
+  local variant pat
+  for variant in "${v1}" "${v2}"; do
+    [[ -n "${variant}" ]] || continue
+    pat="${variant}/"
+    line="${line//"${pat}"/}"
+  done
+
+  printf '%s' "${line:0:500}"
+  return 0
 }
 
 # Prints: passed | failed | skipped
@@ -360,7 +406,7 @@ import(pathToFileURL(target).href)
           --argjson acc "${results_json}" \
           --arg f "${rel_path}" \
           --argjson rc "${rc}" \
-          --arg err "$(compact_node_failure "${out}")" \
+          --arg err "$(compact_node_failure "${out}" "${SURFACE_PATH}")" \
           '$acc + [{file:$f, status:"failed", exit_code:$rc, detail:$err}]'
       )"
     fi

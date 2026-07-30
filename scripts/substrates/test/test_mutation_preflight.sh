@@ -179,6 +179,66 @@ jq -e '.payload.smoke_import == "failed"' \
   "${payloads}/mutation_preflight.json" >/dev/null \
   || fail "smoke_index_not_failed: $(cat "${payloads}/mutation_preflight.json")"
 
+# The detail is the only thing the coder model sees. Status alone passing
+# while detail is decapitated is exactly the regression this guards.
+smoke_detail="$(
+  jq -r '[.payload.results[] | select(.status == "failed") | .detail][0] // ""' \
+    "${payloads}/smoke_import.json"
+)"
+
+[[ -n "${smoke_detail}" ]] \
+  || fail "smoke_detail_empty"
+
+grep -q 'smoke-boom' <<<"${smoke_detail}" \
+  || fail "smoke_detail_lost_error_message: ${smoke_detail}"
+
+# Boundary-anchored: a path spliced onto a leftover prefix (file://src/…,
+# /privatesrc/…) still contains the substring but is not addressable.
+grep -qE '(^|[[:space:]])src/boom\.js' <<<"${smoke_detail}" \
+  || fail "smoke_detail_lost_user_frame: ${smoke_detail}"
+
+grep -qE '(^|[^a-zA-Z0-9_])node:internal' <<<"${smoke_detail}" \
+  && fail "smoke_detail_leaked_node_internals: ${smoke_detail}"
+
+grep -q "${surface}" <<<"${smoke_detail}" \
+  && fail "smoke_detail_leaked_absolute_surface_path: ${smoke_detail}"
+
+[[ "${#smoke_detail}" -le 500 ]] \
+  || fail "smoke_detail_over_budget: ${#smoke_detail} chars"
+
+# --- smoke.import: TypeScript syntax error keeps its message ---
+# Node's strip-types prints the code frame BEFORE the message; a naive
+# head -n on the stack drops the diagnostic and leaves only source text.
+if node --experimental-strip-types -e "0" >/dev/null 2>&1; then
+  rm -rf "${payloads:?}"/*
+  mkdir -p "${payloads}"
+  rm -f "${surface}/src/boom.js"
+  printf 'export function frag(a: number): number {\n  const x = ;\n  return x;\n}\n' \
+    > "${surface}/src/frag.ts"
+
+  if AEGIS_PREFLIGHT_CHANGED_FILES="src/frag.ts" \
+    bash "${PREFLIGHT}" "${surface}" "${payloads}" 2>/dev/null; then
+    fail "ts_syntax_error_should_fail_smoke"
+  fi
+
+  syn_detail="$(
+    jq -r '[.payload.results[] | select(.status == "failed") | .detail][0] // ""' \
+      "${payloads}/smoke_import.json"
+  )"
+
+  grep -qiE 'syntaxerror|invalid_typescript' <<<"${syn_detail}" \
+    || fail "ts_syntax_detail_decapitated: ${syn_detail}"
+
+  grep -qE '(^|[[:space:]])src/frag\.ts' <<<"${syn_detail}" \
+    || fail "ts_syntax_detail_lost_location: ${syn_detail}"
+
+  rm -f "${surface}/src/frag.ts"
+  cat > "${surface}/src/boom.js" <<'EOF'
+throw new Error("smoke-boom");
+export const x = 1;
+EOF
+fi
+
 # --- smoke disabled ---
 rm -rf "${payloads:?}"/*
 mkdir -p "${payloads}"
