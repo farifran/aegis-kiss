@@ -11,12 +11,17 @@ classify_preflight_diagnostic_line() {
   lower="$(printf '%s' "${line}" | tr '[:upper:]' '[:lower:]')"
 
   case "${lower}" in
-    *'syntaxerror'*|*'unexpected token'*|*'unexpected eof'*|*'invalid_typescript'*|*'invalid typescript'*|*'expected * for generator'*|*'expected ;'*|*'missing }'*|*'missing {'*)
+    # tsc phrases syntax errors as "';' expected." / "Expression expected." —
+    # matching on "expected ;" never fired for a single tsc diagnostic, so
+    # every tsc parse error fell through to `other` and lost the syntax policy.
+    *"' expected"*|*'expression expected'*|*'declaration or statement expected'*|\
+    *'syntaxerror'*|*'unexpected token'*|*'unexpected eof'*|*'invalid_typescript'*|*'invalid typescript'*|\
+    *'expected * for generator'*|*'missing }'*|*'missing {'*)
       printf 'syntax'
       ;;
     smoke\ *|*'smoke.'*)
       # Smoke may wrap a SyntaxError — prefer syntax when message says so.
-      if printf '%s' "${lower}" | grep -qE 'syntaxerror|unexpected token|unexpected eof'; then
+      if printf '%s' "${lower}" | grep -qE "syntaxerror|unexpected token|unexpected eof|' expected"; then
         printf 'syntax'
       else
         printf 'runtime_load'
@@ -25,10 +30,17 @@ classify_preflight_diagnostic_line() {
     *'as any'*|*': any'*|*'unexpected any'*|*'no-explicit-any'*|*'ts7006'*|*'implicitly has an "any"'*|*"implicitly has an 'any'"*|*'@ts-ignore'*|*'@ts-expect-error'*|*'ts-nocheck'*)
       printf 'any'
       ;;
-    *'cannot find module'*|*'cannot find package'*|*'err_module_not_found'*|*'ts2307'*|*'ts2305'*|*'has no exported member'*|*'is not a module'*)
+    *'cannot find module'*|*'cannot find package'*|*'err_module_not_found'*|*'ts2307'*|*'ts2305'*|*'has no exported member'*|*'is not a module'*|*'cannot find name'*)
       printf 'import'
       ;;
-    *'is not assignable'*|*'not exist on type'*|*'undefined is not'*|*'null is not'*)
+    # bigint/number mixing is the dominant type failure of this codebase's
+    # demands and needs its own policy — "smallest type fix" is not enough.
+    *'cannot be applied to types'*|*'must be of type'*|*'conversion of type'*)
+      printf 'numeric'
+      ;;
+    *'is not assignable'*|*'not exist on type'*|*'undefined is not'*|*'null is not'*|\
+    *'no initializer'*|*'not definitely assigned'*|*'must return a value'*|*'is possibly'*|\
+    *'read-only property'*|*'arguments, but got'*|*'missing the following properties'*)
       printf 'type'
       ;;
     *)
@@ -84,7 +96,7 @@ assemble_preflight_fix_prompt() {
   local smoke_payload="${AIDER_CAPABILITY_PAYLOAD_DIR}/smoke_import.json"
   local standing_rules="${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/prompts/preflight_standing_rules.txt"
 
-  local -a lines_any=() lines_import=() lines_type=() lines_runtime=() lines_syntax=() lines_other=()
+  local -a lines_any=() lines_import=() lines_type=() lines_runtime=() lines_syntax=() lines_numeric=() lines_other=()
   local raw_line class
 
   if [[ -f "${tsc_payload}" ]]; then
@@ -96,6 +108,7 @@ assemble_preflight_fix_prompt() {
         import) lines_import+=("${raw_line}") ;;
         runtime_load) lines_runtime+=("${raw_line}") ;;
         syntax) lines_syntax+=("${raw_line}") ;;
+        numeric) lines_numeric+=("${raw_line}") ;;
         type) lines_type+=("${raw_line}") ;;
         *) lines_other+=("${raw_line}") ;;
       esac
@@ -133,6 +146,8 @@ assemble_preflight_fix_prompt() {
     "[any] Type escapes" "$(preflight_class_policy any)" ${lines_any[@]+"${lines_any[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
     "[import] Module resolution" "$(preflight_class_policy import)" ${lines_import[@]+"${lines_import[@]}"})"
+  taxonomy_block+="$(preflight_format_class_block \
+    "[numeric] bigint / number mixing" "$(preflight_class_policy numeric)" ${lines_numeric[@]+"${lines_numeric[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
     "[type] Type errors" "$(preflight_class_policy type)" ${lines_type[@]+"${lines_type[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \

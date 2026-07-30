@@ -228,6 +228,83 @@ printf '%s' "${findings_tb}" | jq -e '
 ' >/dev/null \
   || fail "class_method_and_bigint_should_satisfy_acceptance: ${findings_tb}"
 
+# --- a constructor parameter the demand itself declares private must NOT be
+# required as an export. Treating every camelCase token as export-required made
+# "Construtor aceita (maxBytes: bigint)" unsatisfiable: the model was told to
+# publish its own internal state, and no retry could ever succeed. ---
+printf '%s\n' \
+  'export class TokenBucket {' \
+  '  private maxBytes: bigint;' \
+  '  private rateBitsPerMs: number;' \
+  '  private maxTokens: bigint = 0n;' \
+  '  constructor(maxBytes: bigint, mbps: number) {' \
+  '    this.maxBytes = maxBytes;' \
+  '    this.rateBitsPerMs = mbps * 8000;' \
+  '  }' \
+  '}' \
+  'export function obterEstadoBitmask(b: TokenBucket): number { return 0; }' \
+  > "${test_tmp}/src/tokenBucket.ts"
+write_repair_handover "$(cat <<'EOF'
+diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts
+--- /dev/null
++++ b/src/tokenBucket.ts
+@@ -0,0 +1,3 @@
++export class TokenBucket {
++  private maxBytes: bigint;
++}
+EOF
+)" '["src/tokenBucket.ts"]'
+demand_priv="$(cat <<'EOF'
+## Goal
+Crie a classe TokenBucket. Construtor aceita (maxBytes: bigint, mbps: number)
+e converte para rateBitsPerMs. Acumule limitando ao maxTokens.
+Exporte a função obterEstadoBitmask(bucket: TokenBucket): number.
+
+## Targets
+- src/tokenBucket.ts
+
+## Acceptance
+- TokenBucket
+- maxBytes
+- maxTokens
+- rateBitsPerMs
+- obterEstadoBitmask
+EOF
+)"
+findings_priv="$(
+  aegis_mechanical_adversarial_diff_scan "${handover}" "${demand_priv}" "${test_tmp}"
+)"
+printf '%s' "${findings_priv}" | jq -e '
+  type == "array"
+  and (all(.[]; (.description | test("Acceptance identifiers") | not)))
+' >/dev/null \
+  || fail "private_constructor_params_should_satisfy_acceptance: ${findings_priv}"
+
+# --- but a token the demand explicitly marks for export must still be
+# exported. Written as a plain field it is reported as not_exported (it is in
+# the file), never as absent — the two need opposite fixes.
+# NOTE: aegis_acceptance_export_hit accepts any method form, including a
+# private one, so this fixture uses a field to exercise the message path.
+printf '%s\n' \
+  'export class TokenBucket {' \
+  '  private maxBytes: bigint;' \
+  '  private maxTokens: bigint = 0n;' \
+  '  private rateBitsPerMs: number = 0;' \
+  '  private obterEstadoBitmask: number = 0;' \
+  '  constructor(maxBytes: bigint) { this.maxBytes = maxBytes; }' \
+  '}' \
+  > "${test_tmp}/src/tokenBucket.ts"
+findings_notexp="$(
+  aegis_mechanical_adversarial_diff_scan "${handover}" "${demand_priv}" "${test_tmp}"
+)"
+printf '%s' "${findings_notexp}" | jq -e '
+  type == "array" and length >= 1
+  and any(.[]; .description | test("present but not exported"))
+  and any(.[]; .description | test("obterEstadoBitmask"))
+  and (all(.[]; (.description | test("missing from candidate body.*maxBytes") | not)))
+' >/dev/null \
+  || fail "demanded_export_kept_private_should_report_not_exported: ${findings_notexp}"
+
 # --- residual LLM policy ---
 declare -f aegis_adversarial_should_use_llm >/dev/null \
   || fail "missing_should_use_llm"

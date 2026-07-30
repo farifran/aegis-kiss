@@ -2034,18 +2034,49 @@ aegis_acceptance_token_is_language_global() {
 
 # API-like tokens (PascalCase / CamelCase / long) must be public exports,
 # not only a parameter name (stress B gaming: MustExistSymbolXYZ as param).
+# True when the demand text itself puts the token behind an export verb —
+# "Exporte a função obterEstadoBitmask", "export SymbolX". The window stops
+# at a sentence break so a later clause cannot borrow an earlier verb.
+aegis_acceptance_token_demands_export() {
+  local tok="${1-}"
+  local demand="${2-}"
+  [[ -n "${tok}" && -n "${demand}" ]] || return 1
+  printf '%s\n' "${demand}" | tr '\n' ' ' | grep -Eiq \
+    "(exports?|exporte|exporta|exportar|exported|re-?exporte?|expose)[^.]{0,40}\\b${tok}\\b" \
+    2>/dev/null
+}
+
+# Shape alone cannot tell an exported function from a constructor parameter:
+# obterEstadoBitmask and maxBytes are both camelCase. Only PascalCase (types
+# and classes) is required to be exported on shape; for everything else the
+# demand decides. Requiring export from every camelCase token made demands
+# like "Construtor aceita (maxBytes: bigint)" unsatisfiable — the model was
+# told to publish its own internal state.
 aegis_acceptance_token_is_export_like() {
   local tok="${1-}"
+  local demand="${2-}"
   [[ -n "${tok}" ]] || return 1
   # Built-ins are never "must export".
   if aegis_acceptance_token_is_language_global "${tok}"; then
     return 1
   fi
-  # Has internal capital (Camel/Pascal) or long identifier.
-  [[ "${tok}" =~ [a-z][A-Z] || "${tok}" =~ ^[A-Z][a-zA-Z0-9]+[A-Z] || "${#tok}" -ge 16 ]] \
-    && return 0
-  [[ "${tok}" =~ ^[A-Z][A-Za-z0-9]{5,}$ ]] && return 0
-  return 1
+  # PascalCase — class/type/interface names. Keeps the anti-gaming gate that
+  # blocks satisfying an acceptance token with a bare parameter name.
+  [[ "${tok}" =~ ^[A-Z] ]] && return 0
+  # Otherwise the demand is the authority on what is public.
+  aegis_acceptance_token_demands_export "${tok}" "${demand}"
+}
+
+# Token is part of the module's declared surface: a typed member, constructor
+# parameter, binding, or assignment. Used only for tokens the demand does NOT
+# mark for export — for those, appearing as declared state IS the compliance.
+aegis_acceptance_declared_hit() {
+  local tok="${1-}"
+  local corpus="${2-}"
+  [[ -n "${tok}" ]] || return 1
+  printf '%s\n' "${corpus}" | grep -Eq \
+    "(^|[[:space:];{(,])((public|private|protected|static|readonly|abstract|override|let|const|var)[[:space:]]+)*${tok}[[:space:]]*[?!]?[[:space:]]*[:=]|this\\.${tok}[[:space:]]*[=.]" \
+    2>/dev/null
 }
 
 # Hit if token appears as export function/const/class/type/{ Tok }, or as a
@@ -2099,13 +2130,24 @@ aegis_acceptance_missing_in_corpus() {
     if aegis_acceptance_token_is_path_noise "${tok}"; then
       continue
     fi
-    if aegis_acceptance_token_is_export_like "${tok}"; then
+    if aegis_acceptance_token_is_export_like "${tok}" "${investigation}"; then
       if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
-        missing="${missing}${tok}"$'\n'
+        # Distinguish "nowhere in the file" from "written, but not exported":
+        # the two need opposite fixes, and reporting the second as the first
+        # sends the model looking for code that is already there.
+        if aegis_acceptance_declared_hit "${tok}" "${corpus}" \
+          || printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+          missing="${missing}${tok}|not_exported"$'\n'
+        else
+          missing="${missing}${tok}|absent"$'\n'
+        fi
       fi
     else
-      if ! printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
-        missing="${missing}${tok}"$'\n'
+      # Not demanded as an export: being declared state or a parameter IS the
+      # compliance for demands like "Construtor aceita (maxBytes: bigint)".
+      if ! aegis_acceptance_declared_hit "${tok}" "${corpus}" \
+        && ! printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+        missing="${missing}${tok}|absent"$'\n'
       fi
     fi
   done <<< "${tokens_nl}"
@@ -2509,28 +2551,51 @@ aegis_mechanical_adversarial_diff_scan() {
       aegis_acceptance_missing_in_corpus "${investigation}" "${corpus}" 2>/dev/null
     )" || accept_rc=$?
     if [[ "${accept_rc}" -ne 0 && -n "${missing_nl}" ]]; then
-      local miss_list fix_hint
-      miss_list="$(printf '%s\n' "${missing_nl}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-      # Language globals (BigInt) need body usage; export-like need export/method.
-      fix_hint="$(
-        printf '%s\n' "${missing_nl}" | while IFS= read -r mt; do
-          [[ -n "${mt}" ]] || continue
-          if aegis_acceptance_token_is_language_global "${mt}"; then
-            printf 'use %s in the implementation (e.g. %s(Date.now()) / 0n), not as export; ' "${mt}" "${mt}"
-          elif aegis_acceptance_token_is_export_like "${mt}"; then
-            printf 'export class/function %s or public %s() method; ' "${mt}" "${mt}"
-          else
-            printf 'include identifier %s in the candidate body; ' "${mt}"
-          fi
-        done
-      )"
+      local miss_list fix_hint headline
+      local absent_list="" notexp_list="" mt reason
+      while IFS= read -r mt; do
+        [[ -n "${mt}" ]] || continue
+        reason="${mt##*|}"
+        mt="${mt%%|*}"
+        if [[ "${reason}" == "not_exported" ]]; then
+          notexp_list="${notexp_list}${mt} "
+        else
+          absent_list="${absent_list}${mt} "
+        fi
+      done <<< "${missing_nl}"
+      absent_list="${absent_list% }"
+      notexp_list="${notexp_list% }"
+
+      # Two different defects, two different messages. Reporting a written-but-
+      # private identifier as "missing from body" sends the model hunting for
+      # code that is already there.
+      headline=""
+      [[ -n "${absent_list}" ]] \
+        && headline="Acceptance identifiers missing from candidate body: ${absent_list}"
+      if [[ -n "${notexp_list}" ]]; then
+        [[ -n "${headline}" ]] && headline="${headline} | "
+        headline="${headline}Acceptance identifiers present but not exported: ${notexp_list}"
+      fi
+      miss_list="$(printf '%s %s' "${absent_list}" "${notexp_list}" | tr -s ' ' | sed 's/^ //; s/ $//')"
+
+      fix_hint=""
+      for mt in ${absent_list}; do
+        if aegis_acceptance_token_is_language_global "${mt}"; then
+          fix_hint="${fix_hint}use ${mt} in the implementation (e.g. ${mt}(Date.now()) / 0n), not as export; "
+        else
+          fix_hint="${fix_hint}include identifier ${mt} in the candidate body; "
+        fi
+      done
+      for mt in ${notexp_list}; do
+        fix_hint="${fix_hint}${mt} is already in the file — export it (export function/class ${mt}) or expose it as a public ${mt}() method; "
+      done
       [[ -n "${fix_hint}" ]] || fix_hint="Add missing Acceptance identifiers to ${primary}: ${miss_list}"
       findings+=(
         "$(
-          jq -nc --arg f "${primary}" --arg m "${miss_list}" --arg fix "${fix_hint}" '{
+          jq -nc --arg f "${primary}" --arg d "${headline}" --arg fix "${fix_hint}" '{
             type: "contract_violation",
             severity: "high",
-            description: ("Acceptance identifiers missing from candidate body: " + $m),
+            description: $d,
             supported_by_evidence: true,
             evidence_refs: ["candidate.diff", "files_changed.body"],
             target_files: [$f],
