@@ -62,8 +62,8 @@ preflight_format_class_block() {
   local it n=0
   for it in "${items[@]}"; do
     n=$((n + 1))
-    if [[ "${n}" -gt 4 ]]; then
-      printf '%s\n' "- … ($(( ${#items[@]} - 4 )) more omitted)"
+    if [[ "${n}" -gt 8 ]]; then
+      printf '%s\n' "- … ($(( ${#items[@]} - 8 )) more omitted)"
       break
     fi
     printf '%s\n' "- ${it}"
@@ -128,17 +128,17 @@ assemble_preflight_fix_prompt() {
 
   local taxonomy_block=""
   taxonomy_block+="$(preflight_format_class_block \
-    "[syntax] Parse / structure" "$(preflight_class_policy syntax)" "${lines_syntax[@]:-}")"
+    "[syntax] Parse / structure" "$(preflight_class_policy syntax)" ${lines_syntax[@]+"${lines_syntax[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
-    "[any] Type escapes" "$(preflight_class_policy any)" "${lines_any[@]:-}")"
+    "[any] Type escapes" "$(preflight_class_policy any)" ${lines_any[@]+"${lines_any[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
-    "[import] Module resolution" "$(preflight_class_policy import)" "${lines_import[@]:-}")"
+    "[import] Module resolution" "$(preflight_class_policy import)" ${lines_import[@]+"${lines_import[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
-    "[type] Type errors" "$(preflight_class_policy type)" "${lines_type[@]:-}")"
+    "[type] Type errors" "$(preflight_class_policy type)" ${lines_type[@]+"${lines_type[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
-    "[runtime_load] Module load failures" "$(preflight_class_policy runtime_load)" "${lines_runtime[@]:-}")"
+    "[runtime_load] Module load failures" "$(preflight_class_policy runtime_load)" ${lines_runtime[@]+"${lines_runtime[@]}"})"
   taxonomy_block+="$(preflight_format_class_block \
-    "[other] Other diagnostics" "$(preflight_class_policy other)" "${lines_other[@]:-}")"
+    "[other] Other diagnostics" "$(preflight_class_policy other)" ${lines_other[@]+"${lines_other[@]}"})"
 
   if [[ -z "$(printf '%s' "${taxonomy_block}" | sed '/^$/d')" ]]; then
     taxonomy_block="(no structured diagnostics available — re-read the loaded files and make them compile and load cleanly)
@@ -205,7 +205,7 @@ EOF
 #   off            — warn only, never fail
 # AEGIS_MUTATION_INTENT_FIX_ATTEMPTS (default 3) — demand-correction budget
 #   for floor models (separate from tools preflight fixes)
-# AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS (default 2) — tsc/test/smoke fixes
+# AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS (default 3) — tsc/test/smoke fixes
 # AEGIS_MUTATION_MAX_NEW_EXPORTS (default 1) — over-delivery cap on +exports
 # AEGIS_DEMAND_TOKEN_PREFLIGHT=hard — legacy alias for intent hard on tokens
 #   (prefer AEGIS_MUTATION_INTENT_PREFLIGHT)

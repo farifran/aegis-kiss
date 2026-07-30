@@ -199,6 +199,27 @@ run_with_timeout() {
   "$@"
 }
 
+# Compact a Node failure stack into one prompt-sized diagnostic line.
+# Drops stack frames, but always keeps the error message: under
+# --experimental-strip-types Node prints the code frame BEFORE the message,
+# so a plain head -n would cut the diagnostic off and leave only source text.
+compact_node_failure() {
+  printf '%s\n' "${1-}" \
+    | grep -vE '^[[:space:]]*at[[:space:]]+|^node:internal' \
+    | awk '
+        /^[[:space:]]*$/ { next }
+        /^[A-Za-z_]*(Error|Exception)( \[|:)/ && msg == "" { msg = $0; next }
+        n < 2 { rest = (rest == "" ? $0 : rest " " $0); n++ }
+        END {
+          if (msg != "" && rest != "") print msg " | " rest
+          else if (msg != "") print msg
+          else print rest
+        }
+      ' \
+    | sed 's/[[:space:]]\{2,\}/ /g; s/[[:space:]]*$//' \
+    | head -c 500
+}
+
 # Prints: passed | failed | skipped
 run_smoke_import_changed() {
   if [[ "${AEGIS_MUTATION_SMOKE_IMPORT:-true}" == "0" ]] \
@@ -339,7 +360,7 @@ import(pathToFileURL(target).href)
           --argjson acc "${results_json}" \
           --arg f "${rel_path}" \
           --argjson rc "${rc}" \
-          --arg err "$(printf '%s\n' "${out}" | grep -vE '^[[:space:]]*at[[:space:]]+|^node:internal' | head -n 3 | tr '\n' ' ' | sed 's/[[:space:]]*$//' | head -c 500)" \
+          --arg err "$(compact_node_failure "${out}")" \
           '$acc + [{file:$f, status:"failed", exit_code:$rc, detail:$err}]'
       )"
     fi
