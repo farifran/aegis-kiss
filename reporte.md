@@ -33,24 +33,26 @@ O relatório tem dois eixos independentes:
 
 | # | Achado | Impacto | Estado |
 |---|---|---|---|
-| A | Contrato de acceptance insatisfazível | **Matou o run** | Diagnosticado |
-| B | Mensagem do tribunal aponta para o lugar errado | Amplifica A | Diagnosticado |
-| C | 12 de 17 códigos TS caem em `other` | Custo de retry | Patch validado |
-| D | Materialização de candidato falhou 2 de 2 | Perde ciclo de melhoria | Diagnosticado |
-| E | Watchdog não aplicou o teto de 360s | Risco de travamento | **Causa não fechada** |
-| F | Diagnóstico de smoke decapitado | Retry às cegas | **Já corrigido** |
+| A | Contrato de acceptance insatisfazível | **Matou o run** | ✅ corrigido (`2b56efb`) |
+| B | Mensagem do tribunal aponta para o lugar errado | Amplifica A | ✅ corrigido (`2b56efb`) |
+| C | 12 de 17 códigos TS caem em `other` | Custo de retry | ✅ corrigido (`2b56efb`) |
+| D | Materialização de candidato falhou 2 de 2 | Perde ciclo de melhoria | ✅ corrigido (`9528a29`) |
+| E | Watchdog não aplicou o teto de 360s | Risco de travamento | ⚠️ instrumentado; **causa segue aberta** |
+| F | Diagnóstico de smoke decapitado | Retry às cegas | ✅ corrigido (`52c98bf`) |
 
 **Parte II — Eficiência:** o que fazer para o processo custar menos, mesmo estando correto.
 
-| # | Alavanca | Ganho estimado |
-|---|---|---|
-| O1 | Mover checagem de acceptance para o preflight | ~1350s neste run |
-| O2 | Detector de estagnação no loop externo | ~800s neste run |
-| O3 | Contabilidade de tokens (hoje é `null`) | habilita as demais |
-| O4 | Prompt caching desligado apesar de prefixo estável | a medir |
-| O5 | Aider sem teto de `max_tokens` | limita pior caso |
-| O6 | Assimetria 12s (criação) vs 250–543s (fix) | **causa não determinada** |
-| O7 | Proporcionalidade do pipeline por micro-unidade | pequeno |
+| # | Alavanca | Ganho estimado | Estado |
+|---|---|---|---|
+| O1 | Mover checagem de acceptance para o loop interno | ~1350s neste run | ✅ implementado (`401e81a`) |
+| O2 | Detector de estagnação no loop externo | ~800s neste run | ✅ implementado (`9528a29`) |
+| O3 | Contabilidade de tokens | — | ❌ **achado inválido** (ver §11) |
+| O4 | Prompt caching desligado apesar de prefixo estável | marginal | ⏸️ não aplicado (ver §11) |
+| O5 | Aider sem teto de `max_tokens` | nenhum | ❌ **desnecessário** (ver §11) |
+| O6 | Chamadas de 250–543s | não endereçável no harness | ✅ **causa determinada** (ver §11) |
+| O7 | Proporcionalidade do pipeline por micro-unidade | desprezível | ⏸️ não aplicado (ver §11) |
+
+> **§11 é leitura obrigatória.** Quatro itens da Parte II mudaram de status depois que a implementação produziu dados novos: um era erro meu, dois se mostraram desnecessários, e um teve a causa determinada — e não é a que eu supunha.
 
 A observação que organiza a Parte II: **1611s dos 1677s (96%) do run são chamadas ao LLM.** Todo o resto — worktrees, manifestos, tribunal, taxonomia, gates mecânicos — soma menos de 4%. Otimizar este harness significa uma coisa só: **fazer menos chamadas, e mais baratas.** Micro-otimizar shell não move o ponteiro.
 
@@ -638,6 +640,71 @@ Notas de sequenciamento:
 - **O7 por último**: é o único item cujo ganho eu classifico como pequeno, e listo por completude.
 
 Apenas o item 1 muda o desfecho deste comando específico. Os itens de eficiência mudam o custo de **todos** os comandos.
+
+---
+
+## 11. Revisões após a implementação
+
+Implementar os itens produziu dados que não existiam durante a supervisão.
+Quatro conclusões da Parte II mudaram.
+
+### O3 — achado inválido, erro meu
+
+Afirmei que o harness não media tokens porque os registros vinham
+`sent=null recv=null`. **Os campos se chamam `prompt_tokens` e
+`completion_tokens`.** Minha query jq é que estava errada; a contabilidade
+sempre funcionou. Nada a corrigir.
+
+### O6 — causa determinada: variância do provider
+
+Com a contabilidade correta em mãos, as 8 chamadas do run:
+
+| tok/s | duração | fase |
+|---|---|---|
+| 25,17 · 32,90 · 22,09 | 10–12s | `primary` **e** `tools` |
+| 0,77 · 0,86 · 1,33 · 1,36 · 1,62 | 251–543s | `primary` **e** `tools` |
+
+Dois clusters limpos, com contagens de token quase idênticas nos dois
+(prompt 1900–3100, completion 217–419).
+
+**Não é criação vs correção.** `primary` e `tools` aparecem nos dois grupos.
+A minha leitura anterior — "retries custam 20× mais" — estava errada: é
+sorteio. O que varia é o throughput do endpoint, entre ~0,8 e ~33 tok/s, e
+isso não é endereçável dentro do harness.
+
+Consequência prática: o único controle disponível sobre a cauda lenta é o
+watchdog (achado E), o que o torna mais importante do que eu havia dito, não
+menos.
+
+### O5 — desnecessário
+
+A proposta era limitar `max_tokens` do substrato de mutação. As completions
+medidas ficaram entre **217 e 419 tokens** — já pequenas. Um teto não
+resolveria nada e arriscaria truncar saída válida. Não implementado.
+
+### O4 — não aplicado, e por quê
+
+A premissa era que reenviar o prefixo estável de 2032 bytes custava caro. Os
+dados mostram que o gargalo é throughput de geração, não tamanho de prompt.
+Caching reduziria processamento de prompt, que não é onde o tempo está.
+
+Continua sendo um teste que vale fazer contra o NIM, mas ligar por palpite um
+flag que a config desligou deliberadamente não se justifica sem medição — e
+medir custa um run completo.
+
+### O7 — não aplicado
+
+Já estava classificado como ganho desprezível. Os modos mecânicos custam 3–5s
+contra 96% de tempo de LLM. Pular `optimize` e `adversarial` para unidades
+triviais muda a semântica do pipeline em troca de nada mensurável.
+
+### Lacuna nova encontrada durante a implementação
+
+`aegis_acceptance_export_hit` aceita **qualquer forma de método, inclusive
+`private`**. Um token que a demanda manda exportar pode ser satisfeito por um
+método privado. Não foi introduzido pela correção de A e não foi fechado:
+apertar isso tem raio de alcance próprio e merece mudança separada. O fixture
+em `test_mechanical_senior_scans.sh` documenta o comportamento.
 
 ---
 
