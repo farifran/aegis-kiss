@@ -288,6 +288,55 @@ collect_mutation_intent_violations() {
     fi
   fi
 
+  # --- acceptance identifiers ---
+  # The tribunal blocks on exactly this, but only after a full pipeline pass,
+  # so delivering the news costs a whole outer repair round-trip: a fresh
+  # worktree, a candidate rematerialization and one of three scarce repair
+  # attempts. The check itself is mechanical text matching. Running it here
+  # lets the fix loop that is already open resolve it for the price of the
+  # inner attempt it was going to spend anyway.
+  if declare -f aegis_acceptance_missing_in_corpus >/dev/null 2>&1 \
+    && [[ -n "${AEGIS_INVESTIGATION_INPUT:-}" ]]; then
+    local acc_corpus acc_missing acc_rc=0 _f
+    acc_corpus="${added}"
+    while IFS= read -r _f; do
+      [[ -n "${_f}" ]] || continue
+      [[ -f "${AEGIS_EXECUTION_SURFACE_PATH:-}/${_f}" ]] || continue
+      acc_corpus="${acc_corpus}"$'\n'"$(cat "${AEGIS_EXECUTION_SURFACE_PATH}/${_f}" 2>/dev/null || true)"
+    done < <(
+      printf '%s\n' "${diff_content}" \
+        | grep -E '^\+\+\+ b/' \
+        | sed -E 's|^\+\+\+ b/||' \
+        | sort -u \
+        || true
+    )
+
+    acc_missing="$(
+      aegis_acceptance_missing_in_corpus \
+        "${AEGIS_INVESTIGATION_INPUT}" "${acc_corpus}" 2>/dev/null
+    )" || acc_rc=$?
+
+    if [[ "${acc_rc}" -ne 0 && -n "${acc_missing}" ]]; then
+      local _absent="" _notexp="" _mt _reason
+      while IFS= read -r _mt; do
+        [[ -n "${_mt}" ]] || continue
+        _reason="${_mt##*|}"
+        _mt="${_mt%%|*}"
+        if [[ "${_reason}" == "not_exported" ]]; then
+          _notexp="${_notexp}${_mt} "
+        else
+          _absent="${_absent}${_mt} "
+        fi
+      done <<< "${acc_missing}"
+      [[ -n "${_absent}" ]] && violations+=(
+        "acceptance_absent: ${_absent% } — demanded identifier(s) are nowhere in the candidate; add them"
+      )
+      [[ -n "${_notexp}" ]] && violations+=(
+        "acceptance_not_exported: ${_notexp% } — already written in the file; export it or expose a public method, do not re-add it"
+      )
+    fi
+  fi
+
   # --- over-delivery: too many new exports ---
   : "${AEGIS_MUTATION_MAX_NEW_EXPORTS:=1}"
   max_exports="${AEGIS_MUTATION_MAX_NEW_EXPORTS}"

@@ -782,4 +782,54 @@ if declare -f record_mutation_intent_metric >/dev/null 2>&1; then
   unset AEGIS_METRICS_FILE
 fi
 
+# --- acceptance is checked in the inner loop, not only by the tribunal ---
+# The tribunal blocks on these identifiers after a full pipeline pass, which
+# costs a fresh worktree, a candidate rematerialization and one of three
+# scarce outer repair attempts to deliver news a text match already had.
+if declare -f collect_mutation_intent_violations >/dev/null 2>&1 \
+  && declare -f aegis_acceptance_missing_in_corpus >/dev/null 2>&1; then
+  acc_surface="$(mktemp -d)"
+  mkdir -p "${acc_surface}/src"
+  export AEGIS_EXECUTION_SURFACE_PATH="${acc_surface}"
+  export AEGIS_MODE="repair"
+  export AEGIS_INVESTIGATION_INPUT="$(cat <<'EOF'
+Crie a classe TokenBucket. Exporte a função obterEstadoBitmask.
+
+## Acceptance
+- TokenBucket
+- obterEstadoBitmask
+EOF
+)"
+
+  # Written but private: must be reported as not_exported, not as absent.
+  printf '%s\n' \
+    'export class TokenBucket {' \
+    '  private obterEstadoBitmask: number = 0;' \
+    '}' \
+    > "${acc_surface}/src/tokenBucket.ts"
+  acc_diff=$'diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts\n+++ b/src/tokenBucket.ts\n+export class TokenBucket {}\n'
+
+  collect_mutation_intent_violations "${acc_diff}" \
+    && fail "acceptance_not_exported_should_violate_in_inner_loop"
+  printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" \
+    | grep -q 'acceptance_not_exported' \
+    || fail "missing_acceptance_not_exported_diagnostic: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+  printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" \
+    | grep -q 'acceptance_absent' \
+    && fail "written_identifier_reported_as_absent: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+
+  # Properly exported: acceptance must not fire at all.
+  printf '%s\n' \
+    'export class TokenBucket {}' \
+    'export function obterEstadoBitmask(): number { return 0; }' \
+    > "${acc_surface}/src/tokenBucket.ts"
+  collect_mutation_intent_violations "${acc_diff}" || true
+  printf '%s' "${AEGIS_MUTATION_INTENT_DIAGNOSTICS}" \
+    | grep -q 'acceptance_' \
+    && fail "satisfied_acceptance_should_not_violate: ${AEGIS_MUTATION_INTENT_DIAGNOSTICS}"
+
+  rm -rf "${acc_surface}"
+  unset AEGIS_EXECUTION_SURFACE_PATH
+fi
+
 echo "[AEGIS][TEST] demand tokens passed"
