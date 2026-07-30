@@ -370,6 +370,18 @@ invoke_aider() {
     done
   fi
 
+  # Pre-seed 0-byte target files with target header comment so whole-file edit format sees non-empty target
+  if [[ "${#file_args[@]}" -gt 0 ]]; then
+    local f_target full_p_target
+    for f_target in "${file_args[@]}"; do
+      f_target="${f_target#./}"
+      full_p_target="${AEGIS_EXECUTION_SURFACE_PATH}/${f_target}"
+      if [[ -f "${full_p_target}" && ! -s "${full_p_target}" ]]; then
+        printf '// %s\n' "${f_target}" > "${full_p_target}"
+      fi
+    done
+  fi
+
   clear_aider_history_residue
 
   aegis_log "Invoking aider mutation substrate..."
