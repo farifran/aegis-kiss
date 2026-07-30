@@ -969,7 +969,26 @@ promote_epistemic_handover() {
       '
   )" || aegis_fatal "failed_to_materialize_handover"
 
+  # Enrich forensics handover with GLM / Fast Model supervisor brief if provider key present
+  if [[ "${AEGIS_MODE}" == "forensics" ]] \
+    && [[ -n "${OPENAI_API_KEY:-}" ]] \
+    && declare -f aegis_generate_supervisor_brief >/dev/null 2>&1; then
+    local _brief_lines _targets
+    _targets="$(printf '%s' "${handover_json}" | jq -r '.epistemic_state.next_attention_targets | join(", ")' 2>/dev/null || true)"
+    _brief_lines="$(aegis_generate_supervisor_brief "${AEGIS_INVESTIGATION_INPUT:-}" "${_targets:-src}")"
+    if [[ -n "${_brief_lines}" ]]; then
+      aegis_log "GLM Supervisor Brief generated (~30 tokens):"
+      printf '%s\n' "${_brief_lines}" >&2
+      handover_json="$(
+        printf '%s' "${handover_json}" | jq -c --arg brief "${_brief_lines}" '
+          .artifact_snapshot.operational_context.mutation_brief = ($brief | split("\n") | map(select(length > 0)))
+        ' 2>/dev/null || printf '%s' "${handover_json}"
+      )"
+    fi
+  fi
+
   local handover_parts
+
   mapfile -t handover_parts < <(
     printf '%s' "${handover_json}" | jq -c '.artifact_snapshot, .epistemic_state'
   )

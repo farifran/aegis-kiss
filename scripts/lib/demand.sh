@@ -1019,8 +1019,22 @@ aegis_format_mutation_brief_section() {
       echo "DONE WHEN: ${done_line}"
       echo
     fi
+
+    local brief_items
+    brief_items="$(
+      jq -r '
+        (.artifact_snapshot.operational_context.mutation_brief // [])[]?
+        | select(type == "string" and length > 0)
+      ' "${handover}" 2>/dev/null || true
+    )"
+    if [[ -n "${brief_items}" ]]; then
+      echo "SUPERVISOR GUIDANCE (GLM Briefing):"
+      printf '%s\n' "${brief_items}" | sed 's/^/- /'
+      echo
+    fi
   }
 }
+
 
 # True if handover carries at least one forensics repair_candidate id.
 aegis_handover_has_repair_alvo() {
