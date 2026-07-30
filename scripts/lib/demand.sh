@@ -1019,22 +1019,8 @@ aegis_format_mutation_brief_section() {
       echo "DONE WHEN: ${done_line}"
       echo
     fi
-
-    local brief_items
-    brief_items="$(
-      jq -r '
-        (.artifact_snapshot.operational_context.mutation_brief // [])[]?
-        | select(type == "string" and length > 0)
-      ' "${handover}" 2>/dev/null || true
-    )"
-    if [[ -n "${brief_items}" ]]; then
-      echo "SUPERVISOR GUIDANCE (GLM Briefing):"
-      printf '%s\n' "${brief_items}" | sed 's/^/- /'
-      echo
-    fi
   }
 }
-
 
 # True if handover carries at least one forensics repair_candidate id.
 aegis_handover_has_repair_alvo() {
@@ -3237,55 +3223,3 @@ aegis_format_tribunal_summary_section() {
       ""
   ' "${handover}" 2>/dev/null || true
 }
-
-# Invoke Provider HTTP endpoint (GLM 5.2/4.5 or NVIDIA NIM) to generate 2 concise supervisor guidance bullets.
-aegis_generate_supervisor_brief() {
-  local demand="${1-}"
-  local targets="${2-}"
-  local api_base="${GLM_API_BASE:-${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}}"
-  local api_key="${GLM_API_KEY:-${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}}"
-  local model="${AEGIS_SUPERVISOR_MODEL:-meta/llama-3.1-8b-instruct}"
-
-  [[ -n "${demand}" && -n "${api_key}" ]] || return 0
-
-  local req_file resp_file
-  req_file="$(mktemp "${TMPDIR:-/tmp}/aegis_brief_req.XXXXXX")"
-  resp_file="$(mktemp "${TMPDIR:-/tmp}/aegis_brief_resp.XXXXXX")"
-
-  jq -n \
-    --arg model "${model}" \
-    --arg demand "${demand}" \
-    --arg targets "${targets}" \
-    '{
-      model: $model,
-      messages: [
-        {
-          role: "system",
-          content: "You are a senior tech lead supervisor. Do NOT output markdown code blocks. Output ONLY 2 concise bullet points (under 30 words total) for a TypeScript coder: 1. Convert mbps to rateBitsPerMs using BigInt(Math.floor(mbps * 8000)). 2. Keep all tokens/timestamps as native bigint."
-        },
-        {
-          role: "user",
-          content: ("Demand: " + $demand + "\nTargets: " + $targets)
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 80
-    }' > "${req_file}"
-
-  curl -s --connect-timeout 5 --max-time 15 \
-    -X POST "${api_base%/}/chat/completions" \
-    -H "Authorization: Bearer ${api_key}" \
-    -H "Content-Type: application/json" \
-    --data @"${req_file}" > "${resp_file}" 2>/dev/null || true
-
-  rm -f "${req_file}"
-
-  local content
-  content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
-  rm -f "${resp_file}"
-
-  if [[ -n "${content}" ]]; then
-    printf '%s' "${content}"
-  fi
-}
-
