@@ -85,6 +85,20 @@ next_step="${line#*$'\t'}"
 [[ -n "${next_step}" ]] \
   || fail "classify_fresh_resume_empty_next_step"
 
+# --- stalled repair loop is a contract problem, not a budget problem ---
+# Raising the budget cannot satisfy a finding the candidate cannot satisfy,
+# so the next step must not suggest it.
+line="$(aegis_classify_reason "repair_loop_stalled")"
+class="${line%%$'\t'*}"
+next_step="${line#*$'\t'}"
+
+[[ "${class}" == "contract" ]] \
+  || fail "classify_stalled_class: got '${class}'"
+[[ -n "${next_step}" ]] \
+  || fail "classify_stalled_empty_next_step"
+printf '%s' "${next_step}" | grep -q "AEGIS_MAX_REPAIR_ATTEMPTS" \
+  && fail "classify_stalled_should_not_suggest_raising_budget: ${next_step}"
+
 # --- D remains: prefix match empty_diff:* ---
 line="$(aegis_classify_reason "empty_diff: aider produced no changes")"
 class="${line%%$'\t'*}"

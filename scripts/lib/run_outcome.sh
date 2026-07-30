@@ -99,6 +99,10 @@ aegis_classify_reason() {
       class="budget"
       next_step="Teto do loop de repair; leia findings no handover, refine a demanda ou aumente AEGIS_MAX_REPAIR_ATTEMPTS"
       ;;
+    repair_loop_stalled)
+      class="contract"
+      next_step="Os mesmos findings voltaram sem mudança: o candidate não consegue satisfazê-los. Não aumente o budget — leia os findings acima e corrija a demanda ou a Acceptance"
+      ;;
     "forensics inconclusive")
       class="epistemic_halt"
       next_step="Nenhum defeito acionável; refine investigation input ou target"

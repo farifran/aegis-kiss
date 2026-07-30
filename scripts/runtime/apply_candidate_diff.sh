@@ -16,32 +16,32 @@ candidate_fatal() {
 [[ -d "${EXECUTION_SURFACE}" ]] \
   || candidate_fatal "missing_execution_surface"
 
-# Repair handover: operational_context.diff. Optimize→repair refine:
-# candidate_result holds the prior Repair patch.
-jq -e '
-  (
-    .artifact_snapshot.mode == "repair"
-    and (.artifact_snapshot.operational_context.diff | type == "string" and length > 0)
-    and (
-      .artifact_snapshot.operational_context.files_changed
-      | type == "array" and length > 0
+# Locate the candidate by SHAPE, not by mode name. Repair carries the patch in
+# operational_context.diff; optimize, adversarial and validation forward it as
+# candidate_result. Enumerating only repair and optimize meant a
+# validation-mode handover — the one every repair-feedback re-entry carries —
+# matched nothing and was refused as an invalid contract, so the loop that
+# validation itself asked for could never rebuild the candidate.
+candidate_src="$(
+  jq -r '
+    def valid_diff: type == "string" and length > 0 and . != "(no changes)";
+    def valid_files: type == "array" and length > 0
       and all(type == "string" and length > 0
         and startswith("/") == false
-        and (split("/") | index("..")) == null)
-    )
-  ) or (
-    .artifact_snapshot.mode == "optimize"
-    and (.artifact_snapshot.operational_context.candidate_result.diff
-      | type == "string" and length > 0 and . != "(no changes)")
-    and (
-      .artifact_snapshot.operational_context.candidate_result.files_changed
-      | type == "array" and length > 0
-      and all(type == "string" and length > 0
-        and startswith("/") == false
-        and (split("/") | index("..")) == null)
-    )
-  )
-' "${HANDOVER_FILE}" >/dev/null 2>&1 \
+        and (split("/") | index("..")) == null);
+    (.artifact_snapshot.operational_context // {}) as $oc
+    | ($oc.candidate_result // {}) as $cr
+    | if ($oc.diff | valid_diff) and ($oc.files_changed | valid_files) then
+        "direct"
+      elif ($cr.diff | valid_diff) and ($cr.files_changed | valid_files) then
+        "candidate_result"
+      else
+        ""
+      end
+  ' "${HANDOVER_FILE}" 2>/dev/null || true
+)"
+
+[[ -n "${candidate_src}" ]] \
   || candidate_fatal "invalid_repair_candidate_contract"
 
 diff_file="$(mktemp)"
@@ -55,20 +55,17 @@ cleanup() {
 
 trap cleanup EXIT
 
-jq -r '
-  if .artifact_snapshot.mode == "optimize" then
-    .artifact_snapshot.operational_context.candidate_result.diff
-  else
-    .artifact_snapshot.operational_context.diff
-  end
-' "${HANDOVER_FILE}" > "${diff_file}"
-jq -r '
-  if .artifact_snapshot.mode == "optimize" then
-    .artifact_snapshot.operational_context.candidate_result.files_changed[]?
-  else
-    .artifact_snapshot.operational_context.files_changed[]?
-  end
-' "${HANDOVER_FILE}" | sort -u > "${expected_files}"
+if [[ "${candidate_src}" == "candidate_result" ]]; then
+  jq -r '.artifact_snapshot.operational_context.candidate_result.diff' \
+    "${HANDOVER_FILE}" > "${diff_file}"
+  jq -r '.artifact_snapshot.operational_context.candidate_result.files_changed[]?' \
+    "${HANDOVER_FILE}" | sort -u > "${expected_files}"
+else
+  jq -r '.artifact_snapshot.operational_context.diff' \
+    "${HANDOVER_FILE}" > "${diff_file}"
+  jq -r '.artifact_snapshot.operational_context.files_changed[]?' \
+    "${HANDOVER_FILE}" | sort -u > "${expected_files}"
+fi
 
 # Prefer clean apply; fall back to 3-way (optimize→repair refine on dirty-ish trees).
 if ! git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" 2>/dev/null; then
@@ -92,8 +89,14 @@ if git -C "${EXECUTION_SURFACE}" grep -l -E '^(<<<<<<< |>>>>>>>)' -- \
   candidate_fatal "candidate_diff_apply_left_conflict_markers"
 fi
 
-git -C "${EXECUTION_SURFACE}" diff --name-only HEAD -- \
-  | sort -u > "${actual_files}"
+# A net-new module is the canonical target ("Create src/tokenBucket.ts"), and
+# `git diff --name-only HEAD` never lists an untracked file. Counting only
+# tracked changes left actual_files empty for exactly the case the pipeline
+# exists to serve, and every creation was rejected as a files_changed mismatch.
+{
+  git -C "${EXECUTION_SURFACE}" diff --name-only HEAD -- 2>/dev/null || true
+  git -C "${EXECUTION_SURFACE}" ls-files --others --exclude-standard 2>/dev/null || true
+} | sort -u > "${actual_files}"
 
 # Allow actual ⊆ expected? No — require equality, but ignore empty noise.
 if ! cmp -s "${expected_files}" "${actual_files}"; then

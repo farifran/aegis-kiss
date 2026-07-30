@@ -261,6 +261,9 @@ set_active_mode "${AEGIS_MODE}"
 # pipeline back into repair mode (hard ceiling below). Operator gate
 # for environments that cannot run the mutation substrate.
 AEGIS_REPAIR_ATTEMPT_COUNT=0
+# Fingerprint of the last rejection's blocking findings — a repeat means the
+# loop is not converging and further passes are wasted.
+AEGIS_REPAIR_LAST_FINDINGS_FP=""
 # Local repair budget (no rediscovery): rejected validation re-enters
 # repair → optimize → adversarial → validation up to this many times.
 : "${AEGIS_MAX_REPAIR_ATTEMPTS:=2}"
@@ -713,7 +716,11 @@ materialize_preceding_mutation_candidate() {
   if [[ "${AEGIS_MODE}" == "repair" ]] \
     && [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT}" -gt 0 ]] \
     && mode_requires_execution_surface; then
-    aegis_log "Materializing Repair candidate for optimize→repair refine..."
+    # The same re-entry serves optimize→repair and validation→repair; naming
+    # only the first made a validation failure report the wrong route.
+    local refine_route="optimize→repair"
+    [[ "${AEGIS_REPAIR_ATTEMPT_COUNT:-0}" -gt 0 ]] && refine_route="validation→repair"
+    aegis_log "Materializing Repair candidate for ${refine_route} refine..."
     if ! bash scripts/runtime/apply_candidate_diff.sh \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}"; then
@@ -721,7 +728,7 @@ materialize_preceding_mutation_candidate() {
       # run Aider on a clean surface (that would drop the prior candidate from
       # the artifact). Aider substrate re-emits the previous candidate.
       # Stress data: mechanical can_improve + apply fail left runs dead when fatal.
-      aegis_warn "optimize_refine_materialize_failed — keeping previous candidate (no repair refine on empty surface)"
+      aegis_warn "${refine_route}_refine_materialize_failed — keeping previous candidate (no repair refine on empty surface)"
       export AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE=1
       return 0
     fi
@@ -1023,6 +1030,24 @@ repair_feedback_loop_should_fire() {
   )"
 
   [[ "${verdict}" == "rejected" ]] || return 1
+
+  # A loop that spends its whole budget the same way whether the demand is
+  # merely hard or outright impossible costs the same in both cases and says
+  # "budget exhausted" either way. If the blocking findings come back
+  # identical, another expensive pass will not change them.
+  local findings_fp
+  findings_fp="$(
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
+      | jq -r '[(.findings // [])[]? | (.description // "")] | sort | join("")' 2>/dev/null \
+      || true
+  )"
+  if [[ -n "${findings_fp}" && "${findings_fp}" == "${AEGIS_REPAIR_LAST_FINDINGS_FP:-}" ]]; then
+    aegis_warn "repair_loop_stalled — findings unchanged since the previous iteration:"
+    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
+      | jq -r '(.findings // [])[]? | "  - \(.description // "?")"' 2>/dev/null >&2 || true
+    aegis_fatal "repair_loop_stalled"
+  fi
+  AEGIS_REPAIR_LAST_FINDINGS_FP="${findings_fp}"
 
   if [[ "${AEGIS_REPAIR_ATTEMPT_COUNT}" -ge "${AEGIS_MAX_REPAIR_ATTEMPTS}" ]]; then
     aegis_fatal "max_repair_attempts_exceeded"

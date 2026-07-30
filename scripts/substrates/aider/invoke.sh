@@ -204,6 +204,18 @@ run_aider_with_watchdog() {
   AEGIS_AIDER_OUTPUT_LOG="$(aider_mktemp)"
   aider_start_time=$(date +%s)
 
+  # A budget that is empty, non-numeric or zero makes `sleep` fail instantly
+  # and the watchdog exits without ever arming — the call then runs unbounded
+  # and nothing in the log says so. Normalize, and state the effective value:
+  # a 543s call was once observed against a 360s budget with no kill and no
+  # trace of why. The log line is what turns that into a closed question.
+  local watchdog_budget="${AEGIS_AIDER_MAX_SECONDS:-}"
+  if [[ ! "${watchdog_budget}" =~ ^[0-9]+$ ]] || [[ "${watchdog_budget}" -le 0 ]]; then
+    aegis_warn "aider_watchdog_budget_invalid:'${watchdog_budget}' — falling back to 360s"
+    watchdog_budget=360
+  fi
+  aegis_log "aider watchdog armed: ${watchdog_budget}s wall clock"
+
   set +e
   (
     cd "${AEGIS_EXECUTION_SURFACE_PATH}" || {
@@ -220,7 +232,7 @@ run_aider_with_watchdog() {
   aider_pid=$!
 
   (
-    sleep "${AEGIS_AIDER_MAX_SECONDS}"
+    sleep "${watchdog_budget}"
     kill "${aider_pid}" 2>/dev/null
     sleep 5
     kill -9 "${aider_pid}" 2>/dev/null
@@ -238,6 +250,12 @@ run_aider_with_watchdog() {
   AEGIS_AIDER_LAST_ELAPSED=$((aider_end_time - aider_start_time))
   AEGIS_AIDER_LAST_STATUS="${aider_status}"
   echo "[AEGIS][TIMING] aider_substrate_call: ${AEGIS_AIDER_LAST_ELAPSED}s" >&2
+
+  # Completing past the budget means the watchdog did not fire. Silence here
+  # is what made the original overrun invisible; say it out loud instead.
+  if [[ "${AEGIS_AIDER_LAST_ELAPSED}" -gt "${watchdog_budget}" ]]; then
+    aegis_warn "aider_watchdog_did_not_fire: ran ${AEGIS_AIDER_LAST_ELAPSED}s past a ${watchdog_budget}s budget"
+  fi
 }
 
 # Interpret non-zero aider exit: tolerate post-edit summarizer crash when
