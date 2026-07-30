@@ -62,8 +62,8 @@ preflight_format_class_block() {
   local it n=0
   for it in "${items[@]}"; do
     n=$((n + 1))
-    if [[ "${n}" -gt 8 ]]; then
-      printf '%s\n' "- … ($(( ${#items[@]} - 8 )) more omitted)"
+    if [[ "${n}" -gt 4 ]]; then
+      printf '%s\n' "- … ($(( ${#items[@]} - 4 )) more omitted)"
       break
     fi
     printf '%s\n' "- ${it}"

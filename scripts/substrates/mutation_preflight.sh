@@ -339,7 +339,7 @@ import(pathToFileURL(target).href)
           --argjson acc "${results_json}" \
           --arg f "${rel_path}" \
           --argjson rc "${rc}" \
-          --arg err "$(printf '%s' "${out}" | head -c 2000)" \
+          --arg err "$(printf '%s\n' "${out}" | grep -vE '^[[:space:]]*at[[:space:]]+|^node:internal' | head -n 3 | tr '\n' ' ' | sed 's/[[:space:]]*$//' | head -c 500)" \
           '$acc + [{file:$f, status:"failed", exit_code:$rc, detail:$err}]'
       )"
     fi
