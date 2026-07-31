@@ -454,6 +454,10 @@ EOC
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
+  local parent_briefing parent_constraints
+  parent_briefing="$(aegis_fit_md_section "Briefing" "${parent}")"
+  parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
+
   cat <<EOF
 ## Goal
 Single-file micro: ${title}.
@@ -467,7 +471,10 @@ ${targets_block}
 
 ## Change
 ${change_block}
-
+${parent_briefing:+
+## Briefing
+${parent_briefing}
+}
 ## Acceptance
 ${acc_block}
 
@@ -485,6 +492,7 @@ ${acc_block}
 - one primary public export preferred (methods allowed)
 - NodeNext .js imports if this file imports siblings
 - BigInt is global when high-precision time is required
+${parent_constraints:+${parent_constraints}}
 EOF
 }
 
