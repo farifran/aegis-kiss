@@ -7,9 +7,9 @@
 # The product surface. run_aegis.sh stays the low-level tool
 # used to build and test the harness itself.
 #
-# One issue = one task = one target. No branch management, no
-# checklist, no outer retry loop: the pipeline already retries
-# internally, and an unmanaged branch is a half-feature.
+# Default: one issue = one task = one target. When fit splits a monster
+# demand, go runs a multi-unit batch: plan approval once, then per-unit
+# checkpoint commits + issue task [x]. Failed unit K keeps 0..K-1.
 #
 # =========================================================
 
@@ -50,11 +50,14 @@ context   Onde o alvo está: branch, worktree, e o que o registo de commits
           Só leitura, offline, sem LLM.
 
 go        Abre a issue, corre o pipeline de mutation completo e pára no gate
-          de commit, que é teu. Um target por go: dois ficheiros são dois go.
+          de commit, que é teu. Um target por go: dois ficheiros são dois go
+          (ou um plano multi-unit com checkpoint por task).
           --accept são tokens curtos que têm de aparecer no código, nunca
           frases. São obrigatórios: são a semente do registo.
-          --issue N volta a correr uma issue existente em vez de abrir outra,
-          e tira o target do ## Targets dela.
+          --issue N volta a correr uma issue existente; se tiver ## Tasks
+          com [ ], retoma na primeira aberta (keep-progress).
+          --force-task K reabre a task K ([x]→[ ]) e re-corre a partir dela.
+          AEGIS_SQUASH_BATCH=1 funde os commits por unit num só no fim.
 
 split     Divide mecanicamente uma Issue em Markdown em micro-unidades
           atômicas de 1 target por vez (100% offline, 0 tokens).
@@ -193,25 +196,31 @@ render_body() {
   local goal="$1"
   local target="$2"
 
+  # Same section order as the supervisor render (briefing.sh) and the
+  # Briefing skill: Goal → Targets → Acceptance → Briefing → Out of scope
+  # → Constraints. Briefing holds pseudocode; the acceptance tokenizer
+  # does not read it, so mechanics stay out of the promotion contract.
+  # Never invent a filler ## Change — its words used to leak into Acceptance.
   printf '## Goal\n%s\n\n' "${goal}"
   printf '## Targets\n- %s\n\n' "${target}"
-
-  # No filler Change: a generic sentence would leak its own words into the
-  # tokenized Acceptance, and from there into the permanent record.
-  if [[ "${#changes[@]}" -gt 0 ]]; then
-    printf '## Change\n'
-    local c
-    for c in "${changes[@]+"${changes[@]}"}"; do
-      printf -- '- %s\n' "${c}"
-    done
-    printf '\n'
-  fi
 
   printf '## Acceptance\n'
   local a
   for a in "${accepts[@]+"${accepts[@]}"}"; do
     printf -- '- %s\n' "${a}"
   done
+  printf '\n'
+
+  # --change lines are operator pseudocode → ## Briefing (not ## Change).
+  # Without --change the section still exists so the draft schema is complete
+  # and `e` (edit) has a place to fill; empty is fine.
+  printf '## Briefing\n'
+  if [[ "${#changes[@]}" -gt 0 ]]; then
+    local c
+    for c in "${changes[@]+"${changes[@]}"}"; do
+      printf '%s\n' "${c}"
+    done
+  fi
   printf '\n'
 
   printf '## Out of scope\n- unrelated files\n- e2e tests\n- drive-by refactors\n\n'
@@ -231,6 +240,385 @@ seed_issue_cache() {
   mkdir -p "${ISSUE_CACHE_DIR}" 2>/dev/null || true
   printf '# Issue #%s: %s\n\n%s' "${issue}" "${title}" "${body}" \
     > "${ISSUE_CACHE_DIR}/issue_${issue}.md"
+}
+
+# ---------------------------------------------------------
+# Multi-unit plan + keep-progress batch
+# ---------------------------------------------------------
+
+count_micro_units() {
+  local dir="${1:-.harness/micros_auto}"
+  local n=0
+  while [[ -f "${dir}/unit-${n}.md" ]]; do
+    n=$((n + 1))
+  done
+  printf '%s' "${n}"
+}
+
+# Acceptance bullets → "TokA, TokB" for Aegis-Accept.
+unit_acceptance_csv() {
+  local file="${1-}"
+  [[ -f "${file}" ]] || return 0
+  awk '/^## Acceptance$/ { p = 1; next } /^## / { p = 0 } p' "${file}" \
+    | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+    | grep -v '^$' \
+    | paste -sd',' - \
+    | sed 's/,/, /g' \
+    || true
+}
+
+# Paths listed under ## Targets of a unit demand.
+unit_target_paths() {
+  local file="${1-}"
+  [[ -f "${file}" ]] || return 0
+  awk '/^## Targets$/ { p = 1; next } /^## / { p = 0 } p' "${file}" \
+    | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+    | grep -v '^$' \
+    || true
+}
+
+# Worktree changes under every path named by the unit (incl. untracked).
+unit_changed_paths() {
+  local file="${1-}"
+  local p
+  while IFS= read -r p; do
+    [[ -n "${p}" ]] || continue
+    p="${p#./}"
+    target_changes "${p}"
+  done < <(unit_target_paths "${file}") | awk 'NF && !seen[$0]++'
+}
+
+# Strip an existing ## Tasks section (through the next ## heading).
+aegis_md_strip_tasks_section() {
+  local text="${1-}"
+  printf '%s\n' "${text}" | awk '
+    /^## Tasks[[:space:]]*$/ { skip = 1; next }
+    /^## / { skip = 0 }
+    !skip { print }
+  '
+}
+
+# How many checklist rows under ## Tasks (open or done).
+aegis_md_task_count() {
+  local text="${1-}"
+  printf '%s\n' "${text}" | awk '
+    BEGIN { n = 0; in_tasks = 0 }
+    /^## Tasks[[:space:]]*$/ { in_tasks = 1; next }
+    /^## / { if (in_tasks) in_tasks = 0 }
+    in_tasks && /^-[[:space:]]*\[[[:space:]xX]\]/ { n++ }
+    END { print n + 0 }
+  '
+}
+
+# 1-based index of the first open `- [ ]` task, or empty if none.
+aegis_md_first_open_task() {
+  local text="${1-}"
+  printf '%s\n' "${text}" | awk '
+    BEGIN { n = 0; in_tasks = 0 }
+    /^## Tasks[[:space:]]*$/ { in_tasks = 1; next }
+    /^## / { if (in_tasks) in_tasks = 0 }
+    in_tasks && /^-[[:space:]]*\[[[:space:]xX]\]/ {
+      n++
+      if ($0 ~ /^-[[:space:]]*\[[[:space:]]\]/) {
+        print n
+        exit
+      }
+    }
+  '
+}
+
+# True if task N (1-based) is already [x]/[X].
+aegis_md_task_is_done() {
+  local text="${1-}"
+  local task_n="${2-0}"
+  [[ "${task_n}" =~ ^[1-9][0-9]*$ ]] || return 1
+  # Note: awk END runs even after exit — do not override a found match there.
+  printf '%s\n' "${text}" | awk -v want="${task_n}" '
+    BEGIN { n = 0; in_tasks = 0; found = 0; done = 0 }
+    /^## Tasks[[:space:]]*$/ { in_tasks = 1; next }
+    /^## / { if (in_tasks) in_tasks = 0 }
+    in_tasks && /^-[[:space:]]*\[[[:space:]xX]\]/ {
+      n++
+      if (n == want + 0) {
+        found = 1
+        if ($0 ~ /\[[xX]\]/) done = 1
+        exit
+      }
+    }
+    END { if (found && done) exit 0; exit 1 }
+  '
+}
+
+# Flip the Nth checklist item under ## Tasks to [x] (1-based).
+# Prints the full markdown body. No-op style if index out of range.
+aegis_md_check_task() {
+  local text="${1-}"
+  local task_n="${2-0}"
+  [[ "${task_n}" =~ ^[1-9][0-9]*$ ]] || {
+    printf '%s' "${text}"
+    return 0
+  }
+  printf '%s\n' "${text}" | awk -v want="${task_n}" '
+    BEGIN { n = 0; in_tasks = 0 }
+    /^## Tasks[[:space:]]*$/ { in_tasks = 1; print; next }
+    /^## / {
+      if (in_tasks) in_tasks = 0
+      print
+      next
+    }
+    in_tasks && /^-[[:space:]]*\[[[:space:]xX]\]/ {
+      n++
+      if (n == want + 0) {
+        sub(/\[[[:space:]]\]/, "[x]")
+      }
+      print
+      next
+    }
+    { print }
+  '
+}
+
+# Reopen the Nth checklist item: [x]/[X] → [ ] (1-based).
+aegis_md_uncheck_task() {
+  local text="${1-}"
+  local task_n="${2-0}"
+  [[ "${task_n}" =~ ^[1-9][0-9]*$ ]] || {
+    printf '%s' "${text}"
+    return 0
+  }
+  printf '%s\n' "${text}" | awk -v want="${task_n}" '
+    BEGIN { n = 0; in_tasks = 0 }
+    /^## Tasks[[:space:]]*$/ { in_tasks = 1; print; next }
+    /^## / {
+      if (in_tasks) in_tasks = 0
+      print
+      next
+    }
+    in_tasks && /^-[[:space:]]*\[[[:space:]xX]\]/ {
+      n++
+      if (n == want + 0) {
+        sub(/\[[xX]\]/, "[ ]")
+      }
+      print
+      next
+    }
+    { print }
+  '
+}
+
+# Build issue body = parent demand (no Tasks) + checklist of every micro unit.
+build_multiunit_plan_body() {
+  local parent_body="${1-}"
+  local micros_dir="${2:-.harness/micros_auto}"
+  local n i title targets_csv accept_csv line tasks="" unit_file fit_json
+  local stripped
+
+  n="$(count_micro_units "${micros_dir}")"
+  [[ "${n}" -gt 0 ]] || {
+    printf '%s' "${parent_body}"
+    return 0
+  }
+
+  fit_json="${micros_dir}/fit.json"
+  for ((i = 0; i < n; i++)); do
+    unit_file="${micros_dir}/unit-${i}.md"
+    title=""
+    if [[ -f "${fit_json}" ]]; then
+      title="$(jq -r --argjson i "${i}" \
+        '.proposed_units[$i].title // empty' "${fit_json}" 2>/dev/null || true)"
+    fi
+    if [[ -z "${title}" && -f "${unit_file}" ]]; then
+      title="$(
+        awk '/^## Goal$/ { p = 1; next } /^## / { p = 0 } p' "${unit_file}" \
+          | tr '\n' ' ' | sed 's/[[:space:]]*$//' | cut -c1-60
+      )"
+    fi
+    [[ -n "${title}" ]] || title="unit-${i}"
+    targets_csv="$(unit_target_paths "${unit_file}" | paste -sd',' - | sed 's/,/, /g')"
+    accept_csv="$(unit_acceptance_csv "${unit_file}")"
+    line="- [ ] Task $((i + 1)) — ${title}"
+    [[ -n "${targets_csv}" ]] && line+=" (\`${targets_csv}\`)"
+    [[ -n "${accept_csv}" ]] && line+=" · accept: ${accept_csv}"
+    tasks+="${line}"$'\n'
+  done
+
+  stripped="$(aegis_md_strip_tasks_section "${parent_body}")"
+  # Drop trailing blank lines so ## Tasks sits cleanly.
+  stripped="$(printf '%s\n' "${stripped}" | awk 'NF { for (; c > 0; c--) print ""; print; next } { c++ }')"
+
+  printf '%s\n\n## Tasks\n%s' "${stripped}" "${tasks}"
+}
+
+print_micro_plan() {
+  local micros_dir="${1:-.harness/micros_auto}"
+  local n i unit_file title targets_csv accept_csv fit_json
+  n="$(count_micro_units "${micros_dir}")"
+  [[ "${n}" -gt 0 ]] || return 0
+  fit_json="${micros_dir}/fit.json"
+  printf '\n── plano multi-unit (%s tasks) ──\n' "${n}"
+  for ((i = 0; i < n; i++)); do
+    unit_file="${micros_dir}/unit-${i}.md"
+    title=""
+    if [[ -f "${fit_json}" ]]; then
+      title="$(jq -r --argjson i "${i}" \
+        '.proposed_units[$i].title // empty' "${fit_json}" 2>/dev/null || true)"
+    fi
+    [[ -n "${title}" ]] || title="unit-${i}"
+    targets_csv="$(unit_target_paths "${unit_file}" | paste -sd',' - | sed 's/,/, /g')"
+    accept_csv="$(unit_acceptance_csv "${unit_file}")"
+    printf '  [%s/%s] %s\n' "$((i + 1))" "${n}" "${title}"
+    [[ -n "${targets_csv}" ]] && printf '         target: %s\n' "${targets_csv}"
+    [[ -n "${accept_csv}" ]] && printf '         accept: %s\n' "${accept_csv}"
+  done
+  printf '── y aprova o plano inteiro; falha na task K mantém 1..K-1 ──\n\n'
+}
+
+# Best-effort: patch issue body via gh and refresh local cache.
+# Args: issue, new_body
+issue_write_body() {
+  local issue="${1-}"
+  local new_body="${2-}"
+  local tmp
+  [[ "${issue}" =~ ^[0-9]+$ ]] || return 1
+  [[ -n "${new_body}" ]] || return 1
+  tmp="$(mktemp)"
+  printf '%s\n' "${new_body}" > "${tmp}"
+  if gh_run issue edit "${issue}" --body-file "${tmp}" >/dev/null 2>&1; then
+    rm -f "${tmp}"
+    if [[ -n "${ISSUE_CACHE_DIR:-}" ]]; then
+      local cache="${ISSUE_CACHE_DIR}/issue_${issue}.md" title
+      if [[ -f "${cache}" ]]; then
+        title="$(head -n 1 "${cache}" | sed -E 's/^# Issue #[0-9]+: //')"
+        seed_issue_cache "${issue}" "${title}" "${new_body}"
+      fi
+    fi
+    return 0
+  fi
+  rm -f "${tmp}"
+  return 1
+}
+
+# Best-effort: mark Task N done on the GitHub issue body.
+issue_mark_task_done() {
+  local issue="${1-}"
+  local task_n="${2-}"
+  local body new_body
+  [[ "${issue}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${task_n}" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  body="$(gh_run issue view "${issue}" --json body -q .body 2>/dev/null || true)"
+  [[ -n "${body}" ]] || return 1
+  new_body="$(aegis_md_check_task "${body}" "${task_n}")"
+  issue_write_body "${issue}" "${new_body}"
+}
+
+# Best-effort: reopen Task N ([x] → [ ]) for --force-task.
+issue_mark_task_open() {
+  local issue="${1-}"
+  local task_n="${2-}"
+  local body new_body
+  [[ "${issue}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${task_n}" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  body="$(gh_run issue view "${issue}" --json body -q .body 2>/dev/null || true)"
+  [[ -n "${body}" ]] || return 1
+  new_body="$(aegis_md_uncheck_task "${body}" "${task_n}")"
+  issue_write_body "${issue}" "${new_body}"
+}
+
+# Ensure .harness/micros_auto matches this issue; re-emit from plan body if needed.
+# Args: issue_number, issue_body
+# Returns 0 when unit-0.md exists.
+ensure_micros_for_resume() {
+  local issue="${1-}"
+  local issue_body="${2-}"
+  local micros_dir=".harness/micros_auto"
+  local id_file="${micros_dir}/issue.id"
+  local parent n_tasks n_units
+
+  n_tasks="$(aegis_md_task_count "${issue_body}")"
+  if [[ -f "${micros_dir}/unit-0.md" ]]; then
+    if [[ -f "${id_file}" ]] && [[ "$(tr -d '[:space:]' < "${id_file}")" == "${issue}" ]]; then
+      n_units="$(count_micro_units "${micros_dir}")"
+      if [[ "${n_tasks}" -le 1 ]] || [[ "${n_units}" -ge 1 ]]; then
+        return 0
+      fi
+    fi
+    # Stale micros from another issue or broken set — rebuild.
+    rm -rf "${micros_dir}" >/dev/null 2>&1 || true
+  fi
+
+  parent="$(aegis_md_strip_tasks_section "${issue_body}")"
+  [[ -n "$(printf '%s' "${parent}" | tr -d '[:space:]')" ]] || return 1
+  mkdir -p "${micros_dir}"
+  if ! printf '%s\n' "${parent}" \
+    | bash "${ROOT}/scripts/fit_check_demand.sh" --emit-micros "${micros_dir}" \
+      >/dev/null 2>&1; then
+    # emit still writes files when run_allowed=false; only fail if no units.
+    :
+  fi
+  [[ -f "${micros_dir}/unit-0.md" ]] || return 1
+  printf '%s\n' "${issue}" > "${id_file}"
+  return 0
+}
+
+# Auto-checkpoint after a successful unit (plan already approved).
+# Args: issue, unit_idx_0based, unit_total, unit_file
+# Prints short sha on success; empty + return 1 on failure.
+commit_unit_checkpoint() {
+  local issue="${1-}"
+  local unit_idx="${2-0}"
+  local unit_total="${3-1}"
+  local unit_file="${4-}"
+  local task_n=$((unit_idx + 1))
+  local task_label="${task_n}/${unit_total}"
+  local paths accept_csv summary msg_file committed p
+
+  paths="$(unit_changed_paths "${unit_file}")"
+  if [[ -z "$(printf '%s' "${paths}" | tr -d '[:space:]')" ]]; then
+    # Fall back: anything unstaged from the promotion (scope may be broader).
+    paths="$(git status --porcelain --untracked-files=all 2>/dev/null | cut -c4- | grep -v '^$' || true)"
+  fi
+  if [[ -z "$(printf '%s' "${paths}" | tr -d '[:space:]')" ]]; then
+    printf ''
+    return 1
+  fi
+
+  accept_csv="$(unit_acceptance_csv "${unit_file}")"
+  if [[ -z "${accept_csv}" ]]; then
+    # Last-resort token so the commit remains record-eligible.
+    local _tp
+    _tp="$(unit_target_paths "${unit_file}" | head -1)"
+    accept_csv="$(basename "${_tp:-unit}" | sed -E 's/\.[^.]+$//')"
+  fi
+  [[ -n "${accept_csv}" ]] || accept_csv="unit-${unit_idx}"
+  summary="$(printf '%s' "${accept_csv}" | cut -d',' -f1 | sed 's/^[[:space:]]*//')"
+
+  mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+  msg_file="${COMMIT_MSG_FILE}.unit-${unit_idx}"
+  aegis_record_render_message "${issue}" "${summary}" "${accept_csv}" "${task_label}" \
+    > "${msg_file}"
+
+  while IFS= read -r p; do
+    [[ -n "${p}" ]] || continue
+    git add -- "${p}" 2>/dev/null || true
+  done <<< "${paths}"
+
+  if git diff --cached --quiet 2>/dev/null; then
+    printf ''
+    return 1
+  fi
+
+  if ! git commit -F "${msg_file}" >/dev/null 2>&1; then
+    git reset --quiet HEAD 2>/dev/null || true
+    printf ''
+    return 1
+  fi
+
+  committed="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  printf '%s' "${committed}"
+  return 0
 }
 
 # First path under ## Targets of an issue, from the cache the run seeds
@@ -276,7 +664,7 @@ emit_result_json() {
 }
 
 cmd_go() {
-  local goal="" target="" issue="" assume_yes=0
+  local goal="" target="" issue="" assume_yes=0 force_task=""
   local -a accepts=() changes=()
 
   while [[ $# -gt 0 ]]; do
@@ -289,6 +677,11 @@ cmd_go() {
       --accept) accepts+=("${2:-}"); shift 2 ;;
       --change) changes+=("${2:-}"); shift 2 ;;
       --issue)  issue="${2:-}"; shift 2 ;;
+      --force-task)
+        force_task="${2:-}"
+        [[ "${force_task}" =~ ^[1-9][0-9]*$ ]] \
+          || aegis_fatal "invalid_force_task:${force_task:-empty} — use --force-task N (1-based)"
+        shift 2 ;;
       --yes|-y) assume_yes=1; shift ;;
       -h|--help) usage; return 0 ;;
       -*) aegis_fatal "unknown_flag:$1" ;;
@@ -301,7 +694,18 @@ cmd_go() {
 
   command -v jq >/dev/null 2>&1 || aegis_fatal "missing_jq"
 
+  if [[ -n "${force_task}" && -z "${issue}" ]]; then
+    aegis_fatal "force_task_requires_issue — usa ./aegis go --issue N --force-task K"
+  fi
+
   local body="" title=""
+  # Multi-unit resume: start_unit is 0-based; empty means single-shot or full batch from 0.
+  local resume_start_unit=""
+  local multi_unit=0
+  local micros_dir=".harness/micros_auto"
+  # 1-based task that must run even if it was [x] (after reopen).
+  local force_task_n=""
+
   if [[ -n "${issue}" ]]; then
     [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "invalid_issue:${issue}"
     command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
@@ -310,14 +714,94 @@ cmd_go() {
     # last attempt, and the target below is read from that same body. The
     # run refetches and re-seeds, so the demand stays stable within the run.
     rm -f "${ISSUE_CACHE_DIR}/issue_${issue}.md"
-    # The issue already names its target under ## Targets; asking the
-    # operator to repeat it is a way to repeat it differently.
-    if [[ -z "${target}" ]]; then
-      target="$(issue_target "${issue}")"
-      [[ -n "${target}" ]] || aegis_fatal "issue_has_no_target:${issue}"
-      aegis_log "target da issue: ${target}"
+    title="$(gh_run issue view "${issue}" --json title -q .title 2>/dev/null || true)"
+    body="$(gh_run issue view "${issue}" --json body -q .body 2>/dev/null || true)"
+    [[ -n "${body}" ]] || aegis_fatal "issue_fetch_failed:${issue}"
+    seed_issue_cache "${issue}" "${title:-issue}" "${body}"
+
+    local n_tasks open_task
+    n_tasks="$(aegis_md_task_count "${body}")"
+    open_task="$(aegis_md_first_open_task "${body}")"
+
+    # Resume multi-unit when the issue has a real checklist, or leftover micros,
+    # or the operator forces a specific task.
+    if [[ "${n_tasks}" -gt 1 ]] || [[ -f "${micros_dir}/unit-0.md" ]] \
+      || [[ -n "${force_task}" ]]; then
+      if [[ -n "${force_task}" ]]; then
+        force_task_n="${force_task}"
+        if issue_mark_task_open "${issue}" "${force_task_n}"; then
+          body="$(aegis_md_uncheck_task "${body}" "${force_task_n}")"
+          seed_issue_cache "${issue}" "${title:-issue}" "${body}"
+          aegis_log "force-task ${force_task_n}: reaberta na issue ([x]→[ ])"
+        else
+          aegis_warn "force-task ${force_task_n}: não actualizei a issue no gh — corro na mesma"
+          body="$(aegis_md_uncheck_task "${body}" "${force_task_n}")"
+        fi
+        open_task="${force_task_n}"
+      fi
+
+      if [[ -z "${open_task}" ]] && [[ "${n_tasks}" -gt 0 ]] && [[ -z "${force_task_n}" ]]; then
+        aegis_fatal "issue_tasks_complete:${issue} — todas as Tasks estão [x]; usa --force-task K para reabrir"
+      fi
+      ensure_micros_for_resume "${issue}" "${body}" \
+        || aegis_fatal "resume_micros_failed:${issue} — não consegui regenerar unit-*.md a partir da issue"
+      multi_unit=1
+      local unit_total_resume
+      unit_total_resume="$(count_micro_units "${micros_dir}")"
+      if [[ -n "${force_task_n}" ]]; then
+        [[ "${force_task_n}" -ge 1 && "${force_task_n}" -le "${unit_total_resume}" ]] \
+          || aegis_fatal "force_task_out_of_range:${force_task_n} (units=${unit_total_resume})"
+        resume_start_unit=$((force_task_n - 1))
+      elif [[ -n "${open_task}" ]]; then
+        resume_start_unit=$((open_task - 1))
+      else
+        resume_start_unit=0
+      fi
+      printf '%s\n' "${issue}" > "${micros_dir}/issue.id"
+      if [[ -n "${force_task_n}" ]]; then
+        aegis_log "force-task issue #${issue} task ${force_task_n}/${unit_total_resume}"
+      else
+        aegis_log "retomar issue #${issue} na task ${open_task:-1}/${unit_total_resume}"
+      fi
+      print_micro_plan "${micros_dir}"
+      if [[ "${assume_yes}" -ne 1 ]]; then
+        local answer=""
+        if [[ -n "${force_task_n}" ]]; then
+          printf 'Forçar re-run da task %s/%s e continuar? [y/N] ' \
+            "${force_task_n}" "${unit_total_resume}"
+        else
+          printf 'Retomar plano na task %s/%s? [y/N] ' \
+            "${open_task:-1}" "${unit_total_resume}"
+        fi
+        read -r answer || answer=""
+        case "${answer}" in
+          y|Y|yes|s|S|sim) ;;
+          *)
+            aegis_log "cancelado; nada foi corrido"
+            emit_result_json "CANCELLED" "${issue}" "" "operator_declined"
+            return 1
+            ;;
+        esac
+      fi
+      target="$(unit_target_paths "${micros_dir}/unit-${resume_start_unit}.md" | head -1)"
+      [[ -n "${target}" ]] || target="$(issue_target "${issue}")"
+    else
+      # Classic single-demand re-run.
+      if [[ -z "${target}" ]]; then
+        target="$(issue_target "${issue}")"
+        [[ -n "${target}" ]] || aegis_fatal "issue_has_no_target:${issue}"
+        aegis_log "target da issue: ${target}"
+      fi
+      # Stale micros from another run must not hijack a single-task issue.
+      if [[ -f "${micros_dir}/unit-0.md" ]]; then
+        local stale_id=""
+        stale_id="$(tr -d '[:space:]' < "${micros_dir}/issue.id" 2>/dev/null || true)"
+        if [[ "${stale_id}" != "${issue}" ]]; then
+          rm -rf "${micros_dir}" >/dev/null 2>&1 || true
+        fi
+      fi
+      aegis_log "a repetir a issue #${issue}"
     fi
-    aegis_log "a repetir a issue #${issue}"
   else
     [[ -n "${goal}" ]] || aegis_fatal "missing_goal"
 
@@ -406,16 +890,50 @@ cmd_go() {
       "$(printf '%s' "${fit_json}" | jq -r '.model_fit')" \
       "$(printf '%s' "${fit_json}" | jq -r '.score')"
 
+    # Multi-unit plan (when fit cannot run the demand as one shot).
+    local parent_body="${body}"
+
     if ! printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1; then
       printf 'blockers: %s\n' "$(printf '%s' "${fit_json}" | jq -r '.blockers | join(", ")')"
-      aegis_log "demanda complexa detectada — fatiando mecanicamente para micro-unidades..."
-      local micros_dir=".harness/micros_auto"
+      parent_body="${body}"
       mkdir -p "${micros_dir}"
-      printf '%s\n' "${body}" | bash scripts/fit_check_demand.sh --emit-micros "${micros_dir}" >/dev/null 2>&1 || true
-      if [[ -f "${micros_dir}/unit-0.md" ]]; then
-        aegis_log "fatiamento concluído com sucesso — selecionando unit-0 para execução..."
-        body="$(cat "${micros_dir}/unit-0.md")"
-        fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
+      local split_ok=0 split_err
+      split_err="$(mktemp)"
+
+      # 1) Supervisor split (8B): intent + export load, Briefing/Acceptance por unit.
+      if aegis_supervisor_split_enabled 2>/dev/null; then
+        aegis_log "demanda complexa — supervisor split (8B)..."
+        if aegis_supervisor_split_generate "${parent_body}" "${micros_dir}" 2>"${split_err}"; then
+          if [[ -f "${micros_dir}/unit-0.md" ]] \
+            && [[ "$(count_micro_units "${micros_dir}")" -ge 2 ]]; then
+            split_ok=1
+            aegis_log "supervisor split ok — $(count_micro_units "${micros_dir}") tasks"
+          fi
+        else
+          aegis_warn "supervisor split recusado ($(tail -n 1 "${split_err}" 2>/dev/null || true)) — fallback mecânico"
+        fi
+      fi
+
+      # 2) Mechanical path/reexport split (always available offline).
+      if [[ "${split_ok}" -eq 0 ]]; then
+        aegis_log "fatiando mecanicamente para micro-unidades..."
+        rm -f "${micros_dir}"/unit-*.md "${micros_dir}/fit.json" 2>/dev/null || true
+        printf '%s\n' "${parent_body}" \
+          | bash scripts/fit_check_demand.sh --emit-micros "${micros_dir}" \
+            >/dev/null 2>&1 || true
+        if [[ -f "${micros_dir}/unit-0.md" ]]; then
+          split_ok=1
+          aegis_log "split mecânico ok — $(count_micro_units "${micros_dir}") tasks"
+        fi
+      fi
+      rm -f "${split_err}"
+
+      if [[ "${split_ok}" -eq 1 ]]; then
+        multi_unit=1
+        resume_start_unit=0
+        body="$(build_multiunit_plan_body "${parent_body}" "${micros_dir}")"
+        print_micro_plan "${micros_dir}"
+        printf '%s\n\n' "${body}"
       else
         aegis_fatal "demand_does_not_fit — aperta o Goal ou parte em dois go"
       fi
@@ -423,7 +941,12 @@ cmd_go() {
 
     if [[ "${assume_yes}" -ne 1 ]]; then
       while true; do
-        printf 'Criar issue e correr? [y/N/e (editar)] '
+        if [[ "${multi_unit}" -eq 1 ]]; then
+          printf 'Aprovar plano (%s tasks) e correr? [y/N/e (editar plano)] ' \
+            "$(count_micro_units "${micros_dir}")"
+        else
+          printf 'Criar issue e correr? [y/N/e (editar)] '
+        fi
         read -r answer || answer=""
         case "${answer}" in
           y|Y|yes|s|S|sim) break ;;
@@ -431,17 +954,27 @@ cmd_go() {
             printf '%s' "${body}" > "${DRAFT_FILE}"
             "${EDITOR:-vi}" "${DRAFT_FILE}" || true
             body="$(cat "${DRAFT_FILE}")"
-            fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
-            body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
-            [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
-            printf '%s\n\n' "${body}"
-            printf 'fit: run_allowed=%s\n' \
-              "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"
-            printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1 \
-              || aegis_fatal "demand_does_not_fit — o draft editado não cabe"
+            [[ -n "$(printf '%s' "${body}" | tr -d '[:space:]')" ]] \
+              || aegis_fatal "draft_vazio"
+            if [[ "${multi_unit}" -eq 1 ]]; then
+              # Plan body is multi-target by design — do not re-fit as one demand.
+              # Unit files on disk remain the execution contract.
+              printf '%s\n\n' "${body}"
+              print_micro_plan "${micros_dir}"
+            else
+              fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
+              body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
+              [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
+              printf '%s\n\n' "${body}"
+              printf 'fit: run_allowed=%s\n' \
+                "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"
+              printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1 \
+                || aegis_fatal "demand_does_not_fit — o draft editado não cabe"
+            fi
             ;;
           *)
             aegis_log "cancelado; nada foi criado"
+            rm -rf "${micros_dir}" >/dev/null 2>&1 || true
             emit_result_json "CANCELLED" "" "" "operator_declined"
             return 1
             ;;
@@ -451,7 +984,12 @@ cmd_go() {
 
     # The demand is the single source of truth for the target: an edited
     # ## Targets must win over whatever was proposed or passed.
-    target="$(aegis_extract_operator_named_paths "${body}" | head -1)"
+    # Multi-unit: first unit target (batch walks each unit's own paths).
+    if [[ "${multi_unit}" -eq 1 ]]; then
+      target="$(unit_target_paths "${micros_dir}/unit-0.md" | head -1)"
+    else
+      target="$(aegis_extract_operator_named_paths "${body}" | head -1)"
+    fi
     [[ -n "${target}" ]] || aegis_fatal "demand_sem_target"
 
     title="$(printf '%s' "${goal}" | tr '\n' ' ' | cut -c1-72)"
@@ -474,6 +1012,10 @@ cmd_go() {
     aegis_log "issue #${issue} criada"
 
     seed_issue_cache "${issue}" "${title}" "${body}"
+    if [[ "${multi_unit}" -eq 1 ]]; then
+      mkdir -p "${micros_dir}" 2>/dev/null || true
+      printf '%s\n' "${issue}" > "${micros_dir}/issue.id"
+    fi
   fi
 
   # A net-new module is a legitimate target (the canonical example is
@@ -484,61 +1026,222 @@ cmd_go() {
   esac
   [[ -d "$(dirname "${target}")" ]] || aegis_fatal "target_dir_not_found:${target}"
 
-  target_is_clean "${target}" \
-    || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
+  local auto_micros_present=0
+  local micros_dir=".harness/micros_auto"
+  if [[ -d "${micros_dir}" && -f "${micros_dir}/unit-0.md" ]]; then
+    auto_micros_present=1
+  fi
+
+  # Dirty check: single-shot uses one target; multi-unit checks every unit path.
+  if [[ "${auto_micros_present}" -eq 1 ]]; then
+    local _up _ui=0
+    local _all_paths=""
+    while [[ -f "${micros_dir}/unit-${_ui}.md" ]]; do
+      _all_paths+="$(unit_target_paths "${micros_dir}/unit-${_ui}.md")"$'\n'
+      _ui=$((_ui + 1))
+    done
+    while IFS= read -r _up; do
+      [[ -n "${_up}" ]] || continue
+      _up="${_up#./}"
+      case "${_up}" in
+        /*|*..*) aegis_fatal "unsafe_target:${_up}" ;;
+      esac
+      if [[ -e "${_up}" ]] || [[ -d "$(dirname "${_up}")" ]]; then
+        target_is_clean "${_up}" \
+          || aegis_fatal "target_dirty:${_up} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
+      fi
+    done < <(printf '%s' "${_all_paths}" | awk 'NF && !seen[$0]++')
+  else
+    target_is_clean "${target}" \
+      || aegis_fatal "target_dirty:${target} — a promoção recusa ficheiros sujos; commit ou stash primeiro"
+  fi
+
+  # Preserve issue identity across runtime wipe (run_aegis --fresh cleans residue).
+  local cached_issue_title="" cached_issue_body=""
+  if [[ -n "${issue}" && -f "${ISSUE_CACHE_DIR}/issue_${issue}.md" ]]; then
+    cached_issue_title="$(
+      head -n 1 "${ISSUE_CACHE_DIR}/issue_${issue}.md" \
+        | sed -E 's/^# Issue #[0-9]+: //'
+    )"
+    cached_issue_body="$(
+      tail -n +3 "${ISSUE_CACHE_DIR}/issue_${issue}.md" 2>/dev/null || true
+    )"
+  fi
 
   # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees)
   rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
-
-  local start_commit=""
-  start_commit="$(git rev-parse HEAD 2>/dev/null || true)"
-
-  local auto_micros_present=0
-  if [[ -d ".harness/micros_auto" && -f ".harness/micros_auto/unit-0.md" ]]; then
-    auto_micros_present=1
+  if [[ -n "${issue}" && -n "${cached_issue_body}" ]]; then
+    seed_issue_cache "${issue}" "${cached_issue_title:-issue}" "${cached_issue_body}"
   fi
 
+  local committed="" last_commit=""
+
   if [[ "${auto_micros_present}" -eq 1 ]]; then
-    local unit_idx=0 unit_file="" next_file="" u_status=""
-    while true; do
-      unit_file=".harness/micros_auto/unit-${unit_idx}.md"
-      [[ -f "${unit_file}" ]] || break
-      aegis_log "executando micro-unidade [unit-${unit_idx}]..."
+    # ── Multi-unit batch ──────────────────────────────────────────
+    # Policy (operator decisions):
+    #   1) keep-progress: unit K fails → units 0..K-1 stay committed
+    #   2) y already approved the whole plan (resume confirms retake)
+    #   3) per-unit Aegis-Accept commit + issue Task [x]
+    #   4) resume: skip [x], start at first open task
+    #   5) --force-task K: reopen K, run K even if was [x], then continue
+    #   6) AEGIS_SQUASH_BATCH=1: soft-squash unit commits into one at the end
+    local unit_total unit_idx unit_file u_status unit_sha task_n
+    local issue_body_live="" ran_any=0 batch_start_commit=""
+    local -a batch_accepts=()
+    unit_total="$(count_micro_units "${micros_dir}")"
+    unit_idx=0
+    if [[ -n "${resume_start_unit}" && "${resume_start_unit}" =~ ^[0-9]+$ ]]; then
+      unit_idx="${resume_start_unit}"
+    fi
+    last_commit=""
+    batch_start_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    printf '%s\n' "${issue}" > "${micros_dir}/issue.id" 2>/dev/null || true
+
+    # Latest checklist from GitHub (resume may have [x] already).
+    issue_body_live="$(gh_run issue view "${issue}" --json body -q .body 2>/dev/null || true)"
+    [[ -n "${issue_body_live}" ]] || issue_body_live="${cached_issue_body:-}"
+    # Local force-task reopen may not have reached gh yet.
+    if [[ -n "${force_task_n}" ]]; then
+      issue_body_live="$(aegis_md_uncheck_task "${issue_body_live}" "${force_task_n}")"
+    fi
+
+    aegis_log "batch multi-unit: ${unit_total} tasks, start unit-${unit_idx} (keep-progress)"
+
+    while [[ "${unit_idx}" -lt "${unit_total}" ]]; do
+      unit_file="${micros_dir}/unit-${unit_idx}.md"
+      task_n=$((unit_idx + 1))
+
+      if [[ -n "${issue_body_live}" ]] && aegis_md_task_is_done "${issue_body_live}" "${task_n}"; then
+        # force-task: never skip the forced task on this run.
+        if [[ -z "${force_task_n}" || "${task_n}" -ne "${force_task_n}" ]]; then
+          aegis_log "task ${task_n}/${unit_total} já [x] — skip"
+          unit_idx=$((unit_idx + 1))
+          continue
+        fi
+      fi
+
+      aegis_log "executando task ${task_n}/${unit_total} [unit-${unit_idx}]..."
+      ran_any=1
+
       set +e
-      bash "${ROOT}/run_aegis.sh" --fresh --from-fit ".harness/micros_auto" --unit "${unit_idx}"
+      bash "${ROOT}/run_aegis.sh" --fresh --from-fit "${micros_dir}" --unit "${unit_idx}"
       set -e
+
       u_status="$(outcome_field pipeline_status)"
       [[ -n "${u_status}" ]] || u_status="$(outcome_field status)"
+
       if [[ "${u_status}" != "SUCCESS" ]]; then
-        aegis_warn "falha na micro-unidade unit-${unit_idx}"
-        if [[ -n "${start_commit}" ]]; then
-          git reset --hard "${start_commit}" >/dev/null 2>&1 || true
-        fi
-        emit_result_json "${u_status:-UNKNOWN}" "${issue}" "" "unit_${unit_idx}_failed"
+        aegis_warn "task ${task_n}/${unit_total} falhou (${u_status:-UNKNOWN}) — progresso anterior mantido"
+        [[ -n "${last_commit}" ]] && printf 'last_ok_commit: %s\n' "${last_commit}"
+        printf 'next: ./aegis go --issue %s   # retoma; ou --force-task %s para reabrir\n' \
+          "${issue}" "${task_n}"
+        gh_run issue comment "${issue}" --body "$(
+          cat <<EOF
+### AEGIS OUTCOME (partial)
+- status: \`${u_status:-UNKNOWN}\`
+- failed_task: ${task_n}/${unit_total} (unit-${unit_idx})
+- last_ok_commit: \`${last_commit:-n/a}\`
+- policy: keep-progress — tasks anteriores permanecem no git e na checklist
+- next: \`./aegis go --issue ${issue}\` or \`--force-task ${task_n}\`
+EOF
+        )" >/dev/null 2>&1 || true
+        # Keep micros_auto for resume/debug; do not roll back commits.
+        emit_result_json "PARTIAL" "${issue}" "${last_commit}" "unit_${unit_idx}_failed"
         return 1
       fi
 
-      # Stage current unit's work so the next unit's worktree sees its exports in HEAD
-      next_file=".harness/micros_auto/unit-$((unit_idx + 1)).md"
-      if [[ -f "${next_file}" ]]; then
-        git add -A >/dev/null 2>&1 || true
-        git commit -m "chore(aegis-wip): staging unit-${unit_idx} for next unit" --no-verify >/dev/null 2>&1 || true
+      unit_sha="$(commit_unit_checkpoint "${issue}" "${unit_idx}" "${unit_total}" "${unit_file}" || true)"
+      if [[ -z "${unit_sha}" ]]; then
+        aegis_warn "task ${task_n}/${unit_total} SUCCESS no pipeline mas nada a commitar — a parar (keep-progress)"
+        gh_run issue comment "${issue}" --body "$(
+          printf '### AEGIS OUTCOME (partial)\n- status: NO_CHANGE\n- failed_task: %s/%s\n- last_ok_commit: `%s`\n- next: `./aegis go --issue %s`\n' \
+            "${task_n}" "${unit_total}" "${last_commit:-n/a}" "${issue}"
+        )" >/dev/null 2>&1 || true
+        emit_result_json "PARTIAL" "${issue}" "${last_commit}" "unit_${unit_idx}_empty_promotion"
+        return 1
       fi
+
+      last_commit="${unit_sha}"
+      aegis_log "task ${task_n}/${unit_total} commit ${unit_sha}"
+
+      # Collect accepts for optional end-of-batch squash.
+      local _acc
+      _acc="$(unit_acceptance_csv "${unit_file}")"
+      if [[ -n "${_acc}" ]]; then
+        local _tok
+        while IFS= read -r _tok; do
+          [[ -n "${_tok}" ]] && batch_accepts+=("${_tok}")
+        done < <(printf '%s' "${_acc}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
+      fi
+
+      if issue_mark_task_done "${issue}" "${task_n}"; then
+        aegis_log "issue #${issue}: Task ${task_n} → [x]"
+        issue_body_live="$(aegis_md_check_task "${issue_body_live}" "${task_n}")"
+      else
+        aegis_warn "issue #${issue}: não marquei Task ${task_n} [x] (gh) — commit ${unit_sha} mantém-se"
+      fi
+
+      gh_run issue comment "${issue}" --body "$(
+        printf '### AEGIS OUTCOME\n- status: SUCCESS\n- task: %s/%s\n- commit: `%s`\n' \
+          "${task_n}" "${unit_total}" "${unit_sha}"
+      )" >/dev/null 2>&1 || true
 
       unit_idx=$((unit_idx + 1))
     done
-    rm -rf ".harness/micros_auto"
 
-    # All units complete: soft squash temporary WIP commits back to start_commit
-    if [[ -n "${start_commit}" ]] && [[ "$(git rev-parse HEAD)" != "${start_commit}" ]]; then
-      git reset --soft "${start_commit}" >/dev/null 2>&1 || true
+    if [[ "${ran_any}" -eq 0 && -z "${last_commit}" ]]; then
+      aegis_log "nada a correr — todas as tasks já estavam [x]"
+      emit_result_json "SUCCESS" "${issue}" "" "all_tasks_already_done"
+      return 0
     fi
-  else
-    set +e
-    bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
-    set -e
+
+    # Optional cosmetic squash: one managed commit with the union of accepts.
+    # Default off — per-unit commits remain the source of truth for keep-progress.
+    case "${AEGIS_SQUASH_BATCH:-0}" in
+      1|true|yes)
+        if [[ -n "${batch_start_commit}" ]] \
+          && [[ "$(git rev-parse HEAD 2>/dev/null || true)" != "${batch_start_commit}" ]]; then
+          local squash_accept squash_summary squash_msg
+          squash_accept="$(
+            printf '%s\n' "${batch_accepts[@]+"${batch_accepts[@]}"}" \
+              | awk 'NF && !seen[$0]++' \
+              | paste -sd',' - | sed 's/,/, /g'
+          )"
+          [[ -n "${squash_accept}" ]] || squash_accept="batch"
+          squash_summary="$(printf '%s' "${squash_accept}" | cut -d',' -f1 | sed 's/^[[:space:]]*//')"
+          mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+          squash_msg="${COMMIT_MSG_FILE}.batch-squash"
+          aegis_record_render_message "${issue}" "${squash_summary}" "${squash_accept}" \
+            "1/${unit_total}" > "${squash_msg}"
+          # Soft-reset unit checkpoints; keep tree; one new commit.
+          if git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
+            && ! git diff --cached --quiet 2>/dev/null \
+            && git commit -F "${squash_msg}" >/dev/null 2>&1; then
+            last_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
+            aegis_log "AEGIS_SQUASH_BATCH: commits das units fundidos em ${last_commit}"
+          else
+            aegis_warn "AEGIS_SQUASH_BATCH falhou — commits por unit mantêm-se"
+          fi
+        fi
+        ;;
+    esac
+
+    rm -rf "${micros_dir}" >/dev/null 2>&1 || true
+
+    gh_run issue close "${issue}" --comment "$(
+      printf '### AEGIS OUTCOME\n- status: SUCCESS\n- batch: %s/%s tasks\n- last_commit: `%s`\n' \
+        "${unit_total}" "${unit_total}" "${last_commit}"
+    )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
+
+    emit_result_json "SUCCESS" "${issue}" "${last_commit}" ""
+    return 0
   fi
+
+  # ── Single-unit path (human commit gate) ──────────────────────
+  set +e
+  bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
+  set -e
 
   local status reason_class reason_code next_step
   status="$(outcome_field pipeline_status)"
@@ -589,7 +1292,7 @@ cmd_go() {
 
   # Stage first: the gate has to show what is being approved, and a
   # net-new file only appears in a diff once it is in the index.
-  local committed="" p=""
+  local p=""
   while IFS= read -r p; do
     [[ -n "${p}" ]] && git add -- "${p}" || true
   done <<< "${paths}"

@@ -68,6 +68,12 @@ printf '%s\n' "${draft_out}" | grep -q '^## Tasks' \
   && fail "generated demand still carries a checklist"
 printf '%s\n' "${draft_out}" | grep -q '^## Change' \
   && fail "generated demand carries a filler Change section"
+printf '%s\n' "${draft_out}" | grep -q '^## Briefing' \
+  || fail "generated demand missing ## Briefing: ${draft_out}"
+printf '%s\n' "${draft_out}" | grep -q '^## Out of scope' \
+  || fail "generated demand missing ## Out of scope: ${draft_out}"
+printf '%s\n' "${draft_out}" | grep -q '^## Constraints' \
+  || fail "generated demand missing ## Constraints: ${draft_out}"
 
 printf '%s\n' "${draft_out}" | grep -qx -- '- converterGigabitsEmTerabits' \
   || fail "acceptance token missing from the demand: ${draft_out}"

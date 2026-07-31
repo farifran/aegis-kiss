@@ -454,9 +454,47 @@ EOC
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
-  local parent_briefing parent_constraints
-  parent_briefing="$(aegis_fit_md_section "Briefing" "${parent}")"
+  local parent_briefing parent_constraints unit_briefing slice_name
   parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
+  # Never copy the full parent Briefing into every unit — that re-poisons the
+  # 8B with sibling targets, barrel blocks, and exports it must not touch.
+  unit_briefing="$(aegis_fit_unit_scoped_briefing "${parent}" "${primary}" "${is_reexport}" "${primary_base}" "${primary_pascal}")"
+  # Single-file multi-export slice: note "export_slice:Name" keeps only that export.
+  slice_name=""
+  if printf '%s' "${note}" | grep -qE '^export_slice:'; then
+    slice_name="$(printf '%s' "${note}" | sed -E 's/^export_slice://; s/[[:space:]]+$//')"
+  fi
+  if [[ -n "${slice_name}" && "${is_reexport}" -eq 0 ]]; then
+    unit_briefing="$(aegis_fit_briefing_slice_export "${unit_briefing:-$(aegis_fit_md_section "Briefing" "${parent}")}" "${slice_name}")"
+    acc_block="- ${slice_name}"
+  fi
+
+  # When a scoped Briefing exists (and this is not an export_slice), keep
+  # module names + tokens that appear in that briefing.
+  if [[ -z "${slice_name}" ]] \
+    && [[ -n "$(printf '%s' "${unit_briefing}" | tr -d '[:space:]')" ]] \
+    && [[ "${is_reexport}" -eq 0 ]]; then
+    acc_block="$(
+      {
+        printf '%s\n' "${primary_base}"
+        printf '%s\n' "${primary_pascal}"
+        printf '%s\n' "${unit_briefing}" \
+          | command grep -oE 'export (class|function|const|let|var) [A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+          | awk '{ print $3 }' || true
+        aegis_fit_md_section "Acceptance" "${parent}" \
+          | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+          | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
+      } | awk -v brief="$(printf '%s' "${unit_briefing}" | tr '\n' ' ')" \
+          -v base="${primary_base}" -v pascal="${primary_pascal}" '
+          NF && !seen[$0]++ {
+            low=tolower($0)
+            if (low=="export"||low=="import"||low=="class"||low=="function"||low=="index"||low=="bigint"||low=="number"||low=="string"||low=="boolean") next
+            if ($0==base || $0==pascal || index(brief,$0)>0) print "- " $0
+          }' | head -n 6
+    )"
+    [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] \
+      || acc_block="- ${primary_pascal}"
+  fi
 
   cat <<EOF
 ## Goal
@@ -471,9 +509,9 @@ ${targets_block}
 
 ## Change
 ${change_block}
-${parent_briefing:+
+${unit_briefing:+
 ## Briefing
-${parent_briefing}
+${unit_briefing}
 }
 ## Acceptance
 ${acc_block}
@@ -484,6 +522,7 @@ ${acc_block}
 - UI
 - e2e
 - multi-file stacks
+- sibling modules not listed in Targets
 
 ## Constraints
 - no any
@@ -494,6 +533,138 @@ ${acc_block}
 - BigInt is global when high-precision time is required
 ${parent_constraints:+${parent_constraints}}
 EOF
+}
+
+# Top-level export names from ## Briefing (export class|function|const Name).
+aegis_fit_briefing_export_names() {
+  local text="${1-}"
+  local briefing
+  briefing="$(aegis_fit_md_section "Briefing" "${text}")"
+  [[ -n "$(printf '%s' "${briefing}" | tr -d '[:space:]')" ]] || {
+    # Fall back: Acceptance export-like tokens when no Briefing.
+    aegis_fit_md_section "Acceptance" "${text}" \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null \
+      | awk 'NF && !seen[$0]++' || true
+    return 0
+  }
+  printf '%s\n' "${briefing}" \
+    | command grep -oE 'export[[:space:]]+(class|function|const|let|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+    | awk '{ print $3 }' \
+    | awk 'NF && !seen[$0]++' \
+    || true
+}
+
+# Keep only the numbered Briefing item / paragraph that defines export Name.
+aegis_fit_briefing_slice_export() {
+  local briefing="${1-}"
+  local name="${2-}"
+  [[ -n "${name}" ]] || {
+    printf '%s' "${briefing}"
+    return 0
+  }
+  printf '%s\n' "${briefing}" | awk -v name="${name}" '
+    BEGIN { keep = 0; any = 0 }
+    /^[0-9]+\)/ {
+      if (index($0, name) > 0 || $0 ~ ("export (class|function|const|let|var) " name)) {
+        keep = 1; any = 1
+      } else {
+        keep = 0
+      }
+      if (keep) print
+      next
+    }
+    /^Em[[:space:]]+/ { keep = 0; next }
+    keep { print }
+    END {
+      # If nothing matched, print nothing — caller still has Change/Goal.
+    }
+  '
+}
+
+# Scope parent ## Briefing to one unit. Drops barrel blocks on create units and
+# drops create/export items on reexport units so the coder never sees the monstro.
+# Args: parent, primary_path, is_reexport (0|1), primary_base, primary_pascal
+aegis_fit_unit_scoped_briefing() {
+  local parent="${1-}"
+  local primary="${2-}"
+  local is_reexport="${3-0}"
+  local primary_base="${4-}"
+  local primary_pascal="${5-}"
+  local briefing scoped sib_base sib_pascal
+
+  briefing="$(aegis_fit_md_section "Briefing" "${parent}")"
+  if [[ -z "$(printf '%s' "${briefing}" | tr -d '[:space:]')" ]]; then
+    printf ''
+    return 0
+  fi
+
+  if [[ "${is_reexport}" -eq 1 ]]; then
+    scoped="$(
+      printf '%s\n' "${briefing}" | awk '
+        BEGIN { keep = 0 }
+        /^Em[[:space:]]+/ {
+          line = $0
+          sub(/^Em[[:space:]]+/, "", line)
+          sub(/:.*$/, "", line)
+          gsub(/[[:space:]]/, "", line)
+          if (line ~ /index\.ts$/ || line == "src/index.ts") keep = 1
+          else keep = 0
+          if (keep) print
+          next
+        }
+        /^[0-9]+\)/ { keep = 0; next }
+        keep { print }
+      '
+    )"
+    if [[ -z "$(printf '%s' "${scoped}" | tr -d '[:space:]')" ]]; then
+      sib_base="$(
+        aegis_fit_target_paths "${parent}" \
+          | awk -v p="${primary}" 'NF && $0 != p {
+              n=$0; sub(/^.*\//,"",n); sub(/\.[^.]+$/,"",n); print n; exit
+            }'
+      )"
+      sib_pascal="$(printf '%s' "${sib_base}" | awk '{if (length($0)>0) print toupper(substr($0,1,1)) substr($0,2)}')"
+      [[ -n "${sib_pascal}" ]] || sib_pascal="Target"
+      [[ -n "${sib_base}" ]] || sib_base="module"
+      scoped="$(
+        cat <<EOB
+Em ${primary}:
+   import { ${sib_pascal} } from './${sib_base}.js'
+   export { ${sib_pascal} }
+EOB
+      )"
+    fi
+    printf '%s' "${scoped}"
+    return 0
+  fi
+
+  # Create / mutate unit: keep Em <primary> blocks and numbered items that
+  # name this module; drop Em src/index.ts and other siblings.
+  scoped="$(
+    printf '%s\n' "${briefing}" | awk -v primary="${primary}" -v base="${primary_base}" -v pascal="${primary_pascal}" '
+      BEGIN { keep = 1 }
+      /^Em[[:space:]]+/ {
+        line = $0
+        sub(/^Em[[:space:]]+/, "", line)
+        sub(/:.*$/, "", line)
+        gsub(/[[:space:]]/, "", line)
+        if (line == primary || index(line, base ".ts") > 0 || index(line, "/" base) > 0) keep = 1
+        else if (line ~ /index\.ts$/) keep = 0
+        else keep = 0
+        if (keep) print
+        next
+      }
+      /^[0-9]+\)/ {
+        if ((base != "" && index($0, base) > 0) || (pascal != "" && index($0, pascal) > 0) || index($0, primary) > 0) keep = 1
+        else keep = 0
+        if (keep) print
+        next
+      }
+      keep { print }
+    '
+  )"
+  printf '%s' "${scoped}"
 }
 
 # Enrich proposed_units[] with full .demand markdown for each unit.
@@ -608,10 +779,41 @@ aegis_fit_propose_units_json() {
       printf '[]'
       return 0
     fi
+    local mod="${arr[0]:-src/}"
+
+    # Single-file multi-export: Briefing has 2+ top-level export items → one unit
+    # per export (same path). This is the offline analogue of supervisor-split
+    # intent partitioning when there is only one path.
+    local export_names export_n
+    export_names="$(aegis_fit_briefing_export_names "${text}")"
+    export_n="$(printf '%s\n' "${export_names}" | grep -c . || true)"
+    export_n="${export_n//[^0-9]/}"
+    export_n="${export_n:-0}"
+    if [[ "${export_n}" -ge 2 && "${mod}" != "src/index.ts" ]]; then
+      units="$(
+        printf '%s\n' "${export_names}" | jq -R -s -c --arg t "${mod}" '
+          split("\n") | map(select(length>0))
+          | map({
+              title: ("export " + . + " only"),
+              targets: [$t],
+              note: ("export_slice:" + .)
+            })
+        '
+      )"
+      # Optional trailing reexport unit when parent asks for barrel.
+      if [[ "${wants_reexport}" -eq 1 ]]; then
+        units="$(
+          jq -cn --argjson u "${units}" \
+            '$u + [{title:"reexport only", targets:["src/index.ts"], note:"after create succeeds"}]'
+        )"
+      fi
+      aegis_fit_enrich_units_with_demand "${text}" "${units}"
+      return 0
+    fi
+
     # Single path: still may split create vs reexport heuristics from Change text
     if [[ "${wants_reexport}" -eq 1 ]] \
       && printf '%s' "${blob}" | grep -qE 'create|new file|tokenbucket|module'; then
-      local mod="${arr[0]:-src/}"
       # If the only target is already index, create still uses that path then reexport is same — skip split.
       if [[ "${mod}" == "src/index.ts" ]]; then
         printf '[]'

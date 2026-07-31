@@ -78,13 +78,20 @@ aegis_record_commit_files() {
 }
 
 # Commit message for an approved managed commit.
-# Args: issue, summary, accept_csv
+# Args: issue, summary, accept_csv [, task_label]
+# task_label is optional (e.g. "2/3") — multi-unit checkpoints write Aegis-Task.
 aegis_record_render_message() {
   local issue="${1-}"
   local summary="${2-}"
   local accept="${3-}"
-  printf 'aegis: issue#%s %s\n\n' "${issue}" "${summary}"
+  local task="${4-}"
+  if [[ -n "${task}" ]]; then
+    printf 'aegis: issue#%s task %s %s\n\n' "${issue}" "${task}" "${summary}"
+  else
+    printf 'aegis: issue#%s %s\n\n' "${issue}" "${summary}"
+  fi
   printf 'Aegis-Issue: %s\n' "${issue}"
+  [[ -n "${task}" ]] && printf 'Aegis-Task: %s\n' "${task}"
   printf 'Aegis-Accept: %s\n' "${accept}"
 }
 

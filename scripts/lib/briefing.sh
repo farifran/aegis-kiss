@@ -35,7 +35,13 @@
 #                                   coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
+#   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
+#   AEGIS_SUPERVISOR_SPLIT_MAX_UNITS  default 4
 #   OPENAI_API_BASE / OPENAI_API_KEY
+#
+# Also: aegis_supervisor_split_* — when fit blocks a monster demand, the same
+# 8B model may partition it into micro units (intent + export load), each with
+# its own Acceptance/Briefing. Mechanical path-split remains the fallback.
 #
 # =========================================================
 
@@ -289,5 +295,594 @@ aegis_briefing_generate() {
   }
 
   printf '%s' "${body}"
+  return 0
+}
+
+# ---------------------------------------------------------
+# Supervisor SPLIT — monster demand → N micro units (8B)
+# ---------------------------------------------------------
+
+aegis_supervisor_split_enabled() {
+  case "${AEGIS_SUPERVISOR_SPLIT:-1}" in
+    0|false|no) return 1 ;;
+  esac
+  aegis_briefing_enabled
+}
+
+aegis_supervisor_split_max_units() {
+  local n="${AEGIS_SUPERVISOR_SPLIT_MAX_UNITS:-4}"
+  [[ "${n}" =~ ^[0-9]+$ ]] && [[ "${n}" -gt 1 ]] || n=4
+  printf '%s' "${n}"
+}
+
+aegis_supervisor_split_system_prompt() {
+  local max_u max_e
+  max_u="$(aegis_supervisor_split_max_units)"
+  max_e="$(aegis_briefing_max_exports)"
+  cat <<PROMPT
+You split a software demand that is too large for one weak-model run into ordered micro units.
+
+Output ONLY a JSON object, no prose:
+{
+  "units": [
+    {
+      "title": "short title",
+      "targets": ["src/oneFile.ts"],
+      "depends_on": [],
+      "kind": "create",
+      "exports": [
+        {
+          "kind": "class",
+          "name": "PascalCaseName",
+          "privateFields": [{"name": "_x", "type": "bigint"}],
+          "ctorParams": [{"name": "arg", "type": "bigint"}],
+          "ctorBody": ["this._x = arg"],
+          "methods": [{"name": "m", "params": [], "returns": "void", "body": ["return"]}],
+          "getters": []
+        }
+      ]
+    },
+    {
+      "title": "reexport only",
+      "targets": ["src/index.ts"],
+      "depends_on": [1],
+      "kind": "reexport",
+      "reexport_names": ["PascalCaseName"],
+      "barrelFrom": "./oneFile.js"
+    }
+  ]
+}
+
+Rules:
+- 2 to ${max_u} units. Prefer fewer units when possible.
+- Exactly ONE path in each unit's "targets".
+- kind is "create" or "reexport" only.
+- create units: 1 to ${max_e} entries in "exports" (top-level export class/function only). Methods stay inside the class — never as separate exports.
+- reexport units: exports must be [] ; set reexport_names + barrelFrom (relative .js NodeNext).
+- depends_on: 1-based unit indexes that must finish first (empty array if none).
+- Order units so dependencies come first (create module before reexport).
+- TypeScript types are lowercase: bigint, number, string, boolean — NEVER BigInt/Number as types.
+- Do not invent files or features absent from the demand. targets must be paths already named in the demand (or src/index.ts for reexport when the demand asks to re-export).
+- One intent per unit: e.g. class in file A, then helper export, then barrel — not everything in one unit.
+- Private fields start with underscore and appear only in privateFields.
+PROMPT
+}
+
+# Paths the parent demand already authorizes (## Targets + path-like tokens).
+aegis_supervisor_split_allowed_paths() {
+  local parent="${1-}"
+  {
+    printf '%s\n' "${parent}" \
+      | awk '/^## Targets[[:space:]]*$/ { p = 1; next } /^## / { p = 0 } p' \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -v '^$' || true
+    printf '%s\n' "${parent}" \
+      | grep -oE 'src/[A-Za-z0-9_./-]+\.[a-z]+' || true
+  } | awk 'NF && !seen[$0]++'
+}
+
+# Validate supervisor split JSON. Prints reason on stderr on failure.
+# Args: json, parent_demand
+aegis_supervisor_split_validate_json() {
+  local json="${1-}"
+  local parent="${2-}"
+  local max_u max_e n i kind title target n_exp n_rx barrel name typ dep
+  local -a allow_paths=()
+
+  printf '%s' "${json}" | jq -e 'type == "object"' >/dev/null 2>&1 || {
+    printf 'invalid_json\n' >&2
+    return 1
+  }
+  printf '%s' "${json}" | jq -e '.units | type == "array"' >/dev/null 2>&1 || {
+    printf 'missing_units\n' >&2
+    return 1
+  }
+
+  max_u="$(aegis_supervisor_split_max_units)"
+  max_e="$(aegis_briefing_max_exports)"
+  n="$(printf '%s' "${json}" | jq '.units | length')"
+  if [[ "${n}" -lt 2 ]]; then
+    printf 'too_few_units\n' >&2
+    return 1
+  fi
+  if [[ "${n}" -gt "${max_u}" ]]; then
+    printf 'too_many_units\n' >&2
+    return 1
+  fi
+
+  while IFS= read -r target; do
+    [[ -n "${target}" ]] && allow_paths+=("${target}")
+  done < <(aegis_supervisor_split_allowed_paths "${parent}")
+
+  path_allowed() {
+    local p="${1-}" a
+    [[ "${p}" == "src/index.ts" ]] && return 0
+    [[ "${p}" == /* || "${p}" == *..* || -z "${p}" ]] && return 1
+    for a in "${allow_paths[@]+"${allow_paths[@]}"}"; do
+      [[ "${a}" == "${p}" ]] && return 0
+    done
+    return 1
+  }
+
+  for ((i = 0; i < n; i++)); do
+    title="$(printf '%s' "${json}" | jq -r --argjson i "${i}" '.units[$i].title // empty')"
+    [[ -n "${title}" ]] || {
+      printf 'empty_title:%s\n' "${i}" >&2
+      return 1
+    }
+
+    if [[ "$(printf '%s' "${json}" | jq --argjson i "${i}" '.units[$i].targets | length')" -ne 1 ]]; then
+      printf 'targets_not_one:%s\n' "${i}" >&2
+      return 1
+    fi
+    target="$(printf '%s' "${json}" | jq -r --argjson i "${i}" '.units[$i].targets[0] // empty')"
+    path_allowed "${target}" || {
+      printf 'bad_target:%s:%s\n' "${i}" "${target}" >&2
+      return 1
+    }
+
+    kind="$(printf '%s' "${json}" | jq -r --argjson i "${i}" '.units[$i].kind // empty')"
+    case "${kind}" in
+      create|reexport) ;;
+      *)
+        printf 'bad_kind:%s\n' "${i}" >&2
+        return 1
+        ;;
+    esac
+
+    n_exp="$(printf '%s' "${json}" | jq --argjson i "${i}" '(.units[$i].exports // []) | length')"
+    if [[ "${kind}" == "create" ]]; then
+      [[ "${n_exp}" -ge 1 ]] || {
+        printf 'create_no_exports:%s\n' "${i}" >&2
+        return 1
+      }
+      [[ "${n_exp}" -le "${max_e}" ]] || {
+        printf 'create_too_many_exports:%s\n' "${i}" >&2
+        return 1
+      }
+    else
+      [[ "${n_exp}" -eq 0 ]] || {
+        printf 'reexport_has_exports:%s\n' "${i}" >&2
+        return 1
+      }
+      n_rx="$(printf '%s' "${json}" | jq --argjson i "${i}" '(.units[$i].reexport_names // []) | length')"
+      [[ "${n_rx}" -ge 1 ]] || {
+        printf 'reexport_no_names:%s\n' "${i}" >&2
+        return 1
+      }
+      barrel="$(printf '%s' "${json}" | jq -r --argjson i "${i}" '.units[$i].barrelFrom // empty')"
+      [[ "${barrel}" == *.js ]] || {
+        printf 'barrel_not_nodenext:%s\n' "${i}" >&2
+        return 1
+      }
+    fi
+
+    while IFS= read -r dep; do
+      [[ -n "${dep}" ]] || continue
+      [[ "${dep}" =~ ^[0-9]+$ ]] || {
+        printf 'bad_depends:%s\n' "${i}" >&2
+        return 1
+      }
+      if [[ "${dep}" -lt 1 || "${dep}" -gt "${n}" || "${dep}" -eq $((i + 1)) ]]; then
+        printf 'depends_oob:%s\n' "${i}" >&2
+        return 1
+      fi
+    done < <(printf '%s' "${json}" | jq -r --argjson i "${i}" '
+      (.units[$i].depends_on // [])
+      | map(if type == "string" then tonumber else . end)
+      | .[]
+    ')
+
+    while IFS= read -r name; do
+      [[ -n "${name}" ]] || continue
+      [[ "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+        printf 'name_not_identifier:%s\n' "${name}" >&2
+        return 1
+      }
+      [[ "${name}" != _* ]] || {
+        printf 'private_as_export:%s\n' "${name}" >&2
+        return 1
+      }
+    done < <(printf '%s' "${json}" | jq -r --argjson i "${i}" '(.units[$i].exports // [])[]?.name // empty')
+
+    while IFS= read -r name; do
+      [[ -n "${name}" ]] || continue
+      case "${name}" in
+        class|function) ;;
+        *)
+          printf 'bad_export_kind:%s\n' "${name}" >&2
+          return 1
+          ;;
+      esac
+    done < <(printf '%s' "${json}" | jq -r --argjson i "${i}" '(.units[$i].exports // [])[]?.kind // empty')
+
+    while IFS= read -r typ; do
+      [[ -n "${typ}" ]] || continue
+      case "${typ}" in
+        BigInt|Number|String|Boolean|Object|Array|Symbol)
+          printf 'constructor_used_as_type:%s\n' "${typ}" >&2
+          return 1
+          ;;
+      esac
+    done < <(printf '%s' "${json}" | jq -r --argjson i "${i}" '
+      [.units[$i].exports[]?
+        | (.privateFields[]?.type, .ctorParams[]?.type, .params[]?.type,
+           .methods[]?.params[]?.type)]
+      | .[]
+    ' 2>/dev/null || true)
+  done
+
+  return 0
+}
+
+# Render one unit object to micro demand markdown.
+# Args: unit_json_object (single), unit_index_0based, unit_total, parent_demand
+aegis_supervisor_unit_render() {
+  local unit_json="${1-}"
+  local idx="${2-0}"
+  local total="${3-1}"
+  local parent="${4-}"
+  local kind title primary siblings oos exports_block briefing_block acc_block
+
+  kind="$(printf '%s' "${unit_json}" | jq -r '.kind // "create"')"
+  title="$(printf '%s' "${unit_json}" | jq -r '.title // "unit"')"
+  primary="$(printf '%s' "${unit_json}" | jq -r '.targets[0] // "src/index.ts"')"
+
+  siblings="$(
+    printf '%s\n' "${parent}" \
+      | grep -oE 'src/[A-Za-z0-9_./-]+\.[a-z]+' 2>/dev/null \
+      | awk -v p="${primary}" 'NF && $0 != p && !seen[$0]++' \
+      | head -n 6 || true
+  )"
+  oos="$(
+    {
+      printf '%s\n' "other source files"
+      printf '%s\n' "e2e tests"
+      printf '%s\n' "drive-by refactors"
+      printf '%s\n' "multi-file stacks"
+      printf '%s\n' "${siblings}"
+    } | awk 'NF { print "- " $0 }'
+  )"
+
+  if [[ "${kind}" == "reexport" ]]; then
+    local names barrel from_list
+    names="$(printf '%s' "${unit_json}" | jq -r '(.reexport_names // []) | join(", ")')"
+    barrel="$(printf '%s' "${unit_json}" | jq -r '.barrelFrom // "./mod.js"')"
+    from_list="$(printf '%s' "${unit_json}" | jq -r '(.reexport_names // []) | join(", ")')"
+    acc_block="$(
+      printf '%s' "${unit_json}" | jq -r '(.reexport_names // [])[] | "- \(.)"'
+    )"
+    [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] || acc_block="- reexport"
+    briefing_block="$(
+      cat <<EOB
+Em ${primary}:
+   import { ${from_list} } from '${barrel}'
+   export { ${from_list} }
+EOB
+    )"
+    cat <<EOF
+## Goal
+Single-file micro: ${title}.
+Edit only \`${primary}\`. Reexport only — no algorithm reimplementation.
+
+## Targets
+- ${primary}
+
+## Tasks
+- [ ] Task $((idx + 1))/${total} — ${title}
+
+## Change
+- Update ONLY \`${primary}\`.
+- Import and re-export: ${names}
+- Do not create or modify any other path.
+
+## Briefing
+${briefing_block}
+
+## Acceptance
+${acc_block}
+
+## Out of scope
+${oos}
+
+## Constraints
+- no any
+- KISS
+- single target micro unit only
+- reexport only
+- NodeNext .js imports if this file imports siblings
+EOF
+    return 0
+  fi
+
+  # create unit — reuse export renderer via a one-export briefing JSON
+  local mini body_full briefing_only
+  mini="$(
+    printf '%s' "${unit_json}" | jq -c --arg goal "Create ${primary} only." --arg primary "${primary}" '
+      {
+        goal: $goal,
+        targets: [$primary],
+        exports: (.exports // []),
+        barrelFile: "",
+        barrelFrom: ""
+      }
+    '
+  )"
+  body_full="$(aegis_briefing_render "${mini}" 2>/dev/null || true)"
+  briefing_only="$(
+    printf '%s\n' "${body_full}" \
+      | awk '
+          /^## Briefing[[:space:]]*$/ { p = 1; next }
+          /^## / { if (p) exit }
+          p { print }
+        '
+  )"
+  # Drop empty barrel leftovers from render (Em : / empty import path).
+  briefing_only="$(
+    printf '%s\n' "${briefing_only}" \
+      | awk '
+          /^Em[[:space:]]*:/ { skip = 1; next }
+          skip && /^[[:space:]]*import / { next }
+          skip && /^[[:space:]]*export / { next }
+          skip && NF == 0 { skip = 0; next }
+          { skip = 0; print }
+        '
+  )"
+  acc_block="$(
+    printf '%s' "${unit_json}" | jq -r '(.exports // [])[] | "- \(.name)"'
+  )"
+  [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] || acc_block="- done"
+
+  cat <<EOF
+## Goal
+Single-file micro: ${title}.
+Edit only \`${primary}\`. Do not re-export from index in this run.
+
+## Targets
+- ${primary}
+
+## Tasks
+- [ ] Task $((idx + 1))/${total} — ${title}
+
+## Change
+- Create or update ONLY \`${primary}\`.
+- Do not create or modify any other path.
+- Do not re-export from index in this run.
+- Prefer top-level exports listed in Acceptance only.
+
+## Briefing
+${briefing_only}
+
+## Acceptance
+${acc_block}
+
+## Out of scope
+${oos}
+
+## Constraints
+- no any
+- KISS
+- single target micro unit only
+- one primary public export preferred (methods allowed)
+- NodeNext .js imports if this file imports siblings
+- BigInt is global when high-precision time is required
+EOF
+}
+
+# Topological order (depends_on is 1-based). Prints 0-based indexes one per line.
+# Note: never name an array "done" — it confuses bash parsing near the done keyword.
+aegis_supervisor_split_order() {
+  local json="${1-}"
+  local n i dep ok progress found d guard
+  n="$(printf '%s' "${json}" | jq '.units | length')"
+  [[ "${n}" =~ ^[0-9]+$ ]] || return 0
+  local -a ordered=()
+  local -a remaining=()
+  for ((i = 0; i < n; i++)); do remaining+=("$i"); done
+
+  guard=0
+  progress=1
+  while [[ "${#remaining[@]}" -gt 0 && "${progress}" -eq 1 && "${guard}" -lt $((n + 2)) ]]; do
+    progress=0
+    guard=$((guard + 1))
+    local -a still=()
+    for i in "${remaining[@]}"; do
+      [[ "${i}" =~ ^[0-9]+$ ]] || continue
+      ok=1
+      while IFS= read -r dep; do
+        [[ -n "${dep}" ]] || continue
+        [[ "${dep}" =~ ^[0-9]+$ ]] || { ok=0; break; }
+        dep=$((dep - 1))
+        found=0
+        for d in "${ordered[@]+"${ordered[@]}"}"; do
+          if [[ "${d}" == "${dep}" ]]; then found=1; break; fi
+        done
+        if [[ "${found}" -eq 0 ]]; then ok=0; break; fi
+      done < <(printf '%s' "${json}" | jq -r --argjson i "${i}" '
+          (.units[$i].depends_on // [])
+          | map(if type == "number" then . elif type == "string" then (tonumber? // -1) else -1 end)
+          | .[]
+        ' 2>/dev/null || true)
+      if [[ "${ok}" -eq 1 ]]; then
+        ordered+=("$i")
+        progress=1
+      else
+        still+=("$i")
+      fi
+    done
+    remaining=("${still[@]+"${still[@]}"}")
+    # If still is empty, clear remaining explicitly (bash empty-array quirks).
+    [[ "${#still[@]}" -eq 0 ]] && remaining=()
+  done
+  for i in "${remaining[@]+"${remaining[@]}"}"; do
+    [[ "${i}" =~ ^[0-9]+$ ]] && ordered+=("$i")
+  done
+  for i in "${ordered[@]+"${ordered[@]}"}"; do
+    printf '%s\n' "${i}"
+  done
+}
+
+# Write unit-N.md + fit.json under out_dir from validated split JSON.
+# Args: split_json, parent_demand, out_dir
+# Prints number of units on stdout.
+aegis_supervisor_split_emit() {
+  local json="${1-}"
+  local parent="${2-}"
+  local out_dir="${3-}"
+  local n i ord idx unit demand units_acc fit_json
+
+  [[ -n "${out_dir}" ]] || return 1
+  mkdir -p "${out_dir}"
+  rm -f "${out_dir}"/unit-*.md "${out_dir}/fit.json" 2>/dev/null || true
+
+  n="$(printf '%s' "${json}" | jq '.units | length')"
+  [[ "${n}" -ge 2 ]] || return 1
+
+  units_acc='[]'
+  idx=0
+  while IFS= read -r ord; do
+    [[ -n "${ord}" ]] || continue
+    unit="$(printf '%s' "${json}" | jq -c --argjson i "${ord}" '.units[$i]')"
+    demand="$(aegis_supervisor_unit_render "${unit}" "${idx}" "${n}" "${parent}")"
+    printf '%s\n' "${demand}" > "${out_dir}/unit-${idx}.md"
+    units_acc="$(
+      jq -cn \
+        --argjson acc "${units_acc}" \
+        --argjson i "${idx}" \
+        --argjson ord "${ord}" \
+        --argjson unit "${unit}" \
+        --arg demand "${demand}" \
+        --arg title "$(printf '%s' "${unit}" | jq -r '.title // "unit"')" \
+        --argjson targets "$(printf '%s' "${unit}" | jq -c '.targets // []')" \
+        '$acc + [{
+          index: $i,
+          title: $title,
+          targets: $targets,
+          note: "supervisor_split",
+          source_index: $ord,
+          demand: $demand
+        }]'
+    )"
+    idx=$((idx + 1))
+  done < <(aegis_supervisor_split_order "${json}")
+
+  fit_json="$(
+    jq -cn \
+      --arg parent "${parent}" \
+      --argjson units "${units_acc}" \
+      '{
+        schema: "aegis.fit_check.v1",
+        run_allowed: false,
+        source: "supervisor_split",
+        fixed_demand: $parent,
+        original_demand: $parent,
+        proposed_units: $units
+      }'
+  )"
+  printf '%s\n' "${fit_json}" > "${out_dir}/fit.json"
+  printf '%s' "${idx}"
+  [[ "${idx}" -ge 2 ]]
+}
+
+# Call 8B, validate, emit micros. Args: parent_demand, out_dir
+# Returns 0 on success (>=2 units written).
+aegis_supervisor_split_generate() {
+  local parent="${1-}"
+  local out_dir="${2-}"
+
+  [[ -n "${parent}" ]] || return 1
+  [[ -n "${out_dir}" ]] || return 1
+  aegis_supervisor_split_enabled || return 1
+
+  local api_base api_key model timeout
+  api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
+  api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
+  model="$(aegis_briefing_model)"
+  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
+
+  local req_file resp_file
+  req_file="$(mktemp "${TMPDIR:-/tmp}/aegis_split_req.XXXXXX")" || return 1
+  resp_file="$(mktemp "${TMPDIR:-/tmp}/aegis_split_resp.XXXXXX")" || {
+    rm -f "${req_file}"
+    return 1
+  }
+
+  # Cap parent size so the prompt stays small for 8B.
+  local parent_clip
+  parent_clip="$(printf '%s' "${parent}" | head -c 6000)"
+
+  jq -n \
+    --arg model "${model}" \
+    --arg sys "$(aegis_supervisor_split_system_prompt)" \
+    --arg parent "${parent_clip}" \
+    '{
+      model: $model,
+      messages: [
+        {role: "system", content: $sys},
+        {role: "user", content: ("Split this Aegis demand into micro units:\n\n" + $parent)}
+      ],
+      temperature: 0.1,
+      max_tokens: 2000,
+      response_format: {type: "json_object"}
+    }' > "${req_file}" 2>/dev/null || {
+    rm -f "${req_file}" "${resp_file}"
+    return 1
+  }
+
+  curl --silent --show-error \
+    --connect-timeout 5 \
+    --max-time "${timeout}" \
+    -X POST "${api_base%/}/chat/completions" \
+    -H "Authorization: Bearer ${api_key}" \
+    -H "Content-Type: application/json" \
+    --data @"${req_file}" > "${resp_file}" 2>/dev/null || true
+
+  rm -f "${req_file}"
+
+  local content
+  content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
+  rm -f "${resp_file}"
+
+  [[ -n "${content}" ]] || {
+    printf 'empty_response\n' >&2
+    return 1
+  }
+
+  content="$(
+    printf '%s' "${content}" \
+      | sed -E 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*//; s/```[[:space:]]*$//'
+  )"
+
+  aegis_supervisor_split_validate_json "${content}" "${parent}" || return 1
+
+  local n
+  n="$(aegis_supervisor_split_emit "${content}" "${parent}" "${out_dir}")" || {
+    printf 'emit_failed\n' >&2
+    return 1
+  }
+  [[ "${n}" -ge 2 ]] || {
+    printf 'too_few_emitted\n' >&2
+    return 1
+  }
   return 0
 }
