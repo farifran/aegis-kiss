@@ -22,6 +22,8 @@ cd "${ROOT}"
 source "${ROOT}/scripts/lib/common.sh"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/record.sh"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/lib/briefing.sh"
 
 AEGIS_LOG_TAG="CLI"
 
@@ -337,10 +339,33 @@ cmd_go() {
       fi
     fi
 
+    # Supervisor pre-pass, before Acceptance is derived. A prose goal makes
+    # derive_accept_tokens harvest constructor parameters and private fields
+    # into Acceptance, which the tribunal then enforces as a promotion
+    # contract — issue #65 died with four internal names in it. When the
+    # supervisor answers, it writes Acceptance itself (public exports only)
+    # and puts the mechanics in a Briefing section, which the tokenizer never
+    # reads and fit_check already propagates into micro-units.
+    # Advisory only: a single failed check falls back to the mechanical path.
+    body=""
+    if aegis_briefing_enabled; then
+      local brief_err
+      brief_err="$(mktemp)"
+      aegis_log "briefing: a expandir a demanda com o supervisor..."
+      body="$(aegis_briefing_generate "${goal}" "${target}" 2>"${brief_err}")" || body=""
+      if [[ -n "${body}" ]]; then
+        aegis_log "briefing: demanda estruturada aceite"
+      else
+        aegis_warn "briefing: recusado ($(tail -n 1 "${brief_err}" 2>/dev/null || true)) — a usar o corpo mecânico"
+      fi
+      rm -f "${brief_err}"
+    fi
+
     # Acceptance seeds the prompt, the commit record and the regression
     # rail. It can be extracted from the goal when the goal already names
-    # code, but never invented: the token becomes permanent.
-    if [[ "${#accepts[@]}" -eq 0 ]]; then
+    # code, but never invented: the token becomes permanent. A supervisor
+    # body already carries its own Acceptance, so this only runs as fallback.
+    if [[ -z "${body}" ]] && [[ "${#accepts[@]}" -eq 0 ]]; then
       local derived
       derived="$(derive_accept_tokens "${goal}")"
       if [[ -z "${derived}" ]]; then
@@ -363,7 +388,7 @@ cmd_go() {
       fi
     fi
 
-    body="$(render_body "${goal}" "${target}")"
+    [[ -n "${body}" ]] || body="$(render_body "${goal}" "${target}")"
 
     # Show → ask → maybe edit → re-check. fit_check owns the verdict and
     # the auto-fixes; go only reads them. The editor is the friendly
