@@ -1,4 +1,6 @@
 // src/index.ts
+import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
+
 export function converterGigabitsEmTerabits(gigabits: bigint): bigint {
   return gigabits * 1024n;
 }
@@ -14,3 +16,5 @@ export function converterMegabitsEmTerabits(megabits: bigint): bigint {
 export function converterGigabitsEmKilobits(gigabits: bigint): bigint {
   return gigabits / 1024n;
 }
+
+export { TokenBucket, obterEstadoBitmask };
