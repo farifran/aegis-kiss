@@ -31,7 +31,8 @@
 #
 # Env:
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
-#   AEGIS_SUPERVISOR_MODEL          default: the mutation model
+#   AEGIS_SUPERVISOR_MODEL          default meta/llama-3.1-8b-instruct — the
+#                                   coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
 #   OPENAI_API_BASE / OPENAI_API_KEY
@@ -46,6 +47,15 @@ aegis_briefing_enabled() {
   command -v curl >/dev/null 2>&1 || return 1
   command -v jq >/dev/null 2>&1 || return 1
   return 0
+}
+
+# Deliberately NOT the mutation model. Filling this schema is a small,
+# highly constrained task: the 8B scored 4 of 4 end-to-end across unrelated
+# demands at 3-4s a call, while the 70B took 100-120s to make the same
+# BigInt-as-a-type mistake. Inheriting OPENAI_MODEL_MUTATION would silently
+# put whatever the coder uses in front of every run.
+aegis_briefing_model() {
+  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-meta/llama-3.1-8b-instruct}"
 }
 
 aegis_briefing_max_exports() {
@@ -213,7 +223,7 @@ aegis_briefing_generate() {
   local api_base api_key model timeout
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
-  model="${AEGIS_SUPERVISOR_MODEL:-${OPENAI_MODEL_MUTATION:-${AEGIS_MUTATION_MODEL:-meta/llama-3.1-8b-instruct}}}"
+  model="$(aegis_briefing_model)"
   timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
 
   local req_file resp_file

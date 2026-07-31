@@ -123,6 +123,22 @@ assert_rejected "$(mutate '.targets = ["../escape.ts"]')"     "bad_target"
 assert_rejected "$(mutate '.barrelFrom = "./tokenBucket"')"   "barrel_not_nodenext"
 assert_rejected "$(mutate '.exports[0].kind = "interface"')"  "bad_kind"
 
+# --- the supervisor model must not inherit the coder's. Filling this schema
+# is a small constrained task the 8B does in 3-4s; the 70B took 100-120s to
+# make the same mistakes. Inheriting OPENAI_MODEL_MUTATION would silently put
+# whatever the coder runs in front of every single run. ---
+(
+  unset AEGIS_SUPERVISOR_MODEL
+  export OPENAI_MODEL_MUTATION="meta/llama-3.3-70b-instruct"
+  export AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct"
+  [[ "$(aegis_briefing_model)" == "meta/llama-3.1-8b-instruct" ]]
+) || fail "default_supervisor_should_not_inherit_mutation_model"
+
+(
+  export AEGIS_SUPERVISOR_MODEL="some/other-model"
+  [[ "$(aegis_briefing_model)" == "some/other-model" ]]
+) || fail "AEGIS_SUPERVISOR_MODEL_should_override"
+
 # --- the pre-pass must be disableable and must not fire without a key ---
 (
   export AEGIS_BRIEFING=0 OPENAI_API_KEY=x
