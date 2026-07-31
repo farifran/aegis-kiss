@@ -1,93 +1,127 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# Briefing pre-pass — supervisor output is advisory, never trusted
+# Briefing pre-pass — supervisor fills a schema, this side renders
 # =========================================================
-# No network: every case drives aegis_briefing_validate directly. The gate is
-# the whole point of the feature — a supervisor answer that slips through
-# writes the promotion contract for the entire run.
+# No network: every case drives the validator and the renderer directly.
+# The gate decides the promotion contract for the whole run, so a bad answer
+# slipping through is worse than no pre-pass at all.
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 # shellcheck disable=SC1091
 source "${AEGIS_TEST_ROOT}/scripts/lib/briefing.sh"
 
-good_body="$(cat <<'EOF'
-## Goal
-Crie src/eventEmitter.ts e re-exporte tudo no src/index.ts.
-
-## Targets
-- src/eventEmitter.ts
-- src/index.ts
-
-## Acceptance
-- EventEmitter
-- contarOuvintes
-
-## Briefing
-1) export class EventEmitter:
-   Campos privados: _ouvintes: Map<string, unknown[]>
-   constructor(): this._ouvintes = new Map()
-2) export function contarOuvintes(e: EventEmitter): number:
-   return 0
-
-## Out of scope
-- unrelated files
-
-## Constraints
-- no any
-EOF
-)"
-
-assert_valid() {
-  aegis_briefing_validate "$1" 2>/dev/null \
-    || fail "should_accept: $2"
-}
+good_json='{
+  "goal": "Crie src/tokenBucket.ts e re-exporte no src/index.ts.",
+  "targets": ["src/tokenBucket.ts", "src/index.ts"],
+  "exports": [
+    {"kind": "class", "name": "TokenBucket",
+     "privateFields": [{"name": "_tokens", "type": "bigint"}],
+     "ctorParams": [{"name": "maxBytes", "type": "bigint"}],
+     "ctorBody": ["this._tokens = maxBytes"],
+     "methods": [{"name": "consume", "params": [{"name": "bits", "type": "bigint"}],
+                  "returns": "boolean", "body": ["return this._tokens >= bits"]}],
+     "getters": [{"name": "tokens", "returns": "bigint", "body": "return this._tokens"}]},
+    {"kind": "function", "name": "obterEstadoBitmask",
+     "params": [{"name": "b", "type": "TokenBucket"}], "returns": "number",
+     "body": ["return b.tokens === 0n ? 1 : 0"]}
+  ],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./tokenBucket.js"
+}'
 
 assert_rejected() {
-  local body="$1" want="$2" got
+  local json="$1" want="$2" got
   # pipefail would surface the validator's own rejection status and set -e
   # would kill the suite before the assertion runs.
-  got="$(aegis_briefing_validate "${body}" 2>&1 >/dev/null | tail -n 1 || true)"
-  if aegis_briefing_validate "${body}" 2>/dev/null; then
+  got="$(aegis_briefing_validate_json "${json}" 2>&1 >/dev/null | tail -n 1 || true)"
+  if aegis_briefing_validate_json "${json}" 2>/dev/null; then
     fail "should_reject_but_accepted: ${want}"
   fi
   printf '%s' "${got}" | grep -q "${want}" \
     || fail "wrong_reject_reason: got '${got}', want '${want}'"
 }
 
-# --- the happy path must actually pass, or the feature is dead weight ---
-assert_valid "${good_body}" "well_formed_supervisor_output"
+mutate() {
+  printf '%s' "${good_json}" | jq -c "$1"
+}
 
-# --- section structure ---
-assert_rejected "" "empty_response"
-assert_rejected "$(printf '%s' "${good_body}" | grep -v '^## Briefing$')" "missing_section:Briefing"
-assert_rejected "$(printf '%s' "${good_body}" | grep -v '^## Acceptance$')" "missing_section:Acceptance"
+# --- the happy path must pass, or the feature is dead weight ---
+aegis_briefing_validate_json "${good_json}" 2>/dev/null \
+  || fail "well_formed_schema_should_be_accepted"
 
-# --- code fences would carry backticks into the permanent record ---
-assert_rejected "$(printf '```markdown\n%s\n```' "${good_body}")" "contains_code_fence"
+# --- Acceptance is DERIVED, never authored. This is the invariant that makes
+# the failure which killed issue #65 unrepresentable rather than merely
+# checked: a private field cannot reach the contract because the contract is
+# the exports list. ---
+rendered="$(aegis_briefing_render "${good_json}")"
+acceptance="$(printf '%s\n' "${rendered}" \
+  | awk '/^## Acceptance$/ {p=1; next} /^## / {p=0} p' | sed -E '/^[[:space:]]*$/d')"
 
-# --- Acceptance must be bare identifiers. A prose line makes fit_check throw
-# the list away and rebuild it by grepping the Goal — the exact path that put
-# maxBytes into the contract and killed issue #65. ---
+printf '%s' "${acceptance}" | grep -q '^- TokenBucket$' \
+  || fail "acceptance_missing_class: ${acceptance}"
+printf '%s' "${acceptance}" | grep -q '^- obterEstadoBitmask$' \
+  || fail "acceptance_missing_function: ${acceptance}"
+printf '%s' "${acceptance}" | grep -qE '_tokens|maxBytes|bits' \
+  && fail "internal_name_reached_acceptance: ${acceptance}"
+[[ "$(printf '%s\n' "${acceptance}" | wc -l | tr -d ' ')" == "2" ]] \
+  || fail "acceptance_should_have_exactly_two_lines: ${acceptance}"
+
+# Every acceptance line must be a bare identifier, or fit_check throws the
+# list away and rebuilds it by grepping the Goal.
+while IFS= read -r line; do
+  [[ -n "${line}" ]] || continue
+  printf '%s' "${line#- }" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$' \
+    || fail "acceptance_line_not_identifier: ${line}"
+done <<< "${acceptance}"
+
+# --- the rendered body must carry what the pipeline reads downstream ---
+printf '%s' "${rendered}" | grep -q '^## Briefing$' || fail "render_missing_briefing"
+printf '%s' "${rendered}" | grep -q '^## Targets$'  || fail "render_missing_targets"
+printf '%s' "${rendered}" | grep -q "from './tokenBucket.js'" \
+  || fail "render_missing_nodenext_barrel"
+printf '%s' "${rendered}" | grep -q '```' && fail "render_emitted_code_fence"
+
+# --- structural rejections ---
+assert_rejected 'not json at all'            "invalid_json"
+assert_rejected "$(mutate '.goal = ""')"      "empty_goal"
+assert_rejected "$(mutate '.targets = []')"   "empty_targets"
+assert_rejected "$(mutate '.exports = []')"   "empty_exports"
+
+# --- a constructor is not a type. Both models tested wrote `_tokens: BigInt`
+# consistently; in prose that was invisible, as a field it is rejectable. ---
 assert_rejected \
-  "${good_body//- contarOuvintes/- the emitter should count its listeners}" \
-  "acceptance_not_identifier"
+  "$(mutate '.exports[0].privateFields[0].type = "BigInt"')" \
+  "constructor_used_as_type:BigInt"
+assert_rejected \
+  "$(mutate '.exports[0].ctorParams[0].type = "Number"')" \
+  "constructor_used_as_type:Number"
+assert_rejected \
+  "$(mutate '.exports[1].params[0].type = "String"')" \
+  "constructor_used_as_type:String"
 
-# --- and the supervisor must export what it calls public. This is the check
-# that catches a private field promoted into the contract at generation time,
-# before a single model call is spent on it. ---
+# --- identifiers. The 8B emitted `TokenBucketState.Bitmask` as an export. ---
 assert_rejected \
-  "${good_body//- contarOuvintes/- _ouvintes}" \
-  "acceptance_not_exported_in_briefing"
+  "$(mutate '.exports[1].name = "TokenBucketState.Bitmask"')" \
+  "name_not_identifier"
+assert_rejected \
+  "$(mutate '.exports[1].name = "_privateThing"')" \
+  "private_as_export"
+assert_rejected \
+  "$(mutate '.exports[0].methods[0].name = "method(refill()"')" \
+  "method_not_identifier"
 
-# --- targets must stay inside the repo ---
+# --- over-delivery: the 8B invented rebitmask and getBit unprompted ---
 assert_rejected \
-  "${good_body//- src\/eventEmitter.ts/- /etc/passwd}" \
-  "bad_target"
-assert_rejected \
-  "${good_body//- src\/eventEmitter.ts/- ../../escape.ts}" \
-  "bad_target"
+  "$(mutate '.exports += [{"kind":"function","name":"extraOne","params":[],"returns":"void","body":["return"]},{"kind":"function","name":"extraTwo","params":[],"returns":"void","body":["return"]}]')" \
+  "too_many_exports"
+
+# --- paths must stay inside the repo, barrels must be NodeNext ---
+assert_rejected "$(mutate '.targets = ["/etc/passwd"]')"      "bad_target"
+assert_rejected "$(mutate '.targets = ["../escape.ts"]')"     "bad_target"
+assert_rejected "$(mutate '.barrelFrom = "./tokenBucket"')"   "barrel_not_nodenext"
+assert_rejected "$(mutate '.exports[0].kind = "interface"')"  "bad_kind"
 
 # --- the pre-pass must be disableable and must not fire without a key ---
 (

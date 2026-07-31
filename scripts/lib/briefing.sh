@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# AEGIS — BRIEFING PRE-PASS (supervisor expands the demand)
+# AEGIS — BRIEFING PRE-PASS (supervisor structures the demand)
 # =========================================================
 #
 # A goal written as free prose makes the CLI derive Acceptance by grepping
@@ -10,19 +10,30 @@
 # tokens, four of them internal, one — timeDiff*rateBitsPerMs — not even a
 # valid identifier.
 #
-# This pre-pass asks a supervisor model to turn the prose into a structured
-# demand whose Acceptance lists only public exports and whose mechanics live
-# in a Briefing section (which the tokenizer never reads, and which
-# fit_check already propagates into micro-units).
+# The supervisor fills a JSON schema; the markdown is rendered here. Asking a
+# small model for markdown was measured at 2 accepted answers out of 5, with
+# invented syntax (`method(refill(): void: ...)`), constructors used as type
+# names (`_tokens: BigInt`), unrequested extra exports and a missing barrel
+# block. The same model filling fields scored 6 out of 6 in 3-4s, because the
+# failures it used to make are no longer expressible:
 #
-# The supervisor is advisory. Anything it returns is validated before use and
-# a single failed check falls back to the mechanical render_body — the run
+#   - sections cannot be missing or fenced: this file writes them
+#   - Acceptance is DERIVED from the exports list, so an acceptance token that
+#     the Briefing does not export is not a check, it is an impossibility
+#   - types are fields, so `BigInt` used as a type is mechanically rejectable
+#
+# What the schema still cannot catch is logic (a call with a missing
+# argument). That is what typescript.check and the inner fix loop are for —
+# and they now start from a well-formed briefing instead of invented syntax.
+#
+# Advisory: any failure falls back to the mechanical render_body and the run
 # behaves exactly as it does today.
 #
 # Env:
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
 #   AEGIS_SUPERVISOR_MODEL          default: the mutation model
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
+#   AEGIS_BRIEFING_MAX_EXPORTS      default 2
 #   OPENAI_API_BASE / OPENAI_API_KEY
 #
 # =========================================================
@@ -37,144 +48,158 @@ aegis_briefing_enabled() {
   return 0
 }
 
-# The rules mirror .claude/skills/briefing/SKILL.md. Kept terse on purpose:
-# this is resent on every run, and a weak supervisor follows a short contract
-# more reliably than a long one.
+aegis_briefing_max_exports() {
+  local n="${AEGIS_BRIEFING_MAX_EXPORTS:-2}"
+  [[ "${n}" =~ ^[0-9]+$ ]] && [[ "${n}" -gt 0 ]] || n=2
+  printf '%s' "${n}"
+}
+
+# The schema doubles as the instruction: a worked example constrains a weak
+# model far better than a list of prose rules.
 aegis_briefing_system_prompt() {
-  cat <<'PROMPT'
-You turn a plain-language software demand into a structured Aegis issue.
+  cat <<PROMPT
+You convert a software demand into JSON. Output ONLY a JSON object, no prose.
 
-Output ONLY the markdown below. No preamble, no explanation, no code fences.
+Schema:
+{
+  "goal": "one short sentence naming the files to create; no parameter or field names",
+  "targets": ["src/thing.ts", "src/index.ts"],
+  "exports": [
+    {
+      "kind": "class",
+      "name": "PascalCaseName",
+      "privateFields": [{"name": "_x", "type": "bigint"}],
+      "ctorParams": [{"name": "arg", "type": "bigint"}],
+      "ctorBody": ["this._x = arg"],
+      "methods": [{"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["if (this._x >= bits) { this._x -= bits; return true }", "return false"]}],
+      "getters": [{"name": "value", "returns": "bigint", "body": "return this._x"}]
+    },
+    {
+      "kind": "function",
+      "name": "camelCaseName",
+      "params": [{"name": "b", "type": "PascalCaseName"}],
+      "returns": "number",
+      "body": ["let mask = 0", "if (b.value === 0n) mask |= 1", "return mask"]
+    }
+  ],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./thing.js"
+}
 
-## Goal
-One short sentence naming the files to create. NEVER mention parameter names,
-field names or types here.
-
-## Targets
-- one relative path per line (e.g. src/foo.ts)
-
-## Acceptance
-- one bare identifier per line, and ONLY public exports
-- NEVER a constructor parameter, a private field, a built-in type, or prose
-
-## Briefing
-Numbered pseudocode, one item per top-level export:
-1) export class Name:
-   Campos privados: _a: tipo, _b: tipo
-   constructor(arg: tipo): this._a = <expression>
-   method(arg: tipo): tipo: <complete one or two line body>
-   get prop(): tipo { return this._x }
-2) export function name(arg: tipo): tipo:
-   <complete body>
-Then the re-export block for the barrel file, with exact import and export
-lines. Write formulas as code (mbps * 8000), bitwise ops explicitly (mask |= 1)
-and conditionals inline (if (c) { a } else { b }).
-
-## Out of scope
-- unrelated files
-- e2e tests
-- drive-by refactors
-
-## Constraints
-- no any / as any / @ts-ignore
-- NodeNext: .js extension in relative imports
-
-Every identifier listed under Acceptance MUST appear in the Briefing behind an
-explicit `export` keyword. If something is internal state, it belongs in the
-Briefing only, never under Acceptance.
+Rules:
+- TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean — those are constructors, not types.
+- Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
+- "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
+- Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
+- Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
+- "barrelFrom" is a relative specifier ending in .js (NodeNext), pointing at the module you defined.
 PROMPT
 }
 
-# Structural + semantic gate. Returns 0 only when the body is safe to use.
-# Prints the reason to stderr on rejection.
-aegis_briefing_validate() {
-  local body="${1-}"
-  local sec line ident
+# Field-level gate. Prints the reason to stderr on rejection.
+aegis_briefing_validate_json() {
+  local json="${1-}"
+  local max reason
 
-  [[ -n "${body}" ]] || {
-    printf 'empty_response\n' >&2
+  printf '%s' "${json}" | jq -e . >/dev/null 2>&1 || {
+    printf 'invalid_json\n' >&2
     return 1
   }
+  max="$(aegis_briefing_max_exports)"
 
-  # Code fences mean the model wrapped the answer; the sections would parse
-  # but the demand would carry stray backticks into the permanent record.
-  if printf '%s\n' "${body}" | grep -q '```'; then
-    printf 'contains_code_fence\n' >&2
+  reason="$(
+    printf '%s' "${json}" | jq -r --argjson max "${max}" '
+      def bad_type:
+        . as $t
+        | ["BigInt","Number","String","Boolean","Object","Array","Symbol"]
+        | index($t);
+      def ident: test("^[A-Za-z_][A-Za-z0-9_]*$");
+      def rel_path: (startswith("/") | not) and (contains("..") | not) and (contains(" ") | not);
+      [
+        (if ((.goal // "") | length) == 0 then "empty_goal" else empty end),
+        (if ((.targets // []) | length) == 0 then "empty_targets" else empty end),
+        (if ((.exports // []) | length) == 0 then "empty_exports" else empty end),
+        (if ((.exports // []) | length) > $max then "too_many_exports" else empty end),
+        ((.targets // [])[]? | select((type != "string") or (rel_path | not)) | "bad_target:\(.)"),
+        ((.exports // [])[]? | select(((.name // "") | ident) | not) | "name_not_identifier:\(.name)"),
+        ((.exports // [])[]? | select((.name // "") | startswith("_")) | "private_as_export:\(.name)"),
+        ((.exports // [])[]? | select((.kind // "") | (. == "class" or . == "function") | not) | "bad_kind:\(.kind)"),
+        ((.exports // [])[]? | (.privateFields // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
+        ((.exports // [])[]? | (.ctorParams // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
+        ((.exports // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
+        ((.exports // [])[]? | (.methods // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
+        ((.exports // [])[]? | (.methods // [])[]? | select(((.name // "") | ident) | not) | "method_not_identifier:\(.name)"),
+        (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
+           then "barrel_not_nodenext:\(.barrelFrom)" else empty end)
+      ] | first // ""
+    ' 2>/dev/null || true
+  )"
+
+  if [[ -n "${reason}" ]]; then
+    printf '%s\n' "${reason}" >&2
     return 1
   fi
-
-  for sec in Goal Targets Acceptance Briefing; do
-    printf '%s\n' "${body}" | grep -qE "^## ${sec}[[:space:]]*$" || {
-      printf 'missing_section:%s\n' "${sec}" >&2
-      return 1
-    }
-  done
-
-  local targets acc briefing
-  targets="$(aegis_briefing_section Targets "${body}")"
-  acc="$(aegis_briefing_section Acceptance "${body}")"
-  briefing="$(aegis_briefing_section Briefing "${body}")"
-
-  [[ -n "${targets}" ]] || {
-    printf 'empty_targets\n' >&2
-    return 1
-  }
-  [[ -n "${briefing}" ]] || {
-    printf 'empty_briefing\n' >&2
-    return 1
-  }
-  [[ -n "${acc}" ]] || {
-    printf 'empty_acceptance\n' >&2
-    return 1
-  }
-
-  # Every target must be a relative path, never absolute and never escaping.
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*-[[:space:]]*//')"
-    [[ -n "${line}" ]] || continue
-    case "${line}" in
-      /*|*..*|*' '*)
-        printf 'bad_target:%s\n' "${line}" >&2
-        return 1
-        ;;
-    esac
-  done <<< "${targets}"
-
-  # Acceptance must be bare identifiers. A prose line here is what makes
-  # fit_check throw the list away and rebuild it by grepping the Goal — the
-  # exact path that put maxBytes into the contract.
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    ident="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')"
-    [[ -n "${ident}" ]] || continue
-    if ! printf '%s' "${ident}" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
-      printf 'acceptance_not_identifier:%s\n' "${ident}" >&2
-      return 1
-    fi
-    # The supervisor's own Briefing has to export what it claims is public.
-    # This is the check that would have caught issue #65 at generation time.
-    if ! printf '%s\n' "${briefing}" \
-      | grep -qE "export[[:space:]]+(async[[:space:]]+)?(function|const|class|type|interface|enum)[[:space:]]+${ident}\\b|export[[:space:]]*\\{[^}]*\\b${ident}\\b"; then
-      printf 'acceptance_not_exported_in_briefing:%s\n' "${ident}" >&2
-      return 1
-    fi
-  done <<< "${acc}"
-
   return 0
 }
 
-# Body of one "## Section" up to the next "## ".
-aegis_briefing_section() {
-  local name="${1-}"
-  local text="${2-}"
-  printf '%s\n' "${text}" \
-    | awk -v s="## ${name}" '
-        $0 == s { p = 1; next }
-        /^## / { p = 0 }
-        p { print }
-      ' \
-    | sed -E '/^[[:space:]]*$/d'
+# Deterministic markdown. Acceptance is the export list, so it cannot name
+# something the Briefing does not export.
+aegis_briefing_render() {
+  local json="${1-}"
+  printf '%s' "${json}" | jq -r '
+    def params($p): (($p // []) | map(.name + ": " + .type) | join(", "));
+    def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
+
+    "## Goal",
+    (.goal // ""),
+    "",
+    "## Targets",
+    (((.targets // []) | map("- " + .)) | join("\n")),
+    "",
+    "## Acceptance",
+    (((.exports // []) | map("- " + .name)) | join("\n")),
+    "",
+    "## Briefing",
+    (((.exports // []) | to_entries | map(
+      (.key + 1 | tostring) as $n
+      | .value as $e
+      | if $e.kind == "class" then
+          $n + ") export class " + $e.name + ":"
+          + (if (($e.privateFields // []) | length) > 0
+               then "\n   Campos privados: " + (($e.privateFields | map(.name + ": " + .type)) | join(", "))
+               else "" end)
+          + "\n   constructor(" + params($e.ctorParams) + "):\n" + lines($e.ctorBody; "     ")
+          + (if (($e.methods // []) | length) > 0
+               then "\n" + (($e.methods | map(
+                      "   " + .name + "(" + params(.params) + "): " + (.returns // "void") + ":\n"
+                      + lines(.body; "     ")
+                    )) | join("\n"))
+               else "" end)
+          + (if (($e.getters // []) | length) > 0
+               then "\n" + (($e.getters | map(
+                      "   get " + .name + "(): " + (.returns // "unknown") + " { " + (.body // "") + " }"
+                    )) | join("\n"))
+               else "" end)
+        else
+          $n + ") export function " + $e.name + "(" + params($e.params) + "): " + ($e.returns // "void") + ":\n"
+          + lines($e.body; "     ")
+        end
+    )) | join("\n\n")),
+    "",
+    ("Em " + (.barrelFile // "src/index.ts") + ":"),
+    ("   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from " + "'"'"'" + (.barrelFrom // "./mod.js") + "'"'"'"),
+    ("   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }"),
+    "",
+    "## Out of scope",
+    "- unrelated files",
+    "- e2e tests",
+    "- drive-by refactors",
+    "",
+    "## Constraints",
+    "- no any / as any / @ts-ignore",
+    "- NodeNext: .js extension in relative imports",
+    "- only packages in package.json; builtins are global"
+  '
 }
 
 # Prints the structured demand on success; prints nothing and returns 1
@@ -207,10 +232,11 @@ aegis_briefing_generate() {
       model: $model,
       messages: [
         {role: "system", content: $sys},
-        {role: "user", content: ("Demand: " + $goal + "\nSuggested targets: " + $target)}
+        {role: "user", content: ("Demand: " + $goal + "\nTargets: " + $target)}
       ],
       temperature: 0.1,
-      max_tokens: 900
+      max_tokens: 1100,
+      response_format: {type: "json_object"}
     }' > "${req_file}" 2>/dev/null || {
     rm -f "${req_file}" "${resp_file}"
     return 1
@@ -232,13 +258,26 @@ aegis_briefing_generate() {
   content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
   rm -f "${resp_file}"
 
-  [[ -n "${content}" ]] || return 1
+  [[ -n "${content}" ]] || {
+    printf 'empty_response\n' >&2
+    return 1
+  }
 
-  # Trim anything the model emitted before the first section.
-  content="$(printf '%s\n' "${content}" | awk '/^## Goal[[:space:]]*$/ {p=1} p')"
+  # Some providers still wrap JSON in a fence even in json_object mode.
+  content="$(
+    printf '%s' "${content}" \
+      | sed -E 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*//; s/```[[:space:]]*$//'
+  )"
 
-  aegis_briefing_validate "${content}" || return 1
+  aegis_briefing_validate_json "${content}" || return 1
 
-  printf '%s' "${content}"
+  local body
+  body="$(aegis_briefing_render "${content}" 2>/dev/null || true)"
+  [[ -n "${body}" ]] || {
+    printf 'render_failed\n' >&2
+    return 1
+  }
+
+  printf '%s' "${body}"
   return 0
 }
