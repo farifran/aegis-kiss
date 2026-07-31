@@ -2,3 +2,7 @@
 export function converterGigabitsEmTerabits(gigabits: bigint): bigint {
   return gigabits * 1024n;
 }
+
+export function converterKilobitsEmTerabits(kilobits: bigint): bigint {
+  return kilobits * 1024n;
+}
