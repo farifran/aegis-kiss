@@ -595,6 +595,7 @@ Edit only \`${primary}\`. Reexport only — no algorithm reimplementation.
 - Update ONLY \`${primary}\`.
 - Import and re-export: ${names}
 - Do not create or modify any other path.
+- Do not delete or demote pre-existing barrel exports unrelated to this demand.
 
 ## Briefing
 ${briefing_block}
@@ -610,6 +611,7 @@ ${oos}
 - KISS
 - single target micro unit only
 - reexport only
+- do not delete pre-existing barrel exports unrelated to this demand
 - NodeNext .js imports if this file imports siblings
 EOF
     return 0
@@ -683,7 +685,8 @@ ${oos}
 - no any
 - KISS
 - single target micro unit only
-- one primary public export preferred (methods allowed)
+- prefer focused public surface (class methods need not be top-level exports)
+- do not delete pre-existing barrel exports unrelated to this demand
 - NodeNext .js imports if this file imports siblings
 - BigInt is global when high-precision time is required
 EOF

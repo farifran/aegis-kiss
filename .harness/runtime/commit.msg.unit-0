@@ -1,0 +1,5 @@
+aegis: issue#92 task 1/2 TokenBucket
+
+Aegis-Issue: 92
+Aegis-Task: 1/2
+Aegis-Accept: TokenBucket, obterEstadoBitmask

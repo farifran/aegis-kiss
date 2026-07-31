@@ -374,7 +374,7 @@ aegis_fit_unit_demand_md() {
   fi
 
   if [[ "${is_reexport}" -eq 1 ]]; then
-    local sib_file sib_pascal
+    local sib_file sib_pascal reexport_list
     sib_file="$(
       aegis_fit_target_paths "${parent}" \
         | awk -v p="${primary}" 'NF && $0 != p {
@@ -382,72 +382,111 @@ aegis_fit_unit_demand_md() {
           }'
     )"
     sib_pascal="$(printf '%s' "${sib_file}" | awk '{if (length($0)>0) print toupper(substr($0,1,1)) substr($0,2)}')"
+    # Public names to reexport: parent Acceptance + briefing exports + sibling.
+    reexport_list="$(
+      {
+        aegis_fit_briefing_export_names "${parent}"
+        aegis_fit_md_section "Acceptance" "${parent}" \
+          | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+          | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
+        # Prefer PascalCase class name over raw module basename.
+        printf '%s\n' "${sib_pascal}"
+      } | awk -v base="${sib_file}" 'NF && !seen[$0]++ {
+          low=tolower($0)
+          if (low=="index"||low=="export"||low=="main"||low=="src"||low=="bigint"||low=="number"||low=="string") next
+          # Constructor params / private state — never reexport requirements.
+          if ($0 ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
+          if ($0 ~ /^(max|min|rate|time|last)[A-Z]/) next
+          # Drop bare module basename (tokenBucket) — not a public export.
+          if (base != "" && $0 == base) next
+          print
+        }' | head -n 6
+    )"
+    [[ -n "$(printf '%s' "${reexport_list}" | tr -d '[:space:]')" ]] \
+      || reexport_list="${sib_pascal:-TokenBucket}"
+    local reexport_csv
+    reexport_csv="$(printf '%s\n' "${reexport_list}" | paste -sd',' - | sed 's/,/, /g')"
     change_block="$(
       cat <<EOR
 - Update ONLY \`${primary}\`.
-- Import and re-export the public API (e.g. \`export { ${sib_pascal:-Target} } from './${sib_file:-module}.js';\`) already created in the sibling module (NodeNext \`.js\` relative import).
+- Import and re-export from './${sib_file:-module}.js': ${reexport_csv} (NodeNext \`.js\` relative import).
 - Do not re-implement the algorithm in this file.
 - Do not create or modify any other path.
+- Do not delete or demote pre-existing barrel exports unrelated to this demand.
 - Scope note: ${note:-reexport after create}
 EOR
     )"
     # Do NOT use barrel basename "index" as acceptance — it never appears in
     # file body and false-fails adversarial (reexport is export { Sibling }).
     acc_block="$(
-      {
-        # Sibling module names (TokenBucket) are the real acceptance tokens.
-        aegis_fit_target_paths "${parent}" \
-          | awk -v p="${primary}" 'NF && $0 != p {
-              n=$0; sub(/^.*\//,"",n); sub(/\.[^.]+$/,"",n); print n
-              # PascalCase form
-              if (length(n)>0) print toupper(substr(n,1,1)) substr(n,2)
-            }' | head -n 4
-        printf '%s\n' "TokenBucket"
-      } | awk 'NF && !seen[$0]++ {
-          low=tolower($0)
-          if (low=="index" || low=="export" || low=="main" || low=="src") next
-          print "- " $0
-        }' | head -n 4
+      printf '%s\n' "${reexport_list}" | awk 'NF { print "- " $0 }'
     )"
     [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] \
       || acc_block="- reexport"
   else
-    local detail
+    local detail multi_export_note=""
     detail="$(aegis_fit_unit_change_lines "${parent}" "${primary}")"
     if [[ -z "$(printf '%s' "${detail}" | tr -d '[:space:]')" ]]; then
       detail="$(
         cat <<EOD
 - Implement the demanded API for \`${primary_base}\` in this file alone.
-- Prefer one public named export (class or function); methods on that export are fine.
 EOD
       )"
     fi
-    local one_export_note=""
-    if ! printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas|exporte a função|export function'; then
-      one_export_note="- Prefer **one** primary top-level export (class or function). Put methods and helpers inside the main class body, never as secondary top-level exports."$'\n'
+    # If Acceptance names more than one symbol, they must be TOP-LEVEL exports
+    # (a method named obterEstadoBitmask does not satisfy a function export).
+    local acc_count
+    acc_count="$(
+      aegis_fit_md_section "Acceptance" "${parent}" \
+        | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+        | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null \
+        | awk 'NF && !seen[$0]++' | grep -c . || true
+    )"
+    acc_count="${acc_count//[^0-9]/}"
+    acc_count="${acc_count:-0}"
+    if [[ "${acc_count}" -ge 2 ]] \
+      || printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas|exporte a função|export function'; then
+      multi_export_note="- Every Acceptance token that is a class or function must be a **top-level** \`export class\` / \`export function\` in this file (not only a method on another export)."$'\n'
+    else
+      multi_export_note="- Prefer one top-level public export; methods on that export are fine."$'\n'
     fi
     change_block="$(
       cat <<EOC
 - Create or update ONLY \`${primary}\`.
 - Do not create or modify any other path.
 - Do not re-export from index in this run.
-${one_export_note}${detail}
+${multi_export_note}${detail}
 - Scope note: ${note:-single-target micro unit}
 EOC
     )"
-    # Acceptance: module tokens + parent Acceptance idents only (no hardcoded
-    # BigInt/encodeState — those false-positive as "export-like" when methods
-    # or language globals are the real intent).
+    # Acceptance: module tokens + parent Acceptance / briefing exports only.
+    # Never promote constructor params or private field names (maxBytes, mbps,
+    # rateBitsPerMs, …) — they poison the tribunal into unsatisfiable contracts.
     acc_block="$(
       {
-        printf '%s\n' "${primary_base}"
         printf '%s\n' "${primary_pascal}"
+        aegis_fit_briefing_export_names "${parent}"
         aegis_fit_md_section "Acceptance" "${parent}" \
           | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
           | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null || true
-      } | awk 'NF && !seen[$0]++ {
+      } | awk -v parent="$(printf '%s' "${parent}" | tr '\n' ' ')" \
+          -v base="${primary_base}" -v pascal="${primary_pascal}" '
+          NF && !seen[$0]++ {
           low=tolower($0)
-          if (low=="export" || low=="import" || low=="class" || low=="function" || low=="index" || low=="index.ts" || low=="bigint" || low=="megabytes" || low=="gigabits" || low=="terabits" || low=="kilobits" || low=="petabytes" || low=="number" || low=="string" || low=="boolean") next
+          if (low=="export" || low=="import" || low=="class" || low=="function" || low=="index" || low=="index.ts" || low=="bigint" || low=="megabytes" || low=="gigabits" || low=="terabits" || low=="kilobits" || low=="petabytes" || low=="number" || low=="string" || low=="boolean" || low=="date" || low=="now") next
+          # Module basename is not a public export when PascalCase class exists.
+          if (base != "" && pascal != "" && $0 == base && base != pascal) next
+          # Param/field shape: "name: type" in constructor prose
+          if (index(parent, $0 ":") > 0) {
+            if (parent !~ ("export (class|function|const) " $0) \
+                && parent !~ ("classe " $0) \
+                && parent !~ ("class " $0) \
+                && parent !~ ("função " $0) \
+                && parent !~ ("function " $0)) next
+          }
+          # Common internal state / param stems when not export-declared
+          if ($0 ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|_)/) next
+          if ($0 ~ /^(mbps|bits|bytes|tokens)$/) next
           print "- " $0
         }' | head -n 6
     )"
@@ -528,7 +567,8 @@ ${acc_block}
 - no any
 - KISS
 - single target micro unit only
-- one primary public export preferred (methods allowed)
+- prefer focused public surface (class methods need not be top-level exports)
+- do not delete pre-existing barrel exports unrelated to this demand
 - NodeNext .js imports if this file imports siblings
 - BigInt is global when high-precision time is required
 ${parent_constraints:+${parent_constraints}}

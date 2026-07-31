@@ -575,11 +575,34 @@ commit_unit_checkpoint() {
   local task_label="${task_n}/${unit_total}"
   local paths accept_csv summary msg_file committed p
 
+  # ONLY paths named by the unit. Never fall back to full `git status` — that
+  # once checkpoint-committed harness edits (scripts/lib/*) as issue#92 task 2.
   paths="$(unit_changed_paths "${unit_file}")"
   if [[ -z "$(printf '%s' "${paths}" | tr -d '[:space:]')" ]]; then
-    # Fall back: anything unstaged from the promotion (scope may be broader).
-    paths="$(git status --porcelain --untracked-files=all 2>/dev/null | cut -c4- | grep -v '^$' || true)"
+    printf ''
+    return 1
   fi
+  # Refuse anything outside the unit targets (defense in depth).
+  local allowed p_ok
+  allowed="$(unit_target_paths "${unit_file}")"
+  paths="$(
+    printf '%s\n' "${paths}" | while IFS= read -r p; do
+      [[ -n "${p}" ]] || continue
+      p_ok=0
+      while IFS= read -r a; do
+        [[ -n "${a}" ]] || continue
+        if [[ "${p}" == "${a}" || "${p}" == "${a}/"* || "${p}" == *"/${a}" ]]; then
+          p_ok=1
+          break
+        fi
+        # allow exact file under target path
+        case "${p}" in
+          "${a}"|"${a}"/*) p_ok=1; break ;;
+        esac
+      done <<< "${allowed}"
+      [[ "${p_ok}" -eq 1 ]] && printf '%s\n' "${p}"
+    done
+  )"
   if [[ -z "$(printf '%s' "${paths}" | tr -d '[:space:]')" ]]; then
     printf ''
     return 1

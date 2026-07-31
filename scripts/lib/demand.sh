@@ -1580,8 +1580,23 @@ aegis_candidate_alignment_gate() {
   export_names="$(aegis_diff_added_export_names "${diff_content}")"
 
   # --- over-export ---
+  # Cap defaults to 1, but multi-symbol Acceptance (class + helper) must be
+  # allowed: TokenBucket + obterEstadoBitmask is a normal L7 demand.
   : "${AEGIS_MUTATION_MAX_NEW_EXPORTS:=1}"
   max_exports="${AEGIS_MUTATION_MAX_NEW_EXPORTS}"
+  local acc_n
+  acc_n="$(
+    printf '%s\n' "${text}" \
+      | awk '/^## Acceptance[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | command grep -oE '[A-Za-z_][A-Za-z0-9_]{2,}' 2>/dev/null \
+      | awk 'NF && !seen[$0]++' | grep -c . || true
+  )"
+  acc_n="${acc_n//[^0-9]/}"
+  acc_n="${acc_n:-0}"
+  if [[ "${acc_n}" -gt "${max_exports}" ]]; then
+    max_exports="${acc_n}"
+  fi
   if declare -f count_diff_added_exports >/dev/null 2>&1; then
     export_n="$(count_diff_added_exports "${diff_content}")"
   else
@@ -1595,7 +1610,7 @@ aegis_candidate_alignment_gate() {
       jq -nc --argjson n "${export_n}" --argjson max "${max_exports}" '{
         code: "over_export",
         reason: ("alignment: " + ($n|tostring) + " new exports in candidate (max " + ($max|tostring) + ")"),
-        fix: "Keep one demand-aligned export; remove parallel APIs",
+        fix: "Keep demand-aligned exports only; remove parallel APIs beyond Acceptance",
         target_files: []
       }'
     )")
@@ -2086,14 +2101,12 @@ aegis_acceptance_export_hit() {
   local tok="${1-}"
   local corpus="${2-}"
   # Escape tok for basic ERE (idents only expected).
+  # TOP-LEVEL export only. A class method named obterEstadoBitmask must NOT
+  # satisfy Acceptance for an exported function of that name — that poison
+  # made issue #91/#92 task-1 "succeed" without the real export, then task-2
+  # reexport failed forever (index cannot invent sibling exports).
   if printf '%s\n' "${corpus}" | grep -Eiq \
     "export[[:space:]]+(async[[:space:]]+)?(function|const|class|type|interface|enum)[[:space:]]+${tok}[[:space:](;=]|export[[:space:]]*\{[^}]*\b${tok}\b" \
-    2>/dev/null; then
-    return 0
-  fi
-  # Method / property function on class or object literal.
-  if printf '%s\n' "${corpus}" | grep -Eiq \
-    "(^|[[:space:];{])((public|private|protected|static|async|readonly|abstract|override)[[:space:]]+)*${tok}[[:space:]]*(\(|:[[:space:]]*\(|:[[:space:]]*function)" \
     2>/dev/null; then
     return 0
   fi
@@ -2187,7 +2200,14 @@ aegis_files_json_pick() {
 aegis_demand_limits_one_export() {
   local investigation="${1-}"
   [[ -n "${investigation}" ]] || return 1
-  if printf '%s' "${investigation}" | grep -Eiq 'bitmask|função exportada|exportada que|funções exportadas'; then
+  # Multi-export or barrel reexport demands must never enter the "delete extra
+  # exports" surface path — index.ts often already has a public API.
+  if printf '%s' "${investigation}" | grep -Eiq \
+    'bitmask|função exportada|exportada que|funções exportadas|reexport only|re-export only|obterEstado|export function.*export class|export class.*export function'; then
+    return 1
+  fi
+  if printf '%s' "${investigation}" | grep -Eiq \
+    'do not delete pre-existing|pre-existing barrel|keep existing exports|barrel reexport'; then
     return 1
   fi
   printf '%s' "${investigation}" | grep -Eiq \
@@ -2214,16 +2234,18 @@ aegis_mechanical_surface_first_improve() {
   aegis_demand_limits_one_export "${investigation}" || return 0
 
   local n primary export_names extras
-  n="$(aegis_count_top_level_exports "${corpus}" | tr -d '[:space:]')"
+  # Prefer NEW exports in the candidate diff. Counting the whole file falsely
+  # flags barrel reexports on src/index.ts that already ship many public APIs.
+  n=0
+  if [[ -n "${diff_content}" ]] && declare -f count_diff_added_exports >/dev/null 2>&1; then
+    n="$(count_diff_added_exports "${diff_content}" 2>/dev/null | tr -d '[:space:]')"
+  fi
   [[ "${n}" =~ ^[0-9]+$ ]] || n=0
-  # Also count +export lines in diff if corpus under-counts empty files.
-  if [[ "${n}" -le 1 && -n "${diff_content}" ]] && declare -f count_diff_added_exports >/dev/null 2>&1; then
-    local dn
-    dn="$(count_diff_added_exports "${diff_content}" 2>/dev/null | tr -d '[:space:]')"
-    [[ "${dn}" =~ ^[0-9]+$ ]] || dn=0
-    if [[ "${dn}" -gt "${n}" ]]; then
-      n="${dn}"
-    fi
+  if [[ "${n}" -le 1 ]]; then
+    n="$(aegis_count_top_level_exports "${corpus}" | tr -d '[:space:]')"
+    [[ "${n}" =~ ^[0-9]+$ ]] || n=0
+    # Whole-file count only when the diff is empty/unavailable; if the demand
+    # is a reexport micro, still bail (limits_one_export should have returned).
   fi
   [[ "${n}" -gt 1 ]] || return 0
 
