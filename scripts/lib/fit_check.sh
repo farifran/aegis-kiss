@@ -423,7 +423,7 @@ EOD
       )"
     fi
     local one_export_note=""
-    if ! printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas'; then
+    if ! printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas|exporte a função|export function'; then
       one_export_note="- Prefer **one** primary top-level export (class or function). Put methods and helpers inside the main class body, never as secondary top-level exports."$'\n'
     fi
     change_block="$(
