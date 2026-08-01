@@ -4,6 +4,18 @@
 # AEGIS — BRIEFING PRE-PASS (supervisor structures the demand)
 # =========================================================
 #
+# Three layers (do not mix):
+#
+#   1. SCHEMA   JSON shape — field names, kinds, idents, path syntax.
+#               Owner: worked example + aegis_briefing_validate_json.
+#   2. RULES    Universal TS/runtime laws (any demand). NEVER BigInt-as-type,
+#               NEVER Math.min/max/floor on bigint, getters vs private fields.
+#               Owner: prompt Rules + validate + aegis_briefing_stable_constraints
+#               (always injected into ## Constraints, independent of the LLM).
+#   3. BRIEFING Demand-specific physics — mbps*8000, time delta, bitmask bits.
+#               Owner: supervisor expand → exports[].body / ctorBody only.
+#               Acceptance is DERIVED from exports names (never params/fields).
+#
 # A goal written as free prose makes the CLI derive Acceptance by grepping
 # identifiers out of it, which pulls constructor parameters and private
 # fields into the promotion contract. Issue #65 died that way: six acceptance
@@ -21,10 +33,10 @@
 #   - Acceptance is DERIVED from the exports list, so an acceptance token that
 #     the Briefing does not export is not a check, it is an impossibility
 #   - types are fields, so `BigInt` used as a type is mechanically rejectable
+#   - Math.min/max/floor on bigint bodies is mechanically rejectable
 #
-# What the schema still cannot catch is logic (a call with a missing
-# argument). That is what typescript.check and the inner fix loop are for —
-# and they now start from a well-formed briefing instead of invented syntax.
+# What the schema still cannot catch is full demand logic (wrong formula).
+# That is the Briefing layer + typescript.check / fix loop.
 #
 # Advisory: any failure falls back to the mechanical render_body and the run
 # behaves exactly as it does today.
@@ -40,8 +52,9 @@
 #   OPENAI_API_BASE / OPENAI_API_KEY
 #
 # Also: aegis_supervisor_split_* — when fit blocks a monster demand, the same
-# 8B model may partition it into micro units (intent + export load), each with
-# its own Acceptance/Briefing. Mechanical path-split remains the fallback.
+# supervisor model may partition it into micro units (intent + export load),
+# each with its own Acceptance/Briefing. Mechanical path-split remains the
+# fallback; multi-export Briefing prefers offline export_slice.
 #
 # =========================================================
 
@@ -68,6 +81,56 @@ aegis_briefing_max_exports() {
   local n="${AEGIS_BRIEFING_MAX_EXPORTS:-2}"
   [[ "${n}" =~ ^[0-9]+$ ]] && [[ "${n}" -gt 0 ]] || n=2
   printf '%s' "${n}"
+}
+
+# Layer-2 RULES as markdown bullets for ## Constraints.
+# Always injected by render/unit builders — never depends on the LLM remembering them.
+aegis_briefing_stable_constraints() {
+  cat <<'EOF'
+- no any / as any / @ts-ignore
+- NodeNext: .js extension in relative imports
+- only packages in package.json; builtins are global
+- TypeScript types are lowercase (bigint, number, string, boolean) — never BigInt/Number/String/Boolean as types; BigInt(x) as a call is OK
+- NEVER Math.min/Math.max/Math.floor/Math.ceil on bigint values — clamp with if (x > max) { x = max }; use BigInt(Date.now()) for time
+- Outside a class, never read private fields (_name) — expose getters and use those in helpers
+- Private fields start with underscore and are not Acceptance exports
+- BigInt is global when high-precision time is required
+- Prefer one top-level export per micro unit; methods on a class are fine
+EOF
+}
+
+# Soft rewrite of common bigint Math antipatterns in body lines (layer-2).
+# Returns rewritten JSON on stdout. Idempotent; leaves non-matching lines alone.
+aegis_briefing_sanitize_json() {
+  local json="${1-}"
+  printf '%s' "${json}" | jq -c '
+    def rewrite_line:
+      . as $s
+      | if ($s | type) != "string" then $s
+        elif ($s | test("Math\\.(min|max)\\([^)]*\\)"))
+             and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b|_tokens|_max|maxTokens")) then
+          # Prefer explicit clamp; drop Math.min/max call shapes the 8B copies badly.
+          ($s
+            | gsub("Math\\.min\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
+                   "(((\(.a)) < (\(.b))) ? (\(.a)) : (\(.b)))")
+            | gsub("Math\\.max\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
+                   "(((\(.a)) > (\(.b))) ? (\(.a)) : (\(.b)))")
+          )
+        else $s end;
+    def map_bodies:
+      if type != "object" then .
+      else
+        .ctorBody = ((.ctorBody // []) | map(rewrite_line))
+        | .body = ((.body // []) | map(rewrite_line))
+        | .methods = ((.methods // []) | map(
+            .body = ((.body // []) | map(rewrite_line))
+          ))
+        | .getters = ((.getters // []) | map(
+            if (.body | type) == "string" then .body = (.body | rewrite_line) else . end
+          ))
+      end;
+    .exports = ((.exports // []) | map(map_bodies))
+  ' 2>/dev/null || printf '%s' "${json}"
 }
 
 # The schema doubles as the instruction: a worked example constrains a weak
@@ -133,6 +196,33 @@ aegis_briefing_validate_json() {
         | index($t);
       def ident: test("^[A-Za-z_][A-Za-z0-9_]*$");
       def rel_path: (startswith("/") | not) and (contains("..") | not) and (contains(" ") | not);
+      # Math.min/max on bigint is the monstro that broke tsc; Math.floor(number)
+      # then BigInt(...) is legitimate — do not reject floor/ceil wholesale.
+      def has_math_minmax: test("Math\\.(min|max)\\(");
+      def has_bigint_signal: test("bigint|BigInt|[0-9]+n|0n|1n|_tokens|_maxTokens|maxTokens");
+      def body_lines:
+        [
+          (.ctorBody // [])[],
+          ((.methods // [])[]? | (.body // [])[]),
+          ((.getters // [])[]? | select((.body | type) == "string") | .body),
+          ((.body // [])[])
+        ];
+      def export_types:
+        [
+          (.privateFields // [])[]?.type,
+          (.ctorParams // [])[]?.type,
+          (.params // [])[]?.type,
+          ((.methods // [])[]? | (.params // [])[]?.type),
+          ((.methods // [])[]? | .returns),
+          ((.getters // [])[]? | .returns),
+          .returns
+        ];
+      def export_uses_bigint:
+        ((export_types | map(select(. != null and (. == "bigint" or . == "BigInt"))) | length) > 0)
+        or ((body_lines | map(select(type == "string" and has_bigint_signal)) | length) > 0);
+      def export_math_on_bigint:
+        export_uses_bigint
+        and ((body_lines | map(select(type == "string" and has_math_minmax)) | length) > 0);
       [
         (if ((.goal // "") | length) == 0 then "empty_goal" else empty end),
         (if ((.targets // []) | length) == 0 then "empty_targets" else empty end),
@@ -147,6 +237,7 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.methods // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.methods // [])[]? | select(((.name // "") | ident) | not) | "method_not_identifier:\(.name)"),
+        ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
            then "barrel_not_nodenext:\(.barrelFrom)" else empty end)
       ] | first // ""
@@ -161,10 +252,12 @@ aegis_briefing_validate_json() {
 }
 
 # Deterministic markdown. Acceptance is the export list, so it cannot name
-# something the Briefing does not export.
+# something the Briefing does not export. Constraints always include layer-2 RULES.
 aegis_briefing_render() {
   local json="${1-}"
-  printf '%s' "${json}" | jq -r '
+  local stable_c
+  stable_c="$(aegis_briefing_stable_constraints)"
+  printf '%s' "${json}" | jq -r --arg constraints "${stable_c}" '
     def params($p): (($p // []) | map(.name + ": " + .type) | join(", "));
     def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
 
@@ -214,9 +307,7 @@ aegis_briefing_render() {
     "- drive-by refactors",
     "",
     "## Constraints",
-    "- no any / as any / @ts-ignore",
-    "- NodeNext: .js extension in relative imports",
-    "- only packages in package.json; builtins are global"
+    $constraints
   '
 }
 
@@ -287,6 +378,8 @@ aegis_briefing_generate() {
       | sed -E 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*//; s/```[[:space:]]*$//'
   )"
 
+  # Layer-2 soft rewrite then hard validate (Math.min+bigint, BigInt-as-type, …).
+  content="$(aegis_briefing_sanitize_json "${content}")"
   aegis_briefing_validate_json "${content}" || return 1
 
   local body
@@ -626,12 +719,11 @@ ${acc_block}
 ${oos}
 
 ## Constraints
-- no any
 - KISS
 - single target micro unit only
 - reexport only
 - do not delete pre-existing barrel exports unrelated to this demand
-- NodeNext .js imports if this file imports siblings
+$(aegis_briefing_stable_constraints)
 EOF
     return 0
   fi
@@ -701,13 +793,11 @@ ${acc_block}
 ${oos}
 
 ## Constraints
-- no any
 - KISS
 - single target micro unit only
 - prefer focused public surface (class methods need not be top-level exports)
 - do not delete pre-existing barrel exports unrelated to this demand
-- NodeNext .js imports if this file imports siblings
-- BigInt is global when high-precision time is required
+$(aegis_briefing_stable_constraints)
 EOF
 }
 

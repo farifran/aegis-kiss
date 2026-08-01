@@ -101,6 +101,29 @@ assert_rejected \
   "$(mutate '.exports[1].params[0].type = "String"')" \
   "constructor_used_as_type:String"
 
+# --- layer-2: Math.min/max on bigint bodies is rejectable (monstro #92) ---
+assert_rejected \
+  "$(mutate '.exports[0].methods[0].body = ["this._tokens = Math.min(this._tokens + 1n, 10n)"]')" \
+  "math_on_bigint"
+# Math.floor on numbers then BigInt() must still be allowed
+aegis_briefing_validate_json "$(mutate '.exports[0].methods[0].body = ["this._tokens += BigInt(Math.floor(3 * 8000))"]')" 2>/dev/null \
+  || fail "math_floor_on_number_should_be_accepted"
+
+# --- layer-2 stable constraints always land in rendered Constraints ---
+printf '%s' "${rendered}" | grep -q 'NEVER Math.min' \
+  || fail "render_missing_stable_math_rule"
+printf '%s' "${rendered}" | grep -q 'never BigInt/Number' \
+  || fail "render_missing_stable_type_rule"
+
+# --- sanitize rewrites Math.min to a clamp ternary before validate ---
+sanitized="$(aegis_briefing_sanitize_json "$(mutate '.exports[0].methods[0].body = ["this._tokens = Math.min(this._tokens + 1n, this._max)"]')")"
+printf '%s' "${sanitized}" | jq -e '
+  .exports[0].methods[0].body[0] | test("Math\\.min") | not
+' >/dev/null \
+  || fail "sanitize_should_rewrite_math_min: ${sanitized}"
+aegis_briefing_validate_json "${sanitized}" 2>/dev/null \
+  || fail "sanitized_math_min_should_validate"
+
 # --- identifiers. The 8B emitted `TokenBucketState.Bitmask` as an export. ---
 assert_rejected \
   "$(mutate '.exports[1].name = "TokenBucketState.Bitmask"')" \
