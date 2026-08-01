@@ -18,6 +18,19 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT}"
 
+# Local secrets/models (gitignored). Load before briefing/intake so supervisor
+# expand sees OPENAI_API_KEY and AEGIS_SUPERVISOR_MODEL without requiring a
+# manual `export` in the operator shell. Skip under test-key sentinels.
+if [[ "${AEGIS_SKIP_LOCAL_ENV:-0}" != "1" ]] \
+  && [[ -f "${ROOT}/.harness/local.env" ]] \
+  && [[ "${OPENAI_API_KEY:-}" != *test-key* ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT}/.harness/local.env"
+  set +a
+fi
+
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/common.sh"
 # shellcheck disable=SC1091
@@ -1063,7 +1076,7 @@ cmd_go() {
         # Quality default: operator --accept builds a micro demand; free prose
         # without expand and without --accept is a hard fail (no Goal grepping).
         if [[ "${#accepts[@]}" -eq 0 ]]; then
-          aegis_fatal "intake_failed — expand 8B indisponível/recusado e sem --accept. Opções: configurar API key, passar --accept NomeExportado, ou --relaxed (não recomendado)"
+          aegis_fatal "intake_failed — expand supervisor (${AEGIS_SUPERVISOR_MODEL:-$(aegis_briefing_model 2>/dev/null || echo '?')}) indisponível/recusado e sem --accept. Defina OPENAI_API_KEY em .harness/local.env (ou export no shell), ou passe --accept NomeExportado, ou --relaxed (não recomendado)"
         fi
         body="$(render_body "${goal}" "${target}")"
         body="$(aegis_intake_ensure_briefing "${body}")"
