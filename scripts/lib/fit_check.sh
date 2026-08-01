@@ -826,22 +826,27 @@ aegis_fit_propose_units_json() {
   done <<< "${paths}"
 
   local units='[]'
-  local blob change_l goal_l
+  local blob change_l goal_l brief_l
   change_l="$(aegis_fit_md_section "Change" "${text}" | tr '[:upper:]' '[:lower:]')"
   goal_l="$(aegis_fit_md_section "Goal" "${text}" | tr '[:upper:]' '[:lower:]')"
-  blob="$(printf '%s\n' "${change_l}${goal_l}")"
-  # Positive reexport ask (Change/Goal). Negations in Change force off for single-file micros.
+  brief_l="$(aegis_fit_md_section "Briefing" "${text}" | tr '[:upper:]' '[:lower:]')"
+  blob="$(printf '%s\n' "${change_l}${goal_l}${brief_l}")"
+  # Positive reexport ask (Change/Goal/Briefing). Negations in Change force off
+  # for single-file micros. Briefing "Em src/index.ts: import… export…" counts.
   local wants_reexport=0
   if printf '%s' "${blob}" | grep -qE 'reexport from|re-export from|reexport public|and reexport|and re-export|,\s*reexport|reexport public api'; then
     wants_reexport=1
   elif printf '%s' "${blob}" | grep -qE '(^|[^a-z-])(reexport|re-export)([^a-z]|$)' \
     && ! printf '%s' "${blob}" | grep -qE 'do not re-?export|omit reexport|without reexport|no reexport'; then
     wants_reexport=1
+  elif printf '%s' "${brief_l}" | grep -qE 'em src/index\.ts|from ['\''"]\./[^'\''"]+\.js['\''"]'; then
+    # Supervisor Briefing barrel block without the word "reexport".
+    wants_reexport=1
   fi
   # Multi-target with index present still treats barrel as reexport stage when word appears.
   if [[ "${#arr[@]}" -gt 1 ]] \
     && printf '%s\n' "${arr[@]}" | grep -qx 'src/index.ts' \
-    && printf '%s' "${blob}" | grep -qE 'reexport|re-export'; then
+    && printf '%s' "${blob}" | grep -qE 'reexport|re-export|em src/index|from ['\''"]\./'; then
     wants_reexport=1
   fi
 

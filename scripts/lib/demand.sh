@@ -1528,17 +1528,23 @@ aegis_diff_removed_export_names() {
 aegis_demand_is_reexport_preserve() {
   local text="${1-}"
   [[ -n "${text}" ]] || return 1
-  # Positive reexport intent (title/goal/change), not a shared constraint line.
-  printf '%s' "${text}" | grep -Eiq \
-    'reexport only|re-export only|barrel reexport|Import and re-export|import and re-export' \
-    || return 1
-  # Explicit create/export_slice micros are never barrel-only.
+  # Positive reexport intent (title/goal/change/briefing barrel block).
+  if ! printf '%s' "${text}" | grep -Eiq \
+    'reexport only|re-export only|barrel reexport|Import and re-export|import and re-export|Do not re-implement the algorithm|do not re-implement the algorithm|Em src/index\.ts|from ['\''"]\./[^'\''"]+\.js['\''"]'; then
+    return 1
+  fi
+  # Explicit create/export_slice micros on a non-index module are never barrel-only.
   if printf '%s' "${text}" | grep -Eiq \
-    'export_slice:|Create or update ONLY|export class |export function |omit reexport|Do not re-export from index'; then
-    # Still allow pure reexport units that mention "do not re-implement".
+    'export_slice:|export class |export function '; then
+    # Pure reexport units may still show Briefing Em index block only.
     printf '%s' "${text}" | grep -Eiq \
-      'reexport only|re-export only|Do not re-implement the algorithm|do not re-implement the algorithm' \
+      'reexport only|re-export only|Do not re-implement the algorithm|do not re-implement the algorithm|Em src/index\.ts' \
       || return 1
+  fi
+  # Create-module wording without reexport title → not barrel.
+  if printf '%s' "${text}" | grep -Eiq 'Create or update ONLY|omit reexport|Do not re-export from index' \
+    && ! printf '%s' "${text}" | grep -Eiq 'reexport only|re-export only|Em src/index\.ts|Import and re-export'; then
+    return 1
   fi
   return 0
 }
