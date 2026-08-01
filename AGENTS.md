@@ -11,3 +11,14 @@ Prefer explicit, local, deterministic implementations. Avoid speculative abstrac
 
 4. EPHEMERAL COGNITION
 You do not own orchestration, memory, or persistence. Perform only the cognition requested by the current mode and produce only the required artifact.
+
+5. DEMAND LAYERS (issue intake)
+Do not mix these layers when expanding or implementing a demand:
+
+| Layer | Holds | Does not hold |
+|-------|--------|----------------|
+| Schema | JSON shape, field names, kinds, idents, path syntax | Business formulas |
+| Rules | Universal TS laws (no BigInt-as-type, no Math.min on bigint, getters vs `_private`) | Feature-specific constants |
+| Briefing | This demand's physics (mbps*8000, time delta, bitmask bits) | Global style rules |
+
+Acceptance is always derived from exported names — never constructor params or private fields.
