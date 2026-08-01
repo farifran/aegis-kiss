@@ -336,7 +336,7 @@ aegis_fit_unit_demand_md() {
   local note="${3-}"
   local targets_json="${4:-[]}"
   local parent_goal
-  local targets_block acc_block change_block primary primary_base primary_pascal
+  local targets_block acc_block="" change_block primary primary_base primary_pascal
   local is_reexport=0
 
   targets_block="$(
@@ -462,6 +462,8 @@ EOC
     # Acceptance: module tokens + parent Acceptance / briefing exports only.
     # Never promote constructor params or private field names (maxBytes, mbps,
     # rateBitsPerMs, …) — they poison the tribunal into unsatisfiable contracts.
+    # When note is export_slice:Name, Acceptance is set later to that name only.
+    if [[ -z "${slice_name:-}" ]] && ! printf '%s' "${note}" | grep -qE '^export_slice:'; then
     acc_block="$(
       {
         printf '%s\n' "${primary_pascal}"
@@ -490,6 +492,7 @@ EOC
           print "- " $0
         }' | head -n 6
     )"
+    fi
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
@@ -515,7 +518,6 @@ EOC
     && [[ "${is_reexport}" -eq 0 ]]; then
     acc_block="$(
       {
-        printf '%s\n' "${primary_base}"
         printf '%s\n' "${primary_pascal}"
         printf '%s\n' "${unit_briefing}" \
           | command grep -oE 'export (class|function|const|let|var) [A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
@@ -528,7 +530,8 @@ EOC
           NF && !seen[$0]++ {
             low=tolower($0)
             if (low=="export"||low=="import"||low=="class"||low=="function"||low=="index"||low=="bigint"||low=="number"||low=="string"||low=="boolean") next
-            if ($0==base || $0==pascal || index(brief,$0)>0) print "- " $0
+            if (base != "" && pascal != "" && $0 == base && base != pascal) next
+            if ($0==pascal || index(brief,$0)>0) print "- " $0
           }' | head -n 6
     )"
     [[ -n "$(printf '%s' "${acc_block}" | tr -d '[:space:]')" ]] \
@@ -872,30 +875,64 @@ aegis_fit_propose_units_json() {
       return 0
     fi
   else
-    # One unit per target path. Order: create modules first, barrel reexport last.
-    # Alphabetical path extract often yields src/index.ts before modules — wrong for RUN order.
-    units="$(
-      jq -cn \
-        --arg paths "$(printf '%s\n' "${arr[@]}")" \
-        --argjson rx "${wants_reexport}" \
-        '
-        ($paths | split("\n") | map(select(length>0))) as $raw
-        | ($raw | map(select(. != "src/index.ts"))) as $mods
-        | ($raw | map(select(. == "src/index.ts"))) as $idx
-        | ($mods + $idx) as $p
-        | [
-            $p[]
-            | . as $t
-            | if ($t == "src/index.ts" and $rx == 1) then
-                {title: "reexport only", targets: [$t], note: "after create succeeds"}
-              elif ($t == "src/index.ts") then
-                {title: ("mutate " + $t), targets: [$t], note: "single-target micro unit"}
-              else
-                {title: ("create " + $t), targets: [$t], note: "create module only; omit reexport"}
-              end
-          ]
-        '
-    )"
+    # Modules first, barrel last. If Briefing names 2+ top-level exports for a
+    # module path, expand into export_slice units (class then helper) so the 8B
+    # does not merge obterEstadoBitmask into a method on the class.
+    local export_names export_n mod_path units_acc='[]' rx_json
+    export_names="$(aegis_fit_briefing_export_names "${text}")"
+    export_n="$(printf '%s\n' "${export_names}" | grep -c . || true)"
+    export_n="${export_n//[^0-9]/}"
+    export_n="${export_n:-0}"
+    rx_json=0
+    [[ "${wants_reexport}" -eq 1 ]] && rx_json=1
+
+    # Module paths (non-index), then index.
+    local -a mods=()
+    local has_index=0
+    for mod_path in "${arr[@]}"; do
+      if [[ "${mod_path}" == "src/index.ts" ]]; then
+        has_index=1
+      else
+        mods+=("${mod_path}")
+      fi
+    done
+
+    for mod_path in "${mods[@]+"${mods[@]}"}"; do
+      if [[ "${export_n}" -ge 2 ]]; then
+        units_acc="$(
+          printf '%s\n' "${export_names}" | jq -R -s -c --arg t "${mod_path}" --argjson acc "${units_acc}" '
+            ($acc) + (
+              split("\n") | map(select(length>0))
+              | map({
+                  title: ("export " + . + " only"),
+                  targets: [$t],
+                  note: ("export_slice:" + .)
+                })
+            )
+          '
+        )"
+      else
+        units_acc="$(
+          jq -cn --argjson acc "${units_acc}" --arg t "${mod_path}" \
+            '$acc + [{title:("create "+$t), targets:[$t], note:"create module only; omit reexport"}]'
+        )"
+      fi
+    done
+
+    if [[ "${has_index}" -eq 1 ]]; then
+      if [[ "${rx_json}" -eq 1 ]]; then
+        units_acc="$(
+          jq -cn --argjson acc "${units_acc}" \
+            '$acc + [{title:"reexport only", targets:["src/index.ts"], note:"after create succeeds"}]'
+        )"
+      else
+        units_acc="$(
+          jq -cn --argjson acc "${units_acc}" \
+            '$acc + [{title:"mutate src/index.ts", targets:["src/index.ts"], note:"single-target micro unit"}]'
+        )"
+      fi
+    fi
+    units="${units_acc}"
   fi
 
   aegis_fit_enrich_units_with_demand "${text}" "${units}"

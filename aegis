@@ -52,8 +52,11 @@ context   Onde o alvo está: branch, worktree, e o que o registo de commits
 go        Abre a issue, corre o pipeline de mutation completo e pára no gate
           de commit, que é teu. Um target por go: dois ficheiros são dois go
           (ou um plano multi-unit com checkpoint por task).
+          Intake de qualidade é o DEFAULT: expand 8B + Briefing/Acceptance
+          limpos (sem params no Acceptance). Sem API key, usa --accept e/ou
+          body já estruturado. Escape: --relaxed ou AEGIS_INTAKE_RELAXED=1.
           --accept são tokens curtos que têm de aparecer no código, nunca
-          frases. São obrigatórios: são a semente do registo.
+          frases. São a semente do registo.
           --issue N volta a correr uma issue existente; se tiver ## Tasks
           com [ ], retoma na primeira aberta (keep-progress).
           --force-task K reabre a task K ([x]→[ ]) e re-corre a partir dela.
@@ -228,6 +231,159 @@ render_body() {
   printf -- '- no any / as any / @ts-ignore\n'
   printf -- '- NodeNext: .js extension in relative imports\n'
   printf -- '- only packages in package.json; builtins are global\n'
+}
+
+# ---------------------------------------------------------
+# Intake quality (DEFAULT). Escape: --relaxed / AEGIS_INTAKE_RELAXED=1
+# ---------------------------------------------------------
+
+aegis_intake_relaxed() {
+  case "${AEGIS_INTAKE_RELAXED:-0}" in
+    1|true|yes|on) return 0 ;;
+  esac
+  return 1
+}
+
+# Poison tokens that must never appear in ## Acceptance (constructor/state).
+aegis_intake_is_poison_accept_token() {
+  local tok="${1-}"
+  case "${tok}" in
+    maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens|_*) return 0 ;;
+  esac
+  [[ "${tok}" == *'*'* ]] && return 0
+  [[ "${tok}" =~ ^(max|min|rate|time|last)[A-Z] ]] && return 0
+  return 1
+}
+
+# Extract ## Section body (until next ##).
+aegis_intake_md_section() {
+  local name="${1-}"
+  local text="${2-}"
+  printf '%s\n' "${text}" | awk -v name="${name}" '
+    index($0, "## " name) == 1 { p = 1; next }
+    /^## / { if (p) exit }
+    p { print }
+  '
+}
+
+# If Briefing is empty, inject minimal export stubs from Acceptance tokens
+# (and optional --change lines already in Briefing via render_body).
+# Prints full demand markdown.
+aegis_intake_ensure_briefing() {
+  local text="${1-}"
+  local briefing acc_lines stubs="" tok stub_file out_file
+  briefing="$(aegis_intake_md_section "Briefing" "${text}")"
+  if [[ -n "$(printf '%s' "${briefing}" | tr -d '[:space:]')" ]]; then
+    printf '%s' "${text}"
+    return 0
+  fi
+  acc_lines="$(
+    aegis_intake_md_section "Acceptance" "${text}" \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | grep -v '^$' || true
+  )"
+  while IFS= read -r tok; do
+    [[ -n "${tok}" ]] || continue
+    aegis_intake_is_poison_accept_token "${tok}" && continue
+    # Non-identifier regression tokens (e.g. / 1000) skip stub lines.
+    [[ "${tok}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "${tok}" =~ ^[A-Z] ]]; then
+      stubs+="export class ${tok} { /* … */ }"$'\n'
+    else
+      stubs+="export function ${tok}(/* … */) { /* … */ }"$'\n'
+    fi
+  done <<< "${acc_lines}"
+  if [[ -z "$(printf '%s' "${stubs}" | tr -d '[:space:]')" ]]; then
+    printf '%s' "${text}"
+    return 0
+  fi
+  # File-based inject: awk -v cannot hold multi-line stubs portably.
+  stub_file="$(mktemp)"
+  out_file="$(mktemp)"
+  printf '%s' "${stubs}" > "${stub_file}"
+  printf '%s\n' "${text}" | awk -v stubf="${stub_file}" '
+    BEGIN {
+      in_b = 0
+      done = 0
+      while ((getline line < stubf) > 0) {
+        stubs = stubs line "\n"
+      }
+      close(stubf)
+    }
+    /^## Briefing[[:space:]]*$/ {
+      print
+      printf "%s", stubs
+      in_b = 1
+      done = 1
+      next
+    }
+    in_b && /^## / { in_b = 0 }
+    in_b { next }
+    { print }
+    END {
+      if (!done) {
+        print ""
+        print "## Briefing"
+        printf "%s", stubs
+      }
+    }
+  ' > "${out_file}"
+  cat "${out_file}"
+  rm -f "${stub_file}" "${out_file}"
+}
+
+# Validate demand for quality intake. Prints reason lines on stderr; return 1 if bad.
+aegis_intake_quality_check() {
+  local text="${1-}"
+  local acc briefing tok reasons="" export_hit
+
+  [[ -n "$(printf '%s' "${text}" | tr -d '[:space:]')" ]] || {
+    printf 'empty_demand\n' >&2
+    return 1
+  }
+  printf '%s\n' "${text}" | grep -qE '^## Goal[[:space:]]*$' || reasons+=$'missing_section:Goal\n'
+  printf '%s\n' "${text}" | grep -qE '^## Targets[[:space:]]*$' || reasons+=$'missing_section:Targets\n'
+  printf '%s\n' "${text}" | grep -qE '^## Acceptance[[:space:]]*$' || reasons+=$'missing_section:Acceptance\n'
+  printf '%s\n' "${text}" | grep -qE '^## Briefing[[:space:]]*$' || reasons+=$'missing_section:Briefing\n'
+
+  acc="$(aegis_intake_md_section "Acceptance" "${text}")"
+  briefing="$(aegis_intake_md_section "Briefing" "${text}")"
+
+  if [[ -z "$(printf '%s' "${briefing}" | tr -d '[:space:]')" ]]; then
+    reasons+=$'empty_briefing\n'
+  fi
+  if [[ -z "$(printf '%s' "${acc}" | tr -d '[:space:]')" ]]; then
+    reasons+=$'empty_acceptance\n'
+  fi
+
+  while IFS= read -r tok; do
+    [[ -n "${tok}" ]] || continue
+    tok="$(printf '%s' "${tok}" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]+$//')"
+    [[ -n "${tok}" ]] || continue
+    if aegis_intake_is_poison_accept_token "${tok}"; then
+      reasons+="poison_acceptance:${tok}"$'\n'
+      continue
+    fi
+    # Identifier exports must appear as top-level export in Briefing.
+    if [[ "${tok}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      export_hit=0
+      if printf '%s\n' "${briefing}" | grep -Eq \
+        "export[[:space:]]+(async[[:space:]]+)?(function|class|const|let|var)[[:space:]]+${tok}([^A-Za-z0-9_]|$)"; then
+        export_hit=1
+      elif printf '%s\n' "${briefing}" | grep -Eq "export[[:space:]]*\{[^}]*\b${tok}\b"; then
+        export_hit=1
+      fi
+      if [[ "${export_hit}" -eq 0 ]]; then
+        reasons+="acceptance_not_in_briefing_export:${tok}"$'\n'
+      fi
+    fi
+  done < <(printf '%s\n' "${acc}")
+
+  if [[ -n "${reasons}" ]]; then
+    printf '%s' "${reasons}" >&2
+    return 1
+  fi
+  return 0
 }
 
 # Byte-identical to aegis_fetch_issue_demand's cache format, so the whole
@@ -687,7 +843,7 @@ emit_result_json() {
 }
 
 cmd_go() {
-  local goal="" target="" issue="" assume_yes=0 force_task=""
+  local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
   local -a accepts=() changes=()
 
   while [[ $# -gt 0 ]]; do
@@ -705,6 +861,10 @@ cmd_go() {
         [[ "${force_task}" =~ ^[1-9][0-9]*$ ]] \
           || aegis_fatal "invalid_force_task:${force_task:-empty} — use --force-task N (1-based)"
         shift 2 ;;
+      --relaxed)
+        intake_relaxed=1
+        export AEGIS_INTAKE_RELAXED=1
+        shift ;;
       --yes|-y) assume_yes=1; shift ;;
       -h|--help) usage; return 0 ;;
       -*) aegis_fatal "unknown_flag:$1" ;;
@@ -719,6 +879,10 @@ cmd_go() {
 
   if [[ -n "${force_task}" && -z "${issue}" ]]; then
     aegis_fatal "force_task_requires_issue — usa ./aegis go --issue N --force-task K"
+  fi
+  # --relaxed flag or env; local also tracks for logging.
+  if aegis_intake_relaxed; then
+    intake_relaxed=1
   fi
 
   local body="" title=""
@@ -846,14 +1010,9 @@ cmd_go() {
       fi
     fi
 
-    # Supervisor pre-pass, before Acceptance is derived. A prose goal makes
-    # derive_accept_tokens harvest constructor parameters and private fields
-    # into Acceptance, which the tribunal then enforces as a promotion
-    # contract — issue #65 died with four internal names in it. When the
-    # supervisor answers, it writes Acceptance itself (public exports only)
-    # and puts the mechanics in a Briefing section, which the tokenizer never
-    # reads and fit_check already propagates into micro-units.
-    # Advisory only: a single failed check falls back to the mechanical path.
+    # Intake (DEFAULT = quality). Expand 8B fills Goal/Acceptance/Briefing.
+    # Mechanical fallback that greps constructor params into Acceptance is
+    # only allowed with --relaxed / AEGIS_INTAKE_RELAXED=1.
     body=""
     if aegis_briefing_enabled; then
       local brief_err
@@ -863,39 +1022,66 @@ cmd_go() {
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"
       else
-        aegis_warn "briefing: recusado ($(tail -n 1 "${brief_err}" 2>/dev/null || true)) — a usar o corpo mecânico"
+        local brief_why
+        brief_why="$(tail -n 1 "${brief_err}" 2>/dev/null || true)"
+        if [[ "${intake_relaxed}" -eq 1 ]]; then
+          aegis_warn "briefing: recusado (${brief_why:-?}) — relaxed: corpo mecânico"
+        else
+          aegis_warn "briefing: recusado (${brief_why:-?})"
+        fi
       fi
       rm -f "${brief_err}"
     fi
 
-    # Acceptance seeds the prompt, the commit record and the regression
-    # rail. It can be extracted from the goal when the goal already names
-    # code, but never invented: the token becomes permanent. A supervisor
-    # body already carries its own Acceptance, so this only runs as fallback.
-    if [[ -z "${body}" ]] && [[ "${#accepts[@]}" -eq 0 ]]; then
-      local derived
-      derived="$(derive_accept_tokens "${goal}")"
-      if [[ -z "${derived}" ]]; then
-        local p path_base
-        for p in ${target}; do
-          path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
-          if [[ "${path_base}" != "index" ]]; then
-            derived="${path_base}"
-            break
+    if [[ -z "${body}" ]]; then
+      if [[ "${intake_relaxed}" -eq 1 ]]; then
+        # Legacy path: derive accept from goal camelCase (can poison — opt-out only).
+        if [[ "${#accepts[@]}" -eq 0 ]]; then
+          local derived
+          derived="$(derive_accept_tokens "${goal}")"
+          if [[ -z "${derived}" ]]; then
+            local p path_base
+            for p in ${target}; do
+              path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
+              if [[ "${path_base}" != "index" ]]; then
+                derived="${path_base}"
+                break
+              fi
+            done
           fi
-        done
-      fi
-      if [[ -n "${derived}" ]]; then
-        while IFS= read -r t; do
-          [[ -n "${t}" ]] && accepts+=("${t}")
-        done <<< "${derived}"
-        aegis_log "acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
+          if [[ -n "${derived}" ]]; then
+            while IFS= read -r t; do
+              [[ -n "${t}" ]] && accepts+=("${t}")
+            done <<< "${derived}"
+            aegis_log "relaxed: acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
+          else
+            aegis_fatal "missing_accept — o goal não nomeia código; dá --accept com o nome exacto (ex: --accept converterXEmY)"
+          fi
+        fi
+        body="$(render_body "${goal}" "${target}")"
       else
-        aegis_fatal "missing_accept — o goal não nomeia código; dá --accept com o nome exacto (ex: --accept converterXEmY)"
+        # Quality default: operator --accept builds a micro demand; free prose
+        # without expand and without --accept is a hard fail (no Goal grepping).
+        if [[ "${#accepts[@]}" -eq 0 ]]; then
+          aegis_fatal "intake_failed — expand 8B indisponível/recusado e sem --accept. Opções: configurar API key, passar --accept NomeExportado, ou --relaxed (não recomendado)"
+        fi
+        body="$(render_body "${goal}" "${target}")"
+        body="$(aegis_intake_ensure_briefing "${body}")"
+        aegis_log "intake: corpo a partir de --accept (sem expand)"
       fi
     fi
 
-    [[ -n "${body}" ]] || body="$(render_body "${goal}" "${target}")"
+    # Quality gates (default): Briefing + Acceptance clean before fit/split/run.
+    if [[ "${intake_relaxed}" -ne 1 ]]; then
+      body="$(aegis_intake_ensure_briefing "${body}")"
+      local q_err
+      q_err="$(mktemp)"
+      if ! aegis_intake_quality_check "${body}" 2>"${q_err}"; then
+        aegis_fatal "intake_quality_failed — $(tr '\n' ' ' < "${q_err}" | sed 's/[[:space:]]*$//') (corrige demanda ou --relaxed)"
+      fi
+      rm -f "${q_err}"
+      aegis_log "intake: quality check ok"
+    fi
 
     # Show → ask → maybe edit → re-check. fit_check owns the verdict and
     # the auto-fixes; go only reads them. The editor is the friendly
@@ -906,6 +1092,39 @@ cmd_go() {
       aegis_fatal "fit_check_failed"
     fi
     body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand')"
+
+    # fit_check may rewrite Acceptance via goal grepping — re-assert quality.
+    if [[ "${intake_relaxed}" -ne 1 ]]; then
+      body="$(aegis_intake_ensure_briefing "${body}")"
+      # Strip poison tokens fit may have re-injected into Acceptance.
+      body="$(
+        printf '%s\n' "${body}" | awk '
+          BEGIN { in_acc = 0 }
+          /^## Acceptance[[:space:]]*$/ { print; in_acc = 1; next }
+          /^## / { in_acc = 0 }
+          in_acc {
+            line = $0
+            sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+            if (line ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
+            if (line ~ /\*/) next
+            if (line ~ /^(max|min|rate|time|last)[A-Z]/) next
+            print
+            next
+          }
+          { print }
+        '
+      )"
+      local q_err2
+      q_err2="$(mktemp)"
+      if ! aegis_intake_quality_check "${body}" 2>"${q_err2}"; then
+        # Re-inject briefing stubs if fit emptied Briefing, then recheck once.
+        body="$(aegis_intake_ensure_briefing "${body}")"
+        if ! aegis_intake_quality_check "${body}" 2>"${q_err2}"; then
+          aegis_fatal "intake_quality_failed_after_fit — $(tr '\n' ' ' < "${q_err2}" | sed 's/[[:space:]]*$//')"
+        fi
+      fi
+      rm -f "${q_err2}"
+    fi
 
     printf '%s\n\n' "${body}"
     printf 'fit: run_allowed=%s model_fit=%s score=%s\n' \
@@ -985,9 +1204,43 @@ cmd_go() {
               printf '%s\n\n' "${body}"
               print_micro_plan "${micros_dir}"
             else
+              if [[ "${intake_relaxed}" -ne 1 ]]; then
+                body="$(aegis_intake_ensure_briefing "${body}")"
+                local qe
+                qe="$(mktemp)"
+                if ! aegis_intake_quality_check "${body}" 2>"${qe}"; then
+                  aegis_fatal "intake_quality_failed_after_edit — $(tr '\n' ' ' < "${qe}" | sed 's/[[:space:]]*$//')"
+                fi
+                rm -f "${qe}"
+              fi
               fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
               body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
               [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
+              if [[ "${intake_relaxed}" -ne 1 ]]; then
+                body="$(aegis_intake_ensure_briefing "${body}")"
+                body="$(
+                  printf '%s\n' "${body}" | awk '
+                    BEGIN { in_acc = 0 }
+                    /^## Acceptance[[:space:]]*$/ { print; in_acc = 1; next }
+                    /^## / { in_acc = 0 }
+                    in_acc {
+                      line = $0
+                      sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+                      if (line ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
+                      if (line ~ /\*/) next
+                      if (line ~ /^(max|min|rate|time|last)[A-Z]/) next
+                      print
+                      next
+                    }
+                    { print }
+                  '
+                )"
+                qe="$(mktemp)"
+                if ! aegis_intake_quality_check "${body}" 2>"${qe}"; then
+                  aegis_fatal "intake_quality_failed_after_edit_fit — $(tr '\n' ' ' < "${qe}" | sed 's/[[:space:]]*$//')"
+                fi
+                rm -f "${qe}"
+              fi
               printf '%s\n\n' "${body}"
               printf 'fit: run_allowed=%s\n' \
                 "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"

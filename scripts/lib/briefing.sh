@@ -431,9 +431,20 @@ aegis_supervisor_split_validate_json() {
       return 1
     }
 
-    if [[ "$(printf '%s' "${json}" | jq --argjson i "${i}" '.units[$i].targets | length')" -ne 1 ]]; then
+    # Coerce multi-target units to the first allowed path (8B often lists
+    # module+index on one unit). Quality intake still keeps reexport separate.
+    local n_targets
+    n_targets="$(printf '%s' "${json}" | jq --argjson i "${i}" '(.units[$i].targets // []) | length')"
+    if [[ "${n_targets}" -lt 1 ]]; then
       printf 'targets_not_one:%s\n' "${i}" >&2
       return 1
+    fi
+    if [[ "${n_targets}" -gt 1 ]]; then
+      json="$(
+        printf '%s' "${json}" | jq -c --argjson i "${i}" '
+          .units[$i].targets = [(.units[$i].targets // [])[0]]
+        '
+      )"
     fi
     target="$(printf '%s' "${json}" | jq -r --argjson i "${i}" '.units[$i].targets[0] // empty')"
     path_allowed "${target}" || {
