@@ -1924,6 +1924,13 @@ aegis_briefing_class_to_ts() {
         print "  }"
         in_ctor = 0
         in_method = 0
+        need_blank = 1
+      }
+    }
+    function maybe_blank() {
+      if (need_blank) {
+        print ""
+        need_blank = 0
       }
     }
     BEGIN {
@@ -1931,6 +1938,8 @@ aegis_briefing_class_to_ts() {
       opened = 1
       in_ctor = 0
       in_method = 0
+      need_blank = 0
+      saw_fields = 0
     }
     /^[0-9]+\)/ { next }
     {
@@ -1944,26 +1953,29 @@ aegis_briefing_class_to_ts() {
           f = trim(parts[i])
           if (f == "") continue
           print "  private " f ";"
+          saw_fields = 1
         }
+        if (saw_fields) need_blank = 1
         next
       }
       # Getter already fully braced on one line
       if (line ~ /^[[:space:]]*get[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)/) {
         emit_close()
+        maybe_blank()
         sub(/^[[:space:]]+/, "", line)
-        # ensure ends with }
         if (line ~ /\{/ && line ~ /\}/) {
           print "  " line
         } else {
-          # get tokens(): bigint { return this._tokens }
           sub(/:[[:space:]]*$/, "", line)
           print "  " line
         }
+        need_blank = 1
         next
       }
       # constructor(...)
       if (line ~ /^[[:space:]]*constructor[[:space:]]*\(/) {
         emit_close()
+        maybe_blank()
         sub(/^[[:space:]]+/, "", line)
         sub(/:[[:space:]]*$/, "", line)
         print "  " line " {"
@@ -1974,8 +1986,8 @@ aegis_briefing_class_to_ts() {
       # method(...): ret:   or method(): void:
       if (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)[[:space:]]*:/) {
         emit_close()
+        maybe_blank()
         sub(/^[[:space:]]+/, "", line)
-        # strip trailing colon after return type
         sub(/:[[:space:]]*$/, "", line)
         print "  " line " {"
         in_method = 1
@@ -2043,30 +2055,34 @@ aegis_mechanical_export_class_create() {
   return 0
 }
 
-# Fix common Briefing→TS bigint/number mix-ups that fail tsc (monstro GLM):
-#   BigInt(timeDiff * this._rateBitsPerMs) when rate is number / timeDiff bigint
-#   timeDiff * numberField without BigInt()
+# Minimal type-safe rewrites only. Quality rule: do NOT invent Number(timeDiff)
+# when the body still uses `> 0n` / bigint products — that broke good Briefings
+# (sensor: product code quality, not wall-clock).
+#
+# Real tsc failures to fix:
+#   BigInt(timeDiff * this._rateBitsPerMs)  // bigint * number inside BigInt()
+#   this._tokens += timeDiff * this._rateBitsPerMs  // bigint * number
+# Safe already (leave alone):
+#   timeDiff * BigInt(this._rateBitsPerMs)
+#   timeDiff * BigInt(Math.floor(this._rateBitsPerMs))
 aegis_mechanical_ts_fix_bigint_arith() {
   local ts="${1-}"
-  # BigInt(A * this._rate…) → A * BigInt(Math.floor(this._rate…)) when A is likely bigint
   ts="$(
     printf '%s\n' "${ts}" | sed -E \
-      -e 's/BigInt\(([^()]+) \* (this\._rateBitsPerMs)\)/(\1) * BigInt(Math.floor(\2))/g' \
-      -e 's/BigInt\(([^()]+) \* (this\._rate)\)/(\1) * BigInt(Math.floor(\2))/g' \
-      -e 's/BigInt\((this\._rateBitsPerMs) \* ([^()]+)\)/BigInt(Math.floor(\1)) * (\2)/g'
+      -e 's/BigInt\(([^()]+) \* (this\._[A-Za-z][A-Za-z0-9_]*)\)/(\1) * BigInt(Math.floor(\2))/g' \
+      -e 's/BigInt\((this\._[A-Za-z][A-Za-z0-9_]*) \* ([^()]+)\)/BigInt(Math.floor(\1)) * (\2)/g'
   )"
-  # If rate field is declared number and timeDiff stays bigint, prefer Number(delta).
-  if printf '%s' "${ts}" | grep -qE '_rateBitsPerMs: number'; then
+  # bigintVar * this._rateNumber (no BigInt on rate) when rate field is number
+  if printf '%s' "${ts}" | grep -qE '_rateBitsPerMs: number|_rate: number'; then
     ts="$(
       printf '%s\n' "${ts}" | sed -E \
-        -e 's/const timeDiff = now - this\._lastUpdate/const timeDiff = Number(now - this._lastUpdate)/g' \
-        -e 's/const timeDiff = this\._lastUpdate/const timeDiff = Number(this._lastUpdate)/g'
+        -e 's/(timeDiff|[[:alnum:]_]+) \* this\._rateBitsPerMs\b/\1 * BigInt(Math.floor(this._rateBitsPerMs))/g' \
+        -e 's/this\._rateBitsPerMs \* (timeDiff|[[:alnum:]_]+)/BigInt(Math.floor(this._rateBitsPerMs)) * \1/g'
     )"
-    # After Number(timeDiff), product with rate is number → BigInt(Math.floor(...))
+    # Avoid double-wrapping: BigInt(Math.floor(BigInt(Math.floor(...))))
     ts="$(
       printf '%s\n' "${ts}" | sed -E \
-        -e 's/this\._tokens \+ timeDiff \* BigInt\(Math\.floor\(this\._rateBitsPerMs\)\)/this._tokens + BigInt(Math.floor(timeDiff * this._rateBitsPerMs))/g' \
-        -e 's/\(timeDiff\) \* BigInt\(Math\.floor\(this\._rateBitsPerMs\)\)/BigInt(Math.floor(timeDiff * this._rateBitsPerMs))/g'
+        's/BigInt\(Math\.floor\(BigInt\(Math\.floor\(([^)]+)\)\)\)\)/BigInt(Math.floor(\1))/g'
     )"
   fi
   printf '%s\n' "${ts}"

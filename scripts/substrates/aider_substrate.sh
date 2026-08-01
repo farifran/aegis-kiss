@@ -253,9 +253,10 @@ main() {
         aegis_log "Aider mutation substrate completed (mechanical)"
         return 0
       fi
-      aegis_warn "mechanical_fast_path_preflight_failed — re-apply mechanical base then aider refine"
-      # Preflight may have rolled back the surface; re-materialize so aider
-      # refines Briefing-shaped code instead of an empty seed.
+      aegis_warn "mechanical_fast_path_preflight_failed — re-apply mechanical (prefer Briefing fidelity over 8B rewrite)"
+      # Preflight may have rolled back the surface. Re-materialize, then prefer
+      # isolated tsc on the target: 8B "fix" often degrades quality (e.g. flips
+      # rate number→bigint) while pure mechanical matches Briefing.
       for _mt in "${mutation_targets[@]:-}"; do
         [[ -n "${_mt}" ]] || continue
         if declare -f aegis_mechanical_export_class_create >/dev/null 2>&1; then
@@ -275,6 +276,33 @@ main() {
             ;;
         esac
       done
+      local _iso_ok=1
+      for _mt in "${mutation_targets[@]:-}"; do
+        [[ -n "${_mt}" && -f "${_surface_root}/${_mt}" ]] || continue
+        if ! npx --yes tsc --noEmit --strict --target ES2022 \
+          --module NodeNext --moduleResolution NodeNext \
+          "${_surface_root}/${_mt}" >/dev/null 2>&1; then
+          _iso_ok=0
+          break
+        fi
+      done
+      if [[ "${_iso_ok}" -eq 1 ]]; then
+        for _mt in "${mutation_targets[@]:-}"; do
+          [[ -n "${_mt}" && -f "${_surface_root}/${_mt}" ]] || continue
+          git --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
+            --work-tree="${_surface_root}" \
+            add --intent-to-add -- "${_mt}" >/dev/null 2>&1 || true
+        done
+        diff_content="$(capture_worktree_diff)"
+        if [[ -n "${diff_content}" ]] \
+          && assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
+          aegis_log "mechanical_isolated_tsc_ok: emitting without aider (quality-first)"
+          emit_mutation_artifact "${diff_content}"
+          aegis_log "Aider mutation substrate completed (mechanical isolated)"
+          return 0
+        fi
+      fi
+      aegis_warn "mechanical_isolated_tsc_failed — falling through to aider refine"
       _mech_ok=0
     fi
   fi
