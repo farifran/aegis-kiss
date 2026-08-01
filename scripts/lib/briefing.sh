@@ -84,18 +84,32 @@ Schema:
     {
       "kind": "class",
       "name": "PascalCaseName",
-      "privateFields": [{"name": "_x", "type": "bigint"}],
-      "ctorParams": [{"name": "arg", "type": "bigint"}],
-      "ctorBody": ["this._x = arg"],
-      "methods": [{"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["if (this._x >= bits) { this._x -= bits; return true }", "return false"]}],
-      "getters": [{"name": "value", "returns": "bigint", "body": "return this._x"}]
+      "privateFields": [
+        {"name": "_rateBitsPerMs", "type": "bigint"},
+        {"name": "_lastUpdate", "type": "bigint"},
+        {"name": "_tokens", "type": "bigint"}
+      ],
+      "ctorParams": [{"name": "maxBytes", "type": "bigint"}, {"name": "mbps", "type": "number"}],
+      "ctorBody": [
+        "this._rateBitsPerMs = BigInt(Math.floor(mbps * 8000))",
+        "this._lastUpdate = BigInt(Date.now())",
+        "this._tokens = maxBytes * 8n"
+      ],
+      "methods": [
+        {"name": "update", "params": [], "returns": "void", "body": ["const now = BigInt(Date.now())", "const delta = now - this._lastUpdate", "if (delta > 0n) { this._tokens += delta * this._rateBitsPerMs; if (this._tokens > this._maxTokens) this._tokens = this._maxTokens; this._lastUpdate = now }"]},
+        {"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["this.update()", "if (this._tokens >= bits) { this._tokens -= bits; return true }", "return false"]}
+      ],
+      "getters": [
+        {"name": "tokens", "returns": "bigint", "body": "return this._tokens"},
+        {"name": "lastUpdate", "returns": "bigint", "body": "return this._lastUpdate"}
+      ]
     },
     {
       "kind": "function",
       "name": "camelCaseName",
       "params": [{"name": "b", "type": "PascalCaseName"}],
       "returns": "number",
-      "body": ["let mask = 0", "if (b.value === 0n) mask |= 1", "return mask"]
+      "body": ["let mask = 0", "if (b.tokens === 0n) mask |= 1", "if (BigInt(Date.now()) - b.lastUpdate < 1000n) mask |= 2", "return mask"]
     }
   ],
   "barrelFile": "src/index.ts",
@@ -106,7 +120,9 @@ Rules:
 - TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
 - Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
 - NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint.
-- Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
+- When a constructor parameter is number but used in bigint arithmetic, store it as bigint: privateField type "bigint", ctorBody "this._rate = BigInt(Math.floor(param * multiplier))". Never mix bigint fields with number fields in the same arithmetic expression.
+- For temporal/dynamic state ("refill active", "last seen", "window open"): use a bigint timestamp getter (get lastUpdate(): bigint) and compare in helper functions with BigInt(Date.now()) - bucket.lastUpdate < windowMs. NEVER use a static boolean field to represent dynamic temporal state.
+- Outside a class, NEVER read private fields (_tokens, _lastUpdate). Expose getters and use those in helper functions.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
@@ -253,7 +269,7 @@ aegis_briefing_generate() {
         {role: "user", content: ("Demand: " + $goal + "\nTargets: " + $target)}
       ],
       temperature: 0.1,
-      max_tokens: 1100,
+      max_tokens: 1536,
       response_format: {type: "json_object"}
     }' > "${req_file}" 2>/dev/null || {
     rm -f "${req_file}" "${resp_file}"
