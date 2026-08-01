@@ -365,6 +365,24 @@ aegis_fit_unit_demand_md() {
   parent_goal="$(printf '%s' "${parent_goal}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-220)"
   [[ -n "${parent_goal}" ]] || parent_goal="${title}"
 
+  # Parse export_slice early — sibling names must not leak into Goal/Change.
+  local slice_name=""
+  if printf '%s' "${note}" | grep -qE '^export_slice:'; then
+    slice_name="$(printf '%s' "${note}" | sed -E 's/^export_slice://; s/[[:space:]]+$//')"
+  fi
+  if [[ -n "${slice_name}" ]]; then
+    # Drop other top-level export names from parent goal (prevents 8B stubs).
+    local _sib_export
+    while IFS= read -r _sib_export; do
+      [[ -n "${_sib_export}" ]] || continue
+      [[ "${_sib_export}" == "${slice_name}" ]] && continue
+      # macOS BSD sed: [[:<:]]/[[:>:]]; GNU also accepts these for word edges.
+      parent_goal="$(printf '%s' "${parent_goal}" | sed -E "s/[[:<:]]${_sib_export}[[:>:]]//g")"
+    done < <(aegis_fit_briefing_export_names "${parent}")
+    parent_goal="$(printf '%s' "${parent_goal}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-160)"
+    [[ -n "${parent_goal}" ]] || parent_goal="export ${slice_name} only in ${primary}"
+  fi
+
   # Title "reexport only" wins; note "omit reexport" must NOT flip create units.
   if printf '%s' "${title}" | grep -qiE '^reexport|^re-export' \
     || { [[ "${primary}" == "src/index.ts" ]] \
@@ -433,8 +451,8 @@ EOR
 EOD
       )"
     fi
-    # If Acceptance names more than one symbol, they must be TOP-LEVEL exports
-    # (a method named obterEstadoBitmask does not satisfy a function export).
+    # export_slice: ONE top-level export only. Parent multi-export text must
+    # not tell the 8B to also stub sibling symbols (over_export + stub loops).
     local acc_count
     acc_count="$(
       aegis_fit_md_section "Acceptance" "${parent}" \
@@ -444,7 +462,20 @@ EOD
     )"
     acc_count="${acc_count//[^0-9]/}"
     acc_count="${acc_count:-0}"
-    if [[ "${acc_count}" -ge 2 ]] \
+    if [[ -n "${slice_name}" ]]; then
+      local _sibs_csv="" _sib
+      while IFS= read -r _sib; do
+        [[ -n "${_sib}" && "${_sib}" != "${slice_name}" ]] || continue
+        _sibs_csv="${_sibs_csv:+${_sibs_csv}, }${_sib}"
+      done < <(aegis_fit_briefing_export_names "${parent}")
+      multi_export_note="- Export **only** top-level \`${slice_name}\` in this unit (export class/function/const)."$'\n'
+      multi_export_note+="- Do **not** add other top-level exports"
+      if [[ -n "${_sibs_csv}" ]]; then
+        multi_export_note+=" (especially not ${_sibs_csv} — later unit)"
+      fi
+      multi_export_note+="; no stub \`export function\` siblings."$'\n'
+      multi_export_note+="- Methods on \`${slice_name}\` are fine; sibling public APIs are out of scope."$'\n'
+    elif [[ "${acc_count}" -ge 2 ]] \
       || printf '%s' "${parent}" | grep -Eiq 'bitmask|função exportada|funções exportadas|exporte a função|export function'; then
       multi_export_note="- Every Acceptance token that is a class or function must be a **top-level** \`export class\` / \`export function\` in this file (not only a method on another export)."$'\n'
     else
@@ -463,7 +494,7 @@ EOC
     # Never promote constructor params or private field names (maxBytes, mbps,
     # rateBitsPerMs, …) — they poison the tribunal into unsatisfiable contracts.
     # When note is export_slice:Name, Acceptance is set later to that name only.
-    if [[ -z "${slice_name:-}" ]] && ! printf '%s' "${note}" | grep -qE '^export_slice:'; then
+    if [[ -z "${slice_name}" ]]; then
     acc_block="$(
       {
         printf '%s\n' "${primary_pascal}"
@@ -496,16 +527,12 @@ EOC
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
-  local parent_briefing parent_constraints unit_briefing slice_name
+  local parent_briefing parent_constraints unit_briefing
   parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
   # Never copy the full parent Briefing into every unit — that re-poisons the
   # 8B with sibling targets, barrel blocks, and exports it must not touch.
   unit_briefing="$(aegis_fit_unit_scoped_briefing "${parent}" "${primary}" "${is_reexport}" "${primary_base}" "${primary_pascal}")"
   # Single-file multi-export slice: note "export_slice:Name" keeps only that export.
-  slice_name=""
-  if printf '%s' "${note}" | grep -qE '^export_slice:'; then
-    slice_name="$(printf '%s' "${note}" | sed -E 's/^export_slice://; s/[[:space:]]+$//')"
-  fi
   if [[ -n "${slice_name}" && "${is_reexport}" -eq 0 ]]; then
     unit_briefing="$(aegis_fit_briefing_slice_export "${unit_briefing:-$(aegis_fit_md_section "Briefing" "${parent}")}" "${slice_name}")"
     acc_block="- ${slice_name}"
