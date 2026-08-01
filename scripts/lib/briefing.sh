@@ -85,23 +85,25 @@ Schema:
       "kind": "class",
       "name": "PascalCaseName",
       "privateFields": [
-        {"name": "_rateBitsPerMs", "type": "bigint"},
-        {"name": "_lastUpdate", "type": "bigint"},
-        {"name": "_tokens", "type": "bigint"}
+        {"name": "_ratePerTick", "type": "bigint"},
+        {"name": "_checkpoint", "type": "bigint"},
+        {"name": "_budget", "type": "bigint"},
+        {"name": "_capacity", "type": "bigint"}
       ],
-      "ctorParams": [{"name": "maxBytes", "type": "bigint"}, {"name": "mbps", "type": "number"}],
+      "ctorParams": [{"name": "capacity", "type": "bigint"}, {"name": "ratePerSec", "type": "number"}],
       "ctorBody": [
-        "this._rateBitsPerMs = BigInt(Math.floor(mbps * 8000))",
-        "this._lastUpdate = BigInt(Date.now())",
-        "this._tokens = maxBytes * 8n"
+        "this._ratePerTick = BigInt(Math.floor(ratePerSec * 1000))",
+        "this._checkpoint = BigInt(Date.now())",
+        "this._capacity = capacity",
+        "this._budget = capacity"
       ],
       "methods": [
-        {"name": "update", "params": [], "returns": "void", "body": ["const now = BigInt(Date.now())", "const delta = now - this._lastUpdate", "if (delta > 0n) { this._tokens += delta * this._rateBitsPerMs; if (this._tokens > this._maxTokens) this._tokens = this._maxTokens; this._lastUpdate = now }"]},
-        {"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["this.update()", "if (this._tokens >= bits) { this._tokens -= bits; return true }", "return false"]}
+        {"name": "refill", "params": [], "returns": "void", "body": ["const now = BigInt(Date.now())", "const delta = now - this._checkpoint", "if (delta > 0n) { this._budget += delta * this._ratePerTick; if (this._budget > this._capacity) this._budget = this._capacity; this._checkpoint = now }"]},
+        {"name": "consume", "params": [{"name": "units", "type": "bigint"}], "returns": "boolean", "body": ["this.refill()", "if (this._budget >= units) { this._budget -= units; return true }", "return false"]}
       ],
       "getters": [
-        {"name": "tokens", "returns": "bigint", "body": "return this._tokens"},
-        {"name": "lastUpdate", "returns": "bigint", "body": "return this._lastUpdate"}
+        {"name": "budget", "returns": "bigint", "body": "return this._budget"},
+        {"name": "checkpoint", "returns": "bigint", "body": "return this._checkpoint"}
       ]
     },
     {
@@ -109,7 +111,7 @@ Schema:
       "name": "camelCaseName",
       "params": [{"name": "b", "type": "PascalCaseName"}],
       "returns": "number",
-      "body": ["let mask = 0", "if (b.tokens === 0n) mask |= 1", "if (BigInt(Date.now()) - b.lastUpdate < 1000n) mask |= 2", "return mask"]
+      "body": ["let mask = 0", "if (b.budget === 0n) mask |= 1", "if (BigInt(Date.now()) - b.checkpoint < 1000n) mask |= 2", "return mask"]
     }
   ],
   "barrelFile": "src/index.ts",
