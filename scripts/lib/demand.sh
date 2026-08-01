@@ -2766,7 +2766,7 @@ aegis_mechanical_adversarial_diff_scan() {
         fi
       done
       for mt in ${notexp_list}; do
-        fix_hint="${fix_hint}${mt} is already in the file — export it (export function/class ${mt}) or expose it as a public ${mt}() method; "
+        fix_hint="${fix_hint}${mt} is already in the file — add top-level export function/class/const ${mt} (a class method does not satisfy Acceptance); "
       done
       [[ -n "${fix_hint}" ]] || fix_hint="Add missing Acceptance identifiers to ${primary}: ${miss_list}"
       findings+=(

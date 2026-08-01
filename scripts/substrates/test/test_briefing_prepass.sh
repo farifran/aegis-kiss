@@ -131,7 +131,7 @@ assert_rejected "$(mutate '.exports[0].kind = "interface"')"  "bad_kind"
   unset AEGIS_SUPERVISOR_MODEL
   export OPENAI_MODEL_MUTATION="meta/llama-3.3-70b-instruct"
   export AEGIS_MUTATION_MODEL="meta/llama-3.3-70b-instruct"
-  [[ "$(aegis_briefing_model)" == "meta/llama-3.1-8b-instruct" ]]
+  [[ "$(aegis_briefing_model)" == "z-ai/glm-5.2" ]]
 ) || fail "default_supervisor_should_not_inherit_mutation_model"
 
 (

@@ -333,7 +333,7 @@ collect_mutation_intent_violations() {
         "acceptance_absent: ${_absent% } — demanded identifier(s) are nowhere in the candidate; add them"
       )
       [[ -n "${_notexp}" ]] && violations+=(
-        "acceptance_not_exported: ${_notexp% } — already written in the file; export it or expose a public method, do not re-add it"
+        "acceptance_not_exported: ${_notexp% } — already written in the file; add a top-level export function/class/const (methods do not satisfy Acceptance), do not re-add as a private field"
       )
     fi
   fi

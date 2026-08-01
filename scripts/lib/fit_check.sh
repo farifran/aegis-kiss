@@ -606,10 +606,12 @@ aegis_fit_briefing_slice_export() {
     printf '%s' "${briefing}"
     return 0
   }
+  # Match the export declaration name only — NOT type mentions like
+  # "export function foo(bucket: TokenBucket)" when slicing TokenBucket.
   printf '%s\n' "${briefing}" | awk -v name="${name}" '
     BEGIN { keep = 0; any = 0 }
     /^[0-9]+\)/ {
-      if (index($0, name) > 0 || $0 ~ ("export (class|function|const|let|var) " name)) {
+      if ($0 ~ ("export[[:space:]]+(class|function|const|let|var)[[:space:]]+" name "([^A-Za-z0-9_]|$)")) {
         keep = 1; any = 1
       } else {
         keep = 0

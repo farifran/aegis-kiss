@@ -359,7 +359,7 @@ Rules:
 - 2 to ${max_u} units. Prefer fewer units when possible.
 - Exactly ONE path in each unit's "targets".
 - kind is "create" or "reexport" only.
-- create units: 1 to ${max_e} entries in "exports" (top-level export class/function only). Methods stay inside the class — never as separate exports.
+- create units: EXACTLY 1 entry in "exports" (one top-level export class OR function per unit). Methods stay inside the class — never as separate exports. If the demand has class + helper function, emit two create units on the same path (class first, then function), then reexport.
 - reexport units: exports must be [] ; set reexport_names + barrelFrom (relative .js NodeNext).
 - depends_on: 1-based unit indexes that must finish first (empty array if none).
 - Order units so dependencies come first (create module before reexport).
@@ -469,6 +469,12 @@ aegis_supervisor_split_validate_json() {
         printf 'create_no_exports:%s\n' "${i}" >&2
         return 1
       }
+      # One top-level export per create unit (8B merges multi-export into methods).
+      # Parent max_e still caps expand; split is stricter.
+      if [[ "${n_exp}" -gt 1 ]]; then
+        printf 'create_too_many_exports:%s\n' "${i}" >&2
+        return 1
+      fi
       [[ "${n_exp}" -le "${max_e}" ]] || {
         printf 'create_too_many_exports:%s\n' "${i}" >&2
         return 1

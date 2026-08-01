@@ -1142,9 +1142,41 @@ cmd_go() {
       local split_ok=0 split_err
       split_err="$(mktemp)"
 
-      # 1) Supervisor split (8B): intent + export load, Briefing/Acceptance por unit.
-      if aegis_supervisor_split_enabled 2>/dev/null; then
-        aegis_log "demanda complexa — supervisor split (8B)..."
+      # Prefer mechanical multi-export (export_slice) when ## Briefing names 2+
+      # top-level exports. Supervisor often packs class+function into one create
+      # unit; the 8B coder then demotes the helper to a method and the pipeline
+      # "succeeds" with wrong shape. Offline export_slice is deterministic.
+      # (fit_check.sh is not always sourced here — count exports from Briefing text.)
+      local export_n_parent=0
+      export_n_parent="$(
+        printf '%s\n' "${parent_body}" \
+          | awk '/^## Briefing[[:space:]]*$/ { p=1; next } /^## / { p=0 } p' \
+          | grep -oE 'export[[:space:]]+(class|function|const|let|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+          | awk '{ print $3 }' \
+          | awk 'NF && !seen[$0]++' \
+          | grep -c . || true
+      )"
+      export_n_parent="${export_n_parent//[^0-9]/}"
+      export_n_parent="${export_n_parent:-0}"
+
+      if [[ "${export_n_parent}" -ge 2 ]]; then
+        aegis_log "briefing multi-export (${export_n_parent}) — split mecânico export_slice..."
+        rm -f "${micros_dir}"/unit-*.md "${micros_dir}/fit.json" 2>/dev/null || true
+        printf '%s\n' "${parent_body}" \
+          | bash scripts/fit_check_demand.sh --emit-micros "${micros_dir}" \
+            >/dev/null 2>&1 || true
+        if [[ -f "${micros_dir}/unit-0.md" ]] \
+          && [[ "$(count_micro_units "${micros_dir}")" -ge 2 ]]; then
+          split_ok=1
+          aegis_log "split mecânico ok — $(count_micro_units "${micros_dir}") tasks"
+        fi
+      fi
+
+      # Supervisor split: intent + export load when mechanical multi-export did not apply.
+      if [[ "${split_ok}" -eq 0 ]] && aegis_supervisor_split_enabled 2>/dev/null; then
+        local _sup_model
+        _sup_model="$(aegis_briefing_model 2>/dev/null || printf 'supervisor')"
+        aegis_log "demanda complexa — supervisor split (${_sup_model})..."
         if aegis_supervisor_split_generate "${parent_body}" "${micros_dir}" 2>"${split_err}"; then
           if [[ -f "${micros_dir}/unit-0.md" ]] \
             && [[ "$(count_micro_units "${micros_dir}")" -ge 2 ]]; then
@@ -1156,7 +1188,7 @@ cmd_go() {
         fi
       fi
 
-      # 2) Mechanical path/reexport split (always available offline).
+      # Mechanical path/reexport split (always available offline).
       if [[ "${split_ok}" -eq 0 ]]; then
         aegis_log "fatiando mecanicamente para micro-unidades..."
         rm -f "${micros_dir}"/unit-*.md "${micros_dir}/fit.json" 2>/dev/null || true
