@@ -84,34 +84,18 @@ Schema:
     {
       "kind": "class",
       "name": "PascalCaseName",
-      "privateFields": [
-        {"name": "_ratePerTick", "type": "bigint"},
-        {"name": "_checkpoint", "type": "bigint"},
-        {"name": "_budget", "type": "bigint"},
-        {"name": "_capacity", "type": "bigint"}
-      ],
-      "ctorParams": [{"name": "capacity", "type": "bigint"}, {"name": "ratePerSec", "type": "number"}],
-      "ctorBody": [
-        "this._ratePerTick = BigInt(Math.floor(ratePerSec * 1000))",
-        "this._checkpoint = BigInt(Date.now())",
-        "this._capacity = capacity",
-        "this._budget = capacity"
-      ],
-      "methods": [
-        {"name": "refill", "params": [], "returns": "void", "body": ["const now = BigInt(Date.now())", "const delta = now - this._checkpoint", "if (delta > 0n) { this._budget += delta * this._ratePerTick; if (this._budget > this._capacity) this._budget = this._capacity; this._checkpoint = now }"]},
-        {"name": "consume", "params": [{"name": "units", "type": "bigint"}], "returns": "boolean", "body": ["this.refill()", "if (this._budget >= units) { this._budget -= units; return true }", "return false"]}
-      ],
-      "getters": [
-        {"name": "budget", "returns": "bigint", "body": "return this._budget"},
-        {"name": "checkpoint", "returns": "bigint", "body": "return this._checkpoint"}
-      ]
+      "privateFields": [{"name": "_x", "type": "bigint"}],
+      "ctorParams": [{"name": "arg", "type": "bigint"}],
+      "ctorBody": ["this._x = arg"],
+      "methods": [{"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["if (this._x >= bits) { this._x -= bits; return true }", "return false"]}],
+      "getters": [{"name": "value", "returns": "bigint", "body": "return this._x"}]
     },
     {
       "kind": "function",
       "name": "camelCaseName",
       "params": [{"name": "b", "type": "PascalCaseName"}],
       "returns": "number",
-      "body": ["let mask = 0", "if (b.budget === 0n) mask |= 1", "if (BigInt(Date.now()) - b.checkpoint < 1000n) mask |= 2", "return mask"]
+      "body": ["let mask = 0", "if (b.value === 0n) mask |= 1", "return mask"]
     }
   ],
   "barrelFile": "src/index.ts",
