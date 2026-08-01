@@ -96,6 +96,8 @@ aegis_briefing_stable_constraints() {
 - Private fields start with underscore and are not Acceptance exports
 - BigInt is global when high-precision time is required
 - Prefer one top-level export per micro unit; methods on a class are fine
+- Rate/token refill: compute timeDiff; only add tokens if timeDiff > 0 (or > 0n for bigint); update last-time only when you refill
+- If a refill-active / refil flag exists: set it after update as tokens < maxTokens (never leave it stuck true forever)
 EOF
 }
 
@@ -103,34 +105,71 @@ EOF
 # Returns rewritten JSON on stdout. Idempotent; leaves non-matching lines alone.
 aegis_briefing_sanitize_json() {
   local json="${1-}"
-  printf '%s' "${json}" | jq -c '
-    def rewrite_line:
-      . as $s
-      | if ($s | type) != "string" then $s
-        elif ($s | test("Math\\.(min|max)\\([^)]*\\)"))
-             and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b|_tokens|_max|maxTokens")) then
-          # Prefer explicit clamp; drop Math.min/max call shapes the 8B copies badly.
-          ($s
-            | gsub("Math\\.min\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
-                   "(((\(.a)) < (\(.b))) ? (\(.a)) : (\(.b)))")
-            | gsub("Math\\.max\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
-                   "(((\(.a)) > (\(.b))) ? (\(.a)) : (\(.b)))")
-          )
-        else $s end;
-    def map_bodies:
-      if type != "object" then .
-      else
-        .ctorBody = ((.ctorBody // []) | map(rewrite_line))
-        | .body = ((.body // []) | map(rewrite_line))
-        | .methods = ((.methods // []) | map(
-            .body = ((.body // []) | map(rewrite_line))
-          ))
-        | .getters = ((.getters // []) | map(
-            if (.body | type) == "string" then .body = (.body | rewrite_line) else . end
-          ))
-      end;
-    .exports = ((.exports // []) | map(map_bodies))
-  ' 2>/dev/null || printf '%s' "${json}"
+  # 1) Math.min/max on bigint → clamp ternaries
+  json="$(
+    printf '%s' "${json}" | jq -c '
+      def rewrite_line:
+        . as $s
+        | if ($s | type) != "string" then $s
+          elif ($s | test("Math\\.(min|max)\\([^)]*\\)"))
+               and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b|_tokens|_max|maxTokens")) then
+            ($s
+              | gsub("Math\\.min\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
+                     "(((\(.a)) < (\(.b))) ? (\(.a)) : (\(.b)))")
+              | gsub("Math\\.max\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
+                     "(((\(.a)) > (\(.b))) ? (\(.a)) : (\(.b)))")
+            )
+          else $s end;
+      def map_bodies:
+        if type != "object" then .
+        else
+          .ctorBody = ((.ctorBody // []) | map(rewrite_line))
+          | .body = ((.body // []) | map(rewrite_line))
+          | .methods = ((.methods // []) | map(
+              .body = ((.body // []) | map(rewrite_line))
+            ))
+          | .getters = ((.getters // []) | map(
+              if (.body | type) == "string" then .body = (.body | rewrite_line) else . end
+            ))
+        end;
+      .exports = ((.exports // []) | map(map_bodies))
+    ' 2>/dev/null || printf '%s' "${json}"
+  )"
+  # 2) Rate-limit quality: ensure update() sets refillActive when the field exists.
+  #    Does not invent timeDiff branches (those stay in the worked example / Rules).
+  json="$(
+    printf '%s' "${json}" | jq -c '
+      def field_names:
+        [(.privateFields // [])[]?.name | select(type=="string")];
+      def pick($names; $re):
+        ([$names[] | select(test($re; "i"))][0] // null);
+      .exports = ((.exports // []) | map(
+        if (.kind // "") != "class" then .
+        else
+          (field_names) as $names
+          | pick($names; "refillActive|refill_active|_refill") as $refill
+          | pick($names; "maxTokens|_maxTokens|_max\\b") as $max
+          | pick($names; "^_tokens$|_tokens$") as $tok
+          | if $refill == null or $max == null or $tok == null then .
+            else
+              .methods = ((.methods // []) | map(
+                if (.name // "") != "update" then .
+                else
+                  ((.body // []) | map(tostring) | join("\n")) as $joined
+                  | if ($joined | test($refill)) then .
+                    else
+                      .body = ((.body // []) + [
+                        ("this." + $refill + " = this." + $tok + " < this." + $max)
+                      ])
+                    end
+                end
+              ))
+            end
+        end
+      ))
+    ' 2>/dev/null || printf '%s' "${json}"
+  )"
+  printf '%s' "${json}"
 }
 
 # The schema doubles as the instruction: a worked example constrains a weak
@@ -147,18 +186,45 @@ Schema:
     {
       "kind": "class",
       "name": "PascalCaseName",
-      "privateFields": [{"name": "_x", "type": "bigint"}],
-      "ctorParams": [{"name": "arg", "type": "bigint"}],
-      "ctorBody": ["this._x = arg"],
-      "methods": [{"name": "consume", "params": [{"name": "bits", "type": "bigint"}], "returns": "boolean", "body": ["if (this._x >= bits) { this._x -= bits; return true }", "return false"]}],
-      "getters": [{"name": "value", "returns": "bigint", "body": "return this._x"}]
+      "privateFields": [
+        {"name": "_tokens", "type": "bigint"},
+        {"name": "_maxTokens", "type": "bigint"},
+        {"name": "_lastUpdate", "type": "bigint"},
+        {"name": "_refillActive", "type": "boolean"}
+      ],
+      "ctorParams": [{"name": "maxTokens", "type": "bigint"}],
+      "ctorBody": ["this._maxTokens = maxTokens", "this._tokens = maxTokens", "this._lastUpdate = BigInt(Date.now())", "this._refillActive = false"],
+      "methods": [
+        {
+          "name": "update",
+          "params": [],
+          "returns": "void",
+          "body": [
+            "const now = BigInt(Date.now())",
+            "const timeDiff = now - this._lastUpdate",
+            "if (timeDiff > 0n) { this._tokens += timeDiff; this._lastUpdate = now }",
+            "if (this._tokens > this._maxTokens) { this._tokens = this._maxTokens }",
+            "this._refillActive = this._tokens < this._maxTokens"
+          ]
+        },
+        {
+          "name": "consume",
+          "params": [{"name": "bits", "type": "bigint"}],
+          "returns": "boolean",
+          "body": ["this.update()", "if (this._tokens >= bits) { this._tokens -= bits; return true }", "return false"]
+        }
+      ],
+      "getters": [
+        {"name": "tokens", "returns": "bigint", "body": "return this._tokens"},
+        {"name": "refillActive", "returns": "boolean", "body": "return this._refillActive"}
+      ]
     },
     {
       "kind": "function",
       "name": "camelCaseName",
       "params": [{"name": "b", "type": "PascalCaseName"}],
       "returns": "number",
-      "body": ["let mask = 0", "if (b.value === 0n) mask |= 1", "return mask"]
+      "body": ["let mask = 0", "if (b.tokens === 0n) mask |= 1", "if (b.refillActive) mask |= 2", "return mask"]
     }
   ],
   "barrelFile": "src/index.ts",
@@ -168,8 +234,10 @@ Schema:
 Rules:
 - TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
 - Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
-- NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint.
+- NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint. Math.floor on number then BigInt(...) is OK.
 - Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
+- Elapsed-time refill (token bucket / rate limiter): compute timeDiff from now - lastUpdate; ONLY add tokens when timeDiff > 0 (or > 0n if bigint). Update lastUpdate only inside that branch (or when you actually refill).
+- If the demand has a refill-active / refil flag (bitmask bit, boolean): after update/clamp set this._refillActive = this._tokens < this._maxTokens (or equivalent). Do NOT leave the flag stuck true from the constructor forever.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".

@@ -2049,10 +2049,58 @@ aegis_mechanical_export_class_create() {
 
   ts="$(aegis_briefing_class_to_ts "${demand}" "${name}")" || return 1
   ts="$(aegis_mechanical_ts_fix_bigint_arith "${ts}")"
+  ts="$(aegis_mechanical_ts_enrich_update_semantics "${ts}")"
   [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
 
   printf '%s\n' "${ts}" > "${surface}"
   return 0
+}
+
+# Quality enrich on materialised class TS (sensor: product code).
+# - If private _refillActive exists but update() never assigns it, append
+#   this._refillActive = this._tokens < this._maxTokens before the method ends.
+# - Does not invent timeDiff branches (Briefing/Rules own that shape).
+aegis_mechanical_ts_enrich_update_semantics() {
+  local ts="${1-}"
+  printf '%s' "${ts}" | grep -qE 'private[[:space:]]+_refillActive' || {
+    printf '%s\n' "${ts}"
+    return 0
+  }
+  printf '%s' "${ts}" | grep -qE 'update[[:space:]]*\(' || {
+    printf '%s\n' "${ts}"
+    return 0
+  }
+  # Already assigns refillActive somewhere in update — leave alone.
+  # Method signature may be `update(): void {` (return type between ) and {).
+  if printf '%s\n' "${ts}" | awk '
+      /update[[:space:]]*\([^)]*\)[^{]*\{/ { inu=1; next }
+      inu && /^  \}[[:space:]]*$/ { inu=0 }
+      inu && /this\._refillActive[[:space:]]*=/ { found=1 }
+      END { exit found ? 0 : 1 }
+    '; then
+    printf '%s\n' "${ts}"
+    return 0
+  fi
+  local maxf tokf
+  maxf="_maxTokens"
+  tokf="_tokens"
+  printf '%s' "${ts}" | grep -qE 'private[[:space:]]+_maxTokens' || maxf="_max"
+  printf '%s' "${ts}" | grep -qE 'private[[:space:]]+_tokens' || tokf="_tokens"
+  printf '%s\n' "${ts}" | awk -v maxf="${maxf}" -v tokf="${tokf}" '
+    BEGIN { inu = 0 }
+    /update[[:space:]]*\([^)]*\)[^{]*\{/ {
+      print
+      inu = 1
+      next
+    }
+    inu && /^  \}[[:space:]]*$/ {
+      print "    this._refillActive = this." tokf " < this." maxf
+      print
+      inu = 0
+      next
+    }
+    { print }
+  '
 }
 
 # Minimal type-safe rewrites only. Quality rule: do NOT invent Number(timeDiff)
