@@ -106,9 +106,7 @@ Rules:
 - TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
 - Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
 - NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint.
-- When a constructor parameter is number but used in bigint arithmetic, store it as bigint: privateField type "bigint", ctorBody "this._rate = BigInt(Math.floor(param * multiplier))". Never mix bigint fields with number fields in the same arithmetic expression.
-- For temporal/dynamic state ("refill active", "last seen", "window open"): use a bigint timestamp getter (get lastUpdate(): bigint) and compare in helper functions with BigInt(Date.now()) - bucket.lastUpdate < windowMs. NEVER use a static boolean field to represent dynamic temporal state.
-- Outside a class, NEVER read private fields (_tokens, _lastUpdate). Expose getters and use those in helper functions.
+- Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
@@ -255,7 +253,7 @@ aegis_briefing_generate() {
         {role: "user", content: ("Demand: " + $goal + "\nTargets: " + $target)}
       ],
       temperature: 0.1,
-      max_tokens: 1536,
+      max_tokens: 1100,
       response_format: {type: "json_object"}
     }' > "${req_file}" 2>/dev/null || {
     rm -f "${req_file}" "${resp_file}"
