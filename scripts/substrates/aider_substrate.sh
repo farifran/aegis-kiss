@@ -253,7 +253,28 @@ main() {
         aegis_log "Aider mutation substrate completed (mechanical)"
         return 0
       fi
-      aegis_warn "mechanical_fast_path_preflight_failed — falling through to aider"
+      aegis_warn "mechanical_fast_path_preflight_failed — re-apply mechanical base then aider refine"
+      # Preflight may have rolled back the surface; re-materialize so aider
+      # refines Briefing-shaped code instead of an empty seed.
+      for _mt in "${mutation_targets[@]:-}"; do
+        [[ -n "${_mt}" ]] || continue
+        if declare -f aegis_mechanical_export_class_create >/dev/null 2>&1; then
+          aegis_mechanical_export_class_create \
+            "${_mt}" "${AEGIS_INVESTIGATION_INPUT}" "${_surface_root}" 2>/dev/null || true
+        fi
+        if declare -f aegis_mechanical_export_function_append >/dev/null 2>&1; then
+          aegis_mechanical_export_function_append \
+            "${_mt}" "${AEGIS_INVESTIGATION_INPUT}" "${_surface_root}" 2>/dev/null || true
+        fi
+        case "${_mt}" in
+          src/index.ts|*/index.ts|index.ts)
+            if declare -f aegis_mechanical_barrel_reexport_apply >/dev/null 2>&1; then
+              aegis_mechanical_barrel_reexport_apply \
+                "${_mt}" "${AEGIS_INVESTIGATION_INPUT}" "${_surface_root}" "1" 2>/dev/null || true
+            fi
+            ;;
+        esac
+      done
       _mech_ok=0
     fi
   fi

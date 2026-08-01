@@ -2036,10 +2036,40 @@ aegis_mechanical_export_class_create() {
   fi
 
   ts="$(aegis_briefing_class_to_ts "${demand}" "${name}")" || return 1
+  ts="$(aegis_mechanical_ts_fix_bigint_arith "${ts}")"
   [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
 
   printf '%s\n' "${ts}" > "${surface}"
   return 0
+}
+
+# Fix common Briefing→TS bigint/number mix-ups that fail tsc (monstro GLM):
+#   BigInt(timeDiff * this._rateBitsPerMs) when rate is number / timeDiff bigint
+#   timeDiff * numberField without BigInt()
+aegis_mechanical_ts_fix_bigint_arith() {
+  local ts="${1-}"
+  # BigInt(A * this._rate…) → A * BigInt(Math.floor(this._rate…)) when A is likely bigint
+  ts="$(
+    printf '%s\n' "${ts}" | sed -E \
+      -e 's/BigInt\(([^()]+) \* (this\._rateBitsPerMs)\)/(\1) * BigInt(Math.floor(\2))/g' \
+      -e 's/BigInt\(([^()]+) \* (this\._rate)\)/(\1) * BigInt(Math.floor(\2))/g' \
+      -e 's/BigInt\((this\._rateBitsPerMs) \* ([^()]+)\)/BigInt(Math.floor(\1)) * (\2)/g'
+  )"
+  # If rate field is declared number and timeDiff stays bigint, prefer Number(delta).
+  if printf '%s' "${ts}" | grep -qE '_rateBitsPerMs: number'; then
+    ts="$(
+      printf '%s\n' "${ts}" | sed -E \
+        -e 's/const timeDiff = now - this\._lastUpdate/const timeDiff = Number(now - this._lastUpdate)/g' \
+        -e 's/const timeDiff = this\._lastUpdate/const timeDiff = Number(this._lastUpdate)/g'
+    )"
+    # After Number(timeDiff), product with rate is number → BigInt(Math.floor(...))
+    ts="$(
+      printf '%s\n' "${ts}" | sed -E \
+        -e 's/this\._tokens \+ timeDiff \* BigInt\(Math\.floor\(this\._rateBitsPerMs\)\)/this._tokens + BigInt(Math.floor(timeDiff * this._rateBitsPerMs))/g' \
+        -e 's/\(timeDiff\) \* BigInt\(Math\.floor\(this\._rateBitsPerMs\)\)/BigInt(Math.floor(timeDiff * this._rateBitsPerMs))/g'
+    )"
+  fi
+  printf '%s\n' "${ts}"
 }
 
 # CamelCase / snake_case → lower tokens (one per line) for export↔demand match.
