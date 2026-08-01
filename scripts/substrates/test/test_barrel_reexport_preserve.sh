@@ -21,6 +21,16 @@ aegis_demand_is_reexport_preserve "## Goal
 create TokenBucket class only
 " && fail "plain create must not be reexport preserve"
 
+# Shared Constraints line alone must NOT trigger barrel path (issue #101 bug).
+aegis_demand_is_reexport_preserve "## Goal
+export TokenBucket only
+## Change
+- Create or update ONLY \`src/tokenBucket.ts\`
+- Scope note: export_slice:TokenBucket
+## Constraints
+- do not delete pre-existing barrel exports unrelated to this demand
+" && fail "export_slice unit must not be reexport_preserve"
+
 # --- removed export names from wipe diff ---
 wipe_diff="$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts

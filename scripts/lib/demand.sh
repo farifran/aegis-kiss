@@ -1523,11 +1523,24 @@ aegis_diff_removed_export_names() {
 }
 
 # True when the unit/demand is a barrel reexport that must keep pre-existing API.
+# Must NOT match create/export_slice units that only say "do not delete
+# pre-existing barrel exports" in Constraints (every micro has that line).
 aegis_demand_is_reexport_preserve() {
   local text="${1-}"
   [[ -n "${text}" ]] || return 1
+  # Positive reexport intent (title/goal/change), not a shared constraint line.
   printf '%s' "${text}" | grep -Eiq \
-    'reexport only|re-export only|do not delete pre-existing|do not re-implement the algorithm|barrel reexport|Import and re-export'
+    'reexport only|re-export only|barrel reexport|Import and re-export|import and re-export' \
+    || return 1
+  # Explicit create/export_slice micros are never barrel-only.
+  if printf '%s' "${text}" | grep -Eiq \
+    'export_slice:|Create or update ONLY|export class |export function |omit reexport|Do not re-export from index'; then
+    # Still allow pure reexport units that mention "do not re-implement".
+    printf '%s' "${text}" | grep -Eiq \
+      'reexport only|re-export only|Do not re-implement the algorithm|do not re-implement the algorithm' \
+      || return 1
+  fi
+  return 0
 }
 
 # Top-level export names present in a TS file body (one per line).

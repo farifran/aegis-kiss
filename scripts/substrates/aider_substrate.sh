@@ -159,12 +159,17 @@ main() {
   _surface_root="${AEGIS_EXECUTION_SURFACE_PATH:-.}"
 
   # 1) Pure barrel reexport: HEAD(+empty) + additive import/export.
+  # Only on index/barrel paths — never rewrite module creates as reexport.
   if [[ "${_mech_ok}" -eq 0 ]] \
     && declare -f aegis_demand_is_reexport_preserve >/dev/null 2>&1 \
     && declare -f aegis_mechanical_barrel_reexport_apply >/dev/null 2>&1 \
     && aegis_demand_is_reexport_preserve "${AEGIS_INVESTIGATION_INPUT:-}"; then
     for _mt in "${mutation_targets[@]:-}"; do
       [[ -n "${_mt}" ]] || continue
+      case "${_mt}" in
+        src/index.ts|*/index.ts|index.ts) ;;
+        *) continue ;;
+      esac
       if aegis_mechanical_barrel_reexport_apply \
         "${_mt}" \
         "${AEGIS_INVESTIGATION_INPUT}" \
@@ -310,6 +315,10 @@ main() {
     local _rt _merged=0
     for _rt in "${mutation_targets[@]:-}"; do
       [[ -n "${_rt}" ]] || continue
+      case "${_rt}" in
+        src/index.ts|*/index.ts|index.ts) ;;
+        *) continue ;;
+      esac
       if aegis_mechanical_barrel_reexport_apply \
         "${_rt}" \
         "${AEGIS_INVESTIGATION_INPUT}" \
