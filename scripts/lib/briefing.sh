@@ -43,8 +43,8 @@
 #
 # Env:
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
-#   AEGIS_SUPERVISOR_MODEL          default deepseek-ai/deepseek-v4-flash —
-#                                   the coder model is NOT inherited on purpose
+#   AEGIS_SUPERVISOR_MODEL          default z-ai/glm-5.2 — the
+#                                   coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
 #   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
@@ -74,7 +74,7 @@ aegis_briefing_enabled() {
 # BigInt-as-a-type mistake. Inheriting OPENAI_MODEL_MUTATION would silently
 # put whatever the coder uses in front of every run.
 aegis_briefing_model() {
-  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-deepseek-ai/deepseek-v4-flash}"
+  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}"
 }
 
 aegis_briefing_max_exports() {
@@ -430,6 +430,26 @@ aegis_briefing_generate() {
     --data @"${req_file}" > "${resp_file}" 2>/dev/null || true
 
   rm -f "${req_file}"
+
+  # Token accounting for supervisor expand (intake; AEGIS_METRICS_FILE may be unset).
+  local _pt _ct _metrics
+  _pt="$(jq -r '.usage.prompt_tokens // 0' "${resp_file}" 2>/dev/null || printf '0')"
+  _ct="$(jq -r '.usage.completion_tokens // 0' "${resp_file}" 2>/dev/null || printf '0')"
+  _metrics="${AEGIS_METRICS_FILE:-${AEGIS_ROOT_DIR:-.}/.harness/runtime/pipeline_metrics.jsonl}"
+  if [[ -n "${_metrics}" ]]; then
+    mkdir -p "$(dirname "${_metrics}")" 2>/dev/null || true
+    jq -cn \
+      --arg model "${model}" \
+      --argjson prompt_tokens "${_pt:-0}" \
+      --argjson completion_tokens "${_ct:-0}" \
+      '{kind:"tokens",mode:"intake",substrate:"supervisor_expand",model:$model,
+        prompt_tokens:$prompt_tokens,completion_tokens:$completion_tokens,
+        total_tokens:($prompt_tokens+$completion_tokens)}' \
+      >> "${_metrics}" 2>/dev/null || true
+    # Also emit a human line for CLI capture.
+    printf '[AEGIS][TOKENS] supervisor_expand model=%s prompt=%s completion=%s total=%s\n' \
+      "${model}" "${_pt:-0}" "${_ct:-0}" "$(( ${_pt:-0} + ${_ct:-0} ))" >&2 || true
+  fi
 
   local content
   content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
