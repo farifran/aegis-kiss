@@ -266,10 +266,11 @@ collect_mutation_intent_violations() {
   local export_n max_exports
 
   added="$(_mutation_diff_added_lines "${diff_content}")"
-  [[ -n "${added}" ]] || return 0
+  # Note: do not early-return on empty +lines — a pure-deletion wipe of a
+  # barrel still needs export_deletion detection below.
 
   # --- dense demand tokens must appear in +lines ---
-  if declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
+  if [[ -n "${added}" ]] && declare -f aegis_demand_dense_tokens >/dev/null 2>&1; then
     tokens="$(aegis_demand_dense_tokens "${AEGIS_INVESTIGATION_INPUT:-}")"
     if [[ -n "${tokens}" ]]; then
       hit=0
@@ -343,6 +344,22 @@ collect_mutation_intent_violations() {
   export_n="$(count_diff_added_exports "${diff_content}")"
   if [[ "${export_n}" -gt "${max_exports}" ]]; then
     violations+=("over_export: ${export_n} new exports in diff (max ${max_exports}) — keep one demand-aligned export; remove parallels")
+  fi
+
+  # --- barrel reexport must not delete pre-existing exports ---
+  if declare -f aegis_demand_is_reexport_preserve >/dev/null 2>&1 \
+    && declare -f aegis_diff_removed_export_names >/dev/null 2>&1 \
+    && aegis_demand_is_reexport_preserve "${AEGIS_INVESTIGATION_INPUT:-}"; then
+    local removed_list
+    removed_list="$(
+      aegis_diff_removed_export_names "${diff_content}" \
+        | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    )"
+    if [[ -n "${removed_list}" ]]; then
+      violations+=(
+        "export_deletion: removed pre-existing export(s) [${removed_list}] — restore them; reexport units may only ADD import/export of demand names"
+      )
+    fi
   fi
 
   if [[ "${#violations[@]}" -eq 0 ]]; then

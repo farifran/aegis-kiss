@@ -1482,13 +1482,170 @@ aegis_diff_added_export_names() {
   [[ -n "${added}" ]] || return 0
   printf '%s\n' "${added}" \
     | grep -Ei \
-      'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]' \
+      'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]|export[[:space:]]+class[[:space:]]+[A-Za-z_]' \
     | sed -E \
       -e 's/^.*export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\2/' \
       -e 's/^.*export[[:space:]]+const[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\1/' \
+      -e 's/^.*export[[:space:]]+class[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\1/' \
     | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' \
     | awk '!seen[$0]++' \
     || true
+}
+
+# Export names removed in a unified diff (-export lines + removed export { X }).
+aegis_diff_removed_export_names() {
+  local diff_content="${1-}"
+  local removed
+  removed="$(
+    printf '%s\n' "${diff_content}" \
+      | grep -E '^-' \
+      | grep -vE '^--- ' \
+      || true
+  )"
+  [[ -n "${removed}" ]] || return 0
+  {
+    printf '%s\n' "${removed}" \
+      | grep -Ei \
+        'export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+[A-Za-z_]|export[[:space:]]+const[[:space:]]+[A-Za-z_]|export[[:space:]]+class[[:space:]]+[A-Za-z_]' \
+      | sed -E \
+        -e 's/^.*export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\2/' \
+        -e 's/^.*export[[:space:]]+const[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\1/' \
+        -e 's/^.*export[[:space:]]+class[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\1/' \
+      || true
+    # export { Foo, Bar } removals
+    printf '%s\n' "${removed}" \
+      | grep -E 'export[[:space:]]*\{' \
+      | sed -E 's/.*\{([^}]*)\}.*/\1/' \
+      | tr ',' '\n' \
+      | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^type[[:space:]]+//; s/[[:space:]]+as[[:space:]].*$//' \
+      || true
+  } | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | awk 'NF && !seen[$0]++' || true
+}
+
+# True when the unit/demand is a barrel reexport that must keep pre-existing API.
+aegis_demand_is_reexport_preserve() {
+  local text="${1-}"
+  [[ -n "${text}" ]] || return 1
+  printf '%s' "${text}" | grep -Eiq \
+    'reexport only|re-export only|do not delete pre-existing|do not re-implement the algorithm|barrel reexport|Import and re-export'
+}
+
+# Top-level export names present in a TS file body (one per line).
+aegis_file_top_level_export_names() {
+  local body="${1-}"
+  [[ -n "${body}" ]] || return 0
+  {
+    printf '%s\n' "${body}" \
+      | grep -Ei \
+        '^[[:space:]]*export[[:space:]]+(async[[:space:]]+)?(function|const|class|let|var)[[:space:]]+[A-Za-z_]' \
+      | sed -E 's/^[[:space:]]*export[[:space:]]+(async[[:space:]]+)?(function|const|class|let|var)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\3/' \
+      || true
+    printf '%s\n' "${body}" \
+      | grep -E '^[[:space:]]*export[[:space:]]*\{' \
+      | sed -E 's/.*\{([^}]*)\}.*/\1/' \
+      | tr ',' '\n' \
+      | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^type[[:space:]]+//; s/[[:space:]]+as[[:space:]].*$//' \
+      || true
+  } | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | awk 'NF && !seen[$0]++' || true
+}
+
+# Acceptance tokens from demand markdown (one per line).
+aegis_demand_acceptance_names() {
+  local text="${1-}"
+  printf '%s\n' "${text}" \
+    | awk '/^## Acceptance[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+    | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+    | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+    | awk 'NF && !seen[$0]++' \
+    || true
+}
+
+# Mechanical barrel merge for reexport units: start from HEAD content, ensure
+# import + export of Acceptance names, never drop pre-existing exports.
+# Args: rel_path, demand_text [, surface_root]
+# Writes surface file; exit 0 if rewritten, 1 if no-op/skip.
+aegis_mechanical_barrel_reexport_apply() {
+  local rel="${1-}"
+  local demand="${2-}"
+  local root="${3:-${AEGIS_EXECUTION_SURFACE_PATH:-.}}"
+  local surface head_body cur_body acc_names missing head_names cur_names
+  local import_from import_line export_line name list
+
+  [[ -n "${rel}" ]] || return 1
+  aegis_demand_is_reexport_preserve "${demand}" || return 1
+
+  surface="${root%/}/${rel}"
+  local git_root
+  git_root="${AEGIS_REPO_ROOT:-${AEGIS_PROJECT_ROOT:-${ROOT:-.}}}"
+  # Prefer the worktree that owns the surface path when running in a jail.
+  if [[ -d "${root}/.git" ]] || git -C "${root}" rev-parse --git-dir >/dev/null 2>&1; then
+    git_root="${root}"
+  fi
+  head_body="$(git -C "${git_root}" show "HEAD:${rel}" 2>/dev/null || true)"
+  [[ -n "$(printf '%s' "${head_body}" | tr -d '[:space:]')" ]] || return 1
+
+  cur_body=""
+  [[ -f "${surface}" ]] && cur_body="$(cat "${surface}" 2>/dev/null || true)"
+
+  head_names="$(aegis_file_top_level_export_names "${head_body}")"
+  cur_names="$(aegis_file_top_level_export_names "${cur_body}")"
+  missing=""
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    if ! printf '%s\n' "${cur_names}" | grep -Fxq -- "${name}"; then
+      missing="${missing}${name}"$'\n'
+    fi
+  done <<< "${head_names}"
+
+  # Also force reexport if HEAD exports survived but Acceptance names missing.
+  acc_names="$(aegis_demand_acceptance_names "${demand}")"
+  local need_reexport=0
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    if ! printf '%s\n' "${cur_names}" | grep -Fxq -- "${name}"; then
+      need_reexport=1
+      break
+    fi
+  done <<< "${acc_names}"
+
+  if [[ -z "$(printf '%s' "${missing}" | tr -d '[:space:]')" && "${need_reexport}" -eq 0 ]]; then
+    return 1
+  fi
+
+  # Infer import path from Briefing (./foo.js) or sibling of index.
+  import_from="$(
+    printf '%s\n' "${demand}" \
+      | grep -oE "from ['\"]\\./[^'\"]+['\"]" \
+      | head -1 \
+      | sed -E "s/from ['\"]([^'\"]+)['\"]/\\1/" \
+      || true
+  )"
+  [[ -n "${import_from}" ]] || import_from="./tokenBucket.js"
+
+  list="$(
+    printf '%s\n' "${acc_names}" | awk 'NF && !seen[$0]++' | paste -sd',' - | sed 's/,/, /g'
+  )"
+  [[ -n "${list}" ]] || return 1
+
+  import_line="import { ${list} } from '${import_from}';"
+  export_line="export { ${list} };"
+
+  # Rebuild from HEAD: drop prior import from the same module path, then append
+  # import+export. Keeps every pre-existing converter export intact.
+  local rebuilt
+  rebuilt="$(
+    printf '%s\n' "${head_body}" | awk -v from="${import_from}" '
+      index($0, from) && $0 ~ /from/ && $0 ~ /import/ { next }
+      { print }
+    '
+  )"
+  # Strip trailing blank lines, then append reexport pair once.
+  while [[ "${rebuilt}" == *$'\n\n' ]]; do
+    rebuilt="${rebuilt%$'\n'}"
+  done
+  printf '%s\n\n%s\n%s\n' "${rebuilt}" "${import_line}" "${export_line}" > "${surface}"
+
+  return 0
 }
 
 # CamelCase / snake_case → lower tokens (one per line) for export↔demand match.

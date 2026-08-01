@@ -214,6 +214,27 @@ main() {
     aegis_fatal "mutation_scope_violation: after primary mutation"
   fi
 
+  # Reexport units: if the model wiped pre-existing barrel exports, rebuild
+  # the file from HEAD + additive import/export (issue #93 task 3 failure).
+  if declare -f aegis_demand_is_reexport_preserve >/dev/null 2>&1 \
+    && declare -f aegis_mechanical_barrel_reexport_apply >/dev/null 2>&1 \
+    && aegis_demand_is_reexport_preserve "${AEGIS_INVESTIGATION_INPUT:-}"; then
+    local _rt _merged=0
+    for _rt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_rt}" ]] || continue
+      if aegis_mechanical_barrel_reexport_apply \
+        "${_rt}" \
+        "${AEGIS_INVESTIGATION_INPUT}" \
+        "${AEGIS_EXECUTION_SURFACE_PATH:-.}"; then
+        _merged=1
+        aegis_warn "barrel_reexport_preserve: restored HEAD exports on ${_rt} + additive reexport"
+      fi
+    done
+    if [[ "${_merged}" -eq 1 ]]; then
+      diff_content="$(capture_worktree_diff)"
+    fi
+  fi
+
   diff_content="$(
     run_mutation_preflight_with_fix_attempts \
       "${resolved_edit_format}" \

@@ -103,8 +103,10 @@ Schema:
 }
 
 Rules:
-- TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean — those are constructors, not types.
+- TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
 - Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
+- NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint.
+- Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
