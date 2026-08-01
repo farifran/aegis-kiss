@@ -1841,6 +1841,7 @@ aegis_mechanical_export_function_append() {
   fi
 
   ts="$(aegis_briefing_function_to_ts "${demand}" "${name}")" || return 1
+  ts="$(aegis_mechanical_ts_fix_bigint_arith "${ts}")"
   [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
 
   body="$(aegis_strip_aider_whole_file_junk "${body}")"
@@ -2247,37 +2248,35 @@ import(pathToFileURL(target).href).then((mod) => {
   return 0
 }
 
-# Minimal type-safe rewrites only. Quality rule: do NOT invent Number(timeDiff)
-# when the body still uses `> 0n` / bigint products — that broke good Briefings
-# (sensor: product code quality, not wall-clock).
+# Sanitize Briefing→TS materialization for numeric/bigint foot-guns that tsc
+# and runtime reject. Domain-agnostic (any class/function, any field names).
+# Implementation: scripts/lib/mechanical_ts_sanitize.py
 #
-# Real tsc failures to fix:
-#   BigInt(timeDiff * this._rateBitsPerMs)  // bigint * number inside BigInt()
-#   this._tokens += timeDiff * this._rateBitsPerMs  // bigint * number
-# Safe already (leave alone):
-#   timeDiff * BigInt(this._rateBitsPerMs)
-#   timeDiff * BigInt(Math.floor(this._rateBitsPerMs))
+# Fixes (fail-closed mechanical must not emit these):
+#   Math.floor/ceil/round/trunc/abs(<expr with bigint>)  → wrap arg in Number()
+#   Math.min/max(a,b) when either side is bigint-ish       → ternary compare
+#   BigInt(bigintish * this.numberField)                   → product of BigInts
+#   timeDiff-like * this.numberField (bare)                → * BigInt(Math.floor(field))
+#
+# Does NOT invent Number(timeDiff) on pure bigint*bigint products that are
+# already type-safe (quality rule: Briefing fidelity over wall-clock casts).
 aegis_mechanical_ts_fix_bigint_arith() {
   local ts="${1-}"
-  ts="$(
-    printf '%s\n' "${ts}" | sed -E \
-      -e 's/BigInt\(([^()]+) \* (this\._[A-Za-z][A-Za-z0-9_]*)\)/(\1) * BigInt(Math.floor(\2))/g' \
-      -e 's/BigInt\((this\._[A-Za-z][A-Za-z0-9_]*) \* ([^()]+)\)/BigInt(Math.floor(\1)) * (\2)/g'
-  )"
-  # bigintVar * this._rateNumber (no BigInt on rate) when rate field is number
-  if printf '%s' "${ts}" | grep -qE '_rateBitsPerMs: number|_rate: number'; then
-    ts="$(
-      printf '%s\n' "${ts}" | sed -E \
-        -e 's/(timeDiff|[[:alnum:]_]+) \* this\._rateBitsPerMs\b/\1 * BigInt(Math.floor(this._rateBitsPerMs))/g' \
-        -e 's/this\._rateBitsPerMs \* (timeDiff|[[:alnum:]_]+)/BigInt(Math.floor(this._rateBitsPerMs)) * \1/g'
-    )"
-    # Avoid double-wrapping: BigInt(Math.floor(BigInt(Math.floor(...))))
-    ts="$(
-      printf '%s\n' "${ts}" | sed -E \
-        's/BigInt\(Math\.floor\(BigInt\(Math\.floor\(([^)]+)\)\)\)\)/BigInt(Math.floor(\1))/g'
-    )"
+  local helper=""
+  local here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${here}/mechanical_ts_sanitize.py" ]]; then
+    helper="${here}/mechanical_ts_sanitize.py"
+  elif [[ -f "${here}/scripts/lib/mechanical_ts_sanitize.py" ]]; then
+    helper="${here}/scripts/lib/mechanical_ts_sanitize.py"
+  elif [[ -n "${AEGIS_ROOT:-}" && -f "${AEGIS_ROOT}/scripts/lib/mechanical_ts_sanitize.py" ]]; then
+    helper="${AEGIS_ROOT}/scripts/lib/mechanical_ts_sanitize.py"
   fi
-  printf '%s\n' "${ts}"
+  if [[ -z "${helper}" ]] || ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "${ts}"
+    return 0
+  fi
+  printf '%s\n' "${ts}" | python3 "${helper}" 2>/dev/null || printf '%s\n' "${ts}"
 }
 
 # CamelCase / snake_case → lower tokens (one per line) for export↔demand match.
