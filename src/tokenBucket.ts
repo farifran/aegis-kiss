@@ -1,4 +1,4 @@
-// src/tokenBucket.ts
+// entire file content ...
 export class TokenBucket {
   private _maxTokens: bigint;
   private _rateBitsPerMs: number;
@@ -34,4 +34,11 @@ export class TokenBucket {
 
   get tokens(): bigint { return this._tokens; }
   get refillActive(): boolean { return this._refillActive; }
+}
+
+export function obterEstadoBitmask(bucket: TokenBucket): number {
+  let mask = 0
+  if (bucket.tokens === 0n) { mask |= 1 }
+  if (bucket.refillActive) { mask |= 2 }
+  return mask
 }
