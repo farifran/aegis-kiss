@@ -43,8 +43,8 @@
 #
 # Env:
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
-#   AEGIS_SUPERVISOR_MODEL          default z-ai/glm-5.2 — the
-#                                   coder model is NOT inherited on purpose
+#   AEGIS_SUPERVISOR_MODEL          default deepseek-ai/deepseek-v4-flash —
+#                                   the coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
 #   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
@@ -74,7 +74,7 @@ aegis_briefing_enabled() {
 # BigInt-as-a-type mistake. Inheriting OPENAI_MODEL_MUTATION would silently
 # put whatever the coder uses in front of every run.
 aegis_briefing_model() {
-  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}"
+  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-deepseek-ai/deepseek-v4-flash}"
 }
 
 aegis_briefing_max_exports() {
