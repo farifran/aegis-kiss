@@ -248,10 +248,19 @@ main() {
       _pf_rc=$?
       set -e
       if [[ "${_pf_rc}" -eq 0 && -n "${diff_content}" ]]; then
-        aegis_log "Emitting mutation artifact (mechanical fast path)..."
-        emit_mutation_artifact "${diff_content}"
-        aegis_log "Aider mutation substrate completed (mechanical)"
-        return 0
+        if declare -f aegis_mechanical_shape_gate >/dev/null 2>&1 \
+          && ! aegis_mechanical_shape_gate \
+            "${AEGIS_INVESTIGATION_INPUT}" \
+            "${_surface_root}" \
+            "${mutation_targets[@]:-}"; then
+          aegis_warn "mechanical_shape_gate_failed after preflight — not emitting"
+        else
+          aegis_log "mechanical_shape_gate: ok"
+          aegis_log "Emitting mutation artifact (mechanical fast path)..."
+          emit_mutation_artifact "${diff_content}"
+          aegis_log "Aider mutation substrate completed (mechanical)"
+          return 0
+        fi
       fi
       aegis_warn "mechanical_fast_path_preflight_failed — re-apply mechanical (prefer Briefing fidelity over 8B rewrite)"
       # Preflight may have rolled back the surface. Re-materialize, then prefer
@@ -296,10 +305,19 @@ main() {
         diff_content="$(capture_worktree_diff)"
         if [[ -n "${diff_content}" ]] \
           && assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
-          aegis_log "mechanical_isolated_tsc_ok: emitting without aider (quality-first)"
-          emit_mutation_artifact "${diff_content}"
-          aegis_log "Aider mutation substrate completed (mechanical isolated)"
-          return 0
+          if declare -f aegis_mechanical_shape_gate >/dev/null 2>&1 \
+            && ! aegis_mechanical_shape_gate \
+              "${AEGIS_INVESTIGATION_INPUT}" \
+              "${_surface_root}" \
+              "${mutation_targets[@]:-}"; then
+            aegis_warn "mechanical_shape_gate_failed after isolated tsc — not emitting"
+          else
+            aegis_log "mechanical_shape_gate: ok"
+            aegis_log "mechanical_isolated_tsc_ok: emitting without aider (quality-first)"
+            emit_mutation_artifact "${diff_content}"
+            aegis_log "Aider mutation substrate completed (mechanical isolated)"
+            return 0
+          fi
         fi
       fi
       aegis_warn "mechanical_isolated_tsc_failed — falling through to aider refine"
@@ -423,6 +441,18 @@ main() {
       "${resolved_edit_format}" \
       "${mutation_targets[@]:-}"
   )"
+
+  # Fail-closed: Acceptance top-level exports + smoke import must hold after
+  # aider/preflight too (method-only poison must not promote).
+  if declare -f aegis_mechanical_shape_gate >/dev/null 2>&1; then
+    if ! aegis_mechanical_shape_gate \
+      "${AEGIS_INVESTIGATION_INPUT}" \
+      "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
+      "${mutation_targets[@]:-}"; then
+      aegis_fatal "shape_gate_failed: acceptance exports missing or smoke failed"
+    fi
+    aegis_log "mechanical_shape_gate: ok (post-aider)"
+  fi
 
   aegis_log "Emitting mutation artifact..."
   emit_mutation_artifact "${diff_content}"

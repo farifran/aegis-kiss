@@ -2103,6 +2103,150 @@ aegis_mechanical_ts_enrich_update_semantics() {
   '
 }
 
+# Fail-closed shape gate for mechanical (and quality-first) candidates.
+# Sensor: Acceptance exports must be top-level bindings in the corpus, and
+# Node must load each non-noise target and resolve those names.
+#
+# Args: demand_text, surface_root, path1 [path2...]
+# Exit 0 = ok; 1 = fail (reasons on stderr).
+# Disable: AEGIS_MECHANICAL_SHAPE_GATE=0
+aegis_mechanical_shape_gate() {
+  local demand="${1-}"
+  local root="${2-}"
+  shift 2 || true
+  local -a paths=("$@")
+
+  case "${AEGIS_MECHANICAL_SHAPE_GATE:-1}" in
+    0|false|no) return 0 ;;
+  esac
+
+  [[ -n "${demand}" && -n "${root}" ]] || {
+    printf 'shape_gate: missing_demand_or_root\n' >&2
+    return 1
+  }
+  [[ "${#paths[@]}" -gt 0 ]] || {
+    printf 'shape_gate: no_paths\n' >&2
+    return 1
+  }
+
+  local corpus="" p abs
+  for p in "${paths[@]}"; do
+    [[ -n "${p}" ]] || continue
+    abs="${root%/}/${p#./}"
+    [[ -f "${abs}" ]] || {
+      printf 'shape_gate: missing_file:%s\n' "${p}" >&2
+      return 1
+    }
+    corpus+="$(cat "${abs}" 2>/dev/null || true)"$'\n'
+  done
+
+  # 1) Static: every ## Acceptance token (except path noise) must be a
+  # TOP-LEVEL export. Stricter than general acceptance_missing — listed
+  # Acceptance items are the public surface for shape purposes (blocks
+  # method-only poison for camelCase names like obterEstadoBitmask).
+  local names=()
+  local tok missing_nl=""
+  while IFS= read -r tok; do
+    [[ -n "${tok}" ]] || continue
+    aegis_acceptance_token_is_path_noise "${tok}" 2>/dev/null && continue
+    names+=("${tok}")
+    if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
+      if printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+        missing_nl+="${tok}|not_exported"$'\n'
+      else
+        missing_nl+="${tok}|absent"$'\n'
+      fi
+    fi
+  done < <(
+    printf '%s\n' "${demand}" \
+      | awk '/^## Acceptance[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+      | awk 'NF && !seen[$0]++' || true
+  )
+  if [[ -n "$(printf '%s' "${missing_nl}" | tr -d '[:space:]')" ]]; then
+    printf 'shape_gate: acceptance_export_missing:\n%s' "${missing_nl}" >&2
+    return 1
+  fi
+
+  # 2) Runtime smoke: import each loadable target; assert Acceptance names exist.
+  command -v node >/dev/null 2>&1 || return 0
+
+  [[ "${#names[@]}" -gt 0 ]] || return 0
+
+  local strip=0
+  if node --experimental-strip-types -e '1' >/dev/null 2>&1; then
+    strip=1
+  fi
+
+  # NodeNext .js → .ts symlinks for smoke only.
+  local -a _links=()
+  local _ts _js
+  while IFS= read -r _ts; do
+    [[ -n "${_ts}" ]] || continue
+    _js="${_ts%.ts}.js"
+    if [[ ! -e "${root%/}/${_js}" && -f "${root%/}/${_ts}" ]]; then
+      if ln -s "$(basename "${_ts}")" "${root%/}/${_js}" 2>/dev/null; then
+        _links+=("${root%/}/${_js}")
+      fi
+    fi
+  done < <(
+    (cd "${root}" && find . -name '*.ts' ! -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||') || true
+  )
+
+  local names_csv
+  names_csv="$(printf '%s,' "${names[@]}" | sed 's/,$//')"
+  local fail=0
+  for p in "${paths[@]}"; do
+    [[ -n "${p}" ]] || continue
+    case "${p}" in
+      *.ts|*.tsx)
+        [[ "${strip}" -eq 1 ]] || continue
+        ;;
+      *.js|*.mjs|*.cjs) ;;
+      *) continue ;;
+    esac
+    abs="${root%/}/${p#./}"
+    local node_args=(node)
+    [[ "${p}" == *.ts || "${p}" == *.tsx ]] && node_args+=(--experimental-strip-types)
+    local out rc=0
+    out="$(
+      cd "${root}" || exit 97
+      "${node_args[@]}" --input-type=module -e '
+import { pathToFileURL } from "node:url";
+const target = process.argv[1];
+const want = (process.argv[2] || "").split(",").filter(Boolean);
+import(pathToFileURL(target).href).then((mod) => {
+  const missing = [];
+  for (const n of want) {
+    if (!(n in mod) || mod[n] === undefined) missing.push(n);
+  }
+  if (missing.length) {
+    console.error("missing_exports:" + missing.join(","));
+    process.exit(2);
+  }
+  process.exit(0);
+}).catch((e) => {
+  console.error(e && e.stack ? e.stack : String(e));
+  process.exit(1);
+});
+      ' "${abs}" "${names_csv}" 2>&1
+    )" || rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
+      fail=1
+      printf 'shape_gate: smoke_failed:%s rc=%s\n%s\n' "${p}" "${rc}" "$(printf '%s' "${out}" | head -n 15)" >&2
+    fi
+  done
+
+  local _l
+  for _l in "${_links[@]+"${_links[@]}"}"; do
+    [[ -L "${_l}" ]] && rm -f "${_l}" 2>/dev/null || true
+  done
+
+  [[ "${fail}" -eq 0 ]] || return 1
+  return 0
+}
+
 # Minimal type-safe rewrites only. Quality rule: do NOT invent Number(timeDiff)
 # when the body still uses `> 0n` / bigint products — that broke good Briefings
 # (sensor: product code quality, not wall-clock).

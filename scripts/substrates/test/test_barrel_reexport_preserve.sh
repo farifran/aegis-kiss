@@ -282,4 +282,47 @@ aegis_demand_is_export_function_slice "${class_demand}" \
 ) || fail "mechanical export class create failed: $(cat "${repo}/src/tokenBucket.ts" 2>/dev/null)"
 rm -rf "${repo}"
 
-echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge + function append + class create"
+# --- shape gate: top-level export + smoke ---
+repo="$(mktemp -d)"
+git -C "${repo}" init --quiet
+git -C "${repo}" config user.email "test@aegis.local"
+git -C "${repo}" config user.name "Aegis Test"
+mkdir -p "${repo}/src"
+cat > "${repo}/src/tokenBucket.ts" <<'EOF'
+export class TokenBucket {
+  private n: bigint = 0n
+  get tokens(): bigint { return this.n }
+  get refillActive(): boolean { return false }
+}
+export function obterEstadoBitmask(bucket: TokenBucket): number {
+  let m = 0
+  if (bucket.tokens === 0n) m |= 1
+  if (bucket.refillActive) m |= 2
+  return m
+}
+EOF
+shape_demand="$(cat <<'EOF'
+## Acceptance
+- TokenBucket
+- obterEstadoBitmask
+EOF
+)"
+(
+  cd "${repo}" || exit 1
+  export AEGIS_MECHANICAL_SHAPE_GATE=1
+  aegis_mechanical_shape_gate "${shape_demand}" "${repo}" "src/tokenBucket.ts" \
+    || exit 1
+  # method-only poison must fail (static export shape)
+  cat > src/tokenBucket.ts <<'EOF'
+export class TokenBucket {
+  obterEstadoBitmask(): number { return 0 }
+}
+EOF
+  if aegis_mechanical_shape_gate "${shape_demand}" "${repo}" "src/tokenBucket.ts" 2>/dev/null; then
+    exit 1
+  fi
+  exit 0
+) || fail "shape_gate checks failed"
+rm -rf "${repo}"
+
+echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge + function append + class create + shape gate"
