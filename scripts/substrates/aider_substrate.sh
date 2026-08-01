@@ -153,7 +153,8 @@ main() {
   resolved_edit_format="$(resolve_aider_edit_format "${mutation_targets[@]:-}")"
 
   # -------------------------------------------------------
-  # Mechanical fast paths (no LLM) — reexport + export_slice function
+  # Mechanical fast paths (no LLM):
+  #   reexport | export_slice class create | export_slice function append
   # -------------------------------------------------------
   local _mech_ok=0 _mt _surface_root
   _surface_root="${AEGIS_EXECUTION_SURFACE_PATH:-.}"
@@ -181,7 +182,27 @@ main() {
     done
   fi
 
-  # 2) export_slice function on an existing module: append TS from Briefing.
+  # 2) export_slice class: materialize Briefing → export class (net-new file).
+  if [[ "${_mech_ok}" -eq 0 ]] \
+    && declare -f aegis_mechanical_export_class_create >/dev/null 2>&1 \
+    && declare -f aegis_demand_is_export_class_slice >/dev/null 2>&1 \
+    && aegis_demand_is_export_class_slice "${AEGIS_INVESTIGATION_INPUT:-}"; then
+    for _mt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_mt}" ]] || continue
+      case "${_mt}" in
+        src/index.ts|*/index.ts|index.ts) continue ;;
+      esac
+      if aegis_mechanical_export_class_create \
+        "${_mt}" \
+        "${AEGIS_INVESTIGATION_INPUT}" \
+        "${_surface_root}"; then
+        _mech_ok=1
+        aegis_log "mechanical_export_class: wrote ${_mt} (no aider)"
+      fi
+    done
+  fi
+
+  # 3) export_slice function on an existing module: append TS from Briefing.
   if [[ "${_mech_ok}" -eq 0 ]] \
     && declare -f aegis_mechanical_export_function_append >/dev/null 2>&1 \
     && declare -f aegis_demand_is_export_function_slice >/dev/null 2>&1 \

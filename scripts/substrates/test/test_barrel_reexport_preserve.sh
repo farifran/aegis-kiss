@@ -229,4 +229,57 @@ export TokenBucket only
 
 rm -rf "${repo}"
 
-echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge + function append"
+# --- export_slice class create from Briefing (net-new) ---
+repo="$(mktemp -d)"
+git -C "${repo}" init --quiet
+git -C "${repo}" config user.email "test@aegis.local"
+git -C "${repo}" config user.name "Aegis Test"
+git -C "${repo}" commit --allow-empty --quiet -m "empty"
+class_demand="$(cat <<'EOF'
+## Goal
+export TokenBucket only
+
+## Targets
+- src/tokenBucket.ts
+
+## Change
+- Scope note: export_slice:TokenBucket
+
+## Briefing
+1) export class TokenBucket:
+   Campos privados: _tokens: bigint, _maxTokens: bigint
+   constructor(maxBytes: bigint, mbps: number):
+     this._maxTokens = maxBytes * 8n
+     this._tokens = this._maxTokens
+   consume(bits: bigint): boolean:
+     if (this._tokens >= bits) { this._tokens -= bits; return true }
+     return false
+   get tokens(): bigint { return this._tokens }
+
+## Acceptance
+- TokenBucket
+EOF
+)"
+aegis_demand_is_export_class_slice "${class_demand}" \
+  || fail "should detect export class slice"
+aegis_demand_is_export_function_slice "${class_demand}" \
+  && fail "class slice must not be function slice"
+(
+  cd "${repo}" || exit 1
+  export AEGIS_REPO_ROOT="${repo}"
+  export AEGIS_EXECUTION_SURFACE_PATH="${repo}"
+  aegis_mechanical_export_class_create "src/tokenBucket.ts" "${class_demand}" "${repo}" \
+    || exit 1
+  grep -q 'export class TokenBucket' src/tokenBucket.ts || exit 1
+  grep -q 'private _tokens: bigint' src/tokenBucket.ts || exit 1
+  grep -q 'constructor(maxBytes: bigint, mbps: number)' src/tokenBucket.ts || exit 1
+  grep -q 'consume(bits: bigint): boolean' src/tokenBucket.ts || exit 1
+  # second create is no-op (already exported)
+  if aegis_mechanical_export_class_create "src/tokenBucket.ts" "${class_demand}" "${repo}"; then
+    exit 1
+  fi
+  exit 0
+) || fail "mechanical export class create failed: $(cat "${repo}/src/tokenBucket.ts" 2>/dev/null)"
+rm -rf "${repo}"
+
+echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge + function append + class create"

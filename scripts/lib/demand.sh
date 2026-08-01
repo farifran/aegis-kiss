@@ -1849,6 +1849,193 @@ aegis_mechanical_export_function_append() {
   return 0
 }
 
+# True when this micro is create/export one class from Briefing (not function slice).
+aegis_demand_is_export_class_slice() {
+  local text="${1-}"
+  local name
+  name="$(aegis_demand_export_slice_name "${text}")"
+  [[ -n "${name}" ]] || {
+    local n_acc
+    n_acc="$(aegis_demand_acceptance_names "${text}" | grep -c . || true)"
+    n_acc="${n_acc//[^0-9]/}"
+    [[ "${n_acc:-0}" -eq 1 ]] || return 1
+    name="$(aegis_demand_acceptance_names "${text}" | head -1)"
+  }
+  [[ -n "${name}" ]] || return 1
+  printf '%s\n' "${text}" \
+    | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+    | grep -qE "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)" \
+    || return 1
+  # Function-only slices are handled elsewhere.
+  if printf '%s\n' "${text}" \
+    | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+    | grep -qE "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)"; then
+    return 1
+  fi
+  return 0
+}
+
+# Convert ## Briefing export-class block into TypeScript source.
+# Args: demand_text, class_name
+aegis_briefing_class_to_ts() {
+  local text="${1-}"
+  local name="${2-}"
+  [[ -n "${name}" ]] || return 1
+  local briefing block
+  briefing="$(
+    printf '%s\n' "${text}" \
+      | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p'
+  )"
+  block="$(
+    printf '%s\n' "${briefing}" | awk -v name="${name}" '
+      BEGIN { keep=0 }
+      /^[0-9]+\)/ {
+        if ($0 ~ ("export[[:space:]]+class[[:space:]]+" name "([^A-Za-z0-9_]|$)")) {
+          keep=1
+        } else { keep=0 }
+        if (keep) print
+        next
+      }
+      /^Em[[:space:]]+/ { keep=0; next }
+      keep { print }
+    '
+  )"
+  [[ -n "$(printf '%s' "${block}" | tr -d '[:space:]')" ]] || return 1
+
+  # Deterministic pseudo-Briefing → TS class. Handles:
+  #   Campos privados: _a: bigint, _b: number
+  #   constructor(...): body lines
+  #   method(...): ret: body lines
+  #   get x(): T { return ... }  (already braced)
+  printf '%s\n' "${block}" | awk -v name="${name}" '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function emit_close() {
+      if (in_ctor || in_method) {
+        print "  }"
+        in_ctor = 0
+        in_method = 0
+      }
+    }
+    BEGIN {
+      print "export class " name " {"
+      opened = 1
+      in_ctor = 0
+      in_method = 0
+    }
+    /^[0-9]+\)/ { next }
+    {
+      line = $0
+      # Private fields declaration line
+      if (line ~ /Campos privados:/) {
+        emit_close()
+        sub(/.*Campos privados:[[:space:]]*/, "", line)
+        n = split(line, parts, /,[[:space:]]*/)
+        for (i = 1; i <= n; i++) {
+          f = trim(parts[i])
+          if (f == "") continue
+          print "  private " f ";"
+        }
+        next
+      }
+      # Getter already fully braced on one line
+      if (line ~ /^[[:space:]]*get[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)/) {
+        emit_close()
+        sub(/^[[:space:]]+/, "", line)
+        # ensure ends with }
+        if (line ~ /\{/ && line ~ /\}/) {
+          print "  " line
+        } else {
+          # get tokens(): bigint { return this._tokens }
+          sub(/:[[:space:]]*$/, "", line)
+          print "  " line
+        }
+        next
+      }
+      # constructor(...)
+      if (line ~ /^[[:space:]]*constructor[[:space:]]*\(/) {
+        emit_close()
+        sub(/^[[:space:]]+/, "", line)
+        sub(/:[[:space:]]*$/, "", line)
+        print "  " line " {"
+        in_ctor = 1
+        in_method = 0
+        next
+      }
+      # method(...): ret:   or method(): void:
+      if (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)[[:space:]]*:/) {
+        emit_close()
+        sub(/^[[:space:]]+/, "", line)
+        # strip trailing colon after return type
+        sub(/:[[:space:]]*$/, "", line)
+        print "  " line " {"
+        in_method = 1
+        in_ctor = 0
+        next
+      }
+      # body lines inside ctor/method
+      if (in_ctor || in_method) {
+        sub(/^[[:space:]]+/, "", line)
+        if (line != "") print "    " line
+        next
+      }
+    }
+    END {
+      emit_close()
+      if (opened) print "}"
+    }
+  '
+}
+
+# Create net-new module with export class from Briefing (export_slice class).
+# Args: rel_path, demand_text [, surface_root]
+# Exit 0 if wrote; 1 if skip (file already has content / not class slice / no briefing).
+aegis_mechanical_export_class_create() {
+  local rel="${1-}"
+  local demand="${2-}"
+  local root="${3:-${AEGIS_EXECUTION_SURFACE_PATH:-.}}"
+  local surface name ts body names
+
+  [[ -n "${rel}" ]] || return 1
+  aegis_demand_is_export_class_slice "${demand}" || return 1
+
+  name="$(aegis_demand_export_slice_name "${demand}")"
+  [[ -n "${name}" ]] || name="$(aegis_demand_acceptance_names "${demand}" | head -1)"
+  [[ -n "${name}" ]] || return 1
+
+  surface="${root%/}/${rel}"
+  mkdir -p "$(dirname "${surface}")"
+
+  # Only net-new / empty (or seed comment). Never overwrite real module body.
+  if [[ -f "${surface}" ]]; then
+    body="$(cat "${surface}" 2>/dev/null || true)"
+    body="$(aegis_strip_aider_whole_file_junk "${body}")"
+    names="$(aegis_file_top_level_export_names "${body}")"
+    if printf '%s\n' "${names}" | grep -Fxq -- "${name}"; then
+      return 1
+    fi
+    # Non-empty with other code but missing class — skip (unsafe to invent merge).
+    if [[ -n "$(printf '%s' "${body}" | tr -d '[:space:]/')" ]]; then
+      # allow only trivial seed "// path"
+      if ! printf '%s' "${body}" | grep -qE '^[[:space:]]*//'; then
+        return 1
+      fi
+      if printf '%s' "${body}" | grep -qE 'class |function |const |let |var '; then
+        return 1
+      fi
+    fi
+  fi
+
+  ts="$(aegis_briefing_class_to_ts "${demand}" "${name}")" || return 1
+  [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
+
+  printf '%s\n' "${ts}" > "${surface}"
+  return 0
+}
+
 # CamelCase / snake_case → lower tokens (one per line) for export↔demand match.
 aegis_split_ident_tokens() {
   local name="${1-}"
