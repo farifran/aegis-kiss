@@ -112,4 +112,111 @@ EOF
 
 rm -rf "${repo}"
 
-echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge"
+# --- empty HEAD reexport (force=1) ---
+repo="$(mktemp -d)"
+git -C "${repo}" init --quiet
+git -C "${repo}" config user.email "test@aegis.local"
+git -C "${repo}" config user.name "Aegis Test"
+mkdir -p "${repo}/src"
+# no index.ts on HEAD
+git -C "${repo}" commit --allow-empty --quiet -m "empty"
+(
+  cd "${repo}" || exit 1
+  export AEGIS_REPO_ROOT="${repo}"
+  export AEGIS_EXECUTION_SURFACE_PATH="${repo}"
+  mkdir -p src
+  aegis_mechanical_barrel_reexport_apply "src/index.ts" "${demand}" "${repo}" "1" \
+    || exit 1
+  grep -q "from './tokenBucket.js'" src/index.ts || exit 1
+  grep -q 'TokenBucket' src/index.ts || exit 1
+  grep -q 'obterEstadoBitmask' src/index.ts || exit 1
+  exit 0
+) || fail "force reexport on empty HEAD failed: $(cat "${repo}/src/index.ts" 2>/dev/null)"
+rm -rf "${repo}"
+
+# --- junk strip ---
+junked="$(cat <<'EOF'
+// entire file content ...
+export class Foo {}
+// ... goes in between
+export function bar() { return 1 }
+// ...
+EOF
+)"
+clean="$(aegis_strip_aider_whole_file_junk "${junked}")"
+printf '%s' "${clean}" | grep -q 'entire file content' && fail "junk strip left entire file content"
+printf '%s' "${clean}" | grep -q 'goes in between' && fail "junk strip left goes in between"
+printf '%s' "${clean}" | grep -q 'export class Foo' || fail "junk strip ate class"
+printf '%s' "${clean}" | grep -q 'export function bar' || fail "junk strip ate function"
+
+# --- export_slice function append ---
+repo="$(mktemp -d)"
+git -C "${repo}" init --quiet
+git -C "${repo}" config user.email "test@aegis.local"
+git -C "${repo}" config user.name "Aegis Test"
+mkdir -p "${repo}/src"
+cat > "${repo}/src/tokenBucket.ts" <<'EOF'
+// entire file content ...
+export class TokenBucket {
+  private _tokens: bigint = 0n;
+  get tokens(): bigint { return this._tokens }
+  get refillActive(): boolean { return false }
+}
+EOF
+git -C "${repo}" add -A
+git -C "${repo}" commit --quiet -m "class only"
+
+fn_demand="$(cat <<'EOF'
+## Goal
+export obterEstadoBitmask only
+
+## Targets
+- src/tokenBucket.ts
+
+## Change
+- Scope note: export_slice:obterEstadoBitmask
+- Export only top-level obterEstadoBitmask
+
+## Briefing
+2) export function obterEstadoBitmask(bucket: TokenBucket): number:
+     let mask = 0
+     if (bucket.tokens === 0n) { mask |= 1 }
+     if (bucket.refillActive) { mask |= 2 }
+     return mask
+
+## Acceptance
+- obterEstadoBitmask
+EOF
+)"
+
+aegis_demand_is_export_function_slice "${fn_demand}" \
+  || fail "should detect export function slice"
+aegis_demand_is_export_function_slice "## Goal
+export TokenBucket only
+## Briefing
+1) export class TokenBucket:
+   constructor(): this._x = 0n
+## Acceptance
+- TokenBucket
+" && fail "class slice must not be function slice"
+
+(
+  cd "${repo}" || exit 1
+  export AEGIS_REPO_ROOT="${repo}"
+  export AEGIS_EXECUTION_SURFACE_PATH="${repo}"
+  aegis_mechanical_export_function_append "src/tokenBucket.ts" "${fn_demand}" "${repo}" \
+    || exit 1
+  grep -q 'export function obterEstadoBitmask' src/tokenBucket.ts || exit 1
+  grep -q 'export class TokenBucket' src/tokenBucket.ts || exit 1
+  grep -q 'mask |= 1' src/tokenBucket.ts || exit 1
+  grep -q 'entire file content' src/tokenBucket.ts && exit 1
+  # second append is no-op
+  if aegis_mechanical_export_function_append "src/tokenBucket.ts" "${fn_demand}" "${repo}"; then
+    exit 1
+  fi
+  exit 0
+) || fail "mechanical export function append failed: $(cat "${repo}/src/tokenBucket.ts")"
+
+rm -rf "${repo}"
+
+echo "[AEGIS][TEST][PASS] barrel reexport preserve: detect deletion + mechanical merge + function append"

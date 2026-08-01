@@ -152,6 +152,86 @@ main() {
   local resolved_edit_format
   resolved_edit_format="$(resolve_aider_edit_format "${mutation_targets[@]:-}")"
 
+  # -------------------------------------------------------
+  # Mechanical fast paths (no LLM) — reexport + export_slice function
+  # -------------------------------------------------------
+  local _mech_ok=0 _mt _surface_root
+  _surface_root="${AEGIS_EXECUTION_SURFACE_PATH:-.}"
+
+  # 1) Pure barrel reexport: HEAD(+empty) + additive import/export.
+  if [[ "${_mech_ok}" -eq 0 ]] \
+    && declare -f aegis_demand_is_reexport_preserve >/dev/null 2>&1 \
+    && declare -f aegis_mechanical_barrel_reexport_apply >/dev/null 2>&1 \
+    && aegis_demand_is_reexport_preserve "${AEGIS_INVESTIGATION_INPUT:-}"; then
+    for _mt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_mt}" ]] || continue
+      if aegis_mechanical_barrel_reexport_apply \
+        "${_mt}" \
+        "${AEGIS_INVESTIGATION_INPUT}" \
+        "${_surface_root}" \
+        "1"; then
+        _mech_ok=1
+        aegis_log "mechanical_reexport: wrote ${_mt} (no aider)"
+      fi
+    done
+  fi
+
+  # 2) export_slice function on an existing module: append TS from Briefing.
+  if [[ "${_mech_ok}" -eq 0 ]] \
+    && declare -f aegis_mechanical_export_function_append >/dev/null 2>&1 \
+    && declare -f aegis_demand_is_export_function_slice >/dev/null 2>&1 \
+    && aegis_demand_is_export_function_slice "${AEGIS_INVESTIGATION_INPUT:-}"; then
+    for _mt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_mt}" ]] || continue
+      if aegis_mechanical_export_function_append \
+        "${_mt}" \
+        "${AEGIS_INVESTIGATION_INPUT}" \
+        "${_surface_root}"; then
+        _mech_ok=1
+        aegis_log "mechanical_export_function: appended on ${_mt} (no aider)"
+      fi
+    done
+  fi
+
+  if [[ "${_mech_ok}" -eq 1 ]]; then
+    # Register net-new paths for diff capture.
+    for _mt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_mt}" && -f "${_surface_root}/${_mt}" ]] || continue
+      git --git-dir="${AEGIS_MUTATION_GIT_DIR}" \
+        --work-tree="${_surface_root}" \
+        add --intent-to-add -- "${_mt}" >/dev/null 2>&1 || true
+    done
+    diff_content="$(capture_worktree_diff)"
+    if [[ -z "${diff_content}" ]]; then
+      aegis_warn "mechanical_fast_path_empty_diff — falling through to aider"
+      _mech_ok=0
+    elif ! assert_mutation_diff_scope "${diff_content}" "${mutation_targets[@]:-}"; then
+      aegis_warn "mechanical_fast_path_scope — falling through to aider"
+      _mech_ok=0
+    else
+      # Tools preflight only; on failure fall through so aider can refine.
+      local _pf_rc=0
+      set +e
+      diff_content="$(
+        AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS=0 \
+        AEGIS_MUTATION_INTENT_FIX_ATTEMPTS=0 \
+          run_mutation_preflight_with_fix_attempts \
+            "${resolved_edit_format}" \
+            "${mutation_targets[@]:-}"
+      )"
+      _pf_rc=$?
+      set -e
+      if [[ "${_pf_rc}" -eq 0 && -n "${diff_content}" ]]; then
+        aegis_log "Emitting mutation artifact (mechanical fast path)..."
+        emit_mutation_artifact "${diff_content}"
+        aegis_log "Aider mutation substrate completed (mechanical)"
+        return 0
+      fi
+      aegis_warn "mechanical_fast_path_preflight_failed — falling through to aider"
+      _mech_ok=0
+    fi
+  fi
+
   local prompt_file
   prompt_file="$(aider_mktemp)"
   export AEGIS_CURRENT_PROMPT_FILE="${prompt_file}"
@@ -161,6 +241,14 @@ main() {
     "${prompt_file}" "${resolved_edit_format}" "${mutation_targets[@]:-}"
   rm -f "${prompt_file}" 2>/dev/null || true
   unset AEGIS_CURRENT_PROMPT_FILE 2>/dev/null || true
+
+  # Strip whole-format junk comments the 8B leaves on authorized files.
+  if declare -f aegis_strip_aider_whole_file_junk_path >/dev/null 2>&1; then
+    for _mt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_mt}" ]] || continue
+      aegis_strip_aider_whole_file_junk_path "${_surface_root}/${_mt}" 2>/dev/null || true
+    done
+  fi
 
   aegis_log "Capturing worktree diff..."
 
@@ -225,12 +313,28 @@ main() {
       if aegis_mechanical_barrel_reexport_apply \
         "${_rt}" \
         "${AEGIS_INVESTIGATION_INPUT}" \
-        "${AEGIS_EXECUTION_SURFACE_PATH:-.}"; then
+        "${AEGIS_EXECUTION_SURFACE_PATH:-.}" \
+        "1"; then
         _merged=1
         aegis_warn "barrel_reexport_preserve: restored HEAD exports on ${_rt} + additive reexport"
       fi
     done
     if [[ "${_merged}" -eq 1 ]]; then
+      diff_content="$(capture_worktree_diff)"
+    fi
+  fi
+
+  # Always scrub whole-format junk before preflight/artifact.
+  if declare -f aegis_strip_aider_whole_file_junk_path >/dev/null 2>&1; then
+    local _scrub=0
+    for _rt in "${mutation_targets[@]:-}"; do
+      [[ -n "${_rt}" ]] || continue
+      if aegis_strip_aider_whole_file_junk_path \
+        "${AEGIS_EXECUTION_SURFACE_PATH:-.}/${_rt}" 2>/dev/null; then
+        _scrub=1
+      fi
+    done
+    if [[ "${_scrub}" -eq 1 ]]; then
       diff_content="$(capture_worktree_diff)"
     fi
   fi

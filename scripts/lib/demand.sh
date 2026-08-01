@@ -1562,12 +1562,14 @@ aegis_demand_acceptance_names() {
 
 # Mechanical barrel merge for reexport units: start from HEAD content, ensure
 # import + export of Acceptance names, never drop pre-existing exports.
-# Args: rel_path, demand_text [, surface_root]
+# Args: rel_path, demand_text [, surface_root] [, force]
+#   force=1 → always write (reexport-only fast path; works with empty HEAD).
 # Writes surface file; exit 0 if rewritten, 1 if no-op/skip.
 aegis_mechanical_barrel_reexport_apply() {
   local rel="${1-}"
   local demand="${2-}"
   local root="${3:-${AEGIS_EXECUTION_SURFACE_PATH:-.}}"
+  local force="${4:-0}"
   local surface head_body cur_body acc_names missing head_names cur_names
   local import_from import_line export_line name list
 
@@ -1582,7 +1584,12 @@ aegis_mechanical_barrel_reexport_apply() {
     git_root="${root}"
   fi
   head_body="$(git -C "${git_root}" show "HEAD:${rel}" 2>/dev/null || true)"
-  [[ -n "$(printf '%s' "${head_body}" | tr -d '[:space:]')" ]] || return 1
+  local head_empty=0
+  if [[ -z "$(printf '%s' "${head_body}" | tr -d '[:space:]')" ]]; then
+    head_empty=1
+    [[ "${force}" == "1" ]] || return 1
+    head_body="// ${rel}"
+  fi
 
   cur_body=""
   [[ -f "${surface}" ]] && cur_body="$(cat "${surface}" 2>/dev/null || true)"
@@ -1608,7 +1615,14 @@ aegis_mechanical_barrel_reexport_apply() {
     fi
   done <<< "${acc_names}"
 
-  if [[ -z "$(printf '%s' "${missing}" | tr -d '[:space:]')" && "${need_reexport}" -eq 0 ]]; then
+  if [[ "${force}" != "1" ]] \
+    && [[ -z "$(printf '%s' "${missing}" | tr -d '[:space:]')" && "${need_reexport}" -eq 0 ]]; then
+    return 1
+  fi
+  # force=1 still skips if surface already matches desired HEAD+reexport shape
+  # and acceptance names are present (no work).
+  if [[ "${force}" == "1" && "${head_empty}" -eq 0 && "${need_reexport}" -eq 0 ]] \
+    && [[ -z "$(printf '%s' "${missing}" | tr -d '[:space:]')" ]]; then
     return 1
   fi
 
@@ -1620,7 +1634,19 @@ aegis_mechanical_barrel_reexport_apply() {
       | sed -E "s/from ['\"]([^'\"]+)['\"]/\\1/" \
       || true
   )"
-  [[ -n "${import_from}" ]] || import_from="./tokenBucket.js"
+  if [[ -z "${import_from}" ]]; then
+    # Sibling module from Acceptance / Targets (tokenBucket → ./tokenBucket.js).
+    local sib
+    sib="$(
+      printf '%s\n' "${demand}" \
+        | grep -oE 'src/[A-Za-z0-9_./-]+\.ts' \
+        | grep -v 'index\.ts' \
+        | head -1 \
+        | sed -E 's|^src/|./|; s|\.ts$|.js|' \
+        || true
+    )"
+    import_from="${sib:-./tokenBucket.js}"
+  fi
 
   list="$(
     printf '%s\n' "${acc_names}" | awk 'NF && !seen[$0]++' | paste -sd',' - | sed 's/,/, /g'
@@ -1639,12 +1665,174 @@ aegis_mechanical_barrel_reexport_apply() {
       { print }
     '
   )"
-  # Strip trailing blank lines, then append reexport pair once.
+  # Strip aider whole-file junk and trailing blank lines.
+  rebuilt="$(aegis_strip_aider_whole_file_junk "${rebuilt}")"
   while [[ "${rebuilt}" == *$'\n\n' ]]; do
     rebuilt="${rebuilt%$'\n'}"
   done
-  printf '%s\n\n%s\n%s\n' "${rebuilt}" "${import_line}" "${export_line}" > "${surface}"
+  # Empty-HEAD seed is just a comment — replace with clean barrel.
+  if [[ "${head_empty}" -eq 1 ]]; then
+    printf '%s\n%s\n%s\n' "// ${rel}" "${import_line}" "${export_line}" > "${surface}"
+  else
+    printf '%s\n\n%s\n%s\n' "${rebuilt}" "${import_line}" "${export_line}" > "${surface}"
+  fi
 
+  return 0
+}
+
+# Strip aider "whole" format noise that models leave as comments.
+aegis_strip_aider_whole_file_junk() {
+  local body="${1-}"
+  printf '%s\n' "${body}" | awk '
+    /^[[:space:]]*\/\/[[:space:]]*entire file content/ { next }
+    /^[[:space:]]*\/\/[[:space:]]*\.\.\.[[:space:]]*goes in between/ { next }
+    /^[[:space:]]*\/\/[[:space:]]*\.\.\.[[:space:]]*$/ { next }
+    { print }
+  '
+}
+
+# Apply junk strip to a surface file in place. Exit 0 if file changed.
+aegis_strip_aider_whole_file_junk_path() {
+  local path="${1-}"
+  [[ -n "${path}" && -f "${path}" ]] || return 1
+  local before after
+  before="$(cat "${path}")"
+  after="$(aegis_strip_aider_whole_file_junk "${before}")"
+  [[ "${before}" != "${after}" ]] || return 1
+  printf '%s\n' "${after}" > "${path}"
+  return 0
+}
+
+# export_slice name from demand (Scope note / Change), if any.
+aegis_demand_export_slice_name() {
+  local text="${1-}"
+  printf '%s\n' "${text}" \
+    | grep -oE 'export_slice:[A-Za-z_][A-Za-z0-9_]*' \
+    | head -1 \
+    | sed -E 's/^export_slice://' \
+    || true
+}
+
+# True when this micro is "add one top-level export function" (not class create).
+aegis_demand_is_export_function_slice() {
+  local text="${1-}"
+  local name
+  name="$(aegis_demand_export_slice_name "${text}")"
+  [[ -n "${name}" ]] || {
+    # Fallback: single Acceptance + briefing export function
+    local n_acc
+    n_acc="$(aegis_demand_acceptance_names "${text}" | grep -c . || true)"
+    n_acc="${n_acc//[^0-9]/}"
+    [[ "${n_acc:-0}" -eq 1 ]] || return 1
+    name="$(aegis_demand_acceptance_names "${text}" | head -1)"
+  }
+  [[ -n "${name}" ]] || return 1
+  # Briefing must declare export function Name (not only class).
+  printf '%s\n' "${text}" \
+    | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+    | grep -qE "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)" \
+    || return 1
+  # Prefer not to treat pure class slices as function append.
+  if printf '%s\n' "${text}" \
+    | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
+    | grep -qE "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)"; then
+    return 1
+  fi
+  return 0
+}
+
+# Convert a single ## Briefing export-function block into TS source.
+# Args: demand_text, function_name
+aegis_briefing_function_to_ts() {
+  local text="${1-}"
+  local name="${2-}"
+  [[ -n "${name}" ]] || return 1
+  local briefing
+  briefing="$(
+    printf '%s\n' "${text}" \
+      | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p'
+  )"
+  # Prefer numbered item that declares export function Name.
+  local block
+  block="$(
+    printf '%s\n' "${briefing}" | awk -v name="${name}" '
+      BEGIN { keep=0 }
+      /^[0-9]+\)/ {
+        if ($0 ~ ("export[[:space:]]+function[[:space:]]+" name "([^A-Za-z0-9_]|$)")) {
+          keep=1
+        } else { keep=0 }
+        if (keep) print
+        next
+      }
+      /^Em[[:space:]]+/ { keep=0; next }
+      keep { print }
+    '
+  )"
+  [[ -n "$(printf '%s' "${block}" | tr -d '[:space:]')" ]] || return 1
+
+  printf '%s\n' "${block}" | awk -v name="${name}" '
+    BEGIN { in_body=0; opened=0 }
+    /^[0-9]+\)/ {
+      # 2) export function foo(a: T): number:
+      line=$0
+      sub(/^[0-9]+\)[[:space:]]*/, "", line)
+      sub(/:[[:space:]]*$/, "", line)
+      if (line ~ /^export[[:space:]]+function/) {
+        print line " {"
+        opened=1
+        in_body=1
+      }
+      next
+    }
+    in_body {
+      # Briefing body is indented with spaces; keep as method body.
+      sub(/^[[:space:]]+/, "  ")
+      if (NF) print
+    }
+    END {
+      if (opened) print "}"
+    }
+  '
+}
+
+# Append a top-level export function from Briefing when the module already exists.
+# Args: rel_path, demand_text [, surface_root]
+# Exit 0 if appended; 1 if skip (need LLM / already present / not a function slice).
+aegis_mechanical_export_function_append() {
+  local rel="${1-}"
+  local demand="${2-}"
+  local root="${3:-${AEGIS_EXECUTION_SURFACE_PATH:-.}}"
+  local surface name body ts names
+
+  [[ -n "${rel}" ]] || return 1
+  aegis_demand_is_export_function_slice "${demand}" || return 1
+
+  name="$(aegis_demand_export_slice_name "${demand}")"
+  [[ -n "${name}" ]] || name="$(aegis_demand_acceptance_names "${demand}" | head -1)"
+  [[ -n "${name}" ]] || return 1
+
+  surface="${root%/}/${rel}"
+  [[ -f "${surface}" ]] || return 1
+  body="$(cat "${surface}" 2>/dev/null || true)"
+  [[ -n "$(printf '%s' "${body}" | tr -d '[:space:]')" ]] || return 1
+
+  names="$(aegis_file_top_level_export_names "${body}")"
+  if printf '%s\n' "${names}" | grep -Fxq -- "${name}"; then
+    return 1
+  fi
+
+  ts="$(aegis_briefing_function_to_ts "${demand}" "${name}")" || return 1
+  [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
+
+  body="$(aegis_strip_aider_whole_file_junk "${body}")"
+  # Drop trailing blank lines for a clean join.
+  while [[ "${body}" == *$'\n' ]]; do
+    local _tail="${body##*$'\n'}"
+    [[ -z "$(printf '%s' "${_tail}" | tr -d '[:space:]')" ]] || break
+    body="${body%$'\n'}"
+  done
+
+  printf '%s\n\n%s\n' "${body}" "${ts}" > "${surface}"
   return 0
 }
 
