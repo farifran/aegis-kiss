@@ -31,7 +31,7 @@
 #
 # Env:
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
-#   AEGIS_SUPERVISOR_MODEL          default meta/llama-3.1-8b-instruct — the
+#   AEGIS_SUPERVISOR_MODEL          default z-ai/glm-5.2 — the
 #                                   coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
@@ -61,7 +61,7 @@ aegis_briefing_enabled() {
 # BigInt-as-a-type mistake. Inheriting OPENAI_MODEL_MUTATION would silently
 # put whatever the coder uses in front of every run.
 aegis_briefing_model() {
-  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-meta/llama-3.1-8b-instruct}"
+  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}"
 }
 
 aegis_briefing_max_exports() {
