@@ -33,26 +33,25 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 ## Execution graph
 
 ```text
-run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
-       │                  │                      │
-       │                  │              capability handlers
-       │                  │                      │
-       │                  │              capability_payloads/
-       │                  │                      │
-       │                  ├── mechanical (discovery always; forensics if clear)
-       │                  ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
-       │                  └── aider_substrate (repair only)
-       │                              │
-       │                         framed JSON artifact
-       │                              │
-       └── outcome (human + metrics + last_outcome.json)
-                  handover promote / cleanup
+./aegis (CLI Intake/Fit/Batch)  ──►  run_aegis.sh  ──►  runtime_aegis.sh  ──►  execute_mode.sh
+            │                               │                  │                      │
+            │                               │                  │              capability handlers
+            │                               │                  │                      │
+            ├── micro-unit plan (.harness/micros_auto)        ├── mechanical (discovery always; forensics if clear)
+            ├── keep-progress batch                           ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
+            └── human commit gate (git commit -e -F)          └── aider_substrate (repair only)
+                                                                            │
+                                                                       framed JSON artifact
+                                                                            │
+                                                               └── outcome (human + metrics + last_outcome.json)
+                                                                          handover promote / cleanup
 ```
 
 | Entrypoint | Owns |
 |---|---|
-| `run_aegis.sh` | Operator CLI, pipelines (`mutation` / `readonly`), timing report, run-level outcome, `pipeline_metrics.jsonl` |
-| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, repair-feedback re-entry |
+| `./aegis` | Top-level Operator CLI: demand intake, supervisor briefing expand, `fit_check` micro-unit split, batch keep-progress execution, TTY human commit gate |
+| `run_aegis.sh` | Low-level driver: pipelines (`mutation` / `readonly`), timing report, run-level outcome, preflight dirty-target check, `pipeline_metrics.jsonl` |
+| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, repair-feedback re-entry, signal termination expunge |
 | `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; loads full `AGENTS.md` as preamble |
 | `.harness/config.sh` | Modes, handlers, evidence profiles, budgets, provider defaults |
 
@@ -185,29 +184,29 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 
 ```text
 .
-├── AGENTS.md                 # constitution → preamble
-├── README.md                 # operator entry
-├── summary.md                # this map
-├── INTAKE.md                 # Scout demand playbook
-├── entry.md                  # demand protocol ADR
-├── run_aegis.sh
-├── runtime_aegis.sh
-├── package.json              # aegis:test / aegis:test:fast
-├── .skills/                  # mode contracts (repair injected into Aider)
+├── aegis                     # Top-level Operator CLI (Intake, Fit Check, Batch, Gate)
+├── run_aegis.sh              # Low-level pipeline driver
+├── runtime_aegis.sh          # Sovereign runtime orchestrator
+├── run_aegis_loop.sh         # Continuous task loop runner
+├── AGENTS.md                 # Constitution → preamble for LLM/Aider paths
+├── README.md                 # Operator quickstart & manual
+├── summary.md                # Canonical repository map
+├── package.json              # aegis:sanity / aegis:test:fast / aegis:test
+├── .skills/                  # Mode contracts (.skills/*.md)
 ├── .harness/
-│   ├── config.sh
-│   ├── contracts/            # JSON contracts (handover, manifest, …)
-│   └── runtime/              # handover, metrics, payloads, surfaces
+│   ├── config.sh             # Engine registries, budgets & evidence profiles
+│   ├── local.env             # Local environment variables & secrets (gitignored)
+│   ├── contracts/            # JSON contracts (handover, manifest, outcome)
+│   ├── micros*/              # Transient multi-unit plans (auto-cleaned on SUCCESS)
+│   └── runtime/              # Epistemic handover, metrics, execution surfaces
 └── scripts/
-    ├── execute_mode.sh
-    ├── lib/                  # demand, evidence, artifact_protocol, …
-    ├── capabilities/
-    ├── runtime/              # promote / apply
-    └── substrates/
-        ├── raw_llm.sh / raw/
-        ├── aider_substrate.sh / aider/
-        ├── prompts/
-        └── test/
+    ├── execute_mode.sh       # Protocol VM
+    ├── fit_check_demand.sh   # Demand fit checking & mechanical micro splitter
+    ├── audit_epistemic_pipeline.sh # Epistemic audit scanner
+    ├── lib/                  # common, demand, evidence, artifact_protocol, record, run_outcome...
+    ├── capabilities/         # Capability handlers (filesystem, git, typescript, eslint, test)
+    ├── runtime/              # apply_candidate_diff, promote_validated_candidate
+    └── substrates/           # aider_substrate.sh, raw_llm.sh, static_gate.sh, preflight, test/
 ```
 
 `src/` is the **mutation playground**, not the harness runtime.
