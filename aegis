@@ -798,15 +798,20 @@ commit_unit_checkpoint() {
   done <<< "${paths}"
 
   if git diff --cached --quiet 2>/dev/null; then
+    rm -f "${msg_file}" 2>/dev/null || true
     printf ''
     return 1
   fi
 
   if ! git commit -F "${msg_file}" >/dev/null 2>&1; then
     git reset --quiet HEAD 2>/dev/null || true
+    rm -f "${msg_file}" 2>/dev/null || true
     printf ''
     return 1
   fi
+
+  # Scratch for -F only; the commit object already holds the message.
+  rm -f "${msg_file}" 2>/dev/null || true
 
   committed="$(git rev-parse --short HEAD 2>/dev/null || true)"
   printf '%s' "${committed}"
@@ -1544,10 +1549,13 @@ EOF
           else
             aegis_warn "AEGIS_SQUASH_BATCH falhou — commits por unit mantêm-se"
           fi
+          rm -f "${squash_msg}" 2>/dev/null || true
         fi
         ;;
     esac
 
+    # Ephemeral -F inputs (unit-* / batch-squash); never leave as repo litter.
+    rm -f "${COMMIT_MSG_FILE}".unit-* "${COMMIT_MSG_FILE}.batch-squash" 2>/dev/null || true
     rm -rf "${micros_dir}" >/dev/null 2>&1 || true
 
     gh_run issue close "${issue}" --comment "$(
@@ -1644,10 +1652,14 @@ EOF
     while IFS= read -r p; do
       [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
     done <<< "${paths}"
+    # Keep commit.msg: status "gate por fechar" + operator can re-run -F.
     aegis_warn "commit cancelado — as alterações ficam no worktree"
     emit_result_json "UNCOMMITTED" "${issue}" "" "gate_cancelled"
     return 1
   fi
+
+  # Gate closed; message lives in the commit object only.
+  rm -f "${COMMIT_MSG_FILE}" 2>/dev/null || true
 
   committed="$(git rev-parse --short HEAD)"
   aegis_log "commit ${committed}"
