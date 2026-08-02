@@ -1752,6 +1752,9 @@ EOF
       "${committed}" "$(printf '%s' "${paths}" | tr '\n' ' ')"
   )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
 
+  # Clean transient micro plan files upon success
+  rm -rf .harness/micros .harness/micros_auto 2>/dev/null || true
+
   emit_result_json "SUCCESS" "${issue}" "${committed}" ""
 }
 
