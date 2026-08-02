@@ -876,6 +876,7 @@ aegis_metrics_session_begin() {
 
 cmd_go() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
+  local brief_why=""
   local -a accepts=() changes=()
 
   while [[ $# -gt 0 ]]; do
@@ -1058,7 +1059,7 @@ cmd_go() {
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"
       else
-        local brief_why
+        # Function-scoped: reused below for intake_failed diagnostics.
         brief_why="$(tail -n 1 "${brief_err}" 2>/dev/null || true)"
         if [[ "${intake_relaxed}" -eq 1 ]]; then
           aegis_warn "briefing: recusado (${brief_why:-?}) — relaxed: corpo mecânico"
@@ -1097,13 +1098,54 @@ cmd_go() {
         body="$(render_body "${goal}" "${target}")"
       else
         # Quality default: operator --accept builds a micro demand; free prose
-        # without expand and without --accept is a hard fail (no Goal grepping).
+        # without expand and without --accept is a hard fail (no Goal grepping)
+        # — except transient provider rate-limit, where we derive acceptance
+        # from named tokens in the goal so ./aegis --yes still progresses.
         if [[ "${#accepts[@]}" -eq 0 ]]; then
-          aegis_fatal "intake_failed — expand supervisor (${AEGIS_SUPERVISOR_MODEL:-$(aegis_briefing_model 2>/dev/null || echo '?')}) indisponível/recusado e sem --accept. Defina OPENAI_API_KEY em .harness/local.env (ou export no shell), ou passe --accept NomeExportado, ou --relaxed (não recomendado)"
+          local _why_hint="" _rate_limited=0
+          case "${brief_why:-}" in
+            http_429*|*"rate_limit"*)
+              _rate_limited=1
+              _why_hint=" Provider em rate-limit (HTTP 429)."
+              ;;
+            missing_api_key)
+              _why_hint=" OPENAI_API_KEY / NVIDIA_API_KEY em falta."
+              ;;
+            http_401*|http_403*)
+              _why_hint=" Chave API rejeitada (401/403)."
+              ;;
+          esac
+          if [[ "${_rate_limited}" -eq 1 ]]; then
+            local derived
+            derived="$(derive_accept_tokens "${goal}")"
+            if [[ -z "${derived}" ]]; then
+              local p path_base
+              for p in ${target}; do
+                path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
+                if [[ "${path_base}" != "index" ]]; then
+                  derived="${path_base}"
+                  break
+                fi
+              done
+            fi
+            if [[ -n "${derived}" ]]; then
+              while IFS= read -r t; do
+                [[ -n "${t}" ]] && accepts+=("${t}")
+              done <<< "${derived}"
+              aegis_warn "briefing offline (http_429_rate_limit) — acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
+            fi
+          fi
+          if [[ "${#accepts[@]}" -eq 0 ]]; then
+            aegis_fatal "intake_failed — expand supervisor (${AEGIS_SUPERVISOR_MODEL:-$(aegis_briefing_model 2>/dev/null || echo '?')}) recusado (${brief_why:-empty_response}).${_why_hint} Alternativas: re-tentar; --accept TokenBucket --accept obterEstadoBitmask; ou --relaxed (não recomendado)"
+          fi
         fi
         body="$(render_body "${goal}" "${target}")"
         body="$(aegis_intake_ensure_briefing "${body}")"
-        aegis_log "intake: corpo a partir de --accept (sem expand)"
+        if [[ -n "${brief_why}" ]]; then
+          aegis_log "intake: corpo mecânico (supervisor=${brief_why})"
+        else
+          aegis_log "intake: corpo a partir de --accept (sem expand)"
+        fi
       fi
     fi
 

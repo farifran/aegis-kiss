@@ -379,6 +379,56 @@ aegis_briefing_render() {
   '
 }
 
+# Extract chat content from an OpenAI-compatible response body.
+# Some gateways return 200 with error JSON; some put text under .message
+# or reasoning fields when content is null.
+aegis_briefing_extract_content() {
+  local resp_file="${1-}"
+  [[ -f "${resp_file}" ]] || return 0
+  jq -r '
+    if (.error // null) != null then empty
+    else
+      (.choices[0].message.content
+        // .choices[0].message.reasoning_content
+        // .choices[0].text
+        // .choices[0].delta.content
+        // empty)
+    end
+  ' "${resp_file}" 2>/dev/null || true
+}
+
+aegis_briefing_provider_error_code() {
+  local resp_file="${1-}"
+  local http_code="${2-0}"
+  [[ -f "${resp_file}" ]] || {
+    printf 'http_%s' "${http_code}"
+    return 0
+  }
+  # Avoid local name "status" — some shells/environments mark it read-only.
+  local title api_status msg
+  title="$(jq -r '.title // empty' "${resp_file}" 2>/dev/null || true)"
+  api_status="$(jq -r '.status // .error.code // empty' "${resp_file}" 2>/dev/null || true)"
+  msg="$(jq -r '.error.message // .message // .detail // empty' "${resp_file}" 2>/dev/null || true)"
+  if [[ "${http_code}" == "429" ]] || [[ "${api_status}" == "429" ]] \
+    || [[ "${title}" == *"Too Many Requests"* ]]; then
+    printf 'http_429_rate_limit'
+    return 0
+  fi
+  if [[ "${http_code}" != "200" && "${http_code}" != "000" && -n "${http_code}" ]]; then
+    if [[ -n "${msg}" ]]; then
+      printf 'http_%s:%s' "${http_code}" "$(printf '%s' "${msg}" | tr '\n' ' ' | cut -c1-80)"
+    else
+      printf 'http_%s' "${http_code}"
+    fi
+    return 0
+  fi
+  if [[ -n "${msg}" ]]; then
+    printf 'provider_error:%s' "$(printf '%s' "${msg}" | tr '\n' ' ' | cut -c1-80)"
+    return 0
+  fi
+  printf 'empty_response'
+}
+
 # Prints the structured demand on success; prints nothing and returns 1
 # whenever the caller should fall back to the mechanical body.
 aegis_briefing_generate() {
@@ -392,6 +442,11 @@ aegis_briefing_generate() {
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="$(aegis_briefing_model)"
   timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
+
+  if [[ -z "${api_key}" ]]; then
+    printf 'missing_api_key\n' >&2
+    return 1
+  fi
 
   local req_file resp_file
   req_file="$(mktemp "${TMPDIR:-/tmp}/aegis_briefing_req.XXXXXX")" || return 1
@@ -419,15 +474,59 @@ aegis_briefing_generate() {
     return 1
   }
 
-  # Measured provider throughput swings between 0.8 and 33 tok/s on identical
-  # payloads, so an unbounded call can stall the run before any work starts.
-  curl --silent --show-error \
-    --connect-timeout 5 \
-    --max-time "${timeout}" \
-    -X POST "${api_base%/}/chat/completions" \
-    -H "Authorization: Bearer ${api_key}" \
-    -H "Content-Type: application/json" \
-    --data @"${req_file}" > "${resp_file}" 2>/dev/null || true
+  # Retry transient provider noise: 429 rate-limit, 5xx, empty body on 200.
+  # Without this, NVIDIA integrate often surfaces as empty_response and the
+  # whole ./aegis go aborts even though a second call would succeed.
+  local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-4}"
+  [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=4
+  local attempt=1
+  local http_code="000"
+  local content=""
+  local fail_reason="empty_response"
+  local backoff
+
+  while [[ "${attempt}" -le "${max_attempts}" ]]; do
+    : > "${resp_file}"
+    http_code="$(
+      curl --silent --show-error \
+        --connect-timeout 5 \
+        --max-time "${timeout}" \
+        --output "${resp_file}" \
+        --write-out "%{http_code}" \
+        -X POST "${api_base%/}/chat/completions" \
+        -H "Authorization: Bearer ${api_key}" \
+        -H "Content-Type: application/json" \
+        --data @"${req_file}" 2>/dev/null || printf '000'
+    )"
+
+    content="$(aegis_briefing_extract_content "${resp_file}")"
+    if [[ -n "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
+      break
+    fi
+
+    fail_reason="$(aegis_briefing_provider_error_code "${resp_file}" "${http_code}")"
+    content=""
+
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      break
+    fi
+
+    case "${http_code}" in
+      429) backoff=$((attempt * 8)) ;;   # 8s, 16s, 24s…
+      500|502|503|504) backoff=$((attempt * 3)) ;;
+      000) backoff=$((attempt * 2)) ;;
+      200) backoff=$((attempt == 1 ? 2 : 5)) ;;
+      401|403)
+        # Auth failures will not heal with sleep.
+        break
+        ;;
+      *) backoff=$((attempt * 2)) ;;
+    esac
+    printf '[AEGIS][BRIEFING][WARN] attempt %s/%s failed (%s http=%s) — retry in %ss\n' \
+      "${attempt}" "${max_attempts}" "${fail_reason}" "${http_code}" "${backoff}" >&2
+    sleep "${backoff}"
+    attempt=$((attempt + 1))
+  done
 
   rm -f "${req_file}"
 
@@ -440,25 +539,27 @@ aegis_briefing_generate() {
     mkdir -p "$(dirname "${_metrics}")" 2>/dev/null || true
     jq -cn \
       --arg model "${model}" \
+      --arg http_code "${http_code:-0}" \
       --argjson prompt_tokens "${_pt:-0}" \
       --argjson completion_tokens "${_ct:-0}" \
+      --argjson attempts "${attempt}" \
       '{kind:"tokens",mode:"intake",substrate:"supervisor_expand",model:$model,
         prompt_tokens:$prompt_tokens,completion_tokens:$completion_tokens,
-        total_tokens:($prompt_tokens+$completion_tokens)}' \
+        total_tokens:($prompt_tokens+$completion_tokens),
+        http_code:$http_code,attempts:$attempts}' \
       >> "${_metrics}" 2>/dev/null || true
     # Also emit a human line for CLI capture.
     printf '[AEGIS][TOKENS] supervisor_expand model=%s prompt=%s completion=%s total=%s\n' \
       "${model}" "${_pt:-0}" "${_ct:-0}" "$(( ${_pt:-0} + ${_ct:-0} ))" >&2 || true
   fi
 
-  local content
-  content="$(jq -r '.choices[0].message.content // empty' "${resp_file}" 2>/dev/null || true)"
-  rm -f "${resp_file}"
-
-  [[ -n "${content}" ]] || {
-    printf 'empty_response\n' >&2
+  if [[ -z "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
+    printf '%s\n' "${fail_reason:-empty_response}" >&2
+    rm -f "${resp_file}"
     return 1
-  }
+  fi
+
+  rm -f "${resp_file}"
 
   # Some providers still wrap JSON in a fence even in json_object mode.
   content="$(
