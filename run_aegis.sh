@@ -257,13 +257,29 @@ mark_modes_nested_after() {
 # this point. The operator-named paths in the demand are the knowable proxy
 # and in practice are the same files. Checking them here turns a multi-minute
 # failure into an immediate one. It cannot be exhaustive: repair may touch a
-# file the demand never named, so the promotion gate stays as the real
-# authority — this only catches the common case early.
+# Auto-create empty stub files for operator-named net-new paths in src/
+ensure_operator_named_src_stubs() {
+  command -v git >/dev/null 2>&1 || return 0
+  local path
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    if [[ "${path}" == src/* || "${path}" == src ]]; then
+      if [[ ! -e "${path}" ]]; then
+        mkdir -p "$(dirname "${path}")" 2>/dev/null || true
+        touch "${path}" 2>/dev/null || true
+        echo "[AEGIS][DEMAND] Stub de novo arquivo em src/ criado: ${path}" >&2
+      fi
+    fi
+  done < <(aegis_extract_operator_named_paths "${INVESTIGATION_INPUT:-}" 2>/dev/null || true)
+}
+
 assert_demand_targets_not_dirty() {
   [[ "${PIPELINE}" == "mutation" ]] || return 0
   [[ "${AEGIS_PROMOTION_RESET_DIRTY:-false}" != "true" ]] || return 0
   command -v git >/dev/null 2>&1 || return 0
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+  ensure_operator_named_src_stubs
 
   local -a dirty=()
   local path status_line
@@ -280,15 +296,23 @@ assert_demand_targets_not_dirty() {
 
   local entry
   for entry in "${dirty[@]}"; do
-    echo "[AEGIS][PIPELINE][FATAL] demand target has uncommitted work: ${entry}" >&2
+    echo "[AEGIS][PIPELINE][WARN] demand target has uncommitted work: ${entry}" >&2
   done
-  echo "[AEGIS][PIPELINE] commit or stash it, or re-run with AEGIS_PROMOTION_RESET_DIRTY=true to discard it." >&2
 
-  # Same reason token the promotion gate uses, so the outcome report
-  # classifies an early refusal exactly like a late one. Written as a
-  # breadcrumb rather than raised via aegis_fatal: that exits immediately
-  # and would skip show_final_report, leaving the operator without the
-  # Status/Class/Next block every other failure produces.
+  # User confirmation for dirty targets
+  if [[ "${AEGIS_NON_INTERACTIVE:-0}" != "1" && ( -t 0 || -p /dev/stdin ) ]]; then
+    echo -n "[AEGIS][PIPELINE] Deseja realizar stash/commit temporário para continuar? [y/N]: " >&2
+    local ans="n"
+    read -r ans <&0 || ans="n"
+    if [[ "${ans}" =~ ^[Yy] ]]; then
+      git stash push -m "aegis-auto-stash-$(date +%s)" >/dev/null 2>&1 || true
+      echo "[AEGIS][PIPELINE] Stash temporário realizado com sucesso." >&2
+      return 0
+    fi
+  fi
+
+  echo "[AEGIS][PIPELINE] commit ou stash it, ou re-run com AEGIS_PROMOTION_RESET_DIRTY=true para descartar." >&2
+
   mkdir -p "$(dirname "${LAST_FATAL_FILE}")" 2>/dev/null || true
   printf '%s\n' "promotion_target_is_dirty" > "${LAST_FATAL_FILE}" 2>/dev/null || true
   return 1

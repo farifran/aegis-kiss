@@ -388,6 +388,11 @@ main() {
         aegis_fatal "provider_http_failure"
       fi
     fi
+    mkdir -p "${AEGIS_RUNTIME_DIR:-.harness/runtime}" 2>/dev/null || true
+    if [[ -f "${AEGIS_AIDER_OUTPUT_LOG}" ]]; then
+      cp "${AEGIS_AIDER_OUTPUT_LOG}" "${AEGIS_RUNTIME_DIR:-.harness/runtime}/substrate_stderr.log" 2>/dev/null || true
+    fi
+    printf '%s\n' "substrate_empty_diff_failure" > "${LAST_FATAL_FILE:-.harness/runtime/last_fatal}" 2>/dev/null || true
     aegis_fatal "empty_diff: aider produced no changes"
   fi
 

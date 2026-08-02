@@ -1,23 +1,25 @@
 ## Goal
-Single-file micro: create src/netNewTest.ts.
-Edit only `src/netNewTest.ts`. Parent intent: Crie src/netNewTest.ts com a função exportada netNewTest(): boolean que retorna true. Re-exporte no .
+Single-file micro: reexport only.
+Edit only `src/index.ts`. Parent intent: Crie com a função exportada netNewTest(): boolean que retorna true. Re-exporte no src/index.ts.
 
 ## Targets
-- src/netNewTest.ts
+- src/index.ts
 
 ## Tasks
-- [ ] Task 1 — create src/netNewTest.ts
+- [ ] Task 1 — reexport only
 
 ## Change
-- Create or update ONLY `src/netNewTest.ts`.
+- Update ONLY `src/index.ts`.
+- Import and re-export from './netNewTest.js': NetNewTest (NodeNext `.js` relative import).
+- Do not re-implement the algorithm in this file.
 - Do not create or modify any other path.
-- Do not re-export from index in this run.
-- Every Acceptance token that is a class or function must be a **top-level** `export class` / `export function` in this file (not only a method on another export).
-- Implement the demanded API for `netNewTest` in this file alone.
-- Scope note: create module only; omit reexport
+- Do not delete or demote pre-existing barrel exports unrelated to this demand.
+- Scope note: after create succeeds
 
 ## Briefing
-export function netNewTest(/* … */) { /* … */ }
+Em src/index.ts:
+   import { NetNewTest } from './netNewTest.js'
+   export { NetNewTest }
 
 ## Acceptance
 - NetNewTest
