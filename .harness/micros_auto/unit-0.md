@@ -1,43 +1,20 @@
 ## Goal
-Single-file micro: create src/netNewTest.ts.
-Edit only `src/netNewTest.ts`. Parent intent: Crie src/netNewTest.ts com a função exportada netNewTest(): boolean que retorna true. Re-exporte no .
+Crie velha10.html com jogo da velha 3D holografico cyberpunk de altíssimo desempenho com Three.js/WebGL 3D, iluminacao neon, Raycasting para cliques no tabuleiro 3D, Minimax Alpha-Beta Grandmaster, Web Audio 3D e sistema de particulas.
 
 ## Targets
-- src/netNewTest.ts
-
-## Tasks
-- [ ] Task 1 — create src/netNewTest.ts
-
-## Change
-- Create or update ONLY `src/netNewTest.ts`.
-- Do not create or modify any other path.
-- Do not re-export from index in this run.
-- Every Acceptance token that is a class or function must be a **top-level** `export class` / `export function` in this file (not only a method on another export).
-- Implement the demanded API for `netNewTest` in this file alone.
-- Scope note: create module only; omit reexport
-
-## Briefing
-export function netNewTest(/* … */) { /* … */ }
+- velha10.html
 
 ## Acceptance
-- NetNewTest
+- JogoDaVelha3D
 
+## Briefing
+export class JogoDaVelha3D { /* … */ }
 ## Out of scope
-- other source files
-- network
-- UI
-- e2e
-- multi-file stacks
-- sibling modules not listed in Targets
+- unrelated files
+- e2e tests
+- drive-by refactors
 
 ## Constraints
-- no any
-- KISS
-- single target micro unit only
-- prefer focused public surface (class methods need not be top-level exports)
-- do not delete pre-existing barrel exports unrelated to this demand
-- NodeNext .js imports if this file imports siblings
-- BigInt is global when high-precision time is required
 - no any / as any / @ts-ignore
 - NodeNext: .js extension in relative imports
 - only packages in package.json; builtins are global
