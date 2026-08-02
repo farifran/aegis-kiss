@@ -427,6 +427,7 @@ clear_pipeline_metrics() {
 # Post-forensics early-exit. 0 = HALT (status set); 1 = continue.
 pipeline_should_halt_after_mode() {
   local mode="$1"
+  [[ "${AEGIS_NO_SKIP:-1}" == "1" || "${AEGIS_FORCE_FULL_PIPELINE:-1}" == "1" ]] && return 1
   [[ "${mode}" == "forensics" ]] || return 1
   [[ -f "${HANDOVER_FILE}" ]] || return 1
 
