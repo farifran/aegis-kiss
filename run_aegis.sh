@@ -65,7 +65,8 @@ Options:
   --fresh              Start a new investigation: wipe handover (and
                        last_good_*) before the pipeline, then bind the
                        new demand from discovery. Mutually exclusive
-                       with --resume.
+                       with --resume. Metrics: truncate unless parent
+                       set AEGIS_METRICS_APPEND=1 (./aegis multi-unit).
   --until MODE         Stop after MODE completes
   --target PATH        Evidence target directory (default: src or .)
   --issue N            Fetch GitHub issue #N (title+body via gh) as demand
@@ -326,7 +327,12 @@ append_pipeline_budget_metric() {
   [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
   [[ -f "${AEGIS_METRICS_FILE}" ]] || return 0
 
-  jq -s -c '
+  # Scope to this unit/run only when metrics are append-shared across units.
+  local slice
+  slice="$(metrics_since_last_run_start "${AEGIS_METRICS_FILE}")"
+  [[ -n "${slice}" ]] || return 0
+
+  printf '%s' "${slice}" | jq -s -c '
     map(select(.kind == "cache" and (.substrate | not)))
     | {
         kind: "pipeline_budget",
@@ -338,21 +344,60 @@ append_pipeline_budget_metric() {
         evidence_cache_bytes: (map(.evidence_cache_bytes // 0) | add // 0),
         budget_pruned_modes: (map(select(.budget_pruned == true)) | length)
       }
-  ' "${AEGIS_METRICS_FILE}" >> "${AEGIS_METRICS_FILE}.tmp" 2>/dev/null || return 0
+  ' >> "${AEGIS_METRICS_FILE}.tmp" 2>/dev/null || return 0
 
   cat "${AEGIS_METRICS_FILE}.tmp" >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
   rm -f "${AEGIS_METRICS_FILE}.tmp" 2>/dev/null || true
 }
 
-clear_pipeline_metrics() {
+# Resolve absolute AEGIS_METRICS_FILE (raw substrate cds into a temp dir).
+ensure_pipeline_metrics_path() {
   mkdir -p "$(dirname "${METRICS_FILE}")" 2>/dev/null || true
-  : > "${METRICS_FILE}"
-  # Absolute, not relative: the raw substrate runs from a disposable
-  # workspace (substrates/raw/workspace.sh cds into mktemp -d), so a
-  # relative path would append into a tree that is deleted on cleanup.
   export AEGIS_METRICS_FILE="$(
     cd "$(dirname "${METRICS_FILE}")" && pwd
   )/$(basename "${METRICS_FILE}")"
+}
+
+# Emit kind:run_start so multi-unit append sessions can scope reports/budget
+# to the current unit without wiping prior token lines.
+append_metrics_run_start() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  local unit_mark="${AEGIS_METRICS_UNIT:-}"
+  jq -cn \
+    --arg unit "${unit_mark}" \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{kind:"run_start",
+      unit:(if $unit == "" then null else $unit end),
+      at:$at}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
+# Lines from the last kind:run_start (inclusive) — for unit-scoped reports.
+metrics_since_last_run_start() {
+  local f="${1:-${AEGIS_METRICS_FILE:-${METRICS_FILE}}}"
+  [[ -f "${f}" ]] || return 0
+  awk '
+    /"kind"[[:space:]]*:[[:space:]]*"run_start"/ { buf = "" }
+    { buf = buf $0 ORS }
+    END { printf "%s", buf }
+  ' "${f}" 2>/dev/null || true
+}
+
+clear_pipeline_metrics() {
+  ensure_pipeline_metrics_path
+
+  # Multi-unit / parent session (./aegis go): keep prior lines so intake +
+  # every unit's kind:tokens accumulate. Parent clears once at session start.
+  case "${AEGIS_METRICS_APPEND:-0}" in
+    1|true|yes|on|append)
+      touch "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+      append_metrics_run_start
+      return 0
+      ;;
+  esac
+
+  : > "${AEGIS_METRICS_FILE}"
+  append_metrics_run_start
 }
 
 # Post-forensics early-exit. 0 = HALT (status set); 1 = continue.
@@ -591,16 +636,20 @@ show_final_report() {
     fi
   done
 
+  # Per-unit slice when AEGIS_METRICS_APPEND keeps a multi-unit session file.
+  local metrics_view
+  metrics_view="$(metrics_since_last_run_start "${METRICS_FILE}")"
+
   # Optimize metrics (if any) — clarifies can_improve vs trivial skip vs LLM.
-  if [[ -f "${METRICS_FILE}" ]] \
-    && grep -q '"kind":"optimize"' "${METRICS_FILE}" 2>/dev/null; then
+  if [[ -n "${metrics_view}" ]] \
+    && printf '%s' "${metrics_view}" | grep -q '"kind":"optimize"' 2>/dev/null; then
     echo
     echo "Optimize:"
-    jq -r '
+    printf '%s' "${metrics_view}" | jq -r '
       select(.kind == "optimize")
       | "  - \(.result)"
         + (if (.detail // "") != "" then " (\(.detail))" else "" end)
-    ' "${METRICS_FILE}" 2>/dev/null | tail -n 8 || true
+    ' 2>/dev/null | tail -n 8 || true
   fi
 
   echo
@@ -608,9 +657,9 @@ show_final_report() {
   echo
 
   # Stage budget telemetry (Tier 2): wall time share + handover signals.
-  if [[ -f "${METRICS_FILE}" ]] && [[ -s "${METRICS_FILE}" ]]; then
+  if [[ -n "${metrics_view}" ]]; then
     echo "Stage budget:"
-    jq -r -s --argjson total "${total}" '
+    printf '%s' "${metrics_view}" | jq -r -s --argjson total "${total}" '
       map(select(.kind == "mode"))
       | .[]
       | (.seconds // 0) as $s
@@ -621,17 +670,17 @@ show_final_report() {
         + (if (.repair_candidates // 0) > 0 then "  candidates=\(.repair_candidates)" else "" end)
         + (if (.findings // 0) > 0 then "  findings=\(.findings)" else "" end)
         + (if (.files_changed // 0) > 0 then "  files=\(.files_changed)" else "" end)
-    ' "${METRICS_FILE}" 2>/dev/null || true
+    ' 2>/dev/null || true
 
     local top_timing
     top_timing="$(
-      jq -r -s '
+      printf '%s' "${metrics_view}" | jq -r -s '
         map(select(.kind == "timing"))
         | sort_by(-.seconds)
         | .[0:5]
         | .[]
         | "  \(.label): \(.seconds)s"
-      ' "${METRICS_FILE}" 2>/dev/null || true
+      ' 2>/dev/null || true
     )"
     if [[ -n "${top_timing}" ]]; then
       echo

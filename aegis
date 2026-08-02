@@ -860,6 +860,20 @@ emit_result_json() {
     '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason}'
 }
 
+# One metrics session for the whole go: intake + all multi-unit tasks append
+# into the same pipeline_metrics.jsonl (run_aegis --fresh would otherwise wipe).
+aegis_metrics_session_begin() {
+  export AEGIS_ROOT_DIR="${ROOT}"
+  export AEGIS_METRICS_FILE="${RUNTIME_DIR}/pipeline_metrics.jsonl"
+  mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+  : > "${AEGIS_METRICS_FILE}"
+  export AEGIS_METRICS_APPEND=1
+  jq -cn \
+    --arg at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{kind:"session_start",source:"aegis_go",at:$at}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
 cmd_go() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
   local -a accepts=() changes=()
@@ -902,6 +916,10 @@ cmd_go() {
   if aegis_intake_relaxed; then
     intake_relaxed=1
   fi
+
+  # Before briefing/supervisor expand so intake tokens land in the same file
+  # as repair/optimize tokens for the full demand.
+  aegis_metrics_session_begin
 
   local body="" title=""
   # Multi-unit resume: start_unit is 0-based; empty means single-shot or full batch from 0.
@@ -1394,9 +1412,28 @@ cmd_go() {
     )"
   fi
 
-  # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees)
+  # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees).
+  # Preserve pipeline_metrics.jsonl: session already holds intake (supervisor)
+  # tokens; a full rm -rf .harness/runtime used to wipe them before multi-unit.
+  local _metrics_save=""
+  if [[ -n "${AEGIS_METRICS_FILE:-}" && -f "${AEGIS_METRICS_FILE}" ]]; then
+    _metrics_save="$(mktemp "${TMPDIR:-/tmp}/aegis_metrics.XXXXXX")"
+    cp "${AEGIS_METRICS_FILE}" "${_metrics_save}" 2>/dev/null || _metrics_save=""
+  fi
   rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
+  mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+  if [[ -n "${_metrics_save}" && -f "${_metrics_save}" ]]; then
+    export AEGIS_METRICS_FILE="${RUNTIME_DIR}/pipeline_metrics.jsonl"
+    mv "${_metrics_save}" "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+    export AEGIS_METRICS_APPEND=1
+  else
+    rm -f "${_metrics_save}" 2>/dev/null || true
+    # Session may not have started yet (resume-only path) — begin now.
+    if [[ -z "${AEGIS_METRICS_FILE:-}" || ! -f "${AEGIS_METRICS_FILE:-/dev/null}" ]]; then
+      aegis_metrics_session_begin
+    fi
+  fi
   if [[ -n "${issue}" && -n "${cached_issue_body}" ]]; then
     seed_issue_cache "${issue}" "${cached_issue_title:-issue}" "${cached_issue_body}"
   fi
@@ -1451,7 +1488,11 @@ cmd_go() {
       ran_any=1
 
       set +e
-      bash "${ROOT}/run_aegis.sh" --fresh --from-fit "${micros_dir}" --unit "${unit_idx}"
+      AEGIS_METRICS_APPEND=1 \
+        AEGIS_METRICS_UNIT="${unit_idx}" \
+        AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE}" \
+        AEGIS_ROOT_DIR="${ROOT}" \
+        bash "${ROOT}/run_aegis.sh" --fresh --from-fit "${micros_dir}" --unit "${unit_idx}"
       set -e
 
       u_status="$(outcome_field pipeline_status)"
