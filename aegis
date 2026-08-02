@@ -45,6 +45,8 @@ readonly OUTCOME_FILE="${RUNTIME_DIR}/last_outcome.json"
 readonly ISSUE_CACHE_DIR="${RUNTIME_DIR}/issue_cache"
 readonly COMMIT_MSG_FILE="${RUNTIME_DIR}/commit.msg"
 readonly DRAFT_FILE="${RUNTIME_DIR}/draft.md"
+readonly MICROS_DIR="${ROOT}/.harness/micros_auto"
+readonly MICROS_MANUAL_DIR="${ROOT}/.harness/micros"
 
 usage() {
   cat <<'EOF'
@@ -268,6 +270,26 @@ aegis_intake_is_poison_accept_token() {
   return 1
 }
 
+# Strip poison tokens from ## Acceptance section cleanly
+aegis_intake_strip_poison_acceptance_tokens() {
+  local text="${1-}"
+  printf '%s\n' "${text}" | awk '
+    BEGIN { in_acc = 0 }
+    /^## Acceptance[[:space:]]*$/ { print; in_acc = 1; next }
+    /^## / { in_acc = 0 }
+    in_acc {
+      line = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+      if (line ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
+      if (line ~ /\*/) next
+      if (line ~ /^(max|min|rate|time|last)[A-Z]/) next
+      print
+      next
+    }
+    { print }
+  '
+}
+
 # Extract ## Section body (until next ##).
 aegis_intake_md_section() {
   local name="${1-}"
@@ -415,8 +437,12 @@ seed_issue_cache() {
 # Multi-unit plan + keep-progress batch
 # ---------------------------------------------------------
 
+clear_micro_plan_cache() {
+  rm -rf "${MICROS_DIR}" "${MICROS_MANUAL_DIR}" 2>/dev/null || true
+}
+
 count_micro_units() {
-  local dir="${1:-.harness/micros_auto}"
+  local dir="${1:-${MICROS_DIR}}"
   local n=0
   while [[ -f "${dir}/unit-${n}.md" ]]; do
     n=$((n + 1))
@@ -1175,23 +1201,7 @@ cmd_go() {
     if [[ "${intake_relaxed}" -ne 1 ]]; then
       body="$(aegis_intake_ensure_briefing "${body}")"
       # Strip poison tokens fit may have re-injected into Acceptance.
-      body="$(
-        printf '%s\n' "${body}" | awk '
-          BEGIN { in_acc = 0 }
-          /^## Acceptance[[:space:]]*$/ { print; in_acc = 1; next }
-          /^## / { in_acc = 0 }
-          in_acc {
-            line = $0
-            sub(/^[[:space:]]*-[[:space:]]*/, "", line)
-            if (line ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
-            if (line ~ /\*/) next
-            if (line ~ /^(max|min|rate|time|last)[A-Z]/) next
-            print
-            next
-          }
-          { print }
-        '
-      )"
+      body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
       local q_err2
       q_err2="$(mktemp)"
       if ! aegis_intake_quality_check "${body}" 2>"${q_err2}"; then
@@ -1328,23 +1338,7 @@ cmd_go() {
               [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
               if [[ "${intake_relaxed}" -ne 1 ]]; then
                 body="$(aegis_intake_ensure_briefing "${body}")"
-                body="$(
-                  printf '%s\n' "${body}" | awk '
-                    BEGIN { in_acc = 0 }
-                    /^## Acceptance[[:space:]]*$/ { print; in_acc = 1; next }
-                    /^## / { in_acc = 0 }
-                    in_acc {
-                      line = $0
-                      sub(/^[[:space:]]*-[[:space:]]*/, "", line)
-                      if (line ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
-                      if (line ~ /\*/) next
-                      if (line ~ /^(max|min|rate|time|last)[A-Z]/) next
-                      print
-                      next
-                    }
-                    { print }
-                  '
-                )"
+                body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
                 qe="$(mktemp)"
                 if ! aegis_intake_quality_check "${body}" 2>"${qe}"; then
                   aegis_fatal "intake_quality_failed_after_edit_fit — $(tr '\n' ' ' < "${qe}" | sed 's/[[:space:]]*$//')"
@@ -1753,7 +1747,7 @@ EOF
   )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
 
   # Clean transient micro plan files upon success
-  rm -rf .harness/micros .harness/micros_auto 2>/dev/null || true
+  clear_micro_plan_cache
 
   emit_result_json "SUCCESS" "${issue}" "${committed}" ""
 }
