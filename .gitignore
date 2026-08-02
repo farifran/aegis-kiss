@@ -3,8 +3,7 @@
 # =========================================================
 
 .harness/execution_surfaces/
-.harness/micros/
-.harness/micros_auto/
+.harness/micros*/
 
 # =========================================================
 # RUNTIME TRANSIENT STATE
