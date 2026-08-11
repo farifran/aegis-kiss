@@ -1,0 +1,41 @@
+# =========================================================
+# AEGIS HARNESS — LITELLM HYBRID ROUTER CONFIGURATION
+# =========================================================
+#
+# Hybrid Routing Topology:
+# - Local GPU (vLLM / SGLang) on http://localhost:8000/v1 ($0/token)
+# - Cloud APIs (Claude 3.5 Sonnet, GPT-4o, Gemini) for complex adversarial review
+# - Automatic Failover: Local GPU fallback to Cloud if VRAM overflows
+#
+
+model_list:
+  # Local GPU Engine (vLLM / SGLang) — Fast Mutations & Discovery
+  - model_name: gemini-3.6-flash
+    litellm_params:
+      model: openai/qwen2.5-coder-32b
+      api_base: http://localhost:8000/v1
+      api_key: local-vllm-key
+
+  # Cloud Fallback Model — Complex Adversarial Review & Escalation
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 2
+  request_timeout: 60
+  fallbacks:
+    - gemini-3.6-flash: ["gpt-4o", "claude-3-5-sonnet"]
+
+router_settings:
+  routing_strategy: usage-based-routing-v2
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT

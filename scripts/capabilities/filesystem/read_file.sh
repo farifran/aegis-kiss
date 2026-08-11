@@ -66,11 +66,18 @@ CONTENT_SIZE_BYTES="$(
   wc -c < "${TMP_CONTENT_FILE}"
 )"
 
-# Optional Skeletal AST Pruning via Tree-sitter (ast-grep).
-# Applies only when AEGIS_READ_SKELETAL=1 is requested for background support files.
+# Skeletal AST Pruning via Tree-sitter (ast-grep).
+# Triggers when AEGIS_READ_SKELETAL=1 or when AEGIS_READ_SKELETAL=auto (default for non-target files > 2000 bytes).
 # Primary mutation targets (AEGIS_EVIDENCE_TARGET_PATH) are NEVER skeletal-pruned.
-if [[ "${AEGIS_READ_SKELETAL:-0}" == "1" ]] \
-  && [[ "${TARGET_FILE}" != "${AEGIS_EVIDENCE_TARGET_PATH:-src}"* ]]; then
+_should_skeletal_prune=0
+if [[ "${AEGIS_READ_SKELETAL:-auto}" == "1" ]]; then
+  _should_skeletal_prune=1
+elif [[ "${AEGIS_READ_SKELETAL:-auto}" == "auto" ]] && [[ "${CONTENT_SIZE_BYTES:-0}" -gt 2000 ]]; then
+  _should_skeletal_prune=1
+fi
+
+if [[ "${_should_skeletal_prune}" == "1" ]] \
+  && [[ "${TARGET_FILE}" != "${AEGIS_EVIDENCE_TARGET_PATH:-src/index.ts}" ]]; then
   case "${TARGET_FILE}" in
     *.ts|*.tsx|*.js|*.jsx)
       if command -v sg >/dev/null 2>&1; then

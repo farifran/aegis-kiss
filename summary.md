@@ -143,8 +143,10 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
 | KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + `Pocket Map`); `kind:"cache"` metric in `pipeline_metrics.jsonl` |
+| Skeletal AST Pruning | Optional `AEGIS_READ_SKELETAL=1` via `ast-grep` (Tree-sitter) in `read_file.sh`; `kind:"skeletal_prune"` metric |
+| Multi-Language AST Rules | Language-tagged AST rules in `.harness/enforcement/rules/` (TS, Python, Rust, Go) |
 
-Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
+Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/lib/language_detector.sh`, `scripts/capabilities/filesystem/read_file.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
 
 ---
 
@@ -227,8 +229,10 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 | `npm run aegis:test:fast` | Contracts without full LLM matrix |
 | `npm run aegis:test` | Full shell suite |
 | `npm run aegis:sanity` | tsc + eslint + static enforce |
+| `npm run aegis:test:language-detector` | Mechanical language detector sentinel census & adaptive TTY test |
+| `npm run aegis:test:skeletal-ast` | Skeletal AST Scope Pruning via Tree-sitter (`ast-grep`) test |
 
-Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent, metrics shape).
+Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent, metrics shape), `test_model_boundary_idempotency_cache.sh` (Byte-0 cache stability).
 
 ---
 

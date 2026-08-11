@@ -310,6 +310,27 @@ check_undeclared_imports() {
 }
 
 # ---------------------------------------------------------
+# SEMGREP SAST SECURITY SCANNER
+# ---------------------------------------------------------
+
+run_semgrep_sast_scan() {
+  local target="$1"
+  local semgrep_bin
+
+  if command -v semgrep >/dev/null 2>&1; then
+    semgrep_bin="$(command -v semgrep)"
+  else
+    return 0
+  fi
+
+  if ! "${semgrep_bin}" scan --quiet --error --config auto "${target}" >/dev/null 2>&1; then
+    gate_error "semgrep_sast_vulnerability_detected: ${target}"
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------
 # PUBLIC ENTRY
 # ---------------------------------------------------------
 
@@ -323,6 +344,7 @@ gate_file() {
   run_ast_rules_on_path "${file}" || failed=1
   run_eval_grep_fallback "${file}" || failed=1
   check_undeclared_imports "${file}" || failed=1
+  run_semgrep_sast_scan "${file}" || failed=1
 
   return "${failed}"
 }
