@@ -36,6 +36,7 @@
     "aegis:test:net-new-index-isolation": "bash scripts/substrates/test/test_net_new_index_isolation.sh",
     "aegis:test:static-gate": "bash scripts/substrates/test/test_static_gate.sh",
     "aegis:test:context-pruning": "bash scripts/substrates/test/test_context_pruning.sh",
+    "aegis:test:skeletal-ast": "bash scripts/substrates/test/test_skeletal_ast_pruning.sh",
     "aegis:test:mutation-preflight": "bash scripts/substrates/test/test_mutation_preflight.sh",
     "aegis:test:mutation-scope-gate": "bash scripts/substrates/test/test_mutation_scope_gate.sh",
     "aegis:test:preflight-fix-taxonomy": "bash scripts/substrates/test/test_preflight_fix_taxonomy.sh",

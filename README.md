@@ -263,6 +263,19 @@ npm run aegis:full
 
 ---
 
+## 🏛️ Architectural Synthesis (Pillars & Synergies)
+
+Aegis synthesizes 4 open-source software engineering and LLM performance paradigms into a single, unified, deterministic harness. Using these concepts in isolation vs. synthesized in Aegis:
+
+| Pillar | Operating in ISOLATION | Synthesized inside AEGIS | Aegis Architectural Synergy |
+|---|---|---|---|
+| **Karpathy** *(Cognition)* | Static `.cursorrules` or prompt instructions ("Think before coding", "Simplicity first"). | **Byte-0 Cognition Constitution** ([`AGENTS.md`](AGENTS.md)) governing LLM preambles. | If LLM violates Karpathy rules, Aegis's intent tribunal (`tribunal:demand_tokens`) mechanically rejects the diff. |
+| **PonyTail** *(Engineering)* | Passive `.md` style guide (NodeNext ESM, `readonly`, zero `any`, BigInt scaling). | **Target Architecture Prompt** + **Mechanical AST Grep Rules** (`.harness/enforcement/rules/*.yml`). | PonyTail conventions are enforced by physical machine AST gates (`npm run aegis:sanity`), blocking invalid code at CI/CD. |
+| **Headroom** *(Budgeting)* | Generic token pruner to fit LLM window sizes. | **Epistemic Context Budgeting** (32KB Ceiling) with root-cause anchor protection. | Prunes low-priority tree data without ever deleting compiler error root causes or mutation targets. |
+| **LMCache** *(Caching)* | Server-side KV-cache infrastructure requiring manual prompt alignment. | **Byte-0 Shared Prefix Architecture** (`prefix_hash` tracking & 50-98% cache hits). | Automatically yields 50% to 98% prompt caching discounts across modes (`optimize` ➔ `adversarial`) and Aider re-entries. |
+
+---
+
 ## Related Work and Credits
 
 - **Andrej Karpathy:** Aegis adapts Karpathy's pragmatic software engineering principles ("Think Before Coding", "Simplicity First", "Direct Output", and "Strict Error Checking") directly into its constitutional cognition contract ([`AGENTS.md`](AGENTS.md)).

@@ -66,6 +66,36 @@ CONTENT_SIZE_BYTES="$(
   wc -c < "${TMP_CONTENT_FILE}"
 )"
 
+# Optional Skeletal AST Pruning via Tree-sitter (ast-grep).
+# Applies only when AEGIS_READ_SKELETAL=1 is requested for background support files.
+# Primary mutation targets (AEGIS_EVIDENCE_TARGET_PATH) are NEVER skeletal-pruned.
+if [[ "${AEGIS_READ_SKELETAL:-0}" == "1" ]] \
+  && [[ "${TARGET_FILE}" != "${AEGIS_EVIDENCE_TARGET_PATH:-src}"* ]]; then
+  case "${TARGET_FILE}" in
+    *.ts|*.tsx|*.js|*.jsx)
+      if command -v sg >/dev/null 2>&1; then
+        _skel_tmp="$(aegis_mktemp)"
+        if sg run --pattern 'function $NAME($$$ARGS) { $$$BODY }' \
+                  --rewrite 'function $NAME($$$ARGS) { /* ... */ }' \
+                  --lang typescript "${TMP_CONTENT_FILE}" > "${_skel_tmp}" 2>/dev/null \
+          && [[ -s "${_skel_tmp}" ]]; then
+          _orig_bytes="$(wc -c < "${TMP_CONTENT_FILE}" | tr -d ' ')"
+          _skel_bytes="$(wc -c < "${_skel_tmp}" | tr -d ' ')"
+          mv "${_skel_tmp}" "${TMP_CONTENT_FILE}"
+          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+            jq -cn \
+              --arg target "${TARGET_FILE}" \
+              --argjson original_bytes "${_orig_bytes:-0}" \
+              --argjson skeletal_bytes "${_skel_bytes:-0}" \
+              '{kind:"skeletal_prune",target:$target,original_bytes:$original_bytes,skeletal_bytes:$skeletal_bytes}' \
+              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+          fi
+        fi
+      fi
+      ;;
+  esac
+fi
+
 # Lossless whitespace reduction for JSON reads. The epistemic handover is
 # stored pretty-printed and is the largest payload in every mode's context;
 # embedding it verbatim spends ~27% of its bytes on indentation the model

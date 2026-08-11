@@ -255,6 +255,19 @@ npm run aegis:full
 
 ---
 
+## 🏛️ Síntese Arquitetural (Pilares & Sinergias)
+
+O Aegis sintetiza 4 paradigmas de engenharia de software e performance de LLM em um harness único, unificado e determinístico. Veja a comparação entre usar esses conceitos em isolamento vs. sintetizados no Aegis:
+
+| Pilar | Funcionamento em ISOLAMENTO | Funcionamento SINTETIZADO no AEGIS | Sinergia Arquitetural no Aegis |
+|---|---|---|---|
+| **Karpathy** *(Cognição)* | Instruções estáticas em `.cursorrules` ou prompt ("Pense antes de codificar", "KISS"). | **Constituição Cognitiva no Byte 0** ([`AGENTS.md`](AGENTS.md)) que rege a mente do modelo. | Se a LLM descumprir o Karpathy, o tribunal de intenção (`tribunal:demand_tokens`) rejeita o diff mecanicamente. |
+| **PonyTail** *(Engenharia)* | Guia de estilo `.md` lido passivamente (NodeNext ESM, `readonly`, zero `any`, BigInt). | **Diretrizes de Arquitetura** + **Bloqueio Mecânico por AST (`ast-grep`)**. | As convenções PonyTail viram física de máquina: a CI/CD local impede fisicamente código sem padrão. |
+| **Headroom** *(Orçamento)* | Poda genérica de tokens para caber na janela do modelo. | **Orçamento Epistêmico de 32KB** com proteção de âncoras de causa raiz. | Poda dados secundários de arquivos sem nunca apagar a causa raiz do bug ou as metas da tarefa. |
+| **LMCache** *(Caching)* | Infraestrutura de cache de KV que exige alinhamento manual de bytes. | **Arquitetura de Prefixo no Byte 0** (`prefix_hash` e 50% a 98% de cache hit). | Automatiza economias massivas na API entre modos (`optimize` ➔ `adversarial`) e reentradas do Aider. |
+
+---
+
 ## Trabalhos Relacionados e Créditos
 
 - **Andrej Karpathy:** O Aegis adapta os princípios pragmáticos de engenharia de software de Karpathy ("Pense Antes de Codificar", "Simplicidade em Primeiro Lugar", "Saída Técnica Direta" e "Verificação de Erros Estrita") diretamente em seu contrato de cognição constitucional ([`AGENTS.md`](AGENTS.md)).
