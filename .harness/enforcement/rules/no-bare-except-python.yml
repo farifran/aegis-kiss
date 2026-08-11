@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS / PonyTail — structural physics (Python)
+# Bare `except:` catches SystemExit and KeyboardInterrupt.
+# =========================================================
+
+id: no-bare-except-python
+
+language: Python
+
+severity: error
+
+message: >
+  Do not use bare except: in Python (PonyTail rule). Catch specific exceptions (except Exception:) to avoid trapping system exit signals.
+
+rule:
+  pattern: "except:"

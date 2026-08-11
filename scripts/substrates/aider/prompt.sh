@@ -298,6 +298,19 @@ assemble_mutation_prompt() {
     fi
   fi
 
+  local target_architecture_section=""
+  local _arch_path=""
+  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] && [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md" ]]; then
+    _arch_path="${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
+  elif [[ -f "src/ARCHITECTURE.md" ]]; then
+    _arch_path="src/ARCHITECTURE.md"
+  elif [[ -f "ARCHITECTURE.md" ]]; then
+    _arch_path="ARCHITECTURE.md"
+  fi
+  if [[ -n "${_arch_path}" && -f "${_arch_path}" ]]; then
+    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_path}" "$(cat "${_arch_path}")")"
+  fi
+
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
 
@@ -307,11 +320,14 @@ assemble_mutation_prompt() {
   cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
-}[Aegis mode:${AEGIS_MODE}]
-
-${skill_contract}
+}
+${target_architecture_section}
 
 ${pocket_section}
+
+[Aegis mode:${AEGIS_MODE}]
+
+${skill_contract}
 
 ---
 

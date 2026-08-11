@@ -1,0 +1,20 @@
+# =========================================================
+# AEGIS / PonyTail — structural physics (TypeScript)
+# Disallow explicit `: any` type annotations on parameters or variables.
+# =========================================================
+
+id: no-explicit-any-annotation
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Explicit any annotation erases type safety (PonyTail rule). Use precise types, generics, or unknown with type guards.
+
+rule:
+  any:
+    - pattern: "let $NAME: any"
+    - pattern: "const $NAME: any"
+    - pattern: "var $NAME: any"
+    - pattern: "function $FUNC($PARAM: any)"

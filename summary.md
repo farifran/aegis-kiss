@@ -15,8 +15,10 @@
 
 | File | Role |
 |---|---|
-| `AGENTS.md` | Cognition constitution (4 rules); injected as preamble on LLM/Aider paths |
-| `README.md` | Operator setup, quick start, test entrypoints |
+| `AGENTS.md` | Cognition constitution (5 Karpathy-inspired rules); injected as preamble on LLM/Aider paths |
+| `README.md` | English operator setup, quick start, test entrypoints, 3-tier governance architecture |
+| `README.pt-BR.md` | Portuguese operator setup, quick start, test entrypoints, 3-tier governance architecture |
+| `src/ARCHITECTURE.md` | Target application architecture directives & PonyTail engineering patterns |
 | `INTAKE.md` | Scout/IDE demand playbook (outside mutation runtime) |
 | `entry.md` | Demand protocol design notes (ADR; code wins on conflict) |
 
@@ -140,6 +142,7 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
+| KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + `Pocket Map`); `kind:"cache"` metric in `pipeline_metrics.jsonl` |
 
 Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
 
@@ -150,6 +153,7 @@ Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/subst
 | File | Role |
 |---|---|
 | `scripts/lib/common.sh` | Logging, path helpers, `measure` (+ timing metrics) |
+| `scripts/lib/language_detector.sh` | Mechanical language detection & adaptive TTY fallback |
 | `scripts/lib/artifact_protocol.sh` | Validate / enrich; forensics gates; validation `repair_feedback` |
 | `scripts/lib/evidence.sh` | Materialize / select payloads; late `search_symbol` for forensics LLM |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write |
@@ -188,25 +192,28 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── run_aegis.sh              # Low-level pipeline driver
 ├── runtime_aegis.sh          # Sovereign runtime orchestrator
 ├── run_aegis_loop.sh         # Continuous task loop runner
-├── AGENTS.md                 # Constitution → preamble for LLM/Aider paths
-├── README.md                 # Operator quickstart & manual
+├── AGENTS.md                 # Cognition constitution loaded into model/Aider preambles
+├── README.md                 # English documentation & 3-tier governance guide
+├── README.pt-BR.md           # Portuguese documentation & 3-tier governance guide
 ├── summary.md                # Canonical repository map
 ├── package.json              # aegis:sanity / aegis:test:fast / aegis:test
 ├── .skills/                  # Mode contracts (.skills/*.md)
 ├── .harness/
 │   ├── config.sh             # Engine registries, budgets & evidence profiles
+│   ├── enforcement/          # Static AST grep enforcement rules (.harness/enforcement/rules/*.yml)
 │   ├── local.env             # Local environment variables & secrets (gitignored)
 │   ├── contracts/            # JSON contracts (handover, manifest, outcome)
 │   ├── micros*/              # Transient multi-unit plans (auto-cleaned on SUCCESS)
 │   └── runtime/              # Epistemic handover, metrics, execution surfaces
-└── scripts/
-    ├── execute_mode.sh       # Protocol VM
-    ├── fit_check_demand.sh   # Demand fit checking & mechanical micro splitter
-    ├── audit_epistemic_pipeline.sh # Epistemic audit scanner
-    ├── lib/                  # common, demand, evidence, artifact_protocol, record, run_outcome...
-    ├── capabilities/         # Capability handlers (filesystem, git, typescript, eslint, test)
-    ├── runtime/              # apply_candidate_diff, promote_validated_candidate
-    └── substrates/           # aider_substrate.sh, raw_llm.sh, static_gate.sh, preflight, test/
+├── scripts/
+│   ├── execute_mode.sh       # Protocol VM
+│   ├── fit_check_demand.sh   # Demand fit checking & mechanical micro splitter
+│   ├── audit_epistemic_pipeline.sh # Epistemic audit scanner
+│   ├── lib/                  # common, demand, evidence, artifact_protocol, record, run_outcome...
+│   ├── capabilities/         # Capability handlers (filesystem, git, typescript, eslint, test)
+│   ├── runtime/              # apply_candidate_diff, promote_validated_candidate
+│   └── substrates/           # aider_substrate.sh, raw_llm.sh, static_gate.sh, preflight, test/
+└── src/                      # Target mutation playground (governed by src/ARCHITECTURE.md)
 ```
 
 `src/` is the **mutation playground**, not the harness runtime.

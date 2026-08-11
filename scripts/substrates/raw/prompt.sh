@@ -37,10 +37,26 @@ assemble_system_prompt() {
   local mode_specific_instructions
   mode_specific_instructions="$(raw_mode_minimal_artifact_instructions)"
 
+  local target_architecture_section=""
+  local _arch_path=""
+  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] && [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md" ]]; then
+    _arch_path="${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
+  elif [[ -f "src/ARCHITECTURE.md" ]]; then
+    _arch_path="src/ARCHITECTURE.md"
+  elif [[ -f "ARCHITECTURE.md" ]]; then
+    _arch_path="ARCHITECTURE.md"
+  fi
+  if [[ -n "${_arch_path}" && -f "${_arch_path}" ]]; then
+    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_path}" "$(cat "${_arch_path}")")"
+  fi
+
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
 
-}[Aegis mode:${AEGIS_MODE}]
+}
+${target_architecture_section}
+
+[Aegis mode:${AEGIS_MODE}]
 
 ${mode_specific_instructions}
 

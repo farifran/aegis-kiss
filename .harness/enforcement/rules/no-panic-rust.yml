@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS / PonyTail — structural physics (Rust)
+# Disallow unhandled panic! in production code.
+# =========================================================
+
+id: no-panic-rust
+
+language: Rust
+
+severity: error
+
+message: >
+  Do not use panic! in production Rust code (PonyTail rule). Use Result<T, E> and propagate errors with the ? operator.
+
+rule:
+  pattern: "panic!($MSG)"
