@@ -344,10 +344,15 @@ invoke_aider() {
   printf -v lint_gate_cmd 'bash "%s"' \
     "${AEGIS_AIDER_SUBSTRATE_ROOT}/scripts/substrates/aider_lint_gate.sh"
 
+  local aider_model_resolved="${AEGIS_AIDER_MODEL:-openai/z-ai/glm-5.2}"
+  if [[ "${aider_model_resolved}" != openai/* ]] && [[ "${aider_model_resolved}" != anthropic/* ]] && [[ "${aider_model_resolved}" != gemini/* ]]; then
+    aider_model_resolved="openai/${aider_model_resolved}"
+  fi
+
   local aider_cmd=(
     "${AEGIS_AIDER_BIN}"
     "--config" "${mutation_conf}"
-    "--model" "${AEGIS_AIDER_MODEL}"
+    "--model" "${aider_model_resolved}"
     "--openai-api-base" "${OPENAI_API_BASE}"
     "--message-file" "${prompt_file}"
     "--timeout" "${AEGIS_AIDER_TIMEOUT}"
