@@ -30,6 +30,14 @@ aegis_fatal() {
   local breadcrumb_dir="${AEGIS_RUNTIME_DIR:-.harness/runtime}"
   mkdir -p "${breadcrumb_dir}" 2>/dev/null || true
   printf '%s\n' "${msg}" > "${breadcrumb_dir}/last_fatal" 2>/dev/null || true
+
+  # Ensure main workspace .harness/runtime/last_fatal is populated if running inside a disposable worktree
+  if [[ -d ".harness/runtime" ]]; then
+    printf '%s\n' "${msg}" > ".harness/runtime/last_fatal" 2>/dev/null || true
+  fi
+  if [[ -n "${AEGIS_WORKSPACE_ROOT:-}" && -d "${AEGIS_WORKSPACE_ROOT}/.harness/runtime" ]]; then
+    printf '%s\n' "${msg}" > "${AEGIS_WORKSPACE_ROOT}/.harness/runtime/last_fatal" 2>/dev/null || true
+  fi
   exit 1
 }
 
