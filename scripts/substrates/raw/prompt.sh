@@ -21,7 +21,7 @@ raw_mode_minimal_artifact_instructions() {
       printf '%s' "MINIMAL OPTIMIZE (advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Prefer no_improvement_needed if unsure. can_improve only with 1-3 items: target_files exact from REPAIR RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff/candidate_result/mode. Full contract: skill file."
       ;;
     adversarial)
-      printf '%s' "MINIMAL ADVERSARIAL: emit ONLY status+findings. challenged only for (a) in-scope tool failures or (b) logic with full +line quote in backticks. Prefer verified+[] when tools clean and no real quote. Include target_files+fix (imperative) so Repair can act. Tools may be reused from repair stamp when candidate hash matches — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
+      printf '%s' "MINIMAL ADVERSARIAL (DEPTH: ${AEGIS_ADVERSARIAL_DEPTH:-medium}): emit ONLY status+findings. challenged only for (a) in-scope tool failures or (b) logic with full +line quote in backticks. Prefer verified+[] when tools clean and no real quote. Include target_files+fix (imperative) so Repair can act. Tools may be reused from repair stamp when candidate hash matches — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
       ;;
     validation)
       printf '%s' "MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
@@ -269,7 +269,7 @@ assemble_bounded_capability_context() {
       fi
     fi
 
-    # Adversarial: candidate + mutation-scoped tools summary (reuse stamp when match).
+    # Adversarial: candidate + mutation-scoped tools summary (reuse stamp when match) + commit record.
     if [[ "${AEGIS_MODE}" == "adversarial" ]]; then
       if declare -f aegis_format_candidate_result_section >/dev/null 2>&1; then
         aegis_format_candidate_result_section \
@@ -279,6 +279,13 @@ assemble_bounded_capability_context() {
         aegis_format_adversarial_tools_summary_section \
           "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
           "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
+      fi
+      if [[ "${AEGIS_ADVERSARIAL_DEPTH:-medium}" != "low" ]] \
+        && declare -f aegis_record_digest >/dev/null 2>&1; then
+        echo
+        echo "=== HISTORICAL MANAGED COMMIT DIGEST (PROTECTED TOKENS) ==="
+        echo
+        aegis_record_digest "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
       fi
     fi
 

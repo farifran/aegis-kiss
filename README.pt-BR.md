@@ -9,7 +9,7 @@ Idioma: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 ![Zero Regressions](https://img.shields.io/badge/Quality-Zero%20Regressions-brightgreen)
 ![KISS Architecture](https://img.shields.io/badge/Architecture-KISS%20Shell-orange)
 
-O **Aegis** transforma demandas de código em um **pipeline autônomo, delimitado e auditável em 6 estágios** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é uma **máquina de governança determinística** que barra códigos ruins via AST, otimiza o consumo de tokens em até 98% via KV-Cache no Byte 0 e garante que **apenas patches 100% testados e alinhados cheguem ao Git**.
+**Aegis** transforma demandas de código em um **pipeline autônomo, inspecionável e delimitado em 6 estágios** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é um **motor de governança determinístico** que bloqueia código inválido via AST, eleva o reuso de código de LLMs para **Red Teaming de Design de Sistema e Invariantes de Estado**, otimiza o consumo de tokens em até 98% via KV-Cache Byte-0 e garante **que apenas patches 100% testados e alinhados à arquitetura cheguem ao Git**.
 
 ---
 
@@ -67,13 +67,13 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 
 ## ⚡ Topologia de KV-Cache & Economia de Tokens
 
-| Modo | Substrato / Motor | O que entra no Prompt da API | Taxa Estimada de Cache Hit |
+| Mode | Substrato / Motor | O que entra no Prompt da API | Taxa Estimada de Cache Hit |
 |---|---|---|---|
 | **`discovery`** | Shell Mecânico | 100% Mecânico em Shell | 🟢 **N/A (0 tokens)** |
 | **`forensics`** | Shell Mecânico | 100% Mecânico em Shell | 🟢 **N/A (0 tokens)** |
 | **`repair` (1ª vez)** | Aider CLI | Topo Congelado + Demanda + Evidências | 🆕 **0%** *(Grava o topo do Aider no servidor)* |
-| **`optimize` (1ª vez)** | Raw LLM | Topo Congelado + Diff $C_1$ do `repair` | 🟡 **~60% Hit** *(Reaproveita o Byte 0 congelado)* |
-| **`adversarial` (1ª vez)**| Raw LLM | Topo Congelado + Diff $C_1$ (Idêntico ao optimize)| ⚡ **95% - 100% Cache Hit** *(Lê topo + Diff a custo ~0)*|
+| **`optimize` (1ª vez)** | Raw LLM | Topo Congelado + Diff $C_1$ *(Refatoração de Design de Sistema)* | 🟡 **~60% Hit** *(Reaproveita o Byte 0 congelado)* |
+| **`adversarial` (1ª vez)**| Raw LLM | Topo Congelado + Diff $C_1$ *(Profundidade `low|medium|paranoid` & Falsificação de Workflow)* | ⚡ **95% - 100% Cache Hit** *(Lê topo + Diff a custo ~0)*|
 | **`repair` (Reentrada)**| Aider CLI | Topo Congelado + *[Feedback na Zona Ao Vivo]* | ⚡ **~100% Header Hit** *(Lê o topo a custo ~0)* |
 | **`validation`** | Shell Mecânico | Tribunal Mecânico (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
 

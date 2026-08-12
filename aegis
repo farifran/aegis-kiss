@@ -52,7 +52,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./aegis "<sua instrução>"
-  ./aegis go "<uma frase>" [--target <path>] [--accept <token>]...
+  ./aegis go "<uma frase>" [--target <path>] [--accept <token>]... [--adversarial-depth low|medium|paranoid]
   ./aegis context [--target PATH]
   ./aegis split <tasks/sua_issue.md> [diretorio_saida]
 
@@ -72,6 +72,8 @@ go        Abre a issue, corre o pipeline de mutation completo e pára no gate
           body já estruturado. Escape: --relaxed ou AEGIS_INTAKE_RELAXED=1.
           --accept são tokens curtos que têm de aparecer no código, nunca
           frases. São a semente do registo.
+          --adversarial-depth (low|medium|paranoid): define a intensidade da
+          falsificação no estágio adversarial (default: medium).
           --issue N volta a correr uma issue existente; se tiver ## Tasks
           com [ ], retoma na primeira aberta (keep-progress).
           --force-task K reabre a task K ([x]→[ ]) e re-corre a partir dela.
@@ -121,7 +123,7 @@ propose_target() {
 # acceptance token becomes permanent, so it is extracted, never invented.
 derive_accept_tokens() {
   printf '%s\n' "${1-}" \
-    | tr ' \t,;()[]{}' '\n' \
+    | tr ' \t,;()[]{}*+%/=-' '\n' \
     | sed -E 's/[.:!?"'"'"']+$//' \
     | grep -Ev '/' \
     | grep -E '([a-z][A-Z]|[a-zA-Z]_[a-zA-Z]|^[0-9]{3,}$)' \
@@ -920,6 +922,12 @@ cmd_go() {
         [[ "${force_task}" =~ ^[1-9][0-9]*$ ]] \
           || aegis_fatal "invalid_force_task:${force_task:-empty} — use --force-task N (1-based)"
         shift 2 ;;
+      --adversarial-depth)
+        case "${2:-}" in
+          low|medium|paranoid) export AEGIS_ADVERSARIAL_DEPTH="${2}"; shift 2 ;;
+          *) aegis_fatal "invalid_adversarial_depth:${2:-empty} — use low|medium|paranoid" ;;
+        esac
+        ;;
       --relaxed)
         intake_relaxed=1
         export AEGIS_INTAKE_RELAXED=1
@@ -1128,39 +1136,33 @@ cmd_go() {
         # — except transient provider rate-limit, where we derive acceptance
         # from named tokens in the goal so ./aegis --yes still progresses.
         if [[ "${#accepts[@]}" -eq 0 ]]; then
-          local _why_hint="" _rate_limited=0
+          local _why_hint=""
           case "${brief_why:-}" in
-            http_429*|*"rate_limit"*)
-              _rate_limited=1
-              _why_hint=" Provider em rate-limit (HTTP 429)."
-              ;;
-            missing_api_key)
-              _why_hint=" OPENAI_API_KEY / NVIDIA_API_KEY em falta."
-              ;;
-            http_401*|http_403*)
-              _why_hint=" Chave API rejeitada (401/403)."
-              ;;
+            http_429*|*"rate_limit"*) _why_hint=" Provider em rate-limit (HTTP 429)." ;;
+            missing_api_key)        _why_hint=" OPENAI_API_KEY / NVIDIA_API_KEY em falta." ;;
+            http_401*|http_403*)      _why_hint=" Chave API rejeitada (401/403)." ;;
+            empty_response*)          _why_hint=" Resposta do supervisor vazia." ;;
           esac
-          if [[ "${_rate_limited}" -eq 1 ]]; then
-            local derived
-            derived="$(derive_accept_tokens "${goal}")"
-            if [[ -z "${derived}" ]]; then
-              local p path_base
-              for p in ${target}; do
-                path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
-                if [[ "${path_base}" != "index" ]]; then
-                  derived="${path_base}"
-                  break
-                fi
-              done
-            fi
-            if [[ -n "${derived}" ]]; then
-              while IFS= read -r t; do
-                [[ -n "${t}" ]] && accepts+=("${t}")
-              done <<< "${derived}"
-              aegis_warn "briefing offline (http_429_rate_limit) — acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
-            fi
+
+          local derived
+          derived="$(derive_accept_tokens "${goal}")"
+          if [[ -z "${derived}" ]]; then
+            local p path_base
+            for p in ${target}; do
+              path_base="$(basename "${p}" | sed -E 's/\.[a-z]+$//')"
+              if [[ "${path_base}" != "index" ]]; then
+                derived="${path_base}"
+                break
+              fi
+            done
           fi
+          if [[ -n "${derived}" ]]; then
+            while IFS= read -r t; do
+              [[ -n "${t}" ]] && accepts+=("${t}")
+            done <<< "${derived}"
+            aegis_warn "briefing fallback (${brief_why:-offline}) — acceptance do goal: $(printf '%s ' "${accepts[@]+"${accepts[@]}"}")"
+          fi
+
           if [[ "${#accepts[@]}" -eq 0 ]]; then
             aegis_fatal "intake_failed — expand supervisor (${AEGIS_SUPERVISOR_MODEL:-$(aegis_briefing_model 2>/dev/null || echo '?')}) recusado (${brief_why:-empty_response}).${_why_hint} Alternativas: re-tentar; --accept TokenBucket --accept obterEstadoBitmask; ou --relaxed (não recomendado)"
           fi
@@ -1177,6 +1179,7 @@ cmd_go() {
 
     # Quality gates (default): Briefing + Acceptance clean before fit/split/run.
     if [[ "${intake_relaxed}" -ne 1 ]]; then
+      body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
       body="$(aegis_intake_ensure_briefing "${body}")"
       local q_err
       q_err="$(mktemp)"

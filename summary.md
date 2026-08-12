@@ -66,8 +66,8 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | `discovery` | **runtime mechanical only** (no LLM) | Gaps over anchors/probes → `observations` / `rationale` / `required_evidence` |
 | `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `repair_candidates[{id,reason}]` |
 | `repair` | aider | Bounded mutation from candidates + MUTATION BRIEF |
-| `optimize` | **raw** (advise only) | Strict plan or `no_improvement_needed`; **can_improve** → re-enter **repair** once; else passthrough → adversarial |
-| `adversarial` | raw LLM | Falsify candidate assumptions |
+| `optimize` | **raw** (advise only) | System Design & Architecture Refactoring (`src/ARCHITECTURE.md` invariants, state pureness, flat control flow); **can_improve** → re-enter **repair** once; else passthrough → adversarial |
+| `adversarial` | raw LLM | Senior Red Teamer & Falsifier (adaptive depth `low|medium|paranoid`, workflow & async race conditions, state lifecycle invariants, commit record contract alignment) |
 | `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `repair_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
 
 **Skills (`.skills/<mode>.md`):**
@@ -77,8 +77,8 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
 | `repair.md` | **Yes** — Aider mutation |
-| `optimize.md` | **Yes** — raw LLM advise-only (JSON plan; no edits) |
-| `adversarial.md` | **Yes** — raw substrate (unless tools-dirty mechanical) |
+| `optimize.md` | **Yes** — raw LLM advise-only (System Design & Architecture; JSON plan; no edits) |
+| `adversarial.md` | **Yes** — raw substrate (System Red Teamer & Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
 
 ---
@@ -117,8 +117,8 @@ Config lists a base set; execute_mode **re-ranks** and may **omit** search when 
 | discovery | `demand_anchors`, `list_tree`, handover, `layer0_facts`, `attention_seed` | Always mechanical body |
 | forensics | `demand_anchors`, handover, `search_symbol` | **Search omitted** if mechanical; + `filesystem.read` anchors |
 | repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
-| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; trivial-skip / max 1 improve / metrics `kind:optimize` |
-| adversarial | handover, tsc, eslint, test | **Reuses** repair tool stamp when candidate hash matches; else re-runs; mechanical findings if tools dirty |
+| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; System Design & Architecture; trivial-skip / max 1 improve / metrics `kind:optimize` |
+| adversarial | handover, tsc, eslint, test | Falsifies workflow/async race conditions & commit record contract alignment under `AEGIS_ADVERSARIAL_DEPTH`; **Reuses** repair tool stamp when candidate hash matches; else re-runs |
 | validation | handover only | **Mechanical tribunal** + **alignment gate** (tokens↔export names, paths, exports, done_when); stable `tribunal:*` basis; no LLM by default |
 
 **Authorization:** operator-named paths, `required_evidence`, Layer 0 / attention seed — not import graphs.

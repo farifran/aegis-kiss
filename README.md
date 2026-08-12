@@ -9,7 +9,7 @@ Language: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 ![Zero Regressions](https://img.shields.io/badge/Quality-Zero%20Regressions-brightgreen)
 ![KISS Architecture](https://img.shields.io/badge/Architecture-KISS%20Shell-orange)
 
-**Aegis** transforms code demands into a **bounded, inspectable, 6-stage autonomous pipeline** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Unlike generic IDE extensions, Aegis is a **deterministic governance engine** that mechanically blocks bad code via AST, optimizes token expenditure up to 98% via Byte-0 KV-Cache, and guarantees **only 100% tested and aligned patches reach Git**.
+**Aegis** transforms code demands into a **bounded, inspectable, 6-stage autonomous pipeline** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Unlike generic IDE extensions, Aegis is a **deterministic governance engine** that mechanically blocks bad code via AST, elevates LLM code reviews from local syntax to **System Design & State Lifecycle Red-Teaming**, optimizes token expenditure up to 98% via Byte-0 KV-Cache, and guarantees **only 100% tested, architecturally aligned patches reach Git**.
 
 ---
 
@@ -72,8 +72,8 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 | **`discovery`** | Mechanical Shell | 100% Mechanical in Shell | 🟢 **N/A (0 tokens)** |
 | **`forensics`** | Mechanical Shell | 100% Mechanical in Shell | 🟢 **N/A (0 tokens)** |
 | **`repair` (1st run)** | Aider CLI | Frozen Header + Demand + Evidence | 🆕 **0%** *(Writes Aider header to server)* |
-| **`optimize` (1st run)** | Raw LLM | Frozen Header + Candidate Diff $C_1$ | 🟡 **~60% Hit** *(Reuses frozen Byte 0)* |
-| **`adversarial` (1st run)**| Raw LLM | Frozen Header + Candidate Diff $C_1$ (Same as opt)| ⚡ **95% - 100% Cache Hit** *(Reads header + Diff at ~0 cost)*|
+| **`optimize` (1st run)** | Raw LLM | Frozen Header + Candidate Diff $C_1$ *(System Design Refactoring)* | 🟡 **~60% Hit** *(Reuses frozen Byte 0)* |
+| **`adversarial` (1st run)**| Raw LLM | Frozen Header + Diff $C_1$ *(Adaptive Depth `low|medium|paranoid` Workflow Falsification)* | ⚡ **95% - 100% Cache Hit** *(Reads header + Diff at ~0 cost)*|
 | **`repair` (Re-entry)** | Aider CLI | Frozen Header + *[Live Zone Feedback]* | ⚡ **~100% Header Hit** *(Reads header at ~0 cost)* |
 | **`validation`** | Mechanical Shell | Mechanical Tribunal (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
 
