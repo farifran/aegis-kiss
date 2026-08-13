@@ -25,19 +25,9 @@ aegis_warn() {
 aegis_fatal() {
   local msg="$*"
   echo "[AEGIS][${AEGIS_LOG_TAG:-HARNESS}][FATAL] ${msg}" >&2
-  # Best-effort operator breadcrumb for the pipeline report. Never blocks
-  # the fatal path; never invents a runtime root that does not exist.
-  local breadcrumb_dir="${AEGIS_RUNTIME_DIR:-.harness/runtime}"
-  mkdir -p "${breadcrumb_dir}" 2>/dev/null || true
-  printf '%s\n' "${msg}" > "${breadcrumb_dir}/last_fatal" 2>/dev/null || true
-
-  # Ensure main workspace .harness/runtime/last_fatal is populated if running inside a disposable worktree
-  if [[ -d ".harness/runtime" ]]; then
-    printf '%s\n' "${msg}" > ".harness/runtime/last_fatal" 2>/dev/null || true
-  fi
-  if [[ -n "${AEGIS_WORKSPACE_ROOT:-}" && -d "${AEGIS_WORKSPACE_ROOT}/.harness/runtime" ]]; then
-    printf '%s\n' "${msg}" > "${AEGIS_WORKSPACE_ROOT}/.harness/runtime/last_fatal" 2>/dev/null || true
-  fi
+  local root_runtime="${AEGIS_ROOT_DIR:-${ROOT:-.}}"/.harness/runtime
+  mkdir -p "${root_runtime}" 2>/dev/null || true
+  printf '%s\n' "${msg}" > "${root_runtime}/last_fatal" 2>/dev/null || true
   exit 1
 }
 
