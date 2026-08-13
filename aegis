@@ -1111,10 +1111,19 @@ cmd_go() {
     # only allowed with --relaxed / AEGIS_INTAKE_RELAXED=1.
     body=""
     if aegis_briefing_enabled; then
-      local brief_err
+      local brief_err intake_evidence="" t
       brief_err="$(mktemp)"
-      aegis_log "briefing: a expandir a demanda com o supervisor..."
-      body="$(aegis_briefing_generate "${goal}" "${target}" 2>"${brief_err}")" || body=""
+      aegis_log "intake: a analisar o workspace (discovery & forensics) antes de estruturar a demanda..."
+      for t in ${target}; do
+        if [[ -f "${t}" ]]; then
+          local t_exports t_snippet
+          t_exports="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null || true)"
+          t_snippet="$(head -n 20 "${t}" 2>/dev/null || true)"
+          intake_evidence="${intake_evidence}File: ${t}\nExisting Exports: ${t_exports}\nSnippet:\n${t_snippet}\n\n"
+        fi
+      done
+      aegis_log "briefing: a expandir a demanda com o supervisor (com evidência epistêmica)..."
+      body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_evidence}" 2>"${brief_err}")" || body=""
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"
       else

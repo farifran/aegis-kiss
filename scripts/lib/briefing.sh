@@ -433,6 +433,7 @@ aegis_briefing_provider_error_code() {
 aegis_briefing_generate() {
   local goal="${1-}"
   local target="${2-}"
+  local evidence="${3-}"
 
   [[ -n "${goal}" ]] || return 1
 
@@ -454,16 +455,20 @@ aegis_briefing_generate() {
     return 1
   }
 
+  local user_prompt="Demand: ${goal}\nTargets: ${target}"
+  if [[ -n "${evidence}" ]]; then
+    user_prompt="${user_prompt}\n\nWorkspace Evidence (Discovery & Forensics):\n${evidence}"
+  fi
+
   jq -n \
     --arg model "${model}" \
     --arg sys "$(aegis_briefing_system_prompt)" \
-    --arg goal "${goal}" \
-    --arg target "${target}" \
+    --arg user "${user_prompt}" \
     '{
       model: $model,
       messages: [
         {role: "system", content: $sys},
-        {role: "user", content: ("Demand: " + $goal + "\nTargets: " + $target)}
+        {role: "user", content: $user}
       ],
       temperature: 0.1,
       max_tokens: 1100,
