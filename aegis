@@ -902,6 +902,16 @@ aegis_metrics_session_begin() {
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }
 
+aegis_is_agentic_execution() {
+  if [[ -n "${ANTIGRAVITY_AGENT:-}${CLAUDE_CODE:-}${CODEX_AGENT:-}${OPENCODE_AGENT:-}" ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    return 0
+  fi
+  return 1
+}
+
 cmd_go() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
   local brief_why=""
@@ -950,6 +960,16 @@ cmd_go() {
   # --relaxed flag or env; local also tracks for logging.
   if aegis_intake_relaxed; then
     intake_relaxed=1
+  fi
+
+  # Interactive Setup Wizard trigger rule:
+  # Trigger interactive setup wizard ONLY if API key is missing AND running interactively by a Human (not AI Agent)
+  if [[ -z "${OPENAI_API_KEY:-${NVIDIA_API_KEY:-${GEMINI_API_KEY:-}}}" ]]; then
+    if aegis_is_agentic_execution; then
+      aegis_log "ambiente agêntico detectado (assistente AI) — operando em modo handover mecânico (sem perguntas TTY)"
+    elif [[ -t 0 ]] && [[ "${assume_yes}" -ne 1 ]]; then
+      cmd_setup
+    fi
   fi
 
   # Before briefing/supervisor expand so intake tokens land in the same file
@@ -1765,12 +1785,123 @@ cmd_split() {
   bash scripts/fit_check_demand.sh --emit-micros "${out_dir}" "${input}"
 }
 
+cmd_setup() {
+  printf '\n=================================================\n'
+  printf ' AEGIS HARNESS — ASSISTENTE DE CONFIGURAÇÃO DE API\n'
+  printf '=================================================\n\n'
+  printf 'Selecione o seu provedor de LLM:\n'
+  printf '  1) NVIDIA Integrate (GLM 5.2 / Llama 3.3) [Recomendado] — https://build.nvidia.com\n'
+  printf '  2) Google Gemini (Gemini 3.6 Flash) — https://aistudio.google.com\n'
+  printf '  3) Custom OpenAI / Groq / DeepSeek / vLLM\n'
+  printf '  4) Pular (modo offline mecânico apenas)\n\n'
+
+  local choice key=""
+  if [[ -t 0 ]]; then
+    read -r -p "Escolha uma opção [1-4]: " choice
+  else
+    aegis_warn "sem TTY interativo para o setup wizard"
+    return 0
+  fi
+
+  case "${choice}" in
+    1)
+      printf '\n[NVIDIA INTEGRATE (GLM 5.2)]\n'
+      read -r -p "Insira a sua NVIDIA API Key (nvapi-...): " key
+      if [[ -n "${key}" ]]; then
+        mkdir -p .harness 2>/dev/null || true
+        cat <<EOF > .harness/local.env
+# --- NVIDIA Integrate Endpoint (GLM 5.2) ---
+export NVIDIA_API_KEY="${key}"
+export OPENAI_API_KEY="\${NVIDIA_API_KEY}"
+export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
+
+# --- Model Config: GLM 5.2 ---
+export OPENAI_MODEL_ANALYSIS="z-ai/glm-5.2"
+export OPENAI_MODEL_READONLY_COGNITION="z-ai/glm-5.2"
+export OPENAI_MODEL_MUTATION="z-ai/glm-5.2"
+export AEGIS_MUTATION_MODEL="z-ai/glm-5.2"
+export AEGIS_AIDER_MODEL="openai/z-ai/glm-5.2"
+export OPENAI_MODEL_OPTIMIZE="z-ai/glm-5.2"
+export AEGIS_MODEL_DEFAULT="z-ai/glm-5.2"
+export AEGIS_SUPERVISOR_MODEL="z-ai/glm-5.2"
+export AEGIS_AIDER_EDIT_FORMAT="whole"
+EOF
+        export OPENAI_API_KEY="${key}"
+        export NVIDIA_API_KEY="${key}"
+        export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
+        aegis_log "Configuração gravada em .harness/local.env com sucesso!"
+      fi
+      ;;
+    2)
+      printf '\n[GOOGLE GEMINI (GEMINI 3.6 FLASH)]\n'
+      read -r -p "Insira a sua Gemini API Key (AIzaSy...): " key
+      if [[ -n "${key}" ]]; then
+        mkdir -p .harness 2>/dev/null || true
+        cat <<EOF > .harness/local.env
+# --- Google Gemini Endpoint ---
+export GEMINI_API_KEY="${key}"
+export OPENAI_API_KEY="\${GEMINI_API_KEY}"
+export OPENAI_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
+
+# --- Model Config: Gemini 3.6 ---
+export OPENAI_MODEL_ANALYSIS="gemini-3.6-flash"
+export OPENAI_MODEL_READONLY_COGNITION="gemini-3.6-flash"
+export OPENAI_MODEL_MUTATION="gemini-3.6-flash"
+export AEGIS_MUTATION_MODEL="gemini-3.6-flash"
+export AEGIS_AIDER_MODEL="openai/gemini-3.6-flash"
+export OPENAI_MODEL_OPTIMIZE="gemini-3.6-flash"
+export AEGIS_MODEL_DEFAULT="gemini-3.6-flash"
+export AEGIS_SUPERVISOR_MODEL="gemini-3.6-flash"
+export AEGIS_AIDER_EDIT_FORMAT="whole"
+EOF
+        export OPENAI_API_KEY="${key}"
+        export GEMINI_API_KEY="${key}"
+        export OPENAI_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
+        aegis_log "Configuração gravada em .harness/local.env com sucesso!"
+      fi
+      ;;
+    3)
+      printf '\n[CUSTOM OPENAI / DEEPSEEK / GROQ / VLLM]\n'
+      local base="" model=""
+      read -r -p "Base URL (ex: https://api.deepseek.com/v1): " base
+      read -r -p "Model Name (ex: deepseek-coder): " model
+      read -r -p "API Key: " key
+      if [[ -n "${key}" && -n "${base}" && -n "${model}" ]]; then
+        mkdir -p .harness 2>/dev/null || true
+        cat <<EOF > .harness/local.env
+# --- Custom OpenAI Endpoint ---
+export OPENAI_API_KEY="${key}"
+export OPENAI_API_BASE="${base}"
+
+# --- Model Config ---
+export OPENAI_MODEL_ANALYSIS="${model}"
+export OPENAI_MODEL_READONLY_COGNITION="${model}"
+export OPENAI_MODEL_MUTATION="${model}"
+export AEGIS_MUTATION_MODEL="${model}"
+export AEGIS_AIDER_MODEL="openai/${model}"
+export OPENAI_MODEL_OPTIMIZE="${model}"
+export AEGIS_MODEL_DEFAULT="${model}"
+export AEGIS_SUPERVISOR_MODEL="${model}"
+export AEGIS_AIDER_EDIT_FORMAT="whole"
+EOF
+        export OPENAI_API_KEY="${key}"
+        export OPENAI_API_BASE="${base}"
+        aegis_log "Configuração gravada em .harness/local.env com sucesso!"
+      fi
+      ;;
+    4)
+      aegis_log "Modo offline selecionado."
+      ;;
+  esac
+}
+
 main() {
   local verb="${1:-}"
   case "${verb}" in
     context) shift; cmd_context "$@" ;;
     go)      shift; cmd_go "$@" ;;
     split)   shift; cmd_split "$@" ;;
+    setup)   shift; cmd_setup "$@" ;;
     ""|-h|--help) usage ;;
     *)       cmd_go "$@" ;;
   esac

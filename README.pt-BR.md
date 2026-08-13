@@ -35,18 +35,9 @@ O Aegis roda de forma transparente em qualquer ambiente de desenvolvimento:
 
 | Cliente / Ambiente | Como Funciona | Comando / Fluxo |
 |---|---|---|
-| 💻 **Aegis CLI Direto** | Operação manual direta no terminal com APIs oficiais na nuvem (OpenAI, Anthropic, Gemini, DeepSeek). | `./aegis "sua demanda" --target src/...` |
+| 💻 **Aegis CLI Direto** | Operação manual direta no terminal com APIs oficiais na nuvem (OpenAI, Anthropic, Gemini, DeepSeek, NVIDIA). | `./aegis "sua demanda" --target src/...` |
 | 🤖 **Claude Code / Open Code** | O assistente invoca o Aegis via terminal interno, usando o tribunal do Aegis para evitar regressões. | `./aegis "sua demanda"` dentro do Claude Code |
 | 🛸 **Antigravity / IDE Assistants** | Assistentes de pair-programming na IDE disparam execuções do Aegis via `run_command` em background. | Inspeciona métricas em `pipeline_metrics.jsonl` |
-| ⚡ **Inferência Híbrida (vLLM + LiteLLM)** | Roteia mutações iterativas para GPU local ($0/token) e análises complexas para a nuvem. | `litellm --config .harness/litellm.config.yaml` |
-
-<details>
-<summary><b>🛠️ Passo a Passo para Configurar vLLM Local + LiteLLM Proxy Router</b></summary>
-
-1. **Subir vLLM (GPU Local):** `vllm serve Qwen/Qwen2.5-Coder-32B-Instruct --port 8000`
-2. **Subir LiteLLM Router:** `litellm --config .harness/litellm.config.yaml --port 4000`
-3. **Apontar Aegis:** Adicionar `OPENAI_API_BASE="http://localhost:4000/v1"` em `.harness/local.env`.
-</details>
 
 ---
 
