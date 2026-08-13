@@ -206,8 +206,28 @@ resolve_resume() {
 build_mode_list() {
 
   local mode
+  local skip_df=false
+
+  if [[ -f "${HANDOVER_FILE}" ]]; then
+    local h_status
+    h_status="$(jq -r '.artifact_snapshot.status // .status // empty' "${HANDOVER_FILE}" 2>/dev/null || true)"
+    case "${h_status}" in
+      interpreted|issue_materialized|verified)
+        skip_df=true
+        ;;
+    esac
+  fi
 
   for mode in ${PIPELINES[$PIPELINE]}; do
+    if ${skip_df}; then
+      case "${mode}" in
+        discovery|forensics)
+          MODE_STATUS["${mode}"]="ok"
+          MODE_TIMINGS["${mode}"]="0"
+          continue
+          ;;
+      esac
+    fi
     EXECUTION_MODES+=("${mode}")
   done
 
@@ -1083,7 +1103,13 @@ main() {
     exit 1
   fi
 
-  clear_operator_breadcrumbs
+  if [[ "${FRESH_INVESTIGATION}" == "true" ]]; then
+    if [[ ! -f "${HANDOVER_FILE}" ]] || [[ -z "$(jq -r '.artifact_snapshot.mode // empty' "${HANDOVER_FILE}" 2>/dev/null || true)" ]]; then
+      clear_operator_breadcrumbs
+    fi
+  else
+    clear_operator_breadcrumbs
+  fi
   prune_pipeline_evidence_cache
 
   local mode

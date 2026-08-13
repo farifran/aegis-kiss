@@ -1126,6 +1126,37 @@ cmd_go() {
       body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_evidence}" 2>"${brief_err}")" || body=""
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"
+        mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+        jq -n \
+          --arg target "${target}" \
+          --arg goal "${goal}" \
+          '{
+            artifact_snapshot: {
+              status: "interpreted",
+              mode: "forensics",
+              evidence_refs: ["filesystem.read:intake"],
+              operational_context: {
+                status: "interpreted",
+                mode: "forensics",
+                repair_candidates: [
+                  {
+                    id: $target,
+                    reason: ("Demand: " + $goal)
+                  }
+                ],
+                handover_attention: {
+                  next_attention_targets: [$target],
+                  attention_scope: "intake_forensics",
+                  attention_reason: "ATTENTION_REASON_FORENSICS"
+                }
+              }
+            },
+            epistemic_state: {
+              next_attention_targets: [$target],
+              attention_scope: "intake_forensics",
+              attention_reason: "ATTENTION_REASON_FORENSICS"
+            }
+          }' > "${RUNTIME_DIR}/epistemic_handover.json" 2>/dev/null || true
       else
         # Function-scoped: reused below for intake_failed diagnostics.
         brief_why="$(tail -n 1 "${brief_err}" 2>/dev/null || true)"
@@ -1488,14 +1519,21 @@ cmd_go() {
   # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees).
   # Preserve pipeline_metrics.jsonl: session already holds intake (supervisor)
   # tokens; a full rm -rf .harness/runtime used to wipe them before multi-unit.
-  local _metrics_save=""
+  local _metrics_save="" _handover_save=""
   if [[ -n "${AEGIS_METRICS_FILE:-}" && -f "${AEGIS_METRICS_FILE}" ]]; then
     _metrics_save="$(mktemp "${TMPDIR:-/tmp}/aegis_metrics.XXXXXX")"
     cp "${AEGIS_METRICS_FILE}" "${_metrics_save}" 2>/dev/null || _metrics_save=""
   fi
+  if [[ -f "${RUNTIME_DIR}/epistemic_handover.json" ]]; then
+    _handover_save="$(mktemp "${TMPDIR:-/tmp}/aegis_handover.XXXXXX")"
+    cp "${RUNTIME_DIR}/epistemic_handover.json" "${_handover_save}" 2>/dev/null || _handover_save=""
+  fi
   rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
   mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+  if [[ -n "${_handover_save}" && -f "${_handover_save}" ]]; then
+    mv "${_handover_save}" "${RUNTIME_DIR}/epistemic_handover.json" 2>/dev/null || true
+  fi
   if [[ -n "${_metrics_save}" && -f "${_metrics_save}" ]]; then
     export AEGIS_METRICS_FILE="${RUNTIME_DIR}/pipeline_metrics.jsonl"
     mv "${_metrics_save}" "${AEGIS_METRICS_FILE}" 2>/dev/null || true
