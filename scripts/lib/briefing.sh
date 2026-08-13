@@ -364,10 +364,9 @@ aegis_briefing_render() {
           + lines($e.body; "     ")
         end
     )) | join("\n\n")),
-    "",
-    ("Em " + (.barrelFile // "src/index.ts") + ":"),
-    ("   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from " + "'"'"'" + (.barrelFrom // "./mod.js") + "'"'"'"),
-    ("   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }"),
+    (if ((.barrelFrom // "") | length) > 0 then
+      ("Em " + (.barrelFile // "src/index.ts") + ":\n   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from '" + .barrelFrom + "'\n   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }")
+    else empty end),
     "",
     "## Out of scope",
     "- unrelated files",
