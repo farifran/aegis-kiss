@@ -348,6 +348,9 @@ invoke_aider() {
   if [[ "${aider_model_resolved}" != openai/* ]] && [[ "${aider_model_resolved}" != anthropic/* ]] && [[ "${aider_model_resolved}" != gemini/* ]]; then
     aider_model_resolved="openai/${aider_model_resolved}"
   fi
+  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    aegis_fatal "provider_authentication_failure: OPENAI_API_KEY is missing or empty — run ./aegis setup or configure .harness/local.env"
+  fi
 
   local aider_cmd=(
     "${AEGIS_AIDER_BIN}"

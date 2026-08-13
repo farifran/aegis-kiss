@@ -440,7 +440,7 @@ aegis_briefing_generate() {
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="$(aegis_briefing_model)"
-  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
+  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-15}"
 
   if [[ -z "${api_key}" ]]; then
     printf 'missing_api_key\n' >&2
@@ -474,9 +474,8 @@ aegis_briefing_generate() {
   }
 
   # Retry transient provider noise: 429 rate-limit, 5xx, empty body on 200.
-  # Without this, NVIDIA integrate often surfaces as empty_response and the
-  # whole ./aegis go aborts even though a second call would succeed.
-  local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-4}"
+  # Cap attempts to 2 and timeout to 15s to prevent long shell hangs on API stalls.
+  local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-2}"
   [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=4
   local attempt=1
   local http_code="000"
