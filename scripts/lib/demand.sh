@@ -1834,13 +1834,15 @@ aegis_mechanical_export_function_append() {
   [[ -n "${name}" ]] || return 1
 
   surface="${root%/}/${rel}"
-  [[ -f "${surface}" ]] || return 1
-  body="$(cat "${surface}" 2>/dev/null || true)"
-  [[ -n "$(printf '%s' "${body}" | tr -d '[:space:]')" ]] || return 1
+  mkdir -p "$(dirname "${surface}")" 2>/dev/null || true
+  body=""
+  [[ -f "${surface}" ]] && body="$(cat "${surface}" 2>/dev/null || true)"
 
-  names="$(aegis_file_top_level_export_names "${body}")"
-  if printf '%s\n' "${names}" | grep -Fxq -- "${name}"; then
-    return 1
+  if [[ -n "${body}" ]]; then
+    names="$(aegis_file_top_level_export_names "${body}")"
+    if printf '%s\n' "${names}" | grep -Fxq -- "${name}"; then
+      return 1
+    fi
   fi
 
   ts="$(aegis_briefing_function_to_ts "${demand}" "${name}")" || return 1
