@@ -110,6 +110,13 @@ fi
 
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] || continue
+  full_path="${REPOSITORY_ROOT}/${changed_file}"
+  # If file exists on disk as an untracked 0-byte empty placeholder created by IDE, remove it so git apply can create net-new target
+  if [[ -f "${full_path}" && ! -s "${full_path}" ]]; then
+    if ! git -C "${REPOSITORY_ROOT}" ls-files --error-unmatch "${changed_file}" >/dev/null 2>&1; then
+      rm -f "${full_path}" 2>/dev/null || true
+    fi
+  fi
   if ! git -C "${REPOSITORY_ROOT}" diff --quiet HEAD -- "${changed_file}"; then
     dirty_stat="$(
       git -C "${REPOSITORY_ROOT}" status --short -- "${changed_file}" 2>/dev/null \

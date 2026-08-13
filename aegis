@@ -137,6 +137,11 @@ derive_accept_tokens() {
 # exactly that. Porcelain v1 is "XY<space>path", hence cut -c4-.
 target_changes() {
   local target="$1"
+  if [[ -n "${target}" && -f "${target}" && ! -s "${target}" ]]; then
+    if ! git ls-files --error-unmatch "${target}" >/dev/null 2>&1; then
+      rm -f "${target}" 2>/dev/null || true
+    fi
+  fi
   git status --porcelain --untracked-files=all -- "${target}" 2>/dev/null \
     | cut -c4- \
     | grep -v '^$' \
