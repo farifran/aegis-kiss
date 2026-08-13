@@ -25,9 +25,15 @@ aegis_warn() {
 aegis_fatal() {
   local msg="$*"
   echo "[AEGIS][${AEGIS_LOG_TAG:-HARNESS}][FATAL] ${msg}" >&2
-  local root_runtime="${AEGIS_ROOT_DIR:-${ROOT:-.}}"/.harness/runtime
-  mkdir -p "${root_runtime}" 2>/dev/null || true
-  printf '%s\n' "${msg}" > "${root_runtime}/last_fatal" 2>/dev/null || true
+  local breadcrumb_dir="${AEGIS_RUNTIME_DIR:-.harness/runtime}"
+  mkdir -p "${breadcrumb_dir}" 2>/dev/null || true
+  printf '%s\n' "${msg}" > "${breadcrumb_dir}/last_fatal" 2>/dev/null || true
+
+  local root_dir="${AEGIS_ROOT_DIR:-${ROOT:-}}"
+  if [[ -n "${root_dir}" && "${root_dir}/.harness/runtime" != "${breadcrumb_dir}" ]]; then
+    mkdir -p "${root_dir}/.harness/runtime" 2>/dev/null || true
+    printf '%s\n' "${msg}" > "${root_dir}/.harness/runtime/last_fatal" 2>/dev/null || true
+  fi
   exit 1
 }
 

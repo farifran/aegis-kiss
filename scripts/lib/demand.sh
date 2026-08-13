@@ -1664,8 +1664,9 @@ aegis_mechanical_barrel_reexport_apply() {
         | sed -E 's|^src/|./|; s|\.ts$|.js|' \
         || true
     )"
-    import_from="${sib:-./tokenBucket.js}"
+    import_from="${sib}"
   fi
+  [[ -n "${import_from}" ]] || return 1
 
   list="$(
     printf '%s\n' "${acc_names}" | awk 'NF && !seen[$0]++' | paste -sd',' - | sed 's/,/, /g'
