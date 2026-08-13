@@ -1699,13 +1699,15 @@ aegis_mechanical_barrel_reexport_apply() {
   return 0
 }
 
-# Strip aider "whole" format noise that models leave as comments.
+# Strip aider "whole" format noise and self-referential index imports that cause TS2303.
 aegis_strip_aider_whole_file_junk() {
   local body="${1-}"
   printf '%s\n' "${body}" | awk '
     /^[[:space:]]*\/\/[[:space:]]*entire file content/ { next }
     /^[[:space:]]*\/\/[[:space:]]*\.\.\.[[:space:]]*goes in between/ { next }
     /^[[:space:]]*\/\/[[:space:]]*\.\.\.[[:space:]]*$/ { next }
+    /^[[:space:]]*export[[:space:]]+\{[^}]+\}[[:space:]]+from[[:space:]]+[\x27"]\.\/index(\.js)?[\x27"];?/ { next }
+    /^[[:space:]]*import[[:space:]]+\{[^}]+\}[[:space:]]+from[[:space:]]+[\x27"]\.\/index(\.js)?[\x27"];?/ { next }
     { print }
   '
 }
