@@ -37,39 +37,12 @@ assemble_system_prompt() {
   local mode_specific_instructions
   mode_specific_instructions="$(raw_mode_minimal_artifact_instructions)"
 
-  # Every candidate is absolute. This function runs AFTER
-  # prepare_isolated_substrate_workspace has cd'd into a temp workspace,
-  # so a relative lookup (the previous "src/ARCHITECTURE.md") resolves
-  # against the empty workspace and silently never matches — the
-  # directives then never reach the model at all.
-  local target_architecture_section=""
-  local _arch_path=""
-  local _arch_candidate
-  local -a _arch_candidates=()
-  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]]; then
-    _arch_candidates+=(
-      "${AEGIS_EXECUTION_SURFACE_PATH}/src/ARCHITECTURE.md"
-      "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
-    )
-  fi
-  _arch_candidates+=(
-    "${AEGIS_SUBSTRATE_ROOT}/src/ARCHITECTURE.md"
-    "${AEGIS_SUBSTRATE_ROOT}/ARCHITECTURE.md"
-  )
-  for _arch_candidate in "${_arch_candidates[@]}"; do
-    if [[ -f "${_arch_candidate}" ]]; then
-      _arch_path="${_arch_candidate}"
-      break
-    fi
-  done
-  if [[ -n "${_arch_path}" ]]; then
-    # Label the source repo-relatively: an absolute path would stamp the
-    # execution-surface location into the frozen prefix.
-    local _arch_label="${_arch_path}"
-    _arch_label="${_arch_label#${AEGIS_EXECUTION_SURFACE_PATH:-__none__}/}"
-    _arch_label="${_arch_label#${AEGIS_SUBSTRATE_ROOT}/}"
-    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_label}" "$(cat "${_arch_path}")")"
-  fi
+  local target_architecture_section
+  target_architecture_section="$(
+    aegis_resolve_architecture_section \
+      "${AEGIS_EXECUTION_SURFACE_PATH:-}" \
+      "${AEGIS_SUBSTRATE_ROOT:-.}"
+  )"
 
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
@@ -150,18 +123,10 @@ emit_raw_prefix_metric() {
   [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
   [[ -f "${TMP_CAPABILITY_CONTEXT_FILE}" ]] || return 0
 
-  _hash_file() {
-    if command -v shasum >/dev/null 2>&1; then
-      shasum -a 256 < "$1" | awk '{print $1}'
-    else
-      cksum < "$1" | awk '{print $1}'
-    fi
-  }
-
   local system_bytes=0 system_hash=""
   if [[ -f "${TMP_SYSTEM_PROMPT_FILE}" ]]; then
     system_bytes="$(wc -c < "${TMP_SYSTEM_PROMPT_FILE}" | tr -d ' ')"
-    system_hash="$(_hash_file "${TMP_SYSTEM_PROMPT_FILE}")"
+    system_hash="$(aegis_hash_file "${TMP_SYSTEM_PROMPT_FILE}")"
   fi
 
   local prefix_file prefix_hash prefix_bytes
@@ -170,7 +135,7 @@ emit_raw_prefix_metric() {
     '$0 == marker { exit } { print }' \
     "${TMP_CAPABILITY_CONTEXT_FILE}" > "${prefix_file}"
   prefix_bytes="$(wc -c < "${prefix_file}" | tr -d ' ')"
-  prefix_hash="$(_hash_file "${prefix_file}")"
+  prefix_hash="$(aegis_hash_file "${prefix_file}")"
   rm -f "${prefix_file}"
 
   # What a byte-0 prefix cache actually sees: system message followed by

@@ -63,17 +63,7 @@ inject_capability_evidence() {
     fi
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
     compact_file="$(aider_mktemp)"
-    if jq -c '
-          if (type == "object")
-            and has("capability")
-            and has("classification")
-          then del(.execution_id, .generated_at)
-          else . end
-        ' "${payload_path}" > "${compact_file}" 2>/dev/null; then
-      :
-    else
-      cat "${payload_path}" > "${compact_file}"
-    fi
+    aegis_project_capability_envelope "${payload_path}" "${compact_file}"
     payload_bytes="$(wc -c < "${compact_file}")"
     if [[ "${payload_bytes}" -le "${max_bytes}" ]]; then
       cat "${compact_file}"
@@ -311,34 +301,12 @@ assemble_mutation_prompt() {
     fi
   fi
 
-  local target_architecture_section=""
-  local _arch_path=""
-  local _arch_candidate
-  local -a _arch_candidates=()
-  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]]; then
-    _arch_candidates+=(
-      "${AEGIS_EXECUTION_SURFACE_PATH}/src/ARCHITECTURE.md"
-      "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
-    )
-  fi
-  _arch_candidates+=(
-    "${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/src/ARCHITECTURE.md"
-    "${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/ARCHITECTURE.md"
-  )
-  for _arch_candidate in "${_arch_candidates[@]}"; do
-    if [[ -f "${_arch_candidate}" ]]; then
-      _arch_path="${_arch_candidate}"
-      break
-    fi
-  done
-  if [[ -n "${_arch_path}" ]]; then
-    # Label the source repo-relatively: an absolute path would stamp the
-    # execution-surface location into the frozen prefix.
-    local _arch_label="${_arch_path}"
-    _arch_label="${_arch_label#${AEGIS_EXECUTION_SURFACE_PATH:-__none__}/}"
-    _arch_label="${_arch_label#${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/}"
-    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_label}" "$(cat "${_arch_path}")")"
-  fi
+  local target_architecture_section
+  target_architecture_section="$(
+    aegis_resolve_architecture_section \
+      "${AEGIS_EXECUTION_SURFACE_PATH:-}" \
+      "${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}"
+  )"
 
   local raw_prompt_file
   raw_prompt_file="$(aider_mktemp)"
@@ -407,11 +375,7 @@ EOF
   prefix_file="$(aider_mktemp)"
   awk '/^---$/{exit} {print}' "${prompt_file}" > "${prefix_file}"
   prefix_bytes="$(wc -c < "${prefix_file}" | tr -d ' ')"
-  if command -v shasum >/dev/null 2>&1; then
-    prefix_hash="$(shasum -a 256 < "${prefix_file}" | awk '{print $1}')"
-  else
-    prefix_hash="$(cksum < "${prefix_file}" | awk '{print $1}')"
-  fi
+  prefix_hash="$(aegis_hash_file "${prefix_file}")"
 
   aegis_log "prompt_prefix: ${prefix_hash:0:16} (${prefix_bytes} bytes stable head)"
 

@@ -149,3 +149,78 @@ measure() {
       >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
   fi
 }
+
+# ---------------------------------------------------------
+# Shared Prompt & Envelope Helpers
+# ---------------------------------------------------------
+
+aegis_hash_file() {
+  local target_file="${1:-}"
+  [[ -f "${target_file}" ]] || return 0
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 < "${target_file}" | awk '{print $1}'
+  else
+    cksum < "${target_file}" | awk '{print $1}'
+  fi
+}
+
+# Deterministic architecture directives resolution across disposable worktrees
+# and substrate roots. Emits section with repo-relative label to preserve prefix.
+aegis_resolve_architecture_section() {
+  local surface_path="${1:-}"
+  local substrate_root="${2:-${AEGIS_SUBSTRATE_ROOT:-.}}"
+  local arch_path="" arch_candidate
+  local -a candidates=()
+
+  if [[ -n "${surface_path}" ]]; then
+    candidates+=(
+      "${surface_path}/src/ARCHITECTURE.md"
+      "${surface_path}/ARCHITECTURE.md"
+    )
+  fi
+  candidates+=(
+    "${substrate_root}/src/ARCHITECTURE.md"
+    "${substrate_root}/ARCHITECTURE.md"
+  )
+
+  for arch_candidate in "${candidates[@]}"; do
+    if [[ -f "${arch_candidate}" ]]; then
+      arch_path="${arch_candidate}"
+      break
+    fi
+  done
+
+  if [[ -n "${arch_path}" ]]; then
+    local arch_label="${arch_path}"
+    arch_label="${arch_label#${surface_path:-__none__}/}"
+    arch_label="${arch_label#${substrate_root}/}"
+    printf '\nTarget application architecture directives (%s):\n%s\n' "${arch_label}" "$(cat "${arch_path}")"
+  fi
+}
+
+# Envelope identity (execution_id, generated_at) is dropped from the RENDERED
+# projection only; the on-disk payload keeps full provenance for auditing.
+aegis_project_capability_envelope() {
+  local payload_path="$1"
+  local output_file="${2:-}"
+  if [[ -n "${output_file}" ]]; then
+    if jq -c '
+          if (type == "object")
+            and has("capability")
+            and has("classification")
+          then del(.execution_id, .generated_at)
+          else . end
+        ' "${payload_path}" > "${output_file}" 2>/dev/null; then
+      return 0
+    fi
+    cat "${payload_path}" > "${output_file}"
+  else
+    jq -c '
+      if (type == "object")
+        and has("capability")
+        and has("classification")
+      then del(.execution_id, .generated_at)
+      else . end
+    ' "${payload_path}" 2>/dev/null || cat "${payload_path}"
+  fi
+}
