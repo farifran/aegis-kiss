@@ -54,7 +54,7 @@ inject_capability_evidence() {
   # set -u safe: optional operator override, else payload budget, else floor.
   local max_bytes="${AEGIS_AIDER_EVIDENCE_MAX_BYTES:-${AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES:-12000}}"
 
-  local payload_path payload_bytes
+  local payload_path payload_bytes compact_file
   for payload_path in "${payload_paths[@]}"; do
     [[ -f "${payload_path}" ]] || continue
     if [[ -n "${only_matching}" ]] \
@@ -62,14 +62,27 @@ inject_capability_evidence() {
       continue
     fi
     printf '\n### %s\n\n' "$(basename "${payload_path}" .json)"
-    payload_bytes="$(wc -c < "${payload_path}")"
-    if [[ "${payload_bytes}" -le "${max_bytes}" ]]; then
-      cat "${payload_path}"
+    compact_file="$(aider_mktemp)"
+    if jq -c '
+          if (type == "object")
+            and has("capability")
+            and has("classification")
+          then del(.execution_id, .generated_at)
+          else . end
+        ' "${payload_path}" > "${compact_file}" 2>/dev/null; then
+      :
     else
-      head -c "${max_bytes}" "${payload_path}"
+      cat "${payload_path}" > "${compact_file}"
+    fi
+    payload_bytes="$(wc -c < "${compact_file}")"
+    if [[ "${payload_bytes}" -le "${max_bytes}" ]]; then
+      cat "${compact_file}"
+    else
+      head -c "${max_bytes}" "${compact_file}"
       printf '\n[AEGIS][EVIDENCE_TRUNCATED:%s->%s bytes]\n' \
         "${payload_bytes}" "${max_bytes}"
     fi
+    rm -f "${compact_file}" 2>/dev/null || true
     printf '\n'
   done
 }
@@ -300,15 +313,31 @@ assemble_mutation_prompt() {
 
   local target_architecture_section=""
   local _arch_path=""
-  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] && [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md" ]]; then
-    _arch_path="${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
-  elif [[ -f "src/ARCHITECTURE.md" ]]; then
-    _arch_path="src/ARCHITECTURE.md"
-  elif [[ -f "ARCHITECTURE.md" ]]; then
-    _arch_path="ARCHITECTURE.md"
+  local _arch_candidate
+  local -a _arch_candidates=()
+  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]]; then
+    _arch_candidates+=(
+      "${AEGIS_EXECUTION_SURFACE_PATH}/src/ARCHITECTURE.md"
+      "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
+    )
   fi
-  if [[ -n "${_arch_path}" && -f "${_arch_path}" ]]; then
-    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_path}" "$(cat "${_arch_path}")")"
+  _arch_candidates+=(
+    "${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/src/ARCHITECTURE.md"
+    "${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/ARCHITECTURE.md"
+  )
+  for _arch_candidate in "${_arch_candidates[@]}"; do
+    if [[ -f "${_arch_candidate}" ]]; then
+      _arch_path="${_arch_candidate}"
+      break
+    fi
+  done
+  if [[ -n "${_arch_path}" ]]; then
+    # Label the source repo-relatively: an absolute path would stamp the
+    # execution-surface location into the frozen prefix.
+    local _arch_label="${_arch_path}"
+    _arch_label="${_arch_label#${AEGIS_EXECUTION_SURFACE_PATH:-__none__}/}"
+    _arch_label="${_arch_label#${AEGIS_AIDER_SUBSTRATE_ROOT:-${AEGIS_SUBSTRATE_ROOT:-.}}/}"
+    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_label}" "$(cat "${_arch_path}")")"
   fi
 
   local raw_prompt_file

@@ -415,6 +415,25 @@ raw_want_json_object_format() {
   return 0
 }
 
+# Returns 0 when raw substrate should format system message with Anthropic cache_control.
+raw_want_anthropic_cache_control() {
+  case "${AEGIS_RAW_CACHE_CONTROL_SUPPORTED:-1}" in
+    0|false|no|off) return 1 ;;
+  esac
+  case "${AEGIS_PROVIDER_CACHE_CONTROL:-auto}" in
+    1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
+  esac
+  local base_lower="${OPENAI_API_BASE,,}"
+  local model_lower="${MODEL,,}"
+  if [[ "${base_lower}" == *anthropic* ]] \
+    || [[ "${model_lower}" == *claude* ]] \
+    || [[ "${model_lower}" == *anthropic* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 assemble_provider_request() {
 
   local effective_max_tokens
@@ -427,6 +446,12 @@ assemble_provider_request() {
   fi
   aegis_log "raw_json_object_format=${want_json_object}"
 
+  local want_cache_control=0
+  if raw_want_anthropic_cache_control; then
+    want_cache_control=1
+  fi
+  aegis_log "raw_anthropic_cache_control=${want_cache_control}"
+
   jq -n \
     --arg model "${MODEL}" \
     --rawfile system_prompt "${TMP_SYSTEM_PROMPT_FILE}" \
@@ -434,6 +459,7 @@ assemble_provider_request() {
     --argjson temperature "${AEGIS_RAW_SUBSTRATE_TEMPERATURE}" \
     --argjson max_tokens "${effective_max_tokens}" \
     --argjson want_json_object "${want_json_object}" \
+    --argjson want_cache_control "${want_cache_control}" \
     '
     {
       model: $model,
@@ -442,7 +468,19 @@ assemble_provider_request() {
       messages: [
         {
           role: "system",
-          content: $system_prompt
+          content: (
+            if $want_cache_control == 1 then
+              [
+                {
+                  type: "text",
+                  text: $system_prompt,
+                  cache_control: {type: "ephemeral"}
+                }
+              ]
+            else
+              $system_prompt
+            end
+          )
         },
         {
           role: "user",

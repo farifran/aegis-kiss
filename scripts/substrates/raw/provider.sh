@@ -23,6 +23,33 @@ request_has_json_object_format() {
     >/dev/null 2>&1
 }
 
+# Drop cache_control structure from messages and fall back to plain string content.
+raw_strip_cache_control() {
+  local stripped
+  stripped="$(
+    jq '
+      .messages |= map(
+        if (.content | type == "array") then
+          .content = ([.content[] | if type == "object" and has("text") then .text else . end] | join(""))
+        else . end
+      )
+    ' "${TMP_REQUEST_FILE}" 2>/dev/null
+  )" || return 1
+  [[ -n "${stripped}" ]] || return 1
+  printf '%s\n' "${stripped}" > "${TMP_REQUEST_FILE}"
+  export AEGIS_RAW_CACHE_CONTROL_SUPPORTED=0
+  return 0
+}
+
+request_has_cache_control() {
+  jq -e '
+    .messages[]?
+    | select(.content | type == "array")
+    | .content[]?
+    | select(type == "object" and has("cache_control"))
+  ' "${TMP_REQUEST_FILE}" >/dev/null 2>&1
+}
+
 # Provider-reported token usage. This is the ONLY number that reflects what
 # the model actually billed/processed: request_bytes below is measured
 # before the request leaves this process, so it cannot see anything a
@@ -44,12 +71,13 @@ emit_provider_usage_metric() {
        mode: $mode,
        model: $model,
        request_bytes: $request_bytes,
-       prompt_tokens: (.usage.prompt_tokens // null),
-       completion_tokens: (.usage.completion_tokens // null),
+       prompt_tokens: (.usage.prompt_tokens // .usage.input_tokens // null),
+       completion_tokens: (.usage.completion_tokens // .usage.output_tokens // null),
        total_tokens: (.usage.total_tokens // null),
        cached_prompt_tokens: (
          .usage.prompt_tokens_details.cached_tokens
          // .usage.cached_tokens
+         // .usage.cache_read_input_tokens
          // null
        )
      }' "${TMP_RESPONSE_FILE}" \
@@ -172,6 +200,15 @@ execute_provider_request() {
         if request_has_json_object_format; then
           if raw_strip_json_object_format; then
             echo "[AEGIS][RAW][WARN] provider rejected response_format=json_object — retrying without it (${error_message:-no message})" >&2
+            continue
+          fi
+        fi
+
+        # Pareto fallback: if provider rejected structured cache_control content blocks,
+        # strip them back to plain string content and retry.
+        if request_has_cache_control; then
+          if raw_strip_cache_control; then
+            echo "[AEGIS][RAW][WARN] provider rejected cache_control content blocks — retrying with plain text (${error_message:-no message})" >&2
             continue
           fi
         fi

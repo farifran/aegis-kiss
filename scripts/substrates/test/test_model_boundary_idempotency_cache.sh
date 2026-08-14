@@ -216,6 +216,46 @@ assert_prompt_prefix_stability() {
   echo "[AEGIS][TEST] prompt prefix stability contract passed"
 }
 
+assert_aider_prompt_prefix_stability() {
+  local prompt_a prompt_b
+  prompt_a="$(mktemp)"
+  prompt_b="$(mktemp)"
+
+  export AEGIS_MODE="repair"
+  export AEGIS_EXECUTION_ID="exec-aider-1"
+  export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_TEST_ROOT}"
+  export AEGIS_INVESTIGATION_INPUT="test repair demand"
+  export AIDER_SKILL_FILE=".skills/repair.md"
+
+  # shellcheck disable=SC1091
+  source "${AEGIS_TEST_ROOT}/scripts/lib/common.sh"
+  # shellcheck disable=SC1091
+  source "${AEGIS_TEST_ROOT}/scripts/lib/demand.sh"
+  # shellcheck disable=SC1091
+  source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/prompt.sh"
+
+  assemble_mutation_prompt "${prompt_a}" "whole" "src/index.ts"
+
+  export AEGIS_EXECUTION_ID="exec-aider-2"
+  assemble_mutation_prompt "${prompt_b}" "whole" "src/index.ts"
+
+  local head_a head_b
+  head_a="$(awk '/^---$/{exit} {print}' "${prompt_a}")"
+  head_b="$(awk '/^---$/{exit} {print}' "${prompt_b}")"
+
+  [[ "${head_a}" == "${head_b}" ]] \
+    || fail "aider_frozen_head_diverged_across_runs"
+
+  printf '%s' "${head_a}" | grep -q "Target application architecture directives" \
+    || fail "aider_architecture_directives_missing_from_frozen_head"
+
+  printf '%s' "${head_a}" | grep -q "Skill contract:" \
+    || fail "aider_skill_contract_missing_from_frozen_head"
+
+  rm -f "${prompt_a}" "${prompt_b}"
+  echo "[AEGIS][TEST] aider prompt prefix stability contract passed"
+}
+
 test_cleanup_extra() {
   rm -rf "${REQUEST_CAPTURE_DIR}" "${CAPTURE_CURL_DIR}" >/dev/null 2>&1 || true
 }
@@ -226,5 +266,6 @@ test_cleanup_extra() {
 
 assert_empty_candidate_rejection_gate
 assert_prompt_prefix_stability
+assert_aider_prompt_prefix_stability
 
 echo "[PASS] model boundary prompt stability"

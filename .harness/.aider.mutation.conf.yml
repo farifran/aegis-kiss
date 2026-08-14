@@ -68,8 +68,8 @@ line-endings: lf
 # CACHE & PERFORMANCE
 # ---------------------------------------------------------
 
-# Disable prompt caching headers that add latency on third-party API providers
-cache-prompts: false
+# Enable prompt caching headers for API providers that support prefix caching
+cache-prompts: true
 
 # ---------------------------------------------------------
 # NON-INTERACTIVE EXIT GUARANTEE

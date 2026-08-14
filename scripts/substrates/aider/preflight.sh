@@ -179,7 +179,6 @@ assemble_preflight_fix_prompt() {
 Preflight fix after a mutation attempt.
 
 Mode: ${AEGIS_MODE}
-Execution ID: ${AEGIS_EXECUTION_ID}
 
 Edit ONLY:
 ${target_list}

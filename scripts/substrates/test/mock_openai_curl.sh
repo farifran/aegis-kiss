@@ -27,13 +27,22 @@ done
 # The raw system prompt marks the mode inline as "[Aegis mode:<mode>]"
 # (scripts/substrates/raw/prompt.sh). Keep this in sync with that marker.
 mode="$(
-  jq -r '.messages[0].content // empty' "${request_file}" \
+  jq -r '
+    if (.messages[0].content | type == "array") then
+      (.messages[0].content[0].text // "")
+    else
+      (.messages[0].content // "")
+    end
+  ' "${request_file}" \
     | sed -n 's/.*\[Aegis mode:\([a-z_]*\)\].*/\1/p' \
     | head -1
 )"
 
 mapfile -t payload_names < <(
-  jq -r '.messages[].content // empty' "${request_file}" \
+  jq -r '
+    .messages[].content
+    | if type == "array" then .[].text // "" else . // "" end
+  ' "${request_file}" \
     | sed -n 's/^--- PAYLOAD: \(.*\) ---$/\1/p'
 )
 

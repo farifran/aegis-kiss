@@ -90,7 +90,7 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ "${model}" == "aegis-test-frontier-model" ]]
+[[ "${model}" == "openai/aegis-test-frontier-model" || "${model}" == "aegis-test-frontier-model" ]]
 grep -q "adicione uma funcao soma" "${message_file}"
 [[ "${target}" == "src/index.ts" ]]
 

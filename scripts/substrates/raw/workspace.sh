@@ -176,7 +176,7 @@ cleanup_raw_substrate() {
     "${TMP_RESPONSE_FILE}" \
     >/dev/null 2>&1 || true
 
-  if [[ -n "${AEGIS_SUBSTRATE_WORKSPACE}" ]]; then
+  if [[ -n "${AEGIS_SUBSTRATE_WORKSPACE:-}" ]]; then
     rm -rf "${AEGIS_SUBSTRATE_WORKSPACE}" \
       >/dev/null 2>&1 || true
   fi

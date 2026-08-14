@@ -327,9 +327,11 @@ pressure.
 build, only a provider that fills them.
 
 Note that Anthropic caching is **explicit**: it requires `cache_control`
-breakpoints, which `assemble_provider_request` does not send. Against Anthropic
-today the counter would read 0 regardless of how stable the prefix is. OpenAI
-and DeepSeek cache automatically.
+breakpoints. `assemble_provider_request` automatically detects Anthropic
+models / gateways (or `AEGIS_PROVIDER_CACHE_CONTROL=1`) and formats the system
+prompt with `{"cache_control": {"type": "ephemeral"}}`, backed by a Pareto
+fallback in `provider.sh` that strips it if the endpoint rejects structured
+content parts. OpenAI and DeepSeek cache automatically on plain text.
 
 **What to run when a reporting key is available.** Replaying captured payloads
 is preferable to re-running the pipeline: it isolates the variable and costs
