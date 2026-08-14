@@ -59,6 +59,24 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 
 ---
 
+## Execution Paradigms & Model Hierarchy
+
+### 1. Execution Paradigms (2 Modes)
+- **Direct CLI Execution (Human Operator)**: Interactive TTY prompts for human approval, triggers interactive guided setup (`./aegis setup`) if API keys are missing.
+- **AI Assistant Handover (Copilot, Antigravity, Claude Code, OpenCode, Codex)**: Automatic environment sensing via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, non-TTY subshells). Operates in non-blocking, silent handover mode returning structured JSON results.
+
+### 2. Model Selection Hierarchy
+- **Global Fallback**: `AEGIS_MODEL_DEFAULT` (e.g. `meta/llama-3.1-8b-instruct` or `ollama/llama3.1:8b`). Applies to all pipeline stages unless specialized per-mode overrides are specified.
+- **Per-Stage Specialized Overrides**:
+  - `AEGIS_SUPERVISOR_MODEL`: Demand expansion & issue creation in intake (`scripts/lib/briefing.sh`).
+  - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`repair`).
+  - `AEGIS_MODEL_DISCOVERY`: Discovery stage.
+  - `AEGIS_MODEL_FORENSICS`: Forensics stage.
+  - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & workflow falsification stage.
+  - `AEGIS_MODEL_VALIDATION`: Tribunal static validation stage.
+  - `AEGIS_MODEL_OPTIMIZE`: System design refactoring stage.
+- **Inference Providers**: Supports local inference (Ollama, vLLM, LM Studio via `OPENAI_API_BASE="http://localhost:11434/v1"`) and cloud endpoints (NVIDIA Integrate, OpenAI, Anthropic, Gemini, DeepSeek).
+
 ## Modes
 
 | Mode | Engine | Role |

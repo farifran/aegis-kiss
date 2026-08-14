@@ -29,15 +29,30 @@ echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-3.6-flash"' >> .harness/local.env
 
 ---
 
-## 🌐 Multi-Client Integration & Inference Scenarios
+## 🌐 Multi-Client Integration & Inference Modes
 
-Aegis operates seamlessly across any development environment:
+Aegis supports **two primary execution modes** across any development environment:
 
-| Client / Environment | How It Works | Command / Workflow |
+### 1. 💻 Direct CLI Execution (Human Operator)
+- **Interactive TTY Experience**: Prompts for confirmation and opens interactive setup (`./aegis setup`) if API keys are missing.
+- **Local LLMs & Cloud APIs**: Connects to local inference servers (Ollama, vLLM, LM Studio) or cloud endpoints (NVIDIA Integrate, OpenAI, Anthropic, Gemini, DeepSeek).
+- **Flexible Model Selection**:
+  - **Single Global Model**: Set `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (or `ollama/llama3.1:8b`) to use one model for all pipeline stages.
+  - **Per-Task / Per-Mode Models**: Override specific pipeline stages with dedicated models:
+    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & issue generation
+    - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`repair`)
+    - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & falsification (`adversarial`)
+    - `AEGIS_MODEL_VALIDATION`: Tribunal static alignment (`validation`)
+
+### 2. 🤖 AI Assistant Handover (Copilot, Antigravity, Claude Code, OpenCode, Codex)
+- **Automatic Agentic Sensing**: Aegis detects assistant environments (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, or non-TTY subshells).
+- **Non-Blocking & Silent Execution**: Disables TTY interactive prompts automatically, executing deterministically and returning structured JSON outcomes directly to the AI pair-programmer.
+
+| Client / Environment | Execution Mode | Workflow / Command |
 |---|---|---|
-| 💻 **Direct Aegis CLI** | Manual terminal execution connected to official cloud APIs (OpenAI, Anthropic, Gemini, DeepSeek, NVIDIA). | `./aegis "your demand" --target src/...` |
-| 🤖 **Claude Code / Open Code** | AI assistant invokes Aegis via terminal, gaining validation tribunals without polluting code. | `./aegis "your demand"` inside Claude Code |
-| 🛸 **Antigravity / IDE Assistants** | IDE pair-programming assistants run Aegis background tasks via `run_command`. | Inspects metrics in `pipeline_metrics.jsonl` |
+| 💻 **Direct Aegis CLI** | Human Operator (Interactive) | `./aegis "your demand" --target src/...` |
+| 🛸 **Antigravity IDE / Codex** | Agentic Pair-Programmer (Non-blocking) | Background execution via `run_command` or terminal subshell |
+| 🤖 **Claude Code / OpenCode** | Agentic Assistant (Silent Handover) | `./aegis "your demand"` inside assistant prompt |
 
 ---
 
