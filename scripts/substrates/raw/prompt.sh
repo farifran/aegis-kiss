@@ -37,17 +37,38 @@ assemble_system_prompt() {
   local mode_specific_instructions
   mode_specific_instructions="$(raw_mode_minimal_artifact_instructions)"
 
+  # Every candidate is absolute. This function runs AFTER
+  # prepare_isolated_substrate_workspace has cd'd into a temp workspace,
+  # so a relative lookup (the previous "src/ARCHITECTURE.md") resolves
+  # against the empty workspace and silently never matches — the
+  # directives then never reach the model at all.
   local target_architecture_section=""
   local _arch_path=""
-  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]] && [[ -f "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md" ]]; then
-    _arch_path="${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
-  elif [[ -f "src/ARCHITECTURE.md" ]]; then
-    _arch_path="src/ARCHITECTURE.md"
-  elif [[ -f "ARCHITECTURE.md" ]]; then
-    _arch_path="ARCHITECTURE.md"
+  local _arch_candidate
+  local -a _arch_candidates=()
+  if [[ -n "${AEGIS_EXECUTION_SURFACE_PATH:-}" ]]; then
+    _arch_candidates+=(
+      "${AEGIS_EXECUTION_SURFACE_PATH}/src/ARCHITECTURE.md"
+      "${AEGIS_EXECUTION_SURFACE_PATH}/ARCHITECTURE.md"
+    )
   fi
-  if [[ -n "${_arch_path}" && -f "${_arch_path}" ]]; then
-    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_path}" "$(cat "${_arch_path}")")"
+  _arch_candidates+=(
+    "${AEGIS_SUBSTRATE_ROOT}/src/ARCHITECTURE.md"
+    "${AEGIS_SUBSTRATE_ROOT}/ARCHITECTURE.md"
+  )
+  for _arch_candidate in "${_arch_candidates[@]}"; do
+    if [[ -f "${_arch_candidate}" ]]; then
+      _arch_path="${_arch_candidate}"
+      break
+    fi
+  done
+  if [[ -n "${_arch_path}" ]]; then
+    # Label the source repo-relatively: an absolute path would stamp the
+    # execution-surface location into the frozen prefix.
+    local _arch_label="${_arch_path}"
+    _arch_label="${_arch_label#${AEGIS_EXECUTION_SURFACE_PATH:-__none__}/}"
+    _arch_label="${_arch_label#${AEGIS_SUBSTRATE_ROOT}/}"
+    target_architecture_section="$(printf '\nTarget application architecture directives (%s):\n%s\n' "${_arch_label}" "$(cat "${_arch_path}")")"
   fi
 
   cat > "${TMP_SYSTEM_PROMPT_FILE}" <<EOF
@@ -117,9 +138,31 @@ readonly AEGIS_LIVE_ZONE_MARKER="=== LIVE ZONE (everything below changes per exe
 # prefix that is genuinely frozen repeats this hash across executions of
 # the same mode; a drifting one shows a new hash every run. Whether the
 # provider exploits the stability is server-side and not observable here.
+#
+# The prefix a provider cache can reuse starts at byte 0 of the SYSTEM
+# message, not at byte 0 of the user message. Measuring only the user
+# message — as this did — understated the real frozen prefix by roughly
+# 3x (306 vs 998 tokens on a forensics run) and made the number
+# useless for deciding whether the prompt clears a provider's minimum
+# cacheable length. Both segments are reported now, separately and
+# summed, because only the sum is comparable against that threshold.
 emit_raw_prefix_metric() {
   [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
   [[ -f "${TMP_CAPABILITY_CONTEXT_FILE}" ]] || return 0
+
+  _hash_file() {
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 < "$1" | awk '{print $1}'
+    else
+      cksum < "$1" | awk '{print $1}'
+    fi
+  }
+
+  local system_bytes=0 system_hash=""
+  if [[ -f "${TMP_SYSTEM_PROMPT_FILE}" ]]; then
+    system_bytes="$(wc -c < "${TMP_SYSTEM_PROMPT_FILE}" | tr -d ' ')"
+    system_hash="$(_hash_file "${TMP_SYSTEM_PROMPT_FILE}")"
+  fi
 
   local prefix_file prefix_hash prefix_bytes
   prefix_file="$(mktemp)"
@@ -127,12 +170,12 @@ emit_raw_prefix_metric() {
     '$0 == marker { exit } { print }' \
     "${TMP_CAPABILITY_CONTEXT_FILE}" > "${prefix_file}"
   prefix_bytes="$(wc -c < "${prefix_file}" | tr -d ' ')"
-  if command -v shasum >/dev/null 2>&1; then
-    prefix_hash="$(shasum -a 256 < "${prefix_file}" | awk '{print $1}')"
-  else
-    prefix_hash="$(cksum < "${prefix_file}" | awk '{print $1}')"
-  fi
+  prefix_hash="$(_hash_file "${prefix_file}")"
   rm -f "${prefix_file}"
+
+  # What a byte-0 prefix cache actually sees: system message followed by
+  # the user-message frozen zone.
+  local frozen_prefix_bytes=$((system_bytes + prefix_bytes))
 
   # rendered_bytes is what the model actually receives; the budgeter upstream
   # only ever saw the capability payload JSON. Formatted sections (candidate
@@ -145,10 +188,15 @@ emit_raw_prefix_metric() {
   jq -cn \
     --arg mode "${AEGIS_MODE:-}" \
     --arg prefix_hash "${prefix_hash:0:16}" \
+    --arg system_hash "${system_hash:0:16}" \
     --argjson prefix_bytes "${prefix_bytes:-0}" \
+    --argjson system_bytes "${system_bytes:-0}" \
+    --argjson frozen_prefix_bytes "${frozen_prefix_bytes:-0}" \
     --argjson rendered_bytes "${rendered_bytes:-0}" \
     '{kind:"cache",mode:$mode,substrate:"raw",
+      system_hash:$system_hash,system_bytes:$system_bytes,
       prefix_hash:$prefix_hash,prefix_bytes:$prefix_bytes,
+      frozen_prefix_bytes:$frozen_prefix_bytes,
       rendered_bytes:$rendered_bytes}' \
     >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
 }

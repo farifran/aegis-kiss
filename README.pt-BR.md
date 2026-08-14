@@ -5,11 +5,11 @@ Idioma: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 > **Harness Soberano e Determinístico para Engenharia de Software Assistida por IA**
 
 ![AST Enforced](https://img.shields.io/badge/AST--Enforced-ast--grep-blue)
-![KV-Cache](https://img.shields.io/badge/KV--Cache-Byte--0-green)
+![KV-Cache](https://img.shields.io/badge/KV--Cache-Byte--0%20prefixo%20est%C3%A1vel-yellowgreen)
 ![Zero Regressions](https://img.shields.io/badge/Quality-Zero%20Regressions-brightgreen)
 ![KISS Architecture](https://img.shields.io/badge/Architecture-KISS%20Shell-orange)
 
-**Aegis** transforma demandas de código em um **pipeline autônomo, inspecionável e delimitado em 6 estágios** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é um **motor de governança determinístico** que bloqueia código inválido via AST, eleva o reuso de código de LLMs para **Red Teaming de Design de Sistema e Invariantes de Estado**, otimiza o consumo de tokens em até 98% via KV-Cache Byte-0 e garante **que apenas patches 100% testados e alinhados à arquitetura cheguem ao Git**.
+**Aegis** transforma demandas de código em um **pipeline autônomo, inspecionável e delimitado em 6 estágios** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é um **motor de governança determinístico** que bloqueia código inválido via AST, eleva o reuso de código de LLMs para **Red Teaming de Design de Sistema e Invariantes de Estado**, mantém **71% de cada prompt do substrato raw byte a byte idêntico desde o Byte 0** (medido) para que um prefix cache do provedor possa reaproveitá-lo, e garante **que apenas patches 100% testados e alinhados à arquitetura cheguem ao Git**.
 
 ---
 
@@ -65,7 +65,7 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 | 🧠 **Karpathy** | Constituição Cognitiva no Byte 0 ([`AGENTS.md`](AGENTS.md)). | Se a LLM alucinar, o tribunal de intenção reprova a saída. |
 | 📐 **PonyTail** | Diretrizes em [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + Regras de AST. | Garante NodeNext ESM, `readonly`, `BigInt` e zero `any`. |
 | ✂️ **Headroom** | Orçamento Epistêmico de 32KB com proteção de âncoras. | Poda arquivos irrelevantes sem apagar a causa raiz do bug. |
-| ⚡ **LMCache** | Prefixo estático de 4.356 bytes gravado a partir do Byte 0. | **50% a 98% de economia de tokens** na API da LLM. |
+| ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. Reuso do lado do provedor ainda não observado; veja [Economia de Tokens](#-topologia-de-kv-cache--economia-de-tokens). |
 | 🛡️ **Semgrep** | Scanner estático de segurança SAST no `static_gate.sh`. | Bloqueia a promoção no Git de falhas OWASP ou injeções. |
 | 🌳 **Tree-sitter** | Extração de escopo esquelético (`AEGIS_READ_SKELETAL=auto`). | **60% a 90% de poda de tokens** em arquivos secundários. |
 
@@ -73,14 +73,49 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 
 ## ⚡ Topologia de KV-Cache & Economia de Tokens
 
-| Mode | Substrato / Motor | O que entra no Prompt da API | Taxa Estimada de Cache Hit |
+O Aegis ordena todo prompt para que a parte invariante venha primeiro:
+constituição, diretrizes de arquitetura, contrato da skill e manifesto de
+capacidades no Byte 0, depois um marcador `LIVE ZONE`, depois tudo que muda a
+cada execução. Um prefix cache do provedor só consegue reaproveitar bytes até o
+primeiro que diverge — essa ordenação é o mecanismo inteiro.
+
+**O que está medido.** Duas execuções `forensics` da mesma demanda, capturadas
+no fio e tokenizadas com `o200k_base`:
+
+| | tokens |
+|---|---|
+| Prompt completo do substrato raw | 2.435 |
+| **Prefixo idêntico desde o Byte 0 entre as duas runs** | **1.718 (71%)** |
+| — system message (constituição + arquitetura + skill) | 1.059 |
+| — user message até a primeira divergência | 659 |
+| Mínimo do provedor para o prefix cache engajar | 1.024 |
+
+O prefixo passa do limiar com folga. Os 29% restantes são o handover
+epistêmico, que carrega o próprio timestamp e legitimamente muda a cada ciclo.
+
+**O que não está medido.** *Se o provedor de fato reaproveita.* Nenhum endpoint
+que reporte cache foi exercitado ainda — o endpoint NVIDIA atual devolve `null`
+em `cached_tokens`, então `cached_prompt_tokens` no `pipeline_metrics.jsonl`
+nunca foi outra coisa senão nulo. Até essa execução acontecer, o teto honesto é
+aritmética, não benchmark:
+
+| Se o cache disparar | Economia no custo de **input** |
+|---|---|
+| Provedor cobra input cacheado com 50% de desconto | ~35% |
+| Provedor cobra input cacheado com 75% de desconto | ~53% |
+
+Tokens de output nunca são cacheados e custam várias vezes a taxa de input,
+então a economia na conta cheia é materialmente menor que qualquer um dos dois
+números. Qualquer alegação acima dessa faixa não tem lastro em evidência neste
+repositório.
+
+| Mode | Substrato / Motor | O que entra no Prompt da API | Situação do prefixo |
 |---|---|---|---|
-| **`discovery`** | Shell Mecânico | 100% Mecânico em Shell | 🟢 **N/A (0 tokens)** |
-| **`forensics`** | Shell Mecânico | 100% Mecânico em Shell | 🟢 **N/A (0 tokens)** |
-| **`repair` (1ª vez)** | Aider CLI | Topo Congelado + Demanda + Evidências | 🆕 **0%** *(Grava o topo do Aider no servidor)* |
-| **`optimize` (1ª vez)** | Raw LLM | Topo Congelado + Diff $C_1$ *(Refatoração de Design de Sistema)* | 🟡 **~60% Hit** *(Reaproveita o Byte 0 congelado)* |
-| **`adversarial` (1ª vez)**| Raw LLM | Topo Congelado + Diff $C_1$ *(Profundidade `low|medium|paranoid` & Falsificação de Workflow)* | ⚡ **95% - 100% Cache Hit** *(Lê topo + Diff a custo ~0)*|
-| **`repair` (Reentrada)**| Aider CLI | Topo Congelado + *[Feedback na Zona Ao Vivo]* | ⚡ **~100% Header Hit** *(Lê o topo a custo ~0)* |
+| **`discovery`** | Shell Mecânico | 100% mecânico em shell | 🟢 **N/A (0 tokens)** |
+| **`forensics`** | Shell Mecânico (só resíduo LLM) | Topo congelado + evidências | 📏 **71% byte-estável (medido)** |
+| **`repair`** | Aider CLI | Topo congelado + demanda + evidências | ❓ **Não medido** *(o Aider monta o próprio prompt)* |
+| **`optimize`** | Raw LLM | Topo congelado + diff $C_1$ | ❓ **Não medido** *(mesmo montador do `forensics`)* |
+| **`adversarial`** | Raw LLM | Topo congelado + diff $C_1$ *(profundidade `low\|medium\|paranoid`)* | ❓ **Não medido** *(contrato de skill maior ⇒ topo congelado maior)* |
 | **`validation`** | Shell Mecânico | Tribunal Mecânico (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
 
 ---

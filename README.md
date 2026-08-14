@@ -5,11 +5,11 @@ Language: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 > **Sovereign & Deterministic Containment Harness for AI-Assisted Software Engineering**
 
 ![AST Enforced](https://img.shields.io/badge/AST--Enforced-ast--grep-blue)
-![KV-Cache](https://img.shields.io/badge/KV--Cache-Byte--0-green)
+![KV-Cache](https://img.shields.io/badge/KV--Cache-Byte--0%20prefix%20stable-yellowgreen)
 ![Zero Regressions](https://img.shields.io/badge/Quality-Zero%20Regressions-brightgreen)
 ![KISS Architecture](https://img.shields.io/badge/Architecture-KISS%20Shell-orange)
 
-**Aegis** transforms code demands into a **bounded, inspectable, 6-stage autonomous pipeline** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Unlike generic IDE extensions, Aegis is a **deterministic governance engine** that mechanically blocks bad code via AST, elevates LLM code reviews from local syntax to **System Design & State Lifecycle Red-Teaming**, optimizes token expenditure up to 98% via Byte-0 KV-Cache, and guarantees **only 100% tested, architecturally aligned patches reach Git**.
+**Aegis** transforms code demands into a **bounded, inspectable, 6-stage autonomous pipeline** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Unlike generic IDE extensions, Aegis is a **deterministic governance engine** that mechanically blocks bad code via AST, elevates LLM code reviews from local syntax to **System Design & State Lifecycle Red-Teaming**, holds a measured **71% of each raw-substrate prompt byte-identical from Byte 0** so a provider prefix cache can reuse it, and guarantees **only 100% tested, architecturally aligned patches reach Git**.
 
 ---
 
@@ -65,7 +65,7 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 | 🧠 **Karpathy** | Cognition Constitution at Byte 0 ([`AGENTS.md`](AGENTS.md)). | Mechanical intent tribunal rejects hallucinated diffs. |
 | 📐 **PonyTail** | Directives in [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + AST rules. | Enforces NodeNext ESM, `readonly`, `BigInt`, zero `any`. |
 | ✂️ **Headroom** | Epistemic 32KB Context Budgeting with anchor protection. | Prunes irrelevant files without deleting bug root causes. |
-| ⚡ **LMCache** | Static 4,356-byte header frozen starting at Byte 0. | **50% to 98% token cost savings** on LLM APIs. |
+| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. Provider-side reuse not yet observed; see [Token Economy](#-kv-cache-topology--token-economy). |
 | 🛡️ **Semgrep** | SAST static security scanner in `static_gate.sh`. | Mechanically blocks Git promotion of OWASP / injection flaws. |
 | 🌳 **Tree-sitter** | Skeletal scope pruning (`AEGIS_READ_SKELETAL=auto`). | **60% to 90% token pruning** on support files. |
 
@@ -73,15 +73,50 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 
 ## ⚡ KV-Cache Topology & Token Economy
 
-| Mode | Substrate / Engine | Prompt Payload Structure | Estimated Cache Hit |
+Aegis orders every prompt so the invariant part comes first: constitution,
+architecture directives, skill contract and capability manifest at Byte 0,
+then a `LIVE ZONE` marker, then everything that changes per execution.
+A provider-side prefix cache can only reuse bytes up to the first one that
+differs, so that ordering is the whole mechanism.
+
+**What is measured.** Two `forensics` runs of the same demand, captured at the
+wire and tokenised with `o200k_base`:
+
+| | tokens |
+|---|---|
+| Whole raw-substrate prompt | 2,435 |
+| **Byte-0 identical prefix across both runs** | **1,718 (71%)** |
+| — system message (constitution + architecture + skill) | 1,059 |
+| — user message up to first divergence | 659 |
+| Provider minimum before any prefix cache engages | 1,024 |
+
+The prefix clears the threshold with room to spare. The residual 29% is the
+epistemic handover, which carries its own timestamp and legitimately changes
+every cycle.
+
+**What is not measured.** *Whether the provider actually reuses it.* No
+cache-reporting endpoint has been exercised yet — the current NVIDIA endpoint
+returns `null` for `cached_tokens`, so `cached_prompt_tokens` in
+`pipeline_metrics.jsonl` has never been anything but null. Until that run
+happens, the honest ceiling is arithmetic, not a benchmark:
+
+| If the cache fires | Saving on **input** cost |
+|---|---|
+| Provider bills cached input at 50% off | ~35% |
+| Provider bills cached input at 75% off | ~53% |
+
+Output tokens are never cached and are billed several times the input rate, so
+the saving on a full bill is materially smaller than either figure. Any claim
+above this range is not supported by evidence in this repository.
+
+| Mode | Substrate / Engine | Prompt Payload Structure | Prefix status |
 |---|---|---|---|
-| **`discovery`** | Mechanical Shell | 100% Mechanical in Shell | 🟢 **N/A (0 tokens)** |
-| **`forensics`** | Mechanical Shell | 100% Mechanical in Shell | 🟢 **N/A (0 tokens)** |
-| **`repair` (1st run)** | Aider CLI | Frozen Header + Demand + Evidence | 🆕 **0%** *(Writes Aider header to server)* |
-| **`optimize` (1st run)** | Raw LLM | Frozen Header + Candidate Diff $C_1$ *(System Design Refactoring)* | 🟡 **~60% Hit** *(Reuses frozen Byte 0)* |
-| **`adversarial` (1st run)**| Raw LLM | Frozen Header + Diff $C_1$ *(Adaptive Depth `low|medium|paranoid` Workflow Falsification)* | ⚡ **95% - 100% Cache Hit** *(Reads header + Diff at ~0 cost)*|
-| **`repair` (Re-entry)** | Aider CLI | Frozen Header + *[Live Zone Feedback]* | ⚡ **~100% Header Hit** *(Reads header at ~0 cost)* |
-| **`validation`** | Mechanical Shell | Mechanical Tribunal (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
+| **`discovery`** | Mechanical Shell | 100% mechanical in shell | 🟢 **N/A (0 tokens)** |
+| **`forensics`** | Mechanical Shell (LLM residual only) | Frozen head + evidence | 📏 **71% byte-stable (measured)** |
+| **`repair`** | Aider CLI | Frozen head + demand + evidence | ❓ **Unmeasured** *(Aider owns its own prompt assembly)* |
+| **`optimize`** | Raw LLM | Frozen head + candidate diff $C_1$ | ❓ **Unmeasured** *(same assembler as `forensics`)* |
+| **`adversarial`** | Raw LLM | Frozen head + diff $C_1$ *(depth `low\|medium\|paranoid`)* | ❓ **Unmeasured** *(larger skill contract ⇒ larger frozen head)* |
+| **`validation`** | Mechanical Shell | Mechanical tribunal (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
 
 ---
 

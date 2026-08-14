@@ -160,7 +160,7 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
-| KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + `Pocket Map`); `kind:"cache"` metric in `pipeline_metrics.jsonl` |
+| KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest — **not** the Pocket Map, which sits below the `LIVE ZONE` marker); `kind:"cache"` metric in `pipeline_metrics.jsonl` reports `system_bytes` + `prefix_bytes` + `frozen_prefix_bytes` |
 | Skeletal AST Pruning | Optional `AEGIS_READ_SKELETAL=1` via `ast-grep` (Tree-sitter) in `read_file.sh`; `kind:"skeletal_prune"` metric |
 | Multi-Language AST Rules | Language-tagged AST rules in `.harness/enforcement/rules/` (TS, Python, Rust, Go) |
 
@@ -269,37 +269,86 @@ Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent
 
 ---
 
-## Open verification — prompt prefix reuse (BLOCKING for context-cost claims)
+## Open verification — prompt prefix reuse (client side now proven; provider side still open)
 
 The context work (tail-first budget pruning, frozen zone / live zone split,
-`kind:"cache"` prefix hashes) all rests on one unproven premise: that the
-provider actually reuses a stable prompt prefix. **That reuse has never been
-observed.**
+`kind:"cache"` prefix hashes) rests on two separate premises, which were
+previously conflated:
 
-Measured so far:
+1. **The client emits a long, byte-stable prefix.** Now measured and true.
+2. **The provider reuses it.** Still unobserved.
 
-| Fact | Value |
-|---|---|
-| Repair frozen head | 2295 B — ~41% of each repair invocation |
-| Raw frozen zone (forensics) | 1512 B, hash stable across runs *and* demands |
-| `cached_prompt_tokens` reported | `null` on every run (NVIDIA `integrate.api.nvidia.com`) |
+### Premise 1 — measured
 
-The current endpoint either has no prefix cache or does not report one, so the
-payoff is unmeasurable here. `emit_provider_usage_metric`
+Two `forensics` runs of the same demand, captured at the wire (mock-curl shim
+from `test_model_boundary_idempotency_cache.sh`, so no network) and tokenised
+with `o200k_base`:
+
+| Fact | Before | After |
+|---|---|---|
+| Whole raw prompt | 2052 tok | 2435 tok |
+| **Byte-0 identical prefix across both runs** | **998 tok (49%)** | **1718 tok (71%)** |
+| Provider minimum before a prefix cache engages | 1024 tok | 1024 tok |
+| Verdict | **26 tok short — could never cache** | clears with margin |
+
+The "before" column is not a tuning miss, it is a design fault that the old
+metric could not see. Three causes, all now fixed:
+
+- **Per-execution identity stamped into every payload envelope.** `execution_id`
+  and `generated_at` from `aegis_emit_capability_success` were the sole cause of
+  the first 23 divergence points between the two runs. `render_bounded_payload_section`
+  now projects them out of the *rendered* prompt; the on-disk payload keeps them
+  for the audit trail.
+- **`src/ARCHITECTURE.md` never reached the model.** The lookup in
+  `assemble_system_prompt` was relative, and it runs after
+  `prepare_isolated_substrate_workspace` has `cd`'d into a temp workspace, so it
+  silently never matched. Candidates are absolute now. This is a correctness fix
+  first and a prefix fix second — architecture directives were simply absent.
+- **`emit_raw_prefix_metric` measured the wrong segment.** It hashed only the
+  user message, reporting 306 tok against a real frozen prefix of 998 — a 3.3x
+  understatement, and the reason the shortfall went unnoticed. It now reports
+  `system_bytes`, `prefix_bytes` and their sum.
+
+Residual: the remaining 29% starts at the epistemic handover payload, whose
+`artifact_snapshot.generated_at` is nested inside a JSON string in file content.
+It is left alone deliberately — scrubbing volatile-looking text out of evidence
+bodies would let the renderer alter what the model reads as fact, which the
+evidence discipline in `AGENTS.md` forbids. Reordering the handover to the tail
+would extend the prefix, but the payload order is the budgeter's priority order,
+and demoting the handover would make it the first thing dropped under budget
+pressure.
+
+### Premise 2 — still open
+
+`cached_prompt_tokens` is `null` on every run (NVIDIA
+`integrate.api.nvidia.com`). `emit_provider_usage_metric`
 (`scripts/substrates/raw/provider.sh`) already reads
-`usage.prompt_tokens_details.cached_tokens` / `usage.cached_tokens` — nothing
-to build, only a provider that fills them.
+`usage.prompt_tokens_details.cached_tokens` / `usage.cached_tokens` — nothing to
+build, only a provider that fills them.
 
-**What to run when one is available** (Anthropic reports
-`cache_read_input_tokens`; OpenAI reports `prompt_tokens_details.cached_tokens`):
+Note that Anthropic caching is **explicit**: it requires `cache_control`
+breakpoints, which `assemble_provider_request` does not send. Against Anthropic
+today the counter would read 0 regardless of how stable the prefix is. OpenAI
+and DeepSeek cache automatically.
+
+**What to run when a reporting key is available.** Replaying captured payloads
+is preferable to re-running the pipeline: it isolates the variable and costs
+cents. Critically, any probe needs a **positive control** — a bare `cached == 0`
+does not distinguish "the design does not cache" from "the measurement cannot
+observe cache":
 
 ```bash
-# same demand twice — the second run should show cached_prompt_tokens > 0
-./run_aegis.sh --fresh --pipeline mutation "<same demand>"
-./run_aegis.sh --fresh --pipeline mutation "<same demand>"
-jq -c 'select(.kind=="tokens")' .harness/runtime/pipeline_metrics.jsonl
+AEGIS_CAPTURE_OUT=/tmp/caps bash scripts/substrates/test/probes/capture_prompt_payloads.sh
+OPENAI_API_KEY=sk-... python3 scripts/substrates/test/probes/prefix_cache_probe.py /tmp/caps --provider openai
 ```
 
-Outcome decides whether prefix discipline is load-bearing or decoration. If
-`cached_prompt_tokens` stays 0 with a reporting provider, the frozen-zone work
-is inert and the ordering constraints it imposes can be relaxed.
+`prefix_cache_probe.py` fires three arms: **A** the payload as shipped, **B**
+the same payload with volatile stamps neutralised, **C** a long, obviously
+cacheable control. If C does not register a hit, the harness or the account is
+the problem and A/B prove nothing.
+
+Ceiling if it does fire: 71% of input tokens at a 50% cached-input discount is
+~35% of input cost (~53% at 75%). Output is never cached and costs several times
+input, so the saving on a full bill is smaller than either number. The former
+"50% to 98%" claim in the READMEs had no evidence behind it and has been
+replaced with the measured figures.

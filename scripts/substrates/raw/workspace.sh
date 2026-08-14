@@ -224,7 +224,28 @@ render_bounded_payload_section() {
     mktemp
   )"
 
-  if jq -c . "${payload_path}" > "${compact_file}" 2>/dev/null; then
+  # Envelope identity is dropped from the RENDERED projection only; the
+  # on-disk payload keeps execution_id/generated_at for the audit trail.
+  #
+  # These two fields are pure per-execution provenance the model never
+  # consumes — the canonical values are already carried once, in the
+  # EXECUTION IDENTITY tail section. Left in place they re-stamp a fresh
+  # value into every payload envelope, which is what actually destroys
+  # prompt prefix reuse: measured on two identical forensics runs, they
+  # were the sole cause of the first 23 divergence points and capped the
+  # byte-identical prefix at 998 tokens — 26 short of the 1024-token
+  # minimum any provider prefix cache requires before it engages.
+  #
+  # The guard keeps this surgical: only objects that are actually
+  # capability envelopes are projected, anything else renders byte-for-
+  # byte as before.
+  if jq -c '
+        if (type == "object")
+          and has("capability")
+          and has("classification")
+        then del(.execution_id, .generated_at)
+        else . end
+      ' "${payload_path}" > "${compact_file}" 2>/dev/null; then
     :
   else
     cat "${payload_path}" > "${compact_file}"
