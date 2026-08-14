@@ -33,3 +33,10 @@ export class RateLimiter {
 
   get windowStart(): bigint { return this._windowStart }
 }
+
+export function estimateBackoffMs(limiter: RateLimiter, nowMs: bigint): bigint {
+  const windowMs = BigInt(limiter.windowMs)
+  const position = (nowMs - limiter.windowStart) % windowMs
+  if (position < 0n) return 0n
+  return windowMs - position
+}
