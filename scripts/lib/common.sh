@@ -202,25 +202,15 @@ aegis_resolve_architecture_section() {
 # projection only; the on-disk payload keeps full provenance for auditing.
 aegis_project_capability_envelope() {
   local payload_path="$1"
-  local output_file="${2:-}"
-  if [[ -n "${output_file}" ]]; then
-    if jq -c '
-          if (type == "object")
-            and has("capability")
-            and has("classification")
-          then del(.execution_id, .generated_at)
-          else . end
-        ' "${payload_path}" > "${output_file}" 2>/dev/null; then
-      return 0
-    fi
-    cat "${payload_path}" > "${output_file}"
-  else
-    jq -c '
-      if (type == "object")
-        and has("capability")
-        and has("classification")
-      then del(.execution_id, .generated_at)
-      else . end
-    ' "${payload_path}" 2>/dev/null || cat "${payload_path}"
+  local output_file="$2"
+  if jq -c '
+        if (type == "object")
+          and has("capability")
+          and has("classification")
+        then del(.execution_id, .generated_at)
+        else . end
+      ' "${payload_path}" > "${output_file}" 2>/dev/null; then
+    return 0
   fi
+  cat "${payload_path}" > "${output_file}"
 }
