@@ -29,6 +29,37 @@ echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-3.6-flash"' >> .harness/local.env
 
 ---
 
+## 📦 Dependencies
+
+`npm install` covers only the TypeScript toolchain (`typescript`, `eslint`,
+`@ast-grep/cli`, … — see `package.json`). The runtime also requires the
+following on your `PATH`:
+
+| Dependency | Required? | Used for |
+|---|---|---|
+| **bash** (≥ 4) | ✅ | Harness runtime (`set -Eeuo pipefail`) |
+| **git** | ✅ | Only durable memory; diff/status & commit gate |
+| **curl** | ✅ | Provider HTTP requests (`raw` substrate) |
+| **jq** | ✅ | JSON evidence, handover, metrics, prompts |
+| **node** + **npm** | ✅ | `tsc`, `eslint`, `ast-grep` toolchain |
+| **Aider CLI** (`aider`) | ✅ *(mutation)* | `repair` substrate — `AEGIS_AIDER_BIN` (default `.venv/bin/aider`, auto-detected from `PATH`) |
+| **python3** | ⚪ optional | Mechanical TS sanitizer + cache probe scripts |
+| **gh** (GitHub CLI) | ⚪ optional | Only `--issue N` demand intake |
+| Ollama / vLLM / LM Studio | ⚪ optional | Local inference provider |
+
+Install **Aider** for the mutation pipeline (install it into the repo venv so
+`AEGIS_AIDER_BIN`'s default `.venv/bin/aider` resolves, or leave it on your
+`PATH`):
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install aider-chat
+```
+
+Aider is only needed for `repair`; read-only modes (`discovery` / `forensics` /
+`validation`) run without it.
+
+---
+
 ## 🌐 Multi-Client Integration & Inference Modes
 
 Aegis supports **two primary execution modes** across any development environment:

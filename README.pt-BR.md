@@ -29,6 +29,37 @@ echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-3.6-flash"' >> .harness/local.env
 
 ---
 
+## 📦 Dependências
+
+O `npm install` cobre apenas o toolchain TypeScript (`typescript`, `eslint`,
+`@ast-grep/cli`, … — veja `package.json`). O runtime também exige os seguintes
+itens no seu `PATH`:
+
+| Dependência | Necessária? | Usada para |
+|---|---|---|
+| **bash** (≥ 4) | ✅ | Runtime do harness (`set -Eeuo pipefail`) |
+| **git** | ✅ | Única memória durável; diff/status e gate de commit |
+| **curl** | ✅ | Requisições HTTP ao provedor (substrato `raw`) |
+| **jq** | ✅ | Evidência JSON, handover, métricas, prompts |
+| **node** + **npm** | ✅ | Toolchain `tsc`, `eslint`, `ast-grep` |
+| **Aider CLI** (`aider`) | ✅ *(mutação)* | Substrato `repair` — `AEGIS_AIDER_BIN` (padrão `.venv/bin/aider`, auto-detectado no `PATH`) |
+| **python3** | ⚪ opcional | Sanitizador mecânico de TS + scripts de probe de cache |
+| **gh** (GitHub CLI) | ⚪ opcional | Apenas intake de demanda `--issue N` |
+| Ollama / vLLM / LM Studio | ⚪ opcional | Provedor de inferência local |
+
+Instale o **Aider** para o pipeline de mutação (instale no venv do repositório
+para que o padrão `.venv/bin/aider` do `AEGIS_AIDER_BIN` resolva, ou deixe-o no
+seu `PATH`):
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install aider-chat
+```
+
+O Aider é necessário apenas no `repair`; os modos somente-leitura (`discovery` /
+`forensics` / `validation`) funcionam sem ele.
+
+---
+
 ## 🌐 Integração Multi-Cliente & Modos de Inferência
 
 O Aegis suporta **dois modos principais de execução** em qualquer ambiente de desenvolvimento:
