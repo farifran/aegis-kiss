@@ -14,9 +14,9 @@ export class RateLimiter {
   allow(nowMs: bigint): boolean {
     const timeDiff = nowMs - this._lastUpdate
     if (timeDiff > 0n) {
-    this._remaining -= 1n;
-    this._lastUpdate = nowMs;
-    if (this._remaining <= 0n) { return false; }
+      this._remaining -= 1n;
+      this._lastUpdate = nowMs;
+      if (this._remaining <= 0n) { return false; }
     }
     return true;
   }
@@ -27,4 +27,14 @@ export class RateLimiter {
   }
 
   get remaining(): bigint { return this._remaining; }
+  get lastUpdate(): bigint { return this._lastUpdate; }
+  get windowMs(): bigint { return this._windowMs; }
+}
+
+export function estimateBackoffMs(limiter: RateLimiter, nowMs: bigint): bigint {
+  const timeDiff = nowMs - limiter.lastUpdate;
+  if (timeDiff > 0n) {
+    return limiter.windowMs - timeDiff;
+  }
+  return 0n;
 }
