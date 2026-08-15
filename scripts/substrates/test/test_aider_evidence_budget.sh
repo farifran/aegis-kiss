@@ -2,7 +2,7 @@
 
 # =========================================================
 # Regression: inject_capability_evidence under set -u without
-# AEGIS_AIDER_EVIDENCE_MAX_BYTES (repair env -i isolation).
+# AEGIS_AIDER_EVIDENCE_MAX_BYTES (build env -i isolation).
 # =========================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
@@ -24,7 +24,7 @@ printf '%s\n' '{"payload":{"ok":true}}' > "${payload}"
 export AEGIS_SELECTED_CAPABILITY_PAYLOADS
 AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(jq -cn --arg p "${payload}" '[$p]')"
 
-# Exactly the isolation shape that crashed repair: set -u, vars unset.
+# Exactly the isolation shape that crashed build: set -u, vars unset.
 unset AEGIS_AIDER_EVIDENCE_MAX_BYTES 2>/dev/null || true
 unset AEGIS_CAPABILITY_PAYLOAD_MAX_BYTES 2>/dev/null || true
 

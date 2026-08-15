@@ -11,17 +11,17 @@ fi
 raw_mode_minimal_artifact_instructions() {
   case "${AEGIS_MODE}" in
     forensics)
-      printf '%s' "MINIMAL FORENSICS (LLM residual only): emit ONLY status + repair_candidates[{id,reason}]. Prefer ONE anchor path. Reason = demand (tokens or X-to-Y), never invent features/paths. Runtime injects mode/evidence_refs/handover_attention — do NOT emit them. Full contract: skill file."
+      printf '%s' "MINIMAL FORENSICS (LLM residual only): emit ONLY status + build_candidates[{id,reason}]. Prefer ONE anchor path. Reason = demand (tokens or X-to-Y), never invent features/paths. Runtime injects mode/evidence_refs/handover_attention — do NOT emit them. Full contract: skill file."
       ;;
     discovery)
       # Guard if raw is ever invoked by mistake — discovery has no LLM path.
       printf '%s' "DISCOVERY IS RUNTIME-ONLY: do not invent discovery JSON. If you see this prompt, the harness mis-routed; emit {\"observations\":[],\"rationale\":\"runtime_only\",\"required_evidence\":[]}."
       ;;
     optimize)
-      printf '%s' "MINIMAL OPTIMIZE (advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Prefer no_improvement_needed if unsure. can_improve only with 1-3 items: target_files exact from REPAIR RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff/candidate_result/mode. Full contract: skill file."
+      printf '%s' "MINIMAL OPTIMIZE (advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Prefer no_improvement_needed if unsure. can_improve only with 1-3 items: target_files exact from BUILD RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff/candidate_result/mode. Full contract: skill file."
       ;;
     adversarial)
-      printf '%s' "MINIMAL ADVERSARIAL (DEPTH: ${AEGIS_ADVERSARIAL_DEPTH:-medium}): emit ONLY status+findings. challenged only for (a) in-scope tool failures or (b) logic with full +line quote in backticks. Prefer verified+[] when tools clean and no real quote. Include target_files+fix (imperative) so Repair can act. Tools may be reused from repair stamp when candidate hash matches — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
+      printf '%s' "MINIMAL ADVERSARIAL (DEPTH: ${AEGIS_ADVERSARIAL_DEPTH:-medium}): emit ONLY status+findings. challenged only for (a) in-scope tool failures or (b) logic with full +line quote in backticks. Prefer verified+[] when tools clean and no real quote. Include target_files+fix (imperative) so Build can act. Tools may be reused from build stamp when candidate hash matches — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
       ;;
     validation)
       printf '%s' "MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
@@ -269,14 +269,14 @@ assemble_bounded_capability_context() {
       aegis_format_tribunal_summary_section
     fi
 
-    # Optimize: Repair delta + post-repair file bodies (advise only).
+    # Optimize: Build delta + post-build file bodies (advise only).
     if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-      if declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
-        aegis_format_repair_result_section \
+      if declare -f aegis_format_build_result_section >/dev/null 2>&1; then
+        aegis_format_build_result_section \
           "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
       fi
-      if declare -f aegis_format_repair_file_bodies_section >/dev/null 2>&1; then
-        aegis_format_repair_file_bodies_section \
+      if declare -f aegis_format_build_file_bodies_section >/dev/null 2>&1; then
+        aegis_format_build_file_bodies_section \
           "${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}" \
           "${AEGIS_EVIDENCE_TARGET_PATH:-.}"
       fi
@@ -303,9 +303,9 @@ assemble_bounded_capability_context() {
     fi
 
     if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-      echo "=== INVESTIGATION INPUT (closed — already satisfied by Repair) ==="
+      echo "=== INVESTIGATION INPUT (closed — already satisfied by Build) ==="
       echo
-      echo "Do not re-open or re-implement this demand. Judge REPAIR RESULT only."
+      echo "Do not re-open or re-implement this demand. Judge BUILD RESULT only."
       echo
       printf '%s\n' "${AEGIS_INVESTIGATION_INPUT}"
     elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then

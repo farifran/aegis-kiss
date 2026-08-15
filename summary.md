@@ -28,7 +28,7 @@ Field ownership lives in mode skills (`.skills/*.md`) and runtime enrich — the
 
 ## One sentence
 
-Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; discovery/forensics default to **mechanical** bodies; repair mutates under jail + intent rails; git is the only durable memory.
+Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; discovery/forensics default to **mechanical** bodies; build mutates under jail + intent rails; git is the only durable memory.
 
 ---
 
@@ -41,7 +41,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
             │                               │                  │                      │
             ├── micro-unit plan (.harness/micros_auto)        ├── mechanical (discovery always; forensics if clear)
             ├── keep-progress batch                           ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
-            └── human commit gate (git commit -e -F)          └── aider_substrate (repair only)
+            └── human commit gate (git commit -e -F)          └── aider_substrate (build only)
                                                                             │
                                                                        framed JSON artifact
                                                                             │
@@ -53,7 +53,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 |---|---|
 | `./aegis` | Top-level Operator CLI: demand intake, supervisor briefing expand, `fit_check` micro-unit split, batch keep-progress execution, TTY human commit gate |
 | `run_aegis.sh` | Low-level driver: pipelines (`mutation` / `readonly`), timing report, run-level outcome, preflight dirty-target check, `pipeline_metrics.jsonl` |
-| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, repair-feedback re-entry, signal termination expunge |
+| `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, build-feedback re-entry, signal termination expunge |
 | `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; loads full `AGENTS.md` as preamble |
 | `.harness/config.sh` | Modes, handlers, evidence profiles, budgets, provider defaults |
 
@@ -69,7 +69,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 - **Global Fallback**: `AEGIS_MODEL_DEFAULT` (e.g. `meta/llama-3.1-8b-instruct` or `ollama/llama3.1:8b`). Applies to all pipeline stages unless specialized per-mode overrides are specified.
 - **Per-Stage Specialized Overrides**:
   - `AEGIS_SUPERVISOR_MODEL`: Demand expansion & issue creation in intake (`scripts/lib/briefing.sh`).
-  - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`repair`).
+  - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`build`).
   - `AEGIS_MODEL_DISCOVERY`: Discovery stage.
   - `AEGIS_MODEL_FORENSICS`: Forensics stage.
   - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & workflow falsification stage.
@@ -82,11 +82,11 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | Mode | Engine | Role |
 |---|---|---|
 | `discovery` | **runtime mechanical only** (no LLM) | Gaps over anchors/probes → `observations` / `rationale` / `required_evidence` |
-| `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `repair_candidates[{id,reason}]` |
-| `repair` | aider | Bounded mutation from candidates + MUTATION BRIEF |
-| `optimize` | **raw** (advise only) | System Design & Architecture Refactoring (`src/ARCHITECTURE.md` invariants, state pureness, flat control flow); **can_improve** → re-enter **repair** once; else passthrough → adversarial |
+| `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `build_candidates[{id,reason}]` |
+| `build` | aider | Bounded mutation from candidates + MUTATION BRIEF |
+| `optimize` | **raw** (advise only) | System Design & Architecture Refactoring (`src/ARCHITECTURE.md` invariants, state pureness, flat control flow); **can_improve** → re-enter **build** once; else passthrough → adversarial |
 | `adversarial` | raw LLM | Senior Red Teamer & Falsifier (adaptive depth `low|medium|paranoid`, workflow & async race conditions, state lifecycle invariants, commit record contract alignment) |
-| `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `repair_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
+| `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `build_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
 
 **Skills (`.skills/<mode>.md`):**
 
@@ -94,7 +94,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 |---|---|
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
-| `repair.md` | **Yes** — Aider mutation |
+| `build.md` | **Yes** — Aider mutation |
 | `optimize.md` | **Yes** — raw LLM advise-only (System Design & Architecture; JSON plan; no edits) |
 | `adversarial.md` | **Yes** — raw substrate (System Red Teamer & Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
@@ -134,9 +134,9 @@ Config lists a base set; execute_mode **re-ranks** and may **omit** search when 
 |---|---|---|
 | discovery | `demand_anchors`, `list_tree`, handover, `layer0_facts`, `attention_seed` | Always mechanical body |
 | forensics | `demand_anchors`, handover, `search_symbol` | **Search omitted** if mechanical; + `filesystem.read` anchors |
-| repair | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
-| optimize | handover only (+ REPAIR RESULT + post-repair file bodies) | Advise-only; System Design & Architecture; trivial-skip / max 1 improve / metrics `kind:optimize` |
-| adversarial | handover, tsc, eslint, test | Falsifies workflow/async race conditions & commit record contract alignment under `AEGIS_ADVERSARIAL_DEPTH`; **Reuses** repair tool stamp when candidate hash matches; else re-runs |
+| build | `demand_anchors`, handover, `search_symbol`, git, tsc, eslint, test | **Search omitted** if forensics ALVO present; + read anchors |
+| optimize | handover only (+ BUILD RESULT + post-build file bodies) | Advise-only; System Design & Architecture; trivial-skip / max 1 improve / metrics `kind:optimize` |
+| adversarial | handover, tsc, eslint, test | Falsifies workflow/async race conditions & commit record contract alignment under `AEGIS_ADVERSARIAL_DEPTH`; **Reuses** build tool stamp when candidate hash matches; else re-runs |
 | validation | handover only | **Mechanical tribunal** + **alignment gate** (tokens↔export names, paths, exports, done_when); stable `tribunal:*` basis; no LLM by default |
 
 **Authorization:** operator-named paths, `required_evidence`, Layer 0 / attention seed — not import graphs.
@@ -156,11 +156,11 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Forensics body | `aegis_build_mechanical_forensics_json`; multi-seed via `aegis_forensics_discriminate_seeds` |
 | Forensics LLM? | `aegis_forensics_needs_llm` (`AEGIS_FORENSICS_LLM=auto\|0\|1`) |
 | Search scope | `aegis_search_symbol_pathspecs` + `git grep` |
-| Repair prompt extras | ALVO / BRIEF (data) / FEEDBACK; skill owns policy (no recency echo) |
-| Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
+| Build prompt extras | ALVO / BRIEF (data) / FEEDBACK; skill owns policy (no recency echo) |
+| Build intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
-| demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
-| **Behavioral oracle (P2)** | Supervisor Briefing carries executable `## Behavior` (desc / exports / prelude[] / assert). `fit_check.sh` carries it into each unit demand; `aegis_mechanical_behavior_gate` (demand.sh) parses, scopes each item to the unit owning its **first-listed export**, imports the union of referenced exports, and executes with `node --experimental-strip-types` → `behavior_failure` findings (severity high, `supported_by_evidence: true`) → validation `rejected` + `repair_feedback`. Asserts anchor time to the exported `windowStart` (never absolute numbers / real-clock sleeps) |
+| demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-build |
+| **Behavioral oracle (P2)** | Supervisor Briefing carries executable `## Behavior` (desc / exports / prelude[] / assert). `fit_check.sh` carries it into each unit demand; `aegis_mechanical_behavior_gate` (demand.sh) parses, scopes each item to the unit owning its **first-listed export**, imports the union of referenced exports, and executes with `node --experimental-strip-types` → `behavior_failure` findings (severity high, `supported_by_evidence: true`) → validation `rejected` + `build_feedback`. Asserts anchor time to the exported `windowStart` (never absolute numbers / real-clock sleeps) |
 | Supervisor reliability | `aegis_briefing_generate`: `AEGIS_BRIEFING_MAX_TOKENS` (default 2048), `AEGIS_BRIEFING_MAX_ATTEMPTS` (default 2), quality-gate retry on degenerate algebra / duplicated declarations (observed deepseek decode glitches); provenance `AEGIS_BRIEFING_SOURCE=user\|supervisor`; bounded correction loop `AEGIS_BRIEFING_CORRECT_MAX` (default 1) when adversarial findings contradict the Goal |
 | KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest — **not** the Pocket Map, which sits below the `LIVE ZONE` marker); `kind:"cache"` metric in `pipeline_metrics.jsonl` reports `system_bytes` + `prefix_bytes` + `frozen_prefix_bytes` |
 | Skeletal AST Pruning | Optional `AEGIS_READ_SKELETAL=1` via `ast-grep` (Tree-sitter) in `read_file.sh`; `kind:"skeletal_prune"` metric |
@@ -176,7 +176,7 @@ Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/lib/l
 |---|---|
 | `scripts/lib/common.sh` | Logging, path helpers, `measure` (+ timing metrics) |
 | `scripts/lib/language_detector.sh` | Mechanical language detection & adaptive TTY fallback |
-| `scripts/lib/artifact_protocol.sh` | Validate / enrich; forensics gates; validation `repair_feedback` |
+| `scripts/lib/artifact_protocol.sh` | Validate / enrich; forensics gates; validation `build_feedback` |
 | `scripts/lib/evidence.sh` | Materialize / select payloads; late `search_symbol` for forensics LLM |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write |
 | `scripts/lib/run_outcome.sh` | Human outcome, metrics JSONL, `last_outcome.json` |
@@ -202,7 +202,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 
 - Capability / cognition children run under **`env -i`** via `run_with_isolated_base_env`.
 - `local.env` loads only when **`AEGIS_LOAD_LOCAL_ENV=1`** (entrypoints).
-- Aider whitelist includes `AEGIS_METRICS_FILE` and intent policy knobs so repair metrics actually land in jsonl.
+- Aider whitelist includes `AEGIS_METRICS_FILE` and intent policy knobs so build metrics actually land in jsonl.
 
 ---
 
@@ -261,7 +261,7 @@ Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent
 - **Deep topology cut complete** — Layer 0 + attention; no structural builder.
 - **Discovery is runtime-only** — no `AEGIS_DISCOVERY_LLM`; mechanical fail is fatal.
 - **Forensics** — mechanical + probe discrimination; search only on LLM residual.
-- **Repair** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
+- **Build** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
 - **Context ceiling is fixed at 32 KB by decision, not omission.** The bound
   comes from the task (one issue = one task = one target), not from the model
   window, so it is deliberately not model-derived. `budget_exceeded: true`

@@ -84,7 +84,7 @@ readonly _TOKEN_SEP="${AEGIS_DEMAND_TOKEN_SEP:-;;}"
 #
 # Pathspecs (optional): AEGIS_SEARCH_SYMBOL_PATHSPECS newline-separated,
 # repo-relative (or relative to SEARCH_ROOT). When set, search only those
-# targets — forensics/repair should not scan harness docs/scripts.
+# targets — forensics/build should not scan harness docs/scripts.
 _use_git_grep=0
 if command -v git >/dev/null 2>&1 \
   && git -C "${SEARCH_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

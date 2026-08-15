@@ -23,7 +23,7 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
-export AEGIS_REPAIR_FEEDBACK_LOOP="false"
+export AEGIS_BUILD_FEEDBACK_LOOP="false"
 
 readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 
@@ -221,11 +221,11 @@ assert_aider_prompt_prefix_stability() {
   prompt_a="$(mktemp)"
   prompt_b="$(mktemp)"
 
-  export AEGIS_MODE="repair"
+  export AEGIS_MODE="build"
   export AEGIS_EXECUTION_ID="exec-aider-1"
   export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_TEST_ROOT}"
-  export AEGIS_INVESTIGATION_INPUT="test repair demand"
-  export AIDER_SKILL_FILE=".skills/repair.md"
+  export AEGIS_INVESTIGATION_INPUT="test build demand"
+  export AIDER_SKILL_FILE=".skills/build.md"
 
   # shellcheck disable=SC1091
   source "${AEGIS_TEST_ROOT}/scripts/lib/common.sh"

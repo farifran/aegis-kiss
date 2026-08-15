@@ -149,7 +149,7 @@ case "${TARGET_FILE}" in
   *.ts|*.tsx)
     # Prefer project tsc delta (errors on THIS file only) so Aider's
     # auto-lint loop sees real type/import failures, not just parse.
-    # Same tsc rails as repair (including optimize refine path).
+    # Same tsc rails as build (including optimize refine path).
     if [[ -f "tsconfig.json" || -f "./tsconfig.json" ]] \
       && [[ "${AEGIS_LINT_PROJECT_TSC:-1}" != "0" ]] \
       && [[ "${AEGIS_LINT_PROJECT_TSC:-1}" != "false" ]] \

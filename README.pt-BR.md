@@ -9,7 +9,7 @@ Idioma: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 ![Zero Regressions](https://img.shields.io/badge/Quality-Zero%20Regressions-brightgreen)
 ![KISS Architecture](https://img.shields.io/badge/Architecture-KISS%20Shell-orange)
 
-**Aegis** transforma demandas de código em um **pipeline autônomo, inspecionável e delimitado em 6 estágios** (`discovery` ➔ `forensics` ➔ `repair` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é um **motor de governança determinístico** que bloqueia código inválido via AST, eleva o reuso de código de LLMs para **Red Teaming de Design de Sistema e Invariantes de Estado**, mantém **71% de cada prompt do substrato raw byte a byte idêntico desde o Byte 0** (medido) para que um prefix cache do provedor possa reaproveitá-lo, e garante **que apenas patches 100% testados e alinhados à arquitetura cheguem ao Git**.
+**Aegis** transforma demandas de código em um **pipeline autônomo, inspecionável e delimitado em 6 estágios** (`discovery` ➔ `forensics` ➔ `build` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Diferente de extensões genéricas de IDE, o Aegis é um **motor de governança determinístico** que bloqueia código inválido via AST, eleva o reuso de código de LLMs para **Red Teaming de Design de Sistema e Invariantes de Estado**, mantém **71% de cada prompt do substrato raw byte a byte idêntico desde o Byte 0** (medido) para que um prefix cache do provedor possa reaproveitá-lo, e garante **que apenas patches 100% testados e alinhados à arquitetura cheguem ao Git**.
 
 ---
 
@@ -42,7 +42,7 @@ itens no seu `PATH`:
 | **curl** | ✅ | Requisições HTTP ao provedor (substrato `raw`) |
 | **jq** | ✅ | Evidência JSON, handover, métricas, prompts |
 | **node** + **npm** | ✅ | Toolchain `tsc`, `eslint`, `ast-grep` |
-| **Aider CLI** (`aider`) | ✅ *(mutação)* | Substrato `repair` — `AEGIS_AIDER_BIN` (padrão `.venv/bin/aider`, auto-detectado no `PATH`) |
+| **Aider CLI** (`aider`) | ✅ *(mutação)* | Substrato `build` — `AEGIS_AIDER_BIN` (padrão `.venv/bin/aider`, auto-detectado no `PATH`) |
 | **python3** | ⚪ opcional | Sanitizador mecânico de TS + scripts de probe de cache |
 | **gh** (GitHub CLI) | ⚪ opcional | Apenas intake de demanda `--issue N` |
 | Ollama / vLLM / LM Studio | ⚪ opcional | Provedor de inferência local |
@@ -55,7 +55,7 @@ seu `PATH`):
 python3 -m venv .venv && .venv/bin/pip install aider-chat
 ```
 
-O Aider é necessário apenas no `repair`; os modos somente-leitura (`discovery` /
+O Aider é necessário apenas no `build`; os modos somente-leitura (`discovery` /
 `forensics` / `validation`) funcionam sem ele.
 
 ---
@@ -71,7 +71,7 @@ O Aegis suporta **dois modos principais de execução** em qualquer ambiente de 
   - **Modelo Único Global**: Defina `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (ou `ollama/llama3.1:8b`) para usar um único modelo em todas as etapas.
   - **Modelos Especializados por Tarefa/Modo**: Sobrescreva estágios específicos com modelos dedicados:
     - `AEGIS_SUPERVISOR_MODEL`: Expansão da demanda no Intake & geração da Issue (ex.: `deepseek-ai/deepseek-v4-flash-0731`; default = modelo de briefing)
-    - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Mutação e edição de código no Aider (`repair`)
+    - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Mutação e edição de código no Aider (`build`)
     - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming e falsificação adversária (`adversarial`)
     - `AEGIS_MODEL_VALIDATION`: Tribunal de validação estática (`validation`)
   - **Knobs de confiabilidade do supervisor**: `AEGIS_BRIEFING_MAX_TOKENS` (default `2048`),
@@ -126,7 +126,7 @@ os itens, escopa cada assert para a unidade dona do **primeiro export listado**
 (imports = união dos exports referenciados) e executa com
 `node --experimental-strip-types`. Um assert falho emite um finding
 `behavior_failure` (severidade alta, `supported_by_evidence: true`) que a
-`validation` converte em veredito duro `rejected` com `repair_feedback` — ou
+`validation` converte em veredito duro `rejected` com `build_feedback` — ou
 seja, um candidato que implementa a API mas viola a semântica pretendida
 **não pode** ser promovido. Isso fecha o buraco do "validado mas semanticamente
 errado".
@@ -186,7 +186,7 @@ repositório.
 |---|---|---|---|
 | **`discovery`** | Shell Mecânico | 100% mecânico em shell | 🟢 **N/A (0 tokens)** |
 | **`forensics`** | Shell Mecânico (só resíduo LLM) | Topo congelado + evidências | 📏 **71% byte-estável (medido)** |
-| **`repair`** | Aider CLI | Topo congelado + demanda + evidências | ❓ **Não medido** *(o Aider monta o próprio prompt)* |
+| **`build`** | Aider CLI | Topo congelado + demanda + evidências | ❓ **Não medido** *(o Aider monta o próprio prompt)* |
 | **`optimize`** | Raw LLM | Topo congelado + diff $C_1$ | ❓ **Não medido** *(mesmo montador do `forensics`)* |
 | **`adversarial`** | Raw LLM | Topo congelado + diff $C_1$ *(profundidade `low\|medium\|paranoid`)* | ❓ **Não medido** *(contrato de skill maior ⇒ topo congelado maior)* |
 | **`validation`** | Shell Mecânico | Tribunal Mecânico (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |

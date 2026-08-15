@@ -18,10 +18,10 @@ mutation_targets_from_handover_contract() {
   jq -r --arg current_mode "${AEGIS_MODE:-}" '
     .artifact_snapshot as $s
     | if $s.mode == "forensics" then
-        $s.operational_context.repair_candidates[]?.id // empty
-      elif ($s.mode == "validation" or $s.mode == "optimize") and $current_mode == "repair" then
-        ($s.operational_context.repair_feedback.authorized_scopes // [])[]?,
-        ($s.operational_context.repair_feedback.violations // [])[]?.target_files[]?
+        $s.operational_context.build_candidates[]?.id // empty
+      elif ($s.mode == "validation" or $s.mode == "optimize") and $current_mode == "build" then
+        ($s.operational_context.build_feedback.authorized_scopes // [])[]?,
+        ($s.operational_context.build_feedback.violations // [])[]?.target_files[]?
       else
         empty
       end
@@ -99,13 +99,13 @@ mutation_targets_assert_contract_nonempty() {
   handover_mode="$(mutation_jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
 
   if [[ "${handover_mode}" == "forensics" ]] && [[ "${count}" -eq 0 ]]; then
-    aegis_fatal "missing_forensics_repair_candidates"
+    aegis_fatal "missing_forensics_build_candidates"
   fi
-  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "repair" ]] \
+  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "build" ]] \
     && [[ "${count}" -eq 0 ]]; then
-    aegis_fatal "missing_repair_feedback_authorized_scopes"
+    aegis_fatal "missing_build_feedback_authorized_scopes"
   fi
-  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "repair" ]] \
+  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "build" ]] \
     && [[ "${count}" -eq 0 ]]; then
     aegis_fatal "missing_optimize_improve_authorized_scopes"
   fi

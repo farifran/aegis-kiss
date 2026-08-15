@@ -978,7 +978,7 @@ cmd_go() {
   fi
 
   # Before briefing/supervisor expand so intake tokens land in the same file
-  # as repair/optimize tokens for the full demand.
+  # as build/optimize tokens for the full demand.
   aegis_metrics_session_begin
 
   local body="" title=""
@@ -1145,7 +1145,7 @@ cmd_go() {
               operational_context: {
                 status: "interpreted",
                 mode: "forensics",
-                repair_candidates: [
+                build_candidates: [
                   {
                     id: $target,
                     reason: ("Demand: " + $goal)

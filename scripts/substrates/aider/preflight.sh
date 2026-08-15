@@ -209,7 +209,7 @@ EOF
 }
 
 # ---------------------------------------------------------
-# Mutation intent gates (repair) — demand fidelity on the diff
+# Mutation intent gates (build) — demand fidelity on the diff
 # ---------------------------------------------------------
 # AEGIS_MUTATION_INTENT_PREFLIGHT:
 #   soft (default) — Aider intent-fix retries first; only after exhausting
@@ -258,7 +258,7 @@ collect_mutation_intent_violations() {
   AEGIS_MUTATION_INTENT_DIAGNOSTICS=""
   export AEGIS_MUTATION_INTENT_DIAGNOSTICS
   [[ -n "${diff_content}" ]] || return 0
-  [[ "${AEGIS_MODE:-}" == "repair" ]] || return 0
+  [[ "${AEGIS_MODE:-}" == "build" ]] || return 0
 
   local -a violations=()
   local added tokens token hit=0 token_list
@@ -290,8 +290,8 @@ collect_mutation_intent_violations() {
 
   # --- acceptance identifiers ---
   # The tribunal blocks on exactly this, but only after a full pipeline pass,
-  # so delivering the news costs a whole outer repair round-trip: a fresh
-  # worktree, a candidate rematerialization and one of three scarce repair
+  # so delivering the news costs a whole outer build round-trip: a fresh
+  # worktree, a candidate rematerialization and one of three scarce build
   # attempts. The check itself is mechanical text matching. Running it here
   # lets the fix loop that is already open resolve it for the price of the
   # inner attempt it was going to spend anyway.
@@ -417,7 +417,7 @@ record_mutation_intent_metric() {
   jq -cn \
     --arg kind "intent" \
     --arg result "${result}" \
-    --arg mode "${AEGIS_MODE:-repair}" \
+    --arg mode "${AEGIS_MODE:-build}" \
     --arg policy "${policy}" \
     --arg phase "${phase}" \
     --argjson attempt "${attempt}" \

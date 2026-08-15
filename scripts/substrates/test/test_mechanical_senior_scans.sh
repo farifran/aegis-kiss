@@ -16,13 +16,13 @@ test_cleanup_extra() {
   rm -rf "${test_tmp}"
 }
 
-write_repair_handover() {
+write_build_handover() {
   local diff="$1"
   local files_json="${2:-[\"src/index.ts\"]}"
   jq -n --arg diff "${diff}" --argjson files "${files_json}" '
     {
       artifact_snapshot: {
-        mode: "repair",
+        mode: "build",
         operational_context: {
           diff: $diff,
           files_changed: $files,
@@ -39,7 +39,7 @@ write_repair_handover() {
 }
 
 # --- optimize: any → can_improve ---
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts
 --- a/src/index.ts
 +++ b/src/index.ts
@@ -74,7 +74,7 @@ printf '%s' "${body}" | jq -e '
   || fail "optimize_can_improve_body: ${body}"
 
 # --- optimize: clean → no improve ---
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts
 --- a/src/index.ts
 +++ b/src/index.ts
@@ -88,7 +88,7 @@ imp_clean="$(aegis_mechanical_optimize_scan "${handover}")"
   || fail "optimize_scan_should_be_empty_on_clean: ${imp_clean}"
 
 # --- adversarial: stub ---
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts
 --- a/src/index.ts
 +++ b/src/index.ts
@@ -99,7 +99,7 @@ diff --git a/src/index.ts b/src/index.ts
 +}
 EOF
 )"
-# adversarial reads optimize candidate_result OR repair diff via mutation_diff
+# adversarial reads optimize candidate_result OR build diff via mutation_diff
 findings="$(aegis_mechanical_adversarial_diff_scan "${handover}" "")"
 printf '%s' "${findings}" | jq -e '
   type == "array" and length >= 1
@@ -109,7 +109,7 @@ printf '%s' "${findings}" | jq -e '
   || fail "adversarial_scan_should_catch_stub: ${findings}"
 
 # --- adversarial: clean (no investigation acceptance) ---
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts
 --- a/src/index.ts
 +++ b/src/index.ts
@@ -125,7 +125,7 @@ printf '%s' "${findings_clean}" | jq -e 'type == "array" and length == 0' >/dev/
 # --- acceptance tokens: missing SymbolX ---
 mkdir -p "${test_tmp}/src"
 printf 'export const n = 1;\n' > "${test_tmp}/src/index.ts"
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/index.ts b/src/index.ts
 --- a/src/index.ts
 +++ b/src/index.ts
@@ -192,7 +192,7 @@ printf '%s\n' \
   '  private n: bigint = 0n;' \
   '}' \
   > "${test_tmp}/src/tokenBucket.ts"
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts
 --- /dev/null
 +++ b/src/tokenBucket.ts
@@ -244,7 +244,7 @@ printf '%s\n' \
   '}' \
   'export function obterEstadoBitmask(b: TokenBucket): number { return 0; }' \
   > "${test_tmp}/src/tokenBucket.ts"
-write_repair_handover "$(cat <<'EOF'
+write_build_handover "$(cat <<'EOF'
 diff --git a/src/tokenBucket.ts b/src/tokenBucket.ts
 --- /dev/null
 +++ b/src/tokenBucket.ts

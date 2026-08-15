@@ -108,8 +108,8 @@ runtime_promotes_validated_diff() {
 #                          operational_context  object; optional status /
 #                            summary non-empty strings; optional
 #                            required_evidence / findings /
-#                            repair_candidates arrays; optional
-#                            repair_feedback object; optional
+#                            build_candidates arrays; optional
+#                            build_feedback object; optional
 #                            demand_anchors object (runtime mechanical)
 #   epistemic_state      exactly {next_attention_targets, attention_scope,
 #                        attention_reason}
@@ -131,8 +131,8 @@ audit_handover_state() {
       and (if has("summary")           then .summary           | nonempty_string else true end)
       and (if has("required_evidence") then .required_evidence | type == "array" else true end)
       and (if has("findings")          then .findings          | type == "array" else true end)
-      and (if has("repair_candidates") then .repair_candidates | type == "array" else true end)
-      and (if has("repair_feedback")   then .repair_feedback
+      and (if has("build_candidates") then .build_candidates | type == "array" else true end)
+      and (if has("build_feedback")   then .build_feedback
              | type == "object"
                and (.violations       | type == "array")
                and (.authorized_scopes | type == "array")
@@ -271,18 +271,18 @@ check_discovery_to_forensics() {
   # Discovery: mechanical runtime only (no .skills/discovery.md).
   # Forensics: skill residual schema + handover/anchors evidence.
   discovery_mechanical_path_ok \
-    && skill_declares ".skills/forensics.md" "repair_candidates" \
+    && skill_declares ".skills/forensics.md" "build_candidates" \
     && array_contains "filesystem.read:epistemic_handover" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
     && array_contains "runtime.demand_anchors" "${AEGIS_FORENSICS_EVIDENCE[@]}" \
     && runtime_seeds_deterministic_reads
 }
 
-check_forensics_to_repair() {
-  skill_declares ".skills/forensics.md" "repair_candidates" \
-    && mutation_resolver_consumes "repair_candidates"
+check_forensics_to_build() {
+  skill_declares ".skills/forensics.md" "build_candidates" \
+    && mutation_resolver_consumes "build_candidates"
 }
 
-check_repair_to_optimize() {
+check_build_to_optimize() {
   # Optimize is advisory (raw): skill declares plan fields; engine is raw.
   skill_declares ".skills/optimize.md" "can_improve" \
     && skill_declares ".skills/optimize.md" "no_improvement_needed" \
@@ -340,21 +340,21 @@ main() {
     "The producer fields, handover exposure, or deterministic read anchors required by Forensics are absent."
 
   record_boundary \
-    "Forensics -> Repair" \
-    '["status","repair_candidates","handover_attention"]' \
-    '["repair_candidates"]' \
-    '["repair_candidates[].id"]' \
-    "$(verdict check_forensics_to_repair)" \
-    "Repair consumes explicit repair candidates emitted by Forensics." \
-    "Forensics does not require repair_candidates and Repair does not consume them; target continuity depends on optional attention strings."
+    "Forensics -> Build" \
+    '["status","build_candidates","handover_attention"]' \
+    '["build_candidates"]' \
+    '["build_candidates[].id"]' \
+    "$(verdict check_forensics_to_build)" \
+    "Build consumes explicit build candidates emitted by Forensics." \
+    "Forensics does not require build_candidates and Build does not consume them; target continuity depends on optional attention strings."
 
   record_boundary \
-    "Repair -> Optimize" \
+    "Build -> Optimize" \
     '["diff","files_changed","handover_attention"]' \
-    '["filesystem.read:epistemic_handover","REPAIR RESULT","optimize skill plan"]' \
-    '["status","improvements","candidate_result(from repair)"]' \
-    "$(verdict check_repair_to_optimize)" \
-    "Optimize is raw advisory: judges Repair via REPAIR RESULT; can_improve re-enters Repair once; else passthrough." \
+    '["filesystem.read:epistemic_handover","BUILD RESULT","optimize skill plan"]' \
+    '["status","improvements","candidate_result(from build)"]' \
+    "$(verdict check_build_to_optimize)" \
+    "Optimize is raw advisory: judges Build via BUILD RESULT; can_improve re-enters Build once; else passthrough." \
     "Optimize skill/engine contract missing (raw + can_improve / no_improvement_needed)."
 
   record_boundary \

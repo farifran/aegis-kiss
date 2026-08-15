@@ -4,8 +4,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 
 # This suite drives single-mode runtime invocations against mock
 # providers whose validation verdict is "rejected"; the automated
-# repair feedback loop would otherwise re-enter the mutation pipeline.
-export AEGIS_REPAIR_FEEDBACK_LOOP="false"
+# build feedback loop would otherwise re-enter the mutation pipeline.
+export AEGIS_BUILD_FEEDBACK_LOOP="false"
 
 readonly TEST_INVESTIGATION_INPUT="readonly smoke investigation"
 readonly DEFAULT_INVESTIGATION_INPUT="Analyze repository structure and identify highest-value investigation targets"
@@ -18,7 +18,7 @@ assert_manifest_contract() {
   )"
 
   printf '%s\n' "${manifest}" | jq -e '
-    (.modes | keys | sort == ["adversarial", "discovery", "forensics", "optimize", "repair", "validation"])
+    (.modes | keys | sort == ["adversarial", "build", "discovery", "forensics", "optimize", "validation"])
     and ([.modes[].capabilities | length > 0] | all)
     and ([.modes[].evidence_capabilities | length > 0] | all)
     and ([.modes[].capabilities[].capability] | index("topology.read_graph") == null)
@@ -130,7 +130,7 @@ assert_discovery_accepts_issue_cli_investigation_input() {
   cat > "${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "issue" && "$2" == "view" && "$3" == "123" ]]; then
-  jq -n '{title:"Fixture issue",body:"Repair the helper in src/index.ts"}'
+  jq -n '{title:"Fixture issue",body:"Build the helper in src/index.ts"}'
   exit 0
 fi
 echo "unexpected gh $*" >&2

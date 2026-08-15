@@ -284,9 +284,9 @@ interpret_aider_exit_status() {
 }
 
 # Aider owns its own provider calls, so the raw substrate's kind:"tokens"
-# metric never sees repair — the most expensive mode was the only one with
+# metric never sees build — the most expensive mode was the only one with
 # no token accounting at all. Aider prints "Tokens: 2.3k sent, 84 received"
-# per invocation; a repair can spend up to 7 of them (1 + intent fixes +
+# per invocation; a build can spend up to 7 of them (1 + intent fixes +
 # preflight fixes), each a cold process resending the whole chat.
 emit_aider_token_metric() {
   [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
@@ -312,7 +312,7 @@ emit_aider_token_metric() {
   received="$(_expand_k "$(printf '%s' "${line}" | awk '{print $4}')")"
 
   jq -cn \
-    --arg mode "${AEGIS_MODE:-repair}" \
+    --arg mode "${AEGIS_MODE:-build}" \
     --arg model "${AEGIS_AIDER_MODEL:-}" \
     --arg phase "${AEGIS_AIDER_INVOCATION_PHASE:-primary}" \
     --argjson prompt_tokens "${sent:-0}" \

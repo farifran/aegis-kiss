@@ -85,10 +85,10 @@ next_step="${line#*$'\t'}"
 [[ -n "${next_step}" ]] \
   || fail "classify_fresh_resume_empty_next_step"
 
-# --- stalled repair loop is a contract problem, not a budget problem ---
+# --- stalled build loop is a contract problem, not a budget problem ---
 # Raising the budget cannot satisfy a finding the candidate cannot satisfy,
 # so the next step must not suggest it.
-line="$(aegis_classify_reason "repair_loop_stalled")"
+line="$(aegis_classify_reason "build_loop_stalled")"
 class="${line%%$'\t'*}"
 next_step="${line#*$'\t'}"
 
@@ -96,7 +96,7 @@ next_step="${line#*$'\t'}"
   || fail "classify_stalled_class: got '${class}'"
 [[ -n "${next_step}" ]] \
   || fail "classify_stalled_empty_next_step"
-printf '%s' "${next_step}" | grep -q "AEGIS_MAX_REPAIR_ATTEMPTS" \
+printf '%s' "${next_step}" | grep -q "AEGIS_MAX_BUILD_ATTEMPTS" \
   && fail "classify_stalled_should_not_suggest_raising_budget: ${next_step}"
 
 # --- D remains: prefix match empty_diff:* ---
@@ -154,7 +154,7 @@ breadcrumb="$(tr -d '\r' < "${AEGIS_RUNTIME_DIR}/last_fatal" | head -n 1)"
 
 # --- D remains: metrics schema (no next_step) ---
 : > "${AEGIS_METRICS_FILE}"
-aegis_append_outcome_metric "FAILED" "x" "provider" "repair"
+aegis_append_outcome_metric "FAILED" "x" "provider" "build"
 
 last_line="$(tail -n 1 "${AEGIS_METRICS_FILE}")"
 echo "${last_line}" | jq -e '
@@ -162,7 +162,7 @@ echo "${last_line}" | jq -e '
   and .status == "FAILED"
   and .reason_code == "x"
   and .reason_class == "provider"
-  and .mode == "repair"
+  and .mode == "build"
   and (.at | type == "string")
 ' >/dev/null \
   || fail "outcome_metric_invalid_json: ${last_line}"
@@ -203,7 +203,7 @@ jq -e '
 : > "${AEGIS_METRICS_FILE}"
 export AEGIS_PIPELINE_DRIVER=1
 simulate_cleanup_outcome 0 "discovery"
-simulate_cleanup_outcome 1 "repair"
+simulate_cleanup_outcome 1 "build"
 count="$(outcome_count)"
 [[ "${count}" -eq 0 ]] \
   || fail "driver_cleanup_must_emit_zero_outcomes: got ${count}"

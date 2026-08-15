@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source-only — artifact extract + JSON repair (loaded by raw_llm.sh)
+# Source-only — artifact extract + JSON build (loaded by raw_llm.sh)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   echo "[AEGIS][FATAL] raw_artifact_lib_not_invocable" >&2
   exit 1

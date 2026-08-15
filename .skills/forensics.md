@@ -1,6 +1,6 @@
 # MODE — FORENSICS
 
-Decide **where to mutate** and **why** → `repair_candidates[{id,reason}]`.
+Decide **where to mutate** and **why** → `build_candidates[{id,reason}]`.
 
 ## Constraints
 1. Candidates only for paths in evidence payloads or operator-named net-new paths.
@@ -12,7 +12,7 @@ Decide **where to mutate** and **why** → `repair_candidates[{id,reason}]`.
 ```json
 {
   "status": "interpreted|inconclusive",
-  "repair_candidates": [
+  "build_candidates": [
     {
       "id": "<repo-relative path from anchors or operator-named only>",
       "reason": "Demand: <tokens or X→Y> (one change)"
@@ -21,4 +21,4 @@ Decide **where to mutate** and **why** → `repair_candidates[{id,reason}]`.
 }
 ```
 `status`: `interpreted` if ≥1 candidate, else `inconclusive`.
-`repair_candidates[].id`: Copy path from anchors or operator-named. Never invent paths.
+`build_candidates[].id`: Copy path from anchors or operator-named. Never invent paths.

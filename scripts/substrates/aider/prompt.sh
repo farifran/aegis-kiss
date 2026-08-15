@@ -36,7 +36,7 @@ inject_capability_evidence() {
   # into the chat via --file, most evidence payloads are redundant noise
   # that drowns small (floor) models — the caller then restricts the
   # evidence to the payloads matching this substring (e.g. the epistemic
-  # handover, which carries repair_feedback on feedback iterations).
+  # handover, which carries build_feedback on feedback iterations).
   local only_matching="${1:-}"
 
   [[ -n "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-}" ]] || return 0
@@ -123,24 +123,24 @@ mutation_prompt_resolve_mode_copy() {
   local label_file="$1"
   local instructions_file="$2"
 
-  # Default = first-pass repair. Policy lives in the skill; this is only the close cue.
+  # Default = first-pass build. Policy lives in the skill; this is only the close cue.
   printf '%s' "Investigation input (operator mutation demand):" \
     > "${label_file}"
   cat > "${instructions_file}" <<'EOF'
 Apply the investigation input to the loaded target file(s) once. Follow the skill contract. Edits only — stop.
 EOF
 
-  # Local repair feedback: validation reject OR optimize can_improve plan.
-  if [[ "${AEGIS_MODE}" == "repair" ]] \
+  # Local build feedback: validation reject OR optimize can_improve plan.
+  if [[ "${AEGIS_MODE}" == "build" ]] \
     && [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}" ]] \
     && jq -e '
         (.artifact_snapshot.mode == "validation"
           and .artifact_snapshot.operational_context.verdict == "rejected"
-          and (.artifact_snapshot.operational_context.repair_feedback | type == "object"))
+          and (.artifact_snapshot.operational_context.build_feedback | type == "object"))
         or
         (.artifact_snapshot.mode == "optimize"
           and .artifact_snapshot.operational_context.status == "can_improve"
-          and (.artifact_snapshot.operational_context.repair_feedback | type == "object"))
+          and (.artifact_snapshot.operational_context.build_feedback | type == "object"))
       ' "${AEGIS_EPISTEMIC_HANDOVER_FILE}" >/dev/null 2>&1; then
     local feedback_summary feedback_mode
     feedback_mode="$(
@@ -149,7 +149,7 @@ EOF
     )"
     feedback_summary="$(
       jq -r '
-        .artifact_snapshot.operational_context.repair_feedback as $rf
+        .artifact_snapshot.operational_context.build_feedback as $rf
         | "authorized_scopes: " + (($rf.authorized_scopes // []) | join(", "))
           + "\nviolations:\n"
           + (
@@ -164,8 +164,8 @@ EOF
       printf '%s' "Original investigation input (optimize refine — demand already applied on surface):" > "${label_file}"
       cat > "${instructions_file}" <<EOF
 CRITICAL — OPTIMIZE REFINE (no rediscovery):
-Repair is ALREADY applied on this workspace. Apply ONLY the optimize improvements below inside authorized_scopes.
-Do NOT re-implement the whole demand. Do NOT expand scope. Do NOT strip Repair features.
+Build is ALREADY applied on this workspace. Apply ONLY the optimize improvements below inside authorized_scopes.
+Do NOT re-implement the whole demand. Do NOT expand scope. Do NOT strip Build features.
 Emit edits only — no narration.
 
 ${feedback_summary}
@@ -174,16 +174,16 @@ Apply the listed refinements and stop.
 EOF
     else
       # Validation path: the violations are already rendered as instance data
-      # by aegis_format_repair_feedback_section (=== REPAIR FEEDBACK ===).
+      # by aegis_format_build_feedback_section (=== BUILD FEEDBACK ===).
       # Repeating them here put every violation in the prompt twice — the
       # close cue points at that section instead of restating it. The
       # optimize branch above keeps its copy: the runtime section selects on
       # mode == "validation", so there it is the only rendering.
-      printf '%s' "Original investigation input (repair feedback iteration — fix only listed violations):" > "${label_file}"
+      printf '%s' "Original investigation input (build feedback iteration — fix only listed violations):" > "${label_file}"
       cat > "${instructions_file}" <<EOF
-CRITICAL — LOCAL REPAIR FEEDBACK (no rediscovery):
+CRITICAL — LOCAL BUILD FEEDBACK (no rediscovery):
 A prior validation REJECTED the candidate. Fix ONLY the violations listed under
-=== REPAIR FEEDBACK (runtime) === above, inside the scopes stated there.
+=== BUILD FEEDBACK (runtime) === above, inside the scopes stated there.
 Do NOT re-implement the whole demand from scratch unless a violation requires it.
 Do NOT expand scope beyond authorized_scopes / loaded targets.
 Do NOT add features unrelated to the violations.
@@ -206,7 +206,7 @@ mutation_prompt_skill_contract() {
   # Fallback if skill path missing (should not happen in normal runs).
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
     cat <<'DISTILLED'
-* Repair already applied the demand — REFINE only; same behavior.
+* Build already applied the demand — REFINE only; same behavior.
 * Mutate ONLY loaded targets. No new files, renames, or re-implementation.
 * Output only file edits — no JSON, no questions.
 DISTILLED
@@ -237,7 +237,7 @@ assemble_mutation_prompt() {
   local prompt_targets=("$@")
 
   # Capability evidence payloads: formatted sections (demand_anchors, forensics_handoff,
-  # repair_feedback) already carry handover facts. Raw JSON dump is only needed as no-targets fallback.
+  # build_feedback) already carry handover facts. Raw JSON dump is only needed as no-targets fallback.
   local capability_evidence=""
   if [[ "${#prompt_targets[@]}" -eq 0 ]]; then
     capability_evidence="$(inject_capability_evidence)"
@@ -266,16 +266,16 @@ assemble_mutation_prompt() {
     demand_anchors_section="$(aegis_format_demand_anchors_section)"
   fi
 
-  # Repair: forensics handoff + mutation brief + optional validation feedback.
-  # Optimize: repair-result delta (instance data — what to refine).
+  # Build: forensics handoff + mutation brief + optional validation feedback.
+  # Optimize: build-result delta (instance data — what to refine).
   local forensics_handoff_section=""
   local mutation_brief_section=""
-  local repair_feedback_section=""
-  local repair_result_section=""
-  if [[ "${AEGIS_MODE}" == "repair" ]]; then
-    if declare -f aegis_format_repair_feedback_section >/dev/null 2>&1; then
-      repair_feedback_section="$(
-        aegis_format_repair_feedback_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+  local build_feedback_section=""
+  local build_result_section=""
+  if [[ "${AEGIS_MODE}" == "build" ]]; then
+    if declare -f aegis_format_build_feedback_section >/dev/null 2>&1; then
+      build_feedback_section="$(
+        aegis_format_build_feedback_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
       )"
     fi
     if declare -f aegis_format_forensics_handoff_section >/dev/null 2>&1; then
@@ -294,9 +294,9 @@ assemble_mutation_prompt() {
       unset _brief_root
     fi
   elif [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    if declare -f aegis_format_repair_result_section >/dev/null 2>&1; then
-      repair_result_section="$(
-        aegis_format_repair_result_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
+    if declare -f aegis_format_build_result_section >/dev/null 2>&1; then
+      build_result_section="$(
+        aegis_format_build_result_section "${AEGIS_EPISTEMIC_HANDOVER_FILE:-}"
       )"
     fi
   fi
@@ -312,7 +312,7 @@ assemble_mutation_prompt() {
   raw_prompt_file="$(aider_mktemp)"
 
   # Ownership (no policy echo):
-  #   skill = edit policy | anchors/ALVO/BRIEF/feedback/repair-result = instance data
+  #   skill = edit policy | anchors/ALVO/BRIEF/feedback/build-result = instance data
   #   jail = path list | anti-truncation = whole format only | mode_instructions = close cue
   cat > "${raw_prompt_file}" << EOF
 ${AEGIS_CONSTITUTIONAL_PREAMBLE:+${AEGIS_CONSTITUTIONAL_PREAMBLE}
@@ -328,7 +328,7 @@ ${skill_contract}
 
 ---
 
-${demand_anchors_section}${repair_feedback_section}${forensics_handoff_section}${mutation_brief_section}${repair_result_section}${input_label}
+${demand_anchors_section}${build_feedback_section}${forensics_handoff_section}${mutation_brief_section}${build_result_section}${input_label}
 ${AEGIS_INVESTIGATION_INPUT}
 ${capability_evidence}
 ---

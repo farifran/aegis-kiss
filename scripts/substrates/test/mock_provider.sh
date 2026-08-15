@@ -157,11 +157,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "confidence": "low",
                 "investigation_hypotheses": [],
                 "investigation_risks": [],
-                "repair_candidates": [],
+                "build_candidates": [],
                 "handover_attention": {
                     "next_attention_targets": [],
                     "attention_scope": "evidence-backed interpretation",
-                    "attention_reason": "no evidence-backed repair candidate",
+                    "attention_reason": "no evidence-backed build candidate",
                 },
             })
 

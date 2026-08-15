@@ -878,7 +878,7 @@ aegis_format_demand_anchors_section() {
   }
 }
 
-# Compact forensics→repair handoff lines (alvo + reason + done_when).
+# Compact forensics→build handoff lines (alvo + reason + done_when).
 aegis_format_forensics_handoff_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
@@ -891,7 +891,7 @@ aegis_format_forensics_handoff_section() {
     jq -r '
       .artifact_snapshot as $snap
       | ($snap.operational_context // {}) as $oc
-      | ($oc.repair_candidates // []) as $cands
+      | ($oc.build_candidates // []) as $cands
       | ($oc.demand_anchors // {}) as $da
       # TOKENS live in DEMAND ANCHORS above — handoff is alvo/reason only.
       | if ($cands | length) == 0 and (($da.seed_targets // []) | length) == 0
@@ -932,7 +932,7 @@ aegis_list_file_exports() {
     || true
 }
 
-# Repair mutation brief: mechanical context for Aider (alvo body state).
+# Build mutation brief: mechanical context for Aider (alvo body state).
 # Complements FORENSICS HANDOFF — does not restate demand free-text.
 # Args: [handover_path] [repo_root]
 aegis_format_mutation_brief_section() {
@@ -946,7 +946,7 @@ aegis_format_mutation_brief_section() {
   local alvos_json tokens_nl done_line
   alvos_json="$(
     jq -c '
-      (.artifact_snapshot.operational_context.repair_candidates // []) as $c
+      (.artifact_snapshot.operational_context.build_candidates // []) as $c
       | if ($c | length) > 0 then [$c[].id | select(type == "string" and length > 0)]
         else
           [.artifact_snapshot.operational_context.demand_anchors.seed_targets[]?
@@ -976,7 +976,7 @@ aegis_format_mutation_brief_section() {
     ' "${handover}" 2>/dev/null || true
   )"
 
-  # Data only — edit policy lives in .skills/repair.md (avoid prompt echo).
+  # Data only — edit policy lives in .skills/build.md (avoid prompt echo).
   local path probe state exports_line full
   {
     echo "=== MUTATION BRIEF (runtime) ==="
@@ -1022,24 +1022,24 @@ aegis_format_mutation_brief_section() {
   }
 }
 
-# True if handover carries at least one forensics repair_candidate id.
-aegis_handover_has_repair_alvo() {
+# True if handover carries at least one forensics build_candidate id.
+aegis_handover_has_build_alvo() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
   fi
   [[ -n "${handover}" && -f "${handover}" ]] || return 1
   jq -e '
-    [.artifact_snapshot.operational_context.repair_candidates[]?.id
+    [.artifact_snapshot.operational_context.build_candidates[]?.id
       | select(type == "string" and length > 0)]
     | length > 0
   ' "${handover}" >/dev/null 2>&1
 }
 
-# Optimize: show the Repair candidate delta as instance data (not policy).
-# Handover must be post-repair (mode=repair, diff + files_changed).
-# Args: [handover_path]  Env: AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES (default 12000)
-aegis_format_repair_result_section() {
+# Optimize: show the Build candidate delta as instance data (not policy).
+# Handover must be post-build (mode=build, diff + files_changed).
+# Args: [handover_path]  Env: AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES (default 12000)
+aegis_format_build_result_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -1047,13 +1047,13 @@ aegis_format_repair_result_section() {
   [[ -n "${handover}" && -f "${handover}" ]] || return 0
 
   local files_line diff_body max_bytes trunc_note=""
-  : "${AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES:=12000}"
-  max_bytes="${AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES}"
+  : "${AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES:=12000}"
+  max_bytes="${AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES}"
 
   files_line="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "repair")
+      | select($snap.mode == "build")
       | ($snap.operational_context.files_changed // [])
       | map(select(type == "string" and length > 0))
       | if length == 0 then empty else join(", ") end
@@ -1064,7 +1064,7 @@ aegis_format_repair_result_section() {
   diff_body="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "repair")
+      | select($snap.mode == "build")
       | ($snap.operational_context.diff // empty)
       | select(type == "string" and length > 0 and . != "(no changes)")
     ' "${handover}" 2>/dev/null || true
@@ -1072,14 +1072,14 @@ aegis_format_repair_result_section() {
   [[ -n "${diff_body}" ]] || return 0
 
   if [[ "${#diff_body}" -gt "${max_bytes}" ]]; then
-    trunc_note="[AEGIS][REPAIR_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
+    trunc_note="[AEGIS][BUILD_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
     diff_body="${diff_body:0:${max_bytes}}"
   fi
 
   {
-    echo "=== REPAIR RESULT (runtime) ==="
+    echo "=== BUILD RESULT (runtime) ==="
     echo
-    echo "Judge this Repair delta only (advise; do not edit files; do not re-implement the demand)."
+    echo "Judge this Build delta only (advise; do not edit files; do not re-implement the demand)."
     echo
     echo "files_changed: ${files_line}"
     echo
@@ -1093,7 +1093,7 @@ aegis_format_repair_result_section() {
   }
 }
 
-# Optimize after a refine pass: no second LLM — forward Repair as no_improvement.
+# Optimize after a refine pass: no second LLM — forward Build as no_improvement.
 aegis_emit_mechanical_optimize_passthrough() {
   local basis="${1:-optimize_passthrough_after_refine}"
   local body
@@ -1124,7 +1124,7 @@ aegis_record_optimize_metric() {
 }
 
 # =========================================================
-# CANDIDATE TOOLS STAMP (repair → adversarial reuse)
+# CANDIDATE TOOLS STAMP (build → adversarial reuse)
 # =========================================================
 # After a green mutation preflight, stamp tsc/test/(eslint) keyed by
 # candidate diff hash. Adversarial reuses when the candidate diff is
@@ -1170,7 +1170,7 @@ aegis_hash_candidate_diff() {
 # Args: <diff_content> <source_mode> [payload_dir ...]
 aegis_stamp_candidate_tools() {
   local diff_content="${1-}"
-  local source_mode="${2:-repair}"
+  local source_mode="${2:-build}"
   shift 2 || true
   local -a dirs=("$@")
   [[ -n "${diff_content}" ]] || return 0
@@ -1260,7 +1260,7 @@ aegis_try_reuse_stamped_tool_payload() {
   return 1
 }
 
-# Candidate hash from handover (repair op_ctx or optimize candidate_result).
+# Candidate hash from handover (build op_ctx or optimize candidate_result).
 aegis_handover_candidate_diff_hash() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
@@ -1273,7 +1273,7 @@ aegis_handover_candidate_diff_hash() {
       .artifact_snapshot as $s
       | if $s.mode == "optimize" then
           $s.operational_context.candidate_result.diff // empty
-        elif $s.mode == "repair" then
+        elif $s.mode == "build" then
           $s.operational_context.diff // empty
         else
           $s.operational_context.candidate_result.diff
@@ -1302,7 +1302,7 @@ aegis_format_candidate_result_section() {
       .artifact_snapshot as $s
       | (
           if $s.mode == "optimize" then $s.operational_context.candidate_result.files_changed
-          elif $s.mode == "repair" then $s.operational_context.files_changed
+          elif $s.mode == "build" then $s.operational_context.files_changed
           else $s.operational_context.candidate_result.files_changed
                 // $s.operational_context.files_changed
           end
@@ -1318,7 +1318,7 @@ aegis_format_candidate_result_section() {
       .artifact_snapshot as $s
       | (
           if $s.mode == "optimize" then $s.operational_context.candidate_result.diff
-          elif $s.mode == "repair" then $s.operational_context.diff
+          elif $s.mode == "build" then $s.operational_context.diff
           else $s.operational_context.candidate_result.diff // $s.operational_context.diff
           end
         ) // empty
@@ -1335,7 +1335,7 @@ aegis_format_candidate_result_section() {
   {
     echo "=== CANDIDATE RESULT (runtime) ==="
     echo
-    echo "Falsify this candidate only. Quote exact full +lines for logic bugs. Tools may be reused from repair when the candidate hash matches."
+    echo "Falsify this candidate only. Quote exact full +lines for logic bugs. Tools may be reused from build when the candidate hash matches."
     echo
     echo "files_changed: ${files_line}"
     echo
@@ -1349,7 +1349,7 @@ aegis_format_candidate_result_section() {
   }
 }
 
-# files_changed for the mutation candidate on a handover (optimize/repair shapes).
+# files_changed for the mutation candidate on a handover (optimize/build shapes).
 # Prints JSON array. Empty array when handover missing or unreadable.
 aegis_handover_candidate_files_changed_json() {
   local handover="${1-}"
@@ -1401,7 +1401,7 @@ aegis_format_adversarial_tools_summary_section() {
     shash="$(jq -r '.candidate_hash // empty' "${meta}" 2>/dev/null || true)"
     want="$(aegis_handover_candidate_diff_hash "${handover}" 2>/dev/null || true)"
     if [[ -n "${shash}" && -n "${want}" && "${shash}" == "${want}" ]]; then
-      reuse_note="tools_source: reused_from_repair_stamp (candidate hash match)"
+      reuse_note="tools_source: reused_from_build_stamp (candidate hash match)"
     else
       reuse_note="tools_source: fresh_run (candidate changed or no stamp)"
     fi
@@ -1464,7 +1464,7 @@ aegis_emit_mechanical_validation_substrate() {
 # Node test importing the unit's first ## Target, and executes the asserts.
 # Prints a JSON findings array (empty when every in-scope assert passes).
 # Returns 0 always — the validation substrate converts non-empty findings
-# into a rejected verdict that feeds repair_feedback.
+# into a rejected verdict that feeds build_feedback.
 aegis_mechanical_behavior_gate() {
   local demand="${AEGIS_INVESTIGATION_INPUT:-}"
   local behavior acceptance targets target
@@ -2713,13 +2713,13 @@ aegis_candidate_alignment_gate() {
   return 0
 }
 
-# Diff text from handover for repair (op.diff) or optimize (candidate_result).
+# Diff text from handover for build (op.diff) or optimize (candidate_result).
 aegis_handover_mutation_diff() {
   local handover="${1-}"
   [[ -n "${handover}" && -f "${handover}" ]] || return 1
   jq -r '
     .artifact_snapshot as $s
-    | if $s.mode == "repair" then
+    | if $s.mode == "build" then
         ($s.operational_context.diff // empty)
       else
         ($s.operational_context.candidate_result.diff
@@ -2728,13 +2728,13 @@ aegis_handover_mutation_diff() {
   ' "${handover}" 2>/dev/null
 }
 
-# files_changed JSON array for repair or optimize candidate.
+# files_changed JSON array for build or optimize candidate.
 aegis_handover_mutation_files_json() {
   local handover="${1-}"
   [[ -n "${handover}" && -f "${handover}" ]] || { printf '[]'; return 0; }
   jq -c '
     .artifact_snapshot as $s
-    | if $s.mode == "repair" then
+    | if $s.mode == "build" then
         [($s.operational_context.files_changed // [])[]?
           | select(type == "string" and length > 0)]
       else
@@ -2754,9 +2754,9 @@ aegis_diff_added_lines() {
     || true
 }
 
-# True when Repair candidate is small/clean enough to skip optimize LLM.
+# True when Build candidate is small/clean enough to skip optimize LLM.
 # Heuristic: ≤N files, ≤M diff lines, no explicit any in added lines.
-aegis_optimize_repair_is_trivial() {
+aegis_optimize_build_is_trivial() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -2791,7 +2791,7 @@ aegis_optimize_repair_is_trivial() {
   return 0
 }
 
-# Senior-equivalent greps on Repair delta: at most one mechanical improve.
+# Senior-equivalent greps on Build delta: at most one mechanical improve.
 # Prints JSON {target_files,change,why_safe,code} or empty string.
 aegis_mechanical_optimize_scan() {
   local handover="${1-}"
@@ -2821,7 +2821,7 @@ aegis_mechanical_optimize_scan() {
       target_files: [$f],
       change: (
         "In " + $f
-        + ", remove explicit any / as any / @ts-ignore / @ts-expect-error introduced in the Repair diff; use concrete types or proper narrowing."
+        + ", remove explicit any / as any / @ts-ignore / @ts-expect-error introduced in the Build diff; use concrete types or proper narrowing."
       ),
       why_safe: "Types-only edit; preserves runtime behavior when any was already type-erased.",
       code: "any_in_added_lines"
@@ -2837,7 +2837,7 @@ aegis_mechanical_optimize_scan() {
       target_files: [$f],
       change: (
         "In " + $f
-        + ", replace TODO/FIXME/not-implemented stubs introduced in the Repair diff with the real demanded implementation (or remove dead stub paths)."
+        + ", replace TODO/FIXME/not-implemented stubs introduced in the Build diff with the real demanded implementation (or remove dead stub paths)."
       ),
       why_safe: "Removes incomplete delivery; does not expand scope beyond files_changed.",
       code: "stub_in_added_lines"
@@ -3461,7 +3461,7 @@ aegis_mechanical_adversarial_diff_scan() {
           supported_by_evidence: true,
           evidence_refs: ["candidate.diff"],
           target_files: [$f],
-          fix: ("In " + $f + ", implement or remove stub paths left in the Repair/optimize candidate.")
+          fix: ("In " + $f + ", implement or remove stub paths left in the Build/optimize candidate.")
         }'
       )"
     )
@@ -3655,11 +3655,11 @@ aegis_adversarial_should_use_llm() {
   return 1
 }
 
-# Post-Repair file bodies for optimize (apply candidate on temp copies of HEAD).
+# Post-Build file bodies for optimize (apply candidate on temp copies of HEAD).
 # Args: [handover_path] [repo_root]
 # Env: AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES (default 8000 per file)
 #      AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES (default 4)
-aegis_format_repair_file_bodies_section() {
+aegis_format_build_file_bodies_section() {
   local handover="${1-}"
   local root="${2:-.}"
   if [[ -z "${handover}" ]]; then
@@ -3677,7 +3677,7 @@ aegis_format_repair_file_bodies_section() {
   diff_body="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "repair")
+      | select($snap.mode == "build")
       | ($snap.operational_context.diff // empty)
       | select(type == "string" and length > 0 and . != "(no changes)")
     ' "${handover}" 2>/dev/null || true
@@ -3687,7 +3687,7 @@ aegis_format_repair_file_bodies_section() {
   files_json="$(
     jq -c '
       .artifact_snapshot as $snap
-      | select($snap.mode == "repair")
+      | select($snap.mode == "build")
       | [($snap.operational_context.files_changed // [])[]?
           | select(type == "string" and length > 0)][0:'"${max_files}"']
     ' "${handover}" 2>/dev/null || printf '[]'
@@ -3707,9 +3707,9 @@ aegis_format_repair_file_bodies_section() {
   printf '%s\n' "${diff_body}" > "${diff_file}"
 
   {
-    echo "=== POST-REPAIR FILE BODIES (runtime; after applying Repair diff) ==="
+    echo "=== POST-BUILD FILE BODIES (runtime; after applying Build diff) ==="
     echo
-    echo "Read-only snapshot for judgment. Prefer citing symbols from these bodies + REPAIR RESULT."
+    echo "Read-only snapshot for judgment. Prefer citing symbols from these bodies + BUILD RESULT."
     echo
   }
 
@@ -3727,13 +3727,13 @@ aegis_format_repair_file_bodies_section() {
     fi
   done < <(printf '%s' "${files_json}" | jq -r '.[]?')
 
-  # Apply full repair patch into the temp tree (paths match +++ b/...).
+  # Apply full build patch into the temp tree (paths match +++ b/...).
   # Use patch(1) from inside tmp (more portable than git apply --directory).
   if ! (
     cd "${tmp}" && patch -p1 --forward --batch --silent < "${diff_file}"
   ) >/dev/null 2>&1; then
     # Fallback: still show HEAD bodies if apply fails (better than silence).
-    echo "(post-repair apply failed — showing pre-repair HEAD bodies where available)"
+    echo "(post-build apply failed — showing pre-build HEAD bodies where available)"
     echo
   fi
 
@@ -3764,8 +3764,8 @@ aegis_format_repair_file_bodies_section() {
   rm -rf "${tmp}" 2>/dev/null || true
 }
 
-# Local re-repair feedback from rejected validation (stable tribunal codes).
-aegis_format_repair_feedback_section() {
+# Local re-build feedback from rejected validation (stable tribunal codes).
+aegis_format_build_feedback_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -3777,11 +3777,11 @@ aegis_format_repair_feedback_section() {
     jq -r '
       .artifact_snapshot as $snap
       | select($snap.mode == "validation")
-      | ($snap.operational_context.repair_feedback // empty) as $rf
+      | ($snap.operational_context.build_feedback // empty) as $rf
       | select($rf | type == "object")
       | ($rf.violations // []) as $v
       | select(($v | length) > 0)
-      | "=== REPAIR FEEDBACK (runtime) ===",
+      | "=== BUILD FEEDBACK (runtime) ===",
         "",
         "Fix ONLY these violations inside authorized scopes. No rediscovery.",
         (
@@ -4210,7 +4210,7 @@ aegis_build_mechanical_forensics_json() {
   fi
 
   if ! printf '%s' "${paths_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-    jq -n '{status: "inconclusive", repair_candidates: []}'
+    jq -n '{status: "inconclusive", build_candidates: []}'
     return 0
   fi
 
@@ -4231,7 +4231,7 @@ aegis_build_mechanical_forensics_json() {
   rm -f "${tmp_cands}" "${tmp_cands}.tmp" 2>/dev/null || true
 
   jq -n --argjson cands "${cands_json:-[]}" \
-    '{status: "interpreted", repair_candidates: $cands}'
+    '{status: "interpreted", build_candidates: $cands}'
 }
 
 aegis_emit_mechanical_forensics_substrate() {

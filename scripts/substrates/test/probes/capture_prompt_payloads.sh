@@ -24,7 +24,7 @@ CAPTURE_OUT="${AEGIS_CAPTURE_OUT:-${TEST_ROOT}/.harness/runtime/prompt_captures}
 mkdir -p "${CAPTURE_OUT}"
 rm -f "${CAPTURE_OUT}"/request_*.json
 
-export AEGIS_REPAIR_FEEDBACK_LOOP="false"
+export AEGIS_BUILD_FEEDBACK_LOOP="false"
 readonly FIXED_INVESTIGATION_INPUT="cache idempotency smoke investigation"
 
 CAPTURE_CURL_DIR="$(mktemp -d)"

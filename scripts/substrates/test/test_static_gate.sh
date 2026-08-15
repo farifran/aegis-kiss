@@ -107,7 +107,7 @@ fi
 # --- lint gate wires static gate (empty catch after syntax-clean TS) ---
 # Run from fixture root so local tsc resolution, if any, stays harmless.
 LINT="scripts/substrates/aider_lint_gate.sh"
-export AEGIS_MODE="repair"
+export AEGIS_MODE="build"
 if (
   cd "${test_tmp}"
   bash "${OLDPWD}/${LINT}" "src/empty_catch.ts" 2>/dev/null
@@ -156,7 +156,7 @@ EOF
   if [[ -d "${AEGIS_TEST_ROOT}/node_modules" ]]; then
     ln -sfn "${AEGIS_TEST_ROOT}/node_modules" "${test_tmp}/delta/node_modules"
   fi
-  export AEGIS_MODE="repair"
+  export AEGIS_MODE="build"
   export AEGIS_LINT_PROJECT_TSC=1
   # Editing the clean file must pass even when baseline debt exists in bad.ts.
   if ! (

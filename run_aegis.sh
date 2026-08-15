@@ -26,7 +26,7 @@ source "scripts/lib/common.sh"
 source "scripts/lib/run_outcome.sh"
 AEGIS_LOG_TAG="RUN"
 
-# Repair stamps tools for adversarial reuse during the pipeline.
+# Build stamps tools for adversarial reuse during the pipeline.
 # Drop after the orchestrator exits (success, fail, halt, or signal).
 # Path jail: only remove dirs whose path contains candidate_tools_stamp and
 # no ".." segments — never rm -rf an arbitrary AEGIS_CANDIDATE_TOOLS_STAMP_DIR.
@@ -54,7 +54,7 @@ usage() {
 Usage: ./run_aegis.sh [readonly] [options] [investigation input...]
 
 Pipelines:
-  (default)            mutation: discovery -> forensics -> repair
+  (default)            mutation: discovery -> forensics -> build
                        -> optimize -> adversarial -> validation
   readonly             discovery -> forensics
 
@@ -85,19 +85,19 @@ Options:
 
 Any mode failure aborts the remaining pipeline. Intelligent early-exit
 halts mutation after forensics when status is inconclusive or no
-repair_candidates exist (no wasted repair/optimize LLM). Rejected
-validation re-enters a local repair feedback loop (no rediscovery):
-repair -> optimize -> adversarial -> validation.
+build_candidates exist (no wasted build/optimize LLM). Rejected
+validation re-enters a local build feedback loop (no rediscovery):
+build -> optimize -> adversarial -> validation.
 
 The final report always shows per-mode status/timings, stage budget
-share, hot timing spans, verdict, structured repair feedback (when
+share, hot timing spans, verdict, structured build feedback (when
 present), and pipeline status (SUCCESS | HALTED | FAILED).
 EOF
 }
 
 declare -A PIPELINES=(
   [readonly]="discovery forensics"
-  [mutation]="discovery forensics repair optimize adversarial validation"
+  [mutation]="discovery forensics build optimize adversarial validation"
 )
 
 PIPELINE="mutation"
@@ -144,7 +144,7 @@ next_mode() {
 }
 
 # True when runtime internal feedback already advanced the handover past
-# the mode we just ran (e.g. optimize can_improve → repair → … → validation
+# the mode we just ran (e.g. optimize can_improve → build → … → validation
 # inside one process). Prevents re-running adversarial/validation.
 pipeline_handover_past_mode() {
   local just_ran="$1"
@@ -276,7 +276,7 @@ mark_modes_nested_after() {
 # The gate checks the candidate's files_changed, which do not exist yet at
 # this point. The operator-named paths in the demand are the knowable proxy
 # and in practice are the same files. Checking them here turns a multi-minute
-# failure into an immediate one. It cannot be exhaustive: repair may touch a
+# failure into an immediate one. It cannot be exhaustive: build may touch a
 # Auto-create empty stub files for operator-named net-new paths in src/
 ensure_operator_named_src_stubs() {
   command -v git >/dev/null 2>&1 || return 0
@@ -460,13 +460,13 @@ pipeline_should_halt_after_mode() {
   )"
   candidate_count="$(
     jq -r '
-      (.artifact_snapshot.operational_context.repair_candidates // []) | length
+      (.artifact_snapshot.operational_context.build_candidates // []) | length
     ' "${HANDOVER_FILE}" 2>/dev/null || echo 0
   )"
 
   if [[ "${forensics_status}" == "inconclusive" ]]; then
     echo
-    echo "[RUN] Forensics inconclusive — no mutation surface justified. Halting before repair."
+    echo "[RUN] Forensics inconclusive — no mutation surface justified. Halting before build."
     PIPELINE_STATUS="HALTED"
     PIPELINE_REASON="forensics inconclusive"
     return 0
@@ -474,9 +474,9 @@ pipeline_should_halt_after_mode() {
 
   if [[ "${candidate_count}" -eq 0 ]]; then
     echo
-    echo "[RUN] No repair candidates proposed. Halting pipeline to collect more evidence."
+    echo "[RUN] No build candidates proposed. Halting pipeline to collect more evidence."
     PIPELINE_STATUS="HALTED"
-    PIPELINE_REASON="no repair candidates in forensics handover"
+    PIPELINE_REASON="no build candidates in forensics handover"
     return 0
   fi
 
@@ -515,8 +515,8 @@ record_mode_handover_metric() {
             (.artifact_snapshot.operational_context.status // null)
           else null end
         ),
-        repair_candidates: (
-          (.artifact_snapshot.operational_context.repair_candidates // [])
+        build_candidates: (
+          (.artifact_snapshot.operational_context.build_candidates // [])
           | length
         ),
         findings: (
@@ -612,7 +612,7 @@ handover_report_fields() {
         | .[0:8]
       ),
       violations: (
-        .artifact_snapshot.operational_context.repair_feedback.violations // []
+        .artifact_snapshot.operational_context.build_feedback.violations // []
         | map({
             severity: (.severity // "unspecified"),
             origin: (.origin // "unspecified"),
@@ -712,7 +712,7 @@ show_final_report() {
       | "  \(.mode)\t\($s)s\t\($pct)%"
         + (if .verdict != null then "  verdict=\(.verdict)" else "" end)
         + (if .forensics_status != null then "  status=\(.forensics_status)" else "" end)
-        + (if (.repair_candidates // 0) > 0 then "  candidates=\(.repair_candidates)" else "" end)
+        + (if (.build_candidates // 0) > 0 then "  candidates=\(.build_candidates)" else "" end)
         + (if (.findings // 0) > 0 then "  findings=\(.findings)" else "" end)
         + (if (.files_changed // 0) > 0 then "  files=\(.files_changed)" else "" end)
     ' 2>/dev/null || true
@@ -757,7 +757,7 @@ show_final_report() {
 
     if jq -e '(.violations | length) > 0' <<<"${fields}" >/dev/null 2>&1; then
       echo
-      echo "Repair Feedback (top violations):"
+      echo "Build Feedback (top violations):"
       jq -r '
         .violations[]
         | "  - [\(.severity)] \(.origin): \(.reason)"
@@ -1119,9 +1119,9 @@ main() {
   fi
 
   for mode in "${EXECUTION_MODES[@]}"; do
-    # Pre-mode gate: entering repair re-checks the forensics handover so
+    # Pre-mode gate: entering build re-checks the forensics handover so
     # we never spend mutation budget on inconclusive / empty candidates.
-    if [[ "${mode}" == "repair" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
+    if [[ "${mode}" == "build" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
       if pipeline_should_halt_after_mode "forensics"; then
         MODE_STATUS["${mode}"]="halted"
         mark_remaining_skipped

@@ -167,7 +167,7 @@ aegis_forensics_ensure_search_symbol_payload() {
 }
 
 # The candidate diff reaches adversarial and optimize TWICE: once as the
-# formatted CANDIDATE RESULT / REPAIR RESULT section (framed, capped, and
+# formatted CANDIDATE RESULT / BUILD RESULT section (framed, capped, and
 # carrying an explicit truncation note) and once verbatim inside the raw
 # epistemic handover payload. The formatted rendering is authoritative, so
 # the raw copy collapses to a pointer that states the real byte length.
@@ -266,7 +266,7 @@ materialize_capability_payloads() {
     cache_hit=0
     cache_path=""
 
-    # Adversarial: reuse tsc/eslint/test stamped after green repair when
+    # Adversarial: reuse tsc/eslint/test stamped after green build when
     # candidate diff hash is unchanged (optimize passthrough / no refine).
     if [[ "${cache_hit}" -eq 0 ]] \
       && [[ "${AEGIS_MODE:-}" == "adversarial" ]] \
@@ -491,7 +491,7 @@ generate_pocket_map() {
 
 mode_uses_attention_zoom() {
   case "${AEGIS_MODE}" in
-    forensics|repair|optimize|adversarial|validation) return 0 ;;
+    forensics|build|optimize|adversarial|validation) return 0 ;;
     *) return 1 ;;
   esac
 }

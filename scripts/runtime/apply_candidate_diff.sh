@@ -16,10 +16,10 @@ candidate_fatal() {
 [[ -d "${EXECUTION_SURFACE}" ]] \
   || candidate_fatal "missing_execution_surface"
 
-# Locate the candidate by SHAPE, not by mode name. Repair carries the patch in
+# Locate the candidate by SHAPE, not by mode name. Build carries the patch in
 # operational_context.diff; optimize, adversarial and validation forward it as
-# candidate_result. Enumerating only repair and optimize meant a
-# validation-mode handover — the one every repair-feedback re-entry carries —
+# candidate_result. Enumerating only build and optimize meant a
+# validation-mode handover — the one every build-feedback re-entry carries —
 # matched nothing and was refused as an invalid contract, so the loop that
 # validation itself asked for could never rebuild the candidate.
 candidate_src="$(
@@ -42,7 +42,7 @@ candidate_src="$(
 )"
 
 [[ -n "${candidate_src}" ]] \
-  || candidate_fatal "invalid_repair_candidate_contract"
+  || candidate_fatal "invalid_build_candidate_contract"
 
 diff_file="$(mktemp)"
 expected_files="$(mktemp)"
@@ -67,7 +67,7 @@ else
     "${HANDOVER_FILE}" | sort -u > "${expected_files}"
 fi
 
-# Prefer clean apply; fall back to 3-way (optimize→repair refine on dirty-ish trees).
+# Prefer clean apply; fall back to 3-way (optimize→build refine on dirty-ish trees).
 if ! git -C "${EXECUTION_SURFACE}" apply --check "${diff_file}" 2>/dev/null; then
   if git -C "${EXECUTION_SURFACE}" apply --3way --check "${diff_file}" 2>/dev/null; then
     git -C "${EXECUTION_SURFACE}" apply --3way "${diff_file}" \
@@ -107,4 +107,4 @@ if ! cmp -s "${expected_files}" "${actual_files}"; then
   candidate_fatal "candidate_files_changed_mismatch"
 fi
 
-echo "[AEGIS][CANDIDATE] Repair candidate materialized" >&2
+echo "[AEGIS][CANDIDATE] Build candidate materialized" >&2

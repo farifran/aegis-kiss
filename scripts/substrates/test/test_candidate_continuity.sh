@@ -30,7 +30,7 @@ jq -n \
   --arg diff "${diff_content}" \
   '{
     artifact_snapshot: {
-      mode: "repair",
+      mode: "build",
       operational_context: {
         diff: $diff,
         files_changed: ["src/index.ts"]
@@ -39,14 +39,14 @@ jq -n \
     epistemic_state: {
       next_attention_targets: ["src/index.ts"],
       attention_scope: "mutation_applied",
-      attention_reason: "repair candidate"
+      attention_reason: "build candidate"
     }
   }' > "${handover}"
 
 bash scripts/runtime/apply_candidate_diff.sh "${handover}" "${repo}"
 
 grep -q "export const soma" "${repo}/src/index.ts" \
-  || fail "repair_candidate_was_not_materialized"
+  || fail "build_candidate_was_not_materialized"
 
 jq '.artifact_snapshot.operational_context.files_changed = ["src/other.ts"]' \
   "${handover}" > "${handover}.invalid"
@@ -59,17 +59,17 @@ if bash scripts/runtime/apply_candidate_diff.sh \
 fi
 
 # Static: soft-fail materialize must set KEEP flag; substrate must passthrough.
-grep -q 'AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE=1' \
+grep -q 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE=1' \
   "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
   || fail "materialize_missing_keep_previous_flag"
-grep -q 'AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE' \
+grep -q 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" \
   || fail "aider_substrate_missing_keep_previous_branch"
 grep -q 'AEGIS_SKIP_CANDIDATE_TOOLS_STAMP' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider/invoke.sh" \
   || fail "emit_mutation_missing_skip_stamp_guard"
 # KEEP branch must run before invoke_aider (order lock).
-_keep_line="$(grep -n 'AEGIS_REPAIR_KEEP_PREVIOUS_CANDIDATE' \
+_keep_line="$(grep -n 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" | head -1 | cut -d: -f1)"
 _inv_line="$(grep -n 'invoke_aider' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" | head -1 | cut -d: -f1)"
@@ -127,7 +127,7 @@ newfile_handover="${test_tmp}/newfile_handover.json"
 jq -n --arg diff "${newfile_diff}
 " '{
   artifact_snapshot: {
-    mode: "repair",
+    mode: "build",
     operational_context: {
       diff: $diff,
       files_changed: ["src/tokenBucket.ts"]
@@ -146,7 +146,7 @@ grep -q 'export class TokenBucket' "${repo}/src/tokenBucket.ts" \
 rm -f "${repo}/src/tokenBucket.ts"
 
 # --- validation carries the candidate as candidate_result, exactly like
-# optimize. Matching on mode name meant every validation->repair re-entry —
+# optimize. Matching on mode name meant every validation->build re-entry —
 # the one validation itself asks for — was refused as an invalid contract. ---
 val_handover="${test_tmp}/val_handover.json"
 jq -n --arg diff "${diff_content}" '{
@@ -155,7 +155,7 @@ jq -n --arg diff "${diff_content}" '{
     operational_context: {
       verdict: "rejected",
       candidate_result: {
-        source_mode: "repair",
+        source_mode: "build",
         diff: $diff,
         files_changed: ["src/index.ts"]
       }
@@ -178,4 +178,4 @@ if bash scripts/runtime/apply_candidate_diff.sh "${bad_handover}" "${repo}" >/de
   fail "handover_without_candidate_was_accepted"
 fi
 
-echo "[PASS] Repair to Optimize candidate continuity"
+echo "[PASS] Build to Optimize candidate continuity"

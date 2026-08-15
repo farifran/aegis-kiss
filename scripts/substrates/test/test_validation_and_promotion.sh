@@ -120,7 +120,7 @@ val_accept="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx}")"
 echo "${val_accept}" | jq -e '
   .verdict == "accepted"
   and (.validated_candidate.files_changed | index("src/index.ts") != null)
-  and ((.repair_feedback | not) or .repair_feedback == null)
+  and ((.build_feedback | not) or .build_feedback == null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_accept: ${val_accept}"
 
@@ -147,8 +147,8 @@ val_reject="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_intent}")"
 echo "${val_reject}" | jq -e '
   .verdict == "rejected"
   and (.basis | map(test("demand_tokens")) | any)
-  and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
-  and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
+  and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
+  and (.build_feedback.authorized_scopes | index("src/index.ts") != null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_reject_intent: ${val_reject}"
 
@@ -170,7 +170,7 @@ val_align="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_align}")"
 echo "${val_align}" | jq -e '
   .verdict == "rejected"
   and (.basis | map(test("demand_tokens")) | any)
-  and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
+  and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_reject_alignment: ${val_align}"
 
@@ -349,7 +349,7 @@ set -e
 [[ "${validation_status}" -ne 0 ]] \
   || fail "validation_accepted_mismatched_candidate"
 
-# Mechanical end-to-end reject (intent stamp) without repair re-entry / promote.
+# Mechanical end-to-end reject (intent stamp) without build re-entry / promote.
 : > "${metrics_file}"
 jq -n --arg diff "${soma_diff}" '
   {
@@ -382,7 +382,7 @@ jq -n --arg diff "${soma_diff}" '
 ' > "${AEGIS_EPISTEMIC_HANDOVER_FILE}"
 
 set +e
-AEGIS_REPAIR_FEEDBACK_LOOP=false \
+AEGIS_BUILD_FEEDBACK_LOOP=false \
 AEGIS_VALIDATION_LLM=0 \
 AEGIS_METRICS_FILE="${metrics_file}" \
 AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \

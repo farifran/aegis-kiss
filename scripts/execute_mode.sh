@@ -159,7 +159,7 @@ augment_evidence_profile_from_handover() {
 # (see materialize_capability_payloads).
 augment_evidence_profile_from_anchors() {
   case "${AEGIS_MODE}" in
-    forensics|repair|adversarial|optimize) ;;
+    forensics|build|adversarial|optimize) ;;
     *) return 0 ;;
   esac
 
@@ -810,7 +810,7 @@ execute_substrate() {
   fi
 
   # Validation is a deterministic tribunal by default (no LLM).
-  # Enrich rewrites verdict/candidate/findings/repair_feedback from
+  # Enrich rewrites verdict/candidate/findings/build_feedback from
   # handover + alignment gate. Opt-in LLM: AEGIS_VALIDATION_LLM=1.
   if [[ "${AEGIS_MODE}" == "validation" ]]; then
     local _val_llm="${AEGIS_VALIDATION_LLM:-0}"
@@ -842,7 +842,7 @@ execute_substrate() {
     local _opt_handover
     _opt_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
 
-    if [[ "${AEGIS_OPTIMIZE_REPAIR_COUNT:-0}" -ge 1 ]]; then
+    if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT:-0}" -ge 1 ]]; then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
       substrate_output="$(
@@ -851,16 +851,16 @@ execute_substrate() {
       )" || substrate_output=""
       [[ -n "${substrate_output}" ]] \
         || aegis_fatal "optimize_passthrough_failed"
-      aegis_log "optimize_passthrough: after refine (count=${AEGIS_OPTIMIZE_REPAIR_COUNT}) — no LLM"
+      aegis_log "optimize_passthrough: after refine (count=${AEGIS_OPTIMIZE_BUILD_COUNT}) — no LLM"
       if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
         aegis_record_optimize_metric "passthrough_after_refine" \
-          "count=${AEGIS_OPTIMIZE_REPAIR_COUNT}"
+          "count=${AEGIS_OPTIMIZE_BUILD_COUNT}"
       fi
       AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
       return 0
     fi
 
-    # Senior-equivalent greps on Repair delta (any/stubs) → at most one improve.
+    # Senior-equivalent greps on Build delta (any/stubs) → at most one improve.
     if declare -f aegis_mechanical_optimize_scan >/dev/null 2>&1 \
       && declare -f aegis_emit_mechanical_optimize_can_improve >/dev/null 2>&1; then
       local _opt_imp
@@ -889,8 +889,8 @@ execute_substrate() {
     # Small clean diff: stage still runs (audit basis), no advisory LLM.
     if [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "0" ]] \
       && [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "false" ]] \
-      && declare -f aegis_optimize_repair_is_trivial >/dev/null 2>&1 \
-      && aegis_optimize_repair_is_trivial "${_opt_handover}"; then
+      && declare -f aegis_optimize_build_is_trivial >/dev/null 2>&1 \
+      && aegis_optimize_build_is_trivial "${_opt_handover}"; then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
       substrate_output="$(
@@ -1016,13 +1016,13 @@ main() {
     export AEGIS_FORENSICS_USE_LLM
   fi
 
-  # Repair with a clear forensics ALVO does not need repo-wide search noise.
-  if [[ "${AEGIS_MODE}" == "repair" ]] \
-    && declare -f aegis_handover_has_repair_alvo >/dev/null 2>&1 \
-    && aegis_handover_has_repair_alvo \
+  # Build with a clear forensics ALVO does not need repo-wide search noise.
+  if [[ "${AEGIS_MODE}" == "build" ]] \
+    && declare -f aegis_handover_has_build_alvo >/dev/null 2>&1 \
+    && aegis_handover_has_build_alvo \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"; then
     omit_active_evidence_entry "filesystem.search_symbol"
-    aegis_log "repair_evidence: omitted search_symbol (forensics ALVO present)"
+    aegis_log "build_evidence: omitted search_symbol (forensics ALVO present)"
   fi
 
   # Rank so materialize + budget exposure hit anchors/content before noise.

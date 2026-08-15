@@ -94,7 +94,7 @@ post_sha="$(shasum -a 256 "${HANDOVER}" | awk '{print $1}')"
 
 # --- assert 5: runtime rejects --fresh (no rebind flag on runtime) ---
 set +e
-out="$(bash "${AEGIS_TEST_ROOT}/runtime_aegis.sh" repair --fresh x 2>&1)"
+out="$(bash "${AEGIS_TEST_ROOT}/runtime_aegis.sh" build --fresh x 2>&1)"
 rt_rc=$?
 set -e
 [[ "${rt_rc}" -ne 0 ]] \

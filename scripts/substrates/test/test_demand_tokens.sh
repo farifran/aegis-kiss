@@ -250,7 +250,7 @@ export AEGIS_MODE="forensics"
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
 raw_for='{
   "status": "interpreted",
-  "repair_candidates": [
+  "build_candidates": [
     {"id": "src/index.ts", "reason": "Request: add power function."},
     {"id": "src/ui/fake_import.ts", "reason": "also maybe"}
   ]
@@ -284,14 +284,14 @@ ctx_for="$(
 )"
 enriched_for="$(enrich_cognitive_artifact "${raw_for}" "${ctx_for}")"
 echo "${enriched_for}" | jq -e '
-  (.repair_candidates | length) == 1
-  and .repair_candidates[0].id == "src/index.ts"
-  and (.repair_candidates[0].reason | test("power"; "i") | not)
+  (.build_candidates | length) == 1
+  and .build_candidates[0].id == "src/index.ts"
+  and (.build_candidates[0].reason | test("power"; "i") | not)
   and (
-    (.repair_candidates[0].reason | test("terabit"; "i"))
-    or (.repair_candidates[0].reason | test("gigabit"; "i"))
-    or (.repair_candidates[0].reason | test("convers"; "i"))
-    or (.repair_candidates[0].reason | startswith("Demand:"))
+    (.build_candidates[0].reason | test("terabit"; "i"))
+    or (.build_candidates[0].reason | test("gigabit"; "i"))
+    or (.build_candidates[0].reason | test("convers"; "i"))
+    or (.build_candidates[0].reason | startswith("Demand:"))
   )
 ' >/dev/null \
   || fail "forensics_should_bind_reason_and_single_seed: ${enriched_for}"
@@ -299,13 +299,13 @@ echo "${enriched_for}" | jq -e '
 # reason that already cites a dense token is preserved
 raw_ok='{
   "status": "interpreted",
-  "repair_candidates": [
+  "build_candidates": [
     {"id": "src/index.ts", "reason": "add terabitsToGigabits helper"}
   ]
 }'
 enriched_ok="$(enrich_cognitive_artifact "${raw_ok}" "${ctx_for}")"
 echo "${enriched_ok}" | jq -e '
-  .repair_candidates[0].reason == "add terabitsToGigabits helper"
+  .build_candidates[0].reason == "add terabitsToGigabits helper"
 ' >/dev/null \
   || fail "forensics_should_keep_token_aligned_reason: ${enriched_ok}"
 
@@ -487,10 +487,10 @@ if aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
 fi
 echo "${for_mech}" | jq -e '
   .status == "interpreted"
-  and (.repair_candidates | length) == 1
-  and .repair_candidates[0].id == "src/index.ts"
-  and (.repair_candidates[0].reason | test("terabit|megabit|Demand"; "i"))
-  and (.repair_candidates[0].reason | test("power"; "i") | not)
+  and (.build_candidates | length) == 1
+  and .build_candidates[0].id == "src/index.ts"
+  and (.build_candidates[0].reason | test("terabit|megabit|Demand"; "i"))
+  and (.build_candidates[0].reason | test("power"; "i") | not)
 ' >/dev/null \
   || fail "mechanical_forensics_shape: ${for_mech}"
 
@@ -533,9 +533,9 @@ for_win="$(aegis_build_mechanical_forensics_json "${AEGIS_INVESTIGATION_INPUT}" 
 echo "${for_win}" | jq -e \
   --arg a "${_win_a}" \
   '.status == "interpreted"
-   and (.repair_candidates | length) == 1
-   and .repair_candidates[0].id == $a
-   and (.repair_candidates[0].reason | test("terabit|megabit|Demand"; "i"))' \
+   and (.build_candidates | length) == 1
+   and .build_candidates[0].id == $a
+   and (.build_candidates[0].reason | test("terabit|megabit|Demand"; "i"))' \
   >/dev/null \
   || fail "mechanical_forensics_probe_winner: ${for_win}"
 rm -f "${_win_a}" "${_win_b}"
@@ -545,14 +545,14 @@ rm -rf "${for_pd}"
 for_empty="$(aegis_build_mechanical_forensics_json "the and for para como" "" "")"
 echo "${for_empty}" | jq -e '
   .status == "inconclusive"
-  and (.repair_candidates | length) == 0
+  and (.build_candidates | length) == 0
 ' >/dev/null \
   || fail "mechanical_forensics_empty: ${for_empty}"
 if aegis_forensics_needs_llm "the and for para como" "" ""; then
   fail "forensics_empty_anchors_should_not_use_llm"
 fi
 
-# forensics handoff section for repair
+# forensics handoff section for build
 tmp_fh="$(mktemp)"
 jq -n \
   --argjson anchors "${struct_a}" \
@@ -563,7 +563,7 @@ jq -n \
       generated_at: "2026-07-18T00:00:00Z",
       operational_context: {
         status: "interpreted",
-        repair_candidates: [
+        build_candidates: [
           {id: "src/index.ts", reason: "Demand: terabits gigabits"}
         ],
         demand_anchors: $anchors
@@ -581,7 +581,7 @@ printf '%s' "${handoff}" | grep -q 'FORENSICS HANDOFF' \
 printf '%s' "${handoff}" | grep -q 'ALVO: src/index.ts' \
   || fail "forensics_handoff_missing_alvo: ${handoff}"
 
-# mutation brief for repair (exports + probe state on ALVO)
+# mutation brief for build (exports + probe state on ALVO)
 brief="$(aegis_format_mutation_brief_section "${tmp_fh}" ".")"
 printf '%s' "${brief}" | grep -q 'MUTATION BRIEF' \
   || fail "mutation_brief_missing_header: ${brief}"
@@ -591,13 +591,13 @@ printf '%s' "${brief}" | grep -q 'EXPORTS NOW:' \
   || fail "mutation_brief_missing_exports: ${brief}"
 printf '%s' "${brief}" | grep -q 'STATE:' \
   || fail "mutation_brief_missing_state: ${brief}"
-# Policy rules live in .skills/repair.md — brief is FILE/STATE/EXPORTS (+ DONE WHEN) only.
-aegis_handover_has_repair_alvo "${tmp_fh}" \
-  || fail "handover_should_report_repair_alvo"
+# Policy rules live in .skills/build.md — brief is FILE/STATE/EXPORTS (+ DONE WHEN) only.
+aegis_handover_has_build_alvo "${tmp_fh}" \
+  || fail "handover_should_report_build_alvo"
 rm -f "${tmp_fh}"
 
-# Intent gates: tokens + over-export (used by repair preflight retry)
-export AEGIS_MODE="repair"
+# Intent gates: tokens + over-export (used by build preflight retry)
+export AEGIS_MODE="build"
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
 # shellcheck disable=SC1091
 source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh" 2>/dev/null || true
@@ -635,11 +635,11 @@ if declare -f collect_mutation_intent_violations >/dev/null 2>&1; then
   fi
 fi
 
-# Optimize: REPAIR RESULT section (repair diff as instance data)
+# Optimize: BUILD RESULT section (build diff as instance data)
 tmp_rr="$(mktemp)"
 jq -n '{
   artifact_snapshot: {
-    mode: "repair",
+    mode: "build",
     investigation_input: "terabits to megabits",
     generated_at: "2026-07-18T00:00:00Z",
     operational_context: {
@@ -650,34 +650,34 @@ jq -n '{
   epistemic_state: {
     next_attention_targets: ["src/conv.ts"],
     attention_scope: "mutation_applied",
-    attention_reason: "ATTENTION_REASON_REPAIR"
+    attention_reason: "ATTENTION_REASON_BUILD"
   }
 }' > "${tmp_rr}"
-rr_sec="$(aegis_format_repair_result_section "${tmp_rr}")"
-printf '%s' "${rr_sec}" | grep -q 'REPAIR RESULT' \
-  || fail "repair_result_section_missing_header: ${rr_sec}"
+rr_sec="$(aegis_format_build_result_section "${tmp_rr}")"
+printf '%s' "${rr_sec}" | grep -q 'BUILD RESULT' \
+  || fail "build_result_section_missing_header: ${rr_sec}"
 printf '%s' "${rr_sec}" | grep -q 'files_changed: src/conv.ts' \
-  || fail "repair_result_missing_files: ${rr_sec}"
+  || fail "build_result_missing_files: ${rr_sec}"
 printf '%s' "${rr_sec}" | grep -q 'terabitsToMegabits' \
-  || fail "repair_result_missing_diff_body: ${rr_sec}"
+  || fail "build_result_missing_diff_body: ${rr_sec}"
 printf '%s' "${rr_sec}" | grep -q 'do not re-implement' \
-  || fail "repair_result_missing_refine_cue: ${rr_sec}"
+  || fail "build_result_missing_refine_cue: ${rr_sec}"
 # truncation path
-export AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES=40
-rr_trunc="$(aegis_format_repair_result_section "${tmp_rr}")"
-printf '%s' "${rr_trunc}" | grep -q 'REPAIR_DIFF_TRUNCATED' \
-  || fail "repair_result_should_truncate: ${rr_trunc}"
-unset AEGIS_OPTIMIZE_REPAIR_DIFF_MAX_BYTES
+export AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES=40
+rr_trunc="$(aegis_format_build_result_section "${tmp_rr}")"
+printf '%s' "${rr_trunc}" | grep -q 'BUILD_DIFF_TRUNCATED' \
+  || fail "build_result_should_truncate: ${rr_trunc}"
+unset AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES
 rm -f "${tmp_rr}"
 
-# R3: repair_feedback section + validation demand_mismatch merge shape
+# R3: build_feedback section + validation demand_mismatch merge shape
 tmp_rf="$(mktemp)"
 jq -n '{
   artifact_snapshot: {
     mode: "validation",
     operational_context: {
       verdict: "rejected",
-      repair_feedback: {
+      build_feedback: {
         authorized_scopes: ["src/index.ts"],
         violations: [
           {
@@ -696,13 +696,13 @@ jq -n '{
     attention_reason: "test"
   }
 }' > "${tmp_rf}"
-rf_sec="$(aegis_format_repair_feedback_section "${tmp_rf}")"
-printf '%s' "${rf_sec}" | grep -q 'REPAIR FEEDBACK' \
-  || fail "repair_feedback_section_missing: ${rf_sec}"
+rf_sec="$(aegis_format_build_feedback_section "${tmp_rf}")"
+printf '%s' "${rf_sec}" | grep -q 'BUILD FEEDBACK' \
+  || fail "build_feedback_section_missing: ${rf_sec}"
 printf '%s' "${rf_sec}" | grep -qE 'demand_mismatch|demand_tokens' \
-  || fail "repair_feedback_should_list_demand_code: ${rf_sec}"
+  || fail "build_feedback_should_list_demand_code: ${rf_sec}"
 printf '%s' "${rf_sec}" | grep -q 'src/index.ts' \
-  || fail "repair_feedback_should_list_scope: ${rf_sec}"
+  || fail "build_feedback_should_list_scope: ${rf_sec}"
 rm -f "${tmp_rf}"
 
 # validation enrich forces reject when candidate carries intent_violations
@@ -751,8 +751,8 @@ if declare -f enrich_cognitive_artifact >/dev/null 2>&1; then
       or (.basis | index("demand_tokens") != null)
       or (.basis | map(test("demand_tokens")) | any)
     )
-    and (.repair_feedback.violations | map(.origin) | index("demand_tokens") != null)
-    and (.repair_feedback.authorized_scopes | index("src/index.ts") != null)
+    and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
+    and (.build_feedback.authorized_scopes | index("src/index.ts") != null)
   ' >/dev/null \
     || fail "validation_should_reject_intent_violations: ${val_out}"
 fi
@@ -762,7 +762,7 @@ if declare -f record_mutation_intent_metric >/dev/null 2>&1; then
   metrics_tmp="$(mktemp)"
   export AEGIS_METRICS_FILE="${metrics_tmp}"
   export AEGIS_MUTATION_PREFLIGHT_ATTEMPT=0
-  export AEGIS_MODE="repair"
+  export AEGIS_MODE="build"
   export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Megabits"
   good_m=$'diff --git a/src/index.ts b/src/index.ts\n+export function terabitsToMegabits(t: number): number { return t * 1024; }\n'
   bad_m=$'diff --git a/src/index.ts b/src/index.ts\n+export function power(x: number): number { return x; }\n'
@@ -785,13 +785,13 @@ fi
 # --- acceptance is checked in the inner loop, not only by the tribunal ---
 # The tribunal blocks on these identifiers after a full pipeline pass, which
 # costs a fresh worktree, a candidate rematerialization and one of three
-# scarce outer repair attempts to deliver news a text match already had.
+# scarce outer build attempts to deliver news a text match already had.
 if declare -f collect_mutation_intent_violations >/dev/null 2>&1 \
   && declare -f aegis_acceptance_missing_in_corpus >/dev/null 2>&1; then
   acc_surface="$(mktemp -d)"
   mkdir -p "${acc_surface}/src"
   export AEGIS_EXECUTION_SURFACE_PATH="${acc_surface}"
-  export AEGIS_MODE="repair"
+  export AEGIS_MODE="build"
   export AEGIS_INVESTIGATION_INPUT="$(cat <<'EOF'
 Crie a classe TokenBucket. Exporte a função obterEstadoBitmask.
 
