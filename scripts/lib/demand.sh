@@ -1448,8 +1448,169 @@ aegis_emit_mechanical_adversarial_from_tools_gate() {
 # Model path is opt-in via AEGIS_VALIDATION_LLM=1. Placeholder fields are
 # overwritten by AEGIS_JQ_ENRICH_VALIDATION (candidate, findings, verdict).
 aegis_emit_mechanical_validation_substrate() {
+  local behavior_findings
+  behavior_findings="$(aegis_mechanical_behavior_gate)" || true
+  if [[ -n "${behavior_findings}" ]]; then
+    aegis_emit_framed_json_artifact \
+      "{\"verdict\":\"rejected\",\"basis\":[],\"findings\":${behavior_findings}}"
+    return 0
+  fi
   aegis_emit_framed_json_artifact \
     '{"verdict":"accepted","basis":[],"findings":[]}'
+}
+
+# P2 executable behavioral oracle. Parses the demand's ## Behavior section,
+# scopes each assert to the unit's ## Acceptance exports, compiles a temporary
+# Node test importing the unit's first ## Target, and executes the asserts.
+# Prints a JSON findings array (empty when every in-scope assert passes).
+# Returns 0 always — the validation substrate converts non-empty findings
+# into a rejected verdict that feeds repair_feedback.
+aegis_mechanical_behavior_gate() {
+  local demand="${AEGIS_INVESTIGATION_INPUT:-}"
+  local behavior acceptance targets target
+  behavior="$(aegis_demand_md_section "Behavior" "${demand}")"
+  [[ -n "$(printf '%s' "${behavior}" | tr -d '[:space:]')" ]] || return 0
+
+  acceptance="$(aegis_demand_md_section "Acceptance" "${demand}")"
+  targets="$(aegis_demand_md_section "Targets" "${demand}")"
+  target="$(
+    printf '%s\n' "${targets}" \
+      | command grep -oE '[A-Za-z0-9_./-]+\.(ts|tsx|mts|mjs)' 2>/dev/null \
+      | command sed 's|^\./||' \
+      | awk '!seen[$0]++' | head -1 || true
+  )"
+  [[ -n "${target}" ]] || return 0
+
+  command -v node >/dev/null 2>&1 || return 0
+  node --experimental-strip-types -e '1' >/dev/null 2>&1 || return 0
+
+  local root="${AEGIS_ROOT_DIR:-.}"
+  [[ -f "${root%/}/${target}" ]] || return 0
+
+  local acc_names import_csv
+  acc_names="$(
+    printf '%s\n' "${acceptance}" \
+      | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
+      | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
+      | awk 'NF && !seen[$0]++' || true
+  )"
+  import_csv="$(printf '%s,' ${acc_names} | sed 's/,$//')"
+  [[ -n "${import_csv}" ]] || return 0
+
+  # Parse ## Behavior items into parallel arrays.
+  local -a b_desc=() b_pre=() b_assert=() b_exp=()
+  local cur_desc="" cur_pre="" cur_assert="" cur_exp="" in_item=0
+  local line
+  while IFS= read -r line; do
+    case "${line}" in
+      "- "*) 
+        if [[ "${in_item}" -eq 1 ]]; then
+          b_desc+=("${cur_desc}"); b_pre+=("${cur_pre}")
+          b_assert+=("${cur_assert}"); b_exp+=("${cur_exp}")
+        fi
+        cur_desc="${line#- }"; cur_pre=""; cur_assert=""; cur_exp=""; in_item=1
+        ;;
+      "   exports: "*) cur_exp="${line#   exports: }" ;;
+      "   prelude: "*) cur_pre+="${line#   prelude: }"$'\n' ;;
+      "   assert: "*)  cur_assert="${line#   assert: }" ;;
+    esac
+  done < <(printf '%s\n' "${behavior}")
+  if [[ "${in_item}" -eq 1 ]]; then
+    b_desc+=("${cur_desc}"); b_pre+=("${cur_pre}")
+    b_assert+=("${cur_assert}"); b_exp+=("${cur_exp}")
+  fi
+
+  # Scope + import union. Item scope = the unit accepts the FIRST listed export
+  # (the export under test); the remaining names are dependencies the
+  # prelude/assert uses and are added to the import list. export_slice units
+  # therefore enforce only their own export while still importing siblings.
+  local findings=() i=0 n=${#b_desc[@]}
+  local -a import_union=() in_scope_item=()
+  local exp_name primary first
+  for ((i=0; i<n; i++)); do
+    primary=""
+    if [[ -n "${b_exp[$i]}" ]]; then
+      first=1
+      while IFS= read -r exp_name; do
+        [[ -n "${exp_name}" ]] || continue
+        if [[ "${first}" -eq 1 ]]; then
+          primary="${exp_name}"; first=0
+        fi
+        if ! printf '%s\n' "${import_union[@]}" | grep -Fqx -- "${exp_name}" \
+          || [[ "${#import_union[@]}" -eq 0 ]]; then
+          import_union+=("${exp_name}")
+        fi
+      done < <(printf '%s\n' "${b_exp[$i]}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
+    fi
+    in_scope_item[$i]=0
+    if [[ -n "${primary}" ]] && printf '%s\n' "${acc_names}" | grep -Fqx -- "${primary}"; then
+      in_scope_item[$i]=1
+    fi
+  done
+  for ((i=0; i<n; i++)); do
+    [[ -z "${b_exp[$i]}" ]] && in_scope_item[$i]=1
+  done
+  for exp_name in ${acc_names}; do
+    if ! printf '%s\n' "${import_union[@]}" | grep -Fqx -- "${exp_name}" \
+      || [[ "${#import_union[@]}" -eq 0 ]]; then
+      import_union+=("${exp_name}")
+    fi
+  done
+  import_csv="$(printf '%s,' "${import_union[@]}" | sed 's/,$//')"
+  [[ -n "${import_csv}" ]] || return 0
+
+  for ((i=0; i<n; i++)); do
+    [[ "${in_scope_item[$i]}" -eq 1 ]] || continue
+    local tmp
+    tmp="$(mktemp "${root%/}/.aegis_behavior_XXXXXX" 2>/dev/null || true)"
+    [[ -n "${tmp}" ]] || continue
+    mv "${tmp}" "${tmp}.mts"
+    tmp="${tmp}.mts"
+    {
+      printf 'import { %s } from "./%s";\n' "${import_csv}" "${target}"
+      printf 'function __aegis_behave(c: unknown, d: string): void {\n'
+      printf '  if (!c) { throw new Error("BEHAVIOR_FAIL: " + d) }\n'
+      printf '}\n'
+      [[ -n "${b_pre[$i]}" ]] && printf '%s\n' "${b_pre[$i]}"
+      printf '__aegis_behave(%s, %s);\n' \
+        "${b_assert[$i]}" \
+        "$(printf '%s' "${b_desc[$i]}" | jq -Rsa . 2>/dev/null || printf '%s' "\"behavior assert $((i + 1))\"")"
+    } > "${tmp}"
+    if [[ "${AEGIS_BEHAVIOR_DEBUG:-0}" == "1" ]]; then
+      printf 'behavior_gate: unit=%s item=%s import=%s\n' "${target}" "${i}" "${import_csv}" >&2
+      cat "${tmp}" >&2
+    fi
+
+    local out rc=0
+    out="$(cd "${root}" && node --experimental-strip-types "${tmp}" 2>&1)" || rc=$?
+    rm -f "${tmp}"
+    if [[ "${rc}" -ne 0 ]]; then
+      local fail_desc
+      fail_desc="$(
+        printf '%s\n' "${out}" \
+          | command grep -m1 'BEHAVIOR_FAIL' \
+          | sed -E 's/.*BEHAVIOR_FAIL: //' || true
+      )"
+      [[ -n "${fail_desc}" ]] || fail_desc="${b_desc[$i]}"
+      findings+=(
+        "$(jq -cn \
+          --arg sev "high" \
+          --arg type "behavior_failure" \
+          --arg desc "behavior: ${fail_desc} (assert: ${b_assert[$i]})" \
+          --arg fix "implement the behavior: ${fail_desc}" \
+          --arg tf "${target}" \
+          '{severity:$sev,type:$type,supported_by_evidence:true,description:$desc,fix:$fix,target_files:[$tf],evidence_refs:["validation.behavior"]}')"
+      )
+    fi
+  done
+
+  if [[ "${#findings[@]}" -gt 0 ]]; then
+    if declare -f aegis_record_validation_metric >/dev/null 2>&1; then
+      aegis_record_validation_metric "behavior_gate" "${#findings[@]} failures"
+    fi
+    printf '%s\n' "${findings[@]}" | jq -s .
+  fi
+  return 0
 }
 
 # Append kind:"validation" metric line.
@@ -3460,6 +3621,12 @@ aegis_emit_mechanical_adversarial_verified() {
 # auto: LLM only when candidate is "large" (lines/files thresholds).
 aegis_adversarial_should_use_llm() {
   local handover="${1-}"
+  # Briefing invented by the supervisor (no operator-supplied Briefing) is the
+  # high-risk case: the pipeline has no oracle on the original demand semantics,
+  # so the LLM adversarial MUST falsify the candidate against the Goal text.
+  if [[ "${AEGIS_BRIEFING_SOURCE:-}" == "supervisor" ]]; then
+    return 0
+  fi
   local flag
   flag="$(printf '%s' "${AEGIS_ADVERSARIAL_LLM:-auto}" | tr '[:upper:]' '[:lower:]')"
   case "${flag}" in

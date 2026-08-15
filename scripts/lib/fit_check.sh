@@ -527,11 +527,14 @@ EOC
   fi
   [[ -n "${acc_block}" ]] || acc_block="- done"
 
-  local parent_briefing parent_constraints unit_briefing
+  local parent_briefing parent_constraints unit_briefing unit_behavior
   parent_constraints="$(aegis_fit_md_section "Constraints" "${parent}")"
   # Never copy the full parent Briefing into every unit — that re-poisons the
   # 8B with sibling targets, barrel blocks, and exports it must not touch.
   unit_briefing="$(aegis_fit_unit_scoped_briefing "${parent}" "${primary}" "${is_reexport}" "${primary_base}" "${primary_pascal}")"
+  # Behavioral oracle travels with every unit; the runner scopes asserts by the
+  # unit's Acceptance exports (see aegis_mechanical_behavior_gate).
+  unit_behavior="$(aegis_fit_md_section "Behavior" "${parent}")"
   # Single-file multi-export slice: note "export_slice:Name" keeps only that export.
   if [[ -n "${slice_name}" && "${is_reexport}" -eq 0 ]]; then
     unit_briefing="$(aegis_fit_briefing_slice_export "${unit_briefing:-$(aegis_fit_md_section "Briefing" "${parent}")}" "${slice_name}")"
@@ -584,7 +587,10 @@ ${unit_briefing}
 }
 ## Acceptance
 ${acc_block}
-
+${unit_behavior:+
+## Behavior
+${unit_behavior}
+}
 ## Out of scope
 - other source files
 - network

@@ -228,7 +228,15 @@ Schema:
     }
   ],
   "barrelFile": "src/index.ts",
-  "barrelFrom": "./thing.js"
+  "barrelFrom": "./thing.js",
+  "behavior": [
+    {
+      "desc": "consume fails when the bucket is empty",
+      "exports": ["TokenBucket"],
+      "prelude": ["const b = new TokenBucket(100n)"],
+      "assert": "b.consume(101n) === false && b.refillActive === true"
+    }
+  ]
 }
 
 Rules:
@@ -237,11 +245,14 @@ Rules:
 - NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint. Math.floor on number then BigInt(...) is OK.
 - Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
 - Elapsed-time refill (token bucket / rate limiter): compute timeDiff from now - lastUpdate; ONLY add tokens when timeDiff > 0 (or > 0n if bigint). Update lastUpdate only inside that branch (or when you actually refill).
+- Time-left / backoff formulas: use the stored window duration directly — const end = start + windowMs; if (now >= end) { return 0n }; return end - now. Never build long algebra and never expand a start with self-cancelling terms; those are bugs.
 - If the demand has a refill-active / refil flag (bitmask bit, boolean): after update/clamp set this._refillActive = this._tokens < this._maxTokens (or equivalent). Do NOT leave the flag stuck true from the constructor forever.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
+- When the demand states a signature (constructor params, method params, getters, types, arity), honor it EXACTLY — do not change a type (e.g. a number param to bigint), drop a getter, or alter arity. Convert internally if needed (e.g. this._windowMs = BigInt(windowMs)).
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
 - "barrelFrom" is a relative specifier ending in .js (NodeNext), pointing at the module you defined.
+- "behavior" (optional but required when the demand has testable semantics: limits, flags, windowed refill, math). An array of executable regression asserts that the coder must satisfy. Each item: "desc" (short sentence), "exports" (names of the exports this assert exercises — list the export under test FIRST, then any dependencies its prelude/assert uses), optional "prelude" (array of one or more TypeScript setup lines, each a complete statement with no leading indentation), and "assert" (a single TypeScript expression that evaluates to boolean, using only exported names and built-ins). Emit 2-4 asserts covering the core contracts: capacity, refill, window slide, and boundary values. Assertions must never touch private fields. For time-based APIs, ALWAYS anchor to the exported windowStart getter — prelude: const ws = limiter.windowStart; assert uses ws, ws + Xn, ws + windowMs. NEVER pass absolute numbers (0n, 1000n) as time arguments: the window start is implementation-defined, so absolute values are wrong unless the constructor anchors at 0n.
 PROMPT
 }
 
@@ -266,7 +277,12 @@ aegis_briefing_validate_json() {
       def rel_path: (startswith("/") | not) and (contains("..") | not) and (contains(" ") | not);
       # Math.min/max on bigint is the monstro that broke tsc; Math.floor(number)
       # then BigInt(...) is legitimate — do not reject floor/ceil wholesale.
-      def has_math_minmax: test("Math\\.(min|max)\\(");
+      # Math on numbers (e.g. Math.max(0, n - m)) is legitimate: only flag a
+      # Math call whose SAME line references bigint operands (_window*, _tokens,
+      # _lastUpdate, or an n-suffixed literal / BigInt()).
+      def has_math_on_bigint:
+        test("Math\\.(min|max)\\(")
+        and test("bigint|BigInt\\(|[0-9]+n\\b|_windowMs|_windowStart|_tokens|_maxTokens|_lastUpdate");
       def has_bigint_signal: test("bigint|BigInt|[0-9]+n|0n|1n|_tokens|_maxTokens|maxTokens");
       def body_lines:
         [
@@ -290,7 +306,7 @@ aegis_briefing_validate_json() {
         or ((body_lines | map(select(type == "string" and has_bigint_signal)) | length) > 0);
       def export_math_on_bigint:
         export_uses_bigint
-        and ((body_lines | map(select(type == "string" and has_math_minmax)) | length) > 0);
+        and ((body_lines | map(select(type == "string" and has_math_on_bigint)) | length) > 0);
       [
         (if ((.goal // "") | length) == 0 then "empty_goal" else empty end),
         (if ((.targets // []) | length) == 0 then "empty_targets" else empty end),
@@ -307,7 +323,17 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | (.methods // [])[]? | select(((.name // "") | ident) | not) | "method_not_identifier:\(.name)"),
         ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
-           then "barrel_not_nodenext:\(.barrelFrom)" else empty end)
+           then "barrel_not_nodenext:\(.barrelFrom)" else empty end),
+        (if ((.behavior // []) | length) > 0
+           and ((.behavior // []) | any(
+                 (type != "object")
+                 or ((.desc // "") | type != "string" or length == 0)
+                 or ((.assert // "") | type != "string" or length == 0)
+                 or (((.prelude // []) | if type == "string" then [.] else . end)
+                     | any(type != "string"))
+                 or (((.exports // []) | any(type != "string" or length == 0))))
+               )
+           then "bad_behavior_shape" else empty end)
       ] | first // ""
     ' 2>/dev/null || true
   )"
@@ -317,6 +343,23 @@ aegis_briefing_validate_json() {
     return 1
   fi
   return 0
+}
+
+# Lightweight quality gate against observed supervisor decode glitches that
+# still yield structurally valid JSON: degenerate self-cancelling algebra
+# (e.g. "start + BigInt(limit) * 0n + start - start") and duplicated
+# declarations (two "const end" in one function body).
+aegis_briefing_quality_check() {
+  local json="${1-}"
+  [[ -n "${json}" ]] || return 1
+  printf '%s' "${json}" | jq -e '
+    ([.exports[]?.body[]?
+       | select(test("\\* *0n") or test("windowStart *- *windowStart") or test("\\+ *- *\\+"))
+      ] | length) == 0
+    and
+    ([.exports[]? | ([.body[]? | select(test("^const "))] | length)]
+       | map(select(. > 1)) | length) == 0
+  ' >/dev/null 2>&1
 }
 
 # Deterministic markdown. Acceptance is the export list, so it cannot name
@@ -365,7 +408,22 @@ aegis_briefing_render() {
         end
     )) | join("\n\n")),
     (if ((.barrelFrom // "") | length) > 0 then
-      ("Em " + (.barrelFile // "src/index.ts") + ":\n   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from '" + .barrelFrom + "'\n   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }")
+      ("Em " + (.barrelFile // "src/index.ts") + ":\n   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from \u0027" + .barrelFrom + "\u0027\n   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }")
+    else empty end),
+    (if ((.behavior // []) | length) > 0 then
+      ("", "## Behavior", (
+        (.behavior | to_entries | map(
+          (.key + 1 | tostring) as $n
+          | .value as $b
+          | "- " + ($b.desc // "")
+            + (if (($b.exports // []) | length) > 0
+                 then "\n   exports: " + (($b.exports | join(", ")))
+                 else "" end)
+            + (((($b.prelude // []) | if type == "string" then [.] else . end))
+               | map("\n   prelude: " + .) | join(""))
+            + "\n   assert: " + ($b.assert // "")
+        )) | join("\n")
+      ))
     else empty end),
     "",
     "## Out of scope",
@@ -437,11 +495,13 @@ aegis_briefing_generate() {
 
   [[ -n "${goal}" ]] || return 1
 
-  local api_base api_key model timeout
+  local api_base api_key model timeout max_tokens
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="$(aegis_briefing_model)"
-  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-15}"
+  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
+  max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-2048}"
+  [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=2048
 
   if [[ -z "${api_key}" ]]; then
     printf 'missing_api_key\n' >&2
@@ -464,6 +524,7 @@ aegis_briefing_generate() {
     --arg model "${model}" \
     --arg sys "$(aegis_briefing_system_prompt)" \
     --arg user "${user_prompt}" \
+    --argjson max_tokens "${max_tokens}" \
     '{
       model: $model,
       messages: [
@@ -471,7 +532,7 @@ aegis_briefing_generate() {
         {role: "user", content: $user}
       ],
       temperature: 0.1,
-      max_tokens: 1100,
+      max_tokens: $max_tokens,
       response_format: {type: "json_object"}
     }' > "${req_file}" 2>/dev/null || {
     rm -f "${req_file}" "${resp_file}"
@@ -479,6 +540,8 @@ aegis_briefing_generate() {
   }
 
   # Retry transient provider noise: 429 rate-limit, 5xx, empty body on 200.
+  # Also retry output that fails JSON validation or the quality gate (observed
+  # deepseek decode glitches: self-cancelling algebra, duplicated const).
   # Cap attempts to 2 and timeout to 15s to prevent long shell hangs on API stalls.
   local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-2}"
   [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=4
@@ -504,10 +567,15 @@ aegis_briefing_generate() {
 
     content="$(aegis_briefing_extract_content "${resp_file}")"
     if [[ -n "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
-      break
+      content="$(aegis_briefing_sanitize_json "${content}")"
+      if aegis_briefing_validate_json "${content}" 2>/dev/null \
+        && aegis_briefing_quality_check "${content}" 2>/dev/null; then
+        break
+      fi
+      fail_reason="invalid_or_low_quality_briefing"
+    else
+      fail_reason="$(aegis_briefing_provider_error_code "${resp_file}" "${http_code}")"
     fi
-
-    fail_reason="$(aegis_briefing_provider_error_code "${resp_file}" "${http_code}")"
     content=""
 
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then

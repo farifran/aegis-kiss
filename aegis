@@ -1122,6 +1122,13 @@ cmd_go() {
           intake_evidence="${intake_evidence}File: ${t}\nExisting Exports: ${t_exports}\nSnippet:\n${t_snippet}\n\n"
         fi
       done
+      if [[ -n "$(aegis_intake_md_section "Briefing" "${goal}" | tr -d '[:space:]')" ]]; then
+        export AEGIS_BRIEFING_SOURCE=user
+        aegis_log "briefing: brief do operador (proveniência=user)"
+      else
+        export AEGIS_BRIEFING_SOURCE=supervisor
+        aegis_log "briefing: brief inventado pelo supervisor (proveniência=supervisor)"
+      fi
       aegis_log "briefing: a expandir a demanda com o supervisor (com evidência epistêmica)..."
       body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_evidence}" 2>"${brief_err}")" || body=""
       if [[ -n "${body}" ]]; then
@@ -1562,6 +1569,7 @@ cmd_go() {
     #   6) AEGIS_SQUASH_BATCH=1: soft-squash unit commits into one at the end
     local unit_total unit_idx unit_file u_status unit_sha task_n
     local issue_body_live="" ran_any=0 batch_start_commit=""
+    local brief_corrected=0
     local -a batch_accepts=()
     unit_total="$(count_micro_units "${micros_dir}")"
     unit_idx=0
@@ -1610,6 +1618,50 @@ cmd_go() {
       [[ -n "${u_status}" ]] || u_status="$(outcome_field status)"
 
       if [[ "${u_status}" != "SUCCESS" ]]; then
+        # Briefing-correction loop (semantic backstop). When the brief was
+        # invented by the supervisor and the adversarial found contradictions
+        # against the original Goal, regenerate the unit Briefing from the
+        # original intent + findings and re-run (bounded).
+        if [[ "${AEGIS_BRIEFING_SOURCE:-}" == "supervisor" ]] \
+          && [[ "${brief_corrected}" -lt "${AEGIS_BRIEFING_CORRECT_MAX:-1}" ]]; then
+          local _findings _ug _ut _corr_body _corr_brief
+          _findings="$(
+            jq -c '.artifact_snapshot.operational_context.findings // []' \
+              "${RUNTIME_DIR}/epistemic_handover.json" 2>/dev/null || printf '[]'
+          )"
+          if [[ "$(printf '%s' "${_findings}" | jq 'length' 2>/dev/null || printf '0')" -gt 0 ]]; then
+            _ug="$(awk '/^## Goal[[:space:]]*$/ {p=1; next} /^## / && p {p=0} p' "${unit_file}" | paste -sd' ' -)"
+            _ut="$(unit_target_paths "${unit_file}" | head -1)"
+            aegis_log "briefing: findings do adversarial — regerando brief com supervisor..."
+            _corr_body="$(
+              aegis_briefing_generate "${_ug}" "${_ut}" \
+"ADVERSARIAL FINDINGS against the original demand semantics:
+${_findings}
+
+Rewrite the Briefing so the implementation satisfies the original Goal. Fix algorithm/behavior contradictions; keep the same exported API shape." \
+                2>/dev/null
+            )" || _corr_body=""
+            _corr_brief="$(
+              printf '%s' "${_corr_body}" \
+                | awk '/^## Briefing[[:space:]]*$/ {p=1; print; next} /^## / && p {p=0} p'
+            )"
+            if [[ -n "$(printf '%s' "${_corr_brief}" | tr -d '[:space:]')" ]]; then
+              local _tmp_b
+              _tmp_b="$(mktemp)"
+              if awk -v nb="${_corr_brief}" '
+                  /^## Briefing[[:space:]]*$/ {inb=1; print nb; next}
+                  /^## / && inb {inb=0}
+                  !inb {print}
+                ' "${unit_file}" > "${_tmp_b}" 2>/dev/null && mv "${_tmp_b}" "${unit_file}"; then
+                brief_corrected=$((brief_corrected + 1))
+                aegis_log "brief corrigido (${brief_corrected}/${AEGIS_BRIEFING_CORRECT_MAX:-1}) — re-executando task ${task_n}"
+                continue
+              fi
+              rm -f "${_tmp_b}" 2>/dev/null || true
+            fi
+          fi
+        fi
+
         aegis_warn "task ${task_n}/${unit_total} falhou (${u_status:-UNKNOWN}) — progresso anterior mantido"
         [[ -n "${last_commit}" ]] && printf 'last_ok_commit: %s\n' "${last_commit}"
         printf 'next: ./aegis go --issue %s   # retoma; ou --force-task %s para reabrir\n' \
