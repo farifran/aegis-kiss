@@ -159,7 +159,7 @@ augment_evidence_profile_from_handover() {
 # (see materialize_capability_payloads).
 augment_evidence_profile_from_anchors() {
   case "${AEGIS_MODE}" in
-    forensics|build|adversarial|optimize) ;;
+    forensics|mutation|build|adversarial|optimize) ;;
     *) return 0 ;;
   esac
 
@@ -889,8 +889,8 @@ execute_substrate() {
     # Small clean diff: stage still runs (audit basis), no advisory LLM.
     if [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "0" ]] \
       && [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "false" ]] \
-      && declare -f aegis_optimize_build_is_trivial >/dev/null 2>&1 \
-      && aegis_optimize_build_is_trivial "${_opt_handover}"; then
+      && (declare -f aegis_optimize_mutation_is_trivial >/dev/null 2>&1 || declare -f aegis_optimize_build_is_trivial >/dev/null 2>&1) \
+      && (aegis_optimize_mutation_is_trivial "${_opt_handover}" 2>/dev/null || aegis_optimize_build_is_trivial "${_opt_handover}"); then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
       substrate_output="$(
@@ -1016,13 +1016,13 @@ main() {
     export AEGIS_FORENSICS_USE_LLM
   fi
 
-  # Build with a clear forensics ALVO does not need repo-wide search noise.
-  if [[ "${AEGIS_MODE}" == "build" ]] \
-    && declare -f aegis_handover_has_build_alvo >/dev/null 2>&1 \
-    && aegis_handover_has_build_alvo \
-      "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"; then
+  # Mutation with a clear forensics ALVO does not need repo-wide search noise.
+  if [[ "${AEGIS_MODE}" == "mutation" || "${AEGIS_MODE}" == "build" ]] \
+    && (declare -f aegis_handover_has_mutation_alvo >/dev/null 2>&1 || declare -f aegis_handover_has_build_alvo >/dev/null 2>&1) \
+    && (aegis_handover_has_mutation_alvo "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}" 2>/dev/null \
+        || aegis_handover_has_build_alvo "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"); then
     omit_active_evidence_entry "filesystem.search_symbol"
-    aegis_log "build_evidence: omitted search_symbol (forensics ALVO present)"
+    aegis_log "mutation_evidence: omitted search_symbol (forensics ALVO present)"
   fi
 
   # Rank so materialize + budget exposure hit anchors/content before noise.

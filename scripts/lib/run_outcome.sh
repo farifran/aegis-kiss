@@ -83,7 +83,7 @@ aegis_classify_reason() {
       class="contract"
       next_step="Output do modelo violou o contrato do artifact; re-execute o mode; persistindo, use modelo mais forte"
       ;;
-    forensics_build_candidate_outside_discovery_scope)
+    forensics_mutation_candidate_outside_discovery_scope|forensics_build_candidate_outside_discovery_scope)
       class="scope"
       next_step="Re-execute discovery com target mais amplo que inclua o arquivo citado"
       ;;
@@ -91,15 +91,15 @@ aegis_classify_reason() {
       class="mutation"
       next_step="Preflight (tsc/test/smoke) falhou na surface; leia payloads em capability_payloads e corrija o candidate"
       ;;
-    failed_to_materialize_build_candidate_for_optimize_refine)
+    failed_to_materialize_mutation_candidate_for_optimize_refine|failed_to_materialize_build_candidate_for_optimize_refine)
       class="mutation"
       next_step="Optimize can_improve re-entry falhou ao reaplicar o candidate no worktree; confira apply_candidate_diff (diff vs HEAD) ou desative refine com AEGIS_OPTIMIZE_BUILD_LOOP=false"
       ;;
-    max_build_attempts_exceeded)
+    max_mutation_attempts_exceeded|max_build_attempts_exceeded)
       class="budget"
-      next_step="Teto do loop de build; leia findings no handover, refine a demanda ou aumente AEGIS_MAX_BUILD_ATTEMPTS"
+      next_step="Teto do loop de mutation; leia findings no handover, refine a demanda ou aumente AEGIS_MAX_MUTATION_ATTEMPTS"
       ;;
-    build_loop_stalled)
+    mutation_loop_stalled|build_loop_stalled)
       class="contract"
       next_step="Os mesmos findings voltaram sem mudança: o candidate não consegue satisfazê-los. Não aumente o budget — leia os findings acima e corrija a demanda ou a Acceptance"
       ;;
@@ -107,7 +107,7 @@ aegis_classify_reason() {
       class="epistemic_halt"
       next_step="Nenhum defeito acionável; refine investigation input ou target"
       ;;
-    "no build candidates in forensics handover")
+    "no mutation candidates in forensics handover"|"no build candidates in forensics handover")
       class="epistemic_halt"
       next_step="Zero candidatos; refine a demanda"
       ;;
@@ -140,7 +140,7 @@ aegis_classify_reason() {
         next_step="Variável bash não definida sob set -u; actualize o harness (defaults locais) e re-execute; se persistir, reporte o path no stderr"
       elif [[ "${token}" == mutation_scope_violation* ]]; then
         class="scope"
-        next_step="Diff tocou path fora dos mutation targets autorizados; re-execute build com escopo explícito ou refine forensics/authorized_scopes"
+        next_step="Diff tocou path fora dos mutation targets autorizados; re-execute mutation com escopo explícito ou refine forensics/authorized_scopes"
       elif [[ "${token}" == precondition_failed_* ]]; then
         class="pipeline_state"
         next_step="Artifact upstream ausente/inválido; rode o mode anterior da cadeia"

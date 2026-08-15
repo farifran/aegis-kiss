@@ -491,7 +491,7 @@ generate_pocket_map() {
 
 mode_uses_attention_zoom() {
   case "${AEGIS_MODE}" in
-    forensics|build|optimize|adversarial|validation) return 0 ;;
+    forensics|mutation|build|optimize|adversarial|validation) return 0 ;;
     *) return 1 ;;
   esac
 }

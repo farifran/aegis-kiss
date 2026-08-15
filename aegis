@@ -1145,7 +1145,7 @@ cmd_go() {
               operational_context: {
                 status: "interpreted",
                 mode: "forensics",
-                build_candidates: [
+                mutation_candidates: [
                   {
                     id: $target,
                     reason: ("Demand: " + $goal)

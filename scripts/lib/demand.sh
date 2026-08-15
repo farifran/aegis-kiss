@@ -891,7 +891,7 @@ aegis_format_forensics_handoff_section() {
     jq -r '
       .artifact_snapshot as $snap
       | ($snap.operational_context // {}) as $oc
-      | ($oc.build_candidates // []) as $cands
+      | ((($oc.mutation_candidates // $oc.build_candidates)) // []) as $cands
       | ($oc.demand_anchors // {}) as $da
       # TOKENS live in DEMAND ANCHORS above — handoff is alvo/reason only.
       | if ($cands | length) == 0 and (($da.seed_targets // []) | length) == 0
@@ -946,7 +946,7 @@ aegis_format_mutation_brief_section() {
   local alvos_json tokens_nl done_line
   alvos_json="$(
     jq -c '
-      (.artifact_snapshot.operational_context.build_candidates // []) as $c
+      ((.artifact_snapshot.operational_context.mutation_candidates // .artifact_snapshot.operational_context.build_candidates) // []) as $c
       | if ($c | length) > 0 then [$c[].id | select(type == "string" and length > 0)]
         else
           [.artifact_snapshot.operational_context.demand_anchors.seed_targets[]?
@@ -1022,24 +1022,25 @@ aegis_format_mutation_brief_section() {
   }
 }
 
-# True if handover carries at least one forensics build_candidate id.
-aegis_handover_has_build_alvo() {
+# True if handover carries at least one forensics mutation_candidate id.
+aegis_handover_has_mutation_alvo() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
   fi
   [[ -n "${handover}" && -f "${handover}" ]] || return 1
   jq -e '
-    [.artifact_snapshot.operational_context.build_candidates[]?.id
+    [((.artifact_snapshot.operational_context.mutation_candidates // .artifact_snapshot.operational_context.build_candidates) // [])[]?.id
       | select(type == "string" and length > 0)]
     | length > 0
   ' "${handover}" >/dev/null 2>&1
 }
+aegis_handover_has_build_alvo() { aegis_handover_has_mutation_alvo "$@"; }
 
-# Optimize: show the Build candidate delta as instance data (not policy).
-# Handover must be post-build (mode=build, diff + files_changed).
-# Args: [handover_path]  Env: AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES (default 12000)
-aegis_format_build_result_section() {
+# Optimize: show the Mutation candidate delta as instance data (not policy).
+# Handover must be post-mutation (mode=mutation or build, diff + files_changed).
+# Args: [handover_path]  Env: AEGIS_OPTIMIZE_MUTATION_DIFF_MAX_BYTES (default 12000)
+aegis_format_mutation_result_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -1047,13 +1048,13 @@ aegis_format_build_result_section() {
   [[ -n "${handover}" && -f "${handover}" ]] || return 0
 
   local files_line diff_body max_bytes trunc_note=""
-  : "${AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES:=12000}"
-  max_bytes="${AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES}"
+  : "${AEGIS_OPTIMIZE_MUTATION_DIFF_MAX_BYTES:=${AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES:-12000}}"
+  max_bytes="${AEGIS_OPTIMIZE_MUTATION_DIFF_MAX_BYTES}"
 
   files_line="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "build")
+      | select($snap.mode == "mutation" or $snap.mode == "build")
       | ($snap.operational_context.files_changed // [])
       | map(select(type == "string" and length > 0))
       | if length == 0 then empty else join(", ") end
@@ -1064,7 +1065,7 @@ aegis_format_build_result_section() {
   diff_body="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "build")
+      | select($snap.mode == "mutation" or $snap.mode == "build")
       | ($snap.operational_context.diff // empty)
       | select(type == "string" and length > 0 and . != "(no changes)")
     ' "${handover}" 2>/dev/null || true
@@ -1072,26 +1073,20 @@ aegis_format_build_result_section() {
   [[ -n "${diff_body}" ]] || return 0
 
   if [[ "${#diff_body}" -gt "${max_bytes}" ]]; then
-    trunc_note="[AEGIS][BUILD_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
+    trunc_note="[AEGIS][MUTATION_DIFF_TRUNCATED:${#diff_body}->${max_bytes} bytes]"
     diff_body="${diff_body:0:${max_bytes}}"
   fi
 
   {
-    echo "=== BUILD RESULT (runtime) ==="
-    echo
-    echo "Judge this Build delta only (advise; do not edit files; do not re-implement the demand)."
-    echo
-    echo "files_changed: ${files_line}"
-    echo
-    echo "diff:"
+    echo "=== MUTATION RESULT (runtime) ==="
+    echo "FILES CHANGED: ${files_line}"
+    echo "CANDIDATE DIFF:"
     printf '%s\n' "${diff_body}"
-    if [[ -n "${trunc_note}" ]]; then
-      echo
-      echo "${trunc_note}"
-    fi
+    [[ -n "${trunc_note}" ]] && echo "${trunc_note}"
     echo
   }
 }
+aegis_format_build_result_section() { aegis_format_mutation_result_section "$@"; }
 
 # Optimize after a refine pass: no second LLM — forward Build as no_improvement.
 aegis_emit_mechanical_optimize_passthrough() {
@@ -2719,7 +2714,7 @@ aegis_handover_mutation_diff() {
   [[ -n "${handover}" && -f "${handover}" ]] || return 1
   jq -r '
     .artifact_snapshot as $s
-    | if $s.mode == "build" then
+    | if ($s.mode == "mutation" or $s.mode == "build") then
         ($s.operational_context.diff // empty)
       else
         ($s.operational_context.candidate_result.diff
@@ -2728,13 +2723,13 @@ aegis_handover_mutation_diff() {
   ' "${handover}" 2>/dev/null
 }
 
-# files_changed JSON array for build or optimize candidate.
+# files_changed JSON array for mutation or optimize candidate.
 aegis_handover_mutation_files_json() {
   local handover="${1-}"
   [[ -n "${handover}" && -f "${handover}" ]] || { printf '[]'; return 0; }
   jq -c '
     .artifact_snapshot as $s
-    | if $s.mode == "build" then
+    | if ($s.mode == "mutation" or $s.mode == "build") then
         [($s.operational_context.files_changed // [])[]?
           | select(type == "string" and length > 0)]
       else
@@ -2754,9 +2749,9 @@ aegis_diff_added_lines() {
     || true
 }
 
-# True when Build candidate is small/clean enough to skip optimize LLM.
+# True when Mutation candidate is small/clean enough to skip optimize LLM.
 # Heuristic: ≤N files, ≤M diff lines, no explicit any in added lines.
-aegis_optimize_build_is_trivial() {
+aegis_optimize_mutation_is_trivial() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -3657,9 +3652,11 @@ aegis_adversarial_should_use_llm() {
 
 # Post-Build file bodies for optimize (apply candidate on temp copies of HEAD).
 # Args: [handover_path] [repo_root]
+aegis_optimize_build_is_trivial() { aegis_optimize_mutation_is_trivial "$@"; }
+
 # Env: AEGIS_OPTIMIZE_FILE_BODY_MAX_BYTES (default 8000 per file)
 #      AEGIS_OPTIMIZE_FILE_BODY_MAX_FILES (default 4)
-aegis_format_build_file_bodies_section() {
+aegis_format_mutation_file_bodies_section() {
   local handover="${1-}"
   local root="${2:-.}"
   if [[ -z "${handover}" ]]; then
@@ -3677,7 +3674,7 @@ aegis_format_build_file_bodies_section() {
   diff_body="$(
     jq -r '
       .artifact_snapshot as $snap
-      | select($snap.mode == "build")
+      | select($snap.mode == "mutation" or $snap.mode == "build")
       | ($snap.operational_context.diff // empty)
       | select(type == "string" and length > 0 and . != "(no changes)")
     ' "${handover}" 2>/dev/null || true
@@ -3687,7 +3684,7 @@ aegis_format_build_file_bodies_section() {
   files_json="$(
     jq -c '
       .artifact_snapshot as $snap
-      | select($snap.mode == "build")
+      | select($snap.mode == "mutation" or $snap.mode == "build")
       | [($snap.operational_context.files_changed // [])[]?
           | select(type == "string" and length > 0)][0:'"${max_files}"']
     ' "${handover}" 2>/dev/null || printf '[]'
@@ -3707,9 +3704,9 @@ aegis_format_build_file_bodies_section() {
   printf '%s\n' "${diff_body}" > "${diff_file}"
 
   {
-    echo "=== POST-BUILD FILE BODIES (runtime; after applying Build diff) ==="
+    echo "=== POST-MUTATION FILE BODIES (runtime; after applying Mutation diff) ==="
     echo
-    echo "Read-only snapshot for judgment. Prefer citing symbols from these bodies + BUILD RESULT."
+    echo "Read-only snapshot for judgment. Prefer citing symbols from these bodies + MUTATION RESULT."
     echo
   }
 
@@ -3727,13 +3724,13 @@ aegis_format_build_file_bodies_section() {
     fi
   done < <(printf '%s' "${files_json}" | jq -r '.[]?')
 
-  # Apply full build patch into the temp tree (paths match +++ b/...).
+  # Apply full mutation patch into the temp tree (paths match +++ b/...).
   # Use patch(1) from inside tmp (more portable than git apply --directory).
   if ! (
     cd "${tmp}" && patch -p1 --forward --batch --silent < "${diff_file}"
   ) >/dev/null 2>&1; then
     # Fallback: still show HEAD bodies if apply fails (better than silence).
-    echo "(post-build apply failed — showing pre-build HEAD bodies where available)"
+    echo "(post-mutation apply failed — showing pre-mutation HEAD bodies where available)"
     echo
   fi
 
@@ -3763,9 +3760,10 @@ aegis_format_build_file_bodies_section() {
   rm -f "${diff_file}" 2>/dev/null || true
   rm -rf "${tmp}" 2>/dev/null || true
 }
+aegis_format_build_file_bodies_section() { aegis_format_mutation_file_bodies_section "$@"; }
 
-# Local re-build feedback from rejected validation (stable tribunal codes).
-aegis_format_build_feedback_section() {
+# Local re-mutation feedback from rejected validation (stable tribunal codes).
+aegis_format_mutation_feedback_section() {
   local handover="${1-}"
   if [[ -z "${handover}" ]]; then
     handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
@@ -3777,11 +3775,11 @@ aegis_format_build_feedback_section() {
     jq -r '
       .artifact_snapshot as $snap
       | select($snap.mode == "validation")
-      | ($snap.operational_context.build_feedback // empty) as $rf
+      | ((($snap.operational_context.mutation_feedback // $snap.operational_context.build_feedback)) // empty) as $rf
       | select($rf | type == "object")
       | ($rf.violations // []) as $v
       | select(($v | length) > 0)
-      | "=== BUILD FEEDBACK (runtime) ===",
+      | "=== MUTATION FEEDBACK (runtime) ===",
         "",
         "Fix ONLY these violations inside authorized scopes. No rediscovery.",
         (
@@ -4210,7 +4208,7 @@ aegis_build_mechanical_forensics_json() {
   fi
 
   if ! printf '%s' "${paths_json}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-    jq -n '{status: "inconclusive", build_candidates: []}'
+    jq -n '{status: "inconclusive", mutation_candidates: []}'
     return 0
   fi
 
@@ -4231,7 +4229,7 @@ aegis_build_mechanical_forensics_json() {
   rm -f "${tmp_cands}" "${tmp_cands}.tmp" 2>/dev/null || true
 
   jq -n --argjson cands "${cands_json:-[]}" \
-    '{status: "interpreted", build_candidates: $cands}'
+    '{status: "interpreted", mutation_candidates: $cands}'
 }
 
 aegis_emit_mechanical_forensics_substrate() {

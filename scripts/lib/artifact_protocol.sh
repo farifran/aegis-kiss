@@ -101,9 +101,9 @@ normalize_weak_model_artifact_status() {
       local status num_candidates
       status="$(echo "${artifact}" | jq -r '.status // empty')"
       if [[ "${status}" == *"|"* || -z "${status}" ]]; then
-        num_candidates="$(echo "${artifact}" | jq '.build_candidates | length')"
+        num_candidates="$(echo "${artifact}" | jq '((.mutation_candidates // .build_candidates) // []) | length')"
         if [[ "${num_candidates}" -gt 0 ]]; then
-          artifact="$(echo "${artifact}" | jq '.status = "interpreted" | .handover_attention.next_attention_targets = [.build_candidates[].id]')"
+          artifact="$(echo "${artifact}" | jq '.status = "interpreted" | .handover_attention.next_attention_targets = [((.mutation_candidates // .build_candidates) // [])[].id]')"
         else
           artifact="$(echo "${artifact}" | jq '.status = "inconclusive"')"
         fi
@@ -193,7 +193,7 @@ validate_forensics_artifact() {
     | jq -e '
         (.status == "interpreted" or .status == "inconclusive")
         and (
-          .build_candidates
+          ((.mutation_candidates // .build_candidates) // [])
           | type == "array"
           and all(
             type == "object"
@@ -214,7 +214,7 @@ validate_forensics_artifact() {
         and (
           .status == "inconclusive"
           or (
-            [.build_candidates[].id]
+            [((.mutation_candidates // .build_candidates) // [])[].id]
             == .handover_attention.next_attention_targets
           )
         )
@@ -237,18 +237,18 @@ validate_forensics_artifact() {
         $previous_discovery | authorized_targets
       ) as $authorized_targets
       | all(
-          .build_candidates[];
+          ((.mutation_candidates // .build_candidates) // [])[];
           . as $candidate
           | $authorized_targets
           | index($candidate.id) != null
         )
     ' >/dev/null 2>&1; then
-    dump_mismatch "forensics_build_candidate_outside_discovery_scope" \
+    dump_mismatch "forensics_mutation_candidate_outside_discovery_scope" \
       "Authorized targets" \
       "$(echo "${previous_discovery}" | jq -c "${AEGIS_JQ_AUTHORIZED_TARGETS} authorized_targets")" \
-      "Forensics build candidates" \
-      "$(echo "${artifact}" | jq -c '.build_candidates')"
-    aegis_fatal "forensics_build_candidate_outside_discovery_scope"
+      "Forensics mutation candidates" \
+      "$(echo "${artifact}" | jq -c '((.mutation_candidates // .build_candidates) // [])')"
+    aegis_fatal "forensics_mutation_candidate_outside_discovery_scope"
   fi
 }
 
@@ -840,8 +840,8 @@ readonly AEGIS_JQ_ENRICH_FORENSICS='
       + ($seed_targets // [])
       + ($existing_paths // [])
       | unique) as $forensics_scope
-  | .build_candidates = (
-      (.build_candidates // [])
+  | .mutation_candidates = (
+      ((.mutation_candidates // .build_candidates) // [])
       | map({
           id,
           reason: (.reason // "unspecified"),
@@ -856,15 +856,15 @@ readonly AEGIS_JQ_ENRICH_FORENSICS='
         )
       | bind_forensics_reasons(.; $dense_tokens; $investigation_input)
     )
-  # Empty model output + mechanical alvo → still interpreted for build.
-  | if ((.build_candidates | length) > 0)
+  # Empty model output + mechanical alvo → still interpreted for mutation.
+  | if (((.mutation_candidates // .build_candidates) | length) > 0)
          and ((.status == "inconclusive") or (.status == null))
     then .status = "interpreted"
     else . end
   | .handover_attention = {
       next_attention_targets: (
         if .status == "interpreted"
-        then ([.build_candidates[].id] | unique)
+        then ([((.mutation_candidates // .build_candidates) // [])[].id] | unique)
         else []
         end
       ),
@@ -926,7 +926,7 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
   | .status = $opt_status
   | .basis = (
       if ((.basis // "") | type == "string" and length > 0) then .basis
-      elif $opt_status == "can_improve" then "optimize: actionable improvements for build"
+      elif $opt_status == "can_improve" then "optimize: actionable improvements for mutation"
       else "optimize: no safe improvement"
       end
     )
@@ -937,7 +937,7 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
   | .intent_violations = ($cand.intent_violations // [])
   | (
       if $opt_status == "can_improve" then
-        .build_feedback = {
+        .mutation_feedback = {
           authorized_scopes: (
             [$valid_imps[].target_files[]?] | unique
           ),
@@ -955,12 +955,12 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
               }
           ]
         }
-      else del(.build_feedback) end
+      else del(.mutation_feedback) end
     )
   | .handover_attention = {
       next_attention_targets: (
         if $opt_status == "can_improve" then
-          ([.build_feedback.authorized_scopes[]?] | unique)
+          ([((.mutation_feedback // .build_feedback).authorized_scopes // [])[]?] | unique)
         else (.candidate_result.files_changed // [])
         end
       ),
@@ -1226,11 +1226,11 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
                (.origin // "") + "|" + (.structural_reason // "")
              )
          ) as $all_violations
-       | .build_feedback = {
+       | .mutation_feedback = {
            violations: $all_violations,
            authorized_scopes: $scopes
          }
-     else del(.build_feedback) end)
+     else del(.mutation_feedback) end)
   | .alignment_gate = $alignment_gate
   | .handover_attention = {
       next_attention_targets: (.validated_candidate.files_changed // []),

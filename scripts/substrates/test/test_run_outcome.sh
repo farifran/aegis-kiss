@@ -96,7 +96,7 @@ next_step="${line#*$'\t'}"
   || fail "classify_stalled_class: got '${class}'"
 [[ -n "${next_step}" ]] \
   || fail "classify_stalled_empty_next_step"
-printf '%s' "${next_step}" | grep -q "AEGIS_MAX_BUILD_ATTEMPTS" \
+printf '%s' "${next_step}" | grep -qE "AEGIS_MAX_(MUTATION|BUILD)_ATTEMPTS" \
   && fail "classify_stalled_should_not_suggest_raising_budget: ${next_step}"
 
 # --- D remains: prefix match empty_diff:* ---

@@ -110,15 +110,15 @@ main() {
   fi
 
   # Optimize uses the raw engine (mechanical trivial-skip / advise). Aider
-  # is build-only; mis-route is a hard fatal rather than a silent refine.
+  # is mutation-only; mis-route is a hard fatal rather than a silent refine.
   if [[ "${AEGIS_MODE}" == "optimize" ]]; then
     aegis_fatal "optimize_uses_raw_engine_not_aider"
   fi
 
-  # optimize→build refine could not re-apply the prior candidate on the
+  # optimize→mutation refine could not re-apply the prior candidate on the
   # disposable surface. Re-emit that candidate; do not invoke Aider on HEAD
   # (would replace the pipeline candidate with an incomplete/wrong patch).
-  if [[ "${AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE:-0}" == "1" ]]; then
+  if [[ "${AEGIS_MUTATION_KEEP_PREVIOUS_CANDIDATE:-${AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE:-0}}" == "1" ]]; then
     local prev_diff=""
     local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}}"
     if [[ -n "${handover}" && -f "${handover}" ]]; then
@@ -127,7 +127,7 @@ main() {
           .artifact_snapshot as $s
           | if $s.mode == "optimize" then
               $s.operational_context.candidate_result.diff // empty
-            elif $s.mode == "build" then
+            elif ($s.mode == "mutation" or $s.mode == "build") then
               $s.operational_context.diff // empty
             else
               $s.operational_context.candidate_result.diff
@@ -137,9 +137,9 @@ main() {
       )"
     fi
     if [[ -z "${prev_diff}" || "${prev_diff}" == "(no changes)" ]]; then
-      aegis_fatal "build_passthrough_missing_previous_candidate"
+      aegis_fatal "mutation_passthrough_missing_previous_candidate"
     fi
-    aegis_log "build_passthrough: materialize failed — re-emitting previous candidate (no refine)"
+    aegis_log "mutation_passthrough: materialize failed — re-emitting previous candidate (no refine)"
     # Do not wipe candidate_tools_stamp (hash still matches previous green run).
     export AEGIS_SKIP_CANDIDATE_TOOLS_STAMP=1
     emit_mutation_artifact "${prev_diff}"

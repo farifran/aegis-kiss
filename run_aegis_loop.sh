@@ -629,12 +629,12 @@ write_insights_digest() {
 
         [[ "${has_preflight}" == "true" ]] && echo "- **preflight failures**: strengthen tools-fix prompts or mechanical preflight classes — not more optimize LLM."
         [[ "${has_precond}" == "true" ]] && echo "- **precondition gaps**: mode handoff contract incomplete — fix runtime preconditions/enrich, not demand poetry."
-        [[ "${has_budget}" == "true" ]] && echo "- **build budget exhausted**: build_feedback quality or intent thrashing — tighten feedback codes / can_improve gate."
+        [[ "${has_budget}" == "true" ]] && echo "- **mutation budget exhausted**: mutation_feedback quality or intent thrashing — tighten feedback codes / can_improve gate."
         [[ "${has_contract}" == "true" ]] && echo "- **artifact contract**: skill min-output vs enrich mismatch — densify skill or strengthen mechanical emit."
         [[ "${has_halt}" == "true" ]] && echo "- **forensics halt**: discovery/forensics anchors weak — improve path extraction / seed, not adversarial."
         [[ "${has_intent}" == "true" ]] && echo "- **intent on failed runs**: review soft_accept vs fail in iter_*/pipeline_metrics.jsonl."
         [[ "${has_mech_v}" == "true" ]] && echo "- **mechanical_verified** on a failed loop: greps/tools may be insufficient for this failure class — inspect failed_mode."
-        [[ "${has_mech_i}" == "true" ]] && echo "- **optimize_mechanical improve** fired: check whether re-build converged or looped."
+        [[ "${has_mech_i}" == "true" ]] && echo "- **optimize_mechanical improve** fired: check whether re-mutation converged or looped."
         echo "- If SUCCESS only after demand shrink: fit_check / INTAKE templates — demand rails, not model upgrade alone."
       fi
     fi

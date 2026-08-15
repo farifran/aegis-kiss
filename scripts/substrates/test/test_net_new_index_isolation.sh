@@ -55,13 +55,13 @@ git -C "${main_repo}" worktree add --detach -q "${surface}" HEAD
 
 mkdir -p "${payload_dir}"
 
-# Forensics handover proposing the NET-NEW file as the build candidate.
+# Forensics handover proposing the NET-NEW file as the mutation candidate.
 jq -n --arg t "${net_new_target}" '
   {
     artifact_snapshot: {
       mode: "forensics",
       operational_context: {
-        build_candidates: [
+        mutation_candidates: [
           { id: $t, reason: "create net-new module", evidence_refs: ["filesystem.search_symbol"] }
         ]
       }
@@ -93,7 +93,7 @@ chmod +x "${fake_aider}"
 output="$(
   env \
     OPENAI_API_KEY="test-key" \
-    AEGIS_MODE="build" \
+    AEGIS_MODE="mutation" \
     AEGIS_EXECUTION_ID="test-execution" \
     AEGIS_EXECUTION_SURFACE_PATH="${surface}" \
     AEGIS_INVESTIGATION_INPUT="crie ${net_new_target}" \
@@ -101,7 +101,7 @@ output="$(
     AEGIS_AIDER_BIN="${fake_aider}" \
     AEGIS_MUTATION_GIT_DIR="${main_repo}/.git" \
     bash scripts/substrates/aider_substrate.sh \
-      ".skills/build.md" \
+      ".skills/mutation.md" \
       "${payload_dir}"
 )"
 

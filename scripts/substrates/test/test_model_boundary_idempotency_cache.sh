@@ -221,11 +221,11 @@ assert_aider_prompt_prefix_stability() {
   prompt_a="$(mktemp)"
   prompt_b="$(mktemp)"
 
-  export AEGIS_MODE="build"
+  export AEGIS_MODE="mutation"
   export AEGIS_EXECUTION_ID="exec-aider-1"
   export AEGIS_EXECUTION_SURFACE_PATH="${AEGIS_TEST_ROOT}"
-  export AEGIS_INVESTIGATION_INPUT="test build demand"
-  export AIDER_SKILL_FILE=".skills/build.md"
+  export AEGIS_INVESTIGATION_INPUT="test mutation demand"
+  export AIDER_SKILL_FILE=".skills/mutation.md"
 
   # shellcheck disable=SC1091
   source "${AEGIS_TEST_ROOT}/scripts/lib/common.sh"

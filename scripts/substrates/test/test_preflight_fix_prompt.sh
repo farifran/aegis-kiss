@@ -22,7 +22,7 @@ source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh"
 tmp_payload="$(mktemp -d)"
 export AIDER_CAPABILITY_PAYLOAD_DIR="${tmp_payload}"
 export AEGIS_AIDER_SUBSTRATE_ROOT="${AEGIS_TEST_ROOT}"
-export AEGIS_MODE="build"
+export AEGIS_MODE="mutation"
 export AEGIS_EXECUTION_ID="test-exec"
 export AEGIS_INVESTIGATION_INPUT="Add TokenBucketGate"
 

@@ -18,10 +18,10 @@ mutation_targets_from_handover_contract() {
   jq -r --arg current_mode "${AEGIS_MODE:-}" '
     .artifact_snapshot as $s
     | if $s.mode == "forensics" then
-        $s.operational_context.build_candidates[]?.id // empty
-      elif ($s.mode == "validation" or $s.mode == "optimize") and $current_mode == "build" then
-        ($s.operational_context.build_feedback.authorized_scopes // [])[]?,
-        ($s.operational_context.build_feedback.violations // [])[]?.target_files[]?
+        ((($s.operational_context.mutation_candidates // $s.operational_context.build_candidates)) // [])[]?.id // empty
+      elif ($s.mode == "validation" or $s.mode == "optimize") and ($current_mode == "mutation" or $current_mode == "build") then
+        ((($s.operational_context.mutation_feedback // $s.operational_context.build_feedback).authorized_scopes // [])[]?),
+        ((($s.operational_context.mutation_feedback // $s.operational_context.build_feedback).violations // [])[]?.target_files[]?)
       else
         empty
       end
@@ -99,13 +99,13 @@ mutation_targets_assert_contract_nonempty() {
   handover_mode="$(mutation_jq_lines "${handover}" '.artifact_snapshot.mode // empty')"
 
   if [[ "${handover_mode}" == "forensics" ]] && [[ "${count}" -eq 0 ]]; then
-    aegis_fatal "missing_forensics_build_candidates"
+    aegis_fatal "missing_forensics_mutation_candidates"
   fi
-  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "build" ]] \
+  if [[ "${handover_mode}" == "validation" ]] && [[ "${AEGIS_MODE}" == "mutation" || "${AEGIS_MODE}" == "build" ]] \
     && [[ "${count}" -eq 0 ]]; then
-    aegis_fatal "missing_build_feedback_authorized_scopes"
+    aegis_fatal "missing_mutation_feedback_authorized_scopes"
   fi
-  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "build" ]] \
+  if [[ "${handover_mode}" == "optimize" ]] && [[ "${AEGIS_MODE}" == "mutation" || "${AEGIS_MODE}" == "build" ]] \
     && [[ "${count}" -eq 0 ]]; then
     aegis_fatal "missing_optimize_improve_authorized_scopes"
   fi

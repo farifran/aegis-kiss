@@ -26,6 +26,7 @@ ARTIFACT_KEYS = {
     "rationale",
     "required_evidence",
     "status",
+    "mutation_candidates",
     "build_candidates",
     "findings",
     "verdict",

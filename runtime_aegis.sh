@@ -238,7 +238,7 @@ parse_runtime_cli "$@"
 # ACTIVE MODE / EXECUTION SURFACE PATH
 # =========================================================
 
-# The epistemic feedback loop can re-enter the pipeline in build mode,
+# The epistemic feedback loop can re-enter the pipeline in mutation mode,
 # so the active mode (and its derived skill/surface paths) is mutable
 # runtime state rather than a readonly constant.
 set_active_mode() {
@@ -257,26 +257,26 @@ set_active_mode "${AEGIS_MODE}"
 # EPISTEMIC FEEDBACK LOOP STATE
 # =========================================================
 
-# Automated build feedback: a rejected validation verdict loops the
-# pipeline back into build mode (hard ceiling below). Operator gate
+# Automated mutation feedback: a rejected validation verdict loops the
+# pipeline back into mutation mode (hard ceiling below). Operator gate
 # for environments that cannot run the mutation substrate.
-AEGIS_BUILD_ATTEMPT_COUNT=0
+AEGIS_MUTATION_ATTEMPT_COUNT=0
 # Fingerprint of the last rejection's blocking findings — a repeat means the
 # loop is not converging and further passes are wasted.
-AEGIS_BUILD_LAST_FINDINGS_FP=""
-# Local build budget (no rediscovery): rejected validation re-enters
-# build → optimize → adversarial → validation up to this many times.
-: "${AEGIS_MAX_BUILD_ATTEMPTS:=2}"
-: "${AEGIS_BUILD_FEEDBACK_LOOP:=true}"
-export AEGIS_MAX_BUILD_ATTEMPTS
-export AEGIS_BUILD_FEEDBACK_LOOP
-# Optimize advisory → one Build refine pass (cap 1; no infinite loop).
-AEGIS_OPTIMIZE_BUILD_COUNT=0
-: "${AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS:=1}"
-: "${AEGIS_OPTIMIZE_BUILD_LOOP:=true}"
-export AEGIS_OPTIMIZE_BUILD_COUNT
-export AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS
-export AEGIS_OPTIMIZE_BUILD_LOOP
+AEGIS_MUTATION_LAST_FINDINGS_FP=""
+# Local mutation budget (no rediscovery): rejected validation re-enters
+# mutation → optimize → adversarial → validation up to this many times.
+: "${AEGIS_MAX_MUTATION_ATTEMPTS:=${AEGIS_MAX_BUILD_ATTEMPTS:-2}}"
+: "${AEGIS_MUTATION_FEEDBACK_LOOP:=${AEGIS_BUILD_FEEDBACK_LOOP:-true}}"
+export AEGIS_MAX_MUTATION_ATTEMPTS
+export AEGIS_MUTATION_FEEDBACK_LOOP
+# Optimize advisory → one Mutation refine pass (cap 1; no infinite loop).
+AEGIS_OPTIMIZE_MUTATION_COUNT=0
+: "${AEGIS_MAX_OPTIMIZE_MUTATION_ATTEMPTS:=${AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS:-1}}"
+: "${AEGIS_OPTIMIZE_MUTATION_LOOP:=${AEGIS_OPTIMIZE_BUILD_LOOP:-true}}"
+export AEGIS_OPTIMIZE_MUTATION_COUNT
+export AEGIS_MAX_OPTIMIZE_MUTATION_ATTEMPTS
+export AEGIS_OPTIMIZE_MUTATION_LOOP
 
 apply_default_investigation_input() {
   export AEGIS_INVESTIGATION_INPUT="${AEGIS_DEFAULT_INVESTIGATION_INPUT}"
@@ -378,7 +378,7 @@ cleanup_runtime() {
     remove_runtime_owned_capability_surfaces
   fi
 
-  # Candidate tools stamp (build → adversarial reuse):
+  # Candidate tools stamp (mutation → adversarial reuse):
   # - Pipeline driver (run_aegis): KEEP across modes; run_aegis drops it
   #   after the full pipeline finishes.
   # - Standalone runtime: this process IS the whole run → drop when done.
@@ -517,42 +517,42 @@ validate_mode_preconditions() {
         "precondition_failed_discovery_artifact_missing_or_invalid" \
         '.artifact_snapshot != null and .artifact_snapshot.mode == "discovery"'
       ;;
-    build)
-      # Optimize advisory → build refine (can_improve + build_feedback).
-      if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT}" -gt 0 ]]; then
+    mutation|build)
+      # Optimize advisory → mutation refine (can_improve + mutation_feedback).
+      if [[ "${AEGIS_OPTIMIZE_MUTATION_COUNT}" -gt 0 ]]; then
         assert_handover_precondition \
           "precondition_failed_optimize_improve_feedback_missing_or_invalid" \
           '.artifact_snapshot != null
            and (.artifact_snapshot.mode == "optimize" or .artifact_snapshot.mode == "validation")
-           and (.artifact_snapshot.operational_context.build_feedback | type == "object")
-           and (.artifact_snapshot.operational_context.build_feedback.violations | type == "array")
-           and (.artifact_snapshot.operational_context.build_feedback.authorized_scopes | type == "array")'
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback) | type == "object")
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback).violations | type == "array")
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback).authorized_scopes | type == "array")'
         return 0
       fi
-      # Feedback re-entry: rejected validation + structured build_feedback.
-      if [[ "${AEGIS_BUILD_ATTEMPT_COUNT}" -gt 0 ]]; then
+      # Feedback re-entry: rejected validation + structured mutation_feedback.
+      if [[ "${AEGIS_MUTATION_ATTEMPT_COUNT}" -gt 0 ]]; then
         assert_handover_precondition \
-          "precondition_failed_structured_build_feedback_missing_or_invalid" \
+          "precondition_failed_structured_mutation_feedback_missing_or_invalid" \
           '.artifact_snapshot != null
            and .artifact_snapshot.mode == "validation"
            and .artifact_snapshot.operational_context.verdict == "rejected"
-           and (.artifact_snapshot.operational_context.build_feedback | type == "object")
-           and (.artifact_snapshot.operational_context.build_feedback.violations | type == "array")
-           and (.artifact_snapshot.operational_context.build_feedback.authorized_scopes | type == "array")'
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback) | type == "object")
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback).violations | type == "array")
+           and ((.artifact_snapshot.operational_context.mutation_feedback // .artifact_snapshot.operational_context.build_feedback).authorized_scopes | type == "array")'
         return 0
       fi
       assert_handover_precondition \
         "precondition_failed_forensics_artifact_missing_or_invalid" \
         '.artifact_snapshot != null
          and .artifact_snapshot.mode == "forensics"
-         and (.artifact_snapshot.operational_context.build_candidates
+         and (((.artifact_snapshot.operational_context.mutation_candidates // .artifact_snapshot.operational_context.build_candidates))
               | type == "array" and length > 0)'
       ;;
     optimize)
       assert_handover_precondition \
-        "precondition_failed_build_candidate_missing_or_invalid" \
+        "precondition_failed_mutation_candidate_missing_or_invalid" \
         '.artifact_snapshot != null
-         and .artifact_snapshot.mode == "build"
+         and (.artifact_snapshot.mode == "mutation" or .artifact_snapshot.mode == "build")
          and (.artifact_snapshot.operational_context.diff
               | type == "string" and length > 0 and . != "(no changes)")
          and (.artifact_snapshot.operational_context.files_changed
@@ -711,16 +711,16 @@ prepare_execution_surface() {
 }
 
 materialize_preceding_mutation_candidate() {
-  # Build refine after optimize: re-apply Build candidate, then Aider
+  # Mutation refine after optimize: re-apply Mutation candidate, then Aider
   # applies only optimize_feedback improvements on that surface.
-  if [[ "${AEGIS_MODE}" == "build" ]] \
-    && [[ "${AEGIS_OPTIMIZE_BUILD_COUNT}" -gt 0 ]] \
+  if [[ "${AEGIS_MODE}" == "mutation" || "${AEGIS_MODE}" == "build" ]] \
+    && [[ "${AEGIS_OPTIMIZE_MUTATION_COUNT}" -gt 0 ]] \
     && mode_requires_execution_surface; then
-    # The same re-entry serves optimize→build and validation→build; naming
+    # The same re-entry serves optimize→mutation and validation→mutation; naming
     # only the first made a validation failure report the wrong route.
-    local refine_route="optimize→build"
-    [[ "${AEGIS_BUILD_ATTEMPT_COUNT:-0}" -gt 0 ]] && refine_route="validation→build"
-    aegis_log "Materializing Build candidate for ${refine_route} refine..."
+    local refine_route="optimize→mutation"
+    [[ "${AEGIS_MUTATION_ATTEMPT_COUNT:-0}" -gt 0 ]] && refine_route="validation→mutation"
+    aegis_log "Materializing Mutation candidate for ${refine_route} refine..."
     if ! bash scripts/runtime/apply_candidate_diff.sh \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE}" \
       "${AEGIS_EXECUTION_SURFACE_PATH}"; then
@@ -728,11 +728,11 @@ materialize_preceding_mutation_candidate() {
       # run Aider on a clean surface (that would drop the prior candidate from
       # the artifact). Aider substrate re-emits the previous candidate.
       # Stress data: mechanical can_improve + apply fail left runs dead when fatal.
-      aegis_warn "${refine_route}_refine_materialize_failed — keeping previous candidate (no build refine on empty surface)"
-      export AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE=1
+      aegis_warn "${refine_route}_refine_materialize_failed — keeping previous candidate (no mutation refine on empty surface)"
+      export AEGIS_MUTATION_KEEP_PREVIOUS_CANDIDATE=1
       return 0
     fi
-    unset AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE 2>/dev/null || true
+    unset AEGIS_MUTATION_KEEP_PREVIOUS_CANDIDATE 2>/dev/null || true
     return 0
   fi
   return 0
@@ -1014,18 +1014,18 @@ run_mode_pipeline() {
   promote_epistemic_handover
 }
 
-# Returns 0 when the pipeline must loop back into build mode. Enforces
+# Returns 0 when the pipeline must loop back into mutation mode. Enforces
 # the hard attempt ceiling fatally. The epistemic handover is NOT reset
 # on re-entry: the rejected validation findings stay in place so the
-# next build iteration exposes the failure context to the substrate.
-build_feedback_loop_should_fire() {
+# next mutation iteration exposes the failure context to the substrate.
+mutation_feedback_loop_should_fire() {
 
-  [[ "${AEGIS_BUILD_FEEDBACK_LOOP}" == "true" ]] || return 1
+  [[ "${AEGIS_MUTATION_FEEDBACK_LOOP}" == "true" && "${AEGIS_BUILD_FEEDBACK_LOOP:-true}" != "false" ]] || return 1
   [[ "${AEGIS_MODE}" == "validation" ]] || return 1
 
   local verdict
   verdict="$(
-    printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
+    printf '%s' "${AEGIS_PROMOTED_ARTILOAD:-${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}}" \
       | jq -r '.verdict // empty' 2>/dev/null
   )"
 
@@ -1038,38 +1038,38 @@ build_feedback_loop_should_fire() {
   local findings_fp
   findings_fp="$(
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
-      | jq -r '[(.findings // [])[]? | (.description // "")] | sort | join("")' 2>/dev/null \
+      | jq -r '[(.findings // [])[]? | (.description // "")] | sort | join(" ")' 2>/dev/null \
       || true
   )"
-  if [[ -n "${findings_fp}" && "${findings_fp}" == "${AEGIS_BUILD_LAST_FINDINGS_FP:-}" ]]; then
-    aegis_warn "build_loop_stalled — findings unchanged since the previous iteration:"
+  if [[ -n "${findings_fp}" && "${findings_fp}" == "${AEGIS_MUTATION_LAST_FINDINGS_FP:-}" ]]; then
+    aegis_warn "mutation_loop_stalled — findings unchanged since the previous iteration:"
     printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" \
       | jq -r '(.findings // [])[]? | "  - \(.description // "?")"' 2>/dev/null >&2 || true
-    aegis_fatal "build_loop_stalled"
+    aegis_fatal "mutation_loop_stalled"
   fi
-  AEGIS_BUILD_LAST_FINDINGS_FP="${findings_fp}"
+  AEGIS_MUTATION_LAST_FINDINGS_FP="${findings_fp}"
 
-  if [[ "${AEGIS_BUILD_ATTEMPT_COUNT}" -ge "${AEGIS_MAX_BUILD_ATTEMPTS}" ]]; then
-    aegis_fatal "max_build_attempts_exceeded"
+  if [[ "${AEGIS_MUTATION_ATTEMPT_COUNT}" -ge "${AEGIS_MAX_MUTATION_ATTEMPTS}" ]]; then
+    aegis_fatal "max_mutation_attempts_exceeded"
   fi
 
-  AEGIS_BUILD_ATTEMPT_COUNT=$((AEGIS_BUILD_ATTEMPT_COUNT + 1))
-  aegis_warn "Validation rejected candidate — LOCAL build feedback iteration ${AEGIS_BUILD_ATTEMPT_COUNT}/${AEGIS_MAX_BUILD_ATTEMPTS} (no rediscovery; scopes from build_feedback)"
+  AEGIS_MUTATION_ATTEMPT_COUNT=$((AEGIS_MUTATION_ATTEMPT_COUNT + 1))
+  aegis_warn "Validation rejected candidate — LOCAL mutation feedback iteration ${AEGIS_MUTATION_ATTEMPT_COUNT}/${AEGIS_MAX_MUTATION_ATTEMPTS} (no rediscovery; scopes from mutation_feedback)"
 
   if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
     jq -cn \
-      --argjson attempt "${AEGIS_BUILD_ATTEMPT_COUNT}" \
-      --argjson max "${AEGIS_MAX_BUILD_ATTEMPTS}" \
-      '{kind:"build_feedback",attempt:$attempt,max:$max}' \
+      --argjson attempt "${AEGIS_MUTATION_ATTEMPT_COUNT}" \
+      --argjson max "${AEGIS_MAX_MUTATION_ATTEMPTS}" \
+      '{kind:"mutation_feedback",attempt:$attempt,max:$max}' \
       >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
   fi
 
   return 0
 }
 
-# Optimize advisory can_improve → one local Build refine (not rediscovery).
+# Optimize advisory can_improve → one local Mutation refine (not rediscovery).
 optimize_improve_loop_should_fire() {
-  [[ "${AEGIS_OPTIMIZE_BUILD_LOOP}" == "true" ]] || return 1
+  [[ "${AEGIS_OPTIMIZE_MUTATION_LOOP}" == "true" ]] || return 1
   [[ "${AEGIS_MODE}" == "optimize" ]] || return 1
 
   local status
@@ -1080,42 +1080,42 @@ optimize_improve_loop_should_fire() {
   [[ "${status}" == "can_improve" ]] || return 1
 
   if ! printf '%s' "${AEGIS_PROMOTED_ARTIFACT_PAYLOAD:-}" | jq -e '
-      (.build_feedback | type == "object")
-      and (.build_feedback.violations | type == "array" and length > 0)
-      and (.build_feedback.authorized_scopes | type == "array" and length > 0)
+      ((.mutation_feedback // .build_feedback) | type == "object")
+      and ((.mutation_feedback // .build_feedback).violations | type == "array" and length > 0)
+      and ((.mutation_feedback // .build_feedback).authorized_scopes | type == "array" and length > 0)
     ' >/dev/null 2>&1; then
     return 1
   fi
 
-  if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT}" -ge "${AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS}" ]]; then
-    aegis_warn "optimize_improve_cap: already refined once — continuing with candidate (no further optimize→build)"
+  if [[ "${AEGIS_OPTIMIZE_MUTATION_COUNT}" -ge "${AEGIS_MAX_OPTIMIZE_MUTATION_ATTEMPTS}" ]]; then
+    aegis_warn "optimize_improve_cap: already refined once — continuing with candidate (no further optimize→mutation)"
     return 1
   fi
 
-  AEGIS_OPTIMIZE_BUILD_COUNT=$((AEGIS_OPTIMIZE_BUILD_COUNT + 1))
-  export AEGIS_OPTIMIZE_BUILD_COUNT
-  aegis_warn "Optimize can_improve — LOCAL build refine ${AEGIS_OPTIMIZE_BUILD_COUNT}/${AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS}"
+  AEGIS_OPTIMIZE_MUTATION_COUNT=$((AEGIS_OPTIMIZE_MUTATION_COUNT + 1))
+  export AEGIS_OPTIMIZE_MUTATION_COUNT
+  aegis_warn "Optimize can_improve — LOCAL mutation refine ${AEGIS_OPTIMIZE_MUTATION_COUNT}/${AEGIS_MAX_OPTIMIZE_MUTATION_ATTEMPTS}"
 
   if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
     jq -cn \
-      --argjson attempt "${AEGIS_OPTIMIZE_BUILD_COUNT}" \
-      --argjson max "${AEGIS_MAX_OPTIMIZE_BUILD_ATTEMPTS}" \
+      --argjson attempt "${AEGIS_OPTIMIZE_MUTATION_COUNT}" \
+      --argjson max "${AEGIS_MAX_OPTIMIZE_MUTATION_ATTEMPTS}" \
       '{kind:"optimize_improve",attempt:$attempt,max:$max}' \
       >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
   fi
   if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
     aegis_record_optimize_metric "can_improve_reentry" \
-      "attempt=${AEGIS_OPTIMIZE_BUILD_COUNT}"
+      "attempt=${AEGIS_OPTIMIZE_MUTATION_COUNT}"
   fi
 
   return 0
 }
 
-# Downstream progression for feedback iterations: re-entered build rolls
+# Downstream progression for feedback iterations: re-entered mutation rolls
 # through the full verification stack. Terminal success is only an
 # explicit "accepted" from a fresh validation pass.
 AEGIS_FEEDBACK_PIPELINE_ACTIVE="false"
-readonly AEGIS_FEEDBACK_MODE_SEQUENCE="build optimize adversarial validation"
+readonly AEGIS_FEEDBACK_MODE_SEQUENCE="mutation optimize adversarial validation"
 
 next_feedback_pipeline_mode() {
   aegis_next_in_sequence "${AEGIS_MODE}" "${AEGIS_FEEDBACK_MODE_SEQUENCE}"
@@ -1128,21 +1128,21 @@ main() {
   while :; do
     run_mode_pipeline
 
-    # Optimize advisory: can_improve → build refine once, then continue
-    # build → optimize → … (optimize will no-op/cap on second visit).
+    # Optimize advisory: can_improve → mutation refine once, then continue
+    # mutation → optimize → … (optimize will no-op/cap on second visit).
     if optimize_improve_loop_should_fire; then
       AEGIS_PROMOTED_ARTIFACT_PAYLOAD=""
       AEGIS_FEEDBACK_PIPELINE_ACTIVE="true"
-      set_active_mode "build"
+      set_active_mode "mutation"
       continue
     fi
 
     # A rejected fresh validation verdict re-enters the mutation stack
     # (or aborts fatally at the attempt ceiling).
-    if build_feedback_loop_should_fire; then
+    if mutation_feedback_loop_should_fire; then
       AEGIS_PROMOTED_ARTIFACT_PAYLOAD=""
       AEGIS_FEEDBACK_PIPELINE_ACTIVE="true"
-      set_active_mode "build"
+      set_active_mode "mutation"
       continue
     fi
 

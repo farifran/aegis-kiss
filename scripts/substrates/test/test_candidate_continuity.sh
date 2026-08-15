@@ -59,17 +59,17 @@ if bash scripts/runtime/apply_candidate_diff.sh \
 fi
 
 # Static: soft-fail materialize must set KEEP flag; substrate must passthrough.
-grep -q 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE=1' \
+grep -qE 'AEGIS_(MUTATION|BUILD)_KEEP_PREVIOUS_CANDIDATE=1' \
   "${AEGIS_TEST_ROOT}/runtime_aegis.sh" \
   || fail "materialize_missing_keep_previous_flag"
-grep -q 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE' \
+grep -qE 'AEGIS_(MUTATION|BUILD)_KEEP_PREVIOUS_CANDIDATE' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" \
   || fail "aider_substrate_missing_keep_previous_branch"
 grep -q 'AEGIS_SKIP_CANDIDATE_TOOLS_STAMP' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider/invoke.sh" \
   || fail "emit_mutation_missing_skip_stamp_guard"
 # KEEP branch must run before invoke_aider (order lock).
-_keep_line="$(grep -n 'AEGIS_BUILD_KEEP_PREVIOUS_CANDIDATE' \
+_keep_line="$(grep -nE 'AEGIS_(MUTATION|BUILD)_KEEP_PREVIOUS_CANDIDATE' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" | head -1 | cut -d: -f1)"
 _inv_line="$(grep -n 'invoke_aider' \
   "${AEGIS_TEST_ROOT}/scripts/substrates/aider_substrate.sh" | head -1 | cut -d: -f1)"

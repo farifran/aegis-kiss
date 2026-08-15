@@ -98,7 +98,7 @@ export AEGIS_INVESTIGATION_INPUT
 export AEGIS_EVIDENCE_TARGET_PATH
 
 # Cap on runtime-owned filesystem.read seeds (operator paths + attention).
-# Soft budget: keeps forensics/build contentful without flooding context.
+# Soft budget: keeps forensics/mutation contentful without flooding context.
 : "${AEGIS_DETERMINISTIC_READ_MAX:=8}"
 export AEGIS_DETERMINISTIC_READ_MAX
 
@@ -224,10 +224,10 @@ export AEGIS_ADVERSARIAL_DEPTH
 : "${AEGIS_PROVIDER_CONNECT_TIMEOUT:=15}"
 : "${AEGIS_PROVIDER_RESPONSE_TIMEOUT:=120}"
 
-# Local build feedback (no rediscovery): max re-entries into the
-# build→optimize→adversarial→validation stack after a rejected verdict.
-: "${AEGIS_MAX_BUILD_ATTEMPTS:=2}"
-: "${AEGIS_BUILD_FEEDBACK_LOOP:=true}"
+# Local mutation feedback (no rediscovery): max re-entries into the
+# mutation→optimize→adversarial→validation stack after a rejected verdict.
+: "${AEGIS_MAX_MUTATION_ATTEMPTS:=${AEGIS_MAX_BUILD_ATTEMPTS:-2}}"
+: "${AEGIS_MUTATION_FEEDBACK_LOOP:=${AEGIS_BUILD_FEEDBACK_LOOP:-true}}"
 
 # Optimize engine is raw (not aider). Live short-circuit knobs live in
 # demand.sh: AEGIS_OPTIMIZE_TRIVIAL_SKIP / MAX_LINES / MAX_FILES.
@@ -240,8 +240,8 @@ export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
 export AEGIS_PROVIDER_CONNECT_TIMEOUT
 export AEGIS_PROVIDER_RESPONSE_TIMEOUT
-export AEGIS_MAX_BUILD_ATTEMPTS
-export AEGIS_BUILD_FEEDBACK_LOOP
+export AEGIS_MAX_MUTATION_ATTEMPTS
+export AEGIS_MUTATION_FEEDBACK_LOOP
 export AEGIS_VALIDATION_LLM
 
 # =========================================================
@@ -251,7 +251,7 @@ export AEGIS_VALIDATION_LLM
 : "${AEGIS_RUNTIME_REMOVE_EXECUTION_SURFACE:=true}"
 : "${AEGIS_RUNTIME_REMOVE_CAPABILITY_ENV:=true}"
 : "${AEGIS_RUNTIME_REMOVE_CAPABILITY_PAYLOADS:=true}"
-# Drop build→adversarial tool stamp after the run finishes (default true).
+# Drop mutation→adversarial tool stamp after the run finishes (default true).
 # Kept across modes while AEGIS_PIPELINE_DRIVER=1; removed by run_aegis at end.
 : "${AEGIS_RUNTIME_REMOVE_CANDIDATE_TOOLS_STAMP:=true}"
 
@@ -377,9 +377,9 @@ declare -Ar AEGIS_EXECUTION_ENGINES=(
   ["forensics"]="raw"
   ["validation"]="raw"
   ["adversarial"]="raw"
-  ["build"]="aider"
+  ["mutation"]="aider"
   # Optimize is advisory only (raw LLM): recommend safe refinements or
-  # no_improvement_needed; mutation stays in Build if can_improve.
+  # no_improvement_needed; mutation stays in Mutation if can_improve.
   ["optimize"]="raw"
 )
 
@@ -444,7 +444,7 @@ declare -Ar AEGIS_MODE_CAPABILITY_MAP=(
   ["forensics"]="AEGIS_BASE_CAPABILITIES"
   ["validation"]="AEGIS_BASE_CAPABILITIES"
   ["adversarial"]="AEGIS_BASE_CAPABILITIES"
-  ["build"]="AEGIS_MUTATION_CAPABILITIES"
+  ["mutation"]="AEGIS_MUTATION_CAPABILITIES"
   # Advisory only — lean envelope (evidence is handover-only).
   ["optimize"]="AEGIS_BASE_CAPABILITIES"
 )
@@ -519,7 +519,7 @@ declare -ar AEGIS_DISCOVERY_EVIDENCE=(
 
 # Forensics: anchors + handover + demand-bound search.
 # Content seeds (operator/attention reads) are appended at runtime.
-# git.status omitted — does not change build_candidates.
+# git.status omitted — does not change mutation_candidates.
 declare -ar AEGIS_FORENSICS_EVIDENCE=(
   "runtime.demand_anchors"
   "filesystem.read:epistemic_handover"
@@ -555,8 +555,8 @@ declare -ar AEGIS_MUTATION_EVIDENCE=(
   "test.run"
 )
 
-# Optimize (advisory): judge Build via handover (+ BUILD RESULT in prompt).
-# No mutation surface; do not re-bind demand anchors as a second build.
+# Optimize (advisory): judge mutation via handover (+ MUTATION RESULT in prompt).
+# No mutation surface; do not re-bind demand anchors as a second mutation.
 declare -ar AEGIS_OPTIMIZE_EVIDENCE=(
   "filesystem.read:epistemic_handover"
 )
@@ -566,7 +566,7 @@ declare -Ar AEGIS_MODE_EVIDENCE_PROFILE=(
   ["forensics"]="AEGIS_FORENSICS_EVIDENCE"
   ["validation"]="AEGIS_VALIDATION_EVIDENCE"
   ["adversarial"]="AEGIS_ADVERSARIAL_EVIDENCE"
-  ["build"]="AEGIS_MUTATION_EVIDENCE"
+  ["mutation"]="AEGIS_MUTATION_EVIDENCE"
   ["optimize"]="AEGIS_OPTIMIZE_EVIDENCE"
 )
 

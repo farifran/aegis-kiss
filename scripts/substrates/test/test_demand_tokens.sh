@@ -284,14 +284,14 @@ ctx_for="$(
 )"
 enriched_for="$(enrich_cognitive_artifact "${raw_for}" "${ctx_for}")"
 echo "${enriched_for}" | jq -e '
-  (.build_candidates | length) == 1
-  and .build_candidates[0].id == "src/index.ts"
-  and (.build_candidates[0].reason | test("power"; "i") | not)
+  (((.mutation_candidates // .build_candidates)) | length) == 1
+  and ((.mutation_candidates // .build_candidates)[0].id == "src/index.ts")
+  and (((.mutation_candidates // .build_candidates)[0].reason | test("power"; "i") | not))
   and (
-    (.build_candidates[0].reason | test("terabit"; "i"))
-    or (.build_candidates[0].reason | test("gigabit"; "i"))
-    or (.build_candidates[0].reason | test("convers"; "i"))
-    or (.build_candidates[0].reason | startswith("Demand:"))
+    ((.mutation_candidates // .build_candidates)[0].reason | test("terabit"; "i"))
+    or ((.mutation_candidates // .build_candidates)[0].reason | test("gigabit"; "i"))
+    or ((.mutation_candidates // .build_candidates)[0].reason | test("convers"; "i"))
+    or ((.mutation_candidates // .build_candidates)[0].reason | startswith("Demand:"))
   )
 ' >/dev/null \
   || fail "forensics_should_bind_reason_and_single_seed: ${enriched_for}"
@@ -591,13 +591,13 @@ printf '%s' "${brief}" | grep -q 'EXPORTS NOW:' \
   || fail "mutation_brief_missing_exports: ${brief}"
 printf '%s' "${brief}" | grep -q 'STATE:' \
   || fail "mutation_brief_missing_state: ${brief}"
-# Policy rules live in .skills/build.md — brief is FILE/STATE/EXPORTS (+ DONE WHEN) only.
-aegis_handover_has_build_alvo "${tmp_fh}" \
+# Policy rules live in .skills/mutation.md — brief is FILE/STATE/EXPORTS (+ DONE WHEN) only.
+(aegis_handover_has_mutation_alvo "${tmp_fh}" || aegis_handover_has_build_alvo "${tmp_fh}") \
   || fail "handover_should_report_build_alvo"
 rm -f "${tmp_fh}"
 
-# Intent gates: tokens + over-export (used by build preflight retry)
-export AEGIS_MODE="build"
+# Intent gates: tokens + over-export (used by mutation preflight retry)
+export AEGIS_MODE="mutation"
 export AEGIS_INVESTIGATION_INPUT="funções de conversão, como Terabits para Gigabits"
 # shellcheck disable=SC1091
 source "${AEGIS_TEST_ROOT}/scripts/substrates/aider/preflight.sh" 2>/dev/null || true

@@ -1,4 +1,4 @@
-# BUILD — Edit Instructions (Aider)
+# MUTATION — Edit Instructions (Aider)
 
 Edit **only** loaded files. Reply with **code edits only** (whole-file or SEARCH/REPLACE). No prose, JSON, or questions.
 
@@ -9,7 +9,7 @@ Edit **only** loaded files. Reply with **code edits only** (whole-file or SEARCH
 4. **Preserve Exports**: When editing entrypoint files (e.g. `src/index.ts`), append new exports while preserving 100% of pre-existing exports intact. Do not overwrite or delete existing exports.
 
 ## Precedence & Feedback
-Obey **ALVO**, **MUTATION BRIEF**, and **BUILD FEEDBACK**. On BUILD FEEDBACK, fix ONLY listed violations within authorized scopes.
+Obey **ALVO**, **MUTATION BRIEF**, and **MUTATION FEEDBACK**. On MUTATION FEEDBACK, fix ONLY listed violations within authorized scopes.
 
 ## Output Format
 Output valid whole-file or SEARCH/REPLACE blocks for loaded targets. Never output empty diffs or placeholders.

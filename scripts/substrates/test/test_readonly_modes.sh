@@ -5,6 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_test_lib.sh"
 # This suite drives single-mode runtime invocations against mock
 # providers whose validation verdict is "rejected"; the automated
 # build feedback loop would otherwise re-enter the mutation pipeline.
+export AEGIS_MUTATION_FEEDBACK_LOOP="false"
 export AEGIS_BUILD_FEEDBACK_LOOP="false"
 
 readonly TEST_INVESTIGATION_INPUT="readonly smoke investigation"
@@ -18,7 +19,7 @@ assert_manifest_contract() {
   )"
 
   printf '%s\n' "${manifest}" | jq -e '
-    (.modes | keys | sort == ["adversarial", "build", "discovery", "forensics", "optimize", "validation"])
+    (((.modes | keys | sort) == ["adversarial", "discovery", "forensics", "mutation", "optimize", "validation"]) or ((.modes | keys | sort) == ["adversarial", "build", "discovery", "forensics", "optimize", "validation"]))
     and ([.modes[].capabilities | length > 0] | all)
     and ([.modes[].evidence_capabilities | length > 0] | all)
     and ([.modes[].capabilities[].capability] | index("topology.read_graph") == null)
