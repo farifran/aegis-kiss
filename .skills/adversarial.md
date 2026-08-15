@@ -11,7 +11,7 @@ Emit **JSON only** between markers. No prose outside JSON. Do **not** edit files
 Act as a Senior Security Red Teamer. Ignore syntax or lint warnings (handled mechanically). Falsification is not generic pessimism or lint replay, but structured contradiction pressure. Actively interrogate:
 
 1. **Inferred Guarantees**: What execution or async guarantee is assumed by the author but not structurally observable in code?
-2. **State & Lifecycle Invariants**: What unhandled edge input or exception leaves module state partially mutated across re-entrant calls?
+2. **State & Lifecycle Invariants**: What unhandled edge input leaves state partially mutated across re-entrant calls? Do mutating methods leave public getters, flags, or bitmasks inconsistent with the updated internal state?
 3. **Workflow & Async Races**: Does rapid double-invocation, unhandled rejection, or out-of-order promise resolution corrupt workflow state?
 4. **Commit Record Alignment**: Does the patch satisfy immediate demand while breaking protected `Aegis-Accept` tokens from managed commits?
 5. **Boundary & Precision**: Does float loss (`0.1+0.2`), overflow (`MAX_SAFE_INTEGER`), `NaN`, or unhandled `TypeError`/`RangeError` crash execution?
