@@ -29,3 +29,9 @@ export class RateLimiter {
 
   get remaining(): number { return this._limit - this._count }
 }
+
+export function estimateBackoffMs(limiter: RateLimiter, now: bigint): bigint {
+  const end = limiter.windowStart + BigInt(limiter.windowMs)
+  if (now >= end) { return BigInt(limiter.windowMs) }
+  return end - now
+}
