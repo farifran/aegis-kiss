@@ -3616,6 +3616,11 @@ aegis_emit_mechanical_adversarial_verified() {
 # auto: LLM only when candidate is "large" (lines/files thresholds).
 aegis_adversarial_should_use_llm() {
   local handover="${1-}"
+  # Agentic handover: adversarial falsification is the assistant's job; never
+  # run the adversarial LLM internally.
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    return 1
+  fi
   # Briefing invented by the supervisor (no operator-supplied Briefing) is the
   # high-risk case: the pipeline has no oracle on the original demand semantics,
   # so the LLM adversarial MUST falsify the candidate against the Goal text.

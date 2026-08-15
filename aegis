@@ -971,6 +971,7 @@ cmd_go() {
   # Trigger interactive setup wizard ONLY if API key is missing AND running interactively by a Human (not AI Agent)
   if [[ -z "${OPENAI_API_KEY:-${NVIDIA_API_KEY:-${GEMINI_API_KEY:-}}}" ]]; then
     if aegis_is_agentic_execution; then
+      export AEGIS_AGENTIC=1
       aegis_log "ambiente agêntico detectado (assistente AI) — operando em modo handover mecânico (sem perguntas TTY)"
     elif [[ -t 0 ]] && [[ "${assume_yes}" -ne 1 ]]; then
       cmd_setup
@@ -1122,7 +1123,8 @@ cmd_go() {
           intake_evidence="${intake_evidence}File: ${t}\nExisting Exports: ${t_exports}\nSnippet:\n${t_snippet}\n\n"
         fi
       done
-      if [[ -n "$(aegis_intake_md_section "Briefing" "${goal}" | tr -d '[:space:]')" ]]; then
+      if [[ -n "$(aegis_intake_md_section "Briefing" "${goal}" | tr -d '[:space:]')" ]] \
+        || aegis_briefing_is_schema_json "${goal}"; then
         export AEGIS_BRIEFING_SOURCE=user
         aegis_log "briefing: brief do operador (proveniência=user)"
       else

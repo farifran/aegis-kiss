@@ -486,6 +486,18 @@ aegis_briefing_provider_error_code() {
   printf 'empty_response'
 }
 
+# Detect a caller-supplied demand already in the briefing JSON schema (as
+# opposed to a free-prose goal). Agentic callers (opencode, Claude Code, …)
+# can pre-expand the demand; when the goal IS valid schema JSON we honor it
+# directly instead of re-invoking the internal supervisor LLM.
+aegis_briefing_is_schema_json() {
+  local s="${1-}"
+  [[ -n "${s}" ]] || return 1
+  printf '%s' "${s}" \
+    | jq -e 'type == "object" and ((.goal? | type) == "string") and ((.exports? | type) == "array")' \
+    >/dev/null 2>&1
+}
+
 # Prints the structured demand on success; prints nothing and returns 1
 # whenever the caller should fall back to the mechanical body.
 aegis_briefing_generate() {
@@ -494,6 +506,37 @@ aegis_briefing_generate() {
   local evidence="${3-}"
 
   [[ -n "${goal}" ]] || return 1
+
+  # Agentic handover: caller already supplied the demand as schema JSON.
+  # Skip the supervisor LLM expand; run the same mechanical gates
+  # (sanitize + validate + quality + render) over the supplied JSON.
+  if aegis_briefing_is_schema_json "${goal}"; then
+    local content body
+    content="$(aegis_briefing_sanitize_json "${goal}")"
+    aegis_briefing_validate_json "${content}" 2>/dev/null || {
+      printf 'invalid_agentic_briefing\n' >&2
+      return 1
+    }
+    aegis_briefing_quality_check "${content}" 2>/dev/null || {
+      printf 'low_quality_agentic_briefing\n' >&2
+      return 1
+    }
+    body="$(aegis_briefing_render "${content}" 2>/dev/null || true)"
+    [[ -n "${body}" ]] || {
+      printf 'render_failed\n' >&2
+      return 1
+    }
+    printf '%s' "${body}"
+    return 0
+  fi
+
+  # Agentic handover never calls the supervisor LLM: a free-prose goal is
+  # not accepted for expansion here — the assistant must supply schema JSON.
+  # Return 1 so the caller falls back to the mechanical body / --accept.
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    printf 'agentic_requires_schema_json\n' >&2
+    return 1
+  fi
 
   local api_base api_key model timeout max_tokens
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
@@ -661,6 +704,11 @@ aegis_supervisor_split_enabled() {
   case "${AEGIS_SUPERVISOR_SPLIT:-1}" in
     0|false|no) return 1 ;;
   esac
+  # Agentic handover: the assistant owns demand partitioning; never run the
+  # supervisor split LLM internally.
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    return 1
+  fi
   aegis_briefing_enabled
 }
 

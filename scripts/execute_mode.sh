@@ -1002,7 +1002,13 @@ main() {
   AEGIS_FORENSICS_USE_LLM=""
   if [[ "${AEGIS_MODE}" == "forensics" ]] \
     && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
-    if aegis_forensics_needs_llm \
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+      # Agentic handover: forensics is the assistant's job; never run the
+      # forensics LLM internally.
+      AEGIS_FORENSICS_USE_LLM=0
+      omit_active_evidence_entry "filesystem.search_symbol"
+      aegis_log "forensics_evidence: agentic — mechanical path (no LLM)"
+    elif aegis_forensics_needs_llm \
       "${AEGIS_INVESTIGATION_INPUT:-}" \
       "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
       "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"; then

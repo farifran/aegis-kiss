@@ -28,7 +28,7 @@ jq -n '
     artifact_snapshot: {
       mode: "forensics",
       operational_context: {
-        build_candidates: [
+        mutation_candidates: [
           {
             id: "src/index.ts",
             reason: "test correction target",
@@ -48,7 +48,7 @@ jq -n '
 run_aider_substrate() {
   env \
     OPENAI_API_KEY="test-key" \
-    AEGIS_MODE="build" \
+    AEGIS_MODE="mutation" \
     AEGIS_EXECUTION_ID="test-execution" \
     AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
     AEGIS_INVESTIGATION_INPUT="adicione uma funcao soma" \
@@ -57,7 +57,7 @@ run_aider_substrate() {
     AEGIS_MUTATION_GIT_DIR="${execution_surface}/.git" \
     AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
     bash scripts/substrates/aider_substrate.sh \
-      ".skills/build.md" \
+      ".skills/mutation.md" \
       "${payload_dir}"
 }
 
@@ -106,10 +106,10 @@ artifact="$(extract_first_artifact_payload "${output}")"
 
 printf '%s\n' "${artifact}" \
   | jq -e '
-      .mode == "build"
+      .mode == "mutation"
       and .files_changed == ["src/index.ts"]
       and .handover_attention.next_attention_targets == ["src/index.ts"]
-      and .handover_attention.attention_reason == "ATTENTION_REASON_BUILD"
+      and .handover_attention.attention_reason == "ATTENTION_REASON_MUTATION"
       and (.diff | contains("export const soma"))
     ' >/dev/null \
   || fail "invalid_mutation_artifact"
@@ -138,12 +138,12 @@ if run_aider_substrate >/dev/null 2>&1; then
   fail "empty_diff_was_accepted"
 fi
 
-jq '.artifact_snapshot.operational_context.build_candidates = []' \
+jq '.artifact_snapshot.operational_context.mutation_candidates = []' \
   "${handover_file}" > "${handover_file}.tmp"
 mv "${handover_file}.tmp" "${handover_file}"
 
 if run_aider_substrate >/dev/null 2>&1; then
-  fail "missing_forensics_build_candidates_was_accepted"
+  fail "missing_forensics_mutation_candidates_was_accepted"
 fi
 
 # --- multi-path investigation unions forensics candidate with named paths ---
@@ -160,7 +160,7 @@ jq -n '
     artifact_snapshot: {
       mode: "forensics",
       operational_context: {
-        build_candidates: [
+        mutation_candidates: [
           { id: "src/tokenBucket.ts", reason: "create module" }
         ],
         required_evidence: ["filesystem.read:src/tokenBucket.ts"]
@@ -201,7 +201,7 @@ chmod +x "${fake_aider}"
 multi_out="$(
   env \
     OPENAI_API_KEY="test-key" \
-    AEGIS_MODE="build" \
+    AEGIS_MODE="mutation" \
     AEGIS_EXECUTION_ID="test-multi" \
     AEGIS_EXECUTION_SURFACE_PATH="${execution_surface}" \
     AEGIS_INVESTIGATION_INPUT="Crie src/tokenBucket.ts e re-exporte em src/index.ts" \
@@ -211,7 +211,7 @@ multi_out="$(
     AEGIS_EPISTEMIC_HANDOVER_FILE="${handover_file}" \
     AEGIS_MUTATION_PREFLIGHT=0 \
     bash scripts/substrates/aider_substrate.sh \
-      ".skills/build.md" \
+      ".skills/mutation.md" \
       "${payload_dir}"
 )"
 
