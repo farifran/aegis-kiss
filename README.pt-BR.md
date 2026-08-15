@@ -70,10 +70,14 @@ O Aegis suporta **dois modos principais de execução** em qualquer ambiente de 
 - **Seleção Flexível de Modelos**:
   - **Modelo Único Global**: Defina `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (ou `ollama/llama3.1:8b`) para usar um único modelo em todas as etapas.
   - **Modelos Especializados por Tarefa/Modo**: Sobrescreva estágios específicos com modelos dedicados:
-    - `AEGIS_SUPERVISOR_MODEL`: Expansão da demanda no Intake & geração da Issue
+    - `AEGIS_SUPERVISOR_MODEL`: Expansão da demanda no Intake & geração da Issue (ex.: `deepseek-ai/deepseek-v4-flash-0731`; default = modelo de briefing)
     - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Mutação e edição de código no Aider (`repair`)
     - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming e falsificação adversária (`adversarial`)
     - `AEGIS_MODEL_VALIDATION`: Tribunal de validação estática (`validation`)
+  - **Knobs de confiabilidade do supervisor**: `AEGIS_BRIEFING_MAX_TOKENS` (default `2048`),
+    `AEGIS_BRIEFING_MAX_ATTEMPTS` (default `2`), `AEGIS_BRIEFING_TIMEOUT_SEC`
+    (default `90`). Um gate de qualidade re-tenta Briefings estruturalmente
+    válidos mas degenerados (álgebra auto-cancelante, declarações duplicadas).
 
 ### 2. 🤖 Handover via Assistente de IA (Copilot, Antigravity, Claude Code, OpenCode, Codex)
 - **Detecção Automática de Ambiente Agêntico**: O Aegis detecta assistentes (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT` ou subshells não-TTY).
@@ -99,6 +103,44 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 | ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. Reuso do lado do provedor ainda não observado; veja [Economia de Tokens](#-topologia-de-kv-cache--economia-de-tokens). |
 | 🛡️ **Semgrep** | Scanner estático de segurança SAST no `static_gate.sh`. | Bloqueia a promoção no Git de falhas OWASP ou injeções. |
 | 🌳 **Tree-sitter** | Extração de escopo esquelético (`AEGIS_READ_SKELETAL=auto`). | **60% a 90% de poda de tokens** em arquivos secundários. |
+
+---
+
+## 🧪 Oráculo Comportamental: Validação Mecânica de Semântica (P2)
+
+O Intake expande uma demanda pelo modelo **supervisor** em um Briefing
+estruturado que carrega uma seção executável **`## Behavior`** — asserts de
+regressão que o coder precisa satisfazer:
+
+```text
+- window slides at the boundary and resets count
+   exports: RateLimiter
+   prelude: const r = new RateLimiter(1, 1000)
+   prelude: r.allow(0n)
+   assert: r.allow(1000n) === true && r.windowStart === 1000n
+```
+
+`fit_check.sh` carrega `## Behavior` para cada demanda de micro-unidade; o **gate
+de behavior** mecânico (`aegis_mechanical_behavior_gate` em `demand.sh`) parseia
+os itens, escopa cada assert para a unidade dona do **primeiro export listado**
+(imports = união dos exports referenciados) e executa com
+`node --experimental-strip-types`. Um assert falho emite um finding
+`behavior_failure` (severidade alta, `supported_by_evidence: true`) que a
+`validation` converte em veredito duro `rejected` com `repair_feedback` — ou
+seja, um candidato que implementa a API mas viola a semântica pretendida
+**não pode** ser promovido. Isso fecha o buraco do "validado mas semanticamente
+errado".
+
+Asserts ancoram tempo no getter exportado `windowStart` (nunca números absolutos
+ou sleeps de relógio real), mantendo o oráculo determinístico. Verificado no
+benchmark RateLimiter: um candidato errado-mas-API-correto que o pipeline antigo
+aceitava (issue #183) agora é rejeitado com findings em todas as unidades
+relevantes.
+
+**Benchmark (braço D, demanda vaga + Aegis).** Com o brief do supervisor + o
+oráculo comportamental, o oráculo de 12 verificações
+(`verify_rate_limiter.ts`) sobe de **0/12 (8B puro)** para **12/12**,
+igualando os braços de demanda estruturada.
 
 ---
 

@@ -70,10 +70,14 @@ Aegis supports **two primary execution modes** across any development environmen
 - **Flexible Model Selection**:
   - **Single Global Model**: Set `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (or `ollama/llama3.1:8b`) to use one model for all pipeline stages.
   - **Per-Task / Per-Mode Models**: Override specific pipeline stages with dedicated models:
-    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & issue generation
+    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & issue generation (e.g. `deepseek-ai/deepseek-v4-flash-0731`; defaults to the brief model)
     - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`repair`)
     - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & falsification (`adversarial`)
     - `AEGIS_MODEL_VALIDATION`: Tribunal static alignment (`validation`)
+  - **Supervisor reliability knobs**: `AEGIS_BRIEFING_MAX_TOKENS` (default `2048`),
+    `AEGIS_BRIEFING_MAX_ATTEMPTS` (default `2`), `AEGIS_BRIEFING_TIMEOUT_SEC`
+    (default `90`). A quality gate retries Briefings that are structurally valid
+    but degenerate (self-cancelling algebra, duplicated declarations).
 
 ### 2. 🤖 AI Assistant Handover (Copilot, Antigravity, Claude Code, OpenCode, Codex)
 - **Automatic Agentic Sensing**: Aegis detects assistant environments (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, or non-TTY subshells).
@@ -99,6 +103,41 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 | ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. Provider-side reuse not yet observed; see [Token Economy](#-kv-cache-topology--token-economy). |
 | 🛡️ **Semgrep** | SAST static security scanner in `static_gate.sh`. | Mechanically blocks Git promotion of OWASP / injection flaws. |
 | 🌳 **Tree-sitter** | Skeletal scope pruning (`AEGIS_READ_SKELETAL=auto`). | **60% to 90% token pruning** on support files. |
+
+---
+
+## 🧪 Behavioral Oracle: Mechanical Validation of Semantics (P2)
+
+Intake expands a demand through the **supervisor** model into a structured
+Briefing that carries an executable **`## Behavior`** section — regression
+asserts the coder must satisfy:
+
+```text
+- window slides at the boundary and resets count
+   exports: RateLimiter
+   prelude: const r = new RateLimiter(1, 1000)
+   prelude: r.allow(0n)
+   assert: r.allow(1000n) === true && r.windowStart === 1000n
+```
+
+`fit_check.sh` carries `## Behavior` into each micro-unit demand; the mechanical
+**behavior gate** (`aegis_mechanical_behavior_gate` in `demand.sh`) parses the
+items, scopes each assert to the unit that owns its **first-listed export**
+(imports are the union of all exports an item references), and executes them
+with `node --experimental-strip-types`. A failing assert emits a
+`behavior_failure` finding (high severity, `supported_by_evidence: true`) that
+`validation` turns into a hard `rejected` verdict with `repair_feedback` — so a
+candidate that implements the API but violates the intended semantics **cannot**
+be promoted. This closes the "validated but semantically wrong" hole.
+
+Assertions anchor time to the exported `windowStart` getter (never absolute
+numbers or real-clock sleeps), keeping the oracle deterministic. Verified on the
+RateLimiter benchmark: a wrong-but-API-correct candidate that the old pipeline
+accepted (issue #183) is now rejected with findings in every relevant unit.
+
+**Benchmark (arm D, vague demand + Aegis).** With the supervisor brief + the
+behavioral oracle the 12-check oracle (`verify_rate_limiter.ts`) goes from
+**0/12 (bare 8B)** to **12/12**, matching the structured-demand arms.
 
 ---
 

@@ -160,6 +160,8 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Repair intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-repair |
+| **Behavioral oracle (P2)** | Supervisor Briefing carries executable `## Behavior` (desc / exports / prelude[] / assert). `fit_check.sh` carries it into each unit demand; `aegis_mechanical_behavior_gate` (demand.sh) parses, scopes each item to the unit owning its **first-listed export**, imports the union of referenced exports, and executes with `node --experimental-strip-types` → `behavior_failure` findings (severity high, `supported_by_evidence: true`) → validation `rejected` + `repair_feedback`. Asserts anchor time to the exported `windowStart` (never absolute numbers / real-clock sleeps) |
+| Supervisor reliability | `aegis_briefing_generate`: `AEGIS_BRIEFING_MAX_TOKENS` (default 2048), `AEGIS_BRIEFING_MAX_ATTEMPTS` (default 2), quality-gate retry on degenerate algebra / duplicated declarations (observed deepseek decode glitches); provenance `AEGIS_BRIEFING_SOURCE=user\|supervisor`; bounded correction loop `AEGIS_BRIEFING_CORRECT_MAX` (default 1) when adversarial findings contradict the Goal |
 | KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest — **not** the Pocket Map, which sits below the `LIVE ZONE` marker); `kind:"cache"` metric in `pipeline_metrics.jsonl` reports `system_bytes` + `prefix_bytes` + `frozen_prefix_bytes` |
 | Skeletal AST Pruning | Optional `AEGIS_READ_SKELETAL=1` via `ast-grep` (Tree-sitter) in `read_file.sh`; `kind:"skeletal_prune"` metric |
 | Multi-Language AST Rules | Language-tagged AST rules in `.harness/enforcement/rules/` (TS, Python, Rust, Go) |
@@ -178,7 +180,7 @@ Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/lib/l
 | `scripts/lib/evidence.sh` | Materialize / select payloads; late `search_symbol` for forensics LLM |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write |
 | `scripts/lib/run_outcome.sh` | Human outcome, metrics JSONL, `last_outcome.json` |
-| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs |
+| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs, **mechanical behavior gate** (`aegis_mechanical_behavior_gate`) + validation substrate (reject/accepted via behavior) |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.  
 Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh` (per-edit: prettier/eslint/static + **project tsc delta** on the edited file so Aider’s auto-lint loop sees real TS errors; baseline debt ignored), `static_gate.sh`.  
@@ -266,6 +268,10 @@ Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent
   reads as *this demand is too large for one execution* — split the demand
   rather than raise the number.
 - Prefer hardening and KISS reduction over new architectural surfaces.
+- **P2 behavioral oracle live** — supervisor-expanded Briefing now carries
+  executable `## Behavior`; wrong-but-API-correct candidates are rejected by the
+  mechanical gate (closed issue #183 hole). Benchmark arm D (vague demand +
+  Aegis): **0/12 → 12/12** (`verify_rate_limiter.ts`).
 
 ---
 
