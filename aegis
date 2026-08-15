@@ -917,6 +917,14 @@ aegis_is_agentic_execution() {
   return 1
 }
 
+# True AI-assistant detection: an agent env var is set (not merely a non-TTY
+# pipe, which can also be a human scripting input). Used to auto-approve TTY
+# prompts only for genuine agent runs; a scripted human decline must still be
+# honoured.
+aegis_is_ai_agent() {
+  [[ -n "${ANTIGRAVITY_AGENT:-}${CLAUDE_CODE:-}${CODEX_AGENT:-}${OPENCODE_AGENT:-}" ]]
+}
+
 cmd_go() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
   local brief_why=""
@@ -967,12 +975,20 @@ cmd_go() {
     intake_relaxed=1
   fi
 
+  # Agentic detection is global: whenever an AI assistant drives the run,
+  # AEGIS_AGENTIC=1 disables internal LLM cognition (supervisor expand/split,
+  # forensics, adversarial) regardless of API-key presence. The interactive
+  # setup wizard below additionally stays off for agents.
+  if aegis_is_agentic_execution; then
+    export AEGIS_AGENTIC=1
+    aegis_log "ambiente agêntico detectado (assistente AI) — operando em modo handover mecânico (sem perguntas TTY)"
+  fi
+
   # Interactive Setup Wizard trigger rule:
   # Trigger interactive setup wizard ONLY if API key is missing AND running interactively by a Human (not AI Agent)
   if [[ -z "${OPENAI_API_KEY:-${NVIDIA_API_KEY:-${GEMINI_API_KEY:-}}}" ]]; then
     if aegis_is_agentic_execution; then
-      export AEGIS_AGENTIC=1
-      aegis_log "ambiente agêntico detectado (assistente AI) — operando em modo handover mecânico (sem perguntas TTY)"
+      :
     elif [[ -t 0 ]] && [[ "${assume_yes}" -ne 1 ]]; then
       cmd_setup
     fi
@@ -1048,8 +1064,7 @@ cmd_go() {
         aegis_log "retomar issue #${issue} na task ${open_task:-1}/${unit_total_resume}"
       fi
       print_micro_plan "${micros_dir}"
-      if [[ "${assume_yes}" -ne 1 ]]; then
-        local answer=""
+      if [[ "${assume_yes}" -ne 1 ]] && ! aegis_is_ai_agent; then
         if [[ -n "${force_task_n}" ]]; then
           printf 'Forçar re-run da task %s/%s e continuar? [y/N] ' \
             "${force_task_n}" "${unit_total_resume}"
@@ -1210,6 +1225,13 @@ cmd_go() {
         # — except transient provider rate-limit, where we derive acceptance
         # from named tokens in the goal so ./aegis --yes still progresses.
         if [[ "${#accepts[@]}" -eq 0 ]]; then
+          # Agentic mode delegates all cognition to the assistant: a prose
+          # demand that the supervisor refused must NOT fall back to grepping
+          # poisoned acceptance tokens from the goal. Require structured
+          # schema JSON (or explicit --accept) from the assistant instead.
+          if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+            aegis_fatal "agentic_requires_schema_json — em modo agêntico a cognição é do assistente; forneça a demanda como schema JSON ou passe --accept com os nomes exatos (ex: --accept TokenBucket --accept obterEstadoBitmask)"
+          fi
           local _why_hint=""
           case "${brief_why:-}" in
             http_429*|*"rate_limit"*) _why_hint=" Provider em rate-limit (HTTP 429)." ;;
@@ -1378,7 +1400,7 @@ cmd_go() {
       fi
     fi
 
-    if [[ "${assume_yes}" -ne 1 ]]; then
+    if [[ "${assume_yes}" -ne 1 ]] && ! aegis_is_ai_agent; then
       while true; do
         if [[ "${multi_unit}" -eq 1 ]]; then
           printf 'Aprovar plano (%s tasks) e correr? [y/N/e (editar plano)] ' \
