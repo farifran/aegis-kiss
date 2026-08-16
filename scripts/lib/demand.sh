@@ -3652,7 +3652,26 @@ aegis_synthesize_agentic_verdict_artifact() {
           aegis_emit_mechanical_adversarial_verified "agentic:${basis}" ;;
         rejected)
           local findings
-          findings="$(jq -c '[.suggestions // [] | .[]? | select(type == "string")] | map({severity: "medium", reason: .})' "${verdict_file}" 2>/dev/null || printf '[]')"
+          findings="$(jq -c '
+            if (.findings // [] | length) > 0 then
+              .findings | map(
+                if type == "string" then {severity: "medium", reason: ., fix: .}
+                elif type == "object" then
+                  {
+                    id: (.id // "adversarial_invariant_violation"),
+                    severity: (.severity // "medium"),
+                    reason: (.reason // .finding // "invariant violation detected"),
+                    target_files: (.target_files // []),
+                    fix: (.fix // .suggestion // "")
+                  }
+                else empty end
+              )
+            elif (.suggestions // [] | length) > 0 then
+              .suggestions | map({severity: "medium", reason: ., fix: .})
+            else
+              [{severity: "medium", reason: (.basis // "rejected by adversarial devil advocate"), fix: ""}]
+            end
+          ' "${verdict_file}" 2>/dev/null || printf '[]')"
           aegis_emit_mechanical_adversarial_findings "${findings}" ;;
         *) return 1 ;;
       esac
