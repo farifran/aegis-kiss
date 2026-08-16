@@ -53,40 +53,33 @@ readonly MICROS_MANUAL_DIR="${ROOT}/.harness/micros"
 usage() {
   cat <<'EOF'
 Usage:
-  ./aegis "<sua instrução>"
-  ./aegis go "<uma frase>" [--target <path>] [--accept <token>]... [--adversarial-depth low|medium|paranoid]
-  ./aegis context [--target PATH]
-  ./aegis split <tasks/sua_issue.md> [diretorio_saida]
+  ./aegis "<sua instrução>" [--target <path>] [--accept <token>]... [--adversarial-depth low|medium|paranoid]
+  ./aegis --issue <N> (ou ./aegis <N>)
   ./aegis squash [issue_number]
+  ./aegis split <tasks/sua_issue.md> [diretorio_saida]
+  ./aegis context [--target PATH]
 
 Só o pedido é obrigatório. O target, se não o deres, sai do reconhecimento
 mecânico do repositório; a acceptance sai do pedido quando ele nomeia código.
 No prompt, "e" abre o rascunho no editor para preencheres o que faltar.
 
-squash    Funde deliberada e manualmente os commits atômicos de micro-tarefas
-          de uma issue em 1 commit consolidado de feature para Pull Request.
+Comandos:
+  ./aegis "<pedido>"    Abre a issue, corre o pipeline de mutation completo e pára no gate
+                        de commit, que é teu. Fatiamento multi-unit determinístico com rollback atômico.
+  ./aegis <N>           Retoma a execução de uma issue existente a partir da primeira task aberta.
+  ./aegis squash <N>    Funde deliberada e manualmente os commits atômicos de micro-tarefas
+                        de uma issue em 1 commit consolidado de feature para Pull Request.
+  ./aegis split <file>  Divide mecanicamente uma Issue em Markdown em micro-unidades
+                        atômicas de 1 target por vez (100% offline, 0 tokens).
+  ./aegis context       Onde o alvo está: branch, worktree e contratos provados (offline).
 
-context   Onde o alvo está: branch, worktree, e o que o registo de commits
-          geridos provou em cada ficheiro (e se ainda lá está).
-          Só leitura, offline, sem LLM.
-
-go        Abre a issue, corre o pipeline de mutation completo e pára no gate
-          de commit, que é teu. Um target por go: dois ficheiros são dois go
-          (ou um plano multi-unit com checkpoint por task).
-          Intake de qualidade é o DEFAULT: expand 8B + Briefing/Acceptance
-          limpos (sem params no Acceptance). Sem API key, usa --accept e/ou
-          body já estruturado. Escape: --relaxed ou AEGIS_INTAKE_RELAXED=1.
-          --accept são tokens curtos que têm de aparecer no código, nunca
-          frases. São a semente do registo.
-          --adversarial-depth (low|medium|paranoid): define a intensidade da
-          falsificação no estágio adversarial (default: medium).
-          --issue N volta a correr uma issue existente; se tiver ## Tasks
-          com [ ], retoma na primeira aberta (keep-progress).
-          --force-task K reabre a task K ([x]→[ ]) e re-corre a partir dela.
-          AEGIS_SQUASH_BATCH=1 funde os commits por unit num só no fim.
-
-split     Divide mecanicamente uma Issue em Markdown em micro-unidades
-          atômicas de 1 target por vez (100% offline, 0 tokens).
+Opções:
+  --issue N             Volta a correr uma issue existente (keep-progress).
+  --force-task K        Reabre a task K ([x]→[ ]) e re-corre a partir dela.
+  --target PATH         Define o arquivo alvo explicitamente.
+  --accept TOKEN        Define símbolos obrigatórios no código.
+  --adversarial-depth   Intensidade do Advogado do Diabo: low | medium | paranoid (default: medium).
+  --agent / --agentic   Execução em modo assistente AI (sem perguntas interativas TTY).
 
 Sem TTY o gate não commita: deixa os paths em stage, a mensagem pronta, e
 imprime os dois comandos que faltam (status PENDING_GATE).
@@ -1838,7 +1831,7 @@ Rewrite the Briefing so the implementation satisfies the original Goal. Fix algo
 
         aegis_warn "task ${task_n}/${unit_total} falhou (${u_status:-UNKNOWN}) — progresso anterior mantido"
         [[ -n "${last_commit}" ]] && printf 'last_ok_commit: %s\n' "${last_commit}"
-        printf 'next: ./aegis go --issue %s   # retoma; ou --force-task %s para reabrir\n' \
+        printf 'next: ./aegis %s   # retoma; ou --force-task %s para reabrir\n' \
           "${issue}" "${task_n}"
         gh_run issue comment "${issue}" --body "$(
           cat <<EOF
@@ -1847,7 +1840,7 @@ Rewrite the Briefing so the implementation satisfies the original Goal. Fix algo
 - failed_task: ${task_n}/${unit_total} (unit-${unit_idx})
 - last_ok_commit: \`${last_commit:-n/a}\`
 - policy: keep-progress — tasks anteriores permanecem no git e na checklist
-- next: \`./aegis go --issue ${issue}\` or \`--force-task ${task_n}\`
+- next: \`./aegis ${issue}\` or \`--force-task ${task_n}\`
 EOF
         )" >/dev/null 2>&1 || true
         # Keep micros_auto for resume/debug; do not roll back commits.
@@ -1859,7 +1852,7 @@ EOF
       if [[ -z "${unit_sha}" ]]; then
         aegis_warn "task ${task_n}/${unit_total} SUCCESS no pipeline mas nada a commitar — a parar (keep-progress)"
         gh_run issue comment "${issue}" --body "$(
-          printf '### AEGIS OUTCOME (partial)\n- status: NO_CHANGE\n- failed_task: %s/%s\n- last_ok_commit: `%s`\n- next: `./aegis go --issue %s`\n' \
+          printf '### AEGIS OUTCOME (partial)\n- status: NO_CHANGE\n- failed_task: %s/%s\n- last_ok_commit: `%s`\n- next: `./aegis %s`\n' \
             "${task_n}" "${unit_total}" "${last_commit:-n/a}" "${issue}"
         )" >/dev/null 2>&1 || true
         emit_result_json "PARTIAL" "${issue}" "${last_commit}" "unit_${unit_idx}_empty_promotion"
@@ -2228,8 +2221,12 @@ main() {
       shift
       cmd_go "$@"
       ;;
+    [0-9]*)
+      # Pure issue number: ./aegis 207 -> ./aegis --issue 207
+      cmd_go --issue "$@"
+      ;;
     context) shift; cmd_context "$@" ;;
-    go)      shift; cmd_go "$@" ;;
+    go)      shift; cmd_go "$@" ;; # Backward compatibility alias
     split)   shift; cmd_split "$@" ;;
     setup)   shift; cmd_setup "$@" ;;
     squash)  shift; cmd_squash "$@" ;;
