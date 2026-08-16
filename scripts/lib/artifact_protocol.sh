@@ -1345,8 +1345,9 @@ load_artifact_enrichment_context() {
     } | command grep -E '\.(ts|tsx|js|jsx|mjs|cjs|sh|py)$' \
       | sort -u \
       | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null \
-      || printf '[]'
+      || true
   )"
+  existing_paths_json="${existing_paths_json:-[]}"
   if ! printf '%s' "${existing_paths_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
     existing_paths_json="[]"
   fi

@@ -842,6 +842,22 @@ execute_substrate() {
     local _opt_handover
     _opt_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
 
+    # Etapa 5: optimize agêntico — synth do verdict do assistente (sem LLM).
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && [[ -n "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]] \
+      && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE}" ]]; then
+      local _agentic_opt
+      _agentic_opt="$(aegis_synthesize_agentic_verdict_artifact "optimize" "${AEGIS_AGENTIC_VERDICT_FILE}")" || _agentic_opt=""
+      if [[ -n "${_agentic_opt}" ]]; then
+        aegis_log "optimize_agentic: artifact sintetizado do verdict do assistente"
+        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+          aegis_record_optimize_metric "agentic_verdict" "$(printf '%s' "${_agentic_opt}" | jq -r '.basis // empty' 2>/dev/null || true)"
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${_agentic_opt}"
+        return 0
+      fi
+    fi
+
     if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT:-0}" -ge 1 ]]; then
       declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
         || aegis_fatal "optimize_passthrough_unavailable"
@@ -1052,6 +1068,26 @@ main() {
     && declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
     local _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
     local _adv_root="."
+
+    # Etapa 6: adversarial agêntico — synth do verdict do assistente (sem LLM).
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && [[ -n "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]] \
+      && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE}" ]]; then
+      local _agentic_adv
+      _agentic_adv="$(aegis_synthesize_agentic_verdict_artifact "adversarial" "${AEGIS_AGENTIC_VERDICT_FILE}")" || _agentic_adv=""
+      if [[ -n "${_agentic_adv}" ]]; then
+        aegis_log "adversarial_agentic: artifact sintetizado do verdict do assistente"
+        if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+          jq -cn '{kind:"adversarial",result:"agentic_verdict"}' \
+            >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${_agentic_adv}"
+        normalize_substrate_output
+        measure "executor_artifact_validation" validate_artifact
+        emit_output
+        return 0
+      fi
+    fi
     _adv_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
     if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
       _adv_files="$(aegis_handover_candidate_files_changed_json "${_adv_handover}")"

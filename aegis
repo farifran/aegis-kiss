@@ -893,6 +893,28 @@ emit_result_json() {
     '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason}'
 }
 
+# Etapa 1/3 — pausa de intake agêntico. Entrega a evidência real (discovery &
+# forensics) ao assistente e pede a demanda como schema JSON. Persiste o
+# estado pendente para --resume consumir. Não é um erro: é handover.
+emit_pending_assistant() {
+  local goal="${1:-}" target="${2:-}" evidence="${3:-}"
+  local pending_file="${RUNTIME_DIR}/pending_assistant.json"
+  mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+  jq -cn \
+    --arg prose "${goal}" \
+    --arg target "${target}" \
+    --arg evidence "${evidence}" \
+    '{schema:"aegis.pending_assistant.v1",prose:$prose,target:$target,evidence:$evidence}' \
+    > "${pending_file}" 2>/dev/null || true
+  printf '\n=== PENDING ASSISTANT (intake) ===\n'
+  printf 'Prose recebida:\n%s\n\nTargets:\n%s\n\nEvidência (discovery & forensics):\n%b\n' \
+    "${goal}" "${target}" "${evidence}"
+  printf '\nDetalha a demanda como schema JSON (issue detalhada pelo agente) e retoma com:\n'
+  printf '  ./aegis --resume --goal \x27<schema-json>\x27 --target \x27%s\x27\n' "${target}"
+  emit_result_json "PENDING_ASSISTANT" "" "" "agentic_requires_schema_json"
+  aegis_log "PENDING_ASSISTANT: intake agêntico pausado; evidência entregue ao assistente"
+}
+
 # One metrics session for the whole go: intake + all multi-unit tasks append
 # into the same pipeline_metrics.jsonl (run_aegis --fresh would otherwise wipe).
 aegis_metrics_session_begin() {
@@ -926,7 +948,7 @@ aegis_is_ai_agent() {
 }
 
 cmd_go() {
-  local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0
+  local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0 resume=0
   local brief_why=""
   local -a accepts=() changes=()
 
@@ -955,6 +977,7 @@ cmd_go() {
         intake_relaxed=1
         export AEGIS_INTAKE_RELAXED=1
         shift ;;
+      --resume) resume=1; shift ;;
       --yes|-y) assume_yes=1; shift ;;
       -h|--help) usage; return 0 ;;
       -*) aegis_fatal "unknown_flag:$1" ;;
@@ -1126,6 +1149,23 @@ cmd_go() {
     # Mechanical fallback that greps constructor params into Acceptance is
     # only allowed with --relaxed / AEGIS_INTAKE_RELAXED=1.
     body=""
+    if [[ "${resume}" -eq 1 ]]; then
+      local pending_file="${RUNTIME_DIR}/pending_assistant.json"
+      local pending_stage=""
+      if [[ -f "${pending_file}" ]]; then
+        pending_stage="$(jq -r '.stage // "intake"' "${pending_file}" 2>/dev/null || printf 'intake')"
+      fi
+      # Etapa 1/3 (intake): o assistente devolveu schema JSON e retoma do intake.
+      if [[ "${pending_stage}" == "intake" || "${pending_stage}" == "" ]] && [[ -f "${pending_file}" ]]; then
+        aegis_log "resume: a consumir estado pendente do intake..."
+        if [[ -z "${target}" ]]; then
+          target="$(jq -r '.target // empty' "${pending_file}" 2>/dev/null || true)"
+          aegis_log "resume: target restaurado: ${target}"
+        fi
+        rm -f "${pending_file}"
+      fi
+      # Etapa 5/6 (pipeline): o pending mantém-se — o resume continua via run_aegis.sh --resume.
+    fi
     if aegis_briefing_enabled; then
       local brief_err intake_evidence="" t
       brief_err="$(mktemp)"
@@ -1230,7 +1270,12 @@ cmd_go() {
           # poisoned acceptance tokens from the goal. Require structured
           # schema JSON (or explicit --accept) from the assistant instead.
           if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
-            aegis_fatal "agentic_requires_schema_json — em modo agêntico a cognição é do assistente; forneça a demanda como schema JSON ou passe --accept com os nomes exatos (ex: --accept TokenBucket --accept obterEstadoBitmask)"
+            # Etapa 1/3: em modo agêntico, prosa sem --accept é handover, não
+            # erro. Discovery & forensics já correram: entrega a evidência real
+            # ao assistente e pausa (PENDING_ASSISTANT) para ele detalhar a
+            # issue como schema JSON. Resume: ./aegis --resume --goal '<schema>'.
+            emit_pending_assistant "${goal}" "${target}" "${intake_evidence:-}"
+            return 1
           fi
           local _why_hint=""
           case "${brief_why:-}" in
@@ -1797,7 +1842,16 @@ EOF
 
   # ── Single-unit path (human commit gate) ──────────────────────
   set +e
-  bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
+  if [[ "${resume}" -eq 1 ]] \
+    && [[ -f "${RUNTIME_DIR}/pending_assistant.json" ]] \
+    && [[ "$(jq -r '.stage // "intake"' "${RUNTIME_DIR}/pending_assistant.json" 2>/dev/null || printf 'intake')" != "intake" ]]; then
+    # Etapas 5/6: pausa de optimize/adversarial — retoma o pipeline pelo
+    # handover (verdict file já gravado pelo assistente), sem --fresh.
+    aegis_log "resume: pipeline pausado — retomando sem --fresh"
+    bash "${ROOT}/run_aegis.sh" --resume --pipeline mutation --issue "${issue}"
+  else
+    bash "${ROOT}/run_aegis.sh" --fresh --pipeline mutation --issue "${issue}"
+  fi
   set -e
 
   local status reason_class reason_code next_step

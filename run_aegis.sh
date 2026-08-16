@@ -444,6 +444,50 @@ clear_pipeline_metrics() {
   append_metrics_run_start
 }
 
+# Etapa 5/6 — pausa de optimize/adversarial em modo agêntico. Entrega ao
+# assistente a evidência real (diff do candidato + demand anchors) e pede o
+# verdict JSON. Não é um erro: é handover. Resume consome o verdict file.
+agentic_verdict_file_for() {
+  local mode="$1"
+  case "${mode}" in
+    optimize)    printf '%s' ".harness/runtime/optimize_verdict.json" ;;
+    adversarial) printf '%s' ".harness/runtime/adversarial_verdict.json" ;;
+    *) printf '' ;;
+  esac
+}
+
+emit_agentic_mode_pause() {
+  local mode="$1"
+  local verdict_file="$2"
+  local pending_file=".harness/runtime/pending_assistant.json"
+  local diff_body demand_anchors
+  diff_body="$(jq -r '.artifact_snapshot.operational_context.diff // empty' "${HANDOVER_FILE}" 2>/dev/null || true)"
+  demand_anchors="$(jq -c '.artifact_snapshot.operational_context.demand_anchors // {}' "${HANDOVER_FILE}" 2>/dev/null || printf '{}')"
+  mkdir -p "$(dirname "${verdict_file}")" 2>/dev/null || true
+  jq -cn \
+    --arg stage "${mode}" \
+    --argjson demand_anchors "${demand_anchors}" \
+    --arg diff "${diff_body}" \
+    --arg verdict_file "${verdict_file}" \
+    '{schema:"aegis.pending_assistant.v1",stage:$stage,demand_anchors:$demand_anchors,diff:$diff,verdict_file:$verdict_file}' \
+    > "${pending_file}" 2>/dev/null || true
+  printf '\n=== PENDING ASSISTANT (mode: %s) ===\n' "${mode}"
+  printf 'Diff do candidato:\n%b\n' "${diff_body}"
+  printf '\nGrava o verdict em %s (schema aegis.verdict.v1: {"status":"approved"|"rejected","basis":"...","suggestions":["..."]}) e retoma com:\n' "${verdict_file}"
+  printf '  ./aegis --resume --issue %s\n' "${ISSUE_NUMBER:-<N>}"
+  emit_result_json "PENDING_ASSISTANT" "${ISSUE_NUMBER:-}" "" "${mode}_awaiting_assistant"
+  aegis_log "PENDING_ASSISTANT: mode ${mode} agêntico pausado; evidência entregue ao assistente"
+}
+
+emit_result_json() {
+  jq -cn \
+    --arg status "${1}" \
+    --arg issue "${2}" \
+    --arg commit "${3}" \
+    --arg reason "${4}" \
+    '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason}'
+}
+
 # Post-forensics early-exit. 0 = HALT (status set); 1 = continue.
 pipeline_should_halt_after_mode() {
   local mode="$1"
@@ -802,6 +846,9 @@ show_final_report() {
   elif [[ "${PIPELINE_STATUS}" == "HALTED" ]]; then
     outcome_status="HALTED"
     outcome_reason="${PIPELINE_REASON}"
+  elif [[ "${PIPELINE_STATUS}" == "PENDING_ASSISTANT" ]]; then
+    outcome_status="PENDING_ASSISTANT"
+    outcome_reason="${PIPELINE_REASON}"
   else
     outcome_status="SUCCESS"
     outcome_reason=""
@@ -1119,6 +1166,25 @@ main() {
   fi
 
   for mode in "${EXECUTION_MODES[@]}"; do
+    # Etapa 5/6: optimize/adversarial em modo agêntico são verificação do
+    # assistente. Sem verdict file → pausa (PENDING_ASSISTANT) entregando a
+    # evidência real. Com verdict → exporta o caminho para o modo sintetizar.
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && { [[ "${mode}" == "optimize" ]] || [[ "${mode}" == "adversarial" ]]; }; then
+      local _vfile
+      _vfile="$(agentic_verdict_file_for "${mode}")"
+      if [[ -n "${_vfile}" && ! -f "${_vfile}" ]]; then
+        emit_agentic_mode_pause "${mode}" "${_vfile}"
+        mark_remaining_skipped
+        MODE_STATUS["${mode}"]="paused"
+        PIPELINE_STATUS="PENDING_ASSISTANT"
+        PIPELINE_REASON="${mode}_awaiting_assistant"
+        break
+      fi
+      export AEGIS_AGENTIC_VERDICT_FILE="${_vfile}"
+      aegis_log "agentic ${mode}: verdict file presente — a sintetizar artifact a partir do assistente"
+    fi
+
     # Pre-mode gate: entering mutation re-checks the forensics handover so
     # we never spend mutation budget on inconclusive / empty candidates.
     if [[ "${mode}" == "mutation" ]] && [[ -f "${HANDOVER_FILE}" ]]; then
@@ -1177,6 +1243,9 @@ main() {
 
   if [[ "${PIPELINE_STATUS}" == "FAILED" ]]; then
     exit 1
+  fi
+  if [[ "${PIPELINE_STATUS}" == "PENDING_ASSISTANT" ]]; then
+    exit 3
   fi
 }
 

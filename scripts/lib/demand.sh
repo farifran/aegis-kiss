@@ -3611,6 +3611,56 @@ aegis_emit_mechanical_adversarial_verified() {
   aegis_emit_framed_json_artifact "${body}"
 }
 
+# Etapa 5/6 — optimize/adversarial agêntico: o assistente preenche o verdict
+# em <stage>_verdict.json e este helper sintetiza o artifact a partir dele.
+# Nunca chama o LLM interno. Verdict schema (aegis.verdict.v1):
+#   {status: "approved"|"rejected", basis: "...", suggestions?: ["..."]}
+# Mapeia para o mesmo shape dos artifacts mecânicos que o validation espera.
+aegis_synthesize_agentic_verdict_artifact() {
+  local mode="${1-}"
+  local verdict_file="${2-}"
+  [[ -f "${verdict_file}" ]] || return 1
+  local status basis suggestions
+  status="$(jq -r '.status // empty' "${verdict_file}" 2>/dev/null || true)"
+  basis="$(jq -r '.basis // "agentic_verdict"' "${verdict_file}" 2>/dev/null || true)"
+  suggestions="$(jq -c '[.suggestions // [] | .[]? | select(type == "string")]' "${verdict_file}" 2>/dev/null || printf '[]')"
+  [[ -n "${status}" ]] || return 1
+
+  case "${mode}" in
+    optimize)
+      case "${status}" in
+        approved)
+          aegis_emit_mechanical_optimize_passthrough "agentic:${basis}" ;;
+        rejected)
+          local body
+          body="$(jq -nc --arg b "agentic:${basis}" --argjson sug "${suggestions}" '{
+            status: "can_improve",
+            basis: $b,
+            improvements: [{
+              target_files: [],
+              change: ($sug | if length > 0 then .[0] else "refine per assistant verdict" end),
+              why_safe: "assistant-verdict"
+            }]
+          }')" || return 1
+          aegis_emit_framed_json_artifact "${body}" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    adversarial)
+      case "${status}" in
+        approved)
+          aegis_emit_mechanical_adversarial_verified "agentic:${basis}" ;;
+        rejected)
+          local findings
+          findings="$(jq -c '[.suggestions // [] | .[]? | select(type == "string")] | map({severity: "medium", reason: .})' "${verdict_file}" 2>/dev/null || printf '[]')"
+          aegis_emit_mechanical_adversarial_findings "${findings}" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 # Whether adversarial residual LLM should run (tools/greps already clean).
 # Env AEGIS_ADVERSARIAL_LLM: auto|0|1 (default auto).
 # auto: LLM only when candidate is "large" (lines/files thresholds).
