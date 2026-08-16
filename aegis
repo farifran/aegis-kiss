@@ -36,9 +36,9 @@ source "${ROOT}/scripts/lib/common.sh"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/record.sh"
 # shellcheck disable=SC1091
-source "${ROOT}/scripts/lib/briefing.sh"
-# shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/demand.sh"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/lib/briefing.sh"
 
 AEGIS_LOG_TAG="CLI"
 
@@ -903,48 +903,57 @@ emit_pending_assistant() {
   local pending_file="${RUNTIME_DIR}/pending_assistant.json"
   mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
 
-  local ws_paths_json="[]" targets_analysis_json="[]"
-  local ws_paths
-  ws_paths="$(git ls-files src/ 2>/dev/null || true)"
-  if [[ -n "${ws_paths}" ]]; then
-    ws_paths_json="$(printf '%s\n' "${ws_paths}" | jq -R . | jq -s .)"
-  fi
-
+  # Mapeia evidência estruturada de cada target
+  local targets_evidence_json="[]"
   local t
-  local -a t_objs=()
   for t in ${target}; do
+    local t_exists=false t_exports="[]" t_snippet=""
     if [[ -f "${t}" ]]; then
-      local t_exp t_snip
-      t_exp="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null | tr '\n' ' ' || true)"
-      t_snip="$(head -n 25 "${t}" 2>/dev/null || true)"
-      t_objs+=("$(jq -nc --arg path "${t}" --arg exp "${t_exp}" --arg snip "${t_snip}" '{path:$path,exists:true,exports:($exp | split(" ") | map(select(length > 0))),snippet:$snip}')")
-    else
-      t_objs+=("$(jq -nc --arg path "${t}" '{path:$path,exists:false,exports:[],snippet:""}')")
+      t_exists=true
+      local raw_exports
+      raw_exports="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null || true)"
+      if [[ -n "${raw_exports}" ]]; then
+        t_exports="$(printf '%s\n' "${raw_exports}" | sed '/^$/d' | jq -R . | jq -s . 2>/dev/null || printf '[]')"
+      fi
+      t_snippet="$(head -n 30 "${t}" 2>/dev/null || true)"
     fi
+    targets_evidence_json="$(jq \
+      --arg path "${t}" \
+      --argjson exists "${t_exists}" \
+      --argjson exports "${t_exports}" \
+      --arg snippet "${t_snippet}" \
+      '. + [{path: $path, exists: $exists, exports: $exports, snippet: $snippet}]' \
+      <<< "${targets_evidence_json}" 2>/dev/null || printf '%s' "${targets_evidence_json}")"
   done
-  if [[ "${#t_objs[@]}" -gt 0 ]]; then
-    targets_analysis_json="$(printf '%s\n' "${t_objs[@]}" | jq -s .)"
+
+  # Pocket map do workspace
+  local pocket_map_json="[]"
+  if command -v git >/dev/null 2>&1; then
+    pocket_map_json="$(git ls-files src/ 2>/dev/null | head -n 50 | jq -R . | jq -s . 2>/dev/null || printf '[]')"
   fi
 
   jq -cn \
+    --arg schema "aegis.pending_assistant.v1" \
+    --arg stage "intake" \
     --arg prose "${goal}" \
     --arg target "${target}" \
+    --argjson targets_evidence "${targets_evidence_json}" \
+    --argjson pocket_map "${pocket_map_json}" \
     --arg evidence "${evidence}" \
-    --argjson ws_paths "${ws_paths_json}" \
-    --argjson targets_analysis "${targets_analysis_json}" \
     '{
-      schema: "aegis.pending_assistant.v1",
-      stage: "intake",
+      schema: $schema,
+      stage: $stage,
       prose: $prose,
       target: $target,
-      workspace_paths: $ws_paths,
-      targets_analysis: $targets_analysis,
+      targets_evidence: $targets_evidence,
+      pocket_map: $pocket_map,
       evidence: $evidence
     }' > "${pending_file}" 2>/dev/null || true
 
   printf '\n=== PENDING ASSISTANT (intake) ===\n'
-  printf 'Prose recebida:\n%s\n\nTargets:\n%s\n\nEvidência (discovery & forensics):\n%b\n' \
-    "${goal}" "${target}" "${evidence}"
+  printf 'Prose recebida:\n%s\n\nTargets:\n%s\n\nEvidência estruturada (discovery & forensics):\n' \
+    "${goal}" "${target}"
+  jq '.' <<< "${targets_evidence_json}" 2>/dev/null || printf '%b\n' "${evidence}"
   printf '\nDetalha a demanda como schema JSON (issue detalhada pelo agente) e retoma com:\n'
   printf '  ./aegis --resume --goal \x27<schema-json>\x27 --target \x27%s\x27\n' "${target}"
   emit_result_json "PENDING_ASSISTANT" "" "" "agentic_requires_schema_json"
@@ -1206,17 +1215,12 @@ cmd_go() {
       local brief_err intake_evidence="" t
       brief_err="$(mktemp)"
       aegis_log "intake: a analisar o workspace (discovery & forensics) antes de estruturar a demanda..."
-      local ws_paths
-      ws_paths="$(git ls-files src/ 2>/dev/null | tr '\n' ' ' || true)"
-      intake_evidence="Workspace Paths: ${ws_paths}\n\n"
       for t in ${target}; do
         if [[ -f "${t}" ]]; then
           local t_exports t_snippet
-          t_exports="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null | tr '\n' ' ' || true)"
-          t_snippet="$(head -n 25 "${t}" 2>/dev/null || true)"
-          intake_evidence="${intake_evidence}Target (Exists): ${t}\nExisting Exports: ${t_exports}\nSnippet:\n${t_snippet}\n\n"
-        else
-          intake_evidence="${intake_evidence}Target (Net-New): ${t}\n\n"
+          t_exports="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null || true)"
+          t_snippet="$(head -n 20 "${t}" 2>/dev/null || true)"
+          intake_evidence="${intake_evidence}File: ${t}\nExisting Exports: ${t_exports}\nSnippet:\n${t_snippet}\n\n"
         fi
       done
       if [[ -n "$(aegis_intake_md_section "Briefing" "${goal}" | tr -d '[:space:]')" ]] \
