@@ -991,7 +991,7 @@ aegis_is_ai_agent() {
     || [[ ! -t 0 ]]
 }
 
-cmd_go() {
+cmd_run() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0 resume=0
   local brief_why=""
   local -a accepts=() changes=()
@@ -1004,7 +1004,7 @@ cmd_go() {
       --goal)   goal="${2:-}"; shift 2 ;;
       --target)
         [[ -z "${target}" ]] \
-          || aegis_fatal "multiple_targets — um target por go; corre duas vezes"
+          || aegis_fatal "multiple_targets — um target por vez; corre duas vezes"
         target="${2:-}"; shift 2 ;;
       --accept) accepts+=("${2:-}"); shift 2 ;;
       --change) changes+=("${2:-}"); shift 2 ;;
@@ -1028,7 +1028,7 @@ cmd_go() {
       --yes|-y) assume_yes=1; shift ;;
       -h|--help) usage; return 0 ;;
       -*) aegis_fatal "unknown_flag:$1" ;;
-      # A bare sentence is the goal: ./aegis go "converter X em Y"
+      # A bare sentence is the goal: ./aegis "converter X em Y"
       *)
         [[ -z "${goal}" ]] || aegis_fatal "goal_given_twice"
         goal="$1"; shift ;;
@@ -1038,7 +1038,7 @@ cmd_go() {
   command -v jq >/dev/null 2>&1 || aegis_fatal "missing_jq"
 
   if [[ -n "${force_task}" && -z "${issue}" ]]; then
-    aegis_fatal "force_task_requires_issue — usa ./aegis go --issue N --force-task K"
+    aegis_fatal "force_task_requires_issue — usa ./aegis --issue N --force-task K"
   fi
   # --relaxed flag or env; local also tracks for logging.
   if aegis_intake_relaxed; then
@@ -2219,19 +2219,18 @@ main() {
     --agent|--agentic|--assistant)
       export AEGIS_AGENTIC=1
       shift
-      cmd_go "$@"
+      cmd_run "$@"
       ;;
     [0-9]*)
       # Pure issue number: ./aegis 207 -> ./aegis --issue 207
-      cmd_go --issue "$@"
+      cmd_run --issue "$@"
       ;;
     context) shift; cmd_context "$@" ;;
-    go)      shift; cmd_go "$@" ;; # Backward compatibility alias
     split)   shift; cmd_split "$@" ;;
     setup)   shift; cmd_setup "$@" ;;
     squash)  shift; cmd_squash "$@" ;;
     ""|-h|--help) usage ;;
-    *)       cmd_go "$@" ;;
+    *)       cmd_run "$@" ;;
   esac
 }
 

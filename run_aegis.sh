@@ -430,7 +430,7 @@ metrics_since_last_run_start() {
 clear_pipeline_metrics() {
   ensure_pipeline_metrics_path
 
-  # Multi-unit / parent session (./aegis go): keep prior lines so intake +
+  # Multi-unit / parent session (./aegis): keep prior lines so intake +
   # every unit's kind:tokens accumulate. Parent clears once at session start.
   case "${AEGIS_METRICS_APPEND:-0}" in
     1|true|yes|on|append)
