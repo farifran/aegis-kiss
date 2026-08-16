@@ -926,31 +926,103 @@ aegis_fit_propose_units_json() {
     rx_json=0
     [[ "${wants_reexport}" -eq 1 ]] && rx_json=1
 
+# Topological sort for module paths based on relative imports declared in demand text.
+# Fallback is graceful: preserves input order on cycle or missing metadata.
+aegis_topological_sort_modules() {
+  local demand_text="${1-}"
+  shift || true
+  local -a in_mods=("$@")
+  if [[ "${#in_mods[@]}" -le 1 ]]; then
+    printf '%s\n' "${in_mods[@]+"${in_mods[@]}"}"
+    return 0
+  fi
+
+  local -a ordered=()
+  local -a remaining=("${in_mods[@]}")
+  local progress=1
+  local m dep
+
+  while [[ "${#remaining[@]}" -gt 0 && "${progress}" -eq 1 ]]; do
+    progress=0
+    local -a next_remaining=()
+    for m in "${remaining[@]}"; do
+      local has_unmet=0
+      local m_base
+      m_base="$(basename "${m}" | sed -E 's/\.[a-z]+$//')"
+
+      for dep in "${remaining[@]}"; do
+        [[ "${dep}" == "${m}" ]] && continue
+        local dep_base
+        dep_base="$(basename "${dep}" | sed -E 's/\.[a-z]+$//')"
+        if printf '%s' "${demand_text}" | grep -qE "from[[:space:]]+['\"]\./${dep_base}(\.js)?['\"]"; then
+          has_unmet=1
+          break
+        fi
+      done
+
+      if [[ "${has_unmet}" -eq 0 ]]; then
+        ordered+=("${m}")
+        progress=1
+      else
+        next_remaining+=("${m}")
+      fi
+    done
+    remaining=("${next_remaining[@]+"${next_remaining[@]}"}")
+  done
+
+  if [[ "${#remaining[@]}" -gt 0 ]]; then
+    for m in "${remaining[@]}"; do
+      ordered+=("${m}")
+    done
+  fi
+
+  printf '%s\n' "${ordered[@]}"
+}
+
     # Module paths (non-index), then index.
-    local -a mods=()
+    local -a raw_mods=()
     local has_index=0
     for mod_path in "${arr[@]}"; do
       if [[ "${mod_path}" == "src/index.ts" ]]; then
         has_index=1
       else
-        mods+=("${mod_path}")
+        raw_mods+=("${mod_path}")
       fi
     done
 
+    local -a mods=()
+    if [[ "${#raw_mods[@]}" -gt 0 ]]; then
+      while IFS= read -r sorted_m; do
+        [[ -n "${sorted_m}" ]] && mods+=("${sorted_m}")
+      done <<< "$(aegis_topological_sort_modules "${text}" "${raw_mods[@]}")"
+    fi
+
+    local has_class=0
+    if printf '%s' "${text}" | grep -qE 'export class '; then
+      has_class=1
+    fi
+
     for mod_path in "${mods[@]+"${mods[@]}"}"; do
       if [[ "${export_n}" -ge 2 ]]; then
-        units_acc="$(
-          printf '%s\n' "${export_names}" | jq -R -s -c --arg t "${mod_path}" --argjson acc "${units_acc}" '
-            ($acc) + (
-              split("\n") | map(select(length>0))
-              | map({
-                  title: ("export " + . + " only"),
-                  targets: [$t],
-                  note: ("export_slice:" + .)
-                })
-            )
-          '
-        )"
+        if [[ "${has_class}" -eq 0 && "${AEGIS_GROUP_PURE_FUNCTIONS:-0}" == "1" ]]; then
+          units_acc="$(
+            jq -cn --argjson acc "${units_acc}" --arg t "${mod_path}" \
+              '$acc + [{title:("create "+$t), targets:[$t], note:"create module only; omit reexport"}]'
+          )"
+        else
+          units_acc="$(
+            printf '%s\n' "${export_names}" | jq -R -s -c --arg t "${mod_path}" --argjson acc "${units_acc}" '
+              ($acc) + (
+                split("\n") | map(select(length>0))
+                | map({
+                    title: ("export " + . + " only"),
+                    targets: [$t],
+                    note: ("export_slice:" + .)
+                  })
+              )
+            '
+          )"
+        fi
       else
         units_acc="$(
           jq -cn --argjson acc "${units_acc}" --arg t "${mod_path}" \
