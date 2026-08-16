@@ -979,7 +979,8 @@ aegis_metrics_session_begin() {
 }
 
 aegis_is_agentic_execution() {
-  if [[ -n "${ANTIGRAVITY_AGENT:-}${CLAUDE_CODE:-}${CODEX_AGENT:-}${OPENCODE_AGENT:-}" ]]; then
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+    || [[ -n "${ANTIGRAVITY_AGENT:-}${ANTIGRAVITY_IDE:-}${GEMINI_CLI:-}${CLAUDE_CODE:-}${CLAUDE_AGENT:-}${ANTHROPIC_CLI:-}${CLAUDE_DESKTOP:-}${CODEX_AGENT:-}${CODEX_CLI:-}${OPENAI_AGENT:-}${CHATGPT_CLI:-}${OPENCODE_AGENT:-}${OPENCODE_CLI:-}${OPENHANDS_AGENT:-}${OPEN_CODE:-}${OPENCODE:-}${CURSOR_AGENT:-}${CURSOR_IDE:-}${WINDSURF_AGENT:-}${CODEIUM_AGENT:-}${COPILOT_AGENT:-}${GITHUB_COPILOT:-}${AIDER_AGENT:-}${GOOSE_AGENT:-}${GOOSE_CLI:-}${CLINE_AGENT:-}${ROO_CODE:-}${DEVIN_AGENT:-}${DEVIN_CLI:-}${CONTINUE_AGENT:-}${AI_AGENT:-}${AGENTIC:-}" ]]; then
     return 0
   fi
   if [[ ! -t 0 ]]; then
@@ -988,12 +989,13 @@ aegis_is_agentic_execution() {
   return 1
 }
 
-# True AI-assistant detection: an agent env var is set (not merely a non-TTY
-# pipe, which can also be a human scripting input). Used to auto-approve TTY
-# prompts only for genuine agent runs; a scripted human decline must still be
+# True AI-assistant detection: an agent env var is set or running in non-TTY pipe.
+# Used to auto-approve TTY prompts only for genuine agent runs; a scripted human decline must still be
 # honoured.
 aegis_is_ai_agent() {
-  [[ -n "${ANTIGRAVITY_AGENT:-}${CLAUDE_CODE:-}${CODEX_AGENT:-}${OPENCODE_AGENT:-}" ]]
+  [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+    || [[ -n "${ANTIGRAVITY_AGENT:-}${ANTIGRAVITY_IDE:-}${GEMINI_CLI:-}${CLAUDE_CODE:-}${CLAUDE_AGENT:-}${ANTHROPIC_CLI:-}${CLAUDE_DESKTOP:-}${CODEX_AGENT:-}${CODEX_CLI:-}${OPENAI_AGENT:-}${CHATGPT_CLI:-}${OPENCODE_AGENT:-}${OPENCODE_CLI:-}${OPENHANDS_AGENT:-}${OPEN_CODE:-}${OPENCODE:-}${CURSOR_AGENT:-}${CURSOR_IDE:-}${WINDSURF_AGENT:-}${CODEIUM_AGENT:-}${COPILOT_AGENT:-}${GITHUB_COPILOT:-}${AIDER_AGENT:-}${GOOSE_AGENT:-}${GOOSE_CLI:-}${CLINE_AGENT:-}${ROO_CODE:-}${DEVIN_AGENT:-}${DEVIN_CLI:-}${CONTINUE_AGENT:-}${AI_AGENT:-}${AGENTIC:-}" ]] \
+    || [[ ! -t 0 ]]
 }
 
 cmd_go() {
@@ -1003,6 +1005,9 @@ cmd_go() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --agent|--agentic|--assistant)
+        export AEGIS_AGENTIC=1
+        shift ;;
       --goal)   goal="${2:-}"; shift 2 ;;
       --target)
         [[ -z "${target}" ]] \
@@ -2218,6 +2223,11 @@ cmd_squash() {
 main() {
   local verb="${1:-}"
   case "${verb}" in
+    --agent|--agentic|--assistant)
+      export AEGIS_AGENTIC=1
+      shift
+      cmd_go "$@"
+      ;;
     context) shift; cmd_context "$@" ;;
     go)      shift; cmd_go "$@" ;;
     split)   shift; cmd_split "$@" ;;
