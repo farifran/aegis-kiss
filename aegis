@@ -1595,7 +1595,7 @@ cmd_go() {
   # Pre-flight workspace sanitization (clean stale runtime residue & stale worktrees).
   # Preserve pipeline_metrics.jsonl: session already holds intake (supervisor)
   # tokens; a full rm -rf .harness/runtime used to wipe them before multi-unit.
-  local _metrics_save="" _handover_save=""
+  local _metrics_save="" _handover_save="" _agentic_save=""
   if [[ -n "${AEGIS_METRICS_FILE:-}" && -f "${AEGIS_METRICS_FILE}" ]]; then
     _metrics_save="$(mktemp "${TMPDIR:-/tmp}/aegis_metrics.XXXXXX")"
     cp "${AEGIS_METRICS_FILE}" "${_metrics_save}" 2>/dev/null || _metrics_save=""
@@ -1604,11 +1604,27 @@ cmd_go() {
     _handover_save="$(mktemp "${TMPDIR:-/tmp}/aegis_handover.XXXXXX")"
     cp "${RUNTIME_DIR}/epistemic_handover.json" "${_handover_save}" 2>/dev/null || _handover_save=""
   fi
+  # Etapa 5/6: preserva o estado agêntico (pending + verdicts de optimize/
+  # adversarial) através do wipe — o resume do pipeline precisa deles.
+  if [[ -f "${RUNTIME_DIR}/pending_assistant.json" ]] \
+    || [[ -f "${RUNTIME_DIR}/optimize_verdict.json" ]] \
+    || [[ -f "${RUNTIME_DIR}/adversarial_verdict.json" ]]; then
+    _agentic_save="$(mktemp -d "${TMPDIR:-/tmp}/aegis_agentic.XXXXXX")"
+    cp "${RUNTIME_DIR}/pending_assistant.json" "${_agentic_save}/" 2>/dev/null || true
+    cp "${RUNTIME_DIR}/optimize_verdict.json" "${_agentic_save}/" 2>/dev/null || true
+    cp "${RUNTIME_DIR}/adversarial_verdict.json" "${_agentic_save}/" 2>/dev/null || true
+  fi
   rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
   mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
   if [[ -n "${_handover_save}" && -f "${_handover_save}" ]]; then
     mv "${_handover_save}" "${RUNTIME_DIR}/epistemic_handover.json" 2>/dev/null || true
+  fi
+  if [[ -n "${_agentic_save}" ]]; then
+    mv "${_agentic_save}/pending_assistant.json" "${RUNTIME_DIR}/" 2>/dev/null || true
+    mv "${_agentic_save}/optimize_verdict.json" "${RUNTIME_DIR}/" 2>/dev/null || true
+    mv "${_agentic_save}/adversarial_verdict.json" "${RUNTIME_DIR}/" 2>/dev/null || true
+    rm -rf "${_agentic_save}" 2>/dev/null || true
   fi
   if [[ -n "${_metrics_save}" && -f "${_metrics_save}" ]]; then
     export AEGIS_METRICS_FILE="${RUNTIME_DIR}/pipeline_metrics.jsonl"
@@ -1676,15 +1692,50 @@ cmd_go() {
       ran_any=1
 
       set +e
-      AEGIS_METRICS_APPEND=1 \
-        AEGIS_METRICS_UNIT="${unit_idx}" \
-        AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE}" \
-        AEGIS_ROOT_DIR="${ROOT}" \
-        bash "${ROOT}/run_aegis.sh" --fresh --from-fit "${micros_dir}" --unit "${unit_idx}"
+      # Etapa 5/6: se há pending de optimize/adversarial cujos targets casam
+      # com os da unit actual, retoma via --resume (sem wipe) em vez de --fresh.
+      local _pending_resume=0
+      if [[ -f "${RUNTIME_DIR}/pending_assistant.json" ]] \
+        && [[ "$(jq -r '.stage // "intake"' "${RUNTIME_DIR}/pending_assistant.json" 2>/dev/null || printf 'intake')" != "intake" ]]; then
+        local _p_targets _u_targets
+        _p_targets="$(
+          jq -r '.demand_anchors.seed_targets[]? // .demand_anchors.operator_named_paths[]? // empty' \
+            "${RUNTIME_DIR}/pending_assistant.json" 2>/dev/null | sort -u
+        )"
+        _u_targets="$(unit_target_paths "${unit_file}" | sort -u)"
+        if [[ -n "${_p_targets}" ]] && [[ "${_p_targets}" == "${_u_targets}" ]]; then
+          _pending_resume=1
+        fi
+      fi
+      if [[ "${_pending_resume}" -eq 1 ]]; then
+        aegis_log "resume: task ${task_n} com pending agêntico — a retomar sem --fresh"
+        # Passa a demanda da unit (a mesma que criou o handover) em vez de
+        # --issue: --issue re-buscaria o corpo completo com as 3 tasks e
+        # causaria investigation_input_mismatch contra o handover da unit.
+        AEGIS_METRICS_APPEND=1 \
+          AEGIS_METRICS_UNIT="${unit_idx}" \
+          AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE}" \
+          AEGIS_ROOT_DIR="${ROOT}" \
+          bash "${ROOT}/run_aegis.sh" --resume --pipeline mutation "$(cat "${unit_file}")"
+      else
+        AEGIS_METRICS_APPEND=1 \
+          AEGIS_METRICS_UNIT="${unit_idx}" \
+          AEGIS_METRICS_FILE="${AEGIS_METRICS_FILE}" \
+          AEGIS_ROOT_DIR="${ROOT}" \
+          bash "${ROOT}/run_aegis.sh" --fresh --from-fit "${micros_dir}" --unit "${unit_idx}"
+      fi
       set -e
 
       u_status="$(outcome_field pipeline_status)"
       [[ -n "${u_status}" ]] || u_status="$(outcome_field status)"
+
+      # Etapa 5/6: a unit concluiu a pausa — limpa o estado agêntico desta
+      # unit para não contaminar a próxima (targets podem repetir-se).
+      if [[ "${u_status}" == "SUCCESS" ]]; then
+        rm -f "${RUNTIME_DIR}/pending_assistant.json" \
+          "${RUNTIME_DIR}/optimize_verdict.json" \
+          "${RUNTIME_DIR}/adversarial_verdict.json" 2>/dev/null || true
+      fi
 
       if [[ "${u_status}" != "SUCCESS" ]]; then
         # Briefing-correction loop (semantic backstop). When the brief was
