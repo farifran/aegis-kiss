@@ -258,7 +258,7 @@ collect_mutation_intent_violations() {
   AEGIS_MUTATION_INTENT_DIAGNOSTICS=""
   export AEGIS_MUTATION_INTENT_DIAGNOSTICS
   [[ -n "${diff_content}" ]] || return 0
-  [[ "${AEGIS_MODE:-}" == "build" ]] || return 0
+  [[ "${AEGIS_MODE:-}" == "mutation" || "${AEGIS_MODE:-}" == "build" ]] || return 0
 
   local -a violations=()
   local added tokens token hit=0 token_list
