@@ -10,13 +10,13 @@ Edit **only** loaded target files. Reply with **code edits only** (whole-file or
 
 2. **Complete & Concrete Implementation**:
    - Zero stubs, placeholders, or `// TODO` comments. All logic must be 100% executable.
-   - Obey language-specific module rules (e.g. NodeNext `.js` extensions in TypeScript relative imports).
+   - All relative imports/exports MUST use NodeNext `.js` extensions (e.g. `./tokenBucket.js`).
 
 3. **Clean Code & Comment Discipline**:
    - Zero trivial narration (e.g. `// set tokens`) and zero commented-out dead code.
    - Preserve 100% of pre-existing JSDocs/architectural comments. Never add AI attribution notes (`// AI generated`).
 
-4. **Entrypoint Integrity (e.g. `src/index.ts`, `src/__init__.py`, `src/lib.rs`)**:
+4. **Entrypoint Integrity (`src/index.ts`)**:
    - Append new exports preserving existing ones intact (unless the demand explicitly commands a removal).
 
 5. **Surgical SEARCH/REPLACE & Feedback**:

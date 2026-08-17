@@ -164,24 +164,8 @@ aegis_hash_file() {
   fi
 }
 
-# Targeted extraction from single unified .harness/architecture_presets.md file
-aegis_extract_architecture_preset() {
-  local lang="${1:-typescript}"
-  local preset_file="${AEGIS_ROOT_DIR:-.}/.harness/architecture_presets.md"
-  [[ -f "${preset_file}" ]] || return 0
-
-  # 1. Universal Core (lines before the first ## [)
-  awk '/^## \[/ { exit } { print }' "${preset_file}"
-  # 2. Targeted language section (exact header match)
-  awk -v lang="${lang}" '
-    $0 == ("## [" lang "]") { in_section = 1; next }
-    in_section && /^## \[/ { exit }
-    in_section { print }
-  ' "${preset_file}"
-}
-
 # Deterministic architecture directives resolution across disposable worktrees
-# and substrate roots. Emits custom project architecture or targeted language preset.
+# and substrate roots. Emits section with repo-relative label to preserve prefix.
 aegis_resolve_architecture_section() {
   local surface_path="${1:-}"
   local substrate_root="${2:-${AEGIS_SUBSTRATE_ROOT:-.}}"
@@ -211,17 +195,6 @@ aegis_resolve_architecture_section() {
     arch_label="${arch_label#${surface_path:-__none__}/}"
     arch_label="${arch_label#${substrate_root}/}"
     printf '\nTarget application architecture directives (%s):\n%s\n' "${arch_label}" "$(cat "${arch_path}")"
-  else
-    # Fallback to targeted extraction from unified presets file
-    local lang="typescript"
-    if declare -f aegis_detect_target_language >/dev/null 2>&1; then
-      lang="$(aegis_detect_target_language "${surface_path:-${substrate_root}}")"
-    fi
-    local content
-    content="$(aegis_extract_architecture_preset "${lang}")"
-    if [[ -n "${content}" ]]; then
-      printf '\nTarget application architecture directives (preset:%s):\n%s\n' "${lang}" "${content}"
-    fi
   fi
 }
 
