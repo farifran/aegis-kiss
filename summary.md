@@ -84,7 +84,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | `discovery` | **runtime mechanical only** (no LLM) | Gaps over anchors/probes → `observations` / `rationale` / `required_evidence` |
 | `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `build_candidates[{id,reason}]` |
 | `build` | aider | Bounded mutation from candidates + MUTATION BRIEF |
-| `optimize` | **raw** (advise only) | System Design & Architecture Refactoring (`src/ARCHITECTURE.md` invariants, state pureness, flat control flow); **can_improve** → re-enter **build** once; else passthrough → adversarial |
+| `optimize` | **raw** (advise only) | Systems & Runtime Physics Refactoring (closed-form $O(1)$ math, zero hot-path GC allocations, reference confinement); **can_improve** → re-enter **mutation** once; else passthrough → adversarial |
 | `adversarial` | raw LLM | **Devil's Advocate (Advogado do Diabo)**: Invariant falsification (non-negativity guards, temporal monotonicity / NTP drift, boundary crashes) with **Strict Anti-Overengineering KISS Filter** (no generic factories/frameworks; 1-line surgical fixes only) |
 | `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `build_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
 
@@ -95,7 +95,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
 | `mutation.md` | **Yes** — Aider mutation |
-| `optimize.md` | **Yes** — raw LLM advise-only (System Design & Architecture; JSON plan; no edits) |
+| `optimize.md` | **Yes** — raw LLM advise-only (Systems & Runtime Physics; closed-form $O(1)$ math & zero GC; strict KISS) |
 | `adversarial.md` | **Yes** — raw substrate (Devil's Advocate & Invariant Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers and strict KISS rule; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
 
