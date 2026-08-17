@@ -165,7 +165,7 @@ aegis_hash_file() {
 }
 
 # Deterministic architecture directives resolution across disposable worktrees
-# and substrate roots. Emits section with repo-relative label to preserve prefix.
+# and substrate roots. Emits custom project architecture or Universal Core + Language Presets.
 aegis_resolve_architecture_section() {
   local surface_path="${1:-}"
   local substrate_root="${2:-${AEGIS_SUBSTRATE_ROOT:-.}}"
@@ -195,6 +195,26 @@ aegis_resolve_architecture_section() {
     arch_label="${arch_label#${surface_path:-__none__}/}"
     arch_label="${arch_label#${substrate_root}/}"
     printf '\nTarget application architecture directives (%s):\n%s\n' "${arch_label}" "$(cat "${arch_path}")"
+  else
+    # Fallback to Universal Core + Language Facet Presets
+    local presets_dir="${AEGIS_ROOT_DIR:-.}/.harness/presets"
+    if [[ -d "${presets_dir}" ]]; then
+      local lang="typescript"
+      if declare -f aegis_detect_target_language >/dev/null 2>&1; then
+        lang="$(aegis_detect_target_language "${surface_path:-${substrate_root}}")"
+      fi
+      local core_preset="${presets_dir}/ARCHITECTURE.core.md"
+      local lang_preset="${presets_dir}/ARCHITECTURE.${lang}.md"
+      local content=""
+      [[ -f "${core_preset}" ]] && content="$(cat "${core_preset}")"
+      if [[ -f "${lang_preset}" ]]; then
+        [[ -n "${content}" ]] && content="${content}"$'\n\n'
+        content="${content}$(cat "${lang_preset}")"
+      fi
+      if [[ -n "${content}" ]]; then
+        printf '\nTarget application architecture directives (preset:%s):\n%s\n' "${lang}" "${content}"
+      fi
+    fi
   fi
 }
 
