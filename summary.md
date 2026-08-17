@@ -233,7 +233,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── .skills/                  # Mode contracts (.skills/*.md)
 ├── .harness/
 │   ├── config.sh             # Engine registries, budgets & evidence profiles
-│   ├── presets/              # Canonical architecture presets (Core, TS, Python, Rust, Go)
+│   ├── architecture_presets.md # Unified architecture presets (Universal Core, TS, Python, Rust, Go)
 │   ├── enforcement/          # Static AST grep enforcement rules (.harness/enforcement/rules/*.yml)
 │   ├── local.env             # Local environment variables & secrets (gitignored)
 │   ├── contracts/            # JSON contracts (handover, manifest, outcome)
