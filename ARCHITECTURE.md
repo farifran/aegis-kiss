@@ -1,6 +1,6 @@
-# Target Project Architecture (`src/ARCHITECTURE.md`)
+# Target Project Architecture (`ARCHITECTURE.md`)
 
-Diretrizes exclusivas do projeto alvo em `src/` (escopo de código, padrões de engenharia e convenções inspiradas no PonyTail).
+Diretrizes exclusivas do projeto alvo (escopo de código, padrões de engenharia e convenções inspiradas no PonyTail).
 
 ## 🏛️ 1. Stack & Dependências (Native-First)
 * **Linguagem & Módulos**: Pure Vanilla TypeScript com **NodeNext ESM** (`import { fn } from './file.js'`).

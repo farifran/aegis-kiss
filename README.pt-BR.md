@@ -99,9 +99,9 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 |---|---|---|
 | 🧠 **Karpathy** | Constituição Cognitiva no Byte 0 ([`AGENTS.md`](AGENTS.md)). | Se a LLM alucinar, o tribunal de intenção reprova a saída. |
 | 😈 **Advogado do Diabo** | Falsificador Adversário de Invariantes ([`.skills/adversarial.md`](.skills/adversarial.md)). | Interroga invariantes de não-negatividade (`bits <= 0n`), desvios de relógio NTP e falhas de borda com a **Lei Estrita Anti-Sobre-Engenharia (KISS)** (correções cirúrgicas de 1 linha). |
-| 📐 **PonyTail** | Diretrizes em [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + Regras de AST. | Garante NodeNext ESM, `readonly`, `BigInt` e zero `any`. |
+| 📐 **PonyTail** | Diretrizes em [`ARCHITECTURE.md`](ARCHITECTURE.md) + Regras de AST. | Garante NodeNext ESM, `readonly`, `BigInt` e zero `any`. |
 | ✂️ **Headroom** | Orçamento Epistêmico de 32KB com proteção de âncoras. | Poda arquivos irrelevantes sem apagar a causa raiz do bug. |
-| ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. |
+| ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. |
 | 🛡️ **Semgrep** | Scanner estático de segurança SAST no `static_gate.sh`. | Bloqueia a promoção no Git de falhas OWASP ou injeções. |
 
 ---

@@ -174,13 +174,13 @@ aegis_resolve_architecture_section() {
 
   if [[ -n "${surface_path}" ]]; then
     candidates+=(
-      "${surface_path}/src/ARCHITECTURE.md"
       "${surface_path}/ARCHITECTURE.md"
+      "${surface_path}/src/ARCHITECTURE.md"
     )
   fi
   candidates+=(
-    "${substrate_root}/src/ARCHITECTURE.md"
     "${substrate_root}/ARCHITECTURE.md"
+    "${substrate_root}/src/ARCHITECTURE.md"
   )
 
   for arch_candidate in "${candidates[@]}"; do

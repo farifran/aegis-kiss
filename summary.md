@@ -16,9 +16,9 @@
 | File | Role |
 |---|---|
 | `AGENTS.md` | Cognition constitution (5 Karpathy-inspired rules); injected as preamble on LLM/Aider paths |
+| `ARCHITECTURE.md` | Target application architecture directives & PonyTail engineering patterns |
 | `README.md` | English operator setup, quick start, test entrypoints, 3-tier governance architecture |
 | `README.pt-BR.md` | Portuguese operator setup, quick start, test entrypoints, 3-tier governance architecture |
-| `src/ARCHITECTURE.md` | Target application architecture directives & PonyTail engineering patterns |
 | `INTAKE.md` | Scout/IDE demand playbook (outside mutation runtime) |
 | `entry.md` | Demand protocol design notes (ADR; code wins on conflict) |
 
@@ -103,7 +103,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 
 | Contract | Owner / Role | Invariant Responsibility |
 |---|---|---|
-| `src/ARCHITECTURE.md` | **Target Domain Law** | NodeNext ESM, `BigInt`, zero `any`, `readonly` immutability, pure getters (Single Source of Truth), and non-negativity guards. |
+| `ARCHITECTURE.md` | **Target Domain Law** | NodeNext ESM, `BigInt`, zero `any`, `readonly` immutability, pure getters (Single Source of Truth), and non-negativity guards. |
 | `.skills/mutation.md` | **Coder Surgery Protocol** | 5 Core Directives: target confinement, complete logic (no stubs), clean comments (no narration/dead code), entrypoint integrity, exact SEARCH/REPLACE. |
 | `.skills/optimize.md` | **Systems & Runtime Physics** | Closed-form $O(1)$ math, zero hot-path GC allocations, boundary reference confinement, strict KISS ($\le 5$ lines). |
 | `.skills/adversarial.md` | **Devil's Advocate** | Invariant falsification (non-negativity, NTP clock drift, boundary crashes) under strict 1-line surgical KISS rule. |
@@ -224,6 +224,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── run_aegis.sh              # Low-level pipeline driver
 ├── runtime_aegis.sh          # Sovereign runtime orchestrator
 ├── run_aegis_loop.sh         # Continuous task loop runner
+├── ARCHITECTURE.md           # Target application architecture directives (PonyTail)
 ├── AGENTS.md                 # Cognition constitution loaded into model/Aider preambles
 ├── README.md                 # English documentation & 3-tier governance guide
 ├── README.pt-BR.md           # Portuguese documentation & 3-tier governance guide
@@ -232,6 +233,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── .skills/                  # Mode contracts (.skills/*.md)
 ├── .harness/
 │   ├── config.sh             # Engine registries, budgets & evidence profiles
+│   ├── presets/              # Canonical architecture presets (Core, TS, Python, Rust, Go)
 │   ├── enforcement/          # Static AST grep enforcement rules (.harness/enforcement/rules/*.yml)
 │   ├── local.env             # Local environment variables & secrets (gitignored)
 │   ├── contracts/            # JSON contracts (handover, manifest, outcome)
@@ -245,7 +247,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 │   ├── capabilities/         # Capability handlers (filesystem, git, typescript, eslint, test)
 │   ├── runtime/              # apply_candidate_diff, promote_validated_candidate
 │   └── substrates/           # aider_substrate.sh, raw_llm.sh, static_gate.sh, preflight, test/
-└── src/                      # Target mutation playground (governed by src/ARCHITECTURE.md)
+└── src/                      # Target mutation playground (governed by ARCHITECTURE.md)
 ```
 
 `src/` is the **mutation playground**, not the harness runtime.

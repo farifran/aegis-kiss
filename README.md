@@ -99,9 +99,9 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 |---|---|---|
 | 🧠 **Karpathy** | Cognition Constitution at Byte 0 ([`AGENTS.md`](AGENTS.md)). | Mechanical intent tribunal rejects hallucinated diffs. |
 | 😈 **Devil's Advocate** | Adversarial Invariant Falsifier ([`.skills/adversarial.md`](.skills/adversarial.md)). | Interrogates sign invariants (`bits <= 0n`), NTP clock drift, and boundary crashes with **Strict Anti-Overengineering KISS Filter** (1-line surgical fixes). |
-| 📐 **PonyTail** | Directives in [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + AST rules. | Enforces NodeNext ESM, `readonly`, `BigInt`, zero `any`. |
+| 📐 **PonyTail** | Directives in [`ARCHITECTURE.md`](ARCHITECTURE.md) + AST rules. | Enforces NodeNext ESM, `readonly`, `BigInt`, zero `any`. |
 | ✂️ **Headroom** | Epistemic 32KB Context Budgeting with anchor protection. | Prunes irrelevant files without deleting bug root causes. |
-| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. |
+| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. |
 | 🛡️ **Semgrep** | SAST static security scanner in `static_gate.sh`. | Mechanically blocks Git promotion of OWASP / injection flaws. |
 
 ---
