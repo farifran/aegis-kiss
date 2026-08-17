@@ -94,7 +94,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 |---|---|
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
 | `forensics.md` | **Yes** only on LLM residual path |
-| `build.md` | **Yes** — Aider mutation |
+| `mutation.md` | **Yes** — Aider mutation |
 | `optimize.md` | **Yes** — raw LLM advise-only (System Design & Architecture; JSON plan; no edits) |
 | `adversarial.md` | **Yes** — raw substrate (Devil's Advocate & Invariant Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers and strict KISS rule; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
