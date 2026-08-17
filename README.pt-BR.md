@@ -79,15 +79,15 @@ O Aegis suporta **dois modos principais de execução** em qualquer ambiente de 
     (default `90`). Um gate de qualidade re-tenta Briefings estruturalmente
     válidos mas degenerados (álgebra auto-cancelante, declarações duplicadas).
 
-### 2. 🤖 Handover via Assistente de IA (Copilot, Antigravity, Claude Code, OpenCode, Codex)
-- **Detecção Automática de Ambiente Agêntico**: O Aegis detecta assistentes (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT` ou subshells não-TTY).
-- **Execução Não-Bloqueante & Silenciosa**: Desativa prompts interativos de TTY automaticamente, executando de forma determinística e retornando resultados JSON estruturados diretamente ao assistente.
+### 2. 🤖 Handover via Assistente de IA (Antigravity, Claude Code, Codex, OpenCode, Cursor, Windsurf)
+- **Detecção Automática de Ambiente Agêntico**: O Aegis detecta automaticamente assistentes via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, `CURSOR_AGENT`, `WINDSURF_AGENT`, flags `--agent` / `--agentic` ou subshells não-TTY).
+- **Execução Não-Bloqueante & Silenciosa**: Desativa prompts interativos de TTY, emitindo JSON limpo e estruturado (`pending_assistant.json`) e devolvendo o controle diretamente ao assistente com 0 tokens de overhead externo.
 
 | Cliente / Ambiente | Modo de Execução | Comando / Fluxo |
 |---|---|---|
-| 💻 **Aegis CLI Direto** | Operador Humano (Interativo) | `./aegis "sua demanda" --target src/...` |
+| 💻 **Aegis CLI Direto** | Operador Humano (Interativo) | `./aegis "sua demanda" --target src/...` ou `./aegis <N>` |
 | 🛸 **Antigravity IDE / Codex** | Assistente de IA (Não-bloqueante) | Execução em background via `run_command` ou subshell |
-| 🤖 **Claude Code / OpenCode** | Assistente de IA (Handover Silencioso) | `./aegis "sua demanda"` dentro do assistente |
+| 🤖 **Claude Code / OpenCode / Cursor** | Assistente de IA (Handover Silencioso) | `./aegis "sua demanda"` dentro do assistente |
 
 ---
 
@@ -98,11 +98,11 @@ O Aegis sintetiza 6 grandes projetos open-source em uma engrenagem única e dete
 | Pilar | Papel no Aegis | Benefício Prático Mensurável |
 |---|---|---|
 | 🧠 **Karpathy** | Constituição Cognitiva no Byte 0 ([`AGENTS.md`](AGENTS.md)). | Se a LLM alucinar, o tribunal de intenção reprova a saída. |
+| 😈 **Advogado do Diabo** | Falsificador Adversário de Invariantes ([`.skills/adversarial.md`](.skills/adversarial.md)). | Interroga invariantes de não-negatividade (`bits <= 0n`), desvios de relógio NTP e falhas de borda com a **Lei Estrita Anti-Sobre-Engenharia (KISS)** (correções cirúrgicas de 1 linha). |
 | 📐 **PonyTail** | Diretrizes em [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + Regras de AST. | Garante NodeNext ESM, `readonly`, `BigInt` e zero `any`. |
 | ✂️ **Headroom** | Orçamento Epistêmico de 32KB com proteção de âncoras. | Poda arquivos irrelevantes sem apagar a causa raiz do bug. |
-| ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. Reuso do lado do provedor ainda não observado; veja [Economia de Tokens](#-topologia-de-kv-cache--economia-de-tokens). |
+| ⚡ **LMCache** | Prompt mantido byte a byte idêntico desde o Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + contrato da skill + manifesto de capacidades). | **71% do prompt medido como byte-estável** entre execuções repetidas — acima do mínimo de 1.024 tokens que um prefix cache exige. |
 | 🛡️ **Semgrep** | Scanner estático de segurança SAST no `static_gate.sh`. | Bloqueia a promoção no Git de falhas OWASP ou injeções. |
-| 🌳 **Tree-sitter** | Extração de escopo esquelético (`AEGIS_READ_SKELETAL=auto`). | **60% a 90% de poda de tokens** em arquivos secundários. |
 
 ---
 
@@ -196,13 +196,22 @@ repositório.
 ## 🚦 Portão de Qualidade & Comandos Rápidos
 
 ```bash
-# 1. Inspecionar estado offline (0 tokens)
+# 1. Executar uma nova demanda (Intake + Fit + Pipeline)
+./aegis "Crie TokenBucket em src/tokenBucket.ts"
+
+# 2. Retomar uma issue existente
+./aegis 207
+
+# 3. Consolidar commits atômicos em 1 commit limpo para PR
+./aegis squash 207
+
+# 4. Inspecionar estado offline (0 tokens)
 ./aegis context --target src
 
-# 2. Rodar tribunal estático (AST grep + ESLint + TS)
+# 5. Rodar tribunal estático (AST grep + ESLint + TS)
 npm run aegis:sanity
 
-# 3. Executar suíte de testes do harness
+# 6. Executar suíte de testes do harness
 npm run aegis:test:fast
 ```
 

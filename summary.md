@@ -51,7 +51,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 
 | Entrypoint | Owns |
 |---|---|
-| `./aegis` | Top-level Operator CLI: demand intake, supervisor briefing expand, `fit_check` micro-unit split, batch keep-progress execution, TTY human commit gate |
+| `./aegis` | Top-level Operator CLI: demand intake, topological `fit_check` micro-unit split, batch keep-progress execution, direct `./aegis <N>` resume, `./aegis squash <N>` feature consolidation, TTY human commit gate |
 | `run_aegis.sh` | Low-level driver: pipelines (`mutation` / `readonly`), timing report, run-level outcome, preflight dirty-target check, `pipeline_metrics.jsonl` |
 | `runtime_aegis.sh` | Lifecycle, surface, handover reset/promote, per-mode invoke, build-feedback re-entry, signal termination expunge |
 | `scripts/execute_mode.sh` | Protocol VM: envelope, evidence, substrate, validate/enrich; loads full `AGENTS.md` as preamble |
@@ -62,8 +62,8 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 ## Execution Paradigms & Model Hierarchy
 
 ### 1. Execution Paradigms (2 Modes)
-- **Direct CLI Execution (Human Operator)**: Interactive TTY prompts for human approval, triggers interactive guided setup (`./aegis setup`) if API keys are missing.
-- **AI Assistant Handover (Copilot, Antigravity, Claude Code, OpenCode, Codex)**: Automatic environment sensing via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, non-TTY subshells). Operates in non-blocking, silent handover mode returning structured JSON results.
+- **Direct CLI Execution (Human Operator)**: Direct invocation via `./aegis "<demand>"`, `./aegis <N>`, or `./aegis squash <N>`. Interactive TTY prompts for human approval; triggers interactive setup (`./aegis setup`) if API keys are missing.
+- **AI Assistant Handover (Antigravity, Claude Code, Codex, OpenCode, Cursor, Windsurf, Aider, Devin)**: Automatic environment sensing via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, `CURSOR_AGENT`, `WINDSURF_AGENT`, `--agent` / `--agentic` flags, or non-TTY subshells). Operates in non-blocking, silent handover mode returning structured JSON results.
 
 ### 2. Model Selection Hierarchy
 - **Global Fallback**: `AEGIS_MODEL_DEFAULT` (e.g. `meta/llama-3.1-8b-instruct` or `ollama/llama3.1:8b`). Applies to all pipeline stages unless specialized per-mode overrides are specified.
@@ -72,7 +72,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
   - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`build`).
   - `AEGIS_MODEL_DISCOVERY`: Discovery stage.
   - `AEGIS_MODEL_FORENSICS`: Forensics stage.
-  - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & workflow falsification stage.
+  - `AEGIS_MODEL_ADVERSARIAL`: Devil's Advocate red-teaming & invariant falsification stage.
   - `AEGIS_MODEL_VALIDATION`: Tribunal static validation stage.
   - `AEGIS_MODEL_OPTIMIZE`: System design refactoring stage.
 - **Inference Providers**: Supports local inference (Ollama, vLLM, LM Studio via `OPENAI_API_BASE="http://localhost:11434/v1"`) and cloud endpoints (NVIDIA Integrate, OpenAI, Anthropic, Gemini, DeepSeek).
@@ -85,7 +85,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | `forensics` | mechanical default; raw LLM if multi-seed **probe tie** / force | `build_candidates[{id,reason}]` |
 | `build` | aider | Bounded mutation from candidates + MUTATION BRIEF |
 | `optimize` | **raw** (advise only) | System Design & Architecture Refactoring (`src/ARCHITECTURE.md` invariants, state pureness, flat control flow); **can_improve** → re-enter **build** once; else passthrough → adversarial |
-| `adversarial` | raw LLM | Senior Red Teamer & Falsifier (adaptive depth `low|medium|paranoid`, workflow & async race conditions, state lifecycle invariants, commit record contract alignment) |
+| `adversarial` | raw LLM | **Devil's Advocate (Advogado do Diabo)**: Invariant falsification (non-negativity guards, temporal monotonicity / NTP drift, boundary crashes) with **Strict Anti-Overengineering KISS Filter** (no generic factories/frameworks; 1-line surgical fixes only) |
 | `validation` | **mechanical tribunal** (default; LLM only if `AEGIS_VALIDATION_LLM=1`) | Verdict; `build_feedback` with stable codes (`demand_tokens` / `over_export` / …) |
 
 **Skills (`.skills/<mode>.md`):**
@@ -96,7 +96,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | `forensics.md` | **Yes** only on LLM residual path |
 | `build.md` | **Yes** — Aider mutation |
 | `optimize.md` | **Yes** — raw LLM advise-only (System Design & Architecture; JSON plan; no edits) |
-| `adversarial.md` | **Yes** — raw substrate (System Red Teamer & Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers; unless tools-dirty mechanical) |
+| `adversarial.md` | **Yes** — raw substrate (Devil's Advocate & Invariant Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers and strict KISS rule; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
 
 ---

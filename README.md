@@ -79,15 +79,15 @@ Aegis supports **two primary execution modes** across any development environmen
     (default `90`). A quality gate retries Briefings that are structurally valid
     but degenerate (self-cancelling algebra, duplicated declarations).
 
-### 2. 🤖 AI Assistant Handover (Copilot, Antigravity, Claude Code, OpenCode, Codex)
-- **Automatic Agentic Sensing**: Aegis detects assistant environments (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, or non-TTY subshells).
-- **Non-Blocking & Silent Execution**: Disables TTY interactive prompts automatically, executing deterministically and returning structured JSON outcomes directly to the AI pair-programmer.
+### 2. 🤖 AI Assistant Handover (Antigravity, Claude Code, Codex, OpenCode, Cursor, Windsurf)
+- **Automatic Agentic Sensing**: Aegis automatically detects AI assistant environments via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, `CURSOR_AGENT`, `WINDSURF_AGENT`, `--agent` / `--agentic` flags, or non-TTY subshells).
+- **Non-Blocking & Silent Execution**: Disables interactive TTY prompts, emitting clean structured JSON (`pending_assistant.json`) and returning execution control directly to the AI assistant with 0 external token overhead.
 
 | Client / Environment | Execution Mode | Workflow / Command |
 |---|---|---|
-| 💻 **Direct Aegis CLI** | Human Operator (Interactive) | `./aegis "your demand" --target src/...` |
+| 💻 **Direct Aegis CLI** | Human Operator (Interactive) | `./aegis "your demand" --target src/...` or `./aegis <N>` |
 | 🛸 **Antigravity IDE / Codex** | Agentic Pair-Programmer (Non-blocking) | Background execution via `run_command` or terminal subshell |
-| 🤖 **Claude Code / OpenCode** | Agentic Assistant (Silent Handover) | `./aegis "your demand"` inside assistant prompt |
+| 🤖 **Claude Code / OpenCode / Cursor** | Agentic Assistant (Silent Handover) | `./aegis "your demand"` inside assistant prompt |
 
 ---
 
@@ -98,11 +98,11 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 | Pillar | Role in Aegis | Measurable Practical Benefit |
 |---|---|---|
 | 🧠 **Karpathy** | Cognition Constitution at Byte 0 ([`AGENTS.md`](AGENTS.md)). | Mechanical intent tribunal rejects hallucinated diffs. |
+| 😈 **Devil's Advocate** | Adversarial Invariant Falsifier ([`.skills/adversarial.md`](.skills/adversarial.md)). | Interrogates sign invariants (`bits <= 0n`), NTP clock drift, and boundary crashes with **Strict Anti-Overengineering KISS Filter** (1-line surgical fixes). |
 | 📐 **PonyTail** | Directives in [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) + AST rules. | Enforces NodeNext ESM, `readonly`, `BigInt`, zero `any`. |
 | ✂️ **Headroom** | Epistemic 32KB Context Budgeting with anchor protection. | Prunes irrelevant files without deleting bug root causes. |
-| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. Provider-side reuse not yet observed; see [Token Economy](#-kv-cache-topology--token-economy). |
+| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. |
 | 🛡️ **Semgrep** | SAST static security scanner in `static_gate.sh`. | Mechanically blocks Git promotion of OWASP / injection flaws. |
-| 🌳 **Tree-sitter** | Skeletal scope pruning (`AEGIS_READ_SKELETAL=auto`). | **60% to 90% token pruning** on support files. |
 
 ---
 
@@ -193,13 +193,22 @@ above this range is not supported by evidence in this repository.
 ## 🚦 Quality Gate & Quick Commands
 
 ```bash
-# 1. Offline context inspection (0 tokens)
+# 1. Execute a new demand (Intake + Fit + Pipeline)
+./aegis "Create TokenBucket in src/tokenBucket.ts"
+
+# 2. Resume an existing issue
+./aegis 207
+
+# 3. Squash micro-task commits into 1 clean feature commit for PR
+./aegis squash 207
+
+# 4. Offline context inspection (0 tokens)
 ./aegis context --target src
 
-# 2. Run static tribunal (AST grep + ESLint + TS)
+# 5. Run static tribunal (AST grep + ESLint + TS)
 npm run aegis:sanity
 
-# 3. Execute harness test suite
+# 6. Execute harness test suite
 npm run aegis:test:fast
 ```
 
