@@ -1,17 +1,27 @@
-# MUTATION — Edit Instructions (Aider / Coder)
+# MUTATION — High-Precision Code Surgery Protocol (Aider / Coder)
 
-Edit **only** loaded files. Reply with **code edits only** (whole-file or SEARCH/REPLACE). No prose, JSON, or questions.
+Edit **only** loaded target files. Reply with **code edits only** (whole-file or SEARCH/REPLACE blocks). No prose, JSON, or markdown commentary outside code blocks.
 
-## Core Rules & Engineering Discipline
-1. **Reuse First & Minimal Surface**: Edit existing exports before adding new ones. Expose zero unsolicited helper exports.
-2. **Demand Fidelity**: Implement exact stated constraints (formulas, units, encoding, monotonic timing).
-3. **Single Source of Truth**: Never store redundant mutable state flags (e.g. `private _active: boolean` updated across methods). Compute dynamic boolean states via pure getters (`get active(): boolean`).
-4. **Flat Control Flow**: Place early guard clauses at the top of methods for boundary checks (`if (arg <= 0n) return false;`), eliminating nested `if/else` staircases.
-5. **Strict Type Correctness**: Zero type assertions (`as any`, `as unknown`). Rely on natural TypeScript narrowing and explicit return types.
-6. **Preserve Exports**: In entrypoints (`src/index.ts`), append new exports while preserving 100% of pre-existing exports intact.
+## 🎯 5 Core Directives
 
-## Precedence & Feedback
-Obey **ALVO**, **MUTATION BRIEF**, and **MUTATION FEEDBACK**. On MUTATION FEEDBACK, fix ONLY listed violations within authorized scopes.
+1. **Target & Scope Confinement**:
+   - Edit ONLY authorized loaded files. Never create unrequested auxiliary files.
+   - Zero collateral edits: do not reformat, reorder, or alter existing unrelated methods.
+
+2. **Complete & Concrete Implementation**:
+   - Zero stubs, placeholders, or `// TODO` comments. All logic must be 100% executable.
+   - All relative imports/exports MUST use NodeNext `.js` extensions (e.g. `./tokenBucket.js`).
+
+3. **Clean Code & Comment Discipline**:
+   - Zero trivial narration (e.g. `// set tokens`) and zero commented-out dead code.
+   - Preserve 100% of pre-existing JSDocs/architectural comments. Never add AI attribution notes (`// AI generated`).
+
+4. **Entrypoint Integrity (`src/index.ts`)**:
+   - Append new exports preserving existing ones intact (unless the demand explicitly commands a removal).
+
+5. **Surgical SEARCH/REPLACE & Feedback**:
+   - Use exact, unambiguous lines for `<<<<<<< SEARCH` anchors copied directly from the target file.
+   - On `MUTATION FEEDBACK`, modify ONLY the specific lines cited in the violation. Never rewrite unaffected logic.
 
 ## Output Format
-Output valid whole-file or SEARCH/REPLACE blocks for loaded targets. Never output empty diffs or placeholders.
+Output valid whole-file or SEARCH/REPLACE blocks. Never output empty diffs or placeholders.
