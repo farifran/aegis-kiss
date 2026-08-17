@@ -99,6 +99,16 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | `adversarial.md` | **Yes** — raw substrate (Devil's Advocate & Invariant Falsifier with `AEGIS_ADVERSARIAL_DEPTH` tiers and strict KISS rule; unless tools-dirty mechanical) |
 | `validation.md` | **Contract only** by default; LLM only if `AEGIS_VALIDATION_LLM=1` |
 
+### Orthogonal Skill Architecture (Zero Redundancy)
+
+| Contract | Owner / Role | Invariant Responsibility |
+|---|---|---|
+| `src/ARCHITECTURE.md` | **Target Domain Law** | NodeNext ESM, `BigInt`, zero `any`, `readonly` immutability, pure getters (Single Source of Truth), and non-negativity guards. |
+| `.skills/mutation.md` | **Coder Surgery Protocol** | 5 Core Directives: target confinement, complete logic (no stubs), clean comments (no narration/dead code), entrypoint integrity, exact SEARCH/REPLACE. |
+| `.skills/optimize.md` | **Systems & Runtime Physics** | Closed-form $O(1)$ math, zero hot-path GC allocations, boundary reference confinement, strict KISS ($\le 5$ lines). |
+| `.skills/adversarial.md` | **Devil's Advocate** | Invariant falsification (non-negativity, NTP clock drift, boundary crashes) under strict 1-line surgical KISS rule. |
+| `.skills/validation.md` | **Mechanical Tribunal** | P2 Behavioral Oracle (`node --experimental-strip-types`) + Promotion Gate to Git. |
+
 ---
 
 ## Capability surface (live)
