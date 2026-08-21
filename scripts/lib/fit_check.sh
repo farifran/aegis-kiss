@@ -627,6 +627,24 @@ aegis_fit_briefing_export_names() {
     || true
 }
 
+# Which of the export names belong to one module path. A name belongs to the
+# module it is named after — formulaParser to src/formulaParser.ts — compared
+# without case so a class FormulaParser matches its own file. Prints nothing
+# when no name matches, which the caller reads as "just create this module".
+aegis_fit_names_for_module() {
+  local mod_path="${1-}"
+  local names="${2-}"
+  local base name
+  base="$(basename "${mod_path}" .ts | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    if [[ "$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')" == "${base}" ]]; then
+      printf '%s\n' "${name}"
+    fi
+  done <<< "${names}"
+  return 0
+}
+
 # Keep only the numbered Briefing item / paragraph that defines export Name.
 aegis_fit_briefing_slice_export() {
   local briefing="${1-}"
@@ -998,8 +1016,23 @@ aegis_fit_propose_units_json() {
       has_class=1
     fi
 
+    # With a single module every name is its own: the class and the helper both
+    # live in that file, and slicing them apart is the point. With several
+    # modules a name belongs to the module it is named after — replicating the
+    # whole list onto every path emitted the cartesian product, three modules
+    # by four names, each unit telling one file to export another file's symbol.
+    local mod_names mod_n
     for mod_path in "${mods[@]+"${mods[@]}"}"; do
-      if [[ "${export_n}" -ge 2 ]]; then
+      if [[ "${#mods[@]}" -gt 1 ]]; then
+        mod_names="$(aegis_fit_names_for_module "${mod_path}" "${export_names}")"
+      else
+        mod_names="${export_names}"
+      fi
+      mod_n="$(printf '%s\n' "${mod_names}" | grep -c . || true)"
+      mod_n="${mod_n//[^0-9]/}"
+      mod_n="${mod_n:-0}"
+
+      if [[ "${mod_n}" -ge 2 ]]; then
         if [[ "${has_class}" -eq 0 && "${AEGIS_GROUP_PURE_FUNCTIONS:-0}" == "1" ]]; then
           units_acc="$(
             jq -cn --argjson acc "${units_acc}" --arg t "${mod_path}" \
@@ -1007,7 +1040,7 @@ aegis_fit_propose_units_json() {
           )"
         else
           units_acc="$(
-            printf '%s\n' "${export_names}" | jq -R -s -c --arg t "${mod_path}" --argjson acc "${units_acc}" '
+            printf '%s\n' "${mod_names}" | jq -R -s -c --arg t "${mod_path}" --argjson acc "${units_acc}" '
               ($acc) + (
                 split("\n") | map(select(length>0))
                 | map({

@@ -112,6 +112,47 @@ fi
 jq -e '.run_allowed == false' /tmp/aegis_fit_out2.json >/dev/null \
   || fail "cli_monster_json"
 
+# --- several modules: one unit per module, each exporting its own symbol.
+# Replicating the whole export list onto every path used to emit the cartesian
+# product — three modules by four names, twelve units, each telling one file
+# to export another file's symbol. ---
+multi="$(cat <<'EOF'
+## Goal
+Motor de planilha: analise de formulas, grafo de dependencias e planilha
+
+## Targets
+- src/formulaParser.ts
+- src/dependencyGraph.ts
+- src/spreadsheet.ts
+- src/index.ts
+
+## Change
+Create the three modules and reexport from index.
+
+## Acceptance
+- formulaParser
+- dependencyGraph
+- spreadsheet
+EOF
+)"
+mu="$(aegis_fit_propose_units_json "${multi}")"
+
+[[ "$(printf '%s' "${mu}" | jq 'length')" == "4" ]] \
+  || fail "multi_module_should_emit_one_unit_per_file: $(printf '%s' "${mu}" | jq -c 'map(.title)')"
+printf '%s' "${mu}" | jq -e '[.[].targets[0]] | length == (unique | length)' >/dev/null \
+  || fail "multi_module_units_share_a_target: $(printf '%s' "${mu}" | jq -c 'map(.targets[0])')"
+# no unit may name an export that belongs to a different module
+printf '%s' "${mu}" | jq -e '
+  all(.[];
+    (.note // "") as $n
+    | ($n | startswith("export_slice:") | not)
+      or ((.targets[0] | sub("^src/"; "") | sub("\\.ts$"; "") | ascii_downcase)
+          == ($n | sub("^export_slice:"; "") | ascii_downcase)))
+' >/dev/null || fail "unit_exports_another_modules_symbol: $(printf '%s' "${mu}" | jq -c 'map({t:.targets[0],n:.note})')"
+# the barrel still comes last, after every module it re-exports
+[[ "$(printf '%s' "${mu}" | jq -r '.[-1].targets[0]')" == "src/index.ts" ]] \
+  || fail "barrel_must_be_last: $(printf '%s' "${mu}" | jq -c 'map(.targets[0])')"
+
 # --- emit-micros writes fit.json + unit-N.md with demand ---
 micro_dir="$(mktemp -d)"
 printf '%s' "${monster}" | bash "${AEGIS_TEST_ROOT}/scripts/fit_check_demand.sh" \
