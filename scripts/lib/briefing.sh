@@ -402,7 +402,7 @@ aegis_briefing_typecheck_json() {
   # Out of tree on purpose: the repo tsconfig includes .harness, so a scratch
   # .ts written under it would join `npm run aegis:typecheck`.
   dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_brief_tsc.XXXXXX")" || return 0
-  printf '{"extends":"%s/tsconfig.json","include":["unit.ts"],"compilerOptions":{"noEmit":true,"rootDir":"."}}' \
+  printf '{"extends":"%s/tsconfig.json","include":["unit.ts"],"compilerOptions":{"noEmit":false,"outDir":".","rootDir":"."}}' \
     "${root}" > "${dir}/tsconfig.json"
 
   printf '%s' "${json}" | jq -r '
@@ -429,9 +429,18 @@ aegis_briefing_typecheck_json() {
     + [ (.behavior // []) | to_entries[]
         | "\(.key)" as $i
         | .value as $b
-        | "async function __behavior\($i)(): Promise<void> {\n"
+        | "async function __behavior\($i)(): Promise<boolean> {\n"
           + lines(($b.prelude // [] | if type == "string" then [.] else . end); "  ")
-          + "\n  const __ok\($i): boolean = (\($b.assert // "true"));\n  void __ok\($i);\n}\nvoid __behavior\($i);" ]
+          + "\n  const __ok\($i): boolean = (\($b.assert // "true"));\n  return __ok\($i);\n}" ]
+    + [ (if ((.behavior // []) | length) > 0 then
+          "async function __run_all(): Promise<void> {\n"
+          + "  const errs: string[] = [];\n"
+          + ([ (.behavior // []) | to_entries[]
+               | "  try { if (!(await __behavior\(.key)())) errs.push(\"assert_failed:\(.key)\"); } catch (e: any) { errs.push(\"exception:\(.key):\" + String(e?.message || e)); }"
+             ] | join("\n"))
+          + "\n  if (errs.length > 0) throw new Error(errs.join(\"\\n\"));\n"
+          + "}\nvoid __run_all();"
+        else empty end) ]
     | join("\n\n")
   ' > "${dir}/unit.ts" 2>/dev/null || { rm -rf "${dir}"; return 0; }
   [[ -s "${dir}/unit.ts" ]] || { rm -rf "${dir}"; return 0; }
@@ -459,6 +468,18 @@ aegis_briefing_typecheck_json() {
       END { emit() }
     ' | sort -u
   )"
+
+  # If compilation cleared without fatal errors and JS was emitted, execute
+  # behavior assertions in Node to verify runtime semantics.
+  if ! printf '%s' "${classified}" | grep -q '^tsc:' && [[ -f "${dir}/unit.js" ]]; then
+    local node_out node_rc=0
+    node_out="$(node "${dir}/unit.js" 2>&1)" || node_rc=$?
+    if [[ "${node_rc}" -ne 0 && -n "${node_out}" ]]; then
+      local b_findings
+      b_findings="$(printf '%s\n' "${node_out}" | sed 's/^/behavior-runtime:/')"
+      classified="${classified}${classified:+$'\n'}${b_findings}"
+    fi
+  fi
 
   if [[ -n "${keep}" ]] && [[ -n "${classified}" ]]; then
     cp "${dir}/unit.ts" "${keep}.ts" 2>/dev/null || true
