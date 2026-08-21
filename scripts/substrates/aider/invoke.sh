@@ -443,6 +443,15 @@ invoke_aider() {
     fi
   fi
 
+  # Normalize target files on execution surface
+  local _target_file _full_tf
+  for _target_file in "${file_args[@]:-}"; do
+    _full_tf="${AEGIS_EXECUTION_SURFACE_PATH}/${_target_file#./}"
+    if [[ -f "${_full_tf}" ]]; then
+      sed -i '' 's/․/./g; s/∕/\//g; s/‹/</g; s/›/>/g' "${_full_tf}" 2>/dev/null || true
+    fi
+  done
+
   interpret_aider_exit_status "${AEGIS_AIDER_LAST_STATUS}" "${AEGIS_AIDER_LAST_ELAPSED}"
 }
 

@@ -2307,18 +2307,11 @@ aegis_mechanical_shape_gate() {
   # Acceptance items are the public surface for shape purposes (blocks
   # method-only poison for camelCase names like obterEstadoBitmask).
   local names=()
-  local tok missing_nl=""
+  local tok
   while IFS= read -r tok; do
     [[ -n "${tok}" ]] || continue
     aegis_acceptance_token_is_path_noise "${tok}" 2>/dev/null && continue
     names+=("${tok}")
-    if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
-      if printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
-        missing_nl+="${tok}|not_exported"$'\n'
-      else
-        missing_nl+="${tok}|absent"$'\n'
-      fi
-    fi
   done < <(
     printf '%s\n' "${demand}" \
       | awk '/^## Acceptance[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
@@ -2326,6 +2319,42 @@ aegis_mechanical_shape_gate() {
       | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
       | awk 'NF && !seen[$0]++' || true
   )
+
+  # Auto-fix: if an acceptance identifier exists as a top-level column-0 declaration but lacks export, surgically add export
+  local changed_fix=0
+  for p in "${paths[@]}"; do
+    [[ -n "${p}" ]] || continue
+    abs="${root%/}/${p#./}"
+    [[ -f "${abs}" ]] || continue
+    for tok in "${names[@]}"; do
+      if grep -Eq "^(class|function|const)[[:space:]]+${tok}\b" "${abs}" 2>/dev/null; then
+        sed -i '' -E "s/^(class|function|const)[[:space:]]+${tok}\b/export \1 ${tok}/g" "${abs}" 2>/dev/null || true
+        changed_fix=1
+      fi
+    done
+  done
+
+  if [[ "${changed_fix}" -eq 1 ]]; then
+    corpus=""
+    for p in "${paths[@]}"; do
+      [[ -n "${p}" ]] || continue
+      abs="${root%/}/${p#./}"
+      [[ -f "${abs}" ]] || continue
+      corpus+="$(cat "${abs}" 2>/dev/null || true)"$'\n'
+    done
+  fi
+
+  missing_nl=""
+  for tok in "${names[@]}"; do
+    if ! aegis_acceptance_export_hit "${tok}" "${corpus}"; then
+      if printf '%s\n' "${corpus}" | grep -Fiq -- "${tok}"; then
+        missing_nl+="${tok}|not_exported"$'\n'
+      else
+        missing_nl+="${tok}|absent"$'\n'
+      fi
+    fi
+  done
+
   if [[ -n "$(printf '%s' "${missing_nl}" | tr -d '[:space:]')" ]]; then
     printf 'shape_gate: acceptance_export_missing:\n%s' "${missing_nl}" >&2
     return 1

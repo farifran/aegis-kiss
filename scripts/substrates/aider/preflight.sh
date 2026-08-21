@@ -328,6 +328,64 @@ collect_mutation_intent_violations() {
           _absent="${_absent}${_mt} "
         fi
       done <<< "${acc_missing}"
+
+      # Surgical auto-fix for unexported top-level declarations
+      if [[ -n "${_notexp}" ]]; then
+        local _fix_applied=0 _abs_f _tok
+        while IFS= read -r _f; do
+          [[ -n "${_f}" ]] || continue
+          _abs_f="${AEGIS_EXECUTION_SURFACE_PATH:-}/${_f}"
+          [[ -f "${_abs_f}" ]] || continue
+          for _tok in ${_notexp}; do
+            if grep -Eq "^(class|function|const)[[:space:]]+${_tok}\b" "${_abs_f}" 2>/dev/null; then
+              sed -i '' -E "s/^(class|function|const)[[:space:]]+${_tok}\b/export \1 ${_tok}/g" "${_abs_f}" 2>/dev/null || true
+              _fix_applied=1
+            fi
+          done
+        done < <(
+          printf '%s\n' "${diff_content}" \
+            | grep -E '^\+\+\+ b/' \
+            | sed -E 's|^\+\+\+ b/||' \
+            | sort -u \
+            || true
+        )
+
+        if [[ "${_fix_applied}" -eq 1 ]]; then
+          # Rebuild acc_corpus and re-check missing tokens
+          acc_corpus="${added}"
+          while IFS= read -r _f; do
+            [[ -n "${_f}" ]] || continue
+            [[ -f "${AEGIS_EXECUTION_SURFACE_PATH:-}/${_f}" ]] || continue
+            acc_corpus="${acc_corpus}"$'\n'"$(cat "${AEGIS_EXECUTION_SURFACE_PATH}/${_f}" 2>/dev/null || true)"
+          done < <(
+            printf '%s\n' "${diff_content}" \
+              | grep -E '^\+\+\+ b/' \
+              | sed -E 's|^\+\+\+ b/||' \
+              | sort -u \
+              || true
+          )
+          acc_missing="$(
+            aegis_acceptance_missing_in_corpus \
+              "${AEGIS_INVESTIGATION_INPUT}" "${acc_corpus}" 2>/dev/null
+          )" || acc_rc=$?
+
+          _absent=""
+          _notexp=""
+          if [[ "${acc_rc}" -ne 0 && -n "${acc_missing}" ]]; then
+            while IFS= read -r _mt; do
+              [[ -n "${_mt}" ]] || continue
+              _reason="${_mt##*|}"
+              _mt="${_mt%%|*}"
+              if [[ "${_reason}" == "not_exported" ]]; then
+                _notexp="${_notexp}${_mt} "
+              else
+                _absent="${_absent}${_mt} "
+              fi
+            done <<< "${acc_missing}"
+          fi
+        fi
+      fi
+
       [[ -n "${_absent}" ]] && violations+=(
         "acceptance_absent: ${_absent% } — demanded identifier(s) are nowhere in the candidate; add them"
       )
