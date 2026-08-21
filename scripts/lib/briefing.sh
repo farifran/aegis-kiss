@@ -326,14 +326,6 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | (.methods // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.methods // [])[]? | select(((.name // "") | ident) | not) | "method_not_identifier:\(.name)"),
         ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
-        # The schema has no private helpers: a body calling this._check(...)
-        # that no field, method or getter declares is a TS2339 the coder
-        # cannot fix from the Briefing alone.
-        ((.exports // [])[]?
-          | [(.privateFields // [])[]?.name, (.methods // [])[]?.name, (.getters // [])[]?.name] as $decl
-          | [body_lines[]? | select(type == "string")
-              | capture("this\\.(?<m>_[A-Za-z0-9_]+)\\s*\\("; "g").m] | unique
-          | .[]? | . as $m | select(($decl | index($m)) == null) | "undeclared_member:\($m)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
            then "barrel_not_nodenext:\(.barrelFrom)" else empty end),
         (if ((.behavior // []) | length) > 0
@@ -455,19 +447,25 @@ aegis_briefing_typecheck_json() {
   out="$("${bin}" -p "${dir}" 2>&1 || true)"
 
   # TS2769 carries the "| undefined is not assignable" detail on continuation
-  # lines, so each error is classified together with the lines explaining it.
+  # lines, so each error is folded together with the lines explaining it before
+  # being classified. The dot in /possibly .undefined./ stands for the quote
+  # tsc prints — matching it that way keeps this one awk program in one pair
+  # of shell quotes.
   classified="$(
-    printf '%s\n' "${out}" \
-      | awk '/error TS[0-9]+/ {if (r != "") print r; r = $0; next} r != "" {r = r " " $0} END {if (r != "") print r}' \
-      | while IFS= read -r line; do
-          case "${line}" in
-            *"possibly 'undefined'"*|*"possibly 'null'"*|*"undefined' is not assignable"*)
-              printf 'tsc-strictnull:' ;;
-            *) printf 'tsc:' ;;
-          esac
-          printf '%s\n' "${line}" \
-            | awk '{if (match($0, /error TS[0-9]+/)) print substr($0, RSTART + 6, RLENGTH - 6)}'
-        done | sort -u
+    printf '%s\n' "${out}" | awk '
+      function emit(   code) {
+        if (r == "") return
+        match(r, /error TS[0-9]+/)
+        code = substr(r, RSTART + 6, RLENGTH - 6)
+        if (r ~ /possibly .(undefined|null)./ || r ~ /undefined. is not assignable/)
+          print "tsc-strictnull:" code
+        else
+          print "tsc:" code
+      }
+      /error TS[0-9]+/ { emit(); r = $0; next }
+      r != "" { r = r " " $0 }
+      END { emit() }
+    ' | sort -u
   )"
 
   if [[ -n "${keep}" ]] && [[ -n "${classified}" ]]; then

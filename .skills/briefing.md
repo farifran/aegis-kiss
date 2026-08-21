@@ -54,7 +54,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - No type parameters anywhere: `<T>` cannot be declared in this schema, so `Promise<T>` is an undefined name. Use the concrete type the demand implies, or `unknown`.
    - Every callable member must appear in `methods[]`. Private helpers are NOT expressible: `this._checkIndex(i)` with no `_checkIndex` in `methods[]` is a rejected briefing. Inline the guard in each body (`if (i < 0 || i >= this._capacity) throw new Error('index out of range')`) or declare `_checkIndex` as a method.
    - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
-   - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`, character for character: `src/seatMap.ts` → `./seatMap.js`, never `./seatmap.js`.
+   - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/seatMap.ts` → `./seatMap.js`.
 
 ---
 

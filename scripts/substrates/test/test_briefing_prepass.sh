@@ -124,18 +124,6 @@ printf '%s' "${sanitized}" | jq -e '
 aegis_briefing_validate_json "${sanitized}" 2>/dev/null \
   || fail "sanitized_math_min_should_validate"
 
-# --- the schema has no private helpers: a call the class never declares is a
-# TS2339 the coder cannot fix from the Briefing (bitset loop, _checkIndex) ---
-assert_rejected \
-  "$(mutate '.exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" \
-  "undeclared_member:_checkIndex"
-aegis_briefing_validate_json \
-  "$(mutate '.exports[0].methods += [{"name":"_checkIndex","params":[{"name":"i","type":"bigint"}],"returns":"void","body":["return"]}] | .exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" \
-  2>/dev/null || fail "declared_underscore_method_should_be_accepted"
-aegis_briefing_validate_json \
-  "$(mutate '.exports[0].methods[0].body = ["return this._tokens.toString(2).length > 0"]')" \
-  2>/dev/null || fail "member_call_on_field_should_be_accepted"
-
 # --- a named data shape is expressible without an interface export: it
 # renders into the Briefing but never reaches Acceptance or the barrel,
 # because a type has no runtime symbol for the smoke test to import ---
@@ -161,6 +149,14 @@ aegis_briefing_typecheck_json "${good_json}" >/dev/null \
 aegis_briefing_typecheck_json \
   "$(mutate '.exports[1].params[0].type = "TokenBucketMissing"')" >/dev/null \
   && fail "unknown_type_should_fail_typecheck"
+# the schema has no private helpers: a call the class never declares (the
+# bitset loop kept emitting this._checkIndex) is a TS2339 the coder cannot fix
+aegis_briefing_typecheck_json \
+  "$(mutate '.exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" >/dev/null \
+  && fail "undeclared_private_helper_should_fail_typecheck"
+aegis_briefing_typecheck_json \
+  "$(mutate '.exports[0].methods += [{"name":"_checkIndex","params":[{"name":"i","type":"bigint"}],"returns":"void","body":["return"]}] | .exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" >/dev/null \
+  || fail "declared_underscore_method_should_pass_typecheck"
 aegis_briefing_typecheck_json \
   "$(mutate '.exports[1].body = ["const rows: string[][] = []", "return rows[0].length"]')" >/dev/null \
   || fail "strictnull_residue_must_not_reject"
