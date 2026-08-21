@@ -202,10 +202,10 @@ Schema:
   "barrelFrom": "./thing.js",
   "behavior": [
     {
-      "desc": "consume fails when the bucket is empty",
-      "exports": ["TokenBucket"],
-      "prelude": ["const b = new TokenBucket(100n)"],
-      "assert": "b.consume(101n) === false && b.refillActive === true"
+      "desc": "method returns false when capacity is exceeded",
+      "exports": ["PascalCaseName"],
+      "prelude": ["const instance = new PascalCaseName(100n)"],
+      "assert": "instance.consume(101n) === false"
     }
   ]
 }
