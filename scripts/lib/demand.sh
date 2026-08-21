@@ -3875,6 +3875,8 @@ aegis_format_mutation_feedback_section() {
   [[ -n "${lines}" ]] || return 0
   printf '%s\n' "${lines}"
 }
+aegis_format_build_feedback_section() { aegis_format_mutation_feedback_section "$@"; }
+
 
 # ---------------------------------------------------------
 # Mechanical discovery / forensics (default — no LLM)

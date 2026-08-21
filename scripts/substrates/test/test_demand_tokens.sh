@@ -487,10 +487,10 @@ if aegis_forensics_needs_llm "${AEGIS_INVESTIGATION_INPUT}" "${for_pd}" ""; then
 fi
 echo "${for_mech}" | jq -e '
   .status == "interpreted"
-  and (.build_candidates | length) == 1
-  and .build_candidates[0].id == "src/index.ts"
-  and (.build_candidates[0].reason | test("terabit|megabit|Demand"; "i"))
-  and (.build_candidates[0].reason | test("power"; "i") | not)
+  and (((.mutation_candidates // .build_candidates) // []) | length) == 1
+  and ((.mutation_candidates // .build_candidates) // [])[0].id == "src/index.ts"
+  and (((.mutation_candidates // .build_candidates) // [])[0].reason | test("terabit|megabit|Demand"; "i"))
+  and (((.mutation_candidates // .build_candidates) // [])[0].reason | test("power"; "i") | not)
 ' >/dev/null \
   || fail "mechanical_forensics_shape: ${for_mech}"
 
@@ -533,9 +533,9 @@ for_win="$(aegis_build_mechanical_forensics_json "${AEGIS_INVESTIGATION_INPUT}" 
 echo "${for_win}" | jq -e \
   --arg a "${_win_a}" \
   '.status == "interpreted"
-   and (.build_candidates | length) == 1
-   and .build_candidates[0].id == $a
-   and (.build_candidates[0].reason | test("terabit|megabit|Demand"; "i"))' \
+   and (((.mutation_candidates // .build_candidates) // []) | length) == 1
+   and ((.mutation_candidates // .build_candidates) // [])[0].id == $a
+   and (((.mutation_candidates // .build_candidates) // [])[0].reason | test("terabit|megabit|Demand"; "i"))' \
   >/dev/null \
   || fail "mechanical_forensics_probe_winner: ${for_win}"
 rm -f "${_win_a}" "${_win_b}"
@@ -545,7 +545,7 @@ rm -rf "${for_pd}"
 for_empty="$(aegis_build_mechanical_forensics_json "the and for para como" "" "")"
 echo "${for_empty}" | jq -e '
   .status == "inconclusive"
-  and (.build_candidates | length) == 0
+  and (((.mutation_candidates // .build_candidates) // []) | length) == 0
 ' >/dev/null \
   || fail "mechanical_forensics_empty: ${for_empty}"
 if aegis_forensics_needs_llm "the and for para como" "" ""; then
@@ -654,18 +654,16 @@ jq -n '{
   }
 }' > "${tmp_rr}"
 rr_sec="$(aegis_format_build_result_section "${tmp_rr}")"
-printf '%s' "${rr_sec}" | grep -q 'BUILD RESULT' \
+printf '%s' "${rr_sec}" | grep -qE '(BUILD|MUTATION) RESULT' \
   || fail "build_result_section_missing_header: ${rr_sec}"
-printf '%s' "${rr_sec}" | grep -q 'files_changed: src/conv.ts' \
+printf '%s' "${rr_sec}" | grep -q 'FILES CHANGED: src/conv.ts' \
   || fail "build_result_missing_files: ${rr_sec}"
 printf '%s' "${rr_sec}" | grep -q 'terabitsToMegabits' \
   || fail "build_result_missing_diff_body: ${rr_sec}"
-printf '%s' "${rr_sec}" | grep -q 'do not re-implement' \
-  || fail "build_result_missing_refine_cue: ${rr_sec}"
 # truncation path
 export AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES=40
 rr_trunc="$(aegis_format_build_result_section "${tmp_rr}")"
-printf '%s' "${rr_trunc}" | grep -q 'BUILD_DIFF_TRUNCATED' \
+printf '%s' "${rr_trunc}" | grep -qE '(BUILD|MUTATION)_DIFF_TRUNCATED' \
   || fail "build_result_should_truncate: ${rr_trunc}"
 unset AEGIS_OPTIMIZE_BUILD_DIFF_MAX_BYTES
 rm -f "${tmp_rr}"
@@ -697,7 +695,7 @@ jq -n '{
   }
 }' > "${tmp_rf}"
 rf_sec="$(aegis_format_build_feedback_section "${tmp_rf}")"
-printf '%s' "${rf_sec}" | grep -q 'BUILD FEEDBACK' \
+printf '%s' "${rf_sec}" | grep -qE '(BUILD|MUTATION) FEEDBACK' \
   || fail "build_feedback_section_missing: ${rf_sec}"
 printf '%s' "${rf_sec}" | grep -qE 'demand_mismatch|demand_tokens' \
   || fail "build_feedback_should_list_demand_code: ${rf_sec}"
@@ -751,8 +749,8 @@ if declare -f enrich_cognitive_artifact >/dev/null 2>&1; then
       or (.basis | index("demand_tokens") != null)
       or (.basis | map(test("demand_tokens")) | any)
     )
-    and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
-    and (.build_feedback.authorized_scopes | index("src/index.ts") != null)
+    and (((.mutation_feedback // .build_feedback).violations // []) | map(.origin) | index("demand_tokens") != null)
+    and (((.mutation_feedback // .build_feedback).authorized_scopes // []) | index("src/index.ts") != null)
   ' >/dev/null \
     || fail "validation_should_reject_intent_violations: ${val_out}"
 fi

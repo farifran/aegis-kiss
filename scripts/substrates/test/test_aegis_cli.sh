@@ -27,6 +27,7 @@ aegis_cli="${AEGIS_TEST_ROOT}/aegis"
 # Quality intake is the product default; covered in test_intake_quality.sh.
 export AEGIS_INTAKE_RELAXED=1
 export AEGIS_BRIEFING=0
+export AEGIS_AGENTIC=0
 
 # --- context is read-only and always answers ---
 context_out="$("${aegis_cli}" context 2>&1)" \

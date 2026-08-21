@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# AEGIS HARNESS — EXECUTION PROTOCOL VM
+# AEGIS HARNESS — EXECUTION PROTOCOL VM (KISS Refactored)
 # =========================================================
 #
 # Capability envelope → evidence payloads → substrate →
@@ -28,7 +28,6 @@ export AEGIS_LOAD_LOCAL_ENV=1
 source ".harness/config.sh"
 
 # Full AGENTS.md is the constitutional preamble (short, always current).
-# Do not section-filter: headings drift, the whole contract must ship.
 load_agents_constitution() {
   local agents_file="${AEGIS_ROOT_DIR}/AGENTS.md"
   [[ -f "${agents_file}" ]] || return 0
@@ -52,6 +51,10 @@ AEGIS_LOG_TAG="EXECUTOR"
 # Executor holds no durable state — only propagate signal exit codes.
 trap 'aegis_warn "Interrupted by SIGINT"; trap - INT TERM; exit 130' INT
 trap 'aegis_warn "Interrupted by SIGTERM"; trap - INT TERM; exit 143' TERM
+
+# =========================================================
+# INPUT & ENGINE RESOLUTION
+# =========================================================
 
 validate_executor_inputs() {
   local pair name fatal_tag
@@ -122,7 +125,10 @@ resolve_evidence_profile() {
     "missing_evidence_profile" "empty_evidence_profile"
 }
 
-# Append evidence entry if not already present (O(n) over the small profile).
+# =========================================================
+# EVIDENCE PROFILE AUGMENTATION & RANKING
+# =========================================================
+
 _append_evidence_entry_unique() {
   local entry="$1"
   local active
@@ -133,11 +139,20 @@ _append_evidence_entry_unique() {
   AEGIS_ACTIVE_EVIDENCE_ENTRIES+=("${entry}")
 }
 
-# Discovery-requested reads only (operational_context.required_evidence).
-# Epistemic next_attention_targets are NOT promoted here — those are
-# incomplete attention, materialised separately as deterministic anchors.
-augment_evidence_profile_from_handover() {
+# Drop a capability id from the active evidence list (in-place).
+omit_active_evidence_entry() {
+  local drop="${1-}"
+  local -a kept=()
+  local e
+  [[ -n "${drop}" ]] || return 0
+  for e in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
+    [[ "${e}" == "${drop}" ]] && continue
+    kept+=("${e}")
+  done
+  AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${kept[@]}")
+}
 
+augment_evidence_profile_from_handover() {
   if [[ -f "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}" ]]; then
     local req_ev
     req_ev="$(
@@ -150,13 +165,6 @@ augment_evidence_profile_from_handover() {
   fi
 }
 
-# Runtime-owned content seeds for modes that must interpret file bodies.
-# Sources (mechanical only — never model-invented):
-#   1. operator-named source paths in AEGIS_INVESTIGATION_INPUT
-#   2. epistemic_state.next_attention_targets (path tokens)
-# Caps at AEGIS_DETERMINISTIC_READ_MAX so budgets stay honest.
-# Missing-on-disk paths still materialise as net-new placeholders
-# (see materialize_capability_payloads).
 augment_evidence_profile_from_anchors() {
   case "${AEGIS_MODE}" in
     forensics|mutation|build|adversarial|optimize) ;;
@@ -167,7 +175,6 @@ augment_evidence_profile_from_anchors() {
   local added=0
   local path entry before candidate_paths=""
 
-  # Collect candidate path tokens (newline-separated), then apply.
   candidate_paths="$(
     {
       aegis_extract_operator_named_paths "${AEGIS_INVESTIGATION_INPUT:-}"
@@ -200,17 +207,6 @@ augment_evidence_profile_from_anchors() {
   fi
 }
 
-# Rank evidence entries so budget cuts hit low-signal first.
-# Lower rank number = higher priority (materialize + expose first).
-#   15 layer0_facts  (must precede attention_seed — predecessor payload)
-#   18 attention_seed
-#   20 demand_anchors (after seed so seed_targets can be filled)
-#   30 filesystem.read (content seeds + handover)
-#   40 search_symbol
-#   50 git
-#   60 tools (tsc/eslint/test)
-#   70 list_tree
-#   80 other
 _evidence_entry_priority_rank() {
   local capability="${1%%:*}"
   case "${capability}" in
@@ -248,69 +244,42 @@ prioritize_evidence_entries() {
 }
 
 resolve_evidence_entry_capability() {
-
-  local evidence_entry="$1"
-
-  printf '%s' "${evidence_entry%%:*}"
+  printf '%s' "${1%%:*}"
 }
 
 resolve_evidence_entry_alias() {
-
-  local evidence_entry="$1"
-
-  if [[ "${evidence_entry}" == *:* ]]; then
-    printf '%s' "${evidence_entry#*:}"
-    return 0
+  if [[ "$1" == *:* ]]; then
+    printf '%s' "${1#*:}"
+  else
+    printf '%s' ""
   fi
-
-  printf '%s' ""
 }
 
 resolve_evidence_payload_file() {
-
   local capability="$1"
   local evidence_alias="${2:-}"
   local payload_key="${capability}"
-
   if [[ -n "${evidence_alias}" ]]; then
     payload_key+="_${evidence_alias}"
   fi
-
   payload_key="${payload_key//./_}"
   printf '%s.json' "${payload_key//\//_}"
 }
 
 # =========================================================
-# EXECUTION STATE
+# PAYLOAD & ENVIRONMENT MATERIALIZATION
 # =========================================================
 
 prepare_execution_state() {
-
   aegis_log "Using runtime-prepared execution state..."
-
-  if [[ ! -d "${AEGIS_CAPABILITY_ENV_DIR}" ]]; then
-    mkdir -p "${AEGIS_CAPABILITY_ENV_DIR}" || aegis_fatal "failed_to_create_capability_environment"
-  fi
-  if [[ ! -d "${AEGIS_CAPABILITY_PAYLOAD_DIR}" ]]; then
-    mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || aegis_fatal "failed_to_create_capability_payload_dir"
-  fi
-
+  mkdir -p "${AEGIS_CAPABILITY_ENV_DIR}" || aegis_fatal "failed_to_create_capability_environment"
+  mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR}" || aegis_fatal "failed_to_create_capability_payload_dir"
 }
 
-# =========================================================
-# PAYLOAD VALIDATION
-# =========================================================
-
 validate_materialized_payload() {
-
-  local capability="$1"
-  local payload_path="$2"
-  local expected_classification
-
+  local capability="$1" payload_path="$2" expected_classification
   expected_classification="${AEGIS_CAPABILITY_CLASSIFICATION[$capability]:-}"
-
-  [[ -n "${expected_classification}" ]] \
-    || aegis_fatal "missing_capability_classification"
+  [[ -n "${expected_classification}" ]] || aegis_fatal "missing_capability_classification"
 
   jq -e \
     --arg capability "${capability}" \
@@ -328,12 +297,7 @@ validate_materialized_payload() {
     || aegis_fatal "invalid_capability_payload_contract: ${capability}"
 }
 
-# =========================================================
-# ARGUMENT CONTRACTS
-# =========================================================
-
 resolve_capability_argument() {
-
   local capability="$1"
   local evidence_alias="${2:-}"
 
@@ -342,23 +306,16 @@ resolve_capability_argument() {
       if [[ -n "${evidence_alias}" ]]; then
         declare -p AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS >/dev/null 2>&1 \
           || aegis_fatal "missing_runtime_filesystem_read_target_registry"
-
-        # Case A: Runtime-owned internal target
         if [[ -n "${AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS[$evidence_alias]:-}" ]]; then
           printf '%s' "${AEGIS_RUNTIME_FILESYSTEM_READ_TARGETS[$evidence_alias]}"
           return 0
         fi
-
-        # Case B: Workspace target file - return directly
         printf '%s' "${evidence_alias}"
         return 0
       fi
-
       printf '%s' "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-}"
       ;;
     filesystem.search_symbol)
-      # Bind search to demand tokens (not the static "AEGIS" default).
-      # Fallback keeps config default when free-text yields no tokens.
       aegis_demand_search_query \
         "${AEGIS_INVESTIGATION_INPUT:-}" \
         "${AEGIS_CAPABILITY_ARGUMENTS[$capability]:-AEGIS}"
@@ -372,9 +329,6 @@ resolve_capability_argument() {
   esac
 }
 
-# Isolated child process envelope: clean env with locale + PATH only.
-# Callers pass additional KEY=value pairs then the command.
-#   run_with_isolated_base_env FOO=bar bash script.sh args...
 run_with_isolated_base_env() {
   env -i \
     PATH="${PATH}" \
@@ -386,10 +340,7 @@ run_with_isolated_base_env() {
 }
 
 invoke_capability_handler() {
-
-  local handler="$1"
-  local capability_argument="$2"
-
+  local handler="$1" capability_argument="$2"
   run_with_isolated_base_env \
     AEGIS_EXECUTION_ID="${AEGIS_EXECUTION_ID}" \
     AEGIS_EXECUTION_TIMESTAMP="${AEGIS_EXECUTION_TIMESTAMP}" \
@@ -408,13 +359,177 @@ invoke_capability_handler() {
     bash "${handler}" "${capability_argument}"
 }
 
+materialize_capability_environment() {
+  aegis_log "Materializing capability environment..."
+  local capability handler capability_path
+
+  for capability in "${AEGIS_ACTIVE_CAPABILITIES[@]}"; do
+    handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
+    [[ -n "${handler}" ]] || aegis_fatal "missing_handler_for_capability"
+    [[ -f "${handler}" ]] || aegis_fatal "missing_capability_handler_file"
+
+    capability_path="${AEGIS_CAPABILITY_ENV_DIR}/${capability}"
+    cat > "${capability_path}" <<EOF
+#!/usr/bin/env bash
+exec bash "${AEGIS_EXECUTOR_ROOT}/${handler}" "\$@"
+EOF
+    chmod +x "${capability_path}"
+  done
+}
+
+consume_runtime_owned_capability_manifest() {
+  aegis_log "Consuming runtime-owned capability manifest..."
+  [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] \
+    || aegis_fatal "missing_capability_manifest"
+  printf '%s\n' "${AEGIS_CAPABILITY_MANIFEST}" | jq empty >/dev/null 2>&1 \
+    || aegis_fatal "invalid_runtime_owned_capability_manifest"
+}
+
+select_evidence_payloads() {
+  local evidence_entry capability evidence_alias payload_file payload_path
+  local payload_paths=()
+
+  for evidence_entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
+    capability="$(resolve_evidence_entry_capability "${evidence_entry}")"
+    evidence_alias="$(resolve_evidence_entry_alias "${evidence_entry}")"
+    payload_file="$(resolve_evidence_payload_file "${capability}" "${evidence_alias}")"
+    payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
+
+    [[ -f "${payload_path}" ]] || aegis_fatal "missing_evidence_payload: ${payload_path}"
+    payload_paths+=("${payload_path}")
+  done
+
+  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
+    jq -cn '$ARGS.positional' --args "${payload_paths[@]}"
+  )"
+}
+
+# =========================================================
+# TOKEN BUDGETER & SELECTED MANIFEST
+# =========================================================
+
+: "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
+AEGIS_CONTEXT_BUDGET_PRUNED="false"
+AEGIS_CONTEXT_BUDGET_EXCEEDED="false"
+
+measure_selected_payload_bytes() {
+  local total=0 payload_path
+  while IFS= read -r payload_path; do
+    [[ -f "${payload_path}" ]] || continue
+    total=$((total + $(wc -c < "${payload_path}")))
+  done < <(printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" | jq -r '.[]?')
+  printf '%s' "${total}"
+}
+
+truncate_payload_for_budget() {
+  local payload_path="$1" pruned_tmp full_dir full_path=""
+  pruned_tmp="$(mktemp)"
+  full_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}/.full"
+
+  if [[ -n "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" ]] && mkdir -p "${full_dir}" 2>/dev/null; then
+    full_path="${full_dir}/$(basename "${payload_path}")"
+    cp "${payload_path}" "${full_path}" 2>/dev/null || full_path=""
+  fi
+
+  if jq -c --arg full_path "${full_path}" '
+      { success, capability, classification, execution_id, generated_at, error }
+      + { payload: ({ context_budget_pruned: true, truncated_preview: ((.payload | tojson)[0:1024]) }
+          + (if $full_path == "" then {} else {recoverable_from: $full_path} end)) }
+    ' "${payload_path}" > "${pruned_tmp}" 2>/dev/null; then
+    mv "${pruned_tmp}" "${payload_path}"
+  else
+    rm -f "${pruned_tmp}"
+    aegis_warn "context_budget_truncation_skipped: ${payload_path}"
+  fi
+}
+
+enforce_context_token_budget() {
+  local total_bytes payload_path
+  total_bytes="$(measure_selected_payload_bytes)"
+
+  if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — within ceiling"
+    return 0
+  fi
+
+  aegis_warn "Context budget exceeded: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — pruning lower-priority evidence"
+
+  while IFS= read -r payload_path; do
+    [[ -f "${payload_path}" ]] || continue
+    truncate_payload_for_budget "${payload_path}"
+    AEGIS_CONTEXT_BUDGET_PRUNED="true"
+    total_bytes="$(measure_selected_payload_bytes)"
+    if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+      break
+    fi
+  done < <(
+    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" \
+      | jq -r 'reverse | .[]?' \
+      | while IFS= read -r p; do
+          [[ -f "${p}" ]] || continue
+          case "${p}" in
+            *epistemic_handover*|*runtime_demand_anchors*|*filesystem_read_*) continue ;;
+          esac
+          printf '%s\n' "${p}"
+        done
+  )
+
+  if [[ "${total_bytes}" -gt "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
+    AEGIS_CONTEXT_BUDGET_EXCEEDED="true"
+    aegis_warn "Context budget still above ceiling after pruning: ${total_bytes} bytes (handover context preserved)"
+  else
+    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes after pruning"
+  fi
+}
+
+emit_context_budget_metric() {
+  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
+  jq -cn \
+    --arg mode "${AEGIS_MODE:-}" \
+    --argjson context_bytes "$(measure_selected_payload_bytes)" \
+    --argjson ceiling_bytes "${AEGIS_MAX_CONTEXT_BYTES}" \
+    --argjson evidence_cache_hits "${AEGIS_EVIDENCE_CACHE_HITS:-0}" \
+    --argjson evidence_cache_bytes "${AEGIS_EVIDENCE_CACHE_BYTES:-0}" \
+    --argjson budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
+    --argjson budget_exceeded "${AEGIS_CONTEXT_BUDGET_EXCEEDED:-false}" \
+    '{kind:"cache",mode:$mode,context_bytes:$context_bytes,
+      ceiling_bytes:$ceiling_bytes,evidence_cache_hits:$evidence_cache_hits,
+      evidence_cache_bytes:$evidence_cache_bytes,
+      budget_pruned:$budget_pruned,budget_exceeded:$budget_exceeded}' \
+    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+}
+
+materialize_selected_manifest() {
+  [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] || aegis_fatal "missing_capability_manifest"
+  AEGIS_SELECTED_MANIFEST="$(
+    echo "${AEGIS_CAPABILITY_MANIFEST}" \
+      | jq -c \
+          --arg mode "${AEGIS_MODE}" \
+          --argjson context_budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
+          '{
+            schema_version: .schema_version,
+            runtime_model: .runtime_model,
+            generated_at: .generated_at,
+            execution_id: .execution_id,
+            manifest_hash: .manifest_hash,
+            mode: $mode,
+            execution_engine: .modes[$mode].execution_engine,
+            capability_envelope: .modes[$mode].capability_envelope,
+            evidence_profile: .modes[$mode].evidence_profile,
+            evidence_capabilities: .modes[$mode].evidence_capabilities,
+            capabilities: .modes[$mode].capabilities,
+            context_budget_pruned: $context_budget_pruned
+          }'
+  )"
+  [[ -n "${AEGIS_SELECTED_MANIFEST}" ]] || aegis_fatal "missing_selected_manifest"
+}
+
+# =========================================================
+# SUBSTRATE INVOCATIONS (RAW & AIDER)
+# =========================================================
+
 invoke_raw_substrate() {
-
-  local model="$1"
-  local skill_file="$2"
-  local selected_manifest="$3"
-  local capability_payload_dir="$4"
-
+  local model="$1" skill_file="$2" selected_manifest="$3" capability_payload_dir="$4"
   run_with_isolated_base_env \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
@@ -455,10 +570,7 @@ invoke_raw_substrate() {
 }
 
 invoke_aider_substrate() {
-
-  local skill_file="$1"
-  local capability_payload_dir="$2"
-
+  local skill_file="$1" capability_payload_dir="$2"
   run_with_isolated_base_env \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_API_BASE="${OPENAI_API_BASE:-}" \
@@ -494,467 +606,236 @@ invoke_aider_substrate() {
       "${capability_payload_dir}"
 }
 
-
 # =========================================================
-# CAPABILITY ENVIRONMENT
+# MECHANICAL SUBSTRATE DISPATCH
 # =========================================================
 
-materialize_capability_environment() {
+execute_mechanical_mode() {
+  local out=""
+  case "${AEGIS_MODE}" in
+    discovery)
+      declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1 \
+        || aegis_fatal "discovery_mechanical_unavailable"
+      out="$(aegis_emit_mechanical_discovery_substrate \
+        "${AEGIS_INVESTIGATION_INPUT:-}" \
+        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}")" || out=""
+      [[ -n "${out}" ]] || aegis_fatal "discovery_mechanical_failed"
+      aegis_log "discovery_mechanical: runtime-only (no LLM)"
+      AEGIS_SUBSTRATE_OUTPUT="${out}"
+      return 0
+      ;;
 
-  aegis_log "Materializing capability environment..."
+    validation)
+      case "$(printf '%s' "${AEGIS_VALIDATION_LLM:-0}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on|llm) aegis_log "validation_llm: force (skill loaded)"; return 1 ;;
+      esac
+      declare -f aegis_emit_mechanical_validation_substrate >/dev/null 2>&1 \
+        || aegis_fatal "validation_mechanical_unavailable"
+      out="$(aegis_emit_mechanical_validation_substrate)" || out=""
+      [[ -n "${out}" ]] || aegis_fatal "validation_mechanical_failed"
+      aegis_log "validation_mechanical: tribunal-only (no LLM)"
+      if declare -f aegis_record_validation_metric >/dev/null 2>&1; then
+        aegis_record_validation_metric "mechanical" "tribunal"
+      fi
+      AEGIS_SUBSTRATE_OUTPUT="${out}"
+      return 0
+      ;;
 
-  local capability
-  local handler
-  local capability_path
+    optimize)
+      local h="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+      if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]]; then
+        out="$(aegis_synthesize_agentic_verdict_artifact "optimize" "${AEGIS_AGENTIC_VERDICT_FILE}")" || out=""
+        if [[ -n "${out}" ]]; then
+          aegis_log "optimize_agentic: artifact sintetizado do assistente"
+          if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+            aegis_record_optimize_metric "agentic_verdict" "$(printf '%s' "${out}" | jq -r '.basis // empty' 2>/dev/null || true)"
+          fi
+          AEGIS_SUBSTRATE_OUTPUT="${out}"
+          return 0
+        fi
+      fi
+      if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT:-0}" -ge 1 ]]; then
+        declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 || aegis_fatal "optimize_passthrough_unavailable"
+        out="$(aegis_emit_mechanical_optimize_passthrough "optimize_passthrough_after_refine")" || out=""
+        [[ -n "${out}" ]] || aegis_fatal "optimize_passthrough_failed"
+        aegis_log "optimize_passthrough: after refine (count=${AEGIS_OPTIMIZE_BUILD_COUNT}) — no LLM"
+        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+          aegis_record_optimize_metric "passthrough_after_refine" "count=${AEGIS_OPTIMIZE_BUILD_COUNT}"
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${out}"
+        return 0
+      fi
+      if declare -f aegis_mechanical_optimize_scan >/dev/null 2>&1 \
+        && declare -f aegis_emit_mechanical_optimize_can_improve >/dev/null 2>&1; then
+        local imp
+        imp="$(aegis_mechanical_optimize_scan "${h}" 2>/dev/null || true)"
+        if [[ -n "${imp}" ]] && printf '%s' "${imp}" | jq -e 'type == "object" and (.change|type=="string")' >/dev/null 2>&1; then
+          out="$(aegis_emit_mechanical_optimize_can_improve "${imp}")" || out=""
+          [[ -n "${out}" ]] || aegis_fatal "optimize_mechanical_improve_failed"
+          aegis_log "optimize_mechanical: $(printf '%s' "${imp}" | jq -r '.code // "improve"' 2>/dev/null || echo improve) — no LLM"
+          if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+            aegis_record_optimize_metric "mechanical_improve" "$(printf '%s' "${imp}" | jq -r '.code // empty' 2>/dev/null || true)"
+          fi
+          AEGIS_SUBSTRATE_OUTPUT="${out}"
+          return 0
+        fi
+      fi
+      if [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "0" && "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "false" ]] \
+        && (declare -f aegis_optimize_mutation_is_trivial >/dev/null 2>&1 || declare -f aegis_optimize_build_is_trivial >/dev/null 2>&1) \
+        && (aegis_optimize_mutation_is_trivial "${h}" 2>/dev/null || aegis_optimize_build_is_trivial "${h}"); then
+        declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 || aegis_fatal "optimize_passthrough_unavailable"
+        out="$(aegis_emit_mechanical_optimize_passthrough "optimize_mechanical_clean")" || out=""
+        [[ -n "${out}" ]] || aegis_fatal "optimize_mechanical_clean_failed"
+        aegis_log "optimize_mechanical_clean: no greppable issues — no LLM"
+        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+          aegis_record_optimize_metric "mechanical_clean" "trivial"
+        fi
+        AEGIS_SUBSTRATE_OUTPUT="${out}"
+        return 0
+      fi
+      return 1
+      ;;
 
-  for capability in "${AEGIS_ACTIVE_CAPABILITIES[@]}"; do
-
-    handler="${AEGIS_CAPABILITY_HANDLERS[$capability]:-}"
-
-    [[ -n "${handler}" ]] \
-      || aegis_fatal "missing_handler_for_capability"
-
-    [[ -f "${handler}" ]] \
-      || aegis_fatal "missing_capability_handler_file"
-
-    capability_path="${AEGIS_CAPABILITY_ENV_DIR}/${capability}"
-
-    cat > "${capability_path}" <<EOF
-#!/usr/bin/env bash
-exec bash "${AEGIS_EXECUTOR_ROOT}/${handler}" "\$@"
-EOF
-
-    chmod +x "${capability_path}"
-
-  done
+    forensics)
+      if declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1; then
+        if [[ "${AEGIS_FORENSICS_USE_LLM:-0}" != "1" ]]; then
+          out="$(aegis_emit_mechanical_forensics_substrate \
+            "${AEGIS_INVESTIGATION_INPUT:-}" \
+            "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
+            "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}")" || out=""
+          if [[ -n "${out}" ]]; then
+            aegis_log "forensics_mechanical: skipped LLM+skill (unambiguous anchors)"
+            AEGIS_SUBSTRATE_OUTPUT="${out}"
+            return 0
+          fi
+          aegis_warn "forensics_mechanical_failed — falling back to LLM"
+          if declare -f aegis_forensics_ensure_search_symbol_payload >/dev/null 2>&1; then
+            aegis_forensics_ensure_search_symbol_payload || true
+          fi
+        else
+          aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force (skill loaded)"
+        fi
+      fi
+      return 1
+      ;;
+  esac
+  return 1
 }
 
-
 # =========================================================
-# RUNTIME-OWNED MANIFEST
-# =========================================================
-
-consume_runtime_owned_capability_manifest() {
-
-  aegis_log "Consuming runtime-owned capability manifest..."
-
-  [[ -n "${AEGIS_CAPABILITY_MANIFEST}" ]] \
-    || aegis_fatal "missing_capability_manifest"
-
-  printf '%s\n' "${AEGIS_CAPABILITY_MANIFEST}" \
-    | jq empty \
-      >/dev/null 2>&1 \
-    || aegis_fatal "invalid_runtime_owned_capability_manifest"
-}
-
-# =========================================================
-# EVIDENCE PAYLOAD SELECTION
+# ADVERSARIAL MECHANICAL PATH (ISOLATED)
 # =========================================================
 
-select_evidence_payloads() {
+execute_adversarial_mechanical() {
+  [[ "${AEGIS_MODE}" == "adversarial" ]] || return 1
+  declare -f build_tribunal_tools_gate >/dev/null 2>&1 || return 1
 
-  local evidence_entry
-  local capability
-  local evidence_alias
-  local payload_file
-  local payload_path
-  local payload_paths=()
+  local handover root="." files="[]" gate clean out="" diff_findings
 
-  for evidence_entry in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]}"; do
-
-    capability="$(
-      resolve_evidence_entry_capability "${evidence_entry}"
-    )"
-
-    evidence_alias="$(
-      resolve_evidence_entry_alias "${evidence_entry}"
-    )"
-
-    payload_file="$(
-      resolve_evidence_payload_file "${capability}" "${evidence_alias}"
-    )"
-
-    payload_path="${AEGIS_CAPABILITY_PAYLOAD_DIR}/${payload_file}"
-
-    [[ -f "${payload_path}" ]] \
-      || aegis_fatal "missing_evidence_payload: ${payload_path}"
-
-    payload_paths+=("${payload_path}")
-  done
-
-  export AEGIS_SELECTED_CAPABILITY_PAYLOADS="$(
-    jq -cn '$ARGS.positional' --args "${payload_paths[@]}"
-  )"
-}
-
-# =========================================================
-# TOKEN BUDGETER
-# =========================================================
-#
-# Native size guard over the assembled prompt payload buffer: when the
-# selected evidence payloads exceed AEGIS_MAX_CONTEXT_BYTES, payloads are
-# truncated from the TAIL of the prompt backwards (the epistemic handover
-# read — the failure/candidate context — is never pruned) until the buffer
-# fits. Pruned payloads and the selected manifest are flagged with
-# context_budget_pruned: true.
-#
-# Tail-first, not largest-first: the selected list is already in prompt
-# order (prioritize_evidence_entries), so reversing it cuts the lowest-
-# signal evidence first and leaves the high-signal head intact. Cutting by
-# size instead would destroy a rank-15 anchor merely for being big while
-# rank-70 noise survives — an inversion of the ranking policy above.
-
-# Declared in .harness/config.sh with the other evidence budgets (the
-# handover read ceiling is derived from it). Fallback kept for direct
-# invocations that bypass config.
-: "${AEGIS_MAX_CONTEXT_BYTES:=32768}"
-
-AEGIS_CONTEXT_BUDGET_PRUNED="false"
-AEGIS_CONTEXT_BUDGET_EXCEEDED="false"
-
-measure_selected_payload_bytes() {
-
-  local total=0
-  local payload_path
-
-  while IFS= read -r payload_path; do
-    [[ -f "${payload_path}" ]] || continue
-    total=$((total + $(wc -c < "${payload_path}")))
-  done < <(
-    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" | jq -r '.[]?'
-  )
-
-  printf '%s' "${total}"
-}
-
-truncate_payload_for_budget() {
-
-  local payload_path="$1"
-
-  local pruned_tmp
-  pruned_tmp="$(mktemp)"
-
-  # Reversible pruning: the full payload is preserved beside the pruned one
-  # before the body collapses, and the pruned form carries a pointer to it.
-  # Pruning is a CONTEXT decision, not an evidence decision — dropping the
-  # bytes from the prompt must not destroy the evidence the runtime already
-  # gathered. Recovery is runtime/operator-side: Aegis has no tool-calling
-  # loop, so the model cannot request the full payload back mid-turn.
-  local full_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}/.full"
-  local full_path=""
-  if [[ -n "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" ]] \
-    && mkdir -p "${full_dir}" 2>/dev/null; then
-    full_path="${full_dir}/$(basename "${payload_path}")"
-    cp "${payload_path}" "${full_path}" 2>/dev/null || full_path=""
-  fi
-
-  # Envelope fields survive; the payload body collapses to a bounded
-  # preview so verbose evidence blocks stop dominating the buffer.
-  if jq -c --arg full_path "${full_path}" '
-      {
-        success,
-        capability,
-        classification,
-        execution_id,
-        generated_at,
-        error
-      }
-      + {
-        payload: (
-          {
-            context_budget_pruned: true,
-            truncated_preview: ((.payload | tojson)[0:1024])
-          }
-          + (if $full_path == "" then {}
-             else {recoverable_from: $full_path} end)
-        )
-      }
-    ' "${payload_path}" > "${pruned_tmp}" 2>/dev/null; then
-    mv "${pruned_tmp}" "${payload_path}"
-  else
-    rm -f "${pruned_tmp}"
-    aegis_warn "context_budget_truncation_skipped: ${payload_path}"
-  fi
-}
-
-enforce_context_token_budget() {
-
-  local total_bytes
-  total_bytes="$(measure_selected_payload_bytes)"
-
-  if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
-    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — within ceiling"
-    return 0
-  fi
-
-  aegis_warn "Context budget exceeded: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes — pruning lower-priority evidence"
-
-  # Prunable payloads, last-in-prompt first. Protected (never pruned):
-  # demand_anchors, epistemic handover, and filesystem.read content seeds
-  # — these are the mechanical anchors.
-  local payload_path
-  while IFS= read -r payload_path; do
-    [[ -f "${payload_path}" ]] || continue
-
-    truncate_payload_for_budget "${payload_path}"
-    AEGIS_CONTEXT_BUDGET_PRUNED="true"
-
-    total_bytes="$(measure_selected_payload_bytes)"
-    if [[ "${total_bytes}" -le "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
-      break
+  # Agentic verdict synthesis
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]]; then
+    out="$(aegis_synthesize_agentic_verdict_artifact "adversarial" "${AEGIS_AGENTIC_VERDICT_FILE}")" || out=""
+    if [[ -n "${out}" ]]; then
+      aegis_log "adversarial_agentic: artifact sintetizado do assistente"
+      if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+        jq -cn '{kind:"adversarial",result:"agentic_verdict"}' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+      fi
+      AEGIS_SUBSTRATE_OUTPUT="${out}"
+      normalize_substrate_output
+      measure "executor_artifact_validation" validate_artifact
+      emit_output
+      return 0
     fi
-  done < <(
-    printf '%s' "${AEGIS_SELECTED_CAPABILITY_PAYLOADS:-[]}" \
-      | jq -r 'reverse | .[]?' \
-      | while IFS= read -r p; do
-          [[ -f "${p}" ]] || continue
-          case "${p}" in
-            *epistemic_handover*|*runtime_demand_anchors*|*filesystem_read_*)
-              continue
-              ;;
-          esac
-          printf '%s\n' "${p}"
-        done
-  )
-
-  if [[ "${total_bytes}" -gt "${AEGIS_MAX_CONTEXT_BYTES}" ]]; then
-    # Advisory, not enforced: the protected set (handover, demand anchors,
-    # content seeds) can exceed the ceiling on its own and the run proceeds.
-    # Surfaced as budget_exceeded so an unmeetable budget is data, not a
-    # warning buried in stderr.
-    AEGIS_CONTEXT_BUDGET_EXCEEDED="true"
-    aegis_warn "Context budget still above ceiling after pruning: ${total_bytes} bytes (handover context preserved)"
-  else
-    aegis_log "Context budget: ${total_bytes}/${AEGIS_MAX_CONTEXT_BYTES} bytes after pruning"
   fi
-}
 
-# One kind:"cache" line per mode execution — makes evidence reuse and
-# budget pruning observable instead of asserted.
-emit_context_budget_metric() {
-  [[ -n "${AEGIS_METRICS_FILE:-}" ]] || return 0
-  jq -cn \
-    --arg mode "${AEGIS_MODE:-}" \
-    --argjson context_bytes "$(measure_selected_payload_bytes)" \
-    --argjson ceiling_bytes "${AEGIS_MAX_CONTEXT_BYTES}" \
-    --argjson evidence_cache_hits "${AEGIS_EVIDENCE_CACHE_HITS:-0}" \
-    --argjson evidence_cache_bytes "${AEGIS_EVIDENCE_CACHE_BYTES:-0}" \
-    --argjson budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
-    --argjson budget_exceeded "${AEGIS_CONTEXT_BUDGET_EXCEEDED:-false}" \
-    '{kind:"cache",mode:$mode,context_bytes:$context_bytes,
-      ceiling_bytes:$ceiling_bytes,evidence_cache_hits:$evidence_cache_hits,
-      evidence_cache_bytes:$evidence_cache_bytes,
-      budget_pruned:$budget_pruned,budget_exceeded:$budget_exceeded}' \
-    >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+  handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+  if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
+    files="$(aegis_handover_candidate_files_changed_json "${handover}")"
+  fi
+  gate="$(build_tribunal_tools_gate "${files}")"
+  clean="$(printf '%s' "${gate}" | jq -r '.mutation_clean // true' 2>/dev/null || printf 'true')"
+
+  if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
+    root="${AEGIS_EXECUTION_SURFACE}"
+  elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
+    root="${AEGIS_EXECUTION_TARGET_PATH}"
+  fi
+
+  # 1. Fidelity/diff greps ALWAYS (highest priority)
+  if declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
+    && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
+    diff_findings="$(aegis_mechanical_adversarial_diff_scan "${handover}" "${AEGIS_INVESTIGATION_INPUT:-}" "${root}")" || diff_findings="[]"
+    if printf '%s' "${diff_findings}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      out="$(aegis_emit_mechanical_adversarial_findings "${diff_findings}")" || out=""
+      if [[ -n "${out}" ]]; then
+        aegis_log "adversarial_mechanical: fidelity/diff smells — skip LLM"
+        AEGIS_SUBSTRATE_OUTPUT="${out}"
+        if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+          jq -cn --argjson n "$(printf '%s' "${diff_findings}" | jq 'length')" \
+            '{kind:"adversarial",result:"mechanical_diff_challenged",findings:$n}' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+        fi
+        normalize_substrate_output
+        measure "executor_artifact_validation" validate_artifact
+        emit_output
+        return 0
+      fi
+    fi
+  fi
+
+  # 2. Tools dirty
+  if [[ "${clean}" == "false" ]] && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
+    out="$(aegis_emit_mechanical_adversarial_from_tools_gate "${gate}")" || out=""
+    if [[ -n "${out}" ]]; then
+      aegis_log "adversarial_mechanical: tools dirty — skip LLM"
+      AEGIS_SUBSTRATE_OUTPUT="${out}"
+      if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+        jq -cn '{kind:"adversarial",result:"mechanical_tools_challenged"}' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+      fi
+      normalize_substrate_output
+      measure "executor_artifact_validation" validate_artifact
+      emit_output
+      return 0
+    fi
+  fi
+
+  # 3. Clean tools + greps: check if verified clean without LLM
+  if [[ "${clean}" == "true" ]]; then
+    if declare -f aegis_adversarial_should_use_llm >/dev/null 2>&1 \
+      && declare -f aegis_emit_mechanical_adversarial_verified >/dev/null 2>&1 \
+      && ! aegis_adversarial_should_use_llm "${handover}"; then
+      out="$(aegis_emit_mechanical_adversarial_verified "mechanical_verified_clean")" || out=""
+      if [[ -n "${out}" ]]; then
+        aegis_log "adversarial_mechanical: verified clean (LLM residual skipped)"
+        AEGIS_SUBSTRATE_OUTPUT="${out}"
+        if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
+          jq -cn '{kind:"adversarial",result:"mechanical_verified"}' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
+        fi
+        normalize_substrate_output
+        measure "executor_artifact_validation" validate_artifact
+        emit_output
+        return 0
+      fi
+    else
+      aegis_log "adversarial_llm: residual falsification (clean tools/greps, risk or force)"
+    fi
+  fi
+
+  return 1
 }
 
 # =========================================================
-# SELECTED MANIFEST
-# =========================================================
-
-materialize_selected_manifest() {
-
-  [[ -n "${AEGIS_CAPABILITY_MANIFEST:-}" ]] \
-    || aegis_fatal "missing_capability_manifest"
-
-  # Shell variable only — consumed in-process and passed to substrates
-  # as an explicit argument, never via the environment.
-  AEGIS_SELECTED_MANIFEST="$(
-    echo "${AEGIS_CAPABILITY_MANIFEST}" \
-      | jq -c \
-          --arg mode "${AEGIS_MODE}" \
-          --argjson context_budget_pruned "${AEGIS_CONTEXT_BUDGET_PRUNED:-false}" \
-          '{
-            schema_version: .schema_version,
-            runtime_model: .runtime_model,
-            generated_at: .generated_at,
-            execution_id: .execution_id,
-            manifest_hash: .manifest_hash,
-            mode: $mode,
-            execution_engine: .modes[$mode].execution_engine,
-            capability_envelope: .modes[$mode].capability_envelope,
-            evidence_profile: .modes[$mode].evidence_profile,
-            evidence_capabilities: .modes[$mode].evidence_capabilities,
-            capabilities: .modes[$mode].capabilities,
-            context_budget_pruned: $context_budget_pruned
-          }'
-  )"
-
-  [[ -n "${AEGIS_SELECTED_MANIFEST}" ]] \
-    || aegis_fatal "missing_selected_manifest"
-}
-
-# =========================================================
-# SUBSTRATE
+# SUBSTRATE EXECUTION
 # =========================================================
 
 execute_substrate() {
-
   local substrate_output
 
-  # Discovery is always mechanical (no LLM, no skill file required).
-  if [[ "${AEGIS_MODE}" == "discovery" ]]; then
-    declare -f aegis_emit_mechanical_discovery_substrate >/dev/null 2>&1 \
-      || aegis_fatal "discovery_mechanical_unavailable"
-    substrate_output="$(
-      aegis_emit_mechanical_discovery_substrate \
-        "${AEGIS_INVESTIGATION_INPUT:-}" \
-        "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
-        "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
-    )" || substrate_output=""
-    [[ -n "${substrate_output}" ]] \
-      || aegis_fatal "discovery_mechanical_failed"
-    aegis_log "discovery_mechanical: runtime-only (no LLM)"
-    AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
+  if execute_mechanical_mode; then
     return 0
   fi
 
-  # Validation is a deterministic tribunal by default (no LLM).
-  # Enrich rewrites verdict/candidate/findings/build_feedback from
-  # handover + alignment gate. Opt-in LLM: AEGIS_VALIDATION_LLM=1.
-  if [[ "${AEGIS_MODE}" == "validation" ]]; then
-    local _val_llm="${AEGIS_VALIDATION_LLM:-0}"
-    case "$(printf '%s' "${_val_llm}" | tr '[:upper:]' '[:lower:]')" in
-      1|true|yes|on|llm)
-        aegis_log "validation_llm: AEGIS_VALIDATION_LLM force (skill loaded)"
-        ;;
-      *)
-        declare -f aegis_emit_mechanical_validation_substrate >/dev/null 2>&1 \
-          || aegis_fatal "validation_mechanical_unavailable"
-        substrate_output="$(
-          aegis_emit_mechanical_validation_substrate
-        )" || substrate_output=""
-        [[ -n "${substrate_output}" ]] \
-          || aegis_fatal "validation_mechanical_failed"
-        aegis_log "validation_mechanical: tribunal-only (no LLM)"
-        if declare -f aegis_record_validation_metric >/dev/null 2>&1; then
-          aegis_record_validation_metric "mechanical" "tribunal"
-        fi
-        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-        return 0
-        ;;
-    esac
-    unset _val_llm
-  fi
-
-  # Optimize mechanical paths (no LLM): refine cap, senior greps, then trivial.
-  if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-    local _opt_handover
-    _opt_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
-
-    # Etapa 5: optimize agêntico — synth do verdict do assistente (sem LLM).
-    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
-      && [[ -n "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]] \
-      && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE}" ]]; then
-      local _agentic_opt
-      _agentic_opt="$(aegis_synthesize_agentic_verdict_artifact "optimize" "${AEGIS_AGENTIC_VERDICT_FILE}")" || _agentic_opt=""
-      if [[ -n "${_agentic_opt}" ]]; then
-        aegis_log "optimize_agentic: artifact sintetizado do verdict do assistente"
-        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-          aegis_record_optimize_metric "agentic_verdict" "$(printf '%s' "${_agentic_opt}" | jq -r '.basis // empty' 2>/dev/null || true)"
-        fi
-        AEGIS_SUBSTRATE_OUTPUT="${_agentic_opt}"
-        return 0
-      fi
-    fi
-
-    if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT:-0}" -ge 1 ]]; then
-      declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
-        || aegis_fatal "optimize_passthrough_unavailable"
-      substrate_output="$(
-        aegis_emit_mechanical_optimize_passthrough \
-          "optimize_passthrough_after_refine"
-      )" || substrate_output=""
-      [[ -n "${substrate_output}" ]] \
-        || aegis_fatal "optimize_passthrough_failed"
-      aegis_log "optimize_passthrough: after refine (count=${AEGIS_OPTIMIZE_BUILD_COUNT}) — no LLM"
-      if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-        aegis_record_optimize_metric "passthrough_after_refine" \
-          "count=${AEGIS_OPTIMIZE_BUILD_COUNT}"
-      fi
-      AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-      return 0
-    fi
-
-    # Senior-equivalent greps on Build delta (any/stubs) → at most one improve.
-    if declare -f aegis_mechanical_optimize_scan >/dev/null 2>&1 \
-      && declare -f aegis_emit_mechanical_optimize_can_improve >/dev/null 2>&1; then
-      local _opt_imp
-      _opt_imp="$(aegis_mechanical_optimize_scan "${_opt_handover}" 2>/dev/null || true)"
-      if [[ -n "${_opt_imp}" ]] \
-        && printf '%s' "${_opt_imp}" | jq -e 'type == "object" and (.change|type=="string")' >/dev/null 2>&1; then
-        substrate_output="$(
-          aegis_emit_mechanical_optimize_can_improve "${_opt_imp}"
-        )" || substrate_output=""
-        [[ -n "${substrate_output}" ]] \
-          || aegis_fatal "optimize_mechanical_improve_failed"
-        aegis_log "optimize_mechanical: $(
-          printf '%s' "${_opt_imp}" | jq -r '.code // "improve"' 2>/dev/null || echo improve
-        ) — no LLM"
-        if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-          aegis_record_optimize_metric "mechanical_improve" \
-            "$(printf '%s' "${_opt_imp}" | jq -r '.code // empty' 2>/dev/null || true)"
-        fi
-        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-        unset _opt_imp
-        return 0
-      fi
-      unset _opt_imp
-    fi
-
-    # Small clean diff: stage still runs (audit basis), no advisory LLM.
-    if [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "0" ]] \
-      && [[ "${AEGIS_OPTIMIZE_TRIVIAL_SKIP:-true}" != "false" ]] \
-      && (declare -f aegis_optimize_mutation_is_trivial >/dev/null 2>&1 || declare -f aegis_optimize_build_is_trivial >/dev/null 2>&1) \
-      && (aegis_optimize_mutation_is_trivial "${_opt_handover}" 2>/dev/null || aegis_optimize_build_is_trivial "${_opt_handover}"); then
-      declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
-        || aegis_fatal "optimize_passthrough_unavailable"
-      substrate_output="$(
-        aegis_emit_mechanical_optimize_passthrough \
-          "optimize_mechanical_clean"
-      )" || substrate_output=""
-      [[ -n "${substrate_output}" ]] \
-        || aegis_fatal "optimize_mechanical_clean_failed"
-      aegis_log "optimize_mechanical_clean: no greppable issues — no LLM"
-      if declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-        aegis_record_optimize_metric "mechanical_clean" "trivial"
-      fi
-      AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-      return 0
-    fi
-    unset _opt_handover
-  fi
-
-  # Forensics: AEGIS_FORENSICS_USE_LLM is set once in main before materialize.
-  # Search omitted on mechanical evidence path; re-materialize on LLM fallthrough.
-  if [[ "${AEGIS_MODE}" == "forensics" ]] \
-    && declare -f aegis_emit_mechanical_forensics_substrate >/dev/null 2>&1; then
-    local _forensics_llm="${AEGIS_FORENSICS_USE_LLM:-0}"
-
-    if [[ "${_forensics_llm}" != "1" ]]; then
-      substrate_output="$(
-        aegis_emit_mechanical_forensics_substrate \
-          "${AEGIS_INVESTIGATION_INPUT:-}" \
-          "${AEGIS_CAPABILITY_PAYLOAD_DIR:-}" \
-          "${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-}"
-      )" || substrate_output=""
-      if [[ -n "${substrate_output}" ]]; then
-        aegis_log "forensics_mechanical: skipped LLM+skill (unambiguous anchors)"
-        AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
-        return 0
-      fi
-      aegis_warn "forensics_mechanical_failed — falling back to LLM substrate (skill loaded)"
-      if declare -f aegis_forensics_ensure_search_symbol_payload >/dev/null 2>&1; then
-        aegis_forensics_ensure_search_symbol_payload || true
-      fi
-    else
-      aegis_log "forensics_llm: ambiguity or AEGIS_FORENSICS_LLM force (skill loaded)"
-    fi
-    unset _forensics_llm
-  fi
-
   case "${AEGIS_EXECUTION_ENGINE}" in
-
     raw)
       local raw_model="${OPENAI_MODEL_READONLY_COGNITION}"
       if [[ "${AEGIS_MODE}" == "optimize" ]]; then
@@ -980,47 +861,59 @@ execute_substrate() {
     *)
       aegis_fatal "unknown_execution_engine"
       ;;
-
   esac
 
-  # Shell variable only — exporting this multi-hundred-KB blob into the
-  # environment makes every subsequent fork/exec fail with E2BIG.
   AEGIS_SUBSTRATE_OUTPUT="${substrate_output}"
 }
 
+# Extract field from artifact JSON for metrics
+_extract_artifact_field() {
+  local query="$1"
+  printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
+    | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
+    | sed -e "1d" -e "\$d" \
+    | jq -r "${query}" 2>/dev/null || true
+}
+
+record_mode_metrics() {
+  if [[ "${AEGIS_MODE}" == "validation" ]] && declare -f aegis_record_validation_metric >/dev/null 2>&1; then
+    local v b
+    v="$(_extract_artifact_field '.verdict // empty')"
+    b="$(_extract_artifact_field '(.basis // []) | if type == "array" then join("; ") else tostring end')"
+    case "${v}" in
+      accepted|rejected|insufficient) aegis_record_validation_metric "${v}" "${b:0:160}" ;;
+    esac
+  elif [[ "${AEGIS_MODE}" == "optimize" ]] && declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
+    local s b
+    s="$(_extract_artifact_field '.status // empty')"
+    b="$(_extract_artifact_field '.basis // empty')"
+    case "${s}" in
+      can_improve|no_improvement_needed)
+        case "${b}" in
+          optimize_passthrough_after_refine|optimize_trivial_skip|optimize_mechanical_clean|optimize_mechanical:*) ;;
+          *) aegis_record_optimize_metric "${s}" "${b:0:120}" ;;
+        esac
+        ;;
+    esac
+  fi
+}
+
 # =========================================================
-# MAIN
+# MAIN ENTRY POINT (KISS PIPELINE)
 # =========================================================
 
 main() {
-
   validate_executor_inputs
   resolve_execution_engine
   resolve_capability_envelope
   resolve_evidence_profile
   augment_evidence_profile_from_handover
   augment_evidence_profile_from_anchors
-  # Drop a capability id from the active evidence list (in-place).
-  omit_active_evidence_entry() {
-    local drop="${1-}"
-    local -a kept=()
-    local e
-    [[ -n "${drop}" ]] || return 0
-    for e in "${AEGIS_ACTIVE_EVIDENCE_ENTRIES[@]:-}"; do
-      [[ "${e}" == "${drop}" ]] && continue
-      kept+=("${e}")
-    done
-    AEGIS_ACTIVE_EVIDENCE_ENTRIES=("${kept[@]}")
-  }
 
-  # Decide forensics path once (evidence profile + substrate share the flag).
-  # Mechanical path does not consume search_symbol — omit before materialize.
+  # Decide forensics search policy before materialize
   AEGIS_FORENSICS_USE_LLM=""
-  if [[ "${AEGIS_MODE}" == "forensics" ]] \
-    && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
+  if [[ "${AEGIS_MODE}" == "forensics" ]] && declare -f aegis_forensics_needs_llm >/dev/null 2>&1; then
     if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
-      # Agentic handover: forensics is the assistant's job; never run the
-      # forensics LLM internally.
       AEGIS_FORENSICS_USE_LLM=0
       omit_active_evidence_entry "filesystem.search_symbol"
       aegis_log "forensics_evidence: agentic — mechanical path (no LLM)"
@@ -1047,7 +940,6 @@ main() {
     aegis_log "mutation_evidence: omitted search_symbol (forensics ALVO present)"
   fi
 
-  # Rank so materialize + budget exposure hit anchors/content before noise.
   prioritize_evidence_entries
   prepare_execution_state
   generate_pocket_map
@@ -1059,132 +951,12 @@ main() {
   emit_context_budget_metric
   materialize_selected_manifest
 
-  # Adversarial mechanical (no LLM):
-  # (1) demand fidelity / diff greps — prefer over tools so domain holes
-  #     are not masked by medium eslint noise
-  # (2) tools dirty
-  # (3) residual LLM / verified
-  if [[ "${AEGIS_MODE}" == "adversarial" ]] \
-    && declare -f build_tribunal_tools_gate >/dev/null 2>&1; then
-    local _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
-    local _adv_root="."
-
-    # Etapa 6: adversarial agêntico — synth do verdict do assistente (sem LLM).
-    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
-      && [[ -n "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]] \
-      && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE}" ]]; then
-      local _agentic_adv
-      _agentic_adv="$(aegis_synthesize_agentic_verdict_artifact "adversarial" "${AEGIS_AGENTIC_VERDICT_FILE}")" || _agentic_adv=""
-      if [[ -n "${_agentic_adv}" ]]; then
-        aegis_log "adversarial_agentic: artifact sintetizado do verdict do assistente"
-        if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
-          jq -cn '{kind:"adversarial",result:"agentic_verdict"}' \
-            >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
-        fi
-        AEGIS_SUBSTRATE_OUTPUT="${_agentic_adv}"
-        normalize_substrate_output
-        measure "executor_artifact_validation" validate_artifact
-        emit_output
-        return 0
-      fi
-    fi
-    _adv_handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
-    if declare -f aegis_handover_candidate_files_changed_json >/dev/null 2>&1; then
-      _adv_files="$(aegis_handover_candidate_files_changed_json "${_adv_handover}")"
-    else
-      _adv_files="[]"
-    fi
-    _adv_gate="$(build_tribunal_tools_gate "${_adv_files}")"
-    _adv_clean="$(
-      printf '%s' "${_adv_gate}" | jq -r '.mutation_clean // true' 2>/dev/null || printf 'true'
-    )"
-    if [[ -n "${AEGIS_EXECUTION_SURFACE:-}" && -d "${AEGIS_EXECUTION_SURFACE}" ]]; then
-      _adv_root="${AEGIS_EXECUTION_SURFACE}"
-    elif [[ -n "${AEGIS_EXECUTION_TARGET_PATH:-}" && -d "${AEGIS_EXECUTION_TARGET_PATH}" ]]; then
-      _adv_root="${AEGIS_EXECUTION_TARGET_PATH}"
-    fi
-
-    # Fidelity/diff greps ALWAYS (even when tools dirty) — skip LLM on hit.
-    if declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1 \
-      && declare -f aegis_emit_mechanical_adversarial_findings >/dev/null 2>&1; then
-      _adv_diff_findings="$(
-        aegis_mechanical_adversarial_diff_scan \
-          "${_adv_handover}" \
-          "${AEGIS_INVESTIGATION_INPUT:-}" \
-          "${_adv_root}"
-      )" || _adv_diff_findings="[]"
-      if printf '%s' "${_adv_diff_findings}" \
-        | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-        _adv_out="$(
-          aegis_emit_mechanical_adversarial_findings "${_adv_diff_findings}"
-        )" || _adv_out=""
-        if [[ -n "${_adv_out}" ]]; then
-          aegis_log "adversarial_mechanical: fidelity/diff smells — skip LLM"
-          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
-          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
-            jq -cn --argjson n "$(printf '%s' "${_adv_diff_findings}" | jq 'length')" \
-              '{kind:"adversarial",result:"mechanical_diff_challenged",findings:$n}' \
-              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
-          fi
-          normalize_substrate_output
-          measure "executor_artifact_validation" validate_artifact
-          emit_output
-          return 0
-        fi
-      fi
-    fi
-
-    if [[ "${_adv_clean}" == "false" ]] \
-      && declare -f aegis_emit_mechanical_adversarial_from_tools_gate >/dev/null 2>&1; then
-      _adv_out="$(
-        aegis_emit_mechanical_adversarial_from_tools_gate "${_adv_gate}"
-      )" || _adv_out=""
-      if [[ -n "${_adv_out}" ]]; then
-        # Thin body; enrich injects tool findings + candidate.
-        aegis_log "adversarial_mechanical: tools dirty — skip LLM (reuse stamp when hash matched)"
-        AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
-        if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
-          jq -cn '{kind:"adversarial",result:"mechanical_tools_challenged"}' \
-            >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
-        fi
-        normalize_substrate_output
-        measure "executor_artifact_validation" validate_artifact
-        emit_output
-        return 0
-      fi
-    fi
-
-    # Tools + greps clean: residual LLM only when risk warrants it.
-    if [[ "${_adv_clean}" == "true" ]]; then
-      if declare -f aegis_adversarial_should_use_llm >/dev/null 2>&1 \
-        && declare -f aegis_emit_mechanical_adversarial_verified >/dev/null 2>&1 \
-        && ! aegis_adversarial_should_use_llm "${_adv_handover}"; then
-        _adv_out="$(
-          aegis_emit_mechanical_adversarial_verified "mechanical_verified_clean"
-        )" || _adv_out=""
-        if [[ -n "${_adv_out}" ]]; then
-          aegis_log "adversarial_mechanical: verified clean (LLM residual skipped)"
-          AEGIS_SUBSTRATE_OUTPUT="${_adv_out}"
-          if [[ -n "${AEGIS_METRICS_FILE:-}" ]]; then
-            jq -cn '{kind:"adversarial",result:"mechanical_verified"}' \
-              >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
-          fi
-          normalize_substrate_output
-          measure "executor_artifact_validation" validate_artifact
-          emit_output
-          return 0
-        fi
-      else
-        aegis_log "adversarial_llm: residual falsification (clean tools/greps, risk or force)"
-      fi
-    fi
-    unset _adv_root
-    unset _adv_files _adv_gate _adv_clean _adv_out _adv_handover _adv_diff_findings
+  # Adversarial mechanical fast-path check
+  if execute_adversarial_mechanical; then
+    return 0
   fi
 
   measure "executor_execute_substrate" execute_substrate
-
-  # Normalize substrate output first, so validate_artifact validates the corrected/enveloped JSON
   normalize_substrate_output
 
   case "${AEGIS_EXECUTION_ENGINE}" in
@@ -1192,62 +964,7 @@ main() {
     *)     measure "executor_artifact_validation" validate_artifact           ;;
   esac
 
-  # Validation: record tribunal verdict after enrich (mechanical or LLM path).
-  if [[ "${AEGIS_MODE}" == "validation" ]] \
-    && declare -f aegis_record_validation_metric >/dev/null 2>&1; then
-    local _val_verdict _val_basis
-    _val_verdict="$(
-      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
-        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
-        | sed -e "1d" -e "\$d" \
-        | jq -r '.verdict // empty' 2>/dev/null || true
-    )"
-    _val_basis="$(
-      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
-        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
-        | sed -e "1d" -e "\$d" \
-        | jq -r '(.basis // []) | if type == "array" then join("; ") else tostring end' \
-          2>/dev/null || true
-    )"
-    case "${_val_verdict}" in
-      accepted|rejected|insufficient)
-        aegis_record_validation_metric "${_val_verdict}" "${_val_basis:0:160}"
-        ;;
-    esac
-    unset _val_verdict _val_basis
-  fi
-
-  # Optimize LLM path: record final enrich status (mechanical paths record earlier).
-  if [[ "${AEGIS_MODE}" == "optimize" ]] \
-    && declare -f aegis_record_optimize_metric >/dev/null 2>&1; then
-    local _opt_status _opt_basis
-    _opt_status="$(
-      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
-        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
-        | sed -e "1d" -e "\$d" \
-        | jq -r '.status // empty' 2>/dev/null || true
-    )"
-    _opt_basis="$(
-      printf '%s' "${AEGIS_SUBSTRATE_OUTPUT:-}" \
-        | sed -n "/${AEGIS_ARTIFACT_BEGIN_MARKER}/,/${AEGIS_ARTIFACT_END_MARKER}/p" \
-        | sed -e "1d" -e "\$d" \
-        | jq -r '.basis // empty' 2>/dev/null || true
-    )"
-    case "${_opt_status}" in
-      can_improve|no_improvement_needed)
-        # Avoid double-count mechanical bases already recorded at emit.
-        case "${_opt_basis}" in
-          optimize_passthrough_after_refine|optimize_trivial_skip|optimize_mechanical_clean|optimize_mechanical:*)
-            ;;
-          *)
-            aegis_record_optimize_metric "${_opt_status}" "${_opt_basis:0:120}"
-            ;;
-        esac
-        ;;
-    esac
-    unset _opt_status _opt_basis
-  fi
-
+  record_mode_metrics
   emit_output
 }
 

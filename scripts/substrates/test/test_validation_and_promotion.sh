@@ -120,7 +120,7 @@ val_accept="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx}")"
 echo "${val_accept}" | jq -e '
   .verdict == "accepted"
   and (.validated_candidate.files_changed | index("src/index.ts") != null)
-  and ((.build_feedback | not) or .build_feedback == null)
+  and (((.mutation_feedback // .build_feedback) | not) or (.mutation_feedback // .build_feedback) == null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_accept: ${val_accept}"
 
@@ -147,8 +147,8 @@ val_reject="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_intent}")"
 echo "${val_reject}" | jq -e '
   .verdict == "rejected"
   and (.basis | map(test("demand_tokens")) | any)
-  and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
-  and (.build_feedback.authorized_scopes | index("src/index.ts") != null)
+  and (((.mutation_feedback // .build_feedback).violations // []) | map(.origin) | index("demand_tokens") != null)
+  and (((.mutation_feedback // .build_feedback).authorized_scopes // []) | index("src/index.ts") != null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_reject_intent: ${val_reject}"
 
@@ -170,7 +170,7 @@ val_align="$(enrich_cognitive_artifact "${mech_body}" "${val_ctx_align}")"
 echo "${val_align}" | jq -e '
   .verdict == "rejected"
   and (.basis | map(test("demand_tokens")) | any)
-  and (.build_feedback.violations | map(.origin) | index("demand_tokens") != null)
+  and (((.mutation_feedback // .build_feedback).violations // []) | map(.origin) | index("demand_tokens") != null)
 ' >/dev/null \
   || fail "mechanical_tribunal_should_reject_alignment: ${val_align}"
 

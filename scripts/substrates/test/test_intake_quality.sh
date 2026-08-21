@@ -103,10 +103,12 @@ aegis_intake_quality_check "${filled}" 2>/tmp/q_micro.err \
 export AEGIS_BRIEFING=0
 unset AEGIS_INTAKE_RELAXED 2>/dev/null || true
 export AEGIS_INTAKE_RELAXED=0
+export AEGIS_AGENTIC=0
+
 
 set +e
 no_accept_out="$(
-  "${aegis_cli}" go --goal "criar um token bucket complexo" --target src/tokenBucket.ts 2>&1
+  "${aegis_cli}" go --goal "criar um token bucket complexo" --target src/index.ts 2>&1
 )"
 no_accept_rc=$?
 set -e
