@@ -175,6 +175,11 @@ aegis_briefing_sanitize_json() {
 # The schema doubles as the instruction: a worked example constrains a weak
 # model far better than a list of prose rules.
 aegis_briefing_system_prompt() {
+  local skill_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
+  if [[ -f "${skill_file}" ]]; then
+    cat "${skill_file}"
+    return 0
+  fi
   cat <<PROMPT
 You convert a software demand into JSON. Output ONLY a JSON object, no prose.
 
