@@ -19,8 +19,7 @@
 | `ARCHITECTURE.md` | Target application architecture directives & PonyTail engineering patterns |
 | `README.md` | English operator setup, quick start, test entrypoints, 3-tier governance architecture |
 | `README.pt-BR.md` | Portuguese operator setup, quick start, test entrypoints, 3-tier governance architecture |
-| `INTAKE.md` | Scout/IDE demand playbook (outside mutation runtime) |
-| `entry.md` | Demand protocol design notes (ADR; code wins on conflict) |
+| `backup.md` | Forensic audit, evolution logs, and comparative table of the historical baseline |
 
 Field ownership lives in mode skills (`.skills/*.md`) and runtime enrich — there is no separate ownership doc.
 
@@ -28,7 +27,7 @@ Field ownership lives in mode skills (`.skills/*.md`) and runtime enrich — the
 
 ## One sentence
 
-Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; discovery/forensics default to **mechanical** bodies; build mutates under jail + intent rails; git is the only durable memory.
+Aegis is a **runtime-sovereign shell harness**: modes get only capability evidence the runtime materializes; discovery/forensics default to **mechanical** bodies; supervisor briefings compile and execute before coding; build mutates under jail + intent rails; git is the only durable memory.
 
 ---
 
@@ -39,10 +38,10 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
             │                               │                  │                      │
             │                               │                  │              capability handlers
             │                               │                  │                      │
-            ├── micro-unit plan (.harness/micros_auto)        ├── mechanical (discovery always; forensics if clear)
-            ├── keep-progress batch                           ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
-            └── human commit gate (git commit -e -F)          └── aider_substrate (build only)
-                                                                            │
+            ├── supervisor briefing (.skills/briefing.md)      ├── mechanical (discovery always; forensics if clear)
+            ├── micro-unit plan (.harness/micros_auto)        ├── raw_llm.sh      (forensics residual, optimize advise, adversarial, validation)
+            ├── keep-progress batch                           └── aider_substrate (build only)
+            └── human commit gate (git commit -e -F)                        │
                                                                        framed JSON artifact
                                                                             │
                                                                └── outcome (human + metrics + last_outcome.json)
@@ -68,7 +67,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 ### 2. Model Selection Hierarchy
 - **Global Fallback**: `AEGIS_MODEL_DEFAULT` (e.g. `meta/llama-3.1-8b-instruct` or `ollama/llama3.1:8b`). Applies to all pipeline stages unless specialized per-mode overrides are specified.
 - **Per-Stage Specialized Overrides**:
-  - `AEGIS_SUPERVISOR_MODEL`: Demand expansion & issue creation in intake (`scripts/lib/briefing.sh`).
+  - `AEGIS_SUPERVISOR_MODEL`: Demand expansion & structured JSON schema generation in intake (`.skills/briefing.md`, `scripts/lib/briefing.sh`).
   - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`build`).
   - `AEGIS_MODEL_DISCOVERY`: Discovery stage.
   - `AEGIS_MODEL_FORENSICS`: Forensics stage.
@@ -76,6 +75,8 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
   - `AEGIS_MODEL_VALIDATION`: Tribunal static validation stage.
   - `AEGIS_MODEL_OPTIMIZE`: System design refactoring stage.
 - **Inference Providers**: Supports local inference (Ollama, vLLM, LM Studio via `OPENAI_API_BASE="http://localhost:11434/v1"`) and cloud endpoints (NVIDIA Integrate, OpenAI, Anthropic, Gemini, DeepSeek).
+
+---
 
 ## Modes
 
@@ -93,6 +94,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | Skill | Loaded into model? |
 |---|---|
 | *(discovery)* | **No skill file** — runtime mechanical only (`demand.sh`) |
+| `briefing.md` | **Yes** — supervisor model JSON schema generation & category decision tree |
 | `forensics.md` | **Yes** only on LLM residual path |
 | `mutation.md` | **Yes** — Aider mutation |
 | `optimize.md` | **Yes** — raw LLM advise-only (Systems & Runtime Physics; closed-form $O(1)$ math & zero GC; strict KISS) |
@@ -104,6 +106,7 @@ Aegis is a **runtime-sovereign shell harness**: modes get only capability eviden
 | Contract | Owner / Role | Invariant Responsibility |
 |---|---|---|
 | `ARCHITECTURE.md` | **Target Domain Law** | NodeNext ESM, `BigInt`, zero `any`, `readonly` immutability, pure getters (Single Source of Truth), and non-negativity guards. |
+| `.skills/briefing.md` | **Supervisor Briefing** | Category Decision Tree (Cat A: Library 2 targets; Cat B: Frontend 3 targets; Cat C: Multi-entity 3-5 targets) + Schema Closure + Invariant Protection. |
 | `.skills/mutation.md` | **Coder Surgery Protocol** | 5 Core Directives: target confinement, complete logic (no stubs), clean comments (no narration/dead code), entrypoint integrity, exact SEARCH/REPLACE. |
 | `.skills/optimize.md` | **Systems & Runtime Physics** | Closed-form $O(1)$ math, zero hot-path GC allocations, boundary reference confinement, strict KISS ($\le 5$ lines). |
 | `.skills/adversarial.md` | **Devil's Advocate** | Invariant falsification (non-negativity, NTP clock drift, boundary crashes) under strict 1-line surgical KISS rule. |
@@ -132,7 +135,7 @@ Handlers under `scripts/capabilities/`, registered only in `.harness/config.sh`.
 Shared emit: `scripts/capabilities/_emit.sh`. Manifest: `generate_manifest.sh`.
 
 **Removed (do not reintroduce without a product decision):**  
-`extract_*` graph extractors, `structural/builder.sh`, composed deep topology profiles.
+`extract_*` graph extractors, `structural/builder.sh`, composed deep topology profiles, multi-language sentinels.
 
 ---
 
@@ -170,13 +173,11 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | Build intent | tokens in `+` lines, max new exports; soft retry → optional soft-accept stamp |
 | Intent metrics | `kind:"intent"` in `pipeline_metrics.jsonl` (`pass`/`fail`/`soft_accept`/`fix_attempt`); P2: separate `INTENT_FIX_ATTEMPTS` (default 3), soft-accept only after ≥1 intent fix |
 | demand_tokens / over_export (etc.) | soft-accept → `intent_violations` → validation reject (`tribunal:demand_tokens`…) + local re-build |
-| **Behavioral oracle (P2)** | Supervisor Briefing carries executable `## Behavior` (desc / exports / prelude[] / assert). `fit_check.sh` carries it into each unit demand; `aegis_mechanical_behavior_gate` (demand.sh) parses, scopes each item to the unit owning its **first-listed export**, imports the union of referenced exports, and executes with `node --experimental-strip-types` → `behavior_failure` findings (severity high, `supported_by_evidence: true`) → validation `rejected` + `build_feedback`. Asserts anchor time to the exported `windowStart` (never absolute numbers / real-clock sleeps) |
-| Supervisor reliability | `aegis_briefing_generate`: `AEGIS_BRIEFING_MAX_TOKENS` (default 2048), `AEGIS_BRIEFING_MAX_ATTEMPTS` (default 2), quality-gate retry on degenerate algebra / duplicated declarations (observed deepseek decode glitches); provenance `AEGIS_BRIEFING_SOURCE=user\|supervisor`; bounded correction loop `AEGIS_BRIEFING_CORRECT_MAX` (default 1) when adversarial findings contradict the Goal |
-| KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest — **not** the Pocket Map, which sits below the `LIVE ZONE` marker); `kind:"cache"` metric in `pipeline_metrics.jsonl` reports `system_bytes` + `prefix_bytes` + `frozen_prefix_bytes` |
+| **Supervisor Briefing & 2-Tier Validation** | `aegis_briefing_typecheck_json`: Compiles generated JSON schema as TypeScript in memory (`tsc`), verifies against `tsconfig.json`, and **executes behavior assertions in real Node.js runtime** (`node unit.js`) before handing off to coder models. |
+| **Behavioral oracle (P2)** | Supervisor Briefing carries executable `## Behavior` (desc / exports / prelude[] / assert). `fit_check.sh` carries it into each unit demand; `aegis_mechanical_behavior_gate` (demand.sh) scopes each item, unions referenced exports, and executes with `node --experimental-strip-types` → `behavior_failure` findings → validation `rejected` + `build_feedback`. |
+| KV-Cache Topology | Byte-0 shared prefix (`AGENTS.md` + `src/ARCHITECTURE.md` + skill contract + capability manifest); `kind:"cache"` metric in `pipeline_metrics.jsonl` reports `system_bytes` + `prefix_bytes` + `frozen_prefix_bytes` (71% byte-stable prefix measured). |
 | Skeletal AST Pruning | Optional `AEGIS_READ_SKELETAL=1` via `ast-grep` (Tree-sitter) in `read_file.sh`; `kind:"skeletal_prune"` metric |
-| Multi-Language AST Rules | Language-tagged AST rules in `.harness/enforcement/rules/` (TS, Python, Rust, Go) |
-
-Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/lib/language_detector.sh`, `scripts/capabilities/filesystem/read_file.sh`, `scripts/substrates/aider/preflight.sh`, `scripts/lib/artifact_protocol.sh`.
+| AST Security & Quality Gate | AST rules in `.harness/enforcement/rules/` (`static_gate.sh`) enforcing zero eval, no non-null assertions, strict privacy, and secret containment. |
 
 ---
 
@@ -185,15 +186,16 @@ Primary code: `scripts/lib/demand.sh`, `scripts/lib/evidence.sh`, `scripts/lib/l
 | File | Role |
 |---|---|
 | `scripts/lib/common.sh` | Logging, path helpers, `measure` (+ timing metrics) |
-| `scripts/lib/language_detector.sh` | Mechanical language detection & adaptive TTY fallback |
 | `scripts/lib/artifact_protocol.sh` | Validate / enrich; forensics gates; validation `build_feedback` |
 | `scripts/lib/evidence.sh` | Materialize / select payloads; late `search_symbol` for forensics LLM |
 | `scripts/lib/epistemic_handover.sh` | Handover read/write |
 | `scripts/lib/run_outcome.sh` | Human outcome, metrics JSONL, `last_outcome.json` |
-| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs, **mechanical behavior gate** (`aegis_mechanical_behavior_gate`) + validation substrate (reject/accepted via behavior) |
+| `scripts/lib/briefing.sh` | Supervisor briefing generation, sanitize, `tsc` typecheck gate & Node.js runtime behavior execution gate |
+| `scripts/lib/fit_check.sh` | Demand fit checking, topological unit slicing & module-export pairing |
+| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs, **mechanical behavior gate** (`aegis_mechanical_behavior_gate`) + validation substrate |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.  
-Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh` (per-edit: prettier/eslint/static + **project tsc delta** on the edited file so Aider’s auto-lint loop sees real TS errors; baseline debt ignored), `static_gate.sh`.  
+Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh` (per-edit: prettier/eslint/static + **project tsc delta** on edited file), `static_gate.sh`.  
 Aider: `scripts/substrates/aider/{targets,prompt,invoke,preflight}.sh`.
 
 ---
@@ -212,7 +214,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 
 - Capability / cognition children run under **`env -i`** via `run_with_isolated_base_env`.
 - `local.env` loads only when **`AEGIS_LOAD_LOCAL_ENV=1`** (entrypoints).
-- Aider whitelist includes `AEGIS_METRICS_FILE` and intent policy knobs so build metrics actually land in jsonl.
+- Aider whitelist includes `AEGIS_METRICS_FILE` and intent policy knobs so build metrics land in jsonl.
 
 ---
 
@@ -229,8 +231,8 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 ├── README.md                 # English documentation & 3-tier governance guide
 ├── README.pt-BR.md           # Portuguese documentation & 3-tier governance guide
 ├── summary.md                # Canonical repository map
-├── package.json              # aegis:sanity / aegis:test:fast / aegis:test
-├── .skills/                  # Mode contracts (.skills/*.md)
+├── package.json              # aegis:sanity / aegis:test:fast / aegis:test / aegis:test:briefing-loop
+├── .skills/                  # Mode contracts (.skills/*.md) including briefing.md
 ├── .harness/
 │   ├── config.sh             # Engine registries, budgets & evidence profiles
 │   ├── enforcement/          # Static AST grep enforcement rules (.harness/enforcement/rules/*.yml)
@@ -242,10 +244,11 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 │   ├── execute_mode.sh       # Protocol VM
 │   ├── fit_check_demand.sh   # Demand fit checking & mechanical micro splitter
 │   ├── audit_epistemic_pipeline.sh # Epistemic audit scanner
-│   ├── lib/                  # common, demand, evidence, artifact_protocol, record, run_outcome...
+│   ├── lib/                  # common, demand, evidence, artifact_protocol, briefing, fit_check, record, run_outcome...
 │   ├── capabilities/         # Capability handlers (filesystem, git, typescript, eslint, test)
 │   ├── runtime/              # apply_candidate_diff, promote_validated_candidate
 │   └── substrates/           # aider_substrate.sh, raw_llm.sh, static_gate.sh, preflight, test/
+│       └── test/             # 39 regression suites & briefing improvement loop
 └── src/                      # Target mutation playground (governed by ARCHITECTURE.md)
 ```
 
@@ -257,117 +260,10 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 
 | Command | Scope |
 |---|---|
-| `npm run aegis:test:fast` | Contracts without full LLM matrix |
-| `npm run aegis:test` | Full shell suite |
+| `npm run aegis:test:fast` | Fast regression suite covering all core contracts without full LLM matrix |
+| `npm run aegis:test` | Full shell test matrix (39 test suites) |
 | `npm run aegis:sanity` | tsc + eslint + static enforce |
-| `npm run aegis:test:language-detector` | Mechanical language detector sentinel census & adaptive TTY test |
+| `npm run aegis:test:briefing-loop` | Automated supervisor briefing benchmark loop (Lots A, B, C with 30 prose demands) |
 | `npm run aegis:test:skeletal-ast` | Skeletal AST Scope Pruning via Tree-sitter (`ast-grep`) test |
 
-Notable: `test_demand_tokens.sh` (tokens, mechanical discovery/forensics, intent, metrics shape), `test_model_boundary_idempotency_cache.sh` (Byte-0 cache stability).
-
----
-
-## Status notes
-
-- **Deep topology cut complete** — Layer 0 + attention; no structural builder.
-- **Discovery is runtime-only** — no `AEGIS_DISCOVERY_LLM`; mechanical fail is fatal.
-- **Forensics** — mechanical + probe discrimination; search only on LLM residual.
-- **Build** — skill always injected; intent gates + metrics; optional `demand_mismatch` re-entry.
-- **Context ceiling is fixed at 32 KB by decision, not omission.** The bound
-  comes from the task (one issue = one task = one target), not from the model
-  window, so it is deliberately not model-derived. `budget_exceeded: true`
-  reads as *this demand is too large for one execution* — split the demand
-  rather than raise the number.
-- Prefer hardening and KISS reduction over new architectural surfaces.
-- **P2 behavioral oracle live** — supervisor-expanded Briefing now carries
-  executable `## Behavior`; wrong-but-API-correct candidates are rejected by the
-  mechanical gate (closed issue #183 hole). Benchmark arm D (vague demand +
-  Aegis): **0/12 → 12/12** (`verify_rate_limiter.ts`).
-
----
-
-## Open verification — prompt prefix reuse (client side now proven; provider side still open)
-
-The context work (tail-first budget pruning, frozen zone / live zone split,
-`kind:"cache"` prefix hashes) rests on two separate premises, which were
-previously conflated:
-
-1. **The client emits a long, byte-stable prefix.** Now measured and true.
-2. **The provider reuses it.** Still unobserved.
-
-### Premise 1 — measured
-
-Two `forensics` runs of the same demand, captured at the wire (mock-curl shim
-from `test_model_boundary_idempotency_cache.sh`, so no network) and tokenised
-with `o200k_base`:
-
-| Fact | Before | After |
-|---|---|---|
-| Whole raw prompt | 2052 tok | 2435 tok |
-| **Byte-0 identical prefix across both runs** | **998 tok (49%)** | **1718 tok (71%)** |
-| Provider minimum before a prefix cache engages | 1024 tok | 1024 tok |
-| Verdict | **26 tok short — could never cache** | clears with margin |
-
-The "before" column is not a tuning miss, it is a design fault that the old
-metric could not see. Three causes, all now fixed:
-
-- **Per-execution identity stamped into every payload envelope.** `execution_id`
-  and `generated_at` from `aegis_emit_capability_success` were the sole cause of
-  the first 23 divergence points between the two runs. `render_bounded_payload_section`
-  now projects them out of the *rendered* prompt; the on-disk payload keeps them
-  for the audit trail.
-- **`src/ARCHITECTURE.md` never reached the model.** The lookup in
-  `assemble_system_prompt` was relative, and it runs after
-  `prepare_isolated_substrate_workspace` has `cd`'d into a temp workspace, so it
-  silently never matched. Candidates are absolute now. This is a correctness fix
-  first and a prefix fix second — architecture directives were simply absent.
-- **`emit_raw_prefix_metric` measured the wrong segment.** It hashed only the
-  user message, reporting 306 tok against a real frozen prefix of 998 — a 3.3x
-  understatement, and the reason the shortfall went unnoticed. It now reports
-  `system_bytes`, `prefix_bytes` and their sum.
-
-Residual: the remaining 29% starts at the epistemic handover payload, whose
-`artifact_snapshot.generated_at` is nested inside a JSON string in file content.
-It is left alone deliberately — scrubbing volatile-looking text out of evidence
-bodies would let the renderer alter what the model reads as fact, which the
-evidence discipline in `AGENTS.md` forbids. Reordering the handover to the tail
-would extend the prefix, but the payload order is the budgeter's priority order,
-and demoting the handover would make it the first thing dropped under budget
-pressure.
-
-### Premise 2 — still open
-
-`cached_prompt_tokens` is `null` on every run (NVIDIA
-`integrate.api.nvidia.com`). `emit_provider_usage_metric`
-(`scripts/substrates/raw/provider.sh`) already reads
-`usage.prompt_tokens_details.cached_tokens` / `usage.cached_tokens` — nothing to
-build, only a provider that fills them.
-
-Note that Anthropic caching is **explicit**: it requires `cache_control`
-breakpoints. `assemble_provider_request` automatically detects Anthropic
-models / gateways (or `AEGIS_PROVIDER_CACHE_CONTROL=1`) and formats the system
-prompt with `{"cache_control": {"type": "ephemeral"}}`, backed by a Pareto
-fallback in `provider.sh` that strips it if the endpoint rejects structured
-content parts. OpenAI and DeepSeek cache automatically on plain text.
-
-**What to run when a reporting key is available.** Replaying captured payloads
-is preferable to re-running the pipeline: it isolates the variable and costs
-cents. Critically, any probe needs a **positive control** — a bare `cached == 0`
-does not distinguish "the design does not cache" from "the measurement cannot
-observe cache":
-
-```bash
-AEGIS_CAPTURE_OUT=/tmp/caps bash scripts/substrates/test/probes/capture_prompt_payloads.sh
-OPENAI_API_KEY=sk-... python3 scripts/substrates/test/probes/prefix_cache_probe.py /tmp/caps --provider openai
-```
-
-`prefix_cache_probe.py` fires three arms: **A** the payload as shipped, **B**
-the same payload with volatile stamps neutralised, **C** a long, obviously
-cacheable control. If C does not register a hit, the harness or the account is
-the problem and A/B prove nothing.
-
-Ceiling if it does fire: 71% of input tokens at a 50% cached-input discount is
-~35% of input cost (~53% at 75%). Output is never cached and costs several times
-input, so the saving on a full bill is smaller than either number. The former
-"50% to 98%" claim in the READMEs had no evidence behind it and has been
-replaced with the measured figures.
+Notable: `test_briefing_loop.sh` (prose demands in, `tsc` compilation + Node runtime behavior execution gate), `test_model_boundary_idempotency_cache.sh` (Byte-0 cache stability).

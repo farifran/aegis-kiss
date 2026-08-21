@@ -21,17 +21,17 @@ git clone https://github.com/farifran/aegis-kiss.git && cd "aegis kiss" && npm i
 
 # 2. Configure Credentials (.harness/local.env)
 echo 'OPENAI_API_KEY="sk-..."' > .harness/local.env
-echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-3.6-flash"' >> .harness/local.env
+echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-2.5-flash"' >> .harness/local.env
 
 # 3. Execute a Demand
-./aegis "Create utility in src/index.ts" --target src/index.ts --accept myFunction
+./aegis "Create TokenBucket in src/tokenBucket.ts" --target src/tokenBucket.ts --accept TokenBucket
 ```
 
 ---
 
 ## 📦 Dependencies
 
-`npm install` covers only the TypeScript toolchain (`typescript`, `eslint`,
+`npm install` covers the TypeScript toolchain (`typescript`, `eslint`,
 `@ast-grep/cli`, … — see `package.json`). The runtime also requires the
 following on your `PATH`:
 
@@ -41,7 +41,7 @@ following on your `PATH`:
 | **git** | ✅ | Only durable memory; diff/status & commit gate |
 | **curl** | ✅ | Provider HTTP requests (`raw` substrate) |
 | **jq** | ✅ | JSON evidence, handover, metrics, prompts |
-| **node** + **npm** | ✅ | `tsc`, `eslint`, `ast-grep` toolchain |
+| **node** + **npm** | ✅ | `tsc`, `eslint`, `ast-grep` toolchain & runtime behavior gate |
 | **Aider CLI** (`aider`) | ✅ *(mutation)* | `build` substrate — `AEGIS_AIDER_BIN` (default `.venv/bin/aider`, auto-detected from `PATH`) |
 | **python3** | ⚪ optional | Mechanical TS sanitizer + cache probe scripts |
 | **gh** (GitHub CLI) | ⚪ optional | Only `--issue N` demand intake |
@@ -70,7 +70,7 @@ Aegis supports **two primary execution modes** across any development environmen
 - **Flexible Model Selection**:
   - **Single Global Model**: Set `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (or `ollama/llama3.1:8b`) to use one model for all pipeline stages.
   - **Per-Task / Per-Mode Models**: Override specific pipeline stages with dedicated models:
-    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & issue generation (e.g. `deepseek-ai/deepseek-v4-flash-0731`; defaults to the brief model)
+    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & JSON schema generation (`.skills/briefing.md`)
     - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`build`)
     - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & falsification (`adversarial`)
     - `AEGIS_MODEL_VALIDATION`: Tribunal static alignment (`validation`)
@@ -93,7 +93,7 @@ Aegis supports **two primary execution modes** across any development environmen
 
 ## 🏛️ Architectural Synthesis: Aegis's 6 Pillars
 
-Aegis unifies 6 major open-source software engineering projects into a single deterministic harness:
+Aegis unifies 6 major open-source software engineering principles into a single deterministic harness:
 
 | Pillar | Role in Aegis | Measurable Practical Benefit |
 |---|---|---|
@@ -106,38 +106,49 @@ Aegis unifies 6 major open-source software engineering projects into a single de
 
 ---
 
-## 🧪 Behavioral Oracle: Mechanical Validation of Semantics (P2)
+## 🧪 Supervisor Briefing & Behavioral Oracle: 2-Tier Validation
 
 Intake expands a demand through the **supervisor** model into a structured
-Briefing that carries an executable **`## Behavior`** section — regression
-asserts the coder must satisfy:
+JSON Briefing based on the canonical contract ([`.skills/briefing.md`](.skills/briefing.md)):
 
-```text
-- window slides at the boundary and resets count
-   exports: RateLimiter
-   prelude: const r = new RateLimiter(1, 1000)
-   prelude: r.allow(0n)
-   assert: r.allow(1000n) === true && r.windowStart === 1000n
+```json
+{
+  "goal": "Create src/slidingWindowLimiter.ts and src/index.ts implementing a sliding window rate limiter",
+  "targets": ["src/slidingWindowLimiter.ts", "src/index.ts"],
+  "exports": [ ... ],
+  "behavior": [
+    {
+      "desc": "Accepts requests up to limit and rejects beyond it",
+      "exports": ["SlidingWindowLimiter"],
+      "prelude": ["const limiter = new SlidingWindowLimiter(2, 1000)"],
+      "assert": "limiter.tryAcquire() === true && limiter.tryAcquire() === true && limiter.tryAcquire() === false"
+    }
+  ]
+}
 ```
 
-`fit_check.sh` carries `## Behavior` into each micro-unit demand; the mechanical
-**behavior gate** (`aegis_mechanical_behavior_gate` in `demand.sh`) parses the
-items, scopes each assert to the unit that owns its **first-listed export**
-(imports are the union of all exports an item references), and executes them
-with `node --experimental-strip-types`. A failing assert emits a
-`behavior_failure` finding (high severity, `supported_by_evidence: true`) that
-`validation` turns into a hard `rejected` verdict with `build_feedback` — so a
-candidate that implements the API but violates the intended semantics **cannot**
-be promoted. This closes the "validated but semantically wrong" hole.
+### 2-Tier Automated Quality Gate:
+1. **TypeScript Compilation in Memory (`tsc`)**: `aegis_briefing_typecheck_json` materializes the schema in a temporary in-memory module and runs `tsc --noEmit` against the project's `tsconfig.json`. Any missing members, unknown types, or bad signatures are rejected and retried before the coder model receives the prompt.
+2. **Node.js Runtime Behavior Execution Gate**: Behavior assertions in `behavior[]` are compiled and executed in real Node.js runtime (`node unit.js`), proving mathematical correctness and runtime validity.
 
-Assertions anchor time to the exported `windowStart` getter (never absolute
-numbers or real-clock sleeps), keeping the oracle deterministic. Verified on the
-RateLimiter benchmark: a wrong-but-API-correct candidate that the old pipeline
-accepted (issue #183) is now rejected with findings in every relevant unit.
+---
 
-**Benchmark (arm D, vague demand + Aegis).** With the supervisor brief + the
-behavioral oracle the 12-check oracle (`verify_rate_limiter.ts`) goes from
-**0/12 (bare 8B)** to **12/12**, matching the structured-demand arms.
+## 🔄 Automated Briefing Improvement Loop
+
+Aegis includes an automated test loop to continuously benchmark and refine supervisor prompt quality across 30 real-world prose demands:
+
+```bash
+# Run standard benchmark suite (Lot A: algorithms, caches, state machines)
+npm run aegis:test:briefing-loop
+
+# Run Lot B (frontend & async error contracts)
+AEGIS_BRIEFING_LOOP_DEMANDS=scripts/substrates/test/probes/briefing_demands_b.jsonl npm run aegis:test:briefing-loop
+
+# Run Lot C (advanced data structures, DAGs, binary parsers, mutexes)
+AEGIS_BRIEFING_LOOP_DEMANDS=scripts/substrates/test/probes/briefing_demands_c.jsonl npm run aegis:test:briefing-loop
+```
+
+Defects are automatically logged and classified in `.harness/runtime/briefing_loop_report.jsonl`.
 
 ---
 
@@ -159,25 +170,6 @@ wire and tokenised with `o200k_base`:
 | — system message (constitution + architecture + skill) | 1,059 |
 | — user message up to first divergence | 659 |
 | Provider minimum before any prefix cache engages | 1,024 |
-
-The prefix clears the threshold with room to spare. The residual 29% is the
-epistemic handover, which carries its own timestamp and legitimately changes
-every cycle.
-
-**What is not measured.** *Whether the provider actually reuses it.* No
-cache-reporting endpoint has been exercised yet — the current NVIDIA endpoint
-returns `null` for `cached_tokens`, so `cached_prompt_tokens` in
-`pipeline_metrics.jsonl` has never been anything but null. Until that run
-happens, the honest ceiling is arithmetic, not a benchmark:
-
-| If the cache fires | Saving on **input** cost |
-|---|---|
-| Provider bills cached input at 50% off | ~35% |
-| Provider bills cached input at 75% off | ~53% |
-
-Output tokens are never cached and are billed several times the input rate, so
-the saving on a full bill is materially smaller than either figure. Any claim
-above this range is not supported by evidence in this repository.
 
 | Mode | Substrate / Engine | Prompt Payload Structure | Prefix status |
 |---|---|---|---|
@@ -208,8 +200,11 @@ above this range is not supported by evidence in this repository.
 # 5. Run static tribunal (AST grep + ESLint + TS)
 npm run aegis:sanity
 
-# 6. Execute harness test suite
+# 6. Execute fast regression test suite
 npm run aegis:test:fast
+
+# 7. Execute full 39-suite test matrix
+npm run aegis:test
 ```
 
 ---
