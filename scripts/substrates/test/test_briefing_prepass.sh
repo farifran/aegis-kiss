@@ -124,6 +124,93 @@ printf '%s' "${sanitized}" | jq -e '
 aegis_briefing_validate_json "${sanitized}" 2>/dev/null \
   || fail "sanitized_math_min_should_validate"
 
+# --- the schema has no private helpers: a call the class never declares is a
+# TS2339 the coder cannot fix from the Briefing (bitset loop, _checkIndex) ---
+assert_rejected \
+  "$(mutate '.exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" \
+  "undeclared_member:_checkIndex"
+aegis_briefing_validate_json \
+  "$(mutate '.exports[0].methods += [{"name":"_checkIndex","params":[{"name":"i","type":"bigint"}],"returns":"void","body":["return"]}] | .exports[0].methods[0].body = ["this._checkIndex(bits)", "return true"]')" \
+  2>/dev/null || fail "declared_underscore_method_should_be_accepted"
+aegis_briefing_validate_json \
+  "$(mutate '.exports[0].methods[0].body = ["return this._tokens.toString(2).length > 0"]')" \
+  2>/dev/null || fail "member_call_on_field_should_be_accepted"
+
+# --- a named data shape is expressible without an interface export: it
+# renders into the Briefing but never reaches Acceptance or the barrel,
+# because a type has no runtime symbol for the smoke test to import ---
+_typed="$(mutate '.types = [{"name":"FieldProblem","shape":"{ field: string; reason: string }"}] | .exports[1].returns = "FieldProblem[]"')"
+aegis_briefing_validate_json "${_typed}" 2>/dev/null || fail "types_array_should_be_accepted"
+_typed_render="$(aegis_briefing_render "${_typed}")"
+printf '%s' "${_typed_render}" | grep -q '^type FieldProblem = { field: string; reason: string }$' \
+  || fail "render_missing_named_type: ${_typed_render}"
+printf '%s' "${_typed_render}" \
+  | awk '/^## Acceptance$/ {p=1; next} /^## / {p=0} p' | grep -q 'FieldProblem' \
+  && fail "named_type_must_not_reach_acceptance"
+printf '%s' "${_typed_render}" | grep -q 'import { TokenBucket, obterEstadoBitmask }' \
+  || fail "named_type_must_not_enter_the_barrel"
+assert_rejected "$(mutate '.types = [{"name":"Bad Name","shape":"{}"}]')"        "type_not_identifier"
+assert_rejected "$(mutate '.types = [{"name":"FieldProblem","shape":""}]')"      "type_without_shape"
+
+# --- the tsc gate: the schema is compiled before the coder sees it. Fatal
+# codes reject; strict-null residue never does, because ## Constraints already
+# tells the coder to bind and guard, and rejecting would cost every honest
+# briefing that indexes an array ---
+aegis_briefing_typecheck_json "${good_json}" >/dev/null \
+  || fail "compilable_schema_should_pass_typecheck"
+aegis_briefing_typecheck_json \
+  "$(mutate '.exports[1].params[0].type = "TokenBucketMissing"')" >/dev/null \
+  && fail "unknown_type_should_fail_typecheck"
+aegis_briefing_typecheck_json \
+  "$(mutate '.exports[1].body = ["const rows: string[][] = []", "return rows[0].length"]')" >/dev/null \
+  || fail "strictnull_residue_must_not_reject"
+(
+  export AEGIS_BRIEFING_TYPECHECK=0
+  aegis_briefing_typecheck_json "$(mutate '.exports[1].params[0].type = "TokenBucketMissing"')" >/dev/null
+) || fail "AEGIS_BRIEFING_TYPECHECK=0_should_disable"
+# config.sh marks AEGIS_ROOT_DIR readonly, so fail-open is proven in a child
+# process pointed at a directory with no tsc and no tsconfig.
+env AEGIS_ROOT_DIR="$(mktemp -d)" bash -c '
+  source "$0/scripts/lib/briefing.sh"
+  aegis_briefing_typecheck_json "$1" >/dev/null
+' "${AEGIS_TEST_ROOT}" "$(mutate '.exports[1].params[0].type = "TokenBucketMissing"')" \
+  || fail "typecheck_should_fail_open_without_tsc"
+
+# --- sanitize aligns barrelFrom casing with the target: ./tokenbucket.js
+# against src/tokenBucket.ts is TS2307 everywhere except macOS ---
+[[ "$(aegis_briefing_sanitize_json "$(mutate '.barrelFrom = "./tokenbucket.js"')" \
+      | jq -r '.barrelFrom')" == "./tokenBucket.js" ]] \
+  || fail "sanitize_should_fix_barrel_casing"
+
+# --- a body may declare as many distinct consts as it needs; only the same
+# name twice in one scope is the decode glitch worth rejecting ---
+aegis_briefing_quality_check \
+  "$(mutate '.exports[1].body = ["const a = 1", "const b = 2", "const c = 3", "return a + b + c"]')" \
+  || fail "distinct_consts_should_pass_quality"
+aegis_briefing_quality_check \
+  "$(mutate '.exports[1].body = ["const end = 1", "const end = 2", "return end"]')" \
+  && fail "redeclared_const_should_fail_quality"
+# two loops may each declare their own const: block scope is not one scope
+aegis_briefing_quality_check \
+  "$(mutate '.exports[1].body = ["for (let i = 0; i < 2; i++) {", "  const x = i", "}", "for (let j = 0; j < 2; j++) {", "  const x = j", "}", "return 0"]')" \
+  || fail "block_scoped_consts_should_pass_quality"
+
+# --- `!` is banned repo-wide (enforcement/rules/no-non-null-assertion.yml).
+# Rewriting beats rejecting: the briefing survives, the static gate stays green ---
+_nn="$(aegis_briefing_sanitize_json \
+  "$(mutate '.exports[0].methods[0].body = ["return this._map.get(bits)!.value"] | .behavior = [{"desc":"x","exports":["TokenBucket"],"prelude":["const i = new TokenBucket(1n)"],"assert":"i.find()!.tokens === 1n"}]')")"
+printf '%s' "${_nn}" | grep -q '!\.' && fail "sanitize_should_rewrite_nonnull_assertion: ${_nn}"
+printf '%s' "${_nn}" | jq -e '.exports[0].methods[0].body[0] | test("get\\(bits\\)\\?\\.value")' >/dev/null \
+  || fail "nonnull_body_should_become_optional_chain: ${_nn}"
+printf '%s' "${_nn}" | jq -e '.behavior[0].assert | test("find\\(\\)\\?\\.tokens")' >/dev/null \
+  || fail "nonnull_assert_should_become_optional_chain: ${_nn}"
+
+# negation and strict inequality are not assertions and must survive untouched
+printf '%s' "$(aegis_briefing_sanitize_json \
+  "$(mutate '.exports[1].body = ["if (b.tokens !== 0n) return 1", "return !b.tokens ? 0 : 1"]')")" \
+  | jq -e '.exports[1].body | join(" ") | test("!==") and test("!b.tokens")' >/dev/null \
+  || fail "negation_and_strict_inequality_must_survive_sanitize"
+
 # --- identifiers. The 8B emitted `TokenBucketState.Bitmask` as an export. ---
 assert_rejected \
   "$(mutate '.exports[1].name = "TokenBucketState.Bitmask"')" \

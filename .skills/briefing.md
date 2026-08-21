@@ -24,7 +24,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 ---
 
-## 🛡️ 5 Architectural Invariants
+## 🛡️ 6 Architectural Invariants
 
 1. **Browser Globals Quarantine (Node.js Smoke Test Safety)**:
    - `src/*.ts` files must NEVER access `window`, `document`, `localStorage`, or `AudioContext` at the top-level module scope.
@@ -45,6 +45,16 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 5. **Behavior Assertions**:
    - Supply 2-4 executable regression tests in `behavior[]` exercising capacity, boundary conditions, transitions, and state mutations.
+   - Each assert is compiled and executed once, headless. `await` is fine for a genuinely asynchronous export — assert the resolved value, NEVER merely that a `Promise` was returned. But NEVER sleep or read a wall clock (`setTimeout`, `Date.now()`, `performance.now()`, `Math.random()`): a timing-dependent assert is flaky, not executable.
+
+6. **Schema Closure (every reference resolves)**:
+   - `kind` is ONLY `class` or `function`. NEVER `interface` or `enum` inside `exports` — an export is a runtime symbol the smoke test imports, and a type has none.
+   - A named data shape goes in the top-level `"types"` array: `"types": [{"name": "FieldProblem", "shape": "{ field: string; reason: string }"}]`. Then use `FieldProblem[]` freely as a param, return or field type.
+   - Every type must be a lowercase primitive, a JavaScript builtin (`Map`, `Set`, `Uint8Array`, …), a `class` in `exports`, or a name declared in `types`.
+   - No type parameters anywhere: `<T>` cannot be declared in this schema, so `Promise<T>` is an undefined name. Use the concrete type the demand implies, or `unknown`.
+   - Every callable member must appear in `methods[]`. Private helpers are NOT expressible: `this._checkIndex(i)` with no `_checkIndex` in `methods[]` is a rejected briefing. Inline the guard in each body (`if (i < 0 || i >= this._capacity) throw new Error('index out of range')`) or declare `_checkIndex` as a method.
+   - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
+   - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`, character for character: `src/seatMap.ts` → `./seatMap.js`, never `./seatmap.js`.
 
 ---
 
@@ -52,10 +62,13 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 ```json
 {
-  "goal": "<One concise sentence naming the files to create and primary purpose>",
+  "goal": "<One concise sentence naming the files to create and primary purpose; never a parameter or field name>",
   "targets": [
     "src/<domain>.ts",
     "src/index.ts"
+  ],
+  "types": [
+    {"name": "PascalCaseShapeName", "shape": "{ field: string; count: number }"}
   ],
   "exports": [
     {

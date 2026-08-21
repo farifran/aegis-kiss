@@ -34,9 +34,13 @@
 #     the Briefing does not export is not a check, it is an impossibility
 #   - types are fields, so `BigInt` used as a type is mechanically rejectable
 #   - Math.min/max/floor on bigint bodies is mechanically rejectable
+#   - the schema is compiled before the coder ever sees it, so a briefing that
+#     contradicts itself is rejected instead of costing a fix loop
 #
 # What the schema still cannot catch is full demand logic (wrong formula).
-# That is the Briefing layer + typescript.check / fix loop.
+# That is the Briefing layer + typescript.check / fix loop. It does now catch
+# self-contradiction: aegis_briefing_typecheck_json materializes the schema
+# and runs the repo's own tsc over it before the briefing is rendered.
 #
 # Advisory: any failure falls back to the mechanical render_body and the run
 # behaves exactly as it does today.
@@ -47,6 +51,8 @@
 #                                   coder model is NOT inherited on purpose
 #   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
+#   AEGIS_BRIEFING_TYPECHECK=0      skip the tsc gate (it fails open anyway
+#                                   when node_modules/.bin/tsc is absent)
 #   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
 #   AEGIS_SUPERVISOR_SPLIT_MAX_UNITS  default 4
 #   OPENAI_API_BASE / OPENAI_API_KEY
@@ -87,7 +93,7 @@ aegis_briefing_max_exports() {
 # Always injected by render/unit builders — never depends on the LLM remembering them.
 aegis_briefing_stable_constraints() {
   cat <<'EOF'
-- no any / as any / @ts-ignore
+- no any / as any / @ts-ignore / non-null assertion (x!)
 - NodeNext: .js extension in relative imports
 - only packages in package.json; builtins are global
 - TypeScript types are lowercase (bigint, number, string, boolean) — never BigInt/Number/String/Boolean as types; BigInt(x) as a call is OK
@@ -96,6 +102,7 @@ aegis_briefing_stable_constraints() {
 - Private fields start with underscore and are not Acceptance exports
 - BigInt is global when high-precision time is required
 - Prefer one top-level export per micro unit; methods on a class are fine
+- noUncheckedIndexedAccess is ON: arr[i] / text[i] / map.get(k) are T | undefined — bind to a const and guard before using, never chain off the index
 - Numerical boundaries: clamp values using explicit conditional checks (if (val > max) val = max)
 - State mutation: methods that mutate internal state must preserve all class invariants
 EOF
@@ -108,8 +115,18 @@ aegis_briefing_sanitize_json() {
   # 1) Math.min/max on bigint → clamp ternaries
   json="$(
     printf '%s' "${json}" | jq -c '
+      # The static gate rejects `x!` (enforcement/rules/no-non-null-assertion).
+      # Rewriting beats rejecting: `a!.b` becomes `a?.b`, `f(a!)` becomes
+      # `f(a)`, and a briefing that was otherwise fine survives.
+      def drop_nonnull:
+        if type != "string" then .
+        else gsub("(?<a>[A-Za-z0-9_)\\]])!(?<b>\\s*[.\\[])"; "\(.a)?\(.b)")
+             | gsub("(?<a>[A-Za-z0-9_)\\]])!(?<b>[).,;])"; "\(.a)\(.b)")
+             | gsub("(?<a>[A-Za-z0-9_)\\]])!\\s*$"; "\(.a)")
+        end;
       def rewrite_line:
-        . as $s
+        drop_nonnull
+        | . as $s
         | if ($s | type) != "string" then $s
           elif ($s | test("Math\\.(min|max)\\([^)]*\\)"))
                and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b|_tokens|_max|maxTokens")) then
@@ -132,7 +149,23 @@ aegis_briefing_sanitize_json() {
               if (.body | type) == "string" then .body = (.body | rewrite_line) else . end
             ))
         end;
-      .exports = ((.exports // []) | map(map_bodies))
+      # 2) barrelFrom must match its target character for character:
+      #    "./seatmap.js" against src/seatMap.ts is TS2307 on any
+      #    case-sensitive filesystem, and silently fine on macOS until CI.
+      def fix_barrel:
+        ((.barrelFrom // "") | sub("^\\./"; "") | sub("\\.js$"; "")) as $stem
+        | if ($stem | length) == 0 then .
+          else
+            ([.targets[]? | select(type == "string" and endswith(".ts"))
+               | sub("^src/"; "") | sub("\\.ts$"; "")
+               | select(ascii_downcase == ($stem | ascii_downcase))] | first) as $hit
+            | if $hit == null then . else .barrelFrom = "./" + $hit + ".js" end
+          end;
+      .behavior = ((.behavior // []) | map(
+          .assert = ((.assert // "") | drop_nonnull)
+          | .prelude = ((.prelude // []) | if type == "string" then drop_nonnull
+                                           else map(drop_nonnull) end)))
+      | .exports = ((.exports // []) | map(map_bodies)) | fix_barrel
     ' 2>/dev/null || printf '%s' "${json}"
   )"
   printf '%s' "${json}"
@@ -285,12 +318,22 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | select(((.name // "") | ident) | not) | "name_not_identifier:\(.name)"),
         ((.exports // [])[]? | select((.name // "") | startswith("_")) | "private_as_export:\(.name)"),
         ((.exports // [])[]? | select((.kind // "") | (. == "class" or . == "function") | not) | "bad_kind:\(.kind)"),
+        ((.types // [])[]? | select(((.name // "") | ident) | not) | "type_not_identifier:\(.name)"),
+        ((.types // [])[]? | select(((.shape // "") | length) == 0) | "type_without_shape:\(.name)"),
         ((.exports // [])[]? | (.privateFields // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.ctorParams // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.methods // [])[]? | (.params // [])[]? | select((.type // "") | bad_type) | "constructor_used_as_type:\(.type)"),
         ((.exports // [])[]? | (.methods // [])[]? | select(((.name // "") | ident) | not) | "method_not_identifier:\(.name)"),
         ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
+        # The schema has no private helpers: a body calling this._check(...)
+        # that no field, method or getter declares is a TS2339 the coder
+        # cannot fix from the Briefing alone.
+        ((.exports // [])[]?
+          | [(.privateFields // [])[]?.name, (.methods // [])[]?.name, (.getters // [])[]?.name] as $decl
+          | [body_lines[]? | select(type == "string")
+              | capture("this\\.(?<m>_[A-Za-z0-9_]+)\\s*\\("; "g").m] | unique
+          | .[]? | . as $m | select(($decl | index($m)) == null) | "undeclared_member:\($m)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
            then "barrel_not_nodenext:\(.barrelFrom)" else empty end),
         (if ((.behavior // []) | length) > 0
@@ -318,6 +361,11 @@ aegis_briefing_validate_json() {
 # still yield structurally valid JSON: degenerate self-cancelling algebra
 # (e.g. "start + BigInt(limit) * 0n + start - start") and duplicated
 # declarations (two "const end" in one function body).
+#
+# Redeclaration is counted by NAME, and only at brace depth 0. Counting
+# `const` lines instead rejected every honest parser (compareSemVer declares
+# parse, pa, pb and maxLen in one body); ignoring depth rejected every honest
+# loop (two `for` blocks may each declare their own `const x`).
 aegis_briefing_quality_check() {
   local json="${1-}"
   [[ -n "${json}" ]] || return 1
@@ -326,9 +374,111 @@ aegis_briefing_quality_check() {
        | select(test("\\* *0n") or test("windowStart *- *windowStart") or test("\\+ *- *\\+"))
       ] | length) == 0
     and
-    ([.exports[]? | ([.body[]? | select(test("^const "))] | length)]
-       | map(select(. > 1)) | length) == 0
+    ([.exports[]? | (.body // []), (.ctorBody // []), ((.methods[]? | .body) // [])]
+       | map(reduce .[] as $l ({depth: 0, names: []};
+               (if ($l | type) == "string" then $l else "" end) as $s
+               | {depth: (.depth + ($s | [scan("[{]")] | length) - ($s | [scan("[}]")] | length)),
+                  names: (.names + (if .depth == 0
+                            then [$s | capture("^\\s*(?:const|let)\\s+(?<v>[A-Za-z_$][A-Za-z0-9_$]*)").v]
+                            else [] end))})
+             | .names | group_by(.) | map(select(length > 1)) | length)
+       | add // 0) == 0
   ' >/dev/null 2>&1
+}
+
+# Compile the schema and let tsc judge it — the same bar the coder's output
+# has to clear. Prints one classified code per line:
+#
+#   tsc:TSxxxx             the briefing contradicts itself (unknown type,
+#                          missing member, wrong argument). Returns 1.
+#   tsc-strictnull:TSxxxx  noUncheckedIndexedAccess residue on a body the
+#                          coder rewrites anyway, and ## Constraints already
+#                          carries the bind-and-guard rule. Never rejects.
+#
+# Fails OPEN: no tsc, no tsconfig, no jq, or a render jq cannot produce all
+# return 0 — a missing compiler must never cost a good briefing.
+# Optional $2 is an artifact prefix: <prefix>.ts and <prefix>.log are kept
+# whenever the check finds anything, for post-mortem.
+#
+# Env: AEGIS_BRIEFING_TYPECHECK=0 disables.
+aegis_briefing_typecheck_json() {
+  local json="${1-}" keep="${2-}"
+  local root bin dir out classified
+
+  case "${AEGIS_BRIEFING_TYPECHECK:-1}" in
+    0|false|no) return 0 ;;
+  esac
+  [[ -n "${json}" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  root="$(cd "${AEGIS_ROOT_DIR:-.}" 2>/dev/null && pwd)" || return 0
+  bin="${root}/node_modules/.bin/tsc"
+  [[ -x "${bin}" ]] && [[ -f "${root}/tsconfig.json" ]] || return 0
+
+  # Out of tree on purpose: the repo tsconfig includes .harness, so a scratch
+  # .ts written under it would join `npm run aegis:typecheck`.
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_brief_tsc.XXXXXX")" || return 0
+  printf '{"extends":"%s/tsconfig.json","include":["unit.ts"],"compilerOptions":{"noEmit":true,"rootDir":"."}}' \
+    "${root}" > "${dir}/tsconfig.json"
+
+  printf '%s' "${json}" | jq -r '
+    def params($p): (($p // []) | map(.name + ": " + .type) | join(", "));
+    def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
+
+    [ (.types[]? | "type \(.name) = \(.shape);") ]
+    + [ (.exports[]?
+        | if .kind == "class" then
+            "export class \(.name) {"
+            + ((.privateFields // []) | map("\n  private \(.name): \(.type);") | join(""))
+            + "\n  constructor(" + params(.ctorParams) + ") {\n" + lines(.ctorBody; "    ") + "\n  }"
+            + ((.methods // []) | map(
+                "\n  \(.name)(" + params(.params) + "): \(.returns // "void") {\n"
+                + lines(.body; "    ") + "\n  }") | join(""))
+            + ((.getters // []) | map(
+                "\n  get \(.name)(): \(.returns // "unknown") { \(.body // "") }") | join(""))
+            + "\n}"
+          else
+            "export function \(.name)(" + params(.params) + "): \(.returns // "void") {\n"
+            + lines(.body; "  ") + "\n}"
+          end)
+    ]
+    + [ (.behavior // []) | to_entries[]
+        | "\(.key)" as $i
+        | .value as $b
+        | "async function __behavior\($i)(): Promise<void> {\n"
+          + lines(($b.prelude // [] | if type == "string" then [.] else . end); "  ")
+          + "\n  const __ok\($i): boolean = (\($b.assert // "true"));\n  void __ok\($i);\n}\nvoid __behavior\($i);" ]
+    | join("\n\n")
+  ' > "${dir}/unit.ts" 2>/dev/null || { rm -rf "${dir}"; return 0; }
+  [[ -s "${dir}/unit.ts" ]] || { rm -rf "${dir}"; return 0; }
+
+  out="$("${bin}" -p "${dir}" 2>&1 || true)"
+
+  # TS2769 carries the "| undefined is not assignable" detail on continuation
+  # lines, so each error is classified together with the lines explaining it.
+  classified="$(
+    printf '%s\n' "${out}" \
+      | awk '/error TS[0-9]+/ {if (r != "") print r; r = $0; next} r != "" {r = r " " $0} END {if (r != "") print r}' \
+      | while IFS= read -r line; do
+          case "${line}" in
+            *"possibly 'undefined'"*|*"possibly 'null'"*|*"undefined' is not assignable"*)
+              printf 'tsc-strictnull:' ;;
+            *) printf 'tsc:' ;;
+          esac
+          printf '%s\n' "${line}" \
+            | awk '{if (match($0, /error TS[0-9]+/)) print substr($0, RSTART + 6, RLENGTH - 6)}'
+        done | sort -u
+  )"
+
+  if [[ -n "${keep}" ]] && [[ -n "${classified}" ]]; then
+    cp "${dir}/unit.ts" "${keep}.ts" 2>/dev/null || true
+    printf '%s\n' "${out}" > "${keep}.log" 2>/dev/null || true
+  fi
+  rm -rf "${dir}"
+
+  [[ -z "${classified}" ]] || printf '%s\n' "${classified}"
+  printf '%s' "${classified}" | grep -q '^tsc:' && return 1
+  return 0
 }
 
 # Deterministic markdown. Acceptance is the export list, so it cannot name
@@ -351,6 +501,9 @@ aegis_briefing_render() {
     (((.exports // []) | map("- " + .name)) | join("\n")),
     "",
     "## Briefing",
+    (if ((.types // []) | length) > 0
+       then ((.types | map("type " + .name + " = " + .shape)) | join("\n")) + "\n"
+       else empty end),
     (((.exports // []) | to_entries | map(
       (.key + 1 | tostring) as $n
       | .value as $e
@@ -467,45 +620,17 @@ aegis_briefing_is_schema_json() {
     >/dev/null 2>&1
 }
 
-# Prints the structured demand on success; prints nothing and returns 1
-# whenever the caller should fall back to the mechanical body.
-aegis_briefing_generate() {
+# Calls the supervisor LLM and prints VALIDATED schema JSON on stdout.
+# Prints nothing and returns 1 whenever the caller should fall back; the
+# reason lands on stderr. Split out of aegis_briefing_generate so the schema
+# itself is observable (see test_briefing_loop.sh) without a second copy of
+# the request/retry/metrics path.
+aegis_briefing_expand_json() {
   local goal="${1-}"
   local target="${2-}"
   local evidence="${3-}"
 
   [[ -n "${goal}" ]] || return 1
-
-  # Agentic handover: caller already supplied the demand as schema JSON.
-  # Skip the supervisor LLM expand; run the same mechanical gates
-  # (sanitize + validate + quality + render) over the supplied JSON.
-  if aegis_briefing_is_schema_json "${goal}"; then
-    local content body
-    content="$(aegis_briefing_sanitize_json "${goal}")"
-    aegis_briefing_validate_json "${content}" 2>/dev/null || {
-      printf 'invalid_agentic_briefing\n' >&2
-      return 1
-    }
-    aegis_briefing_quality_check "${content}" 2>/dev/null || {
-      printf 'low_quality_agentic_briefing\n' >&2
-      return 1
-    }
-    body="$(aegis_briefing_render "${content}" 2>/dev/null || true)"
-    [[ -n "${body}" ]] || {
-      printf 'render_failed\n' >&2
-      return 1
-    }
-    printf '%s' "${body}"
-    return 0
-  fi
-
-  # Agentic handover never calls the supervisor LLM: a free-prose goal is
-  # not accepted for expansion here — the assistant must supply schema JSON.
-  # Return 1 so the caller falls back to the mechanical body / --accept.
-  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
-    printf 'agentic_requires_schema_json\n' >&2
-    return 1
-  fi
 
   local api_base api_key model timeout max_tokens
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
@@ -561,6 +686,8 @@ aegis_briefing_generate() {
   local http_code="000"
   local content=""
   local fail_reason="empty_response"
+  local why=""
+  local _tsc=""
   local backoff
 
   while [[ "${attempt}" -le "${max_attempts}" ]]; do
@@ -580,11 +707,21 @@ aegis_briefing_generate() {
     content="$(aegis_briefing_extract_content "${resp_file}")"
     if [[ -n "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
       content="$(aegis_briefing_sanitize_json "${content}")"
-      if aegis_briefing_validate_json "${content}" 2>/dev/null \
-        && aegis_briefing_quality_check "${content}" 2>/dev/null; then
-        break
+      # Keep the field-level reason: "invalid_briefing" alone tells neither the
+      # CLI log nor the improvement loop WHICH rule the supervisor broke.
+      why="$(aegis_briefing_validate_json "${content}" 2>&1 >/dev/null | tail -n 1 || true)"
+      if [[ -z "${why}" ]]; then
+        if ! aegis_briefing_quality_check "${content}" 2>/dev/null; then
+          why="low_quality"
+        else
+          # Last gate: a briefing that cannot compile hands the coder a fix
+          # loop it cannot win, because the defect is upstream of its file.
+          _tsc="$(aegis_briefing_typecheck_json "${content}" 2>/dev/null)" \
+            || why="typecheck:$(printf '%s' "${_tsc}" | sed -n 's/^tsc://p' | paste -sd, -)"
+          [[ -n "${why}" ]] || break
+        fi
       fi
-      fail_reason="invalid_or_low_quality_briefing"
+      fail_reason="invalid_briefing:${why}"
     else
       fail_reason="$(aegis_briefing_provider_error_code "${resp_file}" "${http_code}")"
     fi
@@ -654,7 +791,45 @@ aegis_briefing_generate() {
   content="$(aegis_briefing_sanitize_json "${content}")"
   aegis_briefing_validate_json "${content}" || return 1
 
-  local body
+  printf '%s' "${content}"
+  return 0
+}
+
+# Prints the structured demand (markdown) on success; prints nothing and
+# returns 1 whenever the caller should fall back to the mechanical body.
+aegis_briefing_generate() {
+  local goal="${1-}"
+  local target="${2-}"
+  local evidence="${3-}"
+  local content body
+
+  [[ -n "${goal}" ]] || return 1
+
+  if aegis_briefing_is_schema_json "${goal}"; then
+    # Agentic handover: caller already supplied the demand as schema JSON.
+    # Skip the supervisor LLM expand; run the same mechanical gates.
+    content="$(aegis_briefing_sanitize_json "${goal}")"
+    aegis_briefing_validate_json "${content}" 2>/dev/null || {
+      printf 'invalid_agentic_briefing\n' >&2
+      return 1
+    }
+    aegis_briefing_quality_check "${content}" 2>/dev/null || {
+      printf 'low_quality_agentic_briefing\n' >&2
+      return 1
+    }
+    aegis_briefing_typecheck_json "${content}" >/dev/null 2>&1 || {
+      printf 'uncompilable_agentic_briefing\n' >&2
+      return 1
+    }
+  elif [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    # Agentic handover never calls the supervisor LLM: a free-prose goal is
+    # not accepted for expansion here — the assistant must supply schema JSON.
+    printf 'agentic_requires_schema_json\n' >&2
+    return 1
+  else
+    content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
+  fi
+
   body="$(aegis_briefing_render "${content}" 2>/dev/null || true)"
   [[ -n "${body}" ]] || {
     printf 'render_failed\n' >&2
