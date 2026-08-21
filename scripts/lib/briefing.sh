@@ -129,7 +129,7 @@ aegis_briefing_sanitize_json() {
         | . as $s
         | if ($s | type) != "string" then $s
           elif ($s | test("Math\\.(min|max)\\([^)]*\\)"))
-               and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b|_tokens|_max|maxTokens")) then
+               and ($s | test("bigint|BigInt|[0-9]+n|\\bn\\b")) then
             ($s
               | gsub("Math\\.min\\((?<a>[^,()]+),[[:space:]]*(?<b>[^)]+)\\)";
                      "(((\(.a)) < (\(.b))) ? (\(.a)) : (\(.b)))")
@@ -186,59 +186,52 @@ Schema:
 {
   "goal": "one short sentence naming the files to create; no parameter or field names",
   "targets": ["src/thing.ts", "src/index.ts"],
+  "types": [
+    {"name": "PascalCaseShapeName", "shape": "{ field: string; count: number }"}
+  ],
   "exports": [
     {
       "kind": "class",
-      "name": "PascalCaseName",
+      "name": "PascalCaseClassName",
       "privateFields": [
-        {"name": "_tokens", "type": "bigint"},
-        {"name": "_maxTokens", "type": "bigint"},
-        {"name": "_lastUpdate", "type": "bigint"},
-        {"name": "_refillActive", "type": "boolean"}
+        {"name": "_capacity", "type": "bigint"},
+        {"name": "_active", "type": "boolean"}
       ],
-      "ctorParams": [{"name": "maxTokens", "type": "bigint"}],
-      "ctorBody": ["this._maxTokens = maxTokens", "this._tokens = maxTokens", "this._lastUpdate = BigInt(Date.now())", "this._refillActive = false"],
+      "ctorParams": [{"name": "capacity", "type": "bigint"}],
+      "ctorBody": ["this._capacity = capacity", "this._active = true"],
       "methods": [
         {
-          "name": "update",
-          "params": [],
-          "returns": "void",
-          "body": [
-            "const now = BigInt(Date.now())",
-            "const timeDiff = now - this._lastUpdate",
-            "if (timeDiff > 0n) { this._tokens += timeDiff; this._lastUpdate = now }",
-            "if (this._tokens > this._maxTokens) { this._tokens = this._maxTokens }",
-            "this._refillActive = this._tokens < this._maxTokens"
-          ]
-        },
-        {
-          "name": "consume",
-          "params": [{"name": "bits", "type": "bigint"}],
+          "name": "process",
+          "params": [{"name": "amount", "type": "bigint"}],
           "returns": "boolean",
-          "body": ["this.update()", "if (this._tokens >= bits) { this._tokens -= bits; return true }", "return false"]
+          "body": [
+            "if (amount > this._capacity) { return false; }",
+            "this._capacity -= amount;",
+            "return true;"
+          ]
         }
       ],
       "getters": [
-        {"name": "tokens", "returns": "bigint", "body": "return this._tokens"},
-        {"name": "refillActive", "returns": "boolean", "body": "return this._refillActive"}
+        {"name": "capacity", "returns": "bigint", "body": "return this._capacity"},
+        {"name": "active", "returns": "boolean", "body": "return this._active"}
       ]
     },
     {
       "kind": "function",
-      "name": "camelCaseName",
-      "params": [{"name": "b", "type": "PascalCaseName"}],
+      "name": "camelCaseFunctionName",
+      "params": [{"name": "instance", "type": "PascalCaseClassName"}],
       "returns": "number",
-      "body": ["let mask = 0", "if (b.tokens === 0n) mask |= 1", "if (b.refillActive) mask |= 2", "return mask"]
+      "body": ["let mask = 0;", "if (instance.capacity === 0n) { mask |= 1; }", "if (instance.active) { mask |= 2; }", "return mask;"]
     }
   ],
   "barrelFile": "src/index.ts",
   "barrelFrom": "./thing.js",
   "behavior": [
     {
-      "desc": "method returns false when capacity is exceeded",
-      "exports": ["PascalCaseName"],
-      "prelude": ["const instance = new PascalCaseName(100n)"],
-      "assert": "instance.consume(101n) === false"
+      "desc": "process returns false when amount exceeds capacity",
+      "exports": ["PascalCaseClassName"],
+      "prelude": ["const instance = new PascalCaseClassName(100n)"],
+      "assert": "instance.process(101n) === false"
     }
   ]
 }
@@ -280,12 +273,11 @@ aegis_briefing_validate_json() {
       # Math.min/max on bigint is the monstro that broke tsc; Math.floor(number)
       # then BigInt(...) is legitimate — do not reject floor/ceil wholesale.
       # Math on numbers (e.g. Math.max(0, n - m)) is legitimate: only flag a
-      # Math call whose SAME line references bigint operands (_window*, _tokens,
-      # _lastUpdate, or an n-suffixed literal / BigInt()).
+      # Math call whose SAME line references bigint operands.
       def has_math_on_bigint:
         test("Math\\.(min|max)\\(")
-        and test("bigint|BigInt\\(|[0-9]+n\\b|_windowMs|_windowStart|_tokens|_maxTokens|_lastUpdate");
-      def has_bigint_signal: test("bigint|BigInt|[0-9]+n|0n|1n|_tokens|_maxTokens|maxTokens");
+        and test("bigint|BigInt\\(|[0-9]+n\\b|\\bn\\b");
+      def has_bigint_signal: test("bigint|BigInt|[0-9]+n|0n|1n|\\bn\\b");
       def body_lines:
         [
           (.ctorBody // [])[],
@@ -363,7 +355,7 @@ aegis_briefing_quality_check() {
   [[ -n "${json}" ]] || return 1
   printf '%s' "${json}" | jq -e '
     ([.exports[]?.body[]?
-       | select(test("\\* *0n") or test("windowStart *- *windowStart") or test("\\+ *- *\\+"))
+       | select(test("\\* *0n") or test("([A-Za-z0-9_]+) *- *\\1") or test("\\+ *- *\\+"))
       ] | length) == 0
     and
     ([.exports[]? | (.body // []), (.ctorBody // []), ((.methods[]? | .body) // [])]
