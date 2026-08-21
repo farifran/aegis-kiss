@@ -96,8 +96,8 @@ aegis_briefing_stable_constraints() {
 - Private fields start with underscore and are not Acceptance exports
 - BigInt is global when high-precision time is required
 - Prefer one top-level export per micro unit; methods on a class are fine
-- Rate/token refill: compute timeDiff; only add tokens if timeDiff > 0 (or > 0n for bigint); update last-time only when you refill
-- If a refill-active / refil flag exists: set it after update as tokens < maxTokens (never leave it stuck true forever)
+- Numerical boundaries: clamp values using explicit conditional checks (if (val > max) val = max)
+- State mutation: methods that mutate internal state must preserve all class invariants
 EOF
 }
 
@@ -133,40 +133,6 @@ aegis_briefing_sanitize_json() {
             ))
         end;
       .exports = ((.exports // []) | map(map_bodies))
-    ' 2>/dev/null || printf '%s' "${json}"
-  )"
-  # 2) Rate-limit quality: ensure update() sets refillActive when the field exists.
-  #    Does not invent timeDiff branches (those stay in the worked example / Rules).
-  json="$(
-    printf '%s' "${json}" | jq -c '
-      def field_names:
-        [(.privateFields // [])[]?.name | select(type=="string")];
-      def pick($names; $re):
-        ([$names[] | select(test($re; "i"))][0] // null);
-      .exports = ((.exports // []) | map(
-        if (.kind // "") != "class" then .
-        else
-          (field_names) as $names
-          | pick($names; "refillActive|refill_active|_refill") as $refill
-          | pick($names; "maxTokens|_maxTokens|_max\\b") as $max
-          | pick($names; "^_tokens$|_tokens$") as $tok
-          | if $refill == null or $max == null or $tok == null then .
-            else
-              .methods = ((.methods // []) | map(
-                if (.name // "") != "update" then .
-                else
-                  ((.body // []) | map(tostring) | join("\n")) as $joined
-                  | if ($joined | test($refill)) then .
-                    else
-                      .body = ((.body // []) + [
-                        ("this." + $refill + " = this." + $tok + " < this." + $max)
-                      ])
-                    end
-                end
-              ))
-            end
-        end
-      ))
     ' 2>/dev/null || printf '%s' "${json}"
   )"
   printf '%s' "${json}"
@@ -246,18 +212,16 @@ Schema:
 
 Rules:
 - TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
-- Every "body" entry is one complete line of TypeScript. Write formulas as code (mbps * 8000), bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
+- Every "body" entry is one complete line of TypeScript. Write formulas directly as code, bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
 - NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint. Math.floor on number then BigInt(...) is OK.
-- Outside a class, NEVER read private fields (_tokens, _refillActive). Expose getters (get tokens(), get refillActive()) and use those in helper functions.
-- Elapsed-time refill (token bucket / rate limiter): compute timeDiff from now - lastUpdate; ONLY add tokens when timeDiff > 0 (or > 0n if bigint). Update lastUpdate only inside that branch (or when you actually refill).
-- Time-left / backoff formulas: use the stored window duration directly — const end = start + windowMs; if (now >= end) { return 0n }; return end - now. Never build long algebra and never expand a start with self-cancelling terms; those are bugs.
-- If the demand has a refill-active / refil flag (bitmask bit, boolean): after update/clamp set this._refillActive = this._tokens < this._maxTokens (or equivalent). Do NOT leave the flag stuck true from the constructor forever.
+- Outside a class, NEVER read private fields (_name). Expose getters and use those in helper functions.
+- State mutation and boundaries: methods that modify internal state must explicitly maintain class invariants and handle boundary conditions cleanly.
 - "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
 - When the demand states a signature (constructor params, method params, getters, types, arity), honor it EXACTLY — do not change a type (e.g. a number param to bigint), drop a getter, or alter arity. Convert internally if needed (e.g. this._windowMs = BigInt(windowMs)).
 - Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
 - Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
 - "barrelFrom" is a relative specifier ending in .js (NodeNext), pointing at the module you defined.
-- "behavior" (optional but required when the demand has testable semantics: limits, flags, windowed refill, math). An array of executable regression asserts that the coder must satisfy. Each item: "desc" (short sentence), "exports" (names of the exports this assert exercises — list the export under test FIRST, then any dependencies its prelude/assert uses), optional "prelude" (array of one or more TypeScript setup lines, each a complete statement with no leading indentation), and "assert" (a single TypeScript expression that evaluates to boolean, using only exported names and built-ins). Emit 2-4 asserts covering the core contracts: capacity, refill, window slide, and boundary values. Assertions must never touch private fields. For time-based APIs, ALWAYS anchor to the exported windowStart getter — prelude: const ws = limiter.windowStart; assert uses ws, ws + Xn, ws + windowMs. NEVER pass absolute numbers (0n, 1000n) as time arguments: the window start is implementation-defined, so absolute values are wrong unless the constructor anchors at 0n.
+- "behavior" (optional but required when the demand has testable semantics: limits, flags, calculations, invariants). An array of executable regression asserts that the coder must satisfy. Each item: "desc" (short sentence), "exports" (names of the exports this assert exercises — list the export under test FIRST, then any dependencies its prelude/assert uses), optional "prelude" (array of one or more TypeScript setup lines, each a complete statement with no leading indentation), and "assert" (a single TypeScript expression that evaluates to boolean, using only exported names and built-ins). Emit 2-4 asserts covering core contracts: capacity, bounds, state transitions, and edge values. Assertions must never touch private fields.
 PROMPT
 }
 

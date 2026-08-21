@@ -8,13 +8,13 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 ## 🎯 Deterministic Category Decision Tree
 
-1. **Category A — Pure Library / Math / Algorithm / Data Structure**:
-   - **Trigger**: Algorithms, mathematical converters, state machines, data structures, parsers, token buckets, rate limiters, crypto or utility logic without visual UI.
+1. **Category A — Pure Library / Algorithm / Data Structure / Engine**:
+   - **Trigger**: Algorithms, mathematical converters, state machines, data structures, parsers, protocols, cryptography, or backend/CLI domain logic without frontend UI.
    - **Target Quota**: **Exactly 2 targets** (`src/<name>.ts`, `src/index.ts`).
    - **Constraint**: Pure TypeScript, 100% agnostic of browser DOM.
 
-2. **Category B — Interactive Web Application / Game / Audio / Canvas**:
-   - **Trigger**: Demands mentioning HTML, CSS, DOM, canvas, browser UI, visual board games, audio, Web Audio API, or frontend interactivity.
+2. **Category B — Interactive Web Application / Frontend / Visual Client**:
+   - **Trigger**: Demands mentioning HTML, CSS, DOM, canvas, browser UI, graphics, audio, or frontend interactivity.
    - **Target Quota**: **Exactly 3 targets** (`src/<engine>.ts`, `index.html`, `src/index.ts`).
    - **Constraint**: Domain logic in `src/<engine>.ts` must be pure and importable in Node.js; all DOM/Audio interactions are encapsulated in `index.html`.
 
@@ -31,20 +31,20 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - All browser interactions must reside inside `index.html` or be strictly guarded by `typeof window !== 'undefined'`. Top-level execution must cleanly succeed under Node.js (`node -e "import('./src/index.js')"`).
 
 2. **Cognitive Density & Output Token Preservation**:
-   - Do not write massive code bodies into the schema. Define exact signatures, mathematical formulas (e.g. `mbps * 8000`), clamping bounds, and behavior assertions.
+   - Do not write massive code bodies into the schema. Define exact signatures, mathematical calculations/formulas, boundary constraints, and behavior assertions.
    - Prevents compact LLMs (8B/11B) from hitting generation limits (`finish_reason: length`).
 
 3. **Collision-Free Barrel Re-exports (TS2308 / TS2440 Shield)**:
-   - Exported types, interfaces, and classes must use domain-prefixed, unique names (e.g. `TokenBucketState`, `TicTacToeGrid`, `RateLimiterConfig`).
+   - Exported types, interfaces, and classes must use domain-prefixed, unique names (e.g. `UserSessionState`, `MatrixCoordinate`, `EngineConfig`).
    - Never use generic collided identifiers like `State`, `Config`, `Props`, or `Result`.
 
 4. **Strict TypeScript & BigInt Invariants**:
    - Types are lowercase: `bigint`, `number`, `string`, `boolean` (NEVER `BigInt`, `Number`, `String` as type annotations).
    - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with `if (tokens > maxTokens) tokens = maxTokens`.
-   - NodeNext imports require explicit `.js` extensions (e.g. `./tokenBucket.js`).
+   - NodeNext imports require explicit `.js` extensions (e.g. `./engine.js`).
 
 5. **Behavior Assertions**:
-   - Supply 2-4 executable regression tests in `behavior[]` exercising capacity, boundary conditions, refills, and state transitions.
+   - Supply 2-4 executable regression tests in `behavior[]` exercising capacity, boundary conditions, transitions, and state mutations.
 
 ---
 
@@ -68,7 +68,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
         {"name": "paramName", "type": "bigint|number|string|boolean"}
       ],
       "ctorBody": [
-        "this._field = param"
+        "this._fieldName = paramName"
       ],
       "methods": [
         {
@@ -84,7 +84,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
         {
           "name": "propertyName",
           "returns": "type",
-          "body": "return this._field"
+          "body": "return this._fieldName"
         }
       ]
     },

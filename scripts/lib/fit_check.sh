@@ -411,17 +411,13 @@ aegis_fit_unit_demand_md() {
         printf '%s\n' "${sib_pascal}"
       } | awk -v base="${sib_file}" 'NF && !seen[$0]++ {
           low=tolower($0)
-          if (low=="index"||low=="export"||low=="main"||low=="src"||low=="bigint"||low=="number"||low=="string") next
-          # Constructor params / private state — never reexport requirements.
-          if ($0 ~ /^(maxBytes|maxTokens|rateBitsPerMs|timeDiff|lastUpdate|mbps|bits|bytes|tokens)$/) next
-          if ($0 ~ /^(max|min|rate|time|last)[A-Z]/) next
-          # Drop bare module basename (tokenBucket) — not a public export.
+          if (low ~ /^(index|export|import|from|default|main|src|bigint|number|string|boolean|void|any|unknown|never|true|false|null|undefined)$/) next
           if (base != "" && $0 == base) next
           print
         }' | head -n 6
     )"
     [[ -n "$(printf '%s' "${reexport_list}" | tr -d '[:space:]')" ]] \
-      || reexport_list="${sib_pascal:-TokenBucket}"
+      || reexport_list="${sib_pascal:-Module}"
     local reexport_csv
     reexport_csv="$(printf '%s\n' "${reexport_list}" | paste -sd',' - | sed 's/,/, /g')"
     change_block="$(
@@ -949,7 +945,7 @@ aegis_fit_propose_units_json() {
 
     # Single path: still may split create vs reexport heuristics from Change text
     if [[ "${wants_reexport}" -eq 1 ]] \
-      && printf '%s' "${blob}" | grep -qE 'create|new file|tokenbucket|module'; then
+      && printf '%s' "${blob}" | grep -qiE 'create|new file|new module|crie|novo arquivo|module|implement|add'; then
       # If the only target is already index, create still uses that path then reexport is same — skip split.
       if [[ "${mod}" == "src/index.ts" ]]; then
         printf '[]'
