@@ -645,7 +645,8 @@ aegis_fit_names_for_module() {
   return 0
 }
 
-# Keep only the numbered Briefing item / paragraph that defines export Name.
+# Keep only the numbered Briefing item / paragraph that defines export Name,
+# while preserving shared type and interface declarations at the top.
 aegis_fit_briefing_slice_export() {
   local briefing="${1-}"
   local name="${2-}"
@@ -656,14 +657,21 @@ aegis_fit_briefing_slice_export() {
   # Match the export declaration name only — NOT type mentions like
   # "export function foo(bucket: TokenBucket)" when slicing TokenBucket.
   printf '%s\n' "${briefing}" | awk -v name="${name}" '
-    BEGIN { keep = 0; any = 0 }
+    BEGIN { keep = 0; any = 0; types = "" }
+    /^(type|interface)[[:space:]]+/ {
+      types = types $0 "\n"
+      next
+    }
     /^[0-9]+\)/ {
       if ($0 ~ ("export[[:space:]]+(class|function|const|let|var)[[:space:]]+" name "([^A-Za-z0-9_]|$)")) {
         keep = 1; any = 1
       } else {
         keep = 0
       }
-      if (keep) print
+      if (keep) {
+        if (types != "") { printf "%s\n", types; types = "" }
+        print
+      }
       next
     }
     /^Em[[:space:]]+/ { keep = 0; next }

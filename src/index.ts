@@ -1,3 +1,5 @@
 // src/index.ts
 import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
-export { TokenBucket, obterEstadoBitmask };
+import { PricingEngine, createStandardPricingEngine } from './pricingEngine.js';
+
+export { TokenBucket, obterEstadoBitmask, PricingEngine, createStandardPricingEngine };

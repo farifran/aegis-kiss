@@ -13,7 +13,11 @@ message: >
   Do not throw literal strings or numbers. Always throw an Error instance (throw new Error(...)) to preserve stack traces.
 
 rule:
-  any:
-    - pattern: throw "$STRING"
-    - pattern: "throw '$STRING'"
-    - pattern: throw $NUM
+  all:
+    - pattern: throw $EXPR
+    - not:
+        pattern: throw new $ERR($$$ARGS)
+    - not:
+        pattern: throw $ERR($$$ARGS)
+    - not:
+        pattern: throw $IDENT

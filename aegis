@@ -1660,11 +1660,15 @@ cmd_run() {
   # adversarial) através do wipe — o resume do pipeline precisa deles.
   if [[ -f "${RUNTIME_DIR}/pending_assistant.json" ]] \
     || [[ -f "${RUNTIME_DIR}/optimize_verdict.json" ]] \
-    || [[ -f "${RUNTIME_DIR}/adversarial_verdict.json" ]]; then
+    || [[ -f "${RUNTIME_DIR}/adversarial_verdict.json" ]] \
+    || [[ -d "${RUNTIME_DIR}/agentic" ]]; then
     _agentic_save="$(mktemp -d "${TMPDIR:-/tmp}/aegis_agentic.XXXXXX")"
     cp "${RUNTIME_DIR}/pending_assistant.json" "${_agentic_save}/" 2>/dev/null || true
     cp "${RUNTIME_DIR}/optimize_verdict.json" "${_agentic_save}/" 2>/dev/null || true
     cp "${RUNTIME_DIR}/adversarial_verdict.json" "${_agentic_save}/" 2>/dev/null || true
+    if [[ -d "${RUNTIME_DIR}/agentic" ]]; then
+      cp -r "${RUNTIME_DIR}/agentic" "${_agentic_save}/" 2>/dev/null || true
+    fi
   fi
   rm -rf .harness/runtime .harness/execution_surfaces >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
@@ -1676,6 +1680,10 @@ cmd_run() {
     mv "${_agentic_save}/pending_assistant.json" "${RUNTIME_DIR}/" 2>/dev/null || true
     mv "${_agentic_save}/optimize_verdict.json" "${RUNTIME_DIR}/" 2>/dev/null || true
     mv "${_agentic_save}/adversarial_verdict.json" "${RUNTIME_DIR}/" 2>/dev/null || true
+    if [[ -d "${_agentic_save}/agentic" ]]; then
+      mkdir -p "${RUNTIME_DIR}/agentic" 2>/dev/null || true
+      cp -r "${_agentic_save}/agentic/"* "${RUNTIME_DIR}/agentic/" 2>/dev/null || true
+    fi
     rm -rf "${_agentic_save}" 2>/dev/null || true
   fi
   if [[ -n "${_metrics_save}" && -f "${_metrics_save}" ]]; then

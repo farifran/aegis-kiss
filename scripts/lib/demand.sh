@@ -2070,6 +2070,12 @@ aegis_briefing_class_to_ts() {
   )"
   [[ -n "$(printf '%s' "${block}" | tr -d '[:space:]')" ]] || return 1
 
+  local types
+  types="$(
+    printf '%s\n' "${briefing}" | awk '/^(type|interface)[[:space:]]+/ { if ($0 !~ /;[[:space:]]*$/) $0 = $0 ";"; print }'
+  )"
+  [[ -z "${types}" ]] || printf '%s\n\n' "${types}"
+
   # Deterministic pseudo-Briefing → TS class. Handles:
   #   Campos privados: _a: bigint, _b: number
   #   constructor(...): body lines
