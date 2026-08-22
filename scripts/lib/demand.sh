@@ -3677,12 +3677,6 @@ aegis_adversarial_should_use_llm() {
   if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
     return 1
   fi
-  # Briefing invented by the supervisor (no operator-supplied Briefing) is the
-  # high-risk case: the pipeline has no oracle on the original demand semantics,
-  # so the LLM adversarial MUST falsify the candidate against the Goal text.
-  if [[ "${AEGIS_BRIEFING_SOURCE:-}" == "supervisor" ]]; then
-    return 0
-  fi
   local flag
   flag="$(printf '%s' "${AEGIS_ADVERSARIAL_LLM:-auto}" | tr '[:upper:]' '[:lower:]')"
   case "${flag}" in
@@ -3695,7 +3689,7 @@ aegis_adversarial_should_use_llm() {
   esac
 
   # auto
-  : "${AEGIS_ADVERSARIAL_LLM_MAX_LINES:=48}"
+  : "${AEGIS_ADVERSARIAL_LLM_MAX_LINES:=60}"
   : "${AEGIS_ADVERSARIAL_LLM_MAX_FILES:=1}"
   local diff_content files_json n_lines n_files
   diff_content="$(aegis_handover_mutation_diff "${handover}" 2>/dev/null || true)"
