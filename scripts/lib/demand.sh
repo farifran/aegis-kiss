@@ -2746,7 +2746,7 @@ aegis_optimize_mutation_is_trivial() {
   [[ -n "${handover}" && -f "${handover}" ]] || return 1
 
   : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_FILES:=1}"
-  : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES:=24}"
+  : "${AEGIS_OPTIMIZE_TRIVIAL_MAX_LINES:=60}"
 
   local n_files n_lines has_any diff_content
   n_files="$(

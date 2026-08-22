@@ -116,6 +116,7 @@ execute_provider_request() {
 
   while [[ "${attempt}" -le "${AEGIS_PROVIDER_MAX_RETRIES}" ]]; do
 
+    local curl_rc=0
     curl_stats="$(
       curl \
         --silent \
@@ -130,9 +131,17 @@ execute_provider_request() {
         -H "Content-Type: application/json" \
         ${extra_headers[@]+"${extra_headers[@]}"} \
         --data @"${TMP_REQUEST_FILE}"
-    )"
+    )" || curl_rc=$?
 
-    read -r http_code t_connect t_starttransfer t_total <<< "${curl_stats}"
+    if [[ "${curl_rc}" -ne 0 ]]; then
+      echo "[AEGIS][RAW][WARN] curl network error (code ${curl_rc}) on attempt ${attempt}/${AEGIS_PROVIDER_MAX_RETRIES}" >&2
+      if [[ "${attempt}" -lt "${AEGIS_PROVIDER_MAX_RETRIES}" ]]; then
+        attempt=$((attempt + 1))
+        sleep $((attempt * 3))
+        continue
+      fi
+      aegis_fatal "provider_network_timeout"
+    fi
 
     t_connect="${t_connect:-0.000000}"
     t_starttransfer="${t_starttransfer:-0.000000}"
