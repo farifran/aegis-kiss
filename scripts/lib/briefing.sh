@@ -756,6 +756,24 @@ aegis_briefing_expand_json() {
     printf '[AEGIS][BRIEFING][WARN] attempt %s/%s failed (%s http=%s) — retry in %ss\n' \
       "${attempt}" "${max_attempts}" "${fail_reason}" "${http_code}" "${backoff}" >&2
     sleep "${backoff}"
+    if [[ -n "${fail_reason}" && "${fail_reason}" == invalid_briefing:* ]]; then
+      local retry_prompt="${user_prompt}\n\n[COMPILATION/RUNTIME FEEDBACK]\nYour previous schema failed with: ${fail_reason}\nPlease fix the schema methods, types, or behavior asserts to resolve this error."
+      jq -n \
+        --arg model "${model}" \
+        --arg sys "$(aegis_briefing_system_prompt)" \
+        --arg user "${retry_prompt}" \
+        --argjson max_tokens "${max_tokens}" \
+        '{
+          model: $model,
+          messages: [
+            {role: "system", content: $sys},
+            {role: "user", content: $user}
+          ],
+          temperature: 0.1,
+          max_tokens: $max_tokens,
+          response_format: {type: "json_object"}
+        }' > "${req_file}" 2>/dev/null || true
+    fi
     attempt=$((attempt + 1))
   done
 
