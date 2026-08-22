@@ -56,6 +56,13 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
    - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/seatMap.ts` → `./seatMap.js`.
 
+7. **Hardware-Aligned KISS Physics & Adversarial Stress Testing**:
+   - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange(this._i32View, lockIdx, 0, 1) === 0` and `Atomics.store(this._i32View, lockIdx, 0)`) over `Int32Array` mapped on `ArrayBuffer`.
+   - **Bounded Memory & Ring Buffers**: When managing queues or buffers with finite capacity, advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) to ensure continuous $O(1)$ memory recycling without capacity leakage.
+   - **Closed-Form $O(1)$ Math**: Replace iterative loops for time delta / rate replenishment with direct closed-form equations.
+   - **Single-Pass Evaluation (Loop Fusion)**: When filtering or validating contiguous blocks, combine predicates into a single sequential pass.
+   - **Adversarial Boundary Asserts**: In `behavior[]`, include at least 1 boundary/stress regression assert (e.g. wrap-around insertion recycling past initial capacity, double-acquire lock contention returning `false`, or rejection of insufficient quorum/invalid inputs).
+
 ---
 
 ## 📋 Output Schema

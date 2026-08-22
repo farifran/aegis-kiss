@@ -18,8 +18,8 @@ Act as a Principal Systems Architect evaluating the candidate patch strictly thr
 - If the patch is already $O(1)$, zero-allocation on hot paths, and minimal → `status: "no_improvement_needed"`, `improvements: []`.
 - If an algorithmic loop can be converted to closed-form math or hot-path allocations can be eliminated → `status: "can_improve"` with **ONE** surgical refactor.
 - **Strict KISS Safety Rails**:
-  - NEVER propose esoteric bit-packing, `ArrayBuffer` rewrites, manual memory pooling, or unrequested worker threads.
-  - NEVER propose generic design patterns (Factories, Strategies, Observers).
+  - NEVER propose unrequested generic design patterns (Factories, Strategies, Observers) or external worker threads.
+  - When the module already operates on memory buffers or state machines, ensure hardware-aligned correctness (Atomics for synchronization, circular modulo for ring buffers).
   - All proposed improvements MUST be self-contained within the existing class/module and take ≤ 5 lines of modified code.
 
 ## Output Format
