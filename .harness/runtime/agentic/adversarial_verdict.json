@@ -1,0 +1,5 @@
+{
+  "status": "verified",
+  "basis": "All class domain invariants, non-negativity checks on consume, and rate calculations verified clean.",
+  "findings": []
+}
