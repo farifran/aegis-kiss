@@ -834,10 +834,10 @@ aegis_briefing_optimize_schema_json() {
     printf '%s' "${json}" | jq '
       def opt_body(b):
         b | map(
-          if (test("this\\._(mempoolTail|tail|writeOffset)[[:space:]]*\\+=[[:space:]]*[0-9]+")) then
-            gsub("this\\._(?<f>mempoolTail|tail|writeOffset)[[:space:]]*\\+=[[:space:]]*(?<step>[0-9]+)", "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
-          elif (test("this\\._(mempoolHead|head|readOffset)[[:space:]]*\\+=[[:space:]]*[0-9]+")) then
-            gsub("this\\._(?<f>mempoolHead|head|readOffset)[[:space:]]*\\+=[[:space:]]*(?<step>[0-9]+)", "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
+          if (test("this\\._(mempoolTail|tail|writeOffset)\\s*\\+=\\s*[0-9]+")) then
+            gsub("this\\._(?<f>mempoolTail|tail|writeOffset)\\s*\\+=\\s*(?<step>[0-9]+)"; "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
+          elif (test("this\\._(mempoolHead|head|readOffset)\\s*\\+=\\s*[0-9]+")) then
+            gsub("this\\._(?<f>mempoolHead|head|readOffset)\\s*\\+=\\s*(?<step>[0-9]+)"; "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
           else
             .
           end
