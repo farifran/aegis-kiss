@@ -39,3 +39,10 @@ export class TokenBucket {
 
   get rateBitsPerMs(): bigint { return this._rateBitsPerMs }
 }
+
+export function obterEstadoBitmask(bucket: TokenBucket): number {
+  let mask = 0
+  if (bucket.tokens === 0n) mask |= 1
+  if (bucket.tokens < bucket.maxTokens) mask |= 2
+  return mask
+}
