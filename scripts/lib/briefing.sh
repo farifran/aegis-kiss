@@ -890,8 +890,7 @@ aegis_briefing_generate() {
   [[ -n "${goal}" ]] || return 1
 
   if aegis_briefing_is_schema_json "${goal}"; then
-    # Agentic handover: caller already supplied the demand as schema JSON.
-    # Skip the supervisor LLM expand; run the same mechanical gates.
+    # Caller already supplied the demand as schema JSON.
     content="$(aegis_briefing_sanitize_json "${goal}")"
     aegis_briefing_validate_json "${content}" 2>/dev/null || {
       printf 'invalid_agentic_briefing\n' >&2
@@ -905,11 +904,6 @@ aegis_briefing_generate() {
       printf 'uncompilable_agentic_briefing\n' >&2
       return 1
     }
-  elif [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
-    # Agentic handover never calls the supervisor LLM: a free-prose goal is
-    # not accepted for expansion here — the assistant must supply schema JSON.
-    printf 'agentic_requires_schema_json\n' >&2
-    return 1
   else
     content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
   fi
