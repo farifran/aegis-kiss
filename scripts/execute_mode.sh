@@ -838,9 +838,11 @@ execute_substrate() {
 
   case "${AEGIS_EXECUTION_ENGINE}" in
     raw)
-      local raw_model="${OPENAI_MODEL_READONLY_COGNITION}"
+      local raw_model="${OPENAI_MODEL_READONLY_COGNITION:-${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}}"
       if [[ "${AEGIS_MODE}" == "optimize" ]]; then
-        raw_model="${OPENAI_MODEL_OPTIMIZE:-${OPENAI_MODEL_READONLY_COGNITION}}"
+        raw_model="${OPENAI_MODEL_OPTIMIZE:-${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}}"
+      elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then
+        raw_model="${OPENAI_MODEL_ADVERSARIAL:-${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}}"
       fi
       substrate_output="$(
         invoke_raw_substrate \
