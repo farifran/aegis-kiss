@@ -143,6 +143,9 @@ execute_provider_request() {
       aegis_fatal "provider_network_timeout"
     fi
 
+    read -r http_code t_connect t_starttransfer t_total <<< "${curl_stats:-000 0.0 0.0 0.0}"
+
+    http_code="${http_code:-000}"
     t_connect="${t_connect:-0.000000}"
     t_starttransfer="${t_starttransfer:-0.000000}"
     t_total="${t_total:-0.000000}"
