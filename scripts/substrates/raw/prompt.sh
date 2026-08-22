@@ -341,6 +341,10 @@ assemble_bounded_capability_context() {
     printf 'Execution identity:\n%s\n' "${AEGIS_EXECUTION_ID}"
     echo
     printf 'Execution timestamp:\n%s\n' "${AEGIS_EXECUTION_TIMESTAMP}"
+    echo
+    echo "=== STRICT OUTPUT DIRECTIVE ==="
+    echo "Output ONLY the structured JSON artifact between ${AEGIS_ARTIFACT_BEGIN_MARKER} and ${AEGIS_ARTIFACT_END_MARKER}."
+    echo "Zero conversational preamble, zero markdown explanations outside markers."
   } >> "${TMP_CAPABILITY_CONTEXT_FILE}"
 
   aegis_log "Capability payload evidence size bytes: $(wc -c < "${TMP_CAPABILITY_CONTEXT_FILE}")"
