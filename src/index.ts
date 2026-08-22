@@ -1,3 +1,4 @@
 // src/index.ts
-import { EdgeConsensusEngine } from './edgeConsensusEngine.js';
-export { EdgeConsensusEngine };
+import { EdgeConsensusEngine, type MempoolEntry, type LazyPredicate } from './edgeConsensusEngine.js';
+
+export { EdgeConsensusEngine, type MempoolEntry, type LazyPredicate };
