@@ -153,14 +153,18 @@ aegis_briefing_sanitize_json() {
       #    "./seatmap.js" against src/seatMap.ts is TS2307 on any
       #    case-sensitive filesystem, and silently fine on macOS until CI.
       def fix_barrel:
-        ((.barrelFrom // "") | sub("^\\./"; "") | sub("\\.js$"; "")) as $stem
-        | if ($stem | length) == 0 then .
-          else
-            ([.targets[]? | select(type == "string" and endswith(".ts"))
-               | sub("^src/"; "") | sub("\\.ts$"; "")
-               | select(ascii_downcase == ($stem | ascii_downcase))] | first) as $hit
-            | if $hit == null then . else .barrelFrom = "./" + $hit + ".js" end
-          end;
+        if ((.targets // []) == ["src/index.ts"]) or ((.barrelFrom // "") == "./index.js") or ((.barrelFrom // "") == "") then
+          .barrelFrom = ""
+        else
+          ((.barrelFrom // "") | sub("^\\./"; "") | sub("\\.js$"; "")) as $stem
+          | if ($stem | length) == 0 or $stem == "index" then .barrelFrom = ""
+            else
+              ([.targets[]? | select(type == "string" and endswith(".ts"))
+                 | sub("^src/"; "") | sub("\\.ts$"; "")
+                 | select(ascii_downcase == ($stem | ascii_downcase))] | first) as $hit
+              | if $hit == null then .barrelFrom = "" else .barrelFrom = "./" + $hit + ".js" end
+            end
+        end;
       .behavior = ((.behavior // []) | map(
           .assert = ((.assert // "") | drop_nonnull)
           | .prelude = ((.prelude // []) | if type == "string" then drop_nonnull

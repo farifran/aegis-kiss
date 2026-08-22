@@ -1823,6 +1823,9 @@ aegis_mechanical_barrel_reexport_apply() {
     import_from="${sib}"
   fi
   [[ -n "${import_from}" ]] || return 1
+  if [[ "${import_from}" == "./index.js" || "${import_from}" == "index.js" || "${import_from}" == "./index" ]]; then
+    return 1
+  fi
 
   list="$(
     printf '%s\n' "${acc_names}" | awk 'NF && !seen[$0]++' | paste -sd',' - | sed 's/,/, /g'
