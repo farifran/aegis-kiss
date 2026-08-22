@@ -1,4 +1,4 @@
-type MempoolEntry = { offset: number; txId: bigint; timestamp: bigint; payload: bigint; hash: bigint };
+export type MempoolEntry = { offset: number; txId: bigint; timestamp: bigint; payload: bigint; hash: bigint };
 
 export class EdgeConsensusEngine {
   private _buffer: ArrayBuffer;
