@@ -49,6 +49,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 33 | [`4991230`](#31-commit-4991230-branch-backup-2---injeção-constitucional-do-agentsmd-no-byte-0-do-supervisor) | `briefing.sh` | Injeção do contrato constitucional `AGENTS.md` no Byte 0 do prompt do Supervisor de Briefing. |
 | 34 | [`f6558c3`](#32-commit-f6558c3-branch-backup-2---benchmark-extremo-níveis-20-a-50-com-100-de-aprovação) | `test/`, `briefing.sh` | Benchmark de dificuldade extrema (Stack VM, Bloom Filter, KD-Tree, Lock-Free SPSC Ring Buffer) com 100% de sucesso. |
 | 35 | [`b7e3480`](#33-commit-b7e3480-branch-backup-2---simplificação-kiss-do-fluxo-de-fit-check-e-confirmação-no-cli) | `aegis` | Simplificação KISS do fluxo de fit-check e confirmação interativa no CLI (remoção de 35 linhas de checagens redundantes). |
+| 36 | [`3febb98`](#34-commits-8d26c27--3febb98-branch-backup-2---execução-completa-de-ponta-a-ponta-da-issue-290-tokenbucket) | `src/` | Execução completa de ponta a ponta da Issue #290 (`TokenBucket` + `src/index.ts`) com o Injetor Mecânico (0 tokens de IA na mutação!). |
 
 ---
 
@@ -369,6 +370,17 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Simplificado o loop de edição do draft (`e`) para revalidar uma única vez com qualidade e fit-check.
 * **Por Que Foi Feito:** O Schema JSON gerado pelo Supervisor já entrega o briefing estruturado com 100% de integridade; não há necessidade de reprocessar o texto várias vezes.
 * **Objetivo:** Redução de 35 linhas de código e execução do CLI mais rápida e elegante.
+
+---
+
+### 34. Commits `8d26c27` & `3febb98` (Branch: `backup-2`) — Execução Completa de Ponta a Ponta da Issue #290 (`TokenBucket`)
+* **ELI5:** Rodamos a demanda real de criação do `TokenBucket` e do `obterEstadoBitmask` com BigInt de ponta a ponta pelo pipeline do Aegis! O Injetor Mecânico gravou o arquivo `src/tokenBucket.ts` e atualizou o barrel `src/index.ts` em **0.01 segundos com ZERO tokens de IA**, e todos os tribunais de otimização, adversarial e oráculo aprovaram o código com **SUCCESS 100%**!
+* **O Que Foi Feito:**
+  * Criada a classe `TokenBucket` com campos privados em BigInt (`_maxTokens`, `_rateBitsPerMs`, `_tokens`, `_lastUpdateMs`) e métodos `update` e `consume`.
+  * Adicionada a reexportação limpa em `src/index.ts`.
+  * Validação completa por todos os modos (`discovery`, `forensics`, `mutation`, `optimize`, `adversarial`, `validation`) com preflight gates de `tsc`, `eslint` e `ast-grep` 100% limpos.
+* **Por Que Foi Feito:** Demonstrar na prática que o Passo 3 (Injetor Mecânico) funciona com perfeição e sem nenhum consumo de tokens de coder.
+* **Objetivo:** Status `SUCCESS` na Issue #290 e fechamento completo das duas tasks.
 
 ---
 
