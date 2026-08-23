@@ -50,6 +50,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 34 | [`f6558c3`](#32-commit-f6558c3-branch-backup-2---benchmark-extremo-níveis-20-a-50-com-100-de-aprovação) | `test/`, `briefing.sh` | Benchmark de dificuldade extrema (Stack VM, Bloom Filter, KD-Tree, Lock-Free SPSC Ring Buffer) com 100% de sucesso. |
 | 35 | [`b7e3480`](#33-commit-b7e3480-branch-backup-2---simplificação-kiss-do-fluxo-de-fit-check-e-confirmação-no-cli) | `aegis` | Simplificação KISS do fluxo de fit-check e confirmação interativa no CLI (remoção de 35 linhas de checagens redundantes). |
 | 36 | [`3febb98`](#34-commits-8d26c27--3febb98-branch-backup-2---execução-completa-de-ponta-a-ponta-da-issue-290-tokenbucket) | `src/` | Execução completa de ponta a ponta da Issue #290 (`TokenBucket` + `src/index.ts`) com o Injetor Mecânico (0 tokens de IA na mutação!). |
+| 37 | [`1b05c0b`](#35-commits-d673f0c--1b05c0b-branch-backup-2---execução-da-issue-292-tokenbucketstate-com-governança-de-arquitetura) | `src/` | Execução completa da Issue #292 (`TokenBucketState` + `getState()` + `obterEstadoBitmask`) através da governança interativa de arquitetura. |
 
 ---
 
@@ -381,6 +382,18 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Validação completa por todos os modos (`discovery`, `forensics`, `mutation`, `optimize`, `adversarial`, `validation`) com preflight gates de `tsc`, `eslint` e `ast-grep` 100% limpos.
 * **Por Que Foi Feito:** Demonstrar na prática que o Passo 3 (Injetor Mecânico) funciona com perfeição e sem nenhum consumo de tokens de coder.
 * **Objetivo:** Status `SUCCESS` na Issue #290 e fechamento completo das duas tasks.
+
+---
+
+### 35. Commits `d673f0c` & `1b05c0b` (Branch: `backup-2`) — Execução da Issue #292 (`TokenBucketState` com Governança de Arquitetura)
+* **ELI5:** O operador usou o modal de decisões arquiteturais para escolher a **Opção 2: Adicionar método tipado `getState(): TokenBucketState`**. O Aegis atualizou o schema em RAM, compilou sem erros e executou a mutação completa com o Injetor Mecânico (0 tokens de coder!), fechando a Issue #292 com status `SUCCESS`!
+* **O Que Foi Feito:**
+  * Declarado o tipo `TokenBucketState` no topo de `src/tokenBucket.ts`.
+  * Adicionado o método `getState(): TokenBucketState` na classe `TokenBucket`.
+  * Reexportado cirurgicamente em `src/index.ts`.
+  * Aprovado por todos os tribunais e oráculos em 25 segundos totais.
+* **Por Que Foi Feito:** Comprovar a viabilidade e eficácia da governança por decisões de engenharia com zero tokens de overhead.
+* **Objetivo:** Status `SUCCESS` na Issue #292 com 100% dos testes e sanidade aprovados.
 
 ---
 
