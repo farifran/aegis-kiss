@@ -171,14 +171,23 @@ aegis_briefing_sanitize_json() {
   printf '%s' "${json}"
 }
 
-# The schema doubles as the instruction in .skills/briefing.md, with AGENTS.md at Byte 0.
+# The schema doubles as the instruction in .skills/briefing.md, with AGENTS.md + ARCHITECTURE.md at Byte 0.
 aegis_briefing_system_prompt() {
   local agents_file="${AEGIS_ROOT_DIR:-.}/AGENTS.md"
+  local arch_file="${AEGIS_ROOT_DIR:-.}/ARCHITECTURE.md"
   local skill_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
   local out=""
 
   if [[ -f "${agents_file}" ]]; then
     out="$(cat "${agents_file}")"
+  fi
+
+  if [[ -f "${arch_file}" ]]; then
+    if [[ -n "${out}" ]]; then
+      out="${out}"$'\n\n---\n\n'"$(cat "${arch_file}")"
+    else
+      out="$(cat "${arch_file}")"
+    fi
   fi
 
   if [[ -f "${skill_file}" ]]; then

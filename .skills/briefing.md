@@ -38,11 +38,10 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Exported types, interfaces, and classes must use domain-prefixed, unique names (e.g. `UserSessionState`, `MatrixCoordinate`, `EngineConfig`).
    - Never use generic collided identifiers like `State`, `Config`, `Props`, or `Result`.
 
-4. **Strict TypeScript & BigInt Invariants**:
-   - Types are lowercase: `bigint`, `number`, `string`, `boolean` (NEVER `BigInt`, `Number`, `String` as type annotations).
-   - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with `if (tokens > maxTokens) tokens = maxTokens`.
-   - Outside a class (e.g. in helper functions or behavior asserts), NEVER access private fields (`_name`). ALWAYS expose and access public getters (`bucket.tokens`). Accessing private fields outside the class triggers TS2341.
-   - NodeNext imports require explicit `.js` extensions (e.g. `./engine.js`).
+4. **Strict TypeScript & Schema Typing Invariants**:
+   - Types in schema must be lowercase primitives: `bigint`, `number`, `string`, `boolean` (NEVER `BigInt`, `Number`, `String` as type annotations).
+   - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with explicit conditional statements (`if (tokens > maxTokens) tokens = maxTokens`).
+   - Outside a class (e.g. in helper functions or behavior asserts), NEVER access private fields (`_name`); use public getters (`bucket.tokens`) to avoid TS2341.
 
 5. **Behavior Assertions**:
    - Supply 2-4 executable regression tests in `behavior[]` exercising capacity, boundary conditions, transitions, and state mutations.
