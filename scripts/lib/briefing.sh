@@ -171,84 +171,14 @@ aegis_briefing_sanitize_json() {
   printf '%s' "${json}"
 }
 
-# The schema doubles as the instruction: a worked example constrains a weak
-# model far better than a list of prose rules.
+# The schema doubles as the instruction in .skills/briefing.md.
 aegis_briefing_system_prompt() {
   local skill_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
   if [[ -f "${skill_file}" ]]; then
     cat "${skill_file}"
     return 0
   fi
-  cat <<PROMPT
-You convert a software demand into JSON. Output ONLY a JSON object, no prose.
-
-Schema:
-{
-  "goal": "one short sentence naming the files to create; no parameter or field names",
-  "targets": ["src/thing.ts", "src/index.ts"],
-  "types": [
-    {"name": "PascalCaseShapeName", "shape": "{ field: string; count: number }"}
-  ],
-  "exports": [
-    {
-      "kind": "class",
-      "name": "PascalCaseClassName",
-      "privateFields": [
-        {"name": "_capacity", "type": "bigint"},
-        {"name": "_active", "type": "boolean"}
-      ],
-      "ctorParams": [{"name": "capacity", "type": "bigint"}],
-      "ctorBody": ["this._capacity = capacity", "this._active = true"],
-      "methods": [
-        {
-          "name": "process",
-          "params": [{"name": "amount", "type": "bigint"}],
-          "returns": "boolean",
-          "body": [
-            "if (amount > this._capacity) { return false; }",
-            "this._capacity -= amount;",
-            "return true;"
-          ]
-        }
-      ],
-      "getters": [
-        {"name": "capacity", "returns": "bigint", "body": "return this._capacity"},
-        {"name": "active", "returns": "boolean", "body": "return this._active"}
-      ]
-    },
-    {
-      "kind": "function",
-      "name": "camelCaseFunctionName",
-      "params": [{"name": "instance", "type": "PascalCaseClassName"}],
-      "returns": "number",
-      "body": ["let mask = 0;", "if (instance.capacity === 0n) { mask |= 1; }", "if (instance.active) { mask |= 2; }", "return mask;"]
-    }
-  ],
-  "barrelFile": "src/index.ts",
-  "barrelFrom": "./thing.js",
-  "behavior": [
-    {
-      "desc": "process returns false when amount exceeds capacity",
-      "exports": ["PascalCaseClassName"],
-      "prelude": ["const instance = new PascalCaseClassName(100n)"],
-      "assert": "instance.process(101n) === false"
-    }
-  ]
-}
-
-Rules:
-- TypeScript type names are lowercase: bigint, number, string, boolean. NEVER BigInt, Number, String, Boolean as types — those are constructors (BigInt(x) as a call is OK).
-- Every "body" entry is one complete line of TypeScript. Write formulas directly as code, bitwise operations explicitly (mask |= 1), conditionals inline (if (c) { a } else { b }).
-- NEVER use Math.min/Math.max/Math.floor with bigint values — clamp with if (x > max) { x = max }. Use BigInt(Date.now()) not Math with bigint. Math.floor on number then BigInt(...) is OK.
-- Outside a class, NEVER read private fields (_name). Expose getters and use those in helper functions.
-- State mutation and boundaries: methods that modify internal state must explicitly maintain class invariants and handle boundary conditions cleanly.
-- "name" is always a plain identifier: letters and digits only, no dots, no parentheses, no spaces.
-- When the demand states a signature (constructor params, method params, getters, types, arity), honor it EXACTLY — do not change a type (e.g. a number param to bigint), drop a getter, or alter arity. Convert internally if needed (e.g. this._windowMs = BigInt(windowMs)).
-- Emit at most $(aegis_briefing_max_exports) entries in "exports". Do not invent helpers that were not asked for.
-- Private field names start with an underscore and appear ONLY in privateFields, never in "exports".
-- "barrelFrom" is a relative specifier ending in .js (NodeNext), pointing at the module you defined.
-- "behavior" (optional but required when the demand has testable semantics: limits, flags, calculations, invariants). An array of executable regression asserts that the coder must satisfy. Each item: "desc" (short sentence), "exports" (names of the exports this assert exercises — list the export under test FIRST, then any dependencies its prelude/assert uses), optional "prelude" (array of one or more TypeScript setup lines, each a complete statement with no leading indentation), and "assert" (a single TypeScript expression that evaluates to boolean, using only exported names and built-ins). Emit 2-4 asserts covering core contracts: capacity, bounds, state transitions, and edge values. Assertions must never touch private fields.
-PROMPT
+  printf 'You convert a software demand into JSON. Output ONLY a valid JSON object matching the briefing schema.\n'
 }
 
 # Field-level gate. Prints the reason to stderr on rejection.
@@ -807,60 +737,6 @@ aegis_briefing_expand_json() {
 }
 
 # Re-analyzes and optimizes the schema methods under Hardware-Aligned KISS physics
-aegis_briefing_optimize_schema_json() {
-  local json="${1-}"
-  [[ -n "${json}" ]] || return 1
-
-  local optimized
-  optimized="$(
-    printf '%s' "${json}" | jq '
-      def opt_body(b):
-        b | map(
-          if (test("this\\._(mempoolTail|tail|writeOffset)\\s*\\+=\\s*[0-9]+")) then
-            gsub("this\\._(?<f>mempoolTail|tail|writeOffset)\\s*\\+=\\s*(?<step>[0-9]+)"; "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
-          elif (test("this\\._(mempoolHead|head|readOffset)\\s*\\+=\\s*[0-9]+")) then
-            gsub("this\\._(?<f>mempoolHead|head|readOffset)\\s*\\+=\\s*(?<step>[0-9]+)"; "this._\(.f) = (this._\(.f) + \(.step)) % this._maxMempoolBytes")
-          else
-            .
-          end
-        );
-
-      .exports |= map(
-        if .kind == "class" then
-          .methods |= map(.body = opt_body(.body))
-        else
-          .
-        end
-      )
-    ' 2>/dev/null || true
-  )"
-
-  if [[ -n "${optimized}" ]] && aegis_briefing_validate_json "${optimized}" >/dev/null 2>&1; then
-    if aegis_briefing_typecheck_json "${optimized}" >/dev/null 2>&1; then
-      printf '%s' "${optimized}"
-      return 0
-    fi
-  fi
-
-  printf '%s' "${json}"
-  return 0
-}
-
-# Re-analyzes schema behaviors and ensures adversarial edge asserts
-aegis_briefing_adversarial_schema_json() {
-  local json="${1-}"
-  [[ -n "${json}" ]] || return 1
-
-  # Validate that the schema withstands the strict runtime gate
-  if aegis_briefing_typecheck_json "${json}" >/dev/null 2>&1; then
-    printf '%s' "${json}"
-    return 0
-  fi
-
-  printf '%s' "${json}"
-  return 0
-}
-
 # Prints the structured demand (markdown) on success; prints nothing and
 # returns 1 whenever the caller should fall back to the mechanical body.
 aegis_briefing_generate() {
@@ -895,10 +771,6 @@ aegis_briefing_generate() {
   else
     content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
   fi
-
-  # Apply optimize and adversarial passes directly to the schema JSON
-  content="$(aegis_briefing_optimize_schema_json "${content}")"
-  content="$(aegis_briefing_adversarial_schema_json "${content}")"
 
   body="$(aegis_briefing_render "${content}" 2>/dev/null || true)"
   [[ -n "${body}" ]] || {

@@ -59,32 +59,22 @@ raw_linear_schema='{
   ]
 }'
 
-opt_schema="$(aegis_briefing_optimize_schema_json "${raw_linear_schema}")"
-
-# Verify that linear += 40 was upgraded to modulo (% this._maxMempoolBytes)
-if ! printf '%s' "${opt_schema}" | grep -q 'this._mempoolTail = (this._mempoolTail + 40) % this._maxMempoolBytes'; then
-  echo "FAIL: aegis_briefing_optimize_schema_json did not optimize linear pointer to ring buffer modulo" >&2
-  exit 1
-fi
-
-# 2. Test Adversarial Schema Gate
-adv_schema="$(aegis_briefing_adversarial_schema_json "${opt_schema}")"
-if [[ -z "${adv_schema}" ]]; then
-  echo "FAIL: aegis_briefing_adversarial_schema_json failed to return valid schema" >&2
-  exit 1
-fi
-
-# 3. Test Full Pipeline via aegis_briefing_generate (IDE / Agentic path)
+# 1. Test Full Pipeline via aegis_briefing_generate (IDE / Agentic schema JSON path)
 body="$(aegis_briefing_generate "${raw_linear_schema}")"
 if [[ -z "${body}" ]]; then
   echo "FAIL: aegis_briefing_generate failed on valid schema" >&2
   exit 1
 fi
 
-if ! printf '%s' "${body}" | grep -q '% this._maxMempoolBytes'; then
-  echo "FAIL: aegis_briefing_generate rendered markdown without optimized ring buffer formula" >&2
+if ! printf '%s' "${body}" | grep -q '## Goal'; then
+  echo "FAIL: aegis_briefing_generate missing ## Goal section" >&2
   exit 1
 fi
 
-echo "[AEGIS][TEST][PASS] briefing schema pipeline (optimize + adversarial) passed in both CLI and IDE modes"
+if ! printf '%s' "${body}" | grep -q '## Acceptance'; then
+  echo "FAIL: aegis_briefing_generate missing ## Acceptance section" >&2
+  exit 1
+fi
+
+echo "[AEGIS][TEST][PASS] briefing schema pipeline passed in both CLI and IDE modes"
 exit 0
