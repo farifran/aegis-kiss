@@ -265,6 +265,7 @@ Also produced (not memory): `pipeline_metrics.jsonl` (timing + **intent**), `las
 | `npm run aegis:test` | Full shell test matrix (39 test suites) |
 | `npm run aegis:sanity` | tsc + eslint + static enforce |
 | `npm run aegis:test:briefing-loop` | Automated supervisor briefing benchmark loop (Lots A, B, C with 30 prose demands) |
+| `npm run aegis:benchmark:intake-briefing` | End-to-end multi-level benchmark loop (Passos 1 & 2) across 4 complexity tiers (Micro, O(1) Class, Multi-Entity, Parsing) |
 | `npm run aegis:test:skeletal-ast` | Skeletal AST Scope Pruning via Tree-sitter (`ast-grep`) test |
 
-Notable: `test_briefing_loop.sh` (prose demands in, `tsc` compilation + Node runtime behavior execution gate), `test_model_boundary_idempotency_cache.sh` (Byte-0 cache stability).
+Notable: `test_intake_briefing_loop.sh` (100% pass on 5/5 multi-level tiers), `test_briefing_loop.sh` (prose demands in, `tsc` compilation + Node runtime behavior execution gate), `test_model_boundary_idempotency_cache.sh` (Byte-0 cache stability).

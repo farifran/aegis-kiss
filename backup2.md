@@ -44,6 +44,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 28 | [`a1eca0b`](#26-commit-a1eca0b-branch-backup-2---expansão-cognitiva-100-em-memória-ram-passo-2) | `briefing.sh`, `.skills/` | Expansão de briefing 100% em memória RAM (streaming curl, zero `/tmp/`, feedback limpo do `tsc`). |
 | 29 | [`c863d62`](#27-commit-c863d62-branch-backup-2---simplificação-kiss-da-detecção-de-ponto-de-entrada) | `demand.sh` | Simplificação KISS da busca de barrel de 16 linhas para 6 linhas. |
 | 30 | [`76e8313`](#28-commit-76e8313-branch-backup-2---purga-de-resíduos-de-domínio-e-prompt-duplicado) | `briefing.sh`, `test/` | Purga de resíduos de domínio (`mempoolTail`) e prompt duplicado (redução de 149 linhas). |
+| 31 | [`1a86b99`](#29-commit-1a86b99-branch-backup-2---loop-de-benchmark-multi-nível-passos-1--2-e-feedback-enriquecido-do-compilador) | `test/`, `briefing.sh`, `.skills/` | Benchmark oficial multi-nível (`npm run aegis:benchmark:intake-briefing`) com 100% de taxa de acerto e feedback enriquecido do `tsc`. |
 
 ---
 
@@ -311,6 +312,18 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Atualizado o teste `test_briefing_schema_pipeline.sh`.
 * **Por Que Foi Feito:** O compilador `tsc` já valida tipos e variáveis com 100% de autoridade; não precisamos de scripts de regex duplicando o trabalho do compilador.
 * **Objetivo:** Redução de 149 linhas e código 100% agnóstico e universal.
+
+---
+
+### 29. Commit `1a86b99` (Branch: `backup-2`) — Loop de Benchmark Multi-Nível (Passos 1 & 2) e Feedback Enriquecido do Compilador
+* **ELI5:** Criamos uma pista de testes oficial (`npm run aegis:benchmark:intake-briefing`) que testa demandas fáceis, médias, difíceis e complexas de uma vez só! Além disso, ensinamos o compilador a dizer exatamente a linha e o nome do campo com erro para a IA consertar na hora. O resultado foi **100% de aprovação em todos os 5 níveis**!
+* **O Que Foi Feito:**
+  * Criado o script `scripts/substrates/test/test_intake_briefing_loop.sh`.
+  * Adicionado o comando `npm run aegis:benchmark:intake-briefing` no `package.json`.
+  * Enriquecido o feedback do `tsc` em `briefing.sh` para incluir a mensagem exata do erro (`clean_r`) com número de linha e membro privado.
+  * Regra explícita contra acesso a campos privados fora da classe no `.skills/briefing.md` (evitando `TS2341`).
+* **Por Que Foi Feito:** Ter um loop automatizado para aferir latência, qualidade e taxa de acerto do Passo 1 e Passo 2 em múltiplos níveis de complexidade.
+* **Objetivo:** 5/5 aprovados (100% de acerto comprovado) com Discovery em 127ms e Briefing em memória.
 
 ---
 
