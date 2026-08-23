@@ -569,12 +569,16 @@ aegis_briefing_render() {
   '
 }
 
-# Extract chat content from an OpenAI-compatible response body.
-# Some gateways return 200 with error JSON; some put text under .message
-# or reasoning fields when content is null.
+# Extract chat content from an OpenAI-compatible response body (string in RAM or file path).
 aegis_briefing_extract_content() {
-  local resp_file="${1-}"
-  [[ -f "${resp_file}" ]] || return 0
+  local input="${1-}"
+  [[ -n "${input}" ]] || return 0
+  local json_stream=""
+  if [[ -f "${input}" ]]; then
+    json_stream="$(cat "${input}" 2>/dev/null || true)"
+  else
+    json_stream="${input}"
+  fi
   jq -r '
     if (.error // null) != null then empty
     else
@@ -584,21 +588,26 @@ aegis_briefing_extract_content() {
         // .choices[0].delta.content
         // empty)
     end
-  ' "${resp_file}" 2>/dev/null || true
+  ' <<< "${json_stream}" 2>/dev/null || true
 }
 
 aegis_briefing_provider_error_code() {
-  local resp_file="${1-}"
+  local input="${1-}"
   local http_code="${2-0}"
-  [[ -f "${resp_file}" ]] || {
+  local json_stream=""
+  if [[ -f "${input}" ]]; then
+    json_stream="$(cat "${input}" 2>/dev/null || true)"
+  else
+    json_stream="${input}"
+  fi
+  if [[ -z "${json_stream}" ]]; then
     printf 'http_%s' "${http_code}"
     return 0
-  }
-  # Avoid local name "status" — some shells/environments mark it read-only.
+  fi
   local title api_status msg
-  title="$(jq -r '.title // empty' "${resp_file}" 2>/dev/null || true)"
-  api_status="$(jq -r '.status // .error.code // empty' "${resp_file}" 2>/dev/null || true)"
-  msg="$(jq -r '.error.message // .message // .detail // empty' "${resp_file}" 2>/dev/null || true)"
+  title="$(jq -r '.title // empty' <<< "${json_stream}" 2>/dev/null || true)"
+  api_status="$(jq -r '.status // .error.code // empty' <<< "${json_stream}" 2>/dev/null || true)"
+  msg="$(jq -r '.error.message // .message // .detail // empty' <<< "${json_stream}" 2>/dev/null || true)"
   if [[ "${http_code}" == "429" ]] || [[ "${api_status}" == "429" ]] \
     || [[ "${title}" == *"Too Many Requests"* ]]; then
     printf 'http_429_rate_limit'
@@ -632,10 +641,7 @@ aegis_briefing_is_schema_json() {
 }
 
 # Calls the supervisor LLM and prints VALIDATED schema JSON on stdout.
-# Prints nothing and returns 1 whenever the caller should fall back; the
-# reason lands on stderr. Split out of aegis_briefing_generate so the schema
-# itself is observable (see test_briefing_loop.sh) without a second copy of
-# the request/retry/metrics path.
+# Operates 100% in-memory via curl streaming without creating temporary files on disk.
 aegis_briefing_expand_json() {
   local goal="${1-}"
   local target="${2-}"
@@ -647,7 +653,7 @@ aegis_briefing_expand_json() {
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="$(aegis_briefing_model)"
-  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-90}"
+  timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-45}"
   max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-2048}"
   [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=2048
 
@@ -655,13 +661,6 @@ aegis_briefing_expand_json() {
     printf 'missing_api_key\n' >&2
     return 1
   fi
-
-  local req_file resp_file
-  req_file="$(mktemp "${TMPDIR:-/tmp}/aegis_briefing_req.XXXXXX")" || return 1
-  resp_file="$(mktemp "${TMPDIR:-/tmp}/aegis_briefing_resp.XXXXXX")" || {
-    rm -f "${req_file}"
-    return 1
-  }
 
   local user_prompt="Demand: ${goal}\nTargets: ${target}"
   if [[ -n "${evidence}" ]]; then
@@ -681,73 +680,66 @@ aegis_briefing_expand_json() {
     fi
   fi
 
-  jq -n \
-    --arg model "${model}" \
-    --arg sys "$(aegis_briefing_system_prompt)" \
-    --arg user "${user_prompt}" \
-    --argjson max_tokens "${max_tokens}" \
-    '{
-      model: $model,
-      messages: [
-        {role: "system", content: $sys},
-        {role: "user", content: $user}
-      ],
-      temperature: 0.1,
-      max_tokens: $max_tokens,
-      response_format: {type: "json_object"}
-    }' > "${req_file}" 2>/dev/null || {
-    rm -f "${req_file}" "${resp_file}"
-    return 1
-  }
-
-  # Retry transient provider noise: 429 rate-limit, 5xx, empty body on 200.
-  # Also retry output that fails JSON validation or the quality gate (observed
-  # deepseek decode glitches: self-cancelling algebra, duplicated const).
-  # Cap attempts to 2 and timeout to 15s to prevent long shell hangs on API stalls.
+  local current_user_prompt="${user_prompt}"
   local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-2}"
-  [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=4
+  [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=2
   local attempt=1
   local http_code="000"
   local content=""
+  local resp_body=""
   local fail_reason="empty_response"
   local why=""
   local _tsc=""
   local backoff
 
   while [[ "${attempt}" -le "${max_attempts}" ]]; do
-    : > "${resp_file}"
-    http_code="$(
-      curl --silent --show-error \
-        --connect-timeout 5 \
-        --max-time "${timeout}" \
-        --output "${resp_file}" \
-        --write-out "%{http_code}" \
-        -X POST "${api_base%/}/chat/completions" \
-        -H "Authorization: Bearer ${api_key}" \
-        -H "Content-Type: application/json" \
-        --data @"${req_file}" 2>/dev/null || printf '000'
-    )"
+    local req_payload
+    req_payload="$(jq -n \
+      --arg model "${model}" \
+      --arg sys "$(aegis_briefing_system_prompt)" \
+      --arg user "${current_user_prompt}" \
+      --argjson max_tokens "${max_tokens}" \
+      '{
+        model: $model,
+        messages: [
+          {role: "system", content: $sys},
+          {role: "user", content: $user}
+        ],
+        temperature: 0.1,
+        max_tokens: $max_tokens,
+        response_format: {type: "json_object"}
+      }')"
 
-    content="$(aegis_briefing_extract_content "${resp_file}")"
+    local raw_resp
+    raw_resp="$(curl --silent --show-error \
+      --connect-timeout 5 \
+      --max-time "${timeout}" \
+      -w "\n%{http_code}" \
+      -X POST "${api_base%/}/chat/completions" \
+      -H "Authorization: Bearer ${api_key}" \
+      -H "Content-Type: application/json" \
+      --data "${req_payload}" 2>/dev/null || printf '\n000')"
+
+    http_code="$(tail -n 1 <<< "${raw_resp}")"
+    resp_body="$(sed '$d' <<< "${raw_resp}")"
+
+    content="$(aegis_briefing_extract_content "${resp_body}")"
     if [[ -n "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
       content="$(aegis_briefing_sanitize_json "${content}")"
-      # Keep the field-level reason: "invalid_briefing" alone tells neither the
-      # CLI log nor the improvement loop WHICH rule the supervisor broke.
       why="$(aegis_briefing_validate_json "${content}" 2>&1 >/dev/null | tail -n 1 || true)"
       if [[ -z "${why}" ]]; then
         if ! aegis_briefing_quality_check "${content}" 2>/dev/null; then
           why="low_quality"
         else
-          # Last gate: a briefing that cannot compile hands the coder a fix
-          # loop it cannot win, because the defect is upstream of its file.
-          _tsc="$(aegis_briefing_typecheck_json "${content}" 2>/dev/null)" \
-            || why="typecheck:$(printf '%s' "${_tsc}" | sed -n 's/^tsc://p' | paste -sd, -)"
+          # Memory preflight typecheck
+          _tsc="$(aegis_briefing_typecheck_json "${content}" 2>&1)" \
+            || why="typecheck:$(printf '%s' "${_tsc}" | sed -n 's/^tsc://p' | sed -E 's|/tmp/[^/]+/||g' | paste -sd, -)"
           [[ -n "${why}" ]] || break
         fi
       fi
       fail_reason="invalid_briefing:${why}"
     else
-      fail_reason="$(aegis_briefing_provider_error_code "${resp_file}" "${http_code}")"
+      fail_reason="$(aegis_briefing_provider_error_code "${resp_body}" "${http_code}")"
     fi
     content=""
 
@@ -756,46 +748,28 @@ aegis_briefing_expand_json() {
     fi
 
     case "${http_code}" in
-      429) backoff=$((attempt * 8)) ;;   # 8s, 16s, 24s…
-      500|502|503|504) backoff=$((attempt * 3)) ;;
+      429) backoff=$((attempt * 4)) ;;
+      500|502|503|504) backoff=$((attempt * 2)) ;;
       000) backoff=$((attempt * 2)) ;;
-      200) backoff=$((attempt == 1 ? 2 : 5)) ;;
-      401|403)
-        # Auth failures will not heal with sleep.
-        break
-        ;;
+      200) backoff=$((attempt == 1 ? 1 : 3)) ;;
+      401|403) break ;;
       *) backoff=$((attempt * 2)) ;;
     esac
     printf '[AEGIS][BRIEFING][WARN] attempt %s/%s failed (%s http=%s) — retry in %ss\n' \
       "${attempt}" "${max_attempts}" "${fail_reason}" "${http_code}" "${backoff}" >&2
     sleep "${backoff}"
     if [[ -n "${fail_reason}" && "${fail_reason}" == invalid_briefing:* ]]; then
-      local retry_prompt="${user_prompt}\n\n[COMPILATION/RUNTIME FEEDBACK]\nYour previous schema failed with: ${fail_reason}\nPlease fix the schema methods, types, or behavior asserts to resolve this error."
-      jq -n \
-        --arg model "${model}" \
-        --arg sys "$(aegis_briefing_system_prompt)" \
-        --arg user "${retry_prompt}" \
-        --argjson max_tokens "${max_tokens}" \
-        '{
-          model: $model,
-          messages: [
-            {role: "system", content: $sys},
-            {role: "user", content: $user}
-          ],
-          temperature: 0.1,
-          max_tokens: $max_tokens,
-          response_format: {type: "json_object"}
-        }' > "${req_file}" 2>/dev/null || true
+      local clean_feedback
+      clean_feedback="$(printf '%s' "${fail_reason}" | sed -E 's|/tmp/[^/]+/||g')"
+      current_user_prompt="${user_prompt}\n\n[COMPILATION/RUNTIME FEEDBACK]\nYour previous schema failed with: ${clean_feedback}\nPlease fix the schema methods, types, or behavior asserts to resolve this error."
     fi
     attempt=$((attempt + 1))
   done
 
-  rm -f "${req_file}"
-
-  # Token accounting for supervisor expand (intake; AEGIS_METRICS_FILE may be unset).
+  # In-memory token accounting
   local _pt _ct _metrics
-  _pt="$(jq -r '.usage.prompt_tokens // 0' "${resp_file}" 2>/dev/null || printf '0')"
-  _ct="$(jq -r '.usage.completion_tokens // 0' "${resp_file}" 2>/dev/null || printf '0')"
+  _pt="$(jq -r '.usage.prompt_tokens // 0' <<< "${resp_body}" 2>/dev/null || printf '0')"
+  _ct="$(jq -r '.usage.completion_tokens // 0' <<< "${resp_body}" 2>/dev/null || printf '0')"
   _metrics="${AEGIS_METRICS_FILE:-${AEGIS_ROOT_DIR:-.}/.harness/runtime/pipeline_metrics.jsonl}"
   if [[ -n "${_metrics}" ]]; then
     mkdir -p "$(dirname "${_metrics}")" 2>/dev/null || true
@@ -810,26 +784,21 @@ aegis_briefing_expand_json() {
         total_tokens:($prompt_tokens+$completion_tokens),
         http_code:$http_code,attempts:$attempts}' \
       >> "${_metrics}" 2>/dev/null || true
-    # Also emit a human line for CLI capture.
     printf '[AEGIS][TOKENS] supervisor_expand model=%s prompt=%s completion=%s total=%s\n' \
       "${model}" "${_pt:-0}" "${_ct:-0}" "$(( ${_pt:-0} + ${_ct:-0} ))" >&2 || true
   fi
 
   if [[ -z "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
     printf '%s\n' "${fail_reason:-empty_response}" >&2
-    rm -f "${resp_file}"
     return 1
   fi
 
-  rm -f "${resp_file}"
-
-  # Some providers still wrap JSON in a fence even in json_object mode.
+  # Strip any unexpected code fences
   content="$(
     printf '%s' "${content}" \
       | sed -E 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*//; s/```[[:space:]]*$//'
   )"
 
-  # Layer-2 soft rewrite then hard validate (Math.min+bigint, BigInt-as-type, …).
   content="$(aegis_briefing_sanitize_json "${content}")"
   aegis_briefing_validate_json "${content}" || return 1
 
