@@ -46,6 +46,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 30 | [`76e8313`](#28-commit-76e8313-branch-backup-2---purga-de-resíduos-de-domínio-e-prompt-duplicado) | `briefing.sh`, `test/` | Purga de resíduos de domínio (`mempoolTail`) e prompt duplicado (redução de 149 linhas). |
 | 31 | [`1a86b99`](#29-commit-1a86b99-branch-backup-2---loop-de-benchmark-multi-nível-passos-1--2-e-feedback-enriquecido-do-compilador) | `test/`, `briefing.sh`, `.skills/` | Benchmark oficial multi-nível (`npm run aegis:benchmark:intake-briefing`) com 100% de taxa de acerto e feedback enriquecido do `tsc`. |
 | 32 | [`88d6a1e`](#30-commit-88d6a1e-branch-backup-2---benchmark-1010-100-green-de-nível-1-a-nível-10--headroom-de-3072-tokens) | `test/`, `briefing.sh`, `.skills/` | Benchmark completo de 10 níveis (Lvl 1 a Lvl 10) com 10/10 (100%) de taxa de acerto e 3072 max_tokens. |
+| 33 | [`4991230`](#31-commit-4991230-branch-backup-2---injeção-constitucional-do-agentsmd-no-byte-0-do-supervisor) | `briefing.sh` | Injeção do contrato constitucional `AGENTS.md` no Byte 0 do prompt do Supervisor de Briefing. |
 
 ---
 
@@ -336,6 +337,16 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Adicionado invariante no `.skills/briefing.md` para parâmetros opcionais com `| undefined` prevenindo erros de aridade `TS2554`.
 * **Por Que Foi Feito:** Provar a robustez e precisão matemática do Passo 1 e Passo 2 contra demandas de altíssima complexidade e algoritmos densos.
 * **Objetivo:** 10/10 (100% de precisão comprovada) com Discovery em 194ms e Briefing em 32.4s.
+
+---
+
+### 31. Commit `4991230` (Branch: `backup-2`) — Injeção Constitucional do `AGENTS.md` no Byte 0 do Supervisor
+* **ELI5:** Agora o "Arquiteto" (Supervisor) é obrigado a ler as 5 leis constitucionais do Aegis (`AGENTS.md`) antes de desenhar o plano. Isso garante que ele nunca planeje sobre-engenharia e que todo o sistema fale a mesma língua desde o primeiro caractere!
+* **O Que Foi Feito:**
+  * Atualizada a função `aegis_briefing_system_prompt()` em `briefing.sh` para carregar `AGENTS.md` no Byte 0 seguido do `.skills/briefing.md`.
+  * Validado no benchmark de 10 níveis que todos os testes continuam com 100% de precisão sob o preâmbulo constitucional.
+* **Por Que Foi Feito:** Eliminar a inconsistência ontológica onde o Coder seguia a constituição mas o Supervisor não.
+* **Objetivo:** Alinhamento cognitivo universal e conformidade estrita com o prefix cache Byte-0.
 
 ---
 
