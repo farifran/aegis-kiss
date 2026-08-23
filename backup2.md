@@ -38,6 +38,12 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 22 | [`865e96e`](#20-commit-865e96e---issue-282-converterkilobitsembits) | `src/` | Execução bem-sucedida em 11s de `converterKilobitsEmbits`. |
 | 23 | [`0541d0e`](#21-commit-0541d0e---issue-283-convertergigabitsembits) | `src/` | Execução bem-sucedida de `converterGigabitsEmbits`. |
 | 24 | [`ace9d1c`](#22-commit-ace9d1c---issue-284-task-13-tokenbucket) | `src/` | Execução da Task 1 da Issue #284. |
+| 25 | [`7a967dc`](#23-commit-7a967dc-branch-backup-2---unificação-do-pre-intake-discovery--forensics-passo-1) | `demand.sh`, `aegis` | Pre-Intake Discovery & Forensics unificado (16 KB budget, full exports, pocket map). |
+| 26 | [`6bba56f`](#24-commit-6bba56f-branch-backup-2---teste-automatizado-do-passo-1-test_intake_discoverysh) | `test/`, `package.json` | Teste automatizado do Passo 1 (`test_intake_discovery.sh`) integrado no `test:fast`. |
+| 27 | [`6da397c`](#25-commit-6da397c-branch-backup-2---documentação-canônica-em-summarymd) | `summary.md` | Documentação canônica do Pre-Intake Discovery no mapa do repositório. |
+| 28 | [`a1eca0b`](#26-commit-a1eca0b-branch-backup-2---expansão-cognitiva-100-em-memória-ram-passo-2) | `briefing.sh`, `.skills/` | Expansão de briefing 100% em memória RAM (streaming curl, zero `/tmp/`, feedback limpo do `tsc`). |
+| 29 | [`c863d62`](#27-commit-c863d62-branch-backup-2---simplificação-kiss-da-detecção-de-ponto-de-entrada) | `demand.sh` | Simplificação KISS da busca de barrel de 16 linhas para 6 linhas. |
+| 30 | [`76e8313`](#28-commit-76e8313-branch-backup-2---purga-de-resíduos-de-domínio-e-prompt-duplicado) | `briefing.sh`, `test/` | Purga de resíduos de domínio (`mempoolTail`) e prompt duplicado (redução de 149 linhas). |
 
 ---
 
@@ -244,6 +250,67 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 * **O Que Foi Feito:** Criação de `src/tokenBucket.ts`.
 * **Por Que Foi Feito:** Execução de task 1 de 3 na Issue #284.
 * **Objetivo:** Entrega determinística de classe orientada a objetos.
+
+---
+
+### 23. Commit `7a967dc` (Branch: `backup-2`) — Unificação do Pre-Intake Discovery & Forensics (Passo 1)
+* **ELI5:** Antes de inventar o projeto, ensinamos o Aegis a olhar tudo o que já existe no computador com atenção total (até 16 KB de código completo sem cortar na linha 20) e a anotar todos os tipos, interfaces, classes e arquivos do projeto.
+* **O Que Foi Feito:**
+  * Criada a função unificada `aegis_intake_discover_context` em `demand.sh`.
+  * Orçamento de 16 KB por arquivo alvo (leitura completa sem pontos cegos).
+  * Regex expandida para capturar `type`, `interface`, `enum`, `class`, `function`, `const`.
+  * Auto-inclusão do barrel do workspace (`src/index.ts`) e pocket map universal via `git ls-files`.
+* **Por Que Foi Feito:** O discovery antigo cortava arquivos na linha 20 (`head -n 20`) e ignorava interfaces e enums, deixando o supervisor "cego".
+* **Objetivo:** 100% de visibilidade factual antes de iniciar a concepção.
+
+---
+
+### 24. Commit `6bba56f` (Branch: `backup-2`) — Teste Automatizado do Passo 1 (`test_intake_discovery.sh`)
+* **ELI5:** Criamos uma pista de testes rigorosa para ter certeza absoluta de que a investigação do Passo 1 nunca falha, mesmo com arquivos gigantes, arquivos novos ou vírgulas nos nomes.
+* **O Que Foi Feito:**
+  * Criado o teste `scripts/substrates/test/test_intake_discovery.sh`.
+  * Registrado no `package.json` em `npm run aegis:test:intake-discovery` e integrado no `test:fast`.
+* **Por Que Foi Feito:** Blindar o Passo 1 contra qualquer regressão futura.
+* **Objetivo:** Garantir 100% de precisão comprovada por testes automatizados.
+
+---
+
+### 25. Commit `6da397c` (Branch: `backup-2`) — Documentação Canônica em `summary.md`
+* **ELI5:** Atualizamos o mapa oficial do repositório para todo desenvolvedor saber exatamente como o novo Discovery de 16 KB funciona.
+* **O Que Foi Feito:** Documentado o Pre-Intake Discovery em `summary.md`.
+* **Por Que Foi Feito:** Manter a documentação alinhada com a realidade do código.
+* **Objetivo:** Transparência arquitetural total.
+
+---
+
+### 26. Commit `a1eca0b` (Branch: `backup-2`) — Expansão Cognitiva 100% em Memória RAM (Passo 2)
+* **ELI5:** Tiramos a necessidade de criar arquivos de rascunho no disco durante a chamada de IA. Agora o envio, a resposta e o cálculo de tokens acontecem direto na memória RAM via streaming do `curl`, e se o compilador achar um erro, limpamos as mensagens feias e mandamos o erro limpinho para a IA corrigir em 1 segundo.
+* **O Que Foi Feito:**
+  * `aegis_briefing_expand_json` reescrito para streaming `curl -w "\n%{http_code}"` em RAM.
+  * Zero arquivos temporários em `/tmp/`.
+  * Limpeza de caminhos temporários no feedback do `tsc` (`sed -E 's|/tmp/[^/]+/||g'`).
+  * `barrelFrom: null` documentado no `.skills/briefing.md` para demandas *in-place*.
+* **Por Que Foi Feito:** Eliminar lentidão de disco (I/O) e evitar que caminhos `/tmp/` confundissem o modelo.
+* **Objetivo:** Velocidade máxima (~1.2s) e zero resíduos órfãos.
+
+---
+
+### 27. Commit `c863d62` (Branch: `backup-2`) — Simplificação KISS da Detecção de Ponto de Entrada
+* **ELI5:** Trocamos 16 linhas de código confusas de repetição por apenas 6 linhas super simples e elegantes em shell.
+* **O Que Foi Feito:** Redução da busca de barrel para uma única linha idiomática de bash.
+* **Por Que Foi Feito:** Eliminar sobre-engenharia e manter o código enxuto.
+* **Objetivo:** Simplicidade e elegância (KISS).
+
+---
+
+### 28. Commit `76e8313` (Branch: `backup-2`) — Purga de Resíduos de Domínio e Prompt Duplicado
+* **ELI5:** Apagamos 149 linhas de código velho que tentavam adivinhar o que o compilador faz e palavras antigas de testes de memória (`mempoolTail`). Agora o compilador de verdade (`tsc`) é o único juiz soberano!
+* **O Que Foi Feito:**
+  * Removidas as funções `aegis_briefing_optimize_schema_json` (resíduo de `mempoolTail`) e `aegis_briefing_adversarial_schema_json`.
+  * Removido o prompt fallback de 70 linhas embutido em `briefing.sh`, usando exclusivamente `.skills/briefing.md`.
+  * Atualizado o teste `test_briefing_schema_pipeline.sh`.
+* **Por Que Foi Feito:** O compilador `tsc` já valida tipos e variáveis com 100% de autoridade; não precisamos de scripts de regex duplicando o trabalho do compilador.
+* **Objetivo:** Redução de 149 linhas e código 100% agnóstico e universal.
 
 ---
 
