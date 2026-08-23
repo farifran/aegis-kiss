@@ -171,11 +171,26 @@ aegis_briefing_sanitize_json() {
   printf '%s' "${json}"
 }
 
-# The schema doubles as the instruction in .skills/briefing.md.
+# The schema doubles as the instruction in .skills/briefing.md, with AGENTS.md at Byte 0.
 aegis_briefing_system_prompt() {
+  local agents_file="${AEGIS_ROOT_DIR:-.}/AGENTS.md"
   local skill_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
+  local out=""
+
+  if [[ -f "${agents_file}" ]]; then
+    out="$(cat "${agents_file}")"
+  fi
+
   if [[ -f "${skill_file}" ]]; then
-    cat "${skill_file}"
+    if [[ -n "${out}" ]]; then
+      out="${out}"$'\n\n---\n\n'"$(cat "${skill_file}")"
+    else
+      out="$(cat "${skill_file}")"
+    fi
+  fi
+
+  if [[ -n "${out}" ]]; then
+    printf '%s\n' "${out}"
     return 0
   fi
   printf 'You convert a software demand into JSON. Output ONLY a valid JSON object matching the briefing schema.\n'
