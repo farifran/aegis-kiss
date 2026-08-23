@@ -51,9 +51,9 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 6. **Schema Closure (every reference resolves)**:
    - `kind` is ONLY `class` or `function`. NEVER `interface` or `enum` inside `exports` — an export is a runtime symbol the smoke test imports, and a type has none.
    - A named data shape goes in the top-level `"types"` array: `"types": [{"name": "FieldProblem", "shape": "{ field: string; reason: string }"}]`. Then use `FieldProblem[]` freely as a param, return or field type.
-   - Every type must be a lowercase primitive, a JavaScript builtin (`Map`, `Set`, `Uint8Array`, …), a `class` in `exports`, or a name declared in `types`.
+   - Every type must be a lowercase primitive, a JavaScript builtin (`Map`, `Set`, `Uint8Array`, …), a `class` in `exports`, or a name declared in `types` (e.g. `KdPoint`, `KdNode`). Undeclared types trigger TS2552.
    - No type parameters anywhere: `<T>` cannot be declared in this schema, so `Promise<T>` is an undefined name. Use the concrete type the demand implies, or `unknown`.
-   - Every callable member must appear in `methods[]`. Private helpers are NOT expressible: `this._checkIndex(i)` with no `_checkIndex` in `methods[]` is a rejected briefing. Inline the guard in each body (`if (i < 0 || i >= this._capacity) throw new Error('index out of range')`) or declare `_checkIndex` as a method.
+   - Every helper method (e.g. `this._calcDistance()`, `this._insert()`) called inside any method body MUST be explicitly declared in `methods[]` with its signature and body, or inlined directly. Calling unlisted methods triggers TS2339.
    - For optional parameters, declare the type as union with undefined (e.g. `"type": "string | undefined"`) or ensure `behavior[]` asserts supply all required arguments (preventing TS2554).
    - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
    - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/seatMap.ts` → `./seatMap.js`. If the demand directly targets the barrel itself (e.g. only `src/index.ts`), `barrelFrom` MUST be `null` (in-place modification).
