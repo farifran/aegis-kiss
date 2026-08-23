@@ -1337,10 +1337,8 @@ cmd_run() {
       fi
     fi
 
-    # Quality gates (default): Briefing + Acceptance clean before fit/split/run.
+    # Quality gate (default): verify structured demand shape
     if [[ "${intake_relaxed}" -ne 1 ]]; then
-      body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
-      body="$(aegis_intake_ensure_briefing "${body}")"
       local q_err
       q_err="$(mktemp)"
       if ! aegis_intake_quality_check "${body}" 2>"${q_err}"; then
@@ -1350,32 +1348,15 @@ cmd_run() {
       aegis_log "intake: quality check ok"
     fi
 
-    # Show → ask → maybe edit → re-check. fit_check owns the verdict and
-    # the auto-fixes; go only reads them. The editor is the friendly
-    # format: whatever you leave blank you can fill in here.
+    # Fit check: evaluate readiness, model fit and auto-fixes
     local fit_json="" answer=""
     fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
     if ! printf '%s' "${fit_json}" | jq -e '.schema == "aegis.fit_check.v1"' >/dev/null 2>&1; then
       aegis_fatal "fit_check_failed"
     fi
-    body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand')"
-
-    # fit_check may rewrite Acceptance via goal grepping — re-assert quality.
-    if [[ "${intake_relaxed}" -ne 1 ]]; then
-      body="$(aegis_intake_ensure_briefing "${body}")"
-      # Strip poison tokens fit may have re-injected into Acceptance.
-      body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
-      local q_err2
-      q_err2="$(mktemp)"
-      if ! aegis_intake_quality_check "${body}" 2>"${q_err2}"; then
-        # Re-inject briefing stubs if fit emptied Briefing, then recheck once.
-        body="$(aegis_intake_ensure_briefing "${body}")"
-        if ! aegis_intake_quality_check "${body}" 2>"${q_err2}"; then
-          aegis_fatal "intake_quality_failed_after_fit — $(tr '\n' ' ' < "${q_err2}" | sed 's/[[:space:]]*$//')"
-        fi
-      fi
-      rm -f "${q_err2}"
-    fi
+    local fixed_fit
+    fixed_fit="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
+    [[ -n "${fixed_fit}" ]] && body="${fixed_fit}"
 
     printf '%s\n\n' "${body}"
     printf 'fit: run_allowed=%s model_fit=%s score=%s\n' \
@@ -1393,11 +1374,7 @@ cmd_run() {
       local split_ok=0 split_err
       split_err="$(mktemp)"
 
-      # Prefer mechanical multi-export (export_slice) when ## Briefing names 2+
-      # top-level exports. Supervisor often packs class+function into one create
-      # unit; the 8B coder then demotes the helper to a method and the pipeline
-      # "succeeds" with wrong shape. Offline export_slice is deterministic.
-      # (fit_check.sh is not always sourced here — count exports from Briefing text.)
+      # Mechanical multi-export slice when ## Briefing names 2+ top-level exports
       local export_n_parent=0
       export_n_parent="$(
         printf '%s\n' "${parent_body}" \
@@ -1423,7 +1400,7 @@ cmd_run() {
         fi
       fi
 
-      # Supervisor split: intent + export load when mechanical multi-export did not apply.
+      # Supervisor split fallback: intent + export load
       if [[ "${split_ok}" -eq 0 ]] && aegis_supervisor_split_enabled 2>/dev/null; then
         local _sup_model
         _sup_model="$(aegis_briefing_model 2>/dev/null || printf 'supervisor')"
@@ -1482,13 +1459,10 @@ cmd_run() {
             [[ -n "$(printf '%s' "${body}" | tr -d '[:space:]')" ]] \
               || aegis_fatal "draft_vazio"
             if [[ "${multi_unit}" -eq 1 ]]; then
-              # Plan body is multi-target by design — do not re-fit as one demand.
-              # Unit files on disk remain the execution contract.
               printf '%s\n\n' "${body}"
               print_micro_plan "${micros_dir}"
             else
               if [[ "${intake_relaxed}" -ne 1 ]]; then
-                body="$(aegis_intake_ensure_briefing "${body}")"
                 local qe
                 qe="$(mktemp)"
                 if ! aegis_intake_quality_check "${body}" 2>"${qe}"; then
@@ -1497,20 +1471,11 @@ cmd_run() {
                 rm -f "${qe}"
               fi
               fit_json="$(printf '%s' "${body}" | bash scripts/fit_check_demand.sh 2>/dev/null || true)"
-              body="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
-              [[ -n "${body}" ]] || aegis_fatal "draft_vazio"
-              if [[ "${intake_relaxed}" -ne 1 ]]; then
-                body="$(aegis_intake_ensure_briefing "${body}")"
-                body="$(aegis_intake_strip_poison_acceptance_tokens "${body}")"
-                qe="$(mktemp)"
-                if ! aegis_intake_quality_check "${body}" 2>"${qe}"; then
-                  aegis_fatal "intake_quality_failed_after_edit_fit — $(tr '\n' ' ' < "${qe}" | sed 's/[[:space:]]*$//')"
-                fi
-                rm -f "${qe}"
-              fi
+              local fixed_edit
+              fixed_edit="$(printf '%s' "${fit_json}" | jq -r '.fixed_demand // empty')"
+              [[ -n "${fixed_edit}" ]] && body="${fixed_edit}"
               printf '%s\n\n' "${body}"
-              printf 'fit: run_allowed=%s\n' \
-                "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"
+              printf 'fit: run_allowed=%s\n' "$(printf '%s' "${fit_json}" | jq -r '.run_allowed')"
               printf '%s' "${fit_json}" | jq -e '.run_allowed == true' >/dev/null 2>&1 \
                 || aegis_fatal "demand_does_not_fit — o draft editado não cabe"
             fi
