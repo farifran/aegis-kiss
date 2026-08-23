@@ -1,0 +1,7 @@
+{
+  "mode": "adversarial",
+  "status": "interpreted",
+  "verdict": "ACCEPT",
+  "confidence": 1.0,
+  "rationale": "TokenBucket passes all boundary constraints and numerical invariants."
+}

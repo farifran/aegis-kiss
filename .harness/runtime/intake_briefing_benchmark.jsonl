@@ -1,4 +1,0 @@
-{"id":"stack_vm","level":20,"p1_pass":true,"p1_latency_ms":127,"p2_pass":true,"p2_latency_ms":79253,"status":"PASS (100%)"}
-{"id":"bloom_filter","level":30,"p1_pass":true,"p1_latency_ms":194,"p2_pass":true,"p2_latency_ms":10974,"status":"PASS (100%)"}
-{"id":"kd_tree_2d","level":40,"p1_pass":true,"p1_latency_ms":119,"p2_pass":true,"p2_latency_ms":84033,"status":"PASS (100%)"}
-{"id":"spsc_ring_buffer","level":50,"p1_pass":true,"p1_latency_ms":123,"p2_pass":true,"p2_latency_ms":43998,"status":"PASS (100%)"}
