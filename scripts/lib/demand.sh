@@ -1712,8 +1712,8 @@ aegis_file_top_level_export_names() {
   {
     printf '%s\n' "${body}" \
       | grep -Ei \
-        '^[[:space:]]*export[[:space:]]+(async[[:space:]]+)?(function|const|class|let|var)[[:space:]]+[A-Za-z_]' \
-      | sed -E 's/^[[:space:]]*export[[:space:]]+(async[[:space:]]+)?(function|const|class|let|var)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\3/' \
+        '^[[:space:]]*export[[:space:]]+(default[[:space:]]+)?(async[[:space:]]+)?(function|const|class|let|var|type|interface|enum)[[:space:]]+[A-Za-z_]' \
+      | sed -E 's/^[[:space:]]*export[[:space:]]+(default[[:space:]]+)?(async[[:space:]]+)?(function|const|class|let|var|type|interface|enum)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*$/\4/' \
       || true
     printf '%s\n' "${body}" \
       | grep -E '^[[:space:]]*export[[:space:]]*\{' \

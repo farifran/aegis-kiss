@@ -233,8 +233,6 @@ materialize_capability_payloads() {
     attention_targets_json="$(resolve_attention_targets_json)"
   fi
 
-  mkdir -p "${AEGIS_CAPABILITY_PAYLOAD_DIR:-.harness/runtime/capability_payloads}" 2>/dev/null || true
-
   if [[ "${AEGIS_EVIDENCE_CACHE_ENABLED:-true}" == "true" ]]; then
     mkdir -p "${AEGIS_EVIDENCE_CACHE_DIR:-.harness/runtime/evidence_cache}" \
       || aegis_warn "evidence_cache_dir_unavailable"
@@ -301,17 +299,15 @@ materialize_capability_payloads() {
       if [[ -f "${cache_path}" ]] && jq empty "${cache_path}" >/dev/null 2>&1; then
         # Rewrite execution identity so the payload contract matches this
         # mode run (cache body is deterministic; identity is per-execution).
-        mkdir -p "$(dirname "${payload_path}")" 2>/dev/null || true
         if jq \
           --arg execution_id "${AEGIS_EXECUTION_ID}" \
           --arg generated_at "${AEGIS_EXECUTION_TIMESTAMP}" \
           '.execution_id = $execution_id | .generated_at = $generated_at' \
-          "${cache_path}" > "${payload_path}" 2>/dev/null && [[ -s "${payload_path}" ]]; then
+          "${cache_path}" > "${payload_path}"; then
           cache_hit=1
           record_evidence_cache_hit "${payload_path}"
           aegis_log "evidence_cache_hit: ${capability}"
         else
-          cache_hit=0
           rm -f "${payload_path}" 2>/dev/null || true
         fi
       fi

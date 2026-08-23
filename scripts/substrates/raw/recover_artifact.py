@@ -211,9 +211,6 @@ def recover_from_prose(raw: str, mode: str) -> str | None:
             or "no vulnerabilities" in text
             or "no issues" in text
             or "meets all contracts" in text
-            or "falsification" in text
-            or "potential issues" in text
-            or "candidate result" in text
         ):
             return dumps_ok({
                 "status": "verified",

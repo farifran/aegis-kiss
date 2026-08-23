@@ -153,18 +153,14 @@ aegis_briefing_sanitize_json() {
       #    "./seatmap.js" against src/seatMap.ts is TS2307 on any
       #    case-sensitive filesystem, and silently fine on macOS until CI.
       def fix_barrel:
-        if ((.targets // []) == ["src/index.ts"]) or ((.barrelFrom // "") == "./index.js") or ((.barrelFrom // "") == "") then
-          .barrelFrom = ""
-        else
-          ((.barrelFrom // "") | sub("^\\./"; "") | sub("\\.js$"; "")) as $stem
-          | if ($stem | length) == 0 or $stem == "index" then .barrelFrom = ""
-            else
-              ([.targets[]? | select(type == "string" and endswith(".ts"))
-                 | sub("^src/"; "") | sub("\\.ts$"; "")
-                 | select(ascii_downcase == ($stem | ascii_downcase))] | first) as $hit
-              | if $hit == null then .barrelFrom = "" else .barrelFrom = "./" + $hit + ".js" end
-            end
-        end;
+        ((.barrelFrom // "") | sub("^\\./"; "") | sub("\\.js$"; "")) as $stem
+        | if ($stem | length) == 0 then .
+          else
+            ([.targets[]? | select(type == "string" and endswith(".ts"))
+               | sub("^src/"; "") | sub("\\.ts$"; "")
+               | select(ascii_downcase == ($stem | ascii_downcase))] | first) as $hit
+            | if $hit == null then . else .barrelFrom = "./" + $hit + ".js" end
+          end;
       .behavior = ((.behavior // []) | map(
           .assert = ((.assert // "") | drop_nonnull)
           | .prelude = ((.prelude // []) | if type == "string" then drop_nonnull
@@ -669,7 +665,20 @@ aegis_briefing_expand_json() {
 
   local user_prompt="Demand: ${goal}\nTargets: ${target}"
   if [[ -n "${evidence}" ]]; then
-    user_prompt="${user_prompt}\n\nWorkspace Evidence (Discovery & Forensics):\n${evidence}"
+    if jq -e . <<< "${evidence}" >/dev/null 2>&1; then
+      local rendered_evidence
+      rendered_evidence="$(printf '%s' "${evidence}" | jq -r '
+        "Topology (Workspace Files): " + ((.topology // []) | join(", ")) + "\n\n" +
+        ([(.targets // [])[]? |
+          "File: " + .path +
+          (if .exists then " (exists, " + (.bytes|tostring) + " bytes)\nExisting Exports: " + (.exports | join(", ")) + "\nContent:\n" + .snippet
+           else " (net-new file)" end)
+        ] | join("\n\n---\n\n"))
+      ' 2>/dev/null || printf '%s' "${evidence}")"
+      user_prompt="${user_prompt}\n\nWorkspace Evidence (Discovery & Forensics):\n${rendered_evidence}"
+    else
+      user_prompt="${user_prompt}\n\nWorkspace Evidence (Discovery & Forensics):\n${evidence}"
+    fi
   fi
 
   jq -n \
@@ -894,7 +903,8 @@ aegis_briefing_generate() {
   [[ -n "${goal}" ]] || return 1
 
   if aegis_briefing_is_schema_json "${goal}"; then
-    # Caller already supplied the demand as schema JSON.
+    # Agentic handover: caller already supplied the demand as schema JSON.
+    # Skip the supervisor LLM expand; run the same mechanical gates.
     content="$(aegis_briefing_sanitize_json "${goal}")"
     aegis_briefing_validate_json "${content}" 2>/dev/null || {
       printf 'invalid_agentic_briefing\n' >&2
@@ -908,6 +918,11 @@ aegis_briefing_generate() {
       printf 'uncompilable_agentic_briefing\n' >&2
       return 1
     }
+  elif [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    # Agentic handover never calls the supervisor LLM: a free-prose goal is
+    # not accepted for expansion here — the assistant must supply schema JSON.
+    printf 'agentic_requires_schema_json\n' >&2
+    return 1
   else
     content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
   fi
