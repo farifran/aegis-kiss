@@ -56,7 +56,8 @@
     "aegis:test:briefing-prepass": "bash scripts/substrates/test/test_briefing_prepass.sh",
     "aegis:test:briefing-loop": "bash scripts/substrates/test/test_briefing_loop.sh",
     "aegis:test:briefing-schema-pipeline": "bash scripts/substrates/test/test_briefing_schema_pipeline.sh",
-    "aegis:test:intake-discovery": "bash scripts/substrates/test/test_intake_discovery.sh"
+    "aegis:test:intake-discovery": "bash scripts/substrates/test/test_intake_discovery.sh",
+    "aegis:benchmark:intake-briefing": "bash scripts/substrates/test/test_intake_briefing_loop.sh"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",

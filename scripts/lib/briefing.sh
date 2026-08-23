@@ -384,14 +384,16 @@ aegis_briefing_typecheck_json() {
   # of shell quotes.
   classified="$(
     printf '%s\n' "${out}" | awk '
-      function emit(   code) {
+      function emit(   code, clean_r) {
         if (r == "") return
         match(r, /error TS[0-9]+/)
         code = substr(r, RSTART + 6, RLENGTH - 6)
+        clean_r = r
+        sub(/^.*unit\.ts/, "unit.ts", clean_r)
         if (r ~ /possibly .(undefined|null)./ || r ~ /undefined. is not assignable/)
-          print "tsc-strictnull:" code
+          print "tsc-strictnull:" code ": " clean_r
         else
-          print "tsc:" code
+          print "tsc:" code ": " clean_r
       }
       /error TS[0-9]+/ { emit(); r = $0; next }
       r != "" { r = r " " $0 }

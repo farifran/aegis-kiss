@@ -41,6 +41,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 4. **Strict TypeScript & BigInt Invariants**:
    - Types are lowercase: `bigint`, `number`, `string`, `boolean` (NEVER `BigInt`, `Number`, `String` as type annotations).
    - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with `if (tokens > maxTokens) tokens = maxTokens`.
+   - Outside a class (e.g. in helper functions or behavior asserts), NEVER access private fields (`_name`). ALWAYS expose and access public getters (`bucket.tokens`). Accessing private fields outside the class triggers TS2341.
    - NodeNext imports require explicit `.js` extensions (e.g. `./engine.js`).
 
 5. **Behavior Assertions**:
