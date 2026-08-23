@@ -48,6 +48,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 32 | [`88d6a1e`](#30-commit-88d6a1e-branch-backup-2---benchmark-1010-100-green-de-nível-1-a-nível-10--headroom-de-3072-tokens) | `test/`, `briefing.sh`, `.skills/` | Benchmark completo de 10 níveis (Lvl 1 a Lvl 10) com 10/10 (100%) de taxa de acerto e 3072 max_tokens. |
 | 33 | [`4991230`](#31-commit-4991230-branch-backup-2---injeção-constitucional-do-agentsmd-no-byte-0-do-supervisor) | `briefing.sh` | Injeção do contrato constitucional `AGENTS.md` no Byte 0 do prompt do Supervisor de Briefing. |
 | 34 | [`f6558c3`](#32-commit-f6558c3-branch-backup-2---benchmark-extremo-níveis-20-a-50-com-100-de-aprovação) | `test/`, `briefing.sh` | Benchmark de dificuldade extrema (Stack VM, Bloom Filter, KD-Tree, Lock-Free SPSC Ring Buffer) com 100% de sucesso. |
+| 35 | [`b7e3480`](#33-commit-b7e3480-branch-backup-2---simplificação-kiss-do-fluxo-de-fit-check-e-confirmação-no-cli) | `aegis` | Simplificação KISS do fluxo de fit-check e confirmação interativa no CLI (remoção de 35 linhas de checagens redundantes). |
 
 ---
 
@@ -358,6 +359,16 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Reforçadas as regras de Invariante 6 no `.skills/briefing.md` para fechamento estrito de métodos helpers (`_helper`) e tipagem de nós em `types[]` (eliminando erros `TS2339` e `TS2552`).
 * **Por Que Foi Feito:** Provar que o pipeline dos Passos 1 e 2 é de classe mundial e resolve desde micro-funções até física de hardware e estruturas de dados de alto desempenho.
 * **Objetivo:** 4/4 aprovados nos desafios extremos com 100% de taxa de acerto e Discovery em 140ms.
+
+---
+
+### 33. Commit `b7e3480` (Branch: `backup-2`) — Simplificação KISS do Fluxo de Fit-Check e Confirmação no CLI
+* **ELI5:** Limpamos 35 linhas de código velho do CLI (`aegis`) que ficavam repetindo 4 vezes a mesma checagem de texto. Agora a apresentação da demanda e a pergunta de aprovação (`[y/N/e]`) rodam de forma direta, limpa e instantânea.
+* **O Que Foi Feito:**
+  * Eliminadas as checagens repetitivas em loop de `aegis_intake_strip_poison_acceptance_tokens` e injeções circulares de briefing em `aegis`.
+  * Simplificado o loop de edição do draft (`e`) para revalidar uma única vez com qualidade e fit-check.
+* **Por Que Foi Feito:** O Schema JSON gerado pelo Supervisor já entrega o briefing estruturado com 100% de integridade; não há necessidade de reprocessar o texto várias vezes.
+* **Objetivo:** Redução de 35 linhas de código e execução do CLI mais rápida e elegante.
 
 ---
 
