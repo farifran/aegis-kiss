@@ -1736,20 +1736,9 @@ aegis_intake_discover_context() {
   done
 
   # 2. Se o entry point principal existir (ex: src/index.ts) e não estiver na lista, inclui para contexto
-  local entry_candidates=("src/index.ts" "src/mod.ts" "src/main.ts" "index.ts")
-  local ec
-  for ec in "${entry_candidates[@]}"; do
+  for ec in src/index.ts src/mod.ts src/main.ts index.ts; do
     if [[ -f "${ec}" ]]; then
-      local already_in=0
-      for t in "${targets[@]}"; do
-        if [[ "${t}" == "${ec}" ]]; then
-          already_in=1
-          break
-        fi
-      done
-      if [[ "${already_in}" -eq 0 ]]; then
-        targets+=("${ec}")
-      fi
+      [[ " ${targets[*]} " != *" ${ec} "* ]] && targets+=("${ec}")
       break
     fi
   done
