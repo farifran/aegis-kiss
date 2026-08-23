@@ -38,20 +38,37 @@ echo "   Modelo Supervisor: $(aegis_briefing_model 2>/dev/null || echo 'default'
 echo "   Timeout: ${AEGIS_BRIEFING_TIMEOUT_SEC}s | Max Tentativas: ${AEGIS_BRIEFING_MAX_ATTEMPTS}"
 echo "========================================================================"
 
-# Matriz de Demandas de Teste por Nível de Complexidade
+# Matriz de Demandas de Teste por Nível de Complexidade (Níveis 1 a 10)
 declare -a BENCHMARK_CASES=(
   # Nível 1: Micro In-Place
   '{"lvl":1, "id":"unit_converter", "targets":"src/index.ts", "demand":"Adicionar uma funcao converterGigabitsEmKilobytes que recebe valor em gigabits (bigint ou number) e retorna o total em kilobytes (bigint)."}'
   
   # Nível 2: Classes com Estado O(1)
   '{"lvl":2, "id":"token_bucket", "targets":"src/tokenBucket.ts, src/index.ts", "demand":"Criar classe TokenBucket com capacidade maxima maxBytes: bigint e taxa rate: number. Metodo consume(bits: bigint): boolean, getters maxBytes e tokens, e funcao obterEstadoBitmask(bucket: TokenBucket): number reexportada no index.ts."}'
-  '{"lvl":2, "id":"sliding_window", "targets":"src/slidingWindowLimiter.ts, src/index.ts", "demand":"Criar classe SlidingWindowLimiter com limite maximo limit: number e janela windowMs: number. Metodo tryAcquire(): boolean e getter remaining: number."}'
   
-  # Nível 3: Multi-Entidade + Barrel
-  '{"lvl":3, "id":"seat_reservation", "targets":"src/seatMap.ts, src/reservationLedger.ts, src/index.ts", "demand":"Criar SeatMap com rows: number e seatsPerRow: number (metodos occupy, release, availableSeats) e ReservationLedger com registro de reservas por cliente. Reexportar ambos no barrel src/index.ts."}'
+  # Nível 3: Limitador com Janela Temporal
+  '{"lvl":3, "id":"sliding_window", "targets":"src/slidingWindowLimiter.ts, src/index.ts", "demand":"Criar classe SlidingWindowLimiter com limite maximo limit: number e janela windowMs: number. Metodo tryAcquire(): boolean e getter remaining: number."}'
   
-  # Nível 4: Algoritmos / Parsing
-  '{"lvl":4, "id":"semver_compare", "targets":"src/semverCompare.ts, src/index.ts", "demand":"Criar funcao semverCompare(v1: string, v2: string): number que compara versoes semanticas ordenando por major, minor, patch numericamente."}'
+  # Nível 4: Multi-Entidade + Barrel
+  '{"lvl":4, "id":"seat_reservation", "targets":"src/seatMap.ts, src/reservationLedger.ts, src/index.ts", "demand":"Criar SeatMap com rows: number e seatsPerRow: number (metodos occupy, release, availableSeats) e ReservationLedger com registro de reservas por cliente. Reexportar ambos no barrel src/index.ts."}'
+  
+  # Nível 5: Algoritmos / Parsing Semver
+  '{"lvl":5, "id":"semver_compare", "targets":"src/semverCompare.ts, src/index.ts", "demand":"Criar funcao semverCompare(v1: string, v2: string): number que compara versoes semanticas ordenando por major, minor, patch numericamente."}'
+
+  # Nível 6: Máquina de Estados Finita
+  '{"lvl":6, "id":"order_state_machine", "targets":"src/orderStateMachine.ts, src/index.ts", "demand":"Criar classe OrderStateMachine com os estados draft, confirmed, paid, shipped, delivered, cancelled. Metodo transitionTo(state: string): boolean que valida transicoes de ciclo de vida, getter currentState: string e getter isTerminal: boolean. Reexportar no index.ts."}'
+  
+  # Nível 7: Manipulação Bitwise com BigInt
+  '{"lvl":7, "id":"bitset_bigint", "targets":"src/bitSet.ts, src/index.ts", "demand":"Criar classe BitSet com capacity: number recebido no construtor e dados em bigint. Metodos setBit(index: number): void, clearBit(index: number): void, testBit(index: number): boolean, getters size: number e countOnes: number, e metodo union(other: BitSet): BitSet. Reexportar no index.ts."}'
+  
+  # Nível 8: URL Path Router com Segmentos Dinâmicos
+  '{"lvl":8, "id":"path_router", "targets":"src/pathRouter.ts, src/index.ts", "demand":"Criar classe PathRouter que registra rotas com parametros dinamicos como /users/:id. Metodo addRoute(pattern: string, name: string): void, metodo resolve(path: string): string | null que retorna o nome da rota, e getter totalRoutes: number. Reexportar no index.ts."}'
+  
+  # Nível 9: Estrutura de Dados LRU Cache O(1)
+  '{"lvl":9, "id":"lru_cache", "targets":"src/lruCache.ts, src/index.ts", "demand":"Criar classe LruCache com capacity: number. Metodos get(key: string): number | undefined, set(key: string, value: number): void, getters size: number, hits: number, misses: number. Eviccao O(1) do menos recentemente usado. Reexportar no index.ts."}'
+  
+  # Nível 10: Parser CSV com Aspas Escapadas & Quebras de Linha
+  '{"lvl":10, "id":"csv_parser", "targets":"src/csvParser.ts, src/index.ts", "demand":"Criar funcao parseCsv(text: string, delimiter: string): string[][] que transforma texto CSV em matriz de strings tratando aspas duplas escapadas e quebras de linha. Reexportar no index.ts."}'
 )
 
 total_cases=${#BENCHMARK_CASES[@]}

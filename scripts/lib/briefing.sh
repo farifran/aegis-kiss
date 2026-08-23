@@ -586,8 +586,8 @@ aegis_briefing_expand_json() {
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="$(aegis_briefing_model)"
   timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-45}"
-  max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-2048}"
-  [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=2048
+  max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-3072}"
+  [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=3072
 
   if [[ -z "${api_key}" ]]; then
     printf 'missing_api_key\n' >&2
