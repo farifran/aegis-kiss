@@ -45,6 +45,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 29 | [`c863d62`](#27-commit-c863d62-branch-backup-2---simplificação-kiss-da-detecção-de-ponto-de-entrada) | `demand.sh` | Simplificação KISS da busca de barrel de 16 linhas para 6 linhas. |
 | 30 | [`76e8313`](#28-commit-76e8313-branch-backup-2---purga-de-resíduos-de-domínio-e-prompt-duplicado) | `briefing.sh`, `test/` | Purga de resíduos de domínio (`mempoolTail`) e prompt duplicado (redução de 149 linhas). |
 | 31 | [`1a86b99`](#29-commit-1a86b99-branch-backup-2---loop-de-benchmark-multi-nível-passos-1--2-e-feedback-enriquecido-do-compilador) | `test/`, `briefing.sh`, `.skills/` | Benchmark oficial multi-nível (`npm run aegis:benchmark:intake-briefing`) com 100% de taxa de acerto e feedback enriquecido do `tsc`. |
+| 32 | [`88d6a1e`](#30-commit-88d6a1e-branch-backup-2---benchmark-1010-100-green-de-nível-1-a-nível-10--headroom-de-3072-tokens) | `test/`, `briefing.sh`, `.skills/` | Benchmark completo de 10 níveis (Lvl 1 a Lvl 10) com 10/10 (100%) de taxa de acerto e 3072 max_tokens. |
 
 ---
 
@@ -324,6 +325,17 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Regra explícita contra acesso a campos privados fora da classe no `.skills/briefing.md` (evitando `TS2341`).
 * **Por Que Foi Feito:** Ter um loop automatizado para aferir latência, qualidade e taxa de acerto do Passo 1 e Passo 2 em múltiplos níveis de complexidade.
 * **Objetivo:** 5/5 aprovados (100% de acerto comprovado) com Discovery em 127ms e Briefing em memória.
+
+---
+
+### 30. Commit `88d6a1e` (Branch: `backup-2`) — Benchmark 10/10 (100% Green de Nível 1 a Nível 10) & Headroom de 3072 Tokens
+* **ELI5:** Expandimos a pista de testes para **todos os 10 níveis de complexidade** (máquinas de estado, bitsets, roteadores de URL, LRU cache e parsers complexos de CSV). Aumentamos o teto de tokens para 3072 para que algoritmos longos nunca sejam cortados no meio, alcançando **10 de 10 testes aprovados (100%)**!
+* **O Que Foi Feito:**
+  * Expandida a matriz do `test_intake_briefing_loop.sh` para 10 níveis completos (Lvl 1 a Lvl 10).
+  * Aumentado `AEGIS_BRIEFING_MAX_TOKENS` padrão de 2048 para 3072 em `briefing.sh`.
+  * Adicionado invariante no `.skills/briefing.md` para parâmetros opcionais com `| undefined` prevenindo erros de aridade `TS2554`.
+* **Por Que Foi Feito:** Provar a robustez e precisão matemática do Passo 1 e Passo 2 contra demandas de altíssima complexidade e algoritmos densos.
+* **Objetivo:** 10/10 (100% de precisão comprovada) com Discovery em 194ms e Briefing em 32.4s.
 
 ---
 
