@@ -19,12 +19,11 @@ Language: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 # 1. Clone & Install
 git clone https://github.com/farifran/aegis-kiss.git && cd "aegis kiss" && npm install
 
-# 2. Configure Credentials (.harness/local.env)
-echo 'OPENAI_API_KEY="sk-..."' > .harness/local.env
-echo 'OPENAI_MODEL_READONLY_COGNITION="gemini-2.5-flash"' >> .harness/local.env
+# 2. Configure Credentials & Ecosystem (Interactive Wizard)
+./aegis setup
 
 # 3. Execute a Demand
-./aegis "Create TokenBucket in src/tokenBucket.ts" --target src/tokenBucket.ts --accept TokenBucket
+./aegis "Create TokenBucket in src/tokenBucket.ts with BigInt(Date.now())"
 ```
 
 ---
@@ -38,7 +37,7 @@ following on your `PATH`:
 | Dependency | Required? | Used for |
 |---|---|---|
 | **bash** (≥ 4) | ✅ | Harness runtime (`set -Eeuo pipefail`) |
-| **git** | ✅ | Only durable memory; diff/status & commit gate |
+| **git** | ✅ | Only durable memory; diff/status, auto-squash & commit gate |
 | **curl** | ✅ | Provider HTTP requests (`raw` substrate) |
 | **jq** | ✅ | JSON evidence, handover, metrics, prompts |
 | **node** + **npm** | ✅ | `tsc`, `eslint`, `ast-grep` toolchain & runtime behavior gate |
@@ -47,61 +46,41 @@ following on your `PATH`:
 | **gh** (GitHub CLI) | ⚪ optional | Only `--issue N` demand intake |
 | Ollama / vLLM / LM Studio | ⚪ optional | Local inference provider |
 
-Install **Aider** for the mutation pipeline (install it into the repo venv so
-`AEGIS_AIDER_BIN`'s default `.venv/bin/aider` resolves, or leave it on your
-`PATH`):
+Install **Aider** for the mutation pipeline:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install aider-chat
 ```
 
-Aider is only needed for `build`; read-only modes (`discovery` / `forensics` /
-`validation`) run without it.
+---
+
+## 🌐 Multi-Client Integration & 5-Pillar Ecosystem
+
+Aegis features an interactive setup wizard (`./aegis setup`) organized across **5 Ecosystem Pillars**:
+
+1. **💻 Native IDE Assistants & CLI Agents** (Antigravity IDE, Claude Code, Cursor, Windsurf, OpenCode)
+2. **☁️ Proprietary / Frontier Cloud APIs** (OpenAI GPT-4o/o3-mini, Anthropic Claude 3.7, Google Gemini 2.5, xAI Grok-2)
+3. **🚀 Open-Weights Fast Hosted APIs** (NVIDIA Integrate GLM-5.2/Llama-3.3, DeepSeek Direct, Moonshot Kimi, Groq)
+4. **🏠 Local & Offline Sovereign Engines** (Ollama, vLLM, SGLang, LM Studio)
+5. **⚙️ Custom Hybrid Mode** (Independent decoupling: Supervisor on IDE/API + Coder on API/Local with smart key reuse)
+
+### Execution Paradigms:
+- **Direct CLI Execution (Human Operator)**: Interactive TTY prompts for human approval; automatic setup wizard triggering when keys are absent.
+- **AI Assistant Handover (Antigravity, Claude Code, Cursor)**: Automatic agentic sensing (`aegis_is_agentic_execution`) emitting non-blocking structured JSON (`PENDING_USER_QUESTIONS`, `PENDING_SETUP_CONFIG`, `PENDING_ASSISTANT`).
 
 ---
 
-## 🌐 Multi-Client Integration & Inference Modes
-
-Aegis supports **two primary execution modes** across any development environment:
-
-### 1. 💻 Direct CLI Execution (Human Operator)
-- **Interactive TTY Experience**: Prompts for confirmation and opens interactive setup (`./aegis setup`) if API keys are missing.
-- **Local LLMs & Cloud APIs**: Connects to local inference servers (Ollama, vLLM, LM Studio) or cloud endpoints (NVIDIA Integrate, OpenAI, Anthropic, Gemini, DeepSeek).
-- **Flexible Model Selection**:
-  - **Single Global Model**: Set `AEGIS_MODEL_DEFAULT="meta/llama-3.1-8b-instruct"` (or `ollama/llama3.1:8b`) to use one model for all pipeline stages.
-  - **Per-Task / Per-Mode Models**: Override specific pipeline stages with dedicated models:
-    - `AEGIS_SUPERVISOR_MODEL`: Intake demand expansion & JSON schema generation (`.skills/briefing.md`)
-    - `AEGIS_AIDER_MODEL` / `AEGIS_MUTATION_MODEL`: Code mutation in Aider (`build`)
-    - `AEGIS_MODEL_ADVERSARIAL`: Red-teaming & falsification (`adversarial`)
-    - `AEGIS_MODEL_VALIDATION`: Tribunal static alignment (`validation`)
-  - **Supervisor reliability knobs**: `AEGIS_BRIEFING_MAX_TOKENS` (default `2048`),
-    `AEGIS_BRIEFING_MAX_ATTEMPTS` (default `2`), `AEGIS_BRIEFING_TIMEOUT_SEC`
-    (default `90`). A quality gate retries Briefings that are structurally valid
-    but degenerate (self-cancelling algebra, duplicated declarations).
-
-### 2. 🤖 AI Assistant Handover (Antigravity, Claude Code, Codex, OpenCode, Cursor, Windsurf)
-- **Automatic Agentic Sensing**: Aegis automatically detects AI assistant environments via `aegis_is_agentic_execution` (`ANTIGRAVITY_AGENT`, `CLAUDE_CODE`, `CODEX_AGENT`, `OPENCODE_AGENT`, `CURSOR_AGENT`, `WINDSURF_AGENT`, `--agent` / `--agentic` flags, or non-TTY subshells).
-- **Non-Blocking & Silent Execution**: Disables interactive TTY prompts, emitting clean structured JSON (`pending_assistant.json`) and returning execution control directly to the AI assistant with 0 external token overhead.
-
-| Client / Environment | Execution Mode | Workflow / Command |
-|---|---|---|
-| 💻 **Direct Aegis CLI** | Human Operator (Interactive) | `./aegis "your demand" --target src/...` or `./aegis <N>` |
-| 🛸 **Antigravity IDE / Codex** | Agentic Pair-Programmer (Non-blocking) | Background execution via `run_command` or terminal subshell |
-| 🤖 **Claude Code / OpenCode / Cursor** | Agentic Assistant (Silent Handover) | `./aegis "your demand"` inside assistant prompt |
-
 ## 💎 What Makes Aegis Uniquely Differentiated?
-
-While standard AI tools act as "naive text generators" that blindly rewrite files, Aegis is an **engineering containment harness** built on 6 breakthrough differentiators:
 
 ```mermaid
 flowchart TD
     subgraph Differentiators["🛡️ The 6 Aegis Differentiators"]
         D1["⚡ 1. Mechanical Injector<br/><b>0 AI Tokens</b> for 80% of disk writes (0.01s execution)"]
-        D2["🧠 2. Sovereign RAM-Only Compiler<br/>Validates types in <code>tsc</code> & runs Node asserts in RAM before touching disk"]
-        D3["🏛️ 3. Active Architecture Governance<br/>Presents meaningful product design decisions, protecting humans from confirmation fatigue"]
+        D2["🧠 2. Sovereign In-Memory Compiler<br/>Validates types in <code>tsc</code> & runs Node asserts in RAM before touching disk"]
+        D3["🏛️ 3. Active Architecture Governance<br/>Presents meaningful product design decisions with zero-token recommended bypass"]
         D4["🔒 4. Byte-0 Prefix Cache<br/><b>71% measured prefix stability</b> via frozen constitutional preambles"]
         D5["😈 5. Devil's Advocate Tribunal<br/>Red-teams time drift, sign boundaries & numerical invariants with strict KISS rules"]
-        D6["🧹 6. Zero Repository Pollution<br/>100% ephemeral runtime with native GitHub Issues & Git trailer integration"]
+        D6["🧹 6. Unconditional Auto-Squash<br/>Consolidates micro-task commits into one clean feature commit automatically"]
     end
 ```
 
@@ -109,131 +88,12 @@ flowchart TD
 |---|---|---|
 | **Disk Write Token Cost** | 🔴 **15,000 to 40,000 tokens** per file edit. Re-reads and rewrites whole files repeatedly. | 🟢 **ZERO TOKENS** on disk mutations. Injects verified modules and barrels via deterministic scripts in 0.01s. |
 | **Compilation Gate** | 🔴 Blindly writes unverified code to disk; creates broken Git commits during trials. | 🟢 **Sovereign In-Memory Compiler**: `tsc --noEmit` & Node.js asserts run 100% in RAM with auto-healing before touching Git. |
-| **Human Supervision** | 🔴 Passive "Accept/Decline" buttons leading to decision fatigue and rubber-stamping. | 🟢 **Engineering Governance Modals**: Formulates real architectural design choices (clock sources, state typing, export scopes) at 0 extra tokens. |
+| **Human Supervision** | 🔴 Passive "Accept/Decline" buttons leading to decision fatigue and rubber-stamping. | 🟢 **Engineering Governance Modals**: Formulates real architectural design choices with **zero-token bypass** when confirming defaults. |
 | **KV-Cache Efficiency** | 🔴 Unordered prompts cause 0% cache hits, forcing full token recalculation every turn. | 🟢 **71% Measured Byte-0 Stability**: Invariant constitution (`AGENTS.md`) is locked at Byte 0 for maximum provider cache hits. |
-| **Algorithmic Defense** | 🔴 Prone to hallucinations, over-engineering, generic factories, and sign boundary errors. | 🟢 **Multi-Stage Tribunals**: Dedicated *Optimize* ($O(1)$ physics) and *Adversarial* (Devil's Advocate red-teaming) modes. |
-| **Workspace Cleanliness** | 🔴 Litters the workspace with temporary files, dirty branches, and uncommitted scratchpads. | 🟢 **100% Clean Workspace**: Ephemeral memory execution with zero draft pollution and native Git trailer traceability. |
+| **Algorithmic Defense** | 🔴 Prone to hallucinations, over-engineering, generic factories, and sign boundary errors. | 🟢 **Multi-Stage Tribunals**: Dedicated *Optimize* ($O(1)$ physics) and *Adversarial* (Devil's Advocate Node.js assertions). |
+| **Workspace Cleanliness** | 🔴 Litters the workspace with temporary files, dirty branches, and multi-commit noise. | 🟢 **Unconditional Auto-Squash**: Ephemeral memory execution, clean working tree, and 1 consolidated Git commit per issue. |
 
 ---
 
-## 🏛️ Architectural Synthesis: Aegis's 6 Pillars
-
-Aegis unifies 6 major open-source software engineering principles into a single deterministic harness:
-
-| Pillar | Role in Aegis | Measurable Practical Benefit |
-|---|---|---|
-| 🧠 **Karpathy** | Cognition Constitution at Byte 0 ([`AGENTS.md`](AGENTS.md)). | Mechanical intent tribunal rejects hallucinated diffs. |
-| 😈 **Devil's Advocate** | Adversarial Invariant Falsifier ([`.skills/adversarial.md`](.skills/adversarial.md)). | Interrogates sign invariants (`bits <= 0n`), NTP clock drift, and boundary crashes with **Strict Anti-Overengineering KISS Filter** (1-line surgical fixes). |
-| 📐 **PonyTail** | Directives in [`ARCHITECTURE.md`](ARCHITECTURE.md) + AST rules. | Enforces NodeNext ESM, `readonly`, `BigInt`, zero `any`. |
-| ✂️ **Headroom** | Epistemic 32KB Context Budgeting with anchor protection. | Prunes irrelevant files without deleting bug root causes. |
-| ⚡ **LMCache** | Prompt held byte-identical from Byte 0 (`AGENTS.md` + `ARCHITECTURE.md` + skill contract + capability manifest). | **71% of the prompt measured byte-stable** across repeat runs — clears the 1,024-token minimum a prefix cache needs. |
-| 🛡️ **Semgrep** | SAST static security scanner in `static_gate.sh`. | Mechanically blocks Git promotion of OWASP / injection flaws. |
-
----
-
-## 🧪 Supervisor Briefing & Behavioral Oracle: 2-Tier Validation
-
-Intake expands a demand through the **supervisor** model into a structured
-JSON Briefing based on the canonical contract ([`.skills/briefing.md`](.skills/briefing.md)):
-
-```json
-{
-  "goal": "Create src/slidingWindowLimiter.ts and src/index.ts implementing a sliding window rate limiter",
-  "targets": ["src/slidingWindowLimiter.ts", "src/index.ts"],
-  "exports": [ ... ],
-  "behavior": [
-    {
-      "desc": "Accepts requests up to limit and rejects beyond it",
-      "exports": ["SlidingWindowLimiter"],
-      "prelude": ["const limiter = new SlidingWindowLimiter(2, 1000)"],
-      "assert": "limiter.tryAcquire() === true && limiter.tryAcquire() === true && limiter.tryAcquire() === false"
-    }
-  ]
-}
-```
-
-### 2-Tier Automated Quality Gate:
-1. **TypeScript Compilation in Memory (`tsc`)**: `aegis_briefing_typecheck_json` materializes the schema in a temporary in-memory module and runs `tsc --noEmit` against the project's `tsconfig.json`. Any missing members, unknown types, or bad signatures are rejected and retried before the coder model receives the prompt.
-2. **Node.js Runtime Behavior Execution Gate**: Behavior assertions in `behavior[]` are compiled and executed in real Node.js runtime (`node unit.js`), proving mathematical correctness and runtime validity.
-
----
-
-## 🔄 Automated Briefing Improvement Loop
-
-Aegis includes an automated test loop to continuously benchmark and refine supervisor prompt quality across 30 real-world prose demands:
-
-```bash
-# Run standard benchmark suite (Lot A: algorithms, caches, state machines)
-npm run aegis:test:briefing-loop
-
-# Run Lot B (frontend & async error contracts)
-AEGIS_BRIEFING_LOOP_DEMANDS=scripts/substrates/test/probes/briefing_demands_b.jsonl npm run aegis:test:briefing-loop
-
-# Run Lot C (advanced data structures, DAGs, binary parsers, mutexes)
-AEGIS_BRIEFING_LOOP_DEMANDS=scripts/substrates/test/probes/briefing_demands_c.jsonl npm run aegis:test:briefing-loop
-```
-
-Defects are automatically logged and classified in `.harness/runtime/briefing_loop_report.jsonl`.
-
----
-
-## ⚡ KV-Cache Topology & Token Economy
-
-Aegis orders every prompt so the invariant part comes first: constitution,
-architecture directives, skill contract and capability manifest at Byte 0,
-then a `LIVE ZONE` marker, then everything that changes per execution.
-A provider-side prefix cache can only reuse bytes up to the first one that
-differs, so that ordering is the whole mechanism.
-
-**What is measured.** Two `forensics` runs of the same demand, captured at the
-wire and tokenised with `o200k_base`:
-
-| | tokens |
-|---|---|
-| Whole raw-substrate prompt | 2,435 |
-| **Byte-0 identical prefix across both runs** | **1,718 (71%)** |
-| — system message (constitution + architecture + skill) | 1,059 |
-| — user message up to first divergence | 659 |
-| Provider minimum before any prefix cache engages | 1,024 |
-
-| Mode | Substrate / Engine | Prompt Payload Structure | Prefix status |
-|---|---|---|---|
-| **`discovery`** | Mechanical Shell | 100% mechanical in shell | 🟢 **N/A (0 tokens)** |
-| **`forensics`** | Mechanical Shell (LLM residual only) | Frozen head + evidence | 📏 **71% byte-stable (measured)** |
-| **`build`** | Aider CLI | Frozen head + demand + evidence | ❓ **Unmeasured** *(Aider owns its own prompt assembly)* |
-| **`optimize`** | Raw LLM | Frozen head + candidate diff $C_1$ | ❓ **Unmeasured** *(same assembler as `forensics`)* |
-| **`adversarial`** | Raw LLM | Frozen head + diff $C_1$ *(depth `low\|medium\|paranoid`)* | ❓ **Unmeasured** *(larger skill contract ⇒ larger frozen head)* |
-| **`validation`** | Mechanical Shell | Mechanical tribunal (`npm run aegis:sanity`) | 🟢 **N/A (0 tokens)** |
-
----
-
-## 🚦 Quality Gate & Quick Commands
-
-```bash
-# 1. Execute a new demand (Intake + Fit + Pipeline)
-./aegis "Create TokenBucket in src/tokenBucket.ts"
-
-# 2. Resume an existing issue
-./aegis 207
-
-# 3. Squash micro-task commits into 1 clean feature commit for PR
-./aegis squash 207
-
-# 4. Offline context inspection (0 tokens)
-./aegis context --target src
-
-# 5. Run static tribunal (AST grep + ESLint + TS)
-npm run aegis:sanity
-
-# 6. Execute fast regression test suite
-npm run aegis:test:fast
-
-# 7. Execute full 39-suite test matrix
-npm run aegis:test
-```
-
----
-
-## 📜 License & Credits
-
-See [`LICENSE.md`](LICENSE.md). Inspired by Andrej Karpathy, Dietrich Gebert (PonyTail), Aider, Headroom, LMCache, Semgrep, and Tree-sitter.
+## 📜 Historical Reference
+For the complete evolutionary chronicle, forensic audits, and historical commit matrix, see [`historyCommit.md`](historyCommit.md).
