@@ -53,6 +53,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 37 | [`1b05c0b`](#35-commits-d673f0c--1b05c0b-branch-backup-2---execução-da-issue-292-tokenbucketstate-com-governança-de-arquitetura) | `src/` | Execução completa da Issue #292 (`TokenBucketState` + `getState()` + `obterEstadoBitmask`) através da governança interativa de arquitetura. |
 | 38 | [`f16faf3`](#36-commit-f16faf3-branch-backup-2---alinhamento-de-kv-cache-byte-0-e-especialização-do-mutation-contract) | `briefing.sh`, `.skills/` | Injeção de `ARCHITECTURE.md` (PonyTail) no Byte-0 do Supervisor e especialização cirúrgica de `mutation.md`. |
 | 39 | [`bc0332c`](#37-commits-36c26df--bc0332c-branch-backup-2---modularização-e-lapidação-kiss-de-demandsh) | `scripts/lib/` | Modularização de `demand.sh` (de 4.393 para 780 linhas) e eliminação de lógica duplicada. |
+| 40 | [`3b4da7c`](#38-commit-3b4da7c-branch-backup-2---lapidação-de-briefingmd-em-7-diretivas-arquiteturais) | `.skills/` | Especialização de `.skills/briefing.md` em 7 Diretivas Arquiteturais e Compile-Time Gates. |
 
 ---
 
@@ -417,6 +418,15 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Preservada 100% de compatibilidade retroativa via importação modular transparente.
 * **Por Que Foi Feito:** Eliminar a sobre-engenharia e o monólito acumulativo, respeitando a constituição de Karpathy (`AGENTS.md`: *KISS & Surgical Mutation - Simplicity First*).
 * **Objetivo:** Código limpo, modular, elegante e com 100% de aprovação na suíte de testes e benchmarks.
+
+### 38. Commit `3b4da7c` (Branch: `backup-2`) — Lapidação de `briefing.md` em 7 Diretivas Arquiteturais
+* **ELI5:** Deixamos o contrato do robô supervisor (`.skills/briefing.md`) tão organizado, limpo e direto quanto deixamos o `.skills/mutation.md`. Agora ele tem 7 Diretivas claras: quarentena do navegador, densidade de tokens, barreira contra colisões em barrels, tipagem estrita de BigInt/TypeScript, integridade de schema (TS2339/TS2552), física de hardware ($O(1)$) e testes de regressão executáveis!
+* **O Que Foi Feito:**
+  * Corrigida a contagem e títulos das 7 Diretivas Arquiteturais em `.skills/briefing.md`.
+  * Eliminadas repetições desnecessárias da constituição que já está no Byte-0 (`AGENTS.md` + `ARCHITECTURE.md`).
+  * Blindadas as regras de Schema Closure e tipagem estrita de BigInt/TypeScript.
+* **Por Que Foi Feito:** Garantir que o Supervisor de Briefing produza Schemas JSON perfeitos e sem nenhuma quebra de compilação ou ambiguidade.
+* **Objetivo:** Zero falhas de sintaxe e máxima aderência aos princípios KISS do Aegis.
 
 ---
 
