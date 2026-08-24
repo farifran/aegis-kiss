@@ -1920,37 +1920,33 @@ EOF
       return 0
     fi
 
-    # Optional cosmetic squash: one managed commit with the union of accepts.
-    # Default off — per-unit commits remain the source of truth for keep-progress.
-    case "${AEGIS_SQUASH_BATCH:-0}" in
-      1|true|yes)
-        if [[ -n "${batch_start_commit}" ]] \
-          && [[ "$(git rev-parse HEAD 2>/dev/null || true)" != "${batch_start_commit}" ]]; then
-          local squash_accept squash_summary squash_msg
-          squash_accept="$(
-            printf '%s\n' "${batch_accepts[@]+"${batch_accepts[@]}"}" \
-              | awk 'NF && !seen[$0]++' \
-              | paste -sd',' - | sed 's/,/, /g'
-          )"
-          [[ -n "${squash_accept}" ]] || squash_accept="batch"
-          squash_summary="$(printf '%s' "${squash_accept}" | cut -d',' -f1 | sed 's/^[[:space:]]*//')"
-          mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
-          squash_msg="${COMMIT_MSG_FILE}.batch-squash"
-          aegis_record_render_message "${issue}" "${squash_summary}" "${squash_accept}" \
-            "1/${unit_total}" > "${squash_msg}"
-          # Soft-reset unit checkpoints; keep tree; one new commit.
-          if git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
-            && ! git diff --cached --quiet 2>/dev/null \
-            && git commit -F "${squash_msg}" >/dev/null 2>&1; then
-            last_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
-            aegis_log "AEGIS_SQUASH_BATCH: commits das units fundidos em ${last_commit}"
-          else
-            aegis_warn "AEGIS_SQUASH_BATCH falhou — commits por unit mantêm-se"
-          fi
-          rm -f "${squash_msg}" 2>/dev/null || true
-        fi
-        ;;
-    esac
+    # Auto-Squash ao concluir a Issue: funde os commits atômicos das micro-tarefas
+    # num único commit de feature limpo e consolidado, eliminando a poluição do git log.
+    if [[ -n "${batch_start_commit}" ]] \
+      && [[ "$(git rev-parse HEAD 2>/dev/null || true)" != "${batch_start_commit}" ]]; then
+      local squash_accept squash_summary squash_msg
+      squash_accept="$(
+        printf '%s\n' "${batch_accepts[@]+"${batch_accepts[@]}"}" \
+          | awk 'NF && !seen[$0]++' \
+          | paste -sd',' - | sed 's/,/, /g'
+      )"
+      [[ -n "${squash_accept}" ]] || squash_accept="batch"
+      squash_summary="$(printf '%s' "${squash_accept}" | cut -d',' -f1 | sed 's/^[[:space:]]*//')"
+      mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+      squash_msg="${COMMIT_MSG_FILE}.batch-squash"
+      aegis_record_render_message "${issue}" "${squash_summary}" "${squash_accept}" \
+        "1/${unit_total}" > "${squash_msg}"
+      # Soft-reset unit checkpoints; keep tree; one new commit.
+      if git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
+        && ! git diff --cached --quiet 2>/dev/null \
+        && git commit -F "${squash_msg}" >/dev/null 2>&1; then
+        last_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
+        aegis_log "auto-squash: ${unit_total} commits atômicos fundidos com sucesso em ${last_commit}"
+      else
+        aegis_warn "auto-squash falhou — commits por unit mantêm-se"
+      fi
+      rm -f "${squash_msg}" 2>/dev/null || true
+    fi
 
     # Ephemeral -F inputs (unit-* / batch-squash); never leave as repo litter.
     rm -f "${COMMIT_MSG_FILE}".unit-* "${COMMIT_MSG_FILE}.batch-squash" 2>/dev/null || true
@@ -2462,44 +2458,6 @@ EOF
   fi
 }
 
-cmd_squash() {
-  local issue="${1:-}"
-  if [[ -z "${issue}" ]]; then
-    # Auto-detect latest issue from git log
-    issue="$(git log -n 20 --oneline | grep -oE 'issue#[0-9]+' | head -1 | sed 's/issue#//' || true)"
-  fi
-  if [[ -z "${issue}" ]]; then
-    aegis_fatal "missing_issue — uso: ./aegis squash <issue_number>"
-  fi
-
-  local task_commits
-  task_commits="$(git log -n 30 --oneline | grep -E "aegis: issue#${issue} task " | cut -d' ' -f1 || true)"
-  local n_commits
-  n_commits="$(printf '%s\n' "${task_commits}" | grep -c . || true)"
-  if [[ "${n_commits}" -le 1 ]]; then
-    aegis_log "squash: apenas ${n_commits} commit(s) atômico(s) encontrado(s) para a issue #${issue}; nada para fundir"
-    return 0
-  fi
-
-  aegis_log "squash: a fundir ${n_commits} commits atômicos da issue #${issue} num commit consolidado de feature..."
-  local parent_commit
-  parent_commit="$(git rev-parse HEAD~"${n_commits}")"
-
-  local msg_title="feat: implement issue #${issue}"
-  local issue_file="${ISSUE_CACHE_DIR}/issue_${issue}.md"
-  if [[ -f "${issue_file}" ]]; then
-    local goal_text
-    goal_text="$(awk '/^## Goal[[:space:]]*$/ { p=1; next } /^## / { p=0 } p' "${issue_file}" | tr '\n' ' ' | sed 's/[[:space:]]*$//' | head -c 80 || true)"
-    if [[ -n "${goal_text}" ]]; then
-      msg_title="feat: ${goal_text} (issue #${issue})"
-    fi
-  fi
-
-  git reset --soft "${parent_commit}"
-  git commit -m "${msg_title}" -m "Consolidated ${n_commits} atomic aegis micro-units for issue #${issue}."
-  aegis_log "squash: consolidado com sucesso em $(git rev-parse --short HEAD) — ${msg_title}"
-}
-
 main() {
   local verb="${1:-}"
   case "${verb}" in
@@ -2515,7 +2473,6 @@ main() {
     context) shift; cmd_context "$@" ;;
     split)   shift; cmd_split "$@" ;;
     setup)   shift; cmd_setup "$@" ;;
-    squash)  shift; cmd_squash "$@" ;;
     go|run)  shift; cmd_run "$@" ;;
     ""|-h|--help) usage ;;
     *)       cmd_run "$@" ;;
