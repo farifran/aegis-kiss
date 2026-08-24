@@ -160,54 +160,28 @@ aegis_demand_search_query() {
 
 aegis_search_symbol_pathspecs() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local payload_dir handover
-  local specs path
+  local payload_dir="${2:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${3:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
 
-  if [[ "$#" -ge 2 ]]; then
-    payload_dir="$2"
-  else
-    payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
-  fi
-  if [[ "$#" -ge 3 ]]; then
-    handover="$3"
-  else
-    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
-  fi
-
+  local specs
   specs="$(
     {
       if declare -f aegis_extract_operator_named_paths >/dev/null 2>&1; then
         aegis_extract_operator_named_paths "${text}"
       fi
       if [[ -n "${handover}" && -f "${handover}" ]]; then
-        jq -r '.epistemic_state.next_attention_targets[]? // empty' \
-          "${handover}" 2>/dev/null || true
+        jq -r '.epistemic_state.next_attention_targets[]? // empty' "${handover}" 2>/dev/null || true
       fi
-      if [[ -n "${payload_dir}" \
-        && -f "${payload_dir}/runtime_attention_seed.json" ]]; then
-        jq -r '.payload.attention_targets[]? // empty' \
-          "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || true
+      if [[ -n "${payload_dir}" && -f "${payload_dir}/runtime_attention_seed.json" ]]; then
+        jq -r '.payload.attention_targets[]? // empty' "${payload_dir}/runtime_attention_seed.json" 2>/dev/null || true
       fi
     } | sed 's|^filesystem\.read:||; s|^\./||' \
-      | awk 'NF && $0 !~ /^\// && $0 !~ /\.\./ { print }' \
+      | awk 'NF && $0 !~ /^\// && $0 !~ /\.\./ { if ($0 ~ /\./ || $0 ~ /\//) print; else if (system("test -e \"" $0 "\"") == 0) print }' \
       | awk '!seen[$0]++'
   )"
 
-  # Keep path-like tokens only (file/dir), drop free-text noise.
-  specs="$(
-    while IFS= read -r path; do
-      [[ -n "${path}" ]] || continue
-      if [[ "${path}" == *.* || "${path}" == */* || -e "${path}" ]]; then
-        printf '%s\n' "${path}"
-      fi
-    done <<< "${specs}"
-  )"
-
   if [[ -z "${specs}" ]]; then
-    # Product default: confine demand search to src/ when present.
-    if [[ -d "src" ]]; then
-      printf 'src\n'
-    fi
+    [[ -d "src" ]] && printf 'src\n'
     return 0
   fi
   printf '%s\n' "${specs}"
@@ -432,29 +406,14 @@ aegis_demand_task_titles() {
 
 aegis_demand_task_count() {
   local text="${1-}"
-  local n=0
-  while IFS= read -r _; do
-    n=$((n + 1))
-  done < <(aegis_demand_task_titles "${text}")
-  printf '%s' "${n}"
+  aegis_demand_task_titles "${text}" | awk 'NF {c++} END {print c+0}'
 }
 
 # 1-based task title; empty if missing.
-
 aegis_demand_task_title_at() {
-  local text="${1-}"
-  local k="${2-}"
-  local i=0
-  local line
+  local text="${1-}" k="${2-}"
   [[ "${k}" =~ ^[1-9][0-9]*$ ]] || return 0
-  while IFS= read -r line; do
-    i=$((i + 1))
-    if [[ "${i}" -eq "${k}" ]]; then
-      printf '%s' "${line}"
-      return 0
-    fi
-  done < <(aegis_demand_task_titles "${text}")
-  return 0
+  aegis_demand_task_titles "${text}" | sed -n "${k}p"
 }
 
 
@@ -795,35 +754,18 @@ aegis_demand_acceptance_names() {
     || true
 }
 
-# Mechanical barrel merge for reexport units: start from HEAD content, ensure
-# import + export of Acceptance names, never drop pre-existing exports.
-# Args: rel_path, demand_text [, surface_root] [, force]
-#   force=1 → always write (reexport-only fast path; works with empty HEAD).
-# Writes surface file; exit 0 if rewritten, 1 if no-op/skip.
-
 aegis_mechanical_demand_anchors_json() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local payload_dir handover anchors_json
+  local payload_dir="${2:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${3:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
 
-  if [[ "$#" -ge 2 ]]; then
-    payload_dir="$2"
+  local anchors_json
+  anchors_json="$(aegis_materialize_demand_anchors_json "${text}" "${handover}" "${payload_dir}")"
+  if printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    printf '%s' "${anchors_json}"
   else
-    payload_dir="${AEGIS_CAPABILITY_PAYLOAD_DIR:-}"
+    printf '{}'
   fi
-  if [[ "$#" -ge 3 ]]; then
-    handover="$3"
-  else
-    handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
-  fi
-
-  anchors_json="$(
-    aegis_materialize_demand_anchors_json "${text}" "${handover}" "${payload_dir}"
-  )"
-  if ! printf '%s' "${anchors_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
-    printf '%s' '{}'
-    return 0
-  fi
-  printf '%s' "${anchors_json}"
 }
 
 # Frame a JSON object body with AEGIS artifact markers (substrate stdout).
