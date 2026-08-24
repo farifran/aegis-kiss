@@ -618,6 +618,34 @@ aegis_briefing_provider_error_code() {
   printf 'empty_response'
 }
 
+# Detects if operator answers accept the default recommended options.
+# When true, the preliminary schema (which was generated under recommended assumptions)
+# can be accepted immediately by stripping questions:[], avoiding a redundant LLM call.
+aegis_briefing_answers_are_recommended() {
+  local answers="${1-}"
+  local schema_json="${2-}"
+  [[ -n "${answers}" ]] || return 1
+  [[ -n "${schema_json}" ]] || return 1
+
+  # Direct affirmative tokens
+  case "$(printf '%s' "${answers}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+    "yes"|"y"|"sim"|"s"|"pode"|"ok"|"recommended"|"all_recommended"|"default"|"aceito")
+      return 0
+      ;;
+  esac
+
+  # Verify if every answer in AEGIS_BRIEFING_ANSWERS contains "(recommended)" or matches option 1
+  local non_rec_count
+  non_rec_count="$(
+    printf '%s\n' "${answers}" \
+      | grep -v '^[[:space:]]*$' \
+      | grep -vi 'recommended' \
+      | grep -v -E '^[[:space:]]*[0-9]+:[[:space:]]*(a|1|\(recommended\))([[:space:]]|$)' \
+      | wc -l | tr -d ' '
+  )"
+  [[ "${non_rec_count}" == "0" ]]
+}
+
 # Detect a caller-supplied demand already in the briefing JSON schema (as
 # opposed to a free-prose goal). Agentic callers (opencode, Claude Code, …)
 # can pre-expand the demand; when the goal IS valid schema JSON we honor it
@@ -841,6 +869,20 @@ aegis_briefing_generate() {
       printf 'uncompilable_agentic_briefing\n' >&2
       return 1
     }
+  elif [[ -n "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
+    local _prelim_schema="${AEGIS_PRELIMINARY_SCHEMA_JSON:-}"
+    local _prelim_file="${AEGIS_ROOT_DIR:-.}/.harness/runtime/preliminary_briefing_schema.json"
+    if [[ -z "${_prelim_schema}" && -f "${_prelim_file}" ]]; then
+      _prelim_schema="$(cat "${_prelim_file}" 2>/dev/null || true)"
+    fi
+    if [[ -n "${_prelim_schema}" ]] && aegis_briefing_answers_are_recommended "${AEGIS_BRIEFING_ANSWERS}" "${_prelim_schema}"; then
+      # Operator accepted the recommended options. The preliminary schema was already
+      # built under recommended assumptions. Strip questions:[] mechanically (0 tokens, 0ms).
+      printf '[AEGIS][BRIEFING] respostas confirmam o recomendado — reutilizando schema preliminar em memória (0 tokens extras)\n' >&2
+      content="$(jq -c '.questions = []' <<< "${_prelim_schema}" 2>/dev/null || printf '%s' "${_prelim_schema}")"
+    else
+      content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
+    fi
   else
     content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
   fi

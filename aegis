@@ -1233,7 +1233,11 @@ cmd_run() {
             rm -f "${_brief_err2}"
             [[ -n "${body}" ]] || aegis_fatal "briefing_after_answers_failed"
             aegis_log "briefing: demanda estruturada aceite (pós-respostas)"
-          elif aegis_is_ai_agent; then
+            # Save preliminary schema JSON to runtime directory for zero-token mechanical reuse
+            if [[ -n "${AEGIS_LAST_SCHEMA_JSON:-}" ]]; then
+              mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+              printf '%s' "${AEGIS_LAST_SCHEMA_JSON}" > "${RUNTIME_DIR}/preliminary_briefing_schema.json" 2>/dev/null || true
+            fi
             printf '\n══════════════════════════════════════════════════════════════\n'
             printf '=== PENDING USER QUESTIONS (questions_pending_user_input) ===\n'
             printf '══════════════════════════════════════════════════════════════\n'
