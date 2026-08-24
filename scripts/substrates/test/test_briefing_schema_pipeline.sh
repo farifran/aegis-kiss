@@ -161,5 +161,28 @@ if ! grep -q 'AEGIS_BRIEFING_ANSWERS:-' aegis; then
   exit 1
 fi
 
-echo "[AEGIS][TEST][PASS] briefing schema pipeline: questions gate + answers injection wired"
+
+# 6. Test mandatory questions quality gate: supervisor + no answers + questions:[] = FAIL
+(
+  export AEGIS_BRIEFING_SOURCE=supervisor
+  unset AEGIS_BRIEFING_ANSWERS 2>/dev/null || true
+  no_questions_schema='{"goal":"test","targets":["src/index.ts"],"questions":[],"exports":[{"kind":"function","name":"f","params":[],"returns":"void","body":[]}]}'
+  if aegis_briefing_quality_check "${no_questions_schema}" 2>/dev/null; then
+    echo "FAIL: quality_check accepted questions:[] from supervisor without answers" >&2
+    exit 1
+  fi
+)
+
+# 7. Test mandatory questions gate is bypassed when AEGIS_BRIEFING_ANSWERS is set
+(
+  export AEGIS_BRIEFING_SOURCE=supervisor
+  export AEGIS_BRIEFING_ANSWERS="1: use HTTP throttling"
+  no_questions_schema='{"goal":"test","targets":["src/index.ts"],"questions":[],"exports":[{"kind":"function","name":"f","params":[],"returns":"void","body":[]}]}'
+  if ! aegis_briefing_quality_check "${no_questions_schema}" 2>/dev/null; then
+    echo "FAIL: quality_check rejected questions:[] when answers already provided" >&2
+    exit 1
+  fi
+)
+
+echo "[AEGIS][TEST][PASS] briefing schema pipeline: mandatory questions gate enforced"
 exit 0

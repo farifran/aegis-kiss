@@ -315,6 +315,20 @@ aegis_briefing_validate_json() {
 aegis_briefing_quality_check() {
   local json="${1-}"
   [[ -n "${json}" ]] || return 1
+
+  # Mandatory questions contract: when the Supervisor generates the briefing
+  # without pre-supplied operator answers, questions:[] is a quality failure.
+  # The Supervisor MUST always surface architectural trade-offs for operator alignment.
+  if [[ "${AEGIS_BRIEFING_SOURCE:-}" == "supervisor" ]] \
+     && [[ -z "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
+    local q_len
+    q_len="$(printf '%s' "${json}" | jq -r '(.questions // []) | length' 2>/dev/null || printf '0')"
+    if [[ "${q_len}" == "0" ]]; then
+      printf 'missing_questions:supervisor_must_surface_tradeoffs\n' >&2
+      return 1
+    fi
+  fi
+
   printf '%s' "${json}" | jq -e '
     ([.exports[]?.body[]?
        | select(test("\\* *0n") or test("([A-Za-z0-9_]+) *- *\\1") or test("\\+ *- *\\+"))
@@ -740,7 +754,20 @@ aegis_briefing_expand_json() {
     if [[ -n "${fail_reason}" && "${fail_reason}" == invalid_briefing:* ]]; then
       local clean_feedback
       clean_feedback="$(printf '%s' "${fail_reason}" | sed -E 's|/tmp/[^/]+/||g')"
-      current_user_prompt="${user_prompt}\n\n[COMPILATION/RUNTIME FEEDBACK]\nYour previous schema failed with: ${clean_feedback}\nPlease fix the schema methods, types, or behavior asserts to resolve this error."
+      if [[ "${clean_feedback}" == *"missing_questions"* ]]; then
+        current_user_prompt="${user_prompt}
+
+[QUALITY GATE FAILURE: MISSING ARCHITECTURAL QUESTIONS]
+Your previous response contained \"questions\": []. This is REJECTED.
+Per the 8th Architectural Directive, you MUST always surface 1–3 questions in \"questions\" that explore the user's real product objective, use case, performance contract, failure-mode policy, and concurrency model — unless the demand already explicitly resolves ALL of these dimensions.
+Generate \"questions\" now. Do not assume or self-resolve any architectural dimension."
+      else
+        current_user_prompt="${user_prompt}
+
+[COMPILATION/RUNTIME FEEDBACK]
+Your previous schema failed with: ${clean_feedback}
+Please fix the schema methods, types, or behavior asserts to resolve this error."
+      fi
     fi
     attempt=$((attempt + 1))
   done
