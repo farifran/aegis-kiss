@@ -53,15 +53,17 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - For optional parameters, declare as union (`"string | undefined"`) or ensure `behavior[]` asserts supply all required arguments (preventing TS2554).
    - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/domain.ts` → `./domain.js`. If the target is the barrel itself (`src/index.ts`), `barrelFrom` MUST be `null`.
 
-6. **Hardware-Aligned Physics & Closed-Form Math**:
-   - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange(this._i32View, lockIdx, 0, 1) === 0` and `Atomics.store(this._i32View, lockIdx, 0)`) over `Int32Array` mapped on `ArrayBuffer`.
-   - **Bounded Memory & Ring Buffers**: When managing queues or buffers with finite capacity, advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) to ensure continuous $O(1)$ memory recycling without capacity leakage.
-   - **Closed-Form $O(1)$ Math**: Replace iterative loops for time delta / rate replenishment with direct closed-form equations.
-   - **Single-Pass Evaluation (Loop Fusion)**: When filtering or validating contiguous blocks, combine predicates into a single sequential pass.
+6. **Optimize — Hardware-Aligned Physics, $O(1)$ Math & Zero Allocations**:
+   - **Closed-Form $O(1)$ Math**: Replace iterative loops (`for`/`while`) or step-by-step increments for time delta, rate replenishment, or metric scaling with direct closed-form mathematical equations (e.g. `(timeDiff * rate) / 1000n`).
+   - **Zero Hot-Path Allocations**: Eliminate transient heap allocations (arrays, temporary objects, closures) inside high-frequency execution methods (`update()`, `consume()`, `allow()`).
+   - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange()`) over `Int32Array` mapped on `ArrayBuffer`.
+   - **Bounded Memory & Ring Buffers**: Advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ memory recycling without leaks.
 
-7. **Headless Executable Regression Asserts (`behavior[]`)**:
-   - Supply 2-4 executable regression tests exercising capacity, boundary conditions, transitions, and state mutations.
-   - Include at least 1 boundary/stress regression assert (e.g. wrap-around insertion recycling past initial capacity, double-acquire lock contention returning `false`, or rejection of insufficient quorum/invalid inputs).
+7. **Adversarial — Headless Executable Falsification Asserts (`behavior[]`)**:
+   - Supply 3-4 executable regression tests exercising the implementation under active falsification pressure:
+     1. **Nominal Case**: Standard happy-path transition and output verification.
+     2. **Boundary/Exhaustion Case**: Edge condition verification (e.g. zero balance, buffer saturated, capacity boundary).
+     3. **Adversarial Stress Case**: Non-trivial domain edge case (e.g. clock rewind / negative delta `timeDiff <= 0n` maintaining state integrity, overflow protection, rejection of negative/invalid inputs).
    - Each assert is compiled and executed once, headless. `await` is supported for async exports (assert resolved values, not raw `Promise`).
    - NEVER sleep or read a wall clock (`setTimeout`, `Date.now()`, `performance.now()`, `Math.random()`). Asserts must be strictly deterministic.
 
