@@ -1444,6 +1444,10 @@ cmd_run() {
     if [[ "${assume_yes}" -ne 1 ]]; then
       while true; do
         if [[ -t 0 ]]; then
+          if printf '%s' "${body}" | grep -q '^## Architectural Decisions & Questions'; then
+            printf '\n🏛️ Decisões Arquiteturais e Perguntas:\n'
+            printf '%s\n\n' "$(printf '%s' "${body}" | awk '/^## Architectural Decisions & Questions/ {p=1; next} /^## / {p=0} p')"
+          fi
           if [[ "${multi_unit}" -eq 1 ]]; then
             printf 'Aprovar plano (%s tasks) e correr? [y/N/e (editar plano)] ' \
               "$(count_micro_units "${micros_dir}")"
@@ -1477,7 +1481,7 @@ cmd_run() {
           printf '=== PENDING ASSISTANT (issue_plan_pending_approval) ===\n'
           printf '══════════════════════════════════════════════════════════════\n'
           printf 'Issue #%s estruturada com plano de tasks.\n' "${issue}"
-          printf 'Apresente o plano e confirme a aprovação no chat do IDE.\n'
+          printf 'Apresente o plano, as decisões arquiteturais e confirme a aprovação no chat do IDE.\n'
           printf 'Para executar após aprovação do operador: ./aegis %s --yes\n' "${issue}"
           emit_result_json "PENDING_ASSISTANT" "${issue}" "" "issue_plan_pending_approval"
           return 0

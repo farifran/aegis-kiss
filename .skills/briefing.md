@@ -65,6 +65,15 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Each assert is compiled and executed once, headless. `await` is supported for async exports (assert resolved values, not raw `Promise`).
    - NEVER sleep or read a wall clock (`setTimeout`, `Date.now()`, `performance.now()`, `Math.random()`). Asserts must be strictly deterministic.
 
+8. **Architectural Questions & Incongruity Detection (`questions[]`)**:
+   - Actively inspect the demand for engineering ambiguities, physical inconsistencies, scale/unit mismatches (e.g. bits/sec vs bits/ms), clock drift/NTP rewind scenarios, unstated initial states (full vs empty capacity), semantic bitmask overlap/redundancy, or concurrency trade-offs.
+   - When ambiguities or trade-offs exist, emit 1 to 3 architectural questions in `questions[]`.
+   - Each question MUST have:
+     - `question`: Concise technical description of the decision.
+     - `options`: Array of clear options, where the primary/safest choice is first and prefixed with `(Recommended)`.
+     - `is_multi_select`: `false` (default) for mutually exclusive options.
+   - If the demand is completely unambiguous, emit `"questions": []`.
+
 ---
 
 ## 📋 Output Schema
@@ -78,6 +87,16 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
   ],
   "types": [
     {"name": "PascalCaseShapeName", "shape": "{ field: string; count: number }"}
+  ],
+  "questions": [
+    {
+      "question": "Concise technical question or architectural decision?",
+      "options": [
+        "(Recommended) Default or recommended decision",
+        "Alternative option"
+      ],
+      "is_multi_select": false
+    }
   ],
   "exports": [
     {

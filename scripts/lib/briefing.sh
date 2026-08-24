@@ -274,6 +274,14 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
            then "barrel_not_nodenext:\(.barrelFrom)" else empty end),
+        (if ((.questions // []) | length) > 0
+           and ((.questions // []) | any(
+                 (type != "object")
+                 or ((.question // "") | type != "string" or length == 0)
+                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
+                 or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+               ))
+           then "bad_questions_shape" else empty end),
         (if ((.behavior // []) | length) > 0
            and ((.behavior // []) | any(
                  (type != "object")
@@ -498,6 +506,18 @@ aegis_briefing_render() {
     )) | join("\n\n")),
     (if ((.barrelFrom // "") | length) > 0 then
       ("Em " + (.barrelFile // "src/index.ts") + ":\n   import { " + (((.exports // []) | map(.name)) | join(", ")) + " } from \u0027" + .barrelFrom + "\u0027\n   export { " + (((.exports // []) | map(.name)) | join(", ")) + " }")
+    else empty end),
+    (if ((.questions // []) | length) > 0 then
+      ("", "## Architectural Decisions & Questions", (
+        (.questions | to_entries | map(
+          (.key + 1 | tostring) as $n
+          | .value as $q
+          | $n + ". " + ($q.question // "")
+            + (if (($q.options // []) | length) > 0
+               then "\n" + (($q.options | map("   - [ ] " + .)) | join("\n"))
+               else "" end)
+        )) | join("\n\n")
+      ))
     else empty end),
     (if ((.behavior // []) | length) > 0 then
       ("", "## Behavior", (

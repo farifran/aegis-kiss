@@ -71,8 +71,65 @@ if ! printf '%s' "${body}" | grep -q '## Goal'; then
   exit 1
 fi
 
-if ! printf '%s' "${body}" | grep -q '## Acceptance'; then
-  echo "FAIL: aegis_briefing_generate missing ## Acceptance section" >&2
+# 2. Test Architectural Decisions & Questions in Schema
+schema_with_questions='{
+  "goal": "Create src/testRing.ts with TestRing and re-export in src/index.ts",
+  "targets": ["src/testRing.ts", "src/index.ts"],
+  "types": [],
+  "questions": [
+    {
+      "question": "Should capacity wrap around circularly or throw an error on overflow?",
+      "options": [
+        "(Recommended) Wrap around using modulo arithmetic",
+        "Throw RangeError on capacity overflow"
+      ],
+      "is_multi_select": false
+    }
+  ],
+  "exports": [
+    {
+      "kind": "class",
+      "name": "TestRing",
+      "privateFields": [
+        {"name": "_tail", "type": "number"}
+      ],
+      "ctorParams": [],
+      "ctorBody": ["this._tail = 0"],
+      "methods": [],
+      "getters": [{"name": "tail", "returns": "number", "body": "return this._tail"}]
+    }
+  ],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./testRing.js",
+  "behavior": []
+}'
+
+# Validate schema with questions passes validation
+aegis_briefing_validate_json "${schema_with_questions}" || {
+  echo "FAIL: aegis_briefing_validate_json rejected valid schema with questions" >&2
+  exit 1
+}
+
+# Validate that bad questions shape is rejected
+bad_questions_schema='{
+  "goal": "bad",
+  "targets": ["src/index.ts"],
+  "questions": [{"question": "invalid without options"}],
+  "exports": [{"kind": "function", "name": "f", "params": [], "returns": "void", "body": []}]
+}'
+if aegis_briefing_validate_json "${bad_questions_schema}" 2>/dev/null; then
+  echo "FAIL: aegis_briefing_validate_json accepted bad_questions_shape" >&2
+  exit 1
+fi
+
+# Render and verify ## Architectural Decisions & Questions section is present
+q_body="$(aegis_briefing_generate "${schema_with_questions}")"
+if ! printf '%s' "${q_body}" | grep -q '## Architectural Decisions & Questions'; then
+  echo "FAIL: aegis_briefing_generate missing ## Architectural Decisions & Questions section" >&2
+  exit 1
+fi
+if ! printf '%s' "${q_body}" | grep -q 'Wrap around using modulo arithmetic'; then
+  echo "FAIL: aegis_briefing_generate missing question options in rendered markdown" >&2
   exit 1
 fi
 
