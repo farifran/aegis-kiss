@@ -639,6 +639,9 @@ aegis_briefing_expand_json() {
   fi
 
   local user_prompt="Demand: ${goal}\nTargets: ${target}"
+  if [[ -n "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
+    user_prompt="${user_prompt}\n\n[OPERATOR ANSWERS TO ARCHITECTURAL QUESTIONS]\n${AEGIS_BRIEFING_ANSWERS}\n\nCRITICAL: The operator has answered all architectural questions above. You MUST set \"questions\": [] in your JSON output — do not generate any new questions."
+  fi
   if [[ -n "${evidence}" ]]; then
     if jq -e . <<< "${evidence}" >/dev/null 2>&1; then
       local rendered_evidence

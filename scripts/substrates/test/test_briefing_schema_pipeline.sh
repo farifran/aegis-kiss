@@ -134,4 +134,32 @@ if ! printf '%s' "${q_body}" | grep -q 'Wrap around using modulo arithmetic'; th
 fi
 
 echo "[AEGIS][TEST][PASS] briefing schema pipeline passed in both CLI and IDE modes"
+
+# 3. Test AEGIS_BRIEFING_ANSWERS injection is wired in briefing.sh
+if ! grep -q 'AEGIS_BRIEFING_ANSWERS' scripts/lib/briefing.sh; then
+  echo "FAIL: AEGIS_BRIEFING_ANSWERS injection missing in briefing.sh" >&2
+  exit 1
+fi
+if ! grep -q 'OPERATOR ANSWERS TO ARCHITECTURAL QUESTIONS' scripts/lib/briefing.sh; then
+  echo "FAIL: answers injection prompt missing in briefing.sh" >&2
+  exit 1
+fi
+
+# 4. Test PENDING_USER_QUESTIONS gate is wired in aegis
+if ! grep -q 'PENDING_USER_QUESTIONS' aegis; then
+  echo "FAIL: questions gate (PENDING_USER_QUESTIONS) missing in aegis" >&2
+  exit 1
+fi
+if ! grep -q 'questions_pending_user_input' aegis; then
+  echo "FAIL: questions_pending_user_input reason code missing in aegis" >&2
+  exit 1
+fi
+
+# 5. Test that AEGIS_BRIEFING_ANSWERS bypass skips the gate (env var already set)
+if ! grep -q 'AEGIS_BRIEFING_ANSWERS:-' aegis; then
+  echo "FAIL: AEGIS_BRIEFING_ANSWERS bypass check missing in aegis" >&2
+  exit 1
+fi
+
+echo "[AEGIS][TEST][PASS] briefing schema pipeline: questions gate + answers injection wired"
 exit 0

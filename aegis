@@ -1209,6 +1209,43 @@ cmd_run() {
       body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_context_json}" 2>"${brief_err}")" || body=""
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"
+        # --- Questions gate: operator alignment is mandatory before proceeding ---
+        local _questions_md
+        _questions_md="$(printf '%s' "${body}" \
+          | awk '/^## Architectural Decisions & Questions/ {p=1; next} /^## / && p {p=0} p' \
+          | sed '/^[[:space:]]*$/d' || true)"
+        if [[ -n "${_questions_md}" ]] && [[ -z "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
+          if [[ -t 0 ]]; then
+            # TTY: interactive Q&A — collect answers then re-run briefing
+            printf '\n🎯 O Supervisor tem perguntas sobre o objectivo da demanda:\n\n'
+            printf '%s\n\n' "${_questions_md}"
+            printf 'Responda as perguntas acima (texto livre). Ctrl+D para finalizar:\n'
+            local _ans_lines=() _ans_line
+            while IFS= read -r _ans_line 2>/dev/null; do
+              _ans_lines+=("${_ans_line}")
+            done || true
+            AEGIS_BRIEFING_ANSWERS="$(printf '%s\n' "${_ans_lines[@]+${_ans_lines[@]}}" | sed '/^[[:space:]]*$/d')"
+            export AEGIS_BRIEFING_ANSWERS
+            aegis_log "briefing: respostas do operador recebidas — re-gerando briefing..."
+            local _brief_err2
+            _brief_err2="$(mktemp)"
+            body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_context_json}" 2>"${_brief_err2}")" || body=""
+            rm -f "${_brief_err2}"
+            [[ -n "${body}" ]] || aegis_fatal "briefing_after_answers_failed"
+            aegis_log "briefing: demanda estruturada aceite (pós-respostas)"
+          elif aegis_is_ai_agent; then
+            printf '\n══════════════════════════════════════════════════════════════\n'
+            printf '=== PENDING USER QUESTIONS (questions_pending_user_input) ===\n'
+            printf '══════════════════════════════════════════════════════════════\n'
+            printf 'O Supervisor identificou questões obrigatórias para alinhar o objectivo.\n'
+            printf 'Apresente as perguntas ao utilizador. Aguarde as respostas antes de continuar.\n\n'
+            printf '%s\n\n' "${_questions_md}"
+            printf 'Após obter as respostas, retome com:\n'
+            printf "  AEGIS_BRIEFING_ANSWERS='1: <resposta1>  2: <resposta2>' ./aegis '%s'\n" "${goal}"
+            emit_result_json "PENDING_USER_QUESTIONS" "" "" "questions_pending_user_input"
+            return 0
+          fi
+        fi
         mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
         jq -n \
           --arg target "${target}" \
