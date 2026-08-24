@@ -13,11 +13,11 @@
     "noPropertyAccessFromIndexSignature": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "sourceMap": true,
+    "sourceMap": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "outDir": "./dist",
+    "noEmit": true,
     "skipLibCheck": true,
     "rootDir": "."
   },
