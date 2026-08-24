@@ -2093,17 +2093,20 @@ cmd_split() {
 }
 
 cmd_setup() {
-  printf '\n=================================================\n'
-  printf ' AEGIS HARNESS — ASSISTENTE DE CONFIGURAÇÃO DE API\n'
-  printf '=================================================\n\n'
+  printf '\n======================================================================\n'
+  printf '      AEGIS HARNESS — SELEÇÃO DE ECOSSISTEMA, PROVEDOR & MODELO       \n'
+  printf '======================================================================\n\n'
 
   if ! [[ -t 0 ]]; then
     if aegis_is_ai_agent; then
       printf '=== PENDING SETUP CONFIG (missing_api_key_wizard) ===\n'
       printf 'Nenhuma chave de API configurada em .harness/local.env.\n'
-      printf 'Pergunte ao utilizador no IDE qual estratégia de provedor deseja configurar:\n'
-      printf '  1. Papéis Independentes / Híbrido [Recomendado] (Briefing vs Coder)\n'
-      printf '  2. Provedor Único para Tudo (mesma API Key e modelo)\n\n'
+      printf 'Pergunte ao utilizador no IDE qual ecossistema deseja configurar:\n'
+      printf '  1. 💻 Assistentes Nativos de IDE & CLI Agents (Antigravity / Claude Code / Cursor / OpenCode)\n'
+      printf '  2. ☁️ Modelos Proprietários / Fronteira (OpenAI / Anthropic / Google Gemini / xAI Grok)\n'
+      printf '  3. 🚀 Modelos Abertos & Pesos Descarregáveis (DeepSeek / Moonshot Kimi / Zhipu GLM / Groq)\n'
+      printf '  4. 🏠 Modelos Locais & Offline (Ollama / vLLM / LM Studio)\n'
+      printf '  5. ⚙️ Modo Híbrido (Briefing via API e Mutação pelo Agente da IDE ou vice-versa)\n\n'
       printf 'Grave as variáveis em .harness/local.env e retome a execução.\n'
       emit_result_json "PENDING_SETUP_CONFIG" "" "" "missing_api_key_wizard"
       return 0
@@ -2112,49 +2115,148 @@ cmd_setup() {
     return 0
   fi
 
-  printf 'Como deseja configurar os papéis do Aegis?\n\n'
-  printf '  1) Papéis Independentes / Híbrido [Recomendado]\n'
-  printf '     - Definir modelo de Briefing/Supervisor e modelo de Coder/Mutation separadamente.\n\n'
-  printf '  2) Provedor Único para Tudo\n'
-  printf '     - Usar a mesma API Key, endpoint e modelo para todas as etapas do pipeline.\n\n'
-  printf '  3) Pular (modo offline / manual apenas)\n\n'
+  printf 'Como deseja orquestrar a inteligência e os papéis do Aegis?\n\n'
+  printf '  1) 💻 Assistentes Nativos de IDE & CLI Agents [Recomendado no Editor]\n'
+  printf '     - Antigravity IDE, Claude Code, Cursor, Windsurf, OpenCode ou Aider nativo.\n\n'
+  printf '  2) ☁️ Modelos Proprietários / Fronteira (Cloud Comercial via API)\n'
+  printf '     - OpenAI (GPT-4o, o3-mini), Anthropic (Claude 3.7 Sonnet), Google Gemini (Gemini 2.5), xAI (Grok-2).\n\n'
+  printf '  3) 🚀 Modelos Abertos & Pesos Descarregáveis (Open Weights via API Hosted)\n'
+  printf '     - DeepSeek Direct (V3/R1), Moonshot Kimi, Zhipu GLM (GLM-5.2), Meta Llama/Qwen (via Groq/NVIDIA).\n\n'
+  printf '  4) 🏠 Modelos Locais & Offline (Soberania Total de Dados)\n'
+  printf '     - Ollama (localhost:11434), vLLM/SGLang (localhost:8000), LM Studio (localhost:1234).\n\n'
+  printf '  5) ⚙️ Modo Híbrido [Customizável]\n'
+  printf '     - Briefing via API e Mutação pelo Agente da IDE (ou vice-versa / modelos separados).\n\n'
+  printf '  6) Pular (modo offline / manual apenas)\n\n'
 
   local strat_choice
-  read -r -p "Escolha a estratégia [1-3]: " strat_choice
+  read -r -p "Escolha o ecossistema [1-6]: " strat_choice
 
   local sup_base="" sup_model="" sup_key=""
   local coder_base="" coder_model="" coder_key=""
+  local coder_is_ide=0 sup_is_ide=0
 
-  _configure_provider_prompts() {
+  _select_from_ecosystem() {
     local role_name="$1"
-    local p_choice
-    printf '\n[%s — Escolha o Provedor]\n' "${role_name}"
-    printf '  1) NVIDIA Integrate (GLM 5.2 / Llama 3.3) — https://build.nvidia.com\n'
-    printf '  2) Google Gemini (Gemini 2.5/3.6 Flash) — https://aistudio.google.com\n'
-    printf '  3) DeepSeek Direct — https://platform.deepseek.com\n'
-    printf '  4) Custom OpenAI / Groq / vLLM / Ollama\n'
-    read -r -p "Selecione o provedor para ${role_name} [1-4]: " p_choice
+    local eco_choice sub_choice
+    printf '\n[%s — Selecione a Categoria]\n' "${role_name}"
+    printf '  1) ☁️ Modelos Proprietários / Fronteira (OpenAI, Anthropic, Gemini, Grok)\n'
+    printf '  2) 🚀 Modelos Abertos (DeepSeek, Kimi, GLM, Groq)\n'
+    printf '  3) 🏠 Modelos Locais / Offline (Ollama, vLLM, LM Studio)\n'
+    printf '  4) 💻 Agente / Assistente do IDE (Sem chave externa de API)\n'
+    read -r -p "Opção [1-4]: " eco_choice
 
-    case "${p_choice}" in
+    case "${eco_choice}" in
       1)
-        _prov_base="https://integrate.api.nvidia.com/v1"
-        _prov_model="z-ai/glm-5.2"
-        read -r -p "NVIDIA API Key (nvapi-...): " _prov_key
+        printf '\n  -- Provedores Proprietários --\n'
+        printf '  1) OpenAI (GPT-4o / GPT-4o-mini) — https://platform.openai.com\n'
+        printf '  2) Google Gemini AI Studio (Gemini 2.5 Flash / Pro) — https://aistudio.google.com\n'
+        printf '  3) Anthropic (Claude 3.7 Sonnet / 3.5 Haiku) — https://console.anthropic.com\n'
+        printf '  4) xAI Grok (Grok-2) — https://console.x.ai\n'
+        read -r -p "Escolha [1-4]: " sub_choice
+        case "${sub_choice}" in
+          1)
+            _prov_base="https://api.openai.com/v1"
+            _prov_model="gpt-4o-mini"
+            read -r -p "OpenAI API Key (sk-...): " _prov_key
+            ;;
+          2)
+            _prov_base="https://generativelanguage.googleapis.com/v1beta/openai/"
+            _prov_model="gemini-2.5-flash"
+            read -r -p "Gemini API Key (AIzaSy...): " _prov_key
+            ;;
+          3)
+            _prov_base="https://api.anthropic.com/v1"
+            _prov_model="claude-3-7-sonnet-20250219"
+            read -r -p "Anthropic API Key (sk-ant-...): " _prov_key
+            ;;
+          4)
+            _prov_base="https://api.x.ai/v1"
+            _prov_model="grok-2-latest"
+            read -r -p "xAI API Key (xai-...): " _prov_key
+            ;;
+          *)
+            _prov_base="https://generativelanguage.googleapis.com/v1beta/openai/"
+            _prov_model="gemini-2.5-flash"
+            read -r -p "Gemini API Key: " _prov_key
+            ;;
+        esac
         ;;
       2)
-        _prov_base="https://generativelanguage.googleapis.com/v1beta/openai/"
-        _prov_model="gemini-2.5-flash"
-        read -r -p "Gemini API Key (AIzaSy...): " _prov_key
+        printf '\n  -- Provedores de Modelos Abertos (Open Weights) --\n'
+        printf '  1) NVIDIA Integrate / Build (GLM-5.2 / Llama 3.3) [Recomendado] — https://build.nvidia.com\n'
+        printf '  2) DeepSeek Direct (DeepSeek V3 / R1 / Coder) — https://platform.deepseek.com\n'
+        printf '  3) Moonshot Kimi (Kimi 1.5 / k1.5) — https://platform.moonshot.cn\n'
+        printf '  4) Groq (LPU Ultra-Rápido: Llama 3.3 / Qwen 2.5 Coder) — https://console.groq.com\n'
+        read -r -p "Escolha [1-4]: " sub_choice
+        case "${sub_choice}" in
+          1)
+            _prov_base="https://integrate.api.nvidia.com/v1"
+            _prov_model="z-ai/glm-5.2"
+            read -r -p "NVIDIA API Key (nvapi-...): " _prov_key
+            ;;
+          2)
+            _prov_base="https://api.deepseek.com/v1"
+            _prov_model="deepseek-coder"
+            read -r -p "DeepSeek API Key (sk-...): " _prov_key
+            ;;
+          3)
+            _prov_base="https://api.moonshot.cn/v1"
+            _prov_model="moonshot-v1-8k"
+            read -r -p "Moonshot Kimi API Key (sk-...): " _prov_key
+            ;;
+          4)
+            _prov_base="https://api.groq.com/openai/v1"
+            _prov_model="llama-3.3-70b-versatile"
+            read -r -p "Groq API Key (gsk_...): " _prov_key
+            ;;
+          *)
+            _prov_base="https://integrate.api.nvidia.com/v1"
+            _prov_model="z-ai/glm-5.2"
+            read -r -p "NVIDIA API Key: " _prov_key
+            ;;
+        esac
         ;;
       3)
-        _prov_base="https://api.deepseek.com/v1"
-        _prov_model="deepseek-coder"
-        read -r -p "DeepSeek API Key (sk-...): " _prov_key
+        printf '\n  -- Provedores Locais & Offline --\n'
+        printf '  1) Ollama (padrão: http://localhost:11434/v1)\n'
+        printf '  2) vLLM / SGLang (padrão: http://localhost:8000/v1)\n'
+        printf '  3) LM Studio (padrão: http://localhost:1234/v1)\n'
+        printf '  4) Endpoint Customizado Local\n'
+        read -r -p "Escolha [1-4]: " sub_choice
+        case "${sub_choice}" in
+          1)
+            _prov_base="http://localhost:11434/v1"
+            _prov_key="ollama"
+            read -r -p "Nome do Modelo Ollama [padrão: qwen2.5-coder:7b]: " _prov_model
+            _prov_model="${_prov_model:-qwen2.5-coder:7b}"
+            ;;
+          2)
+            _prov_base="http://localhost:8000/v1"
+            _prov_key="vllm"
+            read -r -p "Nome do Modelo vLLM: " _prov_model
+            ;;
+          3)
+            _prov_base="http://localhost:1234/v1"
+            _prov_key="lm-studio"
+            read -r -p "Nome do Modelo LM Studio: " _prov_model
+            ;;
+          4)
+            read -r -p "Base URL Local: " _prov_base
+            read -r -p "Model Name: " _prov_model
+            read -r -p "API Key (opcional): " _prov_key
+            _prov_key="${_prov_key:-local-key}"
+            ;;
+          *)
+            _prov_base="http://localhost:11434/v1"
+            _prov_model="qwen2.5-coder:7b"
+            _prov_key="ollama"
+            ;;
+        esac
         ;;
       4)
-        read -r -p "Base URL (ex: https://api.groq.com/openai/v1): " _prov_base
-        read -r -p "Model Name (ex: llama-3.3-70b-versatile): " _prov_model
-        read -r -p "API Key: " _prov_key
+        _prov_base="ide://local"
+        _prov_model="ide-agent"
+        _prov_key="ide-builtin"
         ;;
       *)
         _prov_base="https://integrate.api.nvidia.com/v1"
@@ -2166,39 +2268,157 @@ cmd_setup() {
 
   case "${strat_choice}" in
     1)
-      # --- Papel 1: Supervisor / Briefing ---
+      # --- Assistente do IDE Nativo ---
+      printf '\n[MODO ASSISTENTE DO IDE NATIVO]\n'
+      printf 'O Aegis operará integrado ao workspace do IDE (Antigravity / Claude Code / Cursor).\n'
+      printf 'Deseja configurar uma API Key leve apenas para o Briefing/Intake automático?\n'
+      local brief_api_yn="s"
+      read -r -p "[S/n]: " brief_api_yn
+      if [[ "${brief_api_yn}" =~ ^[Nn]$ ]]; then
+        sup_is_ide=1
+        sup_base="ide://local"; sup_model="ide-agent"; sup_key="ide-builtin"
+      else
+        local _prov_base="" _prov_model="" _prov_key=""
+        _select_from_ecosystem "SUPERVISOR (Briefing Rápido)"
+        sup_base="${_prov_base}"; sup_model="${_prov_model}"; sup_key="${_prov_key}"
+      fi
+      coder_is_ide=1
+      coder_base="ide://local"; coder_model="ide-agent"; coder_key="ide-builtin"
+      ;;
+    2)
+      # --- Cloud Proprietário Unificado ---
       local _prov_base="" _prov_model="" _prov_key=""
-      _configure_provider_prompts "PAPEL 1: SUPERVISOR (Briefing & Alinhamento)"
-      sup_base="${_prov_base}"
-      sup_model="${_prov_model}"
-      sup_key="${_prov_key}"
+      printf '\n[PROVEDOR PROPRIETÁRIO / FRONTEIRA UNIFICADO]\n'
+      printf '  1) Google Gemini AI Studio (Gemini 2.5 Flash) [Rápido & Econômico]\n'
+      printf '  2) OpenAI (GPT-4o / GPT-4o-mini)\n'
+      printf '  3) Anthropic (Claude 3.7 Sonnet)\n'
+      printf '  4) xAI Grok (Grok-2)\n'
+      local c_sub
+      read -r -p "Escolha [1-4]: " c_sub
+      case "${c_sub}" in
+        1)
+          sup_base="https://generativelanguage.googleapis.com/v1beta/openai/"
+          sup_model="gemini-2.5-flash"
+          read -r -p "Gemini API Key (AIzaSy...): " sup_key
+          ;;
+        2)
+          sup_base="https://api.openai.com/v1"
+          sup_model="gpt-4o-mini"
+          read -r -p "OpenAI API Key (sk-...): " sup_key
+          ;;
+        3)
+          sup_base="https://api.anthropic.com/v1"
+          sup_model="claude-3-7-sonnet-20250219"
+          read -r -p "Anthropic API Key (sk-ant-...): " sup_key
+          ;;
+        4)
+          sup_base="https://api.x.ai/v1"
+          sup_model="grok-2-latest"
+          read -r -p "xAI API Key (xai-...): " sup_key
+          ;;
+        *)
+          sup_base="https://generativelanguage.googleapis.com/v1beta/openai/"
+          sup_model="gemini-2.5-flash"
+          read -r -p "Gemini API Key: " sup_key
+          ;;
+      esac
+      coder_base="${sup_base}"; coder_model="${sup_model}"; coder_key="${sup_key}"
+      ;;
+    3)
+      # --- Modelos Abertos Unificado ---
+      printf '\n[MODELOS ABERTOS / OPEN WEIGHTS UNIFICADO]\n'
+      printf '  1) NVIDIA Integrate (GLM-5.2 / Llama 3.3) [Recomendado]\n'
+      printf '  2) DeepSeek Direct (V3 / R1 / Coder)\n'
+      printf '  3) Moonshot Kimi (Kimi 1.5)\n'
+      printf '  4) Groq (Llama 3.3 70B / Qwen 2.5 Coder)\n'
+      local o_sub
+      read -r -p "Escolha [1-4]: " o_sub
+      case "${o_sub}" in
+        1)
+          sup_base="https://integrate.api.nvidia.com/v1"
+          sup_model="z-ai/glm-5.2"
+          read -r -p "NVIDIA API Key (nvapi-...): " sup_key
+          ;;
+        2)
+          sup_base="https://api.deepseek.com/v1"
+          sup_model="deepseek-coder"
+          read -r -p "DeepSeek API Key (sk-...): " sup_key
+          ;;
+        3)
+          sup_base="https://api.moonshot.cn/v1"
+          sup_model="moonshot-v1-8k"
+          read -r -p "Moonshot Kimi API Key: " sup_key
+          ;;
+        4)
+          sup_base="https://api.groq.com/openai/v1"
+          sup_model="llama-3.3-70b-versatile"
+          read -r -p "Groq API Key: " sup_key
+          ;;
+        *)
+          sup_base="https://integrate.api.nvidia.com/v1"
+          sup_model="z-ai/glm-5.2"
+          read -r -p "NVIDIA API Key: " sup_key
+          ;;
+      esac
+      coder_base="${sup_base}"; coder_model="${sup_model}"; coder_key="${sup_key}"
+      ;;
+    4)
+      # --- Modelos Locais & Offline ---
+      printf '\n[MODELOS LOCAIS & OFFLINE UNIFICADO]\n'
+      printf '  1) Ollama (localhost:11434)\n'
+      printf '  2) vLLM / SGLang (localhost:8000)\n'
+      printf '  3) LM Studio (localhost:1234)\n'
+      local l_sub
+      read -r -p "Escolha [1-3]: " l_sub
+      case "${l_sub}" in
+        1)
+          sup_base="http://localhost:11434/v1"
+          read -r -p "Nome do modelo no Ollama [padrão: qwen2.5-coder:7b]: " sup_model
+          sup_model="${sup_model:-qwen2.5-coder:7b}"
+          sup_key="ollama"
+          ;;
+        2)
+          sup_base="http://localhost:8000/v1"
+          read -r -p "Nome do modelo vLLM: " sup_model
+          sup_key="vllm"
+          ;;
+        3)
+          sup_base="http://localhost:1234/v1"
+          read -r -p "Nome do modelo LM Studio: " sup_model
+          sup_key="lm-studio"
+          ;;
+        *)
+          sup_base="http://localhost:11434/v1"
+          sup_model="qwen2.5-coder:7b"
+          sup_key="ollama"
+          ;;
+      esac
+      coder_base="${sup_base}"; coder_model="${sup_model}"; coder_key="${sup_key}"
+      ;;
+    5)
+      # --- Modo Híbrido Personalizado ---
+      printf '\n[MODO HÍBRIDO (Papéis Separados)]\n'
+      local _prov_base="" _prov_model="" _prov_key=""
+      _select_from_ecosystem "PAPEL 1: SUPERVISOR (Briefing & Alinhamento)"
+      sup_base="${_prov_base}"; sup_model="${_prov_model}"; sup_key="${_prov_key}"
 
-      # --- Papel 2: Coder / Mutation ---
-      printf '\n[PAPEL 2: CODER (Mutação & Aider)]\n'
+      printf '\n[PAPEL 2: CODER (Mutação & Validação)]\n'
       local reuse_key="s"
-      read -r -p "Deseja reutilizar o mesmo endpoint e API Key para o Coder? [S/n]: " reuse_key
+      if [[ "${sup_base}" != "ide://local" ]]; then
+        read -r -p "Deseja reutilizar o mesmo endpoint e API Key do Supervisor para o Coder? [S/n]: " reuse_key
+      else
+        reuse_key="n"
+      fi
+
       if [[ "${reuse_key}" =~ ^[Nn]$ ]]; then
-        _configure_provider_prompts "PAPEL 2: CODER (Mutação & Aider)"
-        coder_base="${_prov_base}"
-        coder_model="${_prov_model}"
-        coder_key="${_prov_key}"
+        _select_from_ecosystem "PAPEL 2: CODER (Mutação & Validação)"
+        coder_base="${_prov_base}"; coder_model="${_prov_model}"; coder_key="${_prov_key}"
       else
         coder_base="${sup_base}"
         coder_key="${sup_key}"
-        read -r -p "Modelo para o Coder [padrão: ${sup_model}]: " coder_model
+        read -r -p "Nome do modelo para o Coder [padrão: ${sup_model}]: " coder_model
         coder_model="${coder_model:-${sup_model}}"
       fi
-      ;;
-    2)
-      # --- Provedor Único ---
-      local _prov_base="" _prov_model="" _prov_key=""
-      _configure_provider_prompts "PROVEDOR UNIFICADO"
-      sup_base="${_prov_base}"
-      sup_model="${_prov_model}"
-      sup_key="${_prov_key}"
-      coder_base="${_prov_base}"
-      coder_model="${_prov_model}"
-      coder_key="${_prov_key}"
       ;;
     *)
       aegis_log "Modo offline selecionado."
@@ -2206,7 +2426,7 @@ cmd_setup() {
       ;;
   esac
 
-  if [[ -n "${sup_key}" ]]; then
+  if [[ -n "${sup_key}" || -n "${coder_key}" ]]; then
     mkdir -p .harness 2>/dev/null || true
     cat <<EOF > .harness/local.env
 # =========================================================
