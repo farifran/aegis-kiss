@@ -836,5 +836,3 @@ aegis_emit_framed_json_artifact() {
   local end="${AEGIS_ARTIFACT_END_MARKER:-AEGIS_ARTIFACT_END}"
   printf '%s\n%s\n%s\n' "${begin}" "${body}" "${end}"
 }
-
-# Probe one repo-relative path for demand-token hits (fixed-string, case-ins).
