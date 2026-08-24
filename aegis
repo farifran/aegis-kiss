@@ -1451,40 +1451,38 @@ cmd_run() {
             printf 'Criar issue e correr? [y/N/e (editar)] '
           fi
           read -r answer || answer=""
-        else
-          # Non-interactive / pipe / agentic mode: check if input is piped
-          if read -r answer 2>/dev/null; then
-            :
-          elif aegis_is_ai_agent; then
-            # Default in AI agent / IDE without --yes: create draft issue and pause for user approval in chat
-            command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
-            gh_run label create aegis --force >/dev/null 2>&1 || true
-            title="$(printf '%s' "${goal}" | tr '\n' ' ' | cut -c1-72)"
-            local url=""
-            url="$(printf '%s' "${body}" | gh_run issue create \
-              --title "${title}" --body-file - --label aegis || true)"
-            issue="$(
-              printf '%s' "${url}" | grep -E '/[0-9]+$' | tail -1 \
-                | sed -E 's|.*/([0-9]+)$|\1|'
-            )"
-            [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "issue_create_failed"
-            aegis_log "issue #${issue} criada (rascunho aguardando aprovação)"
-            seed_issue_cache "${issue}" "${title}" "${body}"
-            if [[ "${multi_unit}" -eq 1 ]]; then
-              mkdir -p "${micros_dir}" 2>/dev/null || true
-              printf '%s\n' "${issue}" > "${micros_dir}/issue.id"
-            fi
-            printf '\n══════════════════════════════════════════════════════════════\n'
-            printf '=== PENDING ASSISTANT (issue_plan_pending_approval) ===\n'
-            printf '══════════════════════════════════════════════════════════════\n'
-            printf 'Issue #%s estruturada com plano de tasks.\n' "${issue}"
-            printf 'Apresente o plano e confirme a aprovação no chat do IDE.\n'
-            printf 'Para executar após aprovação do operador: ./aegis %s --yes\n' "${issue}"
-            emit_result_json "PENDING_ASSISTANT" "${issue}" "" "issue_plan_pending_approval"
-            return 0
-          else
-            answer=""
+        elif read -t 0 2>/dev/null; then
+          # Piped input available: read without hanging
+          read -r answer || answer=""
+        elif aegis_is_ai_agent; then
+          # Default in AI agent / IDE without --yes: create draft issue and pause for user approval in chat
+          command -v gh >/dev/null 2>&1 || aegis_fatal "missing_gh"
+          gh_run label create aegis --force >/dev/null 2>&1 || true
+          title="$(printf '%s' "${goal}" | tr '\n' ' ' | cut -c1-72)"
+          local url=""
+          url="$(printf '%s' "${body}" | gh_run issue create \
+            --title "${title}" --body-file - --label aegis || true)"
+          issue="$(
+            printf '%s' "${url}" | grep -E '/[0-9]+$' | tail -1 \
+              | sed -E 's|.*/([0-9]+)$|\1|'
+          )"
+          [[ "${issue}" =~ ^[0-9]+$ ]] || aegis_fatal "issue_create_failed"
+          aegis_log "issue #${issue} criada (rascunho aguardando aprovação)"
+          seed_issue_cache "${issue}" "${title}" "${body}"
+          if [[ "${multi_unit}" -eq 1 ]]; then
+            mkdir -p "${micros_dir}" 2>/dev/null || true
+            printf '%s\n' "${issue}" > "${micros_dir}/issue.id"
           fi
+          printf '\n══════════════════════════════════════════════════════════════\n'
+          printf '=== PENDING ASSISTANT (issue_plan_pending_approval) ===\n'
+          printf '══════════════════════════════════════════════════════════════\n'
+          printf 'Issue #%s estruturada com plano de tasks.\n' "${issue}"
+          printf 'Apresente o plano e confirme a aprovação no chat do IDE.\n'
+          printf 'Para executar após aprovação do operador: ./aegis %s --yes\n' "${issue}"
+          emit_result_json "PENDING_ASSISTANT" "${issue}" "" "issue_plan_pending_approval"
+          return 0
+        else
+          answer=""
         fi
         case "${answer}" in
           y|Y|yes|s|S|sim) break ;;
