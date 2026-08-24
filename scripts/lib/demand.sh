@@ -818,9 +818,6 @@ aegis_materialize_demand_anchors_json() {
     }'
 }
 
-# Human-readable block for raw/aider prompts (mechanical only).
-# Lines only — full JSON lives in capability payload / handover (one machine shape).
-
 aegis_file_top_level_export_names() {
   local body="${1-}"
   [[ -n "${body}" ]] || return 0
@@ -1345,5 +1342,3 @@ aegis_emit_mechanical_forensics_substrate() {
   body="$(aegis_build_mechanical_forensics_json "$@")" || return 1
   aegis_emit_framed_json_artifact "${body}"
 }
-
-# Runtime tribunal snapshot for validation prompts (from handover + optional tools).
