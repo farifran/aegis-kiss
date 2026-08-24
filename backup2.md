@@ -52,7 +52,7 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 36 | [`3febb98`](#34-commits-8d26c27--3febb98-branch-backup-2---execução-completa-de-ponta-a-ponta-da-issue-290-tokenbucket) | `src/` | Execução completa de ponta a ponta da Issue #290 (`TokenBucket` + `src/index.ts`) com o Injetor Mecânico (0 tokens de IA na mutação!). |
 | 37 | [`1b05c0b`](#35-commits-d673f0c--1b05c0b-branch-backup-2---execução-da-issue-292-tokenbucketstate-com-governança-de-arquitetura) | `src/` | Execução completa da Issue #292 (`TokenBucketState` + `getState()` + `obterEstadoBitmask`) através da governança interativa de arquitetura. |
 | 38 | [`f16faf3`](#36-commit-f16faf3-branch-backup-2---alinhamento-de-kv-cache-byte-0-e-especialização-do-mutation-contract) | `briefing.sh`, `.skills/` | Injeção de `ARCHITECTURE.md` (PonyTail) no Byte-0 do Supervisor e especialização cirúrgica de `mutation.md`. |
-| 39 | [PENDING](#37-modularização-de-demandsh-em-mutation_helperssh-e-mechanical_scanssh) | `scripts/lib/` | Modularização de `demand.sh` (4.393 linhas) em 3 bibliotecas ortogonais focadas no Tópico 1. |
+| 39 | [`3fbba4c`](#37-commits-36c26df--3fbba4c-branch-backup-2---modularização-e-lapidação-kiss-de-demandsh) | `scripts/lib/` | Modularização de `demand.sh` (de 4.393 para 840 linhas) e lapidação KISS em 3 bibliotecas. |
 
 ---
 
