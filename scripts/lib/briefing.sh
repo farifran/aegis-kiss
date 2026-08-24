@@ -722,7 +722,9 @@ aegis_briefing_expand_json() {
       why="$(aegis_briefing_validate_json "${content}" 2>&1 >/dev/null | tail -n 1 || true)"
       if [[ -z "${why}" ]]; then
         if ! aegis_briefing_quality_check "${content}" 2>/dev/null; then
-          why="low_quality"
+          local _qc_err
+          _qc_err="$(aegis_briefing_quality_check "${content}" 2>&1 >/dev/null || true)"
+          why="${_qc_err:-low_quality}"
         else
           # Memory preflight typecheck
           _tsc="$(aegis_briefing_typecheck_json "${content}" 2>&1)" \
