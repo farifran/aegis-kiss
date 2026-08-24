@@ -789,11 +789,6 @@ aegis_briefing_generate() {
       printf 'uncompilable_agentic_briefing\n' >&2
       return 1
     }
-  elif [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
-    # Agentic handover never calls the supervisor LLM: a free-prose goal is
-    # not accepted for expansion here — the assistant must supply schema JSON.
-    printf 'agentic_requires_schema_json\n' >&2
-    return 1
   else
     content="$(aegis_briefing_expand_json "${goal}" "${target}" "${evidence}")" || return 1
   fi

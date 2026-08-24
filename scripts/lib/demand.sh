@@ -160,8 +160,8 @@ aegis_demand_search_query() {
 
 aegis_search_symbol_pathspecs() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local payload_dir="${2:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
-  local handover="${3:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
+  local payload_dir="${2-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${3-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
 
   local specs
   specs="$(
@@ -576,8 +576,8 @@ aegis_materialize_investigation_input() {
 
 aegis_materialize_demand_anchors_json() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local handover="${2:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
-  local payload_dir="${3:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${2-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
+  local payload_dir="${3-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
 
   local operator_json="[]" dense_json="[]" search_query="" seed_json="[]" seed_source="none" resonance_json="[]"
   local goal_s="" targets_json="[]" done_when_json="[]" token_source="${text}"
@@ -756,8 +756,8 @@ aegis_demand_acceptance_names() {
 
 aegis_mechanical_demand_anchors_json() {
   local text="${1-${AEGIS_INVESTIGATION_INPUT:-}}"
-  local payload_dir="${2:-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
-  local handover="${3:-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
+  local payload_dir="${2-${AEGIS_CAPABILITY_PAYLOAD_DIR:-}}"
+  local handover="${3-${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}}"
 
   local anchors_json
   anchors_json="$(aegis_materialize_demand_anchors_json "${text}" "${handover}" "${payload_dir}")"
