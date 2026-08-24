@@ -74,11 +74,13 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
      - **Concurrency model**: Is this single-threaded, shared between Workers, or requires lock-free atomics?
    - `"questions": []` is ONLY valid when the demand contains explicit, unambiguous answers to ALL relevant dimensions above. An implied or assumed answer does NOT count — if you had to infer it, you MUST ask.
    - NEVER self-resolve contextual uncertainties silently. If the answer would change the architecture, you MUST ask the user.
-   - Questions must explore what makes this solution *excellent for its specific context*, not what is safe in general. Ask about trade-offs that change the design.
    - Each question MUST have:
      - `question`: A clear product/engineering question that exposes a real architectural trade-off.
      - `options`: 2–4 concrete, mutually exclusive options. The recommended choice goes first, prefixed `(Recommended)`.
      - `is_multi_select`: `false` for mutually exclusive options.
+   - **Interaction & Clarification Lifecycle**:
+      - If the user selects/provides a concrete architectural choice, the pipeline proceeds with `AEGIS_BRIEFING_ANSWERS`.
+      - If the user asks for explanations, alternatives, or trade-offs (e.g. in free-form text or custom option), the agent/IDE must answer the inquiry conversationally and re-prompt the question modal, rather than treating the inquiry as an answer.
 
 ---
 

@@ -1238,10 +1238,13 @@ cmd_run() {
             printf '=== PENDING USER QUESTIONS (questions_pending_user_input) ===\n'
             printf '══════════════════════════════════════════════════════════════\n'
             printf 'O Supervisor identificou questões obrigatórias para alinhar o objectivo.\n'
-            printf 'Apresente as perguntas ao utilizador. Aguarde as respostas antes de continuar.\n\n'
+            printf 'Apresente as perguntas ao utilizador (ex: via modal/ask_question).\n\n'
             printf '%s\n\n' "${_questions_md}"
-            printf 'Após obter as respostas, retome com:\n'
-            printf "  AEGIS_BRIEFING_ANSWERS='1: <resposta1>  2: <resposta2>' ./aegis '%s'\n" "${goal}"
+            printf 'PROTOCOLO DE INTERAÇÃO:\n'
+            printf '  1. Se o utilizador der uma decisão concreta, retome com:\n'
+            printf "     AEGIS_BRIEFING_ANSWERS='1: <resposta1>  2: <resposta2>' ./aegis '%s'\n" "${goal}"
+            printf '  2. Se o utilizador fizer uma pergunta, dúvida ou pedir alternativas:\n'
+            printf '     Responda à dúvida tecnicamente no chat e reapresente as perguntas (nunca envie uma dúvida como resposta ao aegis).\n'
             emit_result_json "PENDING_USER_QUESTIONS" "" "" "questions_pending_user_input"
             return 0
           fi
