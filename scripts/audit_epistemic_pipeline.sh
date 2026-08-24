@@ -53,19 +53,19 @@ skill_declares() {
 
 # Discovery is runtime-only: builder + emitter + execute_mode short-circuit.
 discovery_mechanical_path_ok() {
-  grep -Eq 'aegis_build_mechanical_discovery_json' scripts/lib/demand.sh \
-    && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/lib/demand.sh \
-    && grep -Eq 'required_evidence' scripts/lib/demand.sh \
-    && grep -Eq 'observations' scripts/lib/demand.sh \
+  grep -Eq 'aegis_build_mechanical_discovery_json' scripts/lib/*.sh \
+    && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/lib/*.sh \
+    && grep -Eq 'required_evidence' scripts/lib/*.sh \
+    && grep -Eq 'observations' scripts/lib/*.sh \
     && grep -Eq 'aegis_emit_mechanical_discovery_substrate' scripts/execute_mode.sh
 }
 
 # Validation is tribunal-only by default (mechanical emit + enrich ladder).
 validation_mechanical_path_ok() {
-  grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/lib/demand.sh \
+  grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/lib/*.sh \
     && grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/execute_mode.sh \
     && grep -Eq 'AEGIS_JQ_ENRICH_VALIDATION' scripts/lib/artifact_protocol.sh \
-    && grep -Eq 'aegis_candidate_alignment_gate' scripts/lib/demand.sh \
+    && grep -Eq 'aegis_candidate_alignment_gate' scripts/lib/*.sh \
     && grep -Eq 'AEGIS_VALIDATION_LLM' .harness/config.sh
 }
 
@@ -305,7 +305,7 @@ check_optimize_to_adversarial() {
   # Probe the actual injection path instead.
   array_contains "filesystem.read:epistemic_handover" "${AEGIS_ADVERSARIAL_EVIDENCE[@]}" \
     && runtime_injects_candidate_result_for_adversarial \
-    && grep -Eq 'files_changed' scripts/lib/demand.sh \
+    && grep -Eq 'files_changed' scripts/lib/*.sh \
     && grep -Eq 'AEGIS_JQ_ENRICH_OPTIMIZE' scripts/lib/artifact_protocol.sh \
     && grep -Eq 'candidate_result' scripts/lib/artifact_protocol.sh
 }
@@ -316,7 +316,7 @@ runtime_injects_candidate_result_for_adversarial() {
   local prompt_lib="scripts/substrates/raw/prompt.sh"
   [[ -f "${prompt_lib}" ]] || return 1
   declare -F aegis_format_candidate_result_section >/dev/null 2>&1 \
-    || grep -Eq 'aegis_format_candidate_result_section\(\)' scripts/lib/demand.sh \
+    || grep -Eq 'aegis_format_candidate_result_section\(\)' scripts/lib/*.sh \
     || return 1
   awk '
     /AEGIS_MODE.*==.*"adversarial"/ { in_branch = 1 }
