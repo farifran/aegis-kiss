@@ -194,7 +194,9 @@ Cacheable: `list_tree`, `layer0_facts`, `attention_seed`, `demand_anchors`.
 | `scripts/lib/run_outcome.sh` | Human outcome, metrics JSONL, `last_outcome.json` |
 | `scripts/lib/briefing.sh` | Supervisor briefing generation, sanitize, `tsc` typecheck gate & Node.js runtime behavior execution gate |
 | `scripts/lib/fit_check.sh` | Demand fit checking, topological unit slicing & module-export pairing |
-| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics, briefs, **mechanical behavior gate** (`aegis_mechanical_behavior_gate`) + validation substrate |
+| `scripts/lib/demand.sh` | Demand materialization, tokens, anchors, mechanical discovery/forensics & pre-intake context discovery |
+| `scripts/lib/mutation_helpers.sh` | Mutation & Aider prompt helpers, barrel reexports, AST code snippets & alignment gates |
+| `scripts/lib/mechanical_scans.sh` | Mechanical tribunal scans (Optimize O(1), Adversarial diff scans, tools stamping & behavior gate) |
 
 Promotion: `scripts/runtime/apply_candidate_diff.sh`, `promote_validated_candidate.sh`.  
 Mutation rails: `mutation_preflight.sh`, `mutation_scope_gate.sh`, `aider_lint_gate.sh` (per-edit: prettier/eslint/static + **project tsc delta** on edited file), `static_gate.sh`.  

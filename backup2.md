@@ -51,6 +51,8 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
 | 35 | [`b7e3480`](#33-commit-b7e3480-branch-backup-2---simplificação-kiss-do-fluxo-de-fit-check-e-confirmação-no-cli) | `aegis` | Simplificação KISS do fluxo de fit-check e confirmação interativa no CLI (remoção de 35 linhas de checagens redundantes). |
 | 36 | [`3febb98`](#34-commits-8d26c27--3febb98-branch-backup-2---execução-completa-de-ponta-a-ponta-da-issue-290-tokenbucket) | `src/` | Execução completa de ponta a ponta da Issue #290 (`TokenBucket` + `src/index.ts`) com o Injetor Mecânico (0 tokens de IA na mutação!). |
 | 37 | [`1b05c0b`](#35-commits-d673f0c--1b05c0b-branch-backup-2---execução-da-issue-292-tokenbucketstate-com-governança-de-arquitetura) | `src/` | Execução completa da Issue #292 (`TokenBucketState` + `getState()` + `obterEstadoBitmask`) através da governança interativa de arquitetura. |
+| 38 | [`f16faf3`](#36-commit-f16faf3-branch-backup-2---alinhamento-de-kv-cache-byte-0-e-especialização-do-mutation-contract) | `briefing.sh`, `.skills/` | Injeção de `ARCHITECTURE.md` (PonyTail) no Byte-0 do Supervisor e especialização cirúrgica de `mutation.md`. |
+| 39 | [PENDING](#37-modularização-de-demandsh-em-mutation_helperssh-e-mechanical_scanssh) | `scripts/lib/` | Modularização de `demand.sh` (4.393 linhas) em 3 bibliotecas ortogonais focadas no Tópico 1. |
 
 ---
 
@@ -394,6 +396,27 @@ Este documento registra em detalhes todos os commits, mudanças de código, moti
   * Aprovado por todos os tribunais e oráculos em 25 segundos totais.
 * **Por Que Foi Feito:** Comprovar a viabilidade e eficácia da governança por decisões de engenharia com zero tokens de overhead.
 * **Objetivo:** Status `SUCCESS` na Issue #292 com 100% dos testes e sanidade aprovados.
+
+### 36. Commit `f16faf3` (Branch: `backup-2`) — Alinhamento de KV-Cache Byte-0 e Especialização do Mutation Contract
+* **ELI5:** Fizemos todos os robôs do Aegis (Supervisor de Briefing, Coder Aider, Otimizador e Advogado do Diabo) começarem lendo exatamente a mesma folha de regras (`AGENTS.md` + `ARCHITECTURE.md`). Isso faz com que o cache do modelo seja 100% aproveitado sem reler tudo do zero, economizando tempo e dinheiro! Além disso, deixamos as ordens do Aider super curtas e focadas em cirurgia de código com âncoras de alta fidelidade.
+* **O Que Foi Feito:**
+  * Atualizado `aegis_briefing_system_prompt()` em `scripts/lib/briefing.sh` para carregar `AGENTS.md` + `ARCHITECTURE.md` (PonyTail) no Byte-0.
+  * Removidas 4 redundâncias de `.skills/briefing.md` e `.skills/mutation.md`.
+  * Especializado `.skills/mutation.md` em 4 Diretivas Cirúrgicas (Confinamento Hermético, Âncoras SEARCH de 2-3 linhas, Preservação de JSDocs e Auto-Cura por Coordenadas).
+* **Por Que Foi Feito:** Alinhar o KV-Cache entre o Passo 2 e o Passo 3 e garantir cirurgia de alta precisão sem alucinações de escopo.
+* **Objetivo:** Zero desperdício de cache e 100% de conformidade com as regras do repositório.
+
+---
+
+### 37. Modularização de `demand.sh` em `mutation_helpers.sh` e `mechanical_scans.sh`
+* **ELI5:** O arquivo `demand.sh` tinha ficado gigantesco com quase 4.400 linhas de código misturadas de todas as etapas do sistema. Nós organizamos a casa: separamos em 3 arquivos limpos e organizados — um só para entender o pedido do usuário (Tópico 1), um para ajudar na escrita do código (Tópico 3) e um para os tribunais e testes automáticos (Tópicos 4, 5 e 6).
+* **O Que Foi Feito:**
+  * Criado [`scripts/lib/mutation_helpers.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/mutation_helpers.sh) (47 funções de auxílio a mutação e Aider).
+  * Criado [`scripts/lib/mechanical_scans.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/mechanical_scans.sh) (28 funções de scans mecânicos de Optimize, Adversarial e Stamping).
+  * Limpo e refatorado [`scripts/lib/demand.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/demand.sh) (36 funções puras do Tópico 1).
+  * Preservada 100% de compatibilidade retroativa via importação modular transparente.
+* **Por Que Foi Feito:** Eliminar a sobre-engenharia e o monólito acumulativo, respeitando a constituição de Karpathy (`AGENTS.md`: *KISS & Surgical Mutation - Simplicity First*).
+* **Objetivo:** Código limpo, modular, elegante e com 100% de aprovação na suíte de testes e benchmarks.
 
 ---
 
