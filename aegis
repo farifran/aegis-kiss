@@ -1233,7 +1233,9 @@ cmd_run() {
             rm -f "${_brief_err2}"
             [[ -n "${body}" ]] || aegis_fatal "briefing_after_answers_failed"
             aegis_log "briefing: demanda estruturada aceite (pós-respostas)"
-            # Save preliminary schema JSON to runtime directory for zero-token mechanical reuse
+          else
+            # Non-TTY / Agentic mode: pause and emit PENDING_USER_QUESTIONS protocol
+            # so the IDE assistant can display questions via ask_question modal.
             if [[ -n "${AEGIS_LAST_SCHEMA_JSON:-}" ]]; then
               mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
               printf '%s' "${AEGIS_LAST_SCHEMA_JSON}" > "${RUNTIME_DIR}/preliminary_briefing_schema.json" 2>/dev/null || true

@@ -80,7 +80,11 @@ aegis_briefing_enabled() {
 # BigInt-as-a-type mistake. Inheriting OPENAI_MODEL_MUTATION would silently
 # put whatever the coder uses in front of every run.
 aegis_briefing_model() {
-  printf '%s' "${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}"
+  local m="${AEGIS_SUPERVISOR_MODEL:-deepseek-ai/deepseek-v4-flash-0731}"
+  if [[ "${m}" == "ide-agent" ]]; then
+    m="${OPENAI_MODEL_READONLY_COGNITION:-deepseek-ai/deepseek-v4-flash-0731}"
+  fi
+  printf '%s' "${m}"
 }
 
 aegis_briefing_max_exports() {
