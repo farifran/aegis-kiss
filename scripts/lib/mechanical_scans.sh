@@ -330,19 +330,60 @@ aegis_mechanical_behavior_gate() {
 
   command -v node >/dev/null 2>&1 || return 0
   node --experimental-strip-types -e '1' >/dev/null 2>&1 || return 0
-
   local root="${AEGIS_ROOT_DIR:-.}"
-  [[ -f "${root%/}/${target}" ]] || return 0
+  local test_root="${root}"
+  local tmp_workdir=""
+  local handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
+  if [[ -f "${handover}" ]] && declare -f aegis_handover_candidate_diff_hash >/dev/null 2>&1; then
+    local cand_diff
+    cand_diff="$(jq -r '.artifact_snapshot.operational_context.candidate_result.diff // .artifact_snapshot.operational_context.diff // empty' "${handover}" 2>/dev/null || true)"
+    if [[ -n "${cand_diff}" && "${cand_diff}" != "(no changes)" ]]; then
+      tmp_workdir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_behave.XXXXXX" 2>/dev/null || true)"
+      if [[ -d "${tmp_workdir}" ]]; then
+        cp -r "${root%/}/src" "${tmp_workdir}/" 2>/dev/null || true
+        find "${tmp_workdir}" -type f -size 0 -delete 2>/dev/null || true
+        cp "${root%/}/tsconfig.json" "${tmp_workdir}/" 2>/dev/null || true
+        cp "${root%/}/package.json" "${tmp_workdir}/" 2>/dev/null || true
+        if [[ -d "${root%/}/node_modules" ]]; then
+          ln -s "${root%/}/node_modules" "${tmp_workdir}/node_modules" 2>/dev/null || true
+        fi
+        printf '%s\n' "${cand_diff}" | patch -p1 -d "${tmp_workdir}" >/dev/null 2>&1 || true
+        test_root="${tmp_workdir}"
+      fi
+    fi
+  fi
 
-  local acc_names import_csv
+  if [[ ! -f "${test_root%/}/${target}" ]]; then
+    [[ -n "${tmp_workdir}" && -d "${tmp_workdir}" ]] && rm -rf "${tmp_workdir}"
+    return 0
+  fi
+
+  # Ensure Node can resolve ESM relative imports with .js extension to .ts files.
+  local _ts _js
+  while IFS= read -r _ts; do
+    [[ -n "${_ts}" ]] || continue
+    _js="${_ts%.ts}.js"
+    if [[ ! -e "${_js}" ]]; then
+      ln -s "$(basename "${_ts}")" "${_js}" 2>/dev/null || true
+    fi
+  done < <(
+    find "${test_root}" \( -name '*.ts' -o -name '*.tsx' \) \
+      ! -path '*/node_modules/*' 2>/dev/null || true
+  )
+
+  local acc_names
   acc_names="$(
     printf '%s\n' "${acceptance}" \
       | sed -E 's/^[[:space:]]*-[[:space:]]*//' \
       | command grep -oE '[A-Za-z_][A-Za-z0-9_]*' 2>/dev/null \
       | awk 'NF && !seen[$0]++' || true
   )"
-  import_csv="$(printf '%s,' ${acc_names} | sed 's/,$//')"
-  [[ -n "${import_csv}" ]] || return 0
+  local acc_csv
+  acc_csv="$(printf '%s,' ${acc_names} | sed 's/,$//')"
+  if [[ -z "${acc_csv}" ]]; then
+    [[ -n "${tmp_workdir}" && -d "${tmp_workdir}" ]] && rm -rf "${tmp_workdir}"
+    return 0
+  fi
 
   # Parse ## Behavior items into parallel arrays.
   local -a b_desc=() b_pre=() b_assert=() b_exp=()
@@ -364,7 +405,7 @@ aegis_mechanical_behavior_gate() {
   done < <(printf '%s\n' "${behavior}")
   if [[ "${in_item}" -eq 1 ]]; then
     b_desc+=("${cur_desc}"); b_pre+=("${cur_pre}")
-    b_assert+=("${cur_assert}"); b_exp+=("${cur_exp}")
+    b_assert+=("${cur_assert}") b_exp+=("${cur_exp}")
   fi
 
   # Scope + import union. Item scope = the unit accepts the FIRST listed export
@@ -403,18 +444,31 @@ aegis_mechanical_behavior_gate() {
       import_union+=("${exp_name}")
     fi
   done
-  import_csv="$(printf '%s,' "${import_union[@]}" | sed 's/,$//')"
-  [[ -n "${import_csv}" ]] || return 0
-
+  
   for ((i=0; i<n; i++)); do
     [[ "${in_scope_item[$i]}" -eq 1 ]] || continue
+    local item_csv=""
+    if [[ -n "${b_exp[$i]}" ]]; then
+      local -a item_exp_arr=()
+      while IFS= read -r exp_name; do
+        [[ -n "${exp_name}" ]] || continue
+        if ! printf '%s\n' "${item_exp_arr[@]}" | grep -Fqx -- "${exp_name}" \
+          || [[ "${#item_exp_arr[@]}" -eq 0 ]]; then
+          item_exp_arr+=("${exp_name}")
+        fi
+      done < <(printf '%s\n' "${b_exp[$i]}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
+      item_csv="$(printf '%s,' "${item_exp_arr[@]}" | sed 's/,$//')"
+    fi
+    [[ -n "${item_csv}" ]] || item_csv="${acc_csv}"
+    [[ -n "${item_csv}" ]] || continue
+
     local tmp
-    tmp="$(mktemp "${root%/}/.aegis_behavior_XXXXXX" 2>/dev/null || true)"
+    tmp="$(mktemp "${test_root%/}/.aegis_behavior_XXXXXX" 2>/dev/null || true)"
     [[ -n "${tmp}" ]] || continue
     mv "${tmp}" "${tmp}.mts"
     tmp="${tmp}.mts"
     {
-      printf 'import { %s } from "./%s";\n' "${import_csv}" "${target}"
+      printf 'import { %s } from "./%s";\n' "${item_csv}" "${target}"
       printf 'function __aegis_behave(c: unknown, d: string): void {\n'
       printf '  if (!c) { throw new Error("BEHAVIOR_FAIL: " + d) }\n'
       printf '}\n'
@@ -424,12 +478,12 @@ aegis_mechanical_behavior_gate() {
         "$(printf '%s' "${b_desc[$i]}" | jq -Rsa . 2>/dev/null || printf '%s' "\"behavior assert $((i + 1))\"")"
     } > "${tmp}"
     if [[ "${AEGIS_BEHAVIOR_DEBUG:-0}" == "1" ]]; then
-      printf 'behavior_gate: unit=%s item=%s import=%s\n' "${target}" "${i}" "${import_csv}" >&2
+      printf 'behavior_gate: unit=%s item=%s import=%s\n' "${target}" "${i}" "${item_csv}" >&2
       cat "${tmp}" >&2
     fi
 
     local out rc=0
-    out="$(cd "${root}" && node --experimental-strip-types "${tmp}" 2>&1)" || rc=$?
+    out="$(cd "${test_root}" && node --experimental-strip-types "${tmp}" 2>&1)" || rc=$?
     rm -f "${tmp}"
     if [[ "${rc}" -ne 0 ]]; then
       local fail_desc
@@ -450,6 +504,8 @@ aegis_mechanical_behavior_gate() {
       )
     fi
   done
+
+  [[ -n "${tmp_workdir}" && -d "${tmp_workdir}" ]] && rm -rf "${tmp_workdir}"
 
   if [[ "${#findings[@]}" -gt 0 ]]; then
     if declare -f aegis_record_validation_metric >/dev/null 2>&1; then
