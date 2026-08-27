@@ -1,3 +1,3 @@
 // src/index.ts
-import { SettlementEngine } from './settlementEngine.js';
-export { SettlementEngine };
+import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
+export { TokenBucket, obterEstadoBitmask };
