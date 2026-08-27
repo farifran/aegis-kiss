@@ -706,16 +706,18 @@ aegis_intake_discover_context() {
     local exists=false exports="[]" snippet="" is_truncated=false file_bytes=0
     if [[ -f "${t}" ]]; then
       exists=true
-      file_bytes="$(wc -c < "${t}" 2>/dev/null || echo 0)"
+      local content
+      content="$(cat "${t}" 2>/dev/null || true)"
+      file_bytes="${#content}"
       local raw_exports
-      raw_exports="$(aegis_file_top_level_export_names "$(cat "${t}" 2>/dev/null || true)" 2>/dev/null || true)"
+      raw_exports="$(aegis_file_top_level_export_names "${content}" 2>/dev/null || true)"
       if [[ -n "${raw_exports}" ]]; then
         exports="$(printf '%s\n' "${raw_exports}" | sed '/^$/d' | jq -R . | jq -s . 2>/dev/null || printf '[]')"
       fi
       if [[ "${file_bytes}" -le "${max_bytes}" ]]; then
-        snippet="$(cat "${t}" 2>/dev/null || true)"
+        snippet="${content}"
       else
-        snippet="$(head -c "${max_bytes}" "${t}" 2>/dev/null || true)"
+        snippet="${content:0:max_bytes}"
         is_truncated=true
       fi
     fi

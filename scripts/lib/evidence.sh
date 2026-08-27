@@ -98,10 +98,20 @@ evidence_cache_key() {
   printf '%s' "${seed}"
 }
 
+# Capabilities eligible for intra-pipeline reuse when git repo state is unchanged.
+if [[ ! -v AEGIS_CACHEABLE_CAPABILITIES ]]; then
+  AEGIS_CACHEABLE_CAPABILITIES=(
+    "runtime.layer0_facts"
+    "runtime.attention_seed"
+    "runtime.demand_anchors"
+    "filesystem.list_tree"
+  )
+fi
+
 capability_is_cacheable() {
   local capability="$1"
   local entry
-  for entry in "${AEGIS_CACHEABLE_CAPABILITIES[@]:-}"; do
+  for entry in "${AEGIS_CACHEABLE_CAPABILITIES[@]}"; do
     [[ "${entry}" == "${capability}" ]] && return 0
   done
   return 1
