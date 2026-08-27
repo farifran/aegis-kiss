@@ -44,3 +44,10 @@ export class TokenBucket {
 
   get refillActive(): boolean { return this._tokens < this._maxTokens; }
 }
+
+export function obterEstadoBitmask(bucket: TokenBucket): number {
+  let mask = 0;
+  if (bucket.tokens === 0n) mask |= 1;
+  if (bucket.refillActive) mask |= 2;
+  return mask;
+}
