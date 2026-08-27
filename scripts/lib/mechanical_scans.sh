@@ -405,7 +405,7 @@ aegis_mechanical_behavior_gate() {
   done < <(printf '%s\n' "${behavior}")
   if [[ "${in_item}" -eq 1 ]]; then
     b_desc+=("${cur_desc}"); b_pre+=("${cur_pre}")
-    b_assert+=("${cur_assert}") b_exp+=("${cur_exp}")
+    b_assert+=("${cur_assert}"); b_exp+=("${cur_exp}")
   fi
 
   # Scope + import union. Item scope = the unit accepts the FIRST listed export

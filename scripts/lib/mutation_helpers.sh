@@ -577,11 +577,61 @@ aegis_mechanical_barrel_reexport_apply() {
   import_line="import { ${list} } from '${import_from}';"
   export_line="export { ${list} };"
 
-  # Rebuild from HEAD: drop prior import from the same module path, then append
-  # import+export. Keeps every pre-existing converter export intact.
+  # Rebuild from HEAD: drop prior import from the same module path and dangling imports,
+  # then append import+export. Keeps valid pre-existing converter exports intact.
+  local re_from="from[[:space:]]+['\"]\\./([^'\"]+)\\.js['\"]"
+  local re_sym="\\{[[:space:]]*([^}]+)[[:space:]]*\\}"
+  local re_exp="export[[:space:]]+\\{[[:space:]]*([^}]+)[[:space:]]*\\}"
+  local filtered_head="" l imp_file imp_symbols
+  local -a dropped_symbols=()
+
+  while IFS= read -r l; do
+    if [[ "${l}" =~ ${re_from} ]]; then
+      imp_file="${BASH_REMATCH[1]}"
+      if [[ ! -f "$(dirname "${surface}")/${imp_file}.ts" && ! -f "$(dirname "${surface}")/${imp_file}.js" ]]; then
+        if [[ "${l}" =~ ${re_sym} ]]; then
+          imp_symbols="${BASH_REMATCH[1]}"
+          while IFS= read -r sym; do
+            [[ -n "${sym}" ]] && dropped_symbols+=("${sym}")
+          done < <(printf '%s\n' "${imp_symbols}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
+        fi
+        continue
+      fi
+    fi
+    filtered_head="${filtered_head}${l}"$'\n'
+  done <<< "${head_body}"
+
+  if [[ "${#dropped_symbols[@]}" -gt 0 ]]; then
+    local final_filtered=""
+    while IFS= read -r l; do
+      if [[ "${l}" != *"from"* ]] && [[ "${l}" =~ ${re_exp} ]]; then
+        local exp_syms="${BASH_REMATCH[1]}"
+        local -a kept_syms=()
+        while IFS= read -r sym; do
+          [[ -n "${sym}" ]] || continue
+          if ! printf '%s\n' "${dropped_symbols[@]}" | grep -Fxq -- "${sym}"; then
+            kept_syms+=("${sym}")
+          fi
+        done < <(printf '%s\n' "${exp_syms}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
+        if [[ "${#kept_syms[@]}" -gt 0 ]]; then
+          local kept_list
+          kept_list="$(printf '%s, ' "${kept_syms[@]}" | sed 's/, $//')"
+          final_filtered="${final_filtered}export { ${kept_list} };"$'\n'
+        fi
+        continue
+      fi
+      final_filtered="${final_filtered}${l}"$'\n'
+    done <<< "${filtered_head}"
+    filtered_head="${final_filtered}"
+  fi
+
+  if ! printf '%s' "${filtered_head}" | grep -qE 'export |import '; then
+    head_empty=1
+  fi
+
   local rebuilt
   rebuilt="$(
-    printf '%s\n' "${head_body}" | awk -v from="${import_from}" '
+    printf '%s\n' "${filtered_head}" | awk -v from="${import_from}" '
       index($0, from) && $0 ~ /from/ && $0 ~ /import/ { next }
       { print }
     '
