@@ -1203,9 +1203,13 @@ cmd_run() {
         aegis_log "briefing: brief do operador (proveniência=user)"
       else
         export AEGIS_BRIEFING_SOURCE=supervisor
-        aegis_log "briefing: brief inventado pelo supervisor (proveniência=supervisor)"
+        if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && [[ "${AEGIS_FORCE_REMOTE_SUPERVISOR:-0}" != "1" ]]; then
+          aegis_log "briefing: ambiente agêntico — delegando expansão semântica ao assistente..."
+        else
+          aegis_log "briefing: brief inventado pelo supervisor (proveniência=supervisor)"
+          aegis_log "briefing: a expandir a demanda com o supervisor (com evidência epistêmica)..."
+        fi
       fi
-      aegis_log "briefing: a expandir a demanda com o supervisor (com evidência epistêmica)..."
       body="$(aegis_briefing_generate "${goal}" "${target}" "${intake_context_json}" 2>"${brief_err}")" || body=""
       if [[ -n "${body}" ]]; then
         aegis_log "briefing: demanda estruturada aceite"

@@ -671,6 +671,11 @@ aegis_briefing_expand_json() {
 
   [[ -n "${goal}" ]] || return 1
 
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && [[ "${AEGIS_FORCE_REMOTE_SUPERVISOR:-0}" != "1" ]]; then
+    printf 'agentic_delegated\n' >&2
+    return 1
+  fi
+
   local api_base api_key model timeout max_tokens
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
@@ -779,7 +784,7 @@ aegis_briefing_expand_json() {
       500|502|503|504) backoff=$((attempt * 2)) ;;
       000) backoff=$((attempt * 2)) ;;
       200) backoff=$((attempt == 1 ? 1 : 3)) ;;
-      401|403) break ;;
+      400|401|403|404|405|422) break ;;
       *) backoff=$((attempt * 2)) ;;
     esac
     printf '[AEGIS][BRIEFING][WARN] attempt %s/%s failed (%s http=%s) — retry in %ss\n' \
