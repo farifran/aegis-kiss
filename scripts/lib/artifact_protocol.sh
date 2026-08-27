@@ -1077,9 +1077,18 @@ readonly AEGIS_JQ_ENRICH_VALIDATION='
   | .validated_candidate = ($prev_candidate // .validated_candidate)
   | (.validated_candidate.diff // "") as $cand_diff
   | diff_added_exprs($cand_diff) as $added_exprs
+  # Union, never shadow: jq treats [] as truthy, so `//` would let an empty
+  # carried-forward array erase this stage behavior gate own findings.
+  # Order is preserved (carried-forward first) — no unique_by, which sorts.
   | .findings = (
-      ($prev_findings // .findings // [])
-      | map(gate_finding_quotes($added_exprs; $cand_diff; "soft"))
+      (($prev_findings // []) + (.findings // []))
+      | map(
+          # The quote gate is an anti-hallucination filter for cited snippets.
+          # Execution-backed findings are evidenced by having been run, not
+          # quoted, so they bypass it.
+          if ((.evidence_refs // []) | index("validation.behavior")) then .
+          else gate_finding_quotes($added_exprs; $cand_diff; "soft") end
+        )
     )
   | .basis = (.basis // [] | if type == "string" then [.] else . end)
   # Normalize intent stamps → stable origin codes (legacy demand_mismatch).
