@@ -533,7 +533,7 @@ EOC
   unit_behavior="$(aegis_fit_md_section "Behavior" "${parent}")"
   # Single-file multi-export slice: note "export_slice:Name" keeps only that export.
   if [[ -n "${slice_name}" && "${is_reexport}" -eq 0 ]]; then
-    unit_briefing="$(aegis_fit_briefing_slice_export "${unit_briefing:-$(aegis_fit_md_section "Briefing" "${parent}")}" "${slice_name}")"
+    unit_briefing="$(aegis_fit_briefing_slice_export "$(aegis_fit_md_section "Briefing" "${parent}")" "${slice_name}")"
     acc_block="- ${slice_name}"
   fi
 
