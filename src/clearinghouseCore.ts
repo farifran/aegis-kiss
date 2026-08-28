@@ -98,3 +98,18 @@ export class ClearinghouseCore {
 
   get consecutiveRejections(): number { return this._consecutiveRejections; }
 }
+
+export function obterClearinghouseBitmask(core: ClearinghouseCore): number {
+  let mask = 0;
+  if (core.bus.isGlobalLocked) mask |= 1;
+  if (core.isQuarantineActive) mask |= 2;
+  if (core.totalVolume > 1000000n) mask |= 4;
+  if (core.activeAccountsCount > 500) mask |= 8;
+  let rej = core.consecutiveRejections;
+  if (rej > 15) rej = 15;
+  if (rej < 0) rej = 0;
+  mask |= (rej & 0xF) << 4;
+  const highByte = Number((core.lastChecksum >> 56n) & 0xFFn);
+  mask |= (highByte & 0xFF) << 8;
+  return mask;
+}
