@@ -396,7 +396,7 @@ aegis_briefing_typecheck_json() {
     + [ (.exports[]?
         | if .kind == "class" then
             "export class \(.name) {"
-            + ((.privateFields // []) | map("\n  private \(.name): \(.type);") | join(""))
+            + ((.privateFields // []) | map("\n  private " + (if .readonly then "readonly " else "" end) + "\(.name): \(.type);") | join(""))
             + "\n  constructor(" + params(.ctorParams) + ") {\n" + lines(.ctorBody; "    ") + "\n  }"
             + ((.methods // []) | map(
                 "\n  \(.name)(" + params(.params) + "): \(.returns // "void") {\n"
@@ -506,7 +506,7 @@ aegis_briefing_render() {
       | if $e.kind == "class" then
           $n + ") export class " + $e.name + ":"
           + (if (($e.privateFields // []) | length) > 0
-               then "\n   Campos privados: " + (($e.privateFields | map(.name + ": " + .type)) | join(", "))
+               then "\n   Campos privados: " + (($e.privateFields | map((if .readonly then "readonly " else "" end) + .name + ": " + .type)) | join(", "))
                else "" end)
           + "\n   constructor(" + params($e.ctorParams) + "):\n" + lines($e.ctorBody; "     ")
           + (if (($e.methods // []) | length) > 0

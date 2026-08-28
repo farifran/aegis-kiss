@@ -944,7 +944,7 @@ aegis_briefing_class_to_ts() {
         next
       }
       # constructor(...)
-      if (line ~ /^[[:space:]]*constructor[[:space:]]*\(/) {
+      if (line ~ /^[[:space:]]*constructor[[:space:]]*\(.*:[[:space:]]*$/) {
         emit_close()
         maybe_blank()
         sub(/^[[:space:]]+/, "", line)
@@ -955,7 +955,7 @@ aegis_briefing_class_to_ts() {
         next
       }
       # method(...): ret:   or method(): void:
-      if (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)[[:space:]]*:/) {
+      if (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(.*:[[:space:]]*$/) {
         emit_close()
         maybe_blank()
         sub(/^[[:space:]]+/, "", line)
