@@ -43,6 +43,8 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with explicit conditional statements (`if (tokens > maxTokens) tokens = maxTokens`).
    - Outside a class (e.g. in helper functions or behavior asserts), NEVER access private fields (`_name`); use public getters (`bucket.tokens`) to avoid TS2341.
    - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
+   - Private class fields assigned only in constructor must be declared with `readonly` (e.g. `private readonly _maxTokens: bigint`).
+   - Prefer default parameter initializers (e.g. `nowMs: bigint = BigInt(Date.now())`) over union with `undefined` and internal ternaries.
 
 5. **Schema Closure & Declaration Integrity (TS2339 / TS2552 / TS2554)**:
    - `kind` is ONLY `"class"` or `"function"`. NEVER `"interface"` or `"enum"` inside `exports[]` (types have no runtime presence in smoke imports).
@@ -50,11 +52,12 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Every type must be a lowercase primitive, a JS builtin (`Map`, `Set`, `Uint8Array`), a class in `exports[]`, or declared in `"types"`. Undeclared types trigger TS2552.
    - No unbound type parameters `<T>`. Use concrete types or `unknown`.
    - Every helper method (e.g. `this._calcDistance()`, `this._insert()`) called inside any method body MUST be explicitly declared in `methods[]` with its signature and body. Calling unlisted methods triggers TS2339.
-   - For optional parameters, declare as union (`"string | undefined"`) or ensure `behavior[]` asserts supply all required arguments (preventing TS2554).
+   - For optional parameters, declare as default initializers or union (`"string | undefined"`) and ensure `behavior[]` asserts supply all required arguments.
    - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/domain.ts` → `./domain.js`. If the target is the barrel itself (`src/index.ts`), `barrelFrom` MUST be `null`.
 
 6. **Optimize — Hardware-Aligned Physics, $O(1)$ Math & Zero Allocations**:
    - **Closed-Form $O(1)$ Math**: Replace iterative loops (`for`/`while`) or step-by-step increments for time delta, rate replenishment, or metric scaling with direct closed-form mathematical equations (e.g. `(timeDiff * rate) / 1000n`).
+   - **Monotonic Time & Drift Guard**: When tracking time deltas (`now - lastUpdate`), guard against negative clock drift (NTP skew) with `if (nowMs <= this._lastUpdateMs) return` without rewinding the time cursor.
    - **Zero Hot-Path Allocations**: Eliminate transient heap allocations (arrays, temporary objects, closures) inside high-frequency execution methods (`update()`, `consume()`, `allow()`).
    - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange()`) over `Int32Array` mapped on `ArrayBuffer`.
    - **Bounded Memory & Ring Buffers**: Advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ memory recycling without leaks.

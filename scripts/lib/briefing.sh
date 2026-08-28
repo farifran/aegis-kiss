@@ -109,6 +109,9 @@ aegis_briefing_stable_constraints() {
 - noUncheckedIndexedAccess is ON: arr[i] / text[i] / map.get(k) are T | undefined — bind to a const and guard before using, never chain off the index
 - Numerical boundaries: clamp values using explicit conditional checks (if (val > max) val = max)
 - State mutation: methods that mutate internal state must preserve all class invariants
+- Monotonic time / clock drift: when tracking time deltas (now - lastUpdate), guard with if (now <= lastUpdate) return without rewinding lastUpdate on negative clock jumps (NTP skew)
+- Immutability: private class fields that are assigned only in the constructor must be declared 'private readonly'
+- Function signatures: prefer default parameter initializers (e.g. nowMs: bigint = BigInt(Date.now())) over union with undefined and internal ternaries
 EOF
 }
 
@@ -399,7 +402,7 @@ aegis_briefing_typecheck_json() {
                 "\n  \(.name)(" + params(.params) + "): \(.returns // "void") {\n"
                 + lines(.body; "    ") + "\n  }") | join(""))
             + ((.getters // []) | map(
-                "\n  get \(.name)(): \(.returns // "unknown") { \(.body // "") }") | join(""))
+                "\n  get \(.name)(): \(.returns // "unknown") { " + (if ((.body // "") | test("^\\s*return\\b")) then (.body // "") else "return " + (.body // "") end) + (if ((.body // "") | test(";\\s*$")) then "" else ";" end) + " }") | join(""))
             + "\n}"
           else
             "export function \(.name)(" + params(.params) + "): \(.returns // "void") {\n"
@@ -514,7 +517,7 @@ aegis_briefing_render() {
                else "" end)
           + (if (($e.getters // []) | length) > 0
                then "\n" + (($e.getters | map(
-                      "   get " + .name + "(): " + (.returns // "unknown") + " { " + (.body // "") + " }"
+                      "   get " + .name + "(): " + (.returns // "unknown") + " { " + (if ((.body // "") | test("^\\s*return\\b")) then (.body // "") else "return " + (.body // "") end) + (if ((.body // "") | test(";\\s*$")) then "" else ";" end) + " }"
                     )) | join("\n"))
                else "" end)
         else
