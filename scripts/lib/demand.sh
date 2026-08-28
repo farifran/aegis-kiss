@@ -708,7 +708,7 @@ aegis_intake_discover_context() {
       exists=true
       local content
       content="$(cat "${t}" 2>/dev/null || true)"
-      file_bytes="${#content}"
+      file_bytes="$(wc -c < "${t}" 2>/dev/null || echo 0)"
       local raw_exports
       raw_exports="$(aegis_file_top_level_export_names "${content}" 2>/dev/null || true)"
       if [[ -n "${raw_exports}" ]]; then
