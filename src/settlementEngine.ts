@@ -62,3 +62,12 @@ export class SettlementEngine {
 
   get feeBasisPoints(): bigint { return this._feeBasisPoints; }
 }
+
+export function calcularTaxaDinamica(volume: bigint, baseFeeBps: bigint): bigint {
+  if (volume < 0n || baseFeeBps < 0n) throw new RangeError("Volume and baseFeeBps must be non-negative");
+  if (volume > 1000000n) {
+  const discount = baseFeeBps / 2n;
+  return discount < 10n ? 10n : discount;
+  }
+  return baseFeeBps;
+}
