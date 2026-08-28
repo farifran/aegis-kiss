@@ -415,28 +415,39 @@ aegis_mechanical_behavior_gate() {
   local findings=() i=0 n=${#b_desc[@]}
   local -a import_union=() in_scope_item=()
   local exp_name primary first
+  local file_body file_exports
+  file_body="$(cat "${test_root%/}/${target}" 2>/dev/null || true)"
+  file_exports=""
+  if declare -f aegis_file_top_level_export_names >/dev/null 2>&1; then
+    file_exports="$(aegis_file_top_level_export_names "${file_body}")"
+  else
+    file_exports="$(printf '%s\n' "${file_body}" | grep -oE 'export[[:space:]]+(class|function|const|let|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' | awk '{print $3}')"
+  fi
+
   for ((i=0; i<n; i++)); do
-    primary=""
-    if [[ -n "${b_exp[$i]}" ]]; then
-      first=1
-      while IFS= read -r exp_name; do
-        [[ -n "${exp_name}" ]] || continue
-        if [[ "${first}" -eq 1 ]]; then
-          primary="${exp_name}"; first=0
-        fi
-        if ! printf '%s\n' "${import_union[@]}" | grep -Fqx -- "${exp_name}" \
-          || [[ "${#import_union[@]}" -eq 0 ]]; then
-          import_union+=("${exp_name}")
-        fi
-      done < <(printf '%s\n' "${b_exp[$i]}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
-    fi
     in_scope_item[$i]=0
-    if [[ -n "${primary}" ]] && printf '%s\n' "${acc_names}" | grep -Fqx -- "${primary}"; then
+    if [[ -z "${b_exp[$i]}" ]]; then
+      in_scope_item[$i]=1
+      continue
+    fi
+    local all_available=1
+    local touches_acc=0
+    while IFS= read -r exp_name; do
+      [[ -n "${exp_name}" ]] || continue
+      if ! printf '%s\n' "${import_union[@]}" | grep -Fqx -- "${exp_name}" \
+        || [[ "${#import_union[@]}" -eq 0 ]]; then
+        import_union+=("${exp_name}")
+      fi
+      if printf '%s\n' "${acc_names}" | grep -Fqx -- "${exp_name}"; then
+        touches_acc=1
+      elif ! printf '%s\n' "${file_exports}" | grep -Fqx -- "${exp_name}"; then
+        all_available=0
+      fi
+    done < <(printf '%s\n' "${b_exp[$i]}" | tr ',' '\n' | sed -E 's/^[[:space:]]*|[[:space:]]*$//g')
+
+    if [[ "${touches_acc}" -eq 1 && "${all_available}" -eq 1 ]]; then
       in_scope_item[$i]=1
     fi
-  done
-  for ((i=0; i<n; i++)); do
-    [[ -z "${b_exp[$i]}" ]] && in_scope_item[$i]=1
   done
   for exp_name in ${acc_names}; do
     if ! printf '%s\n' "${import_union[@]}" | grep -Fqx -- "${exp_name}" \
