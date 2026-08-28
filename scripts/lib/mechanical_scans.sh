@@ -489,8 +489,22 @@ aegis_mechanical_behavior_gate() {
     tmp="${tmp}.mts"
     {
       if [[ -f "${test_root%/}/${target}" ]]; then
-        grep -E '^[[:space:]]*import[[:space:]]+' "${test_root%/}/${target}" \
-          | sed -E 's/from "\.\//from ".\/src\//g; s/from '\''\.\//from '\''\.\/src\//g' || true
+        local _imp_line _has_col
+        while IFS= read -r _imp_line; do
+          [[ -n "${_imp_line}" ]] || continue
+          _has_col=0
+          for exp_name in "${item_exp_arr[@]:-}"; do
+            [[ -n "${exp_name}" ]] || continue
+            if [[ "${_imp_line}" =~ [[:space:],\{]${exp_name}[[:space:],\}] ]]; then
+              _has_col=1
+              break
+            fi
+          done
+          if [[ "${_has_col}" -eq 0 ]]; then
+            printf '%s\n' "${_imp_line}" \
+              | sed -E 's/from "\.\//from ".\/src\//g; s/from '\''\.\//from '\''\.\/src\//g'
+          fi
+        done < <(grep -E '^[[:space:]]*import[[:space:]]+' "${test_root%/}/${target}" || true)
       fi
       local _target_mod="./${target%.ts}.js"
       printf 'import { %s } from "%s";\n' "${item_csv}" "${_target_mod}"
