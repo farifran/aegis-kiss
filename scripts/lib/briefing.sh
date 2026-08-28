@@ -339,7 +339,7 @@ aegis_briefing_quality_check() {
 
   printf '%s' "${json}" | jq -e '
     ([.exports[]?.body[]?
-       | select(test("\\* *0n") or test("([A-Za-z0-9_]+) *- *\\1") or test("\\+ *- *\\+"))
+       | select(test("\\* *0n") or test("\\b([A-Za-z0-9_]+)\\b *- *\\b\\1\\b") or test("\\+ *- *\\+"))
       ] | length) == 0
     and
     ([.exports[]? | (.body // []), (.ctorBody // []), ((.methods[]? | .body) // [])]
