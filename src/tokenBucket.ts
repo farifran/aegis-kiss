@@ -6,7 +6,9 @@ export class TokenBucket {
 
   constructor(maxBytes: bigint, mbps: number) {
     if (maxBytes < 0n) throw new RangeError("maxBytes must be non-negative");
-    if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER) throw new RangeError("mbps must be a non-negative safe number");
+    if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER || (mbps > 0 && Math.round(mbps * 8000) === 0)) {
+      throw new RangeError("mbps must be a non-negative safe number with representable rate");
+    }
     this._maxTokens = maxBytes * 8n;
     this._tokens = this._maxTokens;
     this._rateBitsPerMs = BigInt(Math.round(mbps * 8000));

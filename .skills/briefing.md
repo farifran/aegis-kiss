@@ -45,7 +45,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
    - Private class fields assigned only in constructor must be declared with `readonly` (e.g. `private readonly _maxTokens: bigint`).
    - Prefer default parameter initializers (e.g. `nowMs: bigint = BigInt(Date.now())`) over union with `undefined` and internal ternaries.
-   - When validating a `number` parameter before BigInt conversion or rate calculation, guard against non-finite values and unsafe float overflow via `!Number.isFinite(x)` and `x * scale > Number.MAX_SAFE_INTEGER` (e.g. `if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER) throw new RangeError(...)`).
+   - When validating a `number` parameter before BigInt conversion or rate calculation, guard against non-finite values, unsafe float overflow, and positive underflow to zero via `!Number.isFinite(x)`, `x * scale > Number.MAX_SAFE_INTEGER`, and `x > 0 && Math.round(x * scale) === 0` (e.g. `if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER || (mbps > 0 && Math.round(mbps * 8000) === 0)) throw new RangeError(...)`).
 
 5. **Schema Closure & Declaration Integrity (TS2339 / TS2552 / TS2554)**:
    - `kind` is ONLY `"class"` or `"function"`. NEVER `"interface"` or `"enum"` inside `exports[]` (types have no runtime presence in smoke imports).
