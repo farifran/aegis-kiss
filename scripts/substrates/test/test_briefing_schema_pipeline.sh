@@ -225,12 +225,32 @@ if ! printf '%s' "${rendered_md}" | grep -q 'import { SettlementBus } from "./se
   exit 1
 fi
 
-aegis_briefing_typecheck_json "${sibling_import_schema}" || {
-  echo "FAIL: aegis_briefing_typecheck_json failed to resolve sibling import" >&2
+# 9. Test vacuous import rejection
+vacuous_import_schema='{
+  "goal": "Test vacuous import rejection",
+  "targets": ["src/consumer.ts"],
+  "imports": [{"from": "./settlementBus.js", "names": ["SettlementBus", "UnusedGhostSymbol"]}],
+  "exports": [
+    {
+      "kind": "class",
+      "name": "Consumer",
+      "privateFields": [{"name": "_bus", "type": "SettlementBus"}],
+      "ctorParams": [{"name": "bus", "type": "SettlementBus"}],
+      "ctorBody": ["this._bus = bus;"],
+      "methods": [],
+      "getters": [{"name": "bus", "returns": "SettlementBus", "body": "return this._bus;"}]
+    }
+  ],
+  "barrelFrom": "./consumer.js"
+}'
+
+if aegis_briefing_validate_json "${vacuous_import_schema}" 2>/dev/null; then
+  echo "FAIL: validate_json should have rejected vacuous import UnusedGhostSymbol" >&2
   exit 1
-}
+fi
 
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: sibling module imports validated and resolved"
+echo "[AEGIS][TEST][PASS] briefing schema pipeline: non-vacuous import invariant enforced"
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: mandatory questions gate enforced"
 exit 0
 

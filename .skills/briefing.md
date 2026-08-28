@@ -90,7 +90,19 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
      - `is_multi_select`: `false` for mutually exclusive options.
    - **Interaction & Clarification Lifecycle**:
       - If the user selects/provides a concrete architectural choice, the pipeline proceeds with `AEGIS_BRIEFING_ANSWERS`.
-      - If the user asks for explanations, alternatives, or trade-offs (e.g. in free-form text or custom option), the agent/IDE must answer the inquiry conversationally and re-prompt the question modal, rather than treating the inquiry as an answer.
+
+9. **Non-Vacuous Import Invariant (TS6133 / Zero Ghost Imports)**:
+   - When declaring top-level `"imports": [{"from": "./sibling.js", "names": ["SymbolName"]}]`, every imported symbol MUST be actively utilized within the schema. It must appear as a field type in `privateFields`, a parameter type in `ctorParams`, a method parameter/return type, or be directly invoked inside method bodies. Declaring unused "ghost" imports triggers validation failure.
+
+10. **Mutable State Lifecycle Invariant (Zero Dead State)**:
+    - Any private collection (`Map`, `Set`) or counter field that is NOT declared `readonly` represents active mutable runtime state.
+    - If a class declares a non-readonly state field (e.g. `_failureCounts: Map<string, number>`, `_quarantine: Set<string>`), the class methods MUST include at least one state-modifying operation (`.set()`, `.add()`, `.clear()`, `.delete()`, `++`, `+=`, `=`). A mutable field that is only initialized in the constructor and read in guards without ever being mutated indicates an incomplete implementation. If a field is static reference data, declare it `readonly`.
+
+11. **Behavior Assert Semantic Completeness**:
+    - When an export receives an external mutable dependency in its constructor (e.g. `bus: SettlementBus`, `guard: ThrottleGuard`), the `behavior[]` asserts must verify both the return value of the operation AND any mutational effects promised on the injected dependency (e.g. `assert: env.totalVolume === 100n && bus.getBalance("a1") === 900n`).
+
+12. **Procedural Numerical Clamping (Zero Nested Ternaries)**:
+    - When bounding or saturating numerical values within a range (e.g. 0 <= x <= 15), ALWAYS use procedural conditional statements (`let val = raw; if (val > 15) val = 15; if (val < 0) val = 0;`) instead of nested ternary operators (`a ? b : (c ? d : e)`). Nested ternaries violate ESLint `no-nested-ternary` rules.
 
 ---
 

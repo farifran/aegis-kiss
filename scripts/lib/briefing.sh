@@ -295,6 +295,26 @@ aegis_briefing_validate_json() {
                  or (((.names // []) | if type == "array" then . else [] end) | any(type != "string" or (test("^[A-Za-z_][A-Za-z0-9_]*$") | not)))
                ))
            then "bad_imports_shape" else empty end),
+        (
+          . as $root |
+          ($root.imports // [])[]?.names[]? as $sym |
+          select(
+            ($root.exports // []) |
+            all(
+              ((.privateFields // []) | all((.type // "") | contains($sym) | not))
+              and ((.ctorParams // []) | all((.type // "") | contains($sym) | not))
+              and ((.methods // []) | all(
+                    ((.params // []) | all((.type // "") | contains($sym) | not))
+                    and ((.returns // "") | contains($sym) | not)
+                    and ((.body // []) | all(contains($sym) | not))
+                  ))
+              and ((.getters // []) | all(
+                    ((.returns // "") | contains($sym) | not)
+                    and ((.body // "") | contains($sym) | not)
+                  ))
+            )
+          ) | "vacuous_import:\($sym)"
+        ),
         (if ((.questions // []) | length) > 0
            and ((.questions // []) | any(
                  (type != "object")
