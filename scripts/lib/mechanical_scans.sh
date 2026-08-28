@@ -1003,6 +1003,26 @@ aegis_mechanical_adversarial_diff_scan() {
     )
   fi
 
+  # Unsafe number to BigInt conversion (NaN / Infinity / MAX_SAFE_INTEGER precision crash).
+  if [[ -n "${added}" ]] && printf '%s\n' "${added}" \
+    | grep -Eiq 'BigInt\(Math\.(round|floor|ceil)\('; then
+    if ! printf '%s\n' "${corpus}" | grep -Fq 'Number.isFinite'; then
+      findings+=(
+        "$(
+          jq -nc --arg f "${primary}" '{
+            type: "contract_violation",
+            severity: "high",
+            description: "Candidate converts float number to BigInt without guarding against non-finite values (NaN, Infinity)",
+            supported_by_evidence: true,
+            evidence_refs: ["candidate.diff"],
+            target_files: [$f],
+            fix: ("In " + $f + ", guard the number parameter with `if (!Number.isFinite(x) || x < 0 || x * scale > Number.MAX_SAFE_INTEGER)` before BigInt conversion.")
+          }'
+        )"
+      )
+    fi
+  fi
+
   # Public surface bloat when demand limits exports (before fidelity greps).
   if [[ -n "${investigation}" ]] \
     && declare -f aegis_mechanical_surface_findings_json >/dev/null 2>&1; then
