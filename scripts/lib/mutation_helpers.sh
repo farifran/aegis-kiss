@@ -906,7 +906,23 @@ aegis_briefing_class_to_ts() {
         ln = lines[l]
         if (ln ~ /^Campos privados:/) {
           sub(/^Campos privados:[[:space:]]*/, "", ln)
-          n = split(ln, parts, /,[[:space:]]*/)
+          n = 0
+          cur_part = ""
+          b_depth = 0
+          len_ln = length(ln)
+          for (c = 1; c <= len_ln; c++) {
+            ch = substr(ln, c, 1)
+            if (ch == "<" || ch == "(" || ch == "{") b_depth++
+            else if (ch == ">" || ch == ")" || ch == "}") b_depth--
+            if (ch == "," && b_depth == 0) {
+              parts[++n] = cur_part
+              cur_part = ""
+            } else {
+              cur_part = cur_part ch
+            }
+          }
+          if (cur_part != "") parts[++n] = cur_part
+
           for (i = 1; i <= n; i++) {
             p = trim(parts[i])
             if (p == "") continue
