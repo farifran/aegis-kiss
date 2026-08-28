@@ -1,7 +1,7 @@
 export class TokenBucket {
-  private _maxTokens: bigint;
+  private readonly _maxTokens: bigint;
+  private readonly _rateBitsPerMs: bigint;
   private _tokens: bigint;
-  private _rateBitsPerMs: bigint;
   private _lastUpdateMs: bigint;
 
   constructor(maxBytes: bigint, mbps: number) {

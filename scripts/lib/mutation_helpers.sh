@@ -890,91 +890,141 @@ aegis_briefing_class_to_ts() {
       sub(/[[:space:]]+$/, "", s)
       return s
     }
-    function emit_close() {
-      if (in_ctor || in_method) {
-        print "  }"
-        in_ctor = 0
-        in_method = 0
-        need_blank = 1
-      }
-    }
-    function maybe_blank() {
-      if (need_blank) {
-        print ""
-        need_blank = 0
-      }
-    }
     BEGIN {
-      print "export class " name " {"
-      opened = 1
-      in_ctor = 0
-      in_method = 0
-      need_blank = 0
-      saw_fields = 0
+      num_lines = 0
+      num_fields = 0
     }
-    /^[0-9]+\)/ { next }
     {
-      line = $0
-      # Private fields declaration line
-      if (line ~ /Campos privados:/) {
-        emit_close()
-        sub(/.*Campos privados:[[:space:]]*/, "", line)
-        n = split(line, parts, /,[[:space:]]*/)
-        for (i = 1; i <= n; i++) {
-          f = trim(parts[i])
-          if (f == "") continue
-          print "  private " f ";"
-          saw_fields = 1
-        }
-        if (saw_fields) need_blank = 1
-        next
-      }
-      # Getter already fully braced on one line
-      if (line ~ /^[[:space:]]*get[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)/) {
-        emit_close()
-        maybe_blank()
-        sub(/^[[:space:]]+/, "", line)
-        if (line ~ /\{/ && line ~ /\}/) {
-          print "  " line
-        } else {
-          sub(/:[[:space:]]*$/, "", line)
-          print "  " line
-        }
-        need_blank = 1
-        next
-      }
-      # constructor(...)
-      if (line ~ /^[[:space:]]*constructor[[:space:]]*\(.*:[[:space:]]*$/) {
-        emit_close()
-        maybe_blank()
-        sub(/^[[:space:]]+/, "", line)
-        sub(/:[[:space:]]*$/, "", line)
-        print "  " line " {"
-        in_ctor = 1
-        in_method = 0
-        next
-      }
-      # method(...): ret:   or method(): void:
-      if (line ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(.*:[[:space:]]*$/) {
-        emit_close()
-        maybe_blank()
-        sub(/^[[:space:]]+/, "", line)
-        sub(/:[[:space:]]*$/, "", line)
-        print "  " line " {"
-        in_method = 1
-        in_ctor = 0
-        next
-      }
-      # body lines inside ctor/method
-      if (in_ctor || in_method) {
-        sub(/^[[:space:]]+/, "", line)
-        if (line != "") print "    " line
-        next
-      }
+      raw_line = $0
+      sub(/^[[:space:]]+/, "", raw_line)
+      sub(/[[:space:]]+$/, "", raw_line)
+      lines[num_lines++] = raw_line
     }
     END {
-      emit_close()
-      if (opened) print "}"
+      # Pass 1: Extract private fields and check which fields are mutated in methods
+      for (l = 0; l < num_lines; l++) {
+        ln = lines[l]
+        if (ln ~ /^Campos privados:/) {
+          sub(/^Campos privados:[[:space:]]*/, "", ln)
+          n = split(ln, parts, /,[[:space:]]*/)
+          for (i = 1; i <= n; i++) {
+            p = trim(parts[i])
+            if (p == "") continue
+            is_rd = 0
+            if (p ~ /^readonly[[:space:]]+/) {
+              is_rd = 1
+              sub(/^readonly[[:space:]]+/, "", p)
+            }
+            colon_pos = index(p, ":")
+            if (colon_pos > 0) {
+              fn = trim(substr(p, 1, colon_pos - 1))
+              ft = trim(substr(p, colon_pos + 1))
+            } else {
+              fn = p
+              ft = "unknown"
+            }
+            fnames[num_fields] = fn
+            ftypes[num_fields] = ft
+            if (is_rd) is_mutated[fn] = 0; else is_mutated[fn] = -1
+            num_fields++
+          }
+        }
+      }
+
+      # Scan method bodies for mutations: this.<fn> = / += / -= / *= / /= / %= / |= / &= / ^= / ++ / --
+      in_m = 0
+      for (l = 0; l < num_lines; l++) {
+        ln = lines[l]
+        if (ln ~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(.*:[[:space:]]*$/ && ln !~ /^constructor[[:space:]]*\(/) {
+          in_m = 1
+          continue
+        }
+        if (ln ~ /^get[[:space:]]+[A-Za-z_]/ || ln ~ /^constructor[[:space:]]*\(/) {
+          in_m = 0
+          continue
+        }
+        if (in_m) {
+          for (i = 0; i < num_fields; i++) {
+            fn = fnames[i]
+            if (ln ~ ("this\\." fn "[[:space:]]*[+\\-*/%|&^]?=") ||
+                ln ~ ("this\\." fn "[[:space:]]*(\\+\\+|--)") ||
+                ln ~ ("(\\+\\+|--)[[:space:]]*this\\." fn)) {
+              is_mutated[fn] = 1
+            }
+          }
+        }
+      }
+
+      # Pass 2: Emit the TypeScript class
+      print "export class " name " {"
+      need_blank = 0
+      in_ctor = 0
+      in_method = 0
+      
+      for (l = 0; l < num_lines; l++) {
+        ln = lines[l]
+        if (ln ~ /^[0-9]+\)/) continue
+        
+        # Emit Campos privados with inferred readonly
+        if (ln ~ /^Campos privados:/) {
+          for (i = 0; i < num_fields; i++) {
+            fn = fnames[i]
+            ft = ftypes[i]
+            if (is_mutated[fn] == 1) {
+              print "  private " fn ": " ft ";"
+            } else {
+              print "  private readonly " fn ": " ft ";"
+            }
+          }
+          if (num_fields > 0) need_blank = 1
+          continue
+        }
+
+        # Getter already fully braced
+        if (ln ~ /^get[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([^)]*\)/) {
+          if (in_ctor || in_method) { print "  }"; in_ctor = 0; in_method = 0; need_blank = 1 }
+          if (need_blank) { print ""; need_blank = 0 }
+          if (ln ~ /\{/ && ln ~ /\}/) {
+            print "  " ln
+          } else {
+            sub(/:[[:space:]]*$/, "", ln)
+            print "  " ln
+          }
+          need_blank = 1
+          continue
+        }
+
+        # constructor
+        if (ln ~ /^constructor[[:space:]]*\(.*:[[:space:]]*$/) {
+          if (in_ctor || in_method) { print "  }"; in_ctor = 0; in_method = 0; need_blank = 1 }
+          if (need_blank) { print ""; need_blank = 0 }
+          sub(/:[[:space:]]*$/, "", ln)
+          print "  " ln " {"
+          in_ctor = 1
+          in_method = 0
+          continue
+        }
+
+        # method
+        if (ln ~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(.*:[[:space:]]*$/) {
+          if (in_ctor || in_method) { print "  }"; in_ctor = 0; in_method = 0; need_blank = 1 }
+          if (need_blank) { print ""; need_blank = 0 }
+          sub(/:[[:space:]]*$/, "", ln)
+          print "  " ln " {"
+          in_method = 1
+          in_ctor = 0
+          continue
+        }
+
+        # body lines
+        if (in_ctor || in_method) {
+          if (ln != "") print "    " ln
+          continue
+        }
+      }
+
+      if (in_ctor || in_method) { print "  }" }
+      print "}"
     }
   '
 }
