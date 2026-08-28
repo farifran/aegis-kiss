@@ -456,6 +456,15 @@ aegis_mechanical_behavior_gate() {
     fi
   done
   
+  local _ts _js
+  while IFS= read -r _ts; do
+    [[ -n "${_ts}" ]] || continue
+    _js="${_ts%.ts}.js"
+    if [[ ! -e "${_js}" ]]; then
+      ln -s "$(basename "${_ts}")" "${_js}" 2>/dev/null || true
+    fi
+  done < <(find "${test_root%/}" -name '*.ts' 2>/dev/null || true)
+
   for ((i=0; i<n; i++)); do
     [[ "${in_scope_item[$i]}" -eq 1 ]] || continue
     local item_csv=""
@@ -479,7 +488,12 @@ aegis_mechanical_behavior_gate() {
     mv "${tmp}" "${tmp}.mts"
     tmp="${tmp}.mts"
     {
-      printf 'import { %s } from "./%s";\n' "${item_csv}" "${target}"
+      if [[ -f "${test_root%/}/${target}" ]]; then
+        grep -E '^[[:space:]]*import[[:space:]]+' "${test_root%/}/${target}" \
+          | sed -E 's/from "\.\//from ".\/src\//g; s/from '\''\.\//from '\''\.\/src\//g' || true
+      fi
+      local _target_mod="./${target%.ts}.js"
+      printf 'import { %s } from "%s";\n' "${item_csv}" "${_target_mod}"
       printf 'function __aegis_behave(c: unknown, d: string): void {\n'
       printf '  if (!c) { throw new Error("BEHAVIOR_FAIL: " + d) }\n'
       printf '}\n'
@@ -515,6 +529,10 @@ aegis_mechanical_behavior_gate() {
       )
     fi
   done
+
+  while IFS= read -r _js; do
+    [[ -L "${_js}" ]] && rm -f "${_js}" 2>/dev/null || true
+  done < <(find "${test_root%/}" -name '*.js' -type l 2>/dev/null || true)
 
   [[ -n "${tmp_workdir}" && -d "${tmp_workdir}" ]] && rm -rf "${tmp_workdir}"
 
