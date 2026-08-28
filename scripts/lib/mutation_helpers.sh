@@ -682,11 +682,12 @@ aegis_strip_aider_whole_file_junk_path() {
 
 aegis_demand_export_slice_name() {
   local text="${1-}"
-  printf '%s\n' "${text}" \
-    | grep -oE 'export_slice:[A-Za-z_][A-Za-z0-9_]*' \
-    | head -1 \
-    | sed -E 's/^export_slice://' \
-    || true
+  local name
+  name="$(printf '%s\n' "${text}" | grep -oE 'export_slice:[A-Za-z_][A-Za-z0-9_]*' | head -1 | sed -E 's/^export_slice://')"
+  if [[ -z "${name}" ]]; then
+    name="$(printf '%s\n' "${text}" | grep -oE 'export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+only' | head -1 | awk '{print $2}')"
+  fi
+  printf '%s' "${name}"
 }
 
 # True when this micro is "add one top-level export function" (not class create).
