@@ -184,5 +184,53 @@ fi
   fi
 )
 
+# 8. Test Sibling Module Imports resolution in validation, rendering, and typecheck
+sibling_import_schema='{
+  "goal": "Test sibling import",
+  "targets": ["src/consumer.ts", "src/index.ts"],
+  "imports": [{"from": "./settlementBus.js", "names": ["SettlementBus"]}],
+  "exports": [
+    {
+      "kind": "class",
+      "name": "Consumer",
+      "privateFields": [{"name": "_bus", "type": "SettlementBus"}],
+      "ctorParams": [{"name": "bus", "type": "SettlementBus"}],
+      "ctorBody": ["this._bus = bus;"],
+      "methods": [],
+      "getters": [{"name": "bus", "returns": "SettlementBus", "body": "return this._bus;"}]
+    }
+  ],
+  "barrelFrom": "./consumer.js",
+  "behavior": [
+    {
+      "desc": "Consumer accepts SettlementBus instance",
+      "exports": ["Consumer"],
+      "prelude": [
+        "const bus = new SettlementBus();",
+        "const c = new Consumer(bus);"
+      ],
+      "assert": "c.bus !== undefined"
+    }
+  ]
+}'
+
+aegis_briefing_validate_json "${sibling_import_schema}" || {
+  echo "FAIL: validate_json failed on valid sibling imports schema" >&2
+  exit 1
+}
+
+rendered_md="$(aegis_briefing_render "${sibling_import_schema}")"
+if ! printf '%s' "${rendered_md}" | grep -q 'import { SettlementBus } from "./settlementBus.js";'; then
+  echo "FAIL: aegis_briefing_render did not render sibling import statement" >&2
+  exit 1
+fi
+
+aegis_briefing_typecheck_json "${sibling_import_schema}" || {
+  echo "FAIL: aegis_briefing_typecheck_json failed to resolve sibling import" >&2
+  exit 1
+}
+
+echo "[AEGIS][TEST][PASS] briefing schema pipeline: sibling module imports validated and resolved"
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: mandatory questions gate enforced"
 exit 0
+

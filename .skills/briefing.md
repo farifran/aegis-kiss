@@ -52,8 +52,9 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 5. **Schema Closure & Declaration Integrity (TS2339 / TS2552 / TS2554)**:
    - `kind` is ONLY `"class"` or `"function"`. NEVER `"interface"` or `"enum"` inside `exports[]` (types have no runtime presence in smoke imports).
+   - **Sibling Module Resolution (`imports[]`)**: When an export depends on classes or functions from existing files in `src/`, declare top-level `"imports": [{"from": "./sibling.js", "names": ["ClassName"]}]`. NEVER re-declare existing sibling classes as inline structural types in `"types"`.
    - Named data shapes go in top-level `"types": [{"name": "PascalCaseName", "shape": "{ field: string; count: number }"}]`.
-   - Every type must be a lowercase primitive, a JS builtin (`Map`, `Set`, `Uint8Array`), a class in `exports[]`, or declared in `"types"`. Undeclared types trigger TS2552.
+   - Every type must be a lowercase primitive, a JS builtin (`Map`, `Set`, `Uint8Array`), a class in `exports[]`, imported via `imports[]`, or declared in `"types"`. Undeclared types trigger TS2552.
    - No unbound type parameters `<T>`. Use concrete types or `unknown`.
    - Every helper method (e.g. `this._calcDistance()`, `this._insert()`) called inside any method body MUST be explicitly declared in `methods[]` with its signature and body. Calling unlisted methods triggers TS2339.
    - For optional parameters, declare as default initializers or union (`"string | undefined"`) and ensure `behavior[]` asserts supply all required arguments.
@@ -64,7 +65,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - **Monotonic Time & Drift Guard**: When tracking time deltas (`now - lastUpdate`), guard against negative clock drift (NTP skew) with `if (nowMs <= this._lastUpdateMs) return` without rewinding the time cursor.
    - **Zero Hot-Path Allocations**: Eliminate transient heap allocations (arrays, temporary objects, closures) inside high-frequency execution methods (`update()`, `consume()`, `allow()`).
    - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange()`) over `Int32Array` mapped on `ArrayBuffer`.
-   - **Bounded Memory & Ring Buffers**: Advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ memory recycling without leaks. In-memory maps and caches must enforce upper bounds to avoid unbounded heap growth.
+   - **Bounded Memory & Dynamic Ingestion (OOM Protection)**: Any class with in-memory collections (`Map`, `Set`) that ingests dynamic keys provided by external callers (e.g. `userId`, `accountId`, `ip`, `orderId`) MUST enforce a maximum capacity (`maxEntries`) via constructor parameter and guard before insertion (`if (this._map.size >= this._maxEntries) return false;`) to prevent V8 JavaScript heap exhaustion. Ring buffers advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ recycling without leaks.
 
 7. **Adversarial — Headless Executable Falsification Asserts (`behavior[]`)**:
    - Supply 3-4 executable regression tests exercising the implementation under active falsification pressure:

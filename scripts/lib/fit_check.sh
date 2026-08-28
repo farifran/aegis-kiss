@@ -658,7 +658,7 @@ aegis_fit_briefing_slice_export() {
   # "export function foo(bucket: TokenBucket)" when slicing TokenBucket.
   printf '%s\n' "${briefing}" | awk -v name="${name}" '
     BEGIN { keep = 0; any = 0; types = "" }
-    /^(type|interface)[[:space:]]+/ {
+    /^(type|interface|import)[[:space:]]+/ {
       types = types $0 "\n"
       next
     }

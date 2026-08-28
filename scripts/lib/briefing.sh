@@ -116,6 +116,8 @@ aegis_briefing_stable_constraints() {
 - BigInt division: when dividing by a variable BigInt denominator, guard against division by zero (if (divisor <= 0n) throw new RangeError(...))
 - Discount monotonicity: absolute minimum floors on discounted rates must never exceed the original base rate (const clamped = disc < minFloor ? minFloor : disc; return clamped > base ? base : clamped)
 - Heterogeneous collection type-guards: in constructors and methods receiving dynamic Record<string, bigint> maps, validate typeof val === 'bigint' before operations
+- Sibling module imports: when depending on classes or functions from existing files in src/, use formal top-level 'import { Name } from "./sibling.js"' declarations instead of inline structural type redeclarations
+- Dynamic key memory bounds: any in-memory Map or Set that ingests dynamic caller keys must enforce maxEntries capacity to prevent unbounded heap growth
 EOF
 }
 
@@ -285,6 +287,14 @@ aegis_briefing_validate_json() {
         ((.exports // [])[]? | select(export_math_on_bigint) | "math_on_bigint:\(.name)"),
         (if ((.barrelFrom // "") | length) > 0 and ((.barrelFrom // "") | endswith(".js") | not)
            then "barrel_not_nodenext:\(.barrelFrom)" else empty end),
+        (if ((.imports // []) | length) > 0
+           and ((.imports // []) | any(
+                 (type != "object")
+                 or ((.from // "") | type != "string" or length == 0 or (endswith(".js") | not))
+                 or (((.names // []) | if type == "array" then . else [] end) | length == 0)
+                 or (((.names // []) | if type == "array" then . else [] end) | any(type != "string" or (test("^[A-Za-z_][A-Za-z0-9_]*$") | not)))
+               ))
+           then "bad_imports_shape" else empty end),
         (if ((.questions // []) | length) > 0
            and ((.questions // []) | any(
                  (type != "object")
@@ -389,14 +399,39 @@ aegis_briefing_typecheck_json() {
   # Out of tree on purpose: the repo tsconfig includes .harness, so a scratch
   # .ts written under it would join `npm run aegis:typecheck`.
   dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_brief_tsc.XXXXXX")" || return 0
-  printf '{"extends":"%s/tsconfig.json","include":["unit.ts"],"compilerOptions":{"noEmit":false,"outDir":".","rootDir":"."}}' \
+  printf '{"extends":"%s/tsconfig.json","include":["unit.ts"],"compilerOptions":{"noEmit":true,"rootDir":"."}}' \
     "${root}" > "${dir}/tsconfig.json"
+
+  ln -s "${root}/package.json" "${dir}/package.json" 2>/dev/null || true
+  if [[ -d "${root}/node_modules" ]]; then
+    ln -s "${root}/node_modules" "${dir}/node_modules" 2>/dev/null || true
+  fi
+
+  # Link existing workspace src/ files so relative imports (./sibling.js) resolve
+  if [[ -d "${root}/src" ]]; then
+    local _src_f _bn
+    for _src_f in "${root}/src"/*.ts; do
+      [[ -f "${_src_f}" ]] || continue
+      _bn="$(basename "${_src_f}")"
+      [[ "${_bn}" == "index.ts" ]] && continue
+      ln -s "${_src_f}" "${dir}/${_bn}" 2>/dev/null || true
+    done
+  fi
+  local _ts _js
+  while IFS= read -r _ts; do
+    [[ -n "${_ts}" ]] || continue
+    _js="${_ts%.ts}.js"
+    if [[ ! -e "${_js}" ]]; then
+      ln -s "$(basename "${_ts}")" "${_js}" 2>/dev/null || true
+    fi
+  done < <(find "${dir}" -name '*.ts' 2>/dev/null || true)
 
   printf '%s' "${json}" | jq -r '
     def params($p): (($p // []) | map(.name + ": " + .type) | join(", "));
     def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
 
-    [ (.types[]? | "type \(.name) = \(.shape);") ]
+    [ (.imports[]? | "import { \((.names // []) | join(", ")) } from \"\(.from)\";") ]
+    + [ (.types[]? | "type \(.name) = \(.shape);") ]
     + [ (.exports[]?
         | if .kind == "class" then
             "export class \(.name) {"
@@ -458,11 +493,11 @@ aegis_briefing_typecheck_json() {
     ' | sort -u
   )"
 
-  # If compilation cleared without fatal errors and JS was emitted, execute
-  # behavior assertions in Node to verify runtime semantics.
-  if ! printf '%s' "${classified}" | grep -q '^tsc:' && [[ -f "${dir}/unit.js" ]]; then
+  # If compilation cleared without fatal errors, execute behavior assertions
+  # in Node via --experimental-strip-types to verify runtime semantics.
+  if ! printf '%s' "${classified}" | grep -q '^tsc:' && [[ -f "${dir}/unit.ts" ]]; then
     local node_out node_rc=0
-    node_out="$(node "${dir}/unit.js" 2>&1)" || node_rc=$?
+    node_out="$(cd "${dir}" && node --experimental-strip-types "${dir}/unit.ts" 2>&1)" || node_rc=$?
     if [[ "${node_rc}" -ne 0 && -n "${node_out}" ]]; then
       local b_findings
       b_findings="$(printf '%s\n' "${node_out}" | sed 's/^/behavior-runtime:/')"
@@ -501,6 +536,9 @@ aegis_briefing_render() {
     (((.exports // []) | map("- " + .name)) | join("\n")),
     "",
     "## Briefing",
+    (if ((.imports // []) | length) > 0
+       then ((.imports | map("import { " + ((.names // []) | join(", ")) + " } from \"" + .from + "\";")) | join("\n")) + "\n"
+       else empty end),
     (if ((.types // []) | length) > 0
        then ((.types | map("type " + .name + " = " + .shape)) | join("\n")) + "\n"
        else empty end),

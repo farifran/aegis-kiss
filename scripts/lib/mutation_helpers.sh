@@ -874,10 +874,14 @@ aegis_briefing_class_to_ts() {
   )"
   [[ -n "$(printf '%s' "${block}" | tr -d '[:space:]')" ]] || return 1
 
-  local types
+  local imports types
+  imports="$(
+    printf '%s\n' "${briefing}" | awk '/^import[[:space:]]+/ { if ($0 !~ /;[[:space:]]*$/) $0 = $0 ";"; print }'
+  )"
   types="$(
     printf '%s\n' "${briefing}" | awk '/^(type|interface)[[:space:]]+/ { if ($0 !~ /;[[:space:]]*$/) $0 = $0 ";"; print }'
   )"
+  [[ -z "${imports}" ]] || printf '%s\n\n' "${imports}"
   [[ -z "${types}" ]] || printf '%s\n\n' "${types}"
 
   # Deterministic pseudo-Briefing → TS class. Handles:
