@@ -46,6 +46,9 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Private class fields assigned only in constructor must be declared with `readonly` (e.g. `private readonly _maxTokens: bigint`).
    - Prefer default parameter initializers (e.g. `nowMs: bigint = BigInt(Date.now())`) over union with `undefined` and internal ternaries.
    - When validating a `number` parameter before BigInt conversion or rate calculation, guard against non-finite values, unsafe float overflow, and positive underflow to zero via `!Number.isFinite(x)`, `x * scale > Number.MAX_SAFE_INTEGER`, and `x > 0 && Math.round(x * scale) === 0` (e.g. `if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER || (mbps > 0 && Math.round(mbps * 8000) === 0)) throw new RangeError(...)`).
+   - **Division by Zero Guard**: When dividing by a variable BigInt denominator, guard against division by zero with `if (divisor <= 0n) throw new RangeError("Division by zero or negative divisor")`.
+   - **Discount Monotonicity Invariant**: When applying an absolute floor ($P$) to a discounted rate or fee derived from a base ($B$), the result must never exceed the original base: clamp with `const clamped = disc < minFloor ? minFloor : disc; return clamped > base ? base : clamped;` so small base rates are never penalized by high volume.
+   - **Heterogeneous Collection Type-Guards**: In constructors or public methods receiving dynamic maps (`Record<string, bigint>`), guard values with `if (typeof bal !== 'bigint' || bal < 0n) throw new RangeError(...)` against untyped JavaScript runtime callers.
 
 5. **Schema Closure & Declaration Integrity (TS2339 / TS2552 / TS2554)**:
    - `kind` is ONLY `"class"` or `"function"`. NEVER `"interface"` or `"enum"` inside `exports[]` (types have no runtime presence in smoke imports).
@@ -61,7 +64,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - **Monotonic Time & Drift Guard**: When tracking time deltas (`now - lastUpdate`), guard against negative clock drift (NTP skew) with `if (nowMs <= this._lastUpdateMs) return` without rewinding the time cursor.
    - **Zero Hot-Path Allocations**: Eliminate transient heap allocations (arrays, temporary objects, closures) inside high-frequency execution methods (`update()`, `consume()`, `allow()`).
    - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange()`) over `Int32Array` mapped on `ArrayBuffer`.
-   - **Bounded Memory & Ring Buffers**: Advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ memory recycling without leaks.
+   - **Bounded Memory & Ring Buffers**: Advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ memory recycling without leaks. In-memory maps and caches must enforce upper bounds to avoid unbounded heap growth.
 
 7. **Adversarial — Headless Executable Falsification Asserts (`behavior[]`)**:
    - Supply 3-4 executable regression tests exercising the implementation under active falsification pressure:

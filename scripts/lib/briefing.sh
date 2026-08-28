@@ -113,6 +113,9 @@ aegis_briefing_stable_constraints() {
 - Immutability: private class fields that are assigned only in the constructor must be declared 'private readonly'
 - Function signatures: prefer default parameter initializers (e.g. nowMs: bigint = BigInt(Date.now())) over union with undefined and internal ternaries
 - Number-to-BigInt validation: when validating a number parameter before BigInt conversion or rate calculation, guard against non-finite values, unsafe float overflow, and zero-underflow (if (!Number.isFinite(x) || x < 0 || x * scale > Number.MAX_SAFE_INTEGER || (x > 0 && Math.round(x * scale) === 0)) throw new RangeError(...))
+- BigInt division: when dividing by a variable BigInt denominator, guard against division by zero (if (divisor <= 0n) throw new RangeError(...))
+- Discount monotonicity: absolute minimum floors on discounted rates must never exceed the original base rate (const clamped = disc < minFloor ? minFloor : disc; return clamped > base ? base : clamped)
+- Heterogeneous collection type-guards: in constructors and methods receiving dynamic Record<string, bigint> maps, validate typeof val === 'bigint' before operations
 EOF
 }
 

@@ -14,7 +14,7 @@ Act as a Senior Security Red Teamer & Devil's Advocate (Advogado do Diabo). Igno
 2. **State & Lifecycle Invariants**: What unhandled edge input leaves state inconsistent? Do mutating methods leave public getters, flags, or bitmasks desynchronized? (e.g. `refillActive` stuck on `true` when tokens == maxTokens).
 3. **Temporal & Clock Monotonicity**: Does negative clock drift (`timeDiff < 0n` via NTP sync) drain or corrupt rate accumulator state?
 4. **Commit Record Alignment**: Does the patch satisfy immediate demand while breaking protected `Aegis-Accept` tokens from managed commits?
-5. **Boundary & Precision**: Does float loss, overflow, division by zero, float arithmetic exceeding `Number.MAX_SAFE_INTEGER`, sub-unit underflow collapsing to zero (e.g. `0 < x < epsilon` resulting in `0n` rate), non-finite IEEE-754 floats (`NaN`, `+Infinity`, `-Infinity`) passing scalar guards, or unhandled `RangeError` on conversions crash execution or corrupt precision?
+5. **Boundary & Precision**: Does float loss, overflow, division by zero, float arithmetic exceeding `Number.MAX_SAFE_INTEGER`, sub-unit underflow collapsing to zero (e.g. `0 < x < epsilon` resulting in `0n` rate), non-finite IEEE-754 floats (`NaN`, `+Infinity`, `-Infinity`) passing scalar guards, discount floor inversions penalizing small base rates (`minFloor > base`), or unhandled `RangeError` on conversions crash execution or corrupt precision?
 
 ## Anti-Over-Engineering Filter (Strict KISS Law)
 - **PROHIBITED (Over-engineering / YAGNI)**: Never suggest factories, strategies, multi-tier abstraction layers, generic frameworks, or unrequested telemetry/logging.
