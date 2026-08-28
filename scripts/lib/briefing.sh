@@ -112,6 +112,7 @@ aegis_briefing_stable_constraints() {
 - Monotonic time / clock drift: when tracking time deltas (now - lastUpdate), guard with if (now <= lastUpdate) return without rewinding lastUpdate on negative clock jumps (NTP skew)
 - Immutability: private class fields that are assigned only in the constructor must be declared 'private readonly'
 - Function signatures: prefer default parameter initializers (e.g. nowMs: bigint = BigInt(Date.now())) over union with undefined and internal ternaries
+- Number-to-BigInt validation: when validating a number parameter before BigInt conversion or rate calculation, guard against non-finite values (if (!Number.isFinite(x) || x < 0) throw new RangeError(...))
 EOF
 }
 
