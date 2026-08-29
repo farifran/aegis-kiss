@@ -72,3 +72,5 @@ export class TokenBucketRateLimiter {
 export function createTokenBucket(capacity: bigint, refillRatePerSec: bigint): TokenBucketRateLimiter {
   return new TokenBucketRateLimiter({ capacity, refillRatePerSec });
 }
+
+export { TokenBucketRateLimiter as RateLimiter };
