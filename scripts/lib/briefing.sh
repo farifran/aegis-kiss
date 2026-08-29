@@ -332,7 +332,34 @@ aegis_briefing_validate_json() {
                      | any(type != "string"))
                  or (((.exports // []) | any(type != "string" or length == 0))))
                )
-           then "bad_behavior_shape" else empty end)
+           then "bad_behavior_shape" else empty end),
+        (if ((.proofObligations // []) | length) > 0
+           and ((.proofObligations // []) | any(
+                 (type != "object")
+                 or ((.id // "") | type != "string" or length == 0)
+                 or ((.invariant // "") | type != "string" or length == 0)
+                 or ((.oracle // "") | type != "string" or length == 0)
+               ))
+           then "bad_proof_obligations_shape" else empty end),
+        (if (.performanceContract // null) != null
+           and (
+                 ((.performanceContract | type) != "object")
+                 or (((.performanceContract.hotPath // []) | if type == "array" then . else [] end) | any(type != "string"))
+               )
+           then "bad_performance_contract_shape" else empty end),
+        (if (.targetJustification // null) != null
+           and (
+                 ((.targetJustification | type) != "object")
+                 or (((.targetJustification.additionalFiles // []) | if type == "array" then . else [] end) | any(type != "string"))
+               )
+           then "bad_target_justification_shape" else empty end),
+        (if ((.claims // []) | length) > 0
+           and ((.claims // []) | any(
+                 (type != "object")
+                 or ((.id // "") | type != "string" or length == 0)
+                 or ((.requirement // "") | type != "string" or length == 0)
+               ))
+           then "bad_claims_shape" else empty end)
       ] | first // ""
     ' 2>/dev/null || true
   )"
@@ -474,11 +501,21 @@ aegis_briefing_typecheck_json() {
         | "async function __behavior\($i)(): Promise<boolean> {\n"
           + lines(($b.prelude // [] | if type == "string" then [.] else . end); "  ")
           + "\n  const __ok\($i): boolean = (\($b.assert // "true"));\n  return __ok\($i);\n}" ]
-    + [ (if ((.behavior // []) | length) > 0 then
+    + [ (.proofObligations // []) | to_entries[]
+        | "\(.key)" as $i
+        | .value as $po
+        | "async function __proof_obligation_\($i)(): Promise<boolean> {\n"
+          + lines(($po.prelude // [] | if type == "string" then [.] else . end); "  ")
+          + "\n  const __ok\($i): boolean = (\($po.oracle // "true"));\n  return __ok\($i);\n}" ]
+    + [ (if (((.behavior // []) | length) + ((.proofObligations // []) | length)) > 0 then
           "async function __run_all(): Promise<void> {\n"
           + "  const errs: string[] = [];\n"
           + ([ (.behavior // []) | to_entries[]
                | "  try { if (!(await __behavior\(.key)())) errs.push(\"assert_failed:\(.key)\"); } catch (e: any) { errs.push(\"exception:\(.key):\" + String(e?.message || e)); }"
+             ] | join("\n"))
+          + (if ((.behavior // []) | length) > 0 and ((.proofObligations // []) | length) > 0 then "\n" else "" end)
+          + ([ (.proofObligations // []) | to_entries[]
+               | "  try { if (!(await __proof_obligation_\(.key)())) errs.push(\"proof_obligation_failed:\(.value.id // .key)\"); } catch (e: any) { errs.push(\"po_exception:\(.value.id // .key):\" + String(e?.message || e)); }"
              ] | join("\n"))
           + "\n  if (errs.length > 0) throw new Error(errs.join(\"\\n\"));\n"
           + "}\nvoid __run_all();"
@@ -615,6 +652,39 @@ aegis_briefing_render() {
                | map("\n   prelude: " + .) | join(""))
             + "\n   assert: " + ($b.assert // "")
         )) | join("\n")
+      ))
+    else empty end),
+    (if ((.proofObligations // []) | length) > 0 then
+      ("", "## Proof Obligations & Invariants", (
+        (.proofObligations | to_entries | map(
+          (.key + 1 | tostring) as $n
+          | .value as $po
+          | "- [" + ($po.id // ("PO-" + $n)) + "] " + ($po.invariant // "")
+            + (((($po.prelude // []) | if type == "string" then [.] else . end))
+               | map("\n   prelude: " + .) | join(""))
+            + "\n   oracle: " + ($po.oracle // "")
+        )) | join("\n")
+      ))
+    else empty end),
+    (if (.performanceContract // null) != null then
+      ("", "## Performance & Allocation Contract", (
+        "- Hot-path methods: " + (((.performanceContract.hotPath // []) | join(", ")))
+        + "\n- Max heap allocations in hot-path: " + ((.performanceContract.maxAllocations // 0 | tostring))
+      ))
+    else empty end),
+    (if ((.claims // []) | length) > 0 then
+      ("", "## Claims Provenance", (
+        (.claims | to_entries | map(
+          "- [" + (.value.id // ("CLAIM-" + (.key + 1 | tostring))) + "] "
+          + (.value.requirement // "")
+          + (if ((.value.source // "") | length) > 0 then " (source: " + .value.source + ")" else "" end)
+        )) | join("\n")
+      ))
+    else empty end),
+    (if (.targetJustification // null) != null and (((.targetJustification.additionalFiles // []) | length) > 0) then
+      ("", "## Target Justification", (
+        "- Additional targets: " + (((.targetJustification.additionalFiles // []) | join(", ")))
+        + "\n- Rationale: " + (.targetJustification.reason // "")
       ))
     else empty end),
     "",
