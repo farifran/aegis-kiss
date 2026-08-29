@@ -1,3 +1,13 @@
 // src/index.ts
-import { ChessIntelligence, compileChessTelemetryMask } from './chessIntelligence.js';
-export { ChessIntelligence, compileChessTelemetryMask };
+export {
+  MiniAegis,
+  createMiniAegis,
+} from './miniAegis.js';
+
+export type {
+  TargetEvidence,
+  GovernanceContext,
+  ForensicReport,
+  EpistemicPromptPayload,
+  MiniAegisOptions,
+} from './miniAegis.js';
