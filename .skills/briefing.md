@@ -84,8 +84,19 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Transições de estado em hot paths devem atualizar hashes de estado (ex: Zobrist) por delta XOR $O(1)$, sendo terminantemente proibido varrer o estado completo $O(N)$ dentro de `makeMove`/`undoMove`.
 5. **Anti-Overfitting de Coleções (Ruído & Permutações)**:
    - Para métodos que resolvem lotes, grafos, ciclos, reconciliações ou pares, o teste comportamental DEVE incluir elementos fora de ordem e ao menos 1 elemento de ruído/linear para impedir implementações com índices fixos (`arr[0]`).
-6. **Determinismo Temporal**:
-   - NUNCA usar `setTimeout`, `Date.now()` ou `Math.random()` dentro das asserções.
+### Axioma V — Invariantes Semânticas de Domínio (Domain Invariants)
+1. **Predicado Explícito de Validade de Estado**:
+   - Todo estado de domínio complexo DEVE possuir um predicado ou guarda de integridade estrutural (ex.: número exato de entidades vitais, sem sobreposição física de posições).
+2. **Proibição de Degradação Silenciosa**:
+   - Estados inválidos NUNCA devem retornar `false` ou degradar silenciosamente em comportamentos nominais; devem ser explicitamente invalidados ou rejeitados (ex.: ausência de entidade vital é um erro de integridade, não um estado "seguro").
+3. **Preservação de Invariantes em Transições de Estado**:
+   - Toda transição operacional (`make`/`undo`) deve garantir a restauração ou progressão determinística de todos os predicados de domínio e lançar erro de limite se a capacidade de pilha for excedida (`_stateSp >= capacity`).
+4. **Semântica Distinta para Estado Persistente vs Estado Volátil de Busca**:
+   - Histórico persistente de eventos/partida (`GameHistory`) e a pilha volátil de busca/tentativas (`SearchStack`) possuem ciclos de vida ortogonais e não devem ser misturados.
+5. **Chaves de Identidade Derivadas (Equivalência Estrita)**:
+   - Hashes e chaves compactas de estado devem codificar exatamente as variáveis relevantes para equivalência formal (ex.: direitos condicionais ativos apenas quando a ação correspondente é fisicamente viável).
+6. **Falsificação Adversarial Obrigatória**:
+   - Nenhuma regra de domínio não trivial é aceita sem pelo menos um caso de teste adversarial ou oráculo combinatório (ex.: $\text{Perft}(1) = 20, \text{Perft}(2) = 400$, roques com casas sob ataque, en passant com cheque descoberto).
 
 ---
 
