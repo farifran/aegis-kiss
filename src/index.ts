@@ -7,3 +7,6 @@ export { ClearingEngine, obterEstadoCompensacaoBitmask };
 
 import { ClearinghouseCore, obterClearinghouseBitmask } from './clearinghouseCore.js';
 export { ClearinghouseCore, obterClearinghouseBitmask };
+
+import { LiquidityResolver, obterLiquidityResolverBitmask } from './liquidityResolver.js';
+export { LiquidityResolver, obterLiquidityResolverBitmask };
