@@ -24,6 +24,8 @@ readonly AEGIS_DEMAND_TOKEN_SEP=';;'
 # Sourcing modular subsystems (preserves 100% backward compatibility)
 _aegis_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1090
+[[ -f "${_aegis_lib_dir}/mini_aegis.sh" ]] && source "${_aegis_lib_dir}/mini_aegis.sh"
+# shellcheck disable=SC1090
 [[ -f "${_aegis_lib_dir}/mutation_helpers.sh" ]] && source "${_aegis_lib_dir}/mutation_helpers.sh"
 # shellcheck disable=SC1090
 [[ -f "${_aegis_lib_dir}/mechanical_scans.sh" ]] && source "${_aegis_lib_dir}/mechanical_scans.sh"
@@ -684,64 +686,7 @@ aegis_file_top_level_export_names() {
 
 aegis_intake_discover_context() {
   local targets_raw="${1:-}"
-  local targets=() t
-  
-  # 1. Normaliza targets (seguro contra vírgulas ou múltiplos argumentos)
-  for t in $(printf '%s' "${targets_raw}" | tr ',' ' '); do
-    [[ -n "${t}" ]] && targets+=("${t}")
-  done
-
-  # 2. Se o entry point principal existir (ex: src/index.ts) e não estiver na lista, inclui para contexto
-  for ec in src/index.ts src/mod.ts src/main.ts index.ts; do
-    if [[ -f "${ec}" ]]; then
-      [[ " ${targets[*]} " != *" ${ec} "* ]] && targets+=("${ec}")
-      break
-    fi
-  done
-
-  # 3. Extrai evidência de cada arquivo alvo (orçamento de 16 KB)
-  local files_evidence="[]"
-  local max_bytes=16384
-  for t in "${targets[@]}"; do
-    local exists=false exports="[]" snippet="" is_truncated=false file_bytes=0
-    if [[ -f "${t}" ]]; then
-      exists=true
-      local content
-      content="$(cat "${t}" 2>/dev/null || true)"
-      file_bytes="$(wc -c < "${t}" 2>/dev/null || echo 0)"
-      local raw_exports
-      raw_exports="$(aegis_file_top_level_export_names "${content}" 2>/dev/null || true)"
-      if [[ -n "${raw_exports}" ]]; then
-        exports="$(printf '%s\n' "${raw_exports}" | sed '/^$/d' | jq -R . | jq -s . 2>/dev/null || printf '[]')"
-      fi
-      if [[ "${file_bytes}" -le "${max_bytes}" ]]; then
-        snippet="${content}"
-      else
-        snippet="${content:0:max_bytes}"
-        is_truncated=true
-      fi
-    fi
-    files_evidence="$(jq \
-      --arg path "${t}" \
-      --argjson exists "${exists}" \
-      --argjson exports "${exports}" \
-      --arg snippet "${snippet}" \
-      --argjson truncated "${is_truncated}" \
-      --argjson bytes "${file_bytes}" \
-      '. + [{path: $path, exists: $exists, exports: $exports, snippet: $snippet, bytes: $bytes, truncated: $truncated}]' \
-      <<< "${files_evidence}" 2>/dev/null || printf '%s' "${files_evidence}")"
-  done
-
-  # 4. Pocket map universal do workspace (*.ts, *.tsx, *.js, *.jsx)
-  local pocket_map_json="[]"
-  if command -v git >/dev/null 2>&1; then
-    pocket_map_json="$(git ls-files '*.ts' '*.tsx' '*.js' '*.jsx' 2>/dev/null | head -n 50 | jq -R . | jq -s . 2>/dev/null || printf '[]')"
-  fi
-
-  jq -cn \
-    --argjson targets "${files_evidence}" \
-    --argjson topology "${pocket_map_json}" \
-    '{topology: $topology, targets: $targets}'
+  mini_aegis_discover_context "${targets_raw}"
 }
 
 # Acceptance tokens from demand markdown (one per line).
