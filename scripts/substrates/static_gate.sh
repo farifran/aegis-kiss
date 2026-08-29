@@ -151,7 +151,7 @@ run_eval_grep_fallback() {
       ;;
   esac
 
-  # TypeScript Type-Tightening Checks
+  # TypeScript Type-Tightening & Zero-GC Checks
   case "${file}" in
     *.ts|*.tsx)
       # 5. Explicit return type check on exported functions (Type Tightening)
@@ -160,6 +160,19 @@ run_eval_grep_fallback() {
         failed=1
         gate_error "exported function missing explicit return type annotation: ${file}"
         printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+      fi
+
+      # 6. Zero-GC Hot-Path Heap Allocation Check
+      if [[ "${file}" != *"test"* ]] && [[ "${file}" != *"spec"* ]]; then
+        hits="$(grep -nE '(\._stateStack|\._stack|\._history|\.stack)\.push\([[:space:]]*\{[^}]*\[\.\.\.' "${file}" 2>/dev/null || true)"
+        if [[ -z "${hits}" ]]; then
+          hits="$(grep -nE '\.push\([[:space:]]*\{[[:space:]]*[A-Za-z0-9_$]+:[[:space:]]*\[\.\.\.this\._' "${file}" 2>/dev/null || true)"
+        fi
+        if [[ -n "${hits}" ]]; then
+          failed=1
+          gate_error "heap allocation detected in state stack operation (violates Zero-GC hot-path contract): ${file}"
+          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+        fi
       fi
       ;;
   esac

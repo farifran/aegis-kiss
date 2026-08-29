@@ -1,0 +1,16 @@
+# =========================================================
+# AEGIS — structural physics (Zero-GC / Allocation Gate)
+# Array spread in internal state push creates GC churn in hot paths.
+# =========================================================
+
+id: no-hotpath-spread-allocation
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Array spread [...$EXPR] allocates dynamic heap memory in internal state operations. Use pre-allocated typed arrays, static buffers, or in-place indexing.
+
+rule:
+  pattern: '$STACK.push({ $$$BEFORE, $FIELD: [...$EXPR], $$$AFTER })'
