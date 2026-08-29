@@ -68,3 +68,7 @@ export class TokenBucketRateLimiter {
 
   get refillActive(): boolean { return this._tokens < this._capacity; }
 }
+
+export function createTokenBucket(capacity: bigint, refillRatePerSec: bigint): TokenBucketRateLimiter {
+  return new TokenBucketRateLimiter({ capacity, refillRatePerSec });
+}
