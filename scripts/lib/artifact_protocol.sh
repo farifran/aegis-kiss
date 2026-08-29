@@ -1032,6 +1032,24 @@ readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
             }]
           else [] end
         )
+      + (
+          if (($cand_diff // "")
+              | split("\n")
+              | map(select(startswith("+") and (startswith("+++") | not)))
+              | map(select(test("\\.push\\([[:space:]]*\\{[^}]*\\[\\.\\.\\.")))
+              | length) > 0
+          then
+            [{
+              type: "contract_violation",
+              severity: "high",
+              description: "candidate introduces array spread in state push (violates Zero-GC hot-path contract)",
+              supported_by_evidence: true,
+              evidence_refs: ["candidate.diff", "performance.zero_gc"],
+              target_files: $cand_files,
+              fix: "Replace array spread with pre-allocated buffer or in-place state mutation"
+            }]
+          else [] end
+        )
     ) as $mech_findings
   | .findings = (
       ($mech_findings + (.findings // []))

@@ -10,6 +10,7 @@ export class ChessIntelligence {
   private _history: bigint[];
   private readonly _zobristTable: bigint[];
   private _stateStack: { pieces: bigint[]; side: number; castling: number; ep: number; hash: bigint }[];
+  private _stateSp: number;
 
   constructor() {
     this._pieces = [0x000000000000FF00n, 0x0000000000000042n, 0x0000000000000024n, 0x0000000000000081n, 0x0000000000000008n, 0x0000000000000010n, 0x00FF000000000000n, 0x4200000000000000n, 0x2400000000000000n, 0x8100000000000000n, 0x0800000000000000n, 0x1000000000000000n];
@@ -18,12 +19,17 @@ export class ChessIntelligence {
     this._enPassantSquare = -1;
     this._zobristHash = 0n;
     this._history = [];
-    this._stateStack = [];
+    this._stateSp = 0;
+    const stack: { pieces: bigint[]; side: number; castling: number; ep: number; hash: bigint }[] = [];
+    for (let i = 0; i < 256; i++) {
+      stack.push({ pieces: [0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], side: 0, castling: 0, ep: -1, hash: 0n });
+    }
+    this._stateStack = stack;
     const table: bigint[] = [];
     let state = 0x123456789abcdef0n;
     for (let i = 0; i < 12 * 64 + 1 + 16 + 65; i++) {
-    state = (state * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
-    table.push(state);
+      state = (state * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
+      table.push(state);
     }
     this._zobristTable = table;
     this.resetBoard();
@@ -35,7 +41,7 @@ export class ChessIntelligence {
     this._castlingRights = 15;
     this._enPassantSquare = -1;
     this._history = [];
-    this._stateStack = [];
+    this._stateSp = 0;
     this._recomputeZobrist();
   }
 
@@ -257,7 +263,18 @@ export class ChessIntelligence {
 
   makeMove(m: ChessMove): boolean {
     const movingSide = this._sideToMove;
-    this._stateStack.push({ pieces: [...this._pieces], side: this._sideToMove, castling: this._castlingRights, ep: this._enPassantSquare, hash: this._zobristHash });
+    const sp = this._stateSp;
+    const frame = this._stateStack[sp];
+    if (frame !== undefined) {
+      for (let p = 0; p < 12; p++) {
+        frame.pieces[p] = this._pieces[p] ?? 0n;
+      }
+      frame.side = this._sideToMove;
+      frame.castling = this._castlingRights;
+      frame.ep = this._enPassantSquare;
+      frame.hash = this._zobristHash;
+      this._stateSp++;
+    }
     this._history.push(this._zobristHash);
     let movingPiece = -1;
     const fromBit = 1n << BigInt(m.from);
@@ -265,30 +282,30 @@ export class ChessIntelligence {
     const startP = movingSide === 0 ? 0 : 6;
     const endP = movingSide === 0 ? 6 : 12;
     for (let p = startP; p < endP; p++) {
-    const bb = this._pieces[p];
-    if (bb !== undefined && (bb & fromBit) !== 0n) { movingPiece = p; break; }
+      const bb = this._pieces[p];
+      if (bb !== undefined && (bb & fromBit) !== 0n) { movingPiece = p; break; }
     }
     if (movingPiece === -1) { this.undoMove(); return false; }
     this._pieces[movingPiece] = (this._pieces[movingPiece] ?? 0n) ^ fromBit;
     if (m.isEnPassant) {
-    const capSq = movingSide === 0 ? m.to - 8 : m.to + 8;
-    const capP = movingSide === 0 ? 6 : 0;
-    this._pieces[capP] = (this._pieces[capP] ?? 0n) ^ (1n << BigInt(capSq));
+      const capSq = movingSide === 0 ? m.to - 8 : m.to + 8;
+      const capP = movingSide === 0 ? 6 : 0;
+      this._pieces[capP] = (this._pieces[capP] ?? 0n) ^ (1n << BigInt(capSq));
     } else {
-    const oppStart = movingSide === 0 ? 6 : 0;
-    const oppEnd = movingSide === 0 ? 12 : 6;
-    for (let p = oppStart; p < oppEnd; p++) {
-    const bb = this._pieces[p];
-    if (bb !== undefined && (bb & toBit) !== 0n) { this._pieces[p] = bb ^ toBit; break; }
-    }
+      const oppStart = movingSide === 0 ? 6 : 0;
+      const oppEnd = movingSide === 0 ? 12 : 6;
+      for (let p = oppStart; p < oppEnd; p++) {
+        const bb = this._pieces[p];
+        if (bb !== undefined && (bb & toBit) !== 0n) { this._pieces[p] = bb ^ toBit; break; }
+      }
     }
     const finalPiece = m.promotion !== undefined ? m.promotion : movingPiece;
     this._pieces[finalPiece] = (this._pieces[finalPiece] ?? 0n) | toBit;
     if (m.isCastling) {
-    if (m.to === 6) this._pieces[3] = (this._pieces[3] ?? 0n) ^ (1n << 7n) | (1n << 5n);
-    else if (m.to === 2) this._pieces[3] = (this._pieces[3] ?? 0n) ^ (1n << 0n) | (1n << 3n);
-    else if (m.to === 62) this._pieces[9] = (this._pieces[9] ?? 0n) ^ (1n << 63n) | (1n << 61n);
-    else if (m.to === 58) this._pieces[9] = (this._pieces[9] ?? 0n) ^ (1n << 56n) | (1n << 59n);
+      if (m.to === 6) this._pieces[3] = (this._pieces[3] ?? 0n) ^ (1n << 7n) | (1n << 5n);
+      else if (m.to === 2) this._pieces[3] = (this._pieces[3] ?? 0n) ^ (1n << 0n) | (1n << 3n);
+      else if (m.to === 62) this._pieces[9] = (this._pieces[9] ?? 0n) ^ (1n << 63n) | (1n << 61n);
+      else if (m.to === 58) this._pieces[9] = (this._pieces[9] ?? 0n) ^ (1n << 56n) | (1n << 59n);
     }
     if (movingPiece === 5) this._castlingRights = this._castlingRights & ~3;
     if (movingPiece === 11) this._castlingRights = this._castlingRights & ~12;
@@ -306,13 +323,17 @@ export class ChessIntelligence {
   }
 
   undoMove(): void {
-    const st = this._stateStack.pop();
-    if (!st) return;
-    this._pieces = st.pieces;
-    this._sideToMove = st.side;
-    this._castlingRights = st.castling;
-    this._enPassantSquare = st.ep;
-    this._zobristHash = st.hash;
+    if (this._stateSp <= 0) return;
+    this._stateSp--;
+    const frame = this._stateStack[this._stateSp];
+    if (frame === undefined) return;
+    for (let p = 0; p < 12; p++) {
+      this._pieces[p] = frame.pieces[p] ?? 0n;
+    }
+    this._sideToMove = frame.side;
+    this._castlingRights = frame.castling;
+    this._enPassantSquare = frame.ep;
+    this._zobristHash = frame.hash;
     this._history.pop();
   }
 
