@@ -71,12 +71,20 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 ### Axioma IV — Falsificação Simétrica & Obrigações de Prova (Proof Obligations & Invariants)
 1. **Separação entre Comportamento (`behavior[]`) e Invariantes Algébricas (`proofObligations[]`)**:
    - `behavior[]`: Casos nominais, exaustão de fronteira e estresse para validação observável.
-   - `proofObligations[]`: Invariantes matemáticas que devem permanecer verdadeiras sobre todo o espaço de estados (ex.: reversibilidade algébrica $undo(make(s)) \equiv s$, conservação de energia/massa/tokens, idempotência).
-2. **Anti-Overfitting de Coleções (Ruído & Permutações)**:
+   - `proofObligations[]`: Invariantes matemáticas que devem permanecer verdadeiras sobre todo o espaço de estados:
+     * *Reversibilidade Algébrica*: $undo(make(s)) \equiv s$ auditando restauração exata de todos os campos primitivos.
+     * *Oráculos Combinatórios (Perft)*: Para motores de estado/árvores táticas, o briefing DEVE incluir contagens combinatórias formais (ex: $Perft(1) = 20, Perft(2) = 400$).
+     * *Integridade Estrutural de Estado*: Estados impossíveis (ex: zero reis, múltiplos reis, torre ausente em roque) devem ser explicitamente invalidados.
+2. **Separação entre Fronteira Pública e Hot-Path Interno**:
+   - No hot path (busca, árvores, laços $O(1)$), o motor deve operar exclusivamente com inteiros compactos (`number`/`bigint`) e arrays pré-alocados (`Int32Array`/`BigUint64Array`).
+   - Objetos tipados de conveniência da API (ex: `ChessMove`) devem ser instanciados APENAS na fronteira pública (`generateLegalMoves(): ChessMove[]`).
+3. **Completude de Tabelas Heurísticas e Posicionais (PST)**:
+   - Se a demanda exigir avaliação posicional por tabelas (PST), todas as entidades ativas relevantes DEVEM possuir tabelas de 64 elementos completas no schema, ou uma decisão estruturada em `questions[]` deve ser emitida.
+4. **Atualização Incremental de Hash ($O(1)$)**:
+   - Transições de estado em hot paths devem atualizar hashes de estado (ex: Zobrist) por delta XOR $O(1)$, sendo terminantemente proibido varrer o estado completo $O(N)$ dentro de `makeMove`/`undoMove`.
+5. **Anti-Overfitting de Coleções (Ruído & Permutações)**:
    - Para métodos que resolvem lotes, grafos, ciclos, reconciliações ou pares, o teste comportamental DEVE incluir elementos fora de ordem e ao menos 1 elemento de ruído/linear para impedir implementações com índices fixos (`arr[0]`).
-3. **Verificação de Efeitos Colaterais em Dependências Injetadas**:
-   - Se um método promete alterar o estado de uma dependência injetada (ex: `bus: SettlementBus`), a asserção DEVE validar tanto o retorno quanto o estado resultante na dependência.
-4. **Determinismo Temporal**:
+6. **Determinismo Temporal**:
    - NUNCA usar `setTimeout`, `Date.now()` ou `Math.random()` dentro das asserções.
 
 ---

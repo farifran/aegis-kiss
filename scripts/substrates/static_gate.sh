@@ -173,6 +173,13 @@ run_eval_grep_fallback() {
           gate_error "heap allocation detected in state stack operation (violates Zero-GC hot-path contract): ${file}"
           printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
         fi
+
+        # 7. Incremental Hash Hot-Path Check (makeMove must not trigger full O(N) recompute)
+        hits="$(grep -nE 'makeMove\b.*\{([^}]*\n)+[[:space:]]*this\._recomputeZobrist\(\)' "${file}" 2>/dev/null || true)"
+        if [[ -n "${hits}" ]]; then
+          gate_error "makeMove performs full O(N) hash recomputation instead of incremental O(1) XOR delta: ${file}"
+          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+        fi
       fi
       ;;
   esac
