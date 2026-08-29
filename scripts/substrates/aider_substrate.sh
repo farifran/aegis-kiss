@@ -47,6 +47,10 @@ AEGIS_AIDER_OUTPUT_LOG=""
 source "scripts/lib/common.sh"
 # shellcheck disable=SC1091
 source "scripts/lib/demand.sh"
+# shellcheck disable=SC1091
+source "scripts/lib/briefing.sh"
+# shellcheck disable=SC1091
+source "scripts/lib/mutation_helpers.sh"
 AEGIS_LOG_TAG="AIDER"
 
 # shellcheck disable=SC1091

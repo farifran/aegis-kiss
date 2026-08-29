@@ -708,12 +708,12 @@ aegis_demand_is_export_function_slice() {
   # Briefing must declare export function Name (not only class).
   printf '%s\n' "${text}" \
     | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
-    | grep -qE "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)" \
+    | grep -E "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)" >/dev/null \
     || return 1
   # Prefer not to treat pure class slices as function append.
   if printf '%s\n' "${text}" \
     | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
-    | grep -qE "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)"; then
+    | grep -E "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)" >/dev/null; then
     return 1
   fi
   return 0
@@ -835,12 +835,12 @@ aegis_demand_is_export_class_slice() {
   [[ -n "${name}" ]] || return 1
   printf '%s\n' "${text}" \
     | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
-    | grep -qE "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)" \
+    | grep -E "export[[:space:]]+class[[:space:]]+${name}([^A-Za-z0-9_]|$)" >/dev/null \
     || return 1
   # Function-only slices are handled elsewhere.
   if printf '%s\n' "${text}" \
     | awk '/^## Briefing[[:space:]]*$/ {p=1;next} /^## / {p=0} p' \
-    | grep -qE "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)"; then
+    | grep -E "export[[:space:]]+function[[:space:]]+${name}([^A-Za-z0-9_]|$)" >/dev/null; then
     return 1
   fi
   return 0
@@ -1076,6 +1076,15 @@ aegis_mechanical_export_class_create() {
     body="$(aegis_strip_aider_whole_file_junk "${body}")"
     names="$(aegis_file_top_level_export_names "${body}")"
     if printf '%s\n' "${names}" | grep -Fxq -- "${name}"; then
+      local n_exp
+      n_exp="$(printf '%s\n' "${names}" | grep -c . || true)"
+      if [[ "${n_exp:-0}" -le 1 ]]; then
+        ts="$(aegis_briefing_class_to_ts "${demand}" "${name}")" || return 1
+        ts="$(aegis_mechanical_ts_fix_bigint_arith "${ts}")"
+        [[ -n "$(printf '%s' "${ts}" | tr -d '[:space:]')" ]] || return 1
+        printf '%s\n' "${ts}" > "${surface}"
+        return 0
+      fi
       return 1
     fi
     # Non-empty with other code but missing class — skip (unsafe to invent merge).

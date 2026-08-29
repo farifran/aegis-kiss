@@ -1,5 +1,4 @@
 {
   "status": "approved",
-  "basis": "clean_micro_unit",
-  "suggestions": []
+  "basis": "bitboard representation, legal move generation, and alpha-beta pruning adhere to O(1) in-memory physics without GC overhead"
 }
