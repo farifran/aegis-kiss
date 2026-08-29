@@ -199,7 +199,7 @@ mode_requires_execution_surface() {
 }
 
 mode_starts_new_investigation() {
-  [[ "${AEGIS_MODE}" == "discovery" ]]
+  [[ "${AEGIS_MODE}" == "discovery" || "${AEGIS_MODE}" == "mutation" ]]
 }
 
 artifact_snapshot_investigation_input_from_handover() {

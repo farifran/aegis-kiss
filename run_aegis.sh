@@ -79,7 +79,7 @@ EOF
 
 declare -A PIPELINES=(
   [readonly]="discovery forensics"
-  [mutation]="discovery forensics mutation optimize adversarial validation"
+  [mutation]="mutation optimize adversarial validation"
 )
 
 PIPELINE="mutation"
