@@ -56,14 +56,19 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
    - Fronteiras de módulo, retornos e interfaces públicas devem ser estritamente imutáveis (`readonly`).
    - Mutabilidade interna e buffers pré-alocados são permitidos e encorajados em algoritmos incrementais e motores de alta performance.
 2. **Contrato de Alocação & Zero-GC no Hot Path**:
-   - Métodos críticos de alta frequência (buscas, minimax, matching, loops de simulação) NUNCA devem alocar memória dinâmica na heap dentro do ciclo (`0 heap allocations`: sem `[...arr]`, spreads desnecessários ou instanciacões transientes).
-3. **Aritmética Segura & Bounds Numéricos**:
+   - Métodos pertencentes ao caminho de execução iterativa/recursiva (hot-path: buscas, minimax, move generation, transições) NUNCA podem alocar memória dinâmica na heap dentro do ciclo (`0 heap allocations`: sem `[...arr]`, sem `const moves: ChessMove[] = []`, sem `.push({ from, to })` por nó).
+   - Representações intermediárias no hot path DEVEM usar buffers pré-alocados (`Int32Array`/`BigUint64Array`) ou inteiros compactos (`number`/`bigint` bitfields).
+3. **Derivação Incremental de Estado ($O(1)$)**:
+   - Qualquer estado derivável incrementalmente de uma mutação (ex: Zobrist Hash, ocupações agregadas) NÃO DEVE ser recomputado por varredura global $O(N)$ dentro do hot path. A mutação deve aplicar estritamente deltas XOR em $O(1)$.
+4. **Recursão Limitada & Guarda Determinística de Overflow**:
+   - Toda estrutura associada à profundidade de execução ou pilha de busca DEVE possuir capacidade explícita fixa e guarda determinística contra overflow (`if (this._stateSp >= this._stateStack.length) throw new RangeError("search stack exhausted")`).
+5. **Aritmética Segura & Bounds Numéricos**:
    - Guardar divisões por zero com `if (divisor <= 0n) throw new RangeError(...)`.
    - Monotonicidade de taxas/descontos: o piso com desconto nunca pode ultrapassar a taxa base original (`const clamped = disc < min ? min : disc; return clamped > base ? base : clamped`).
    - Saturação numérica e clamping SEMPRE com condicionais procedurais explícitas (`if (val > max) val = max; if (val < min) val = min;`). NUNCA usar ternários aninhados (`no-nested-ternary`).
-4. **Modularidade e Complexidade Ciclomática ($\le 12$)**:
+6. **Modularidade e Complexidade Ciclomática ($\le 12$)**:
    - Métodos com fluxos compostos devem ser decompostos em métodos auxiliares privados declarados em `methods[]` (ex: `_isValid`, `_computeChecksum`, `_resolveGraph`).
-5. **Integridade de Estado Vivo (Zero Dead State)**:
+7. **Integridade de Estado Vivo (Zero Dead State)**:
    - Todo campo privado mutável (coleções `Map`/`Set`, contadores) DEVE possuir mutação operacional (`.set()`, `.add()`, `.clear()`, `++`, `+=`) no fluxo principal de negócio, e não apenas no construtor ou em métodos de `reset`.
    - Campos atribuídos apenas no construtor DEVEM ser declarados como `readonly`.
    - Proteção de Heap (OOM): coleções que ingerem chaves dinâmicas devem ter capacidade máxima (`maxEntries`/`maxHeapAccounts`).
@@ -75,15 +80,21 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
      * *Reversibilidade Algébrica*: $undo(make(s)) \equiv s$ auditando restauração exata de todos os campos primitivos.
      * *Oráculos Combinatórios (Perft)*: Para motores de estado/árvores táticas, o briefing DEVE incluir contagens combinatórias formais (ex: $Perft(1) = 20, Perft(2) = 400$).
      * *Integridade Estrutural de Estado*: Estados impossíveis (ex: zero reis, múltiplos reis, torre ausente em roque) devem ser explicitamente invalidados.
-2. **Separação entre Fronteira Pública e Hot-Path Interno**:
+2. **Falsificação de Performance & Semântica**:
+   - Asserções de prova e tribunais adversariais DEVEM testar e rejeitar ativamente:
+     * Alocações dinâmicas no hot path (`no-hotpath-dynamic-allocation`).
+     * Recomputação global de estado incremental ($O(N)$ em hot path).
+     * Crescimento não delimitado de histórico de busca.
+     * Ausência de verificação de limites em pilhas de execução.
+     * Estados estruturalmente impossíveis degradando silenciosamente.
+3. **Separação entre Fronteira Pública e Hot-Path Interno**:
    - No hot path (busca, árvores, laços $O(1)$), o motor deve operar exclusivamente com inteiros compactos (`number`/`bigint`) e arrays pré-alocados (`Int32Array`/`BigUint64Array`).
    - Objetos tipados de conveniência da API (ex: `ChessMove`) devem ser instanciados APENAS na fronteira pública (`generateLegalMoves(): ChessMove[]`).
-3. **Completude de Tabelas Heurísticas e Posicionais (PST)**:
+4. **Completude de Tabelas Heurísticas e Posicionais (PST)**:
    - Se a demanda exigir avaliação posicional por tabelas (PST), todas as entidades ativas relevantes DEVEM possuir tabelas de 64 elementos completas no schema, ou uma decisão estruturada em `questions[]` deve ser emitida.
-4. **Atualização Incremental de Hash ($O(1)$)**:
-   - Transições de estado em hot paths devem atualizar hashes de estado (ex: Zobrist) por delta XOR $O(1)$, sendo terminantemente proibido varrer o estado completo $O(N)$ dentro de `makeMove`/`undoMove`.
 5. **Anti-Overfitting de Coleções (Ruído & Permutações)**:
    - Para métodos que resolvem lotes, grafos, ciclos, reconciliações ou pares, o teste comportamental DEVE incluir elementos fora de ordem e ao menos 1 elemento de ruído/linear para impedir implementações com índices fixos (`arr[0]`).
+
 ### Axioma V — Invariantes Semânticas de Domínio (Domain Invariants)
 1. **Predicado Explícito de Validade de Estado**:
    - Todo estado de domínio complexo DEVE possuir um predicado ou guarda de integridade estrutural (ex.: número exato de entidades vitais, sem sobreposição física de posições).
