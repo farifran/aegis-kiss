@@ -863,7 +863,7 @@ aegis_briefing_expand_json() {
 
 [QUALITY GATE FAILURE: MISSING ARCHITECTURAL QUESTIONS]
 Your previous response contained \"questions\": []. This is REJECTED.
-Per the 8th Architectural Directive, you MUST always surface 1–3 questions in \"questions\" that explore the user's real product objective, use case, performance contract, failure-mode policy, and concurrency model — unless the demand already explicitly resolves ALL of these dimensions.
+Per Axiom I (Intent & Questions Gate), you MUST always surface 1–3 questions in \"questions\" that explore the user's real product objective, use case, performance contract, failure-mode policy, and concurrency model — unless the demand already explicitly resolves ALL of these dimensions.
 Generate \"questions\" now. Do not assume or self-resolve any architectural dimension."
       else
         current_user_prompt="${user_prompt}

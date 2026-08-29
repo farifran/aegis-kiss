@@ -24,85 +24,52 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
 
 ---
 
-## 🛡️ 7 Architectural Directives & Compile-Time Gates
+## 🏛️ Os 4 Axiomas Físicos do Aegis (Invariantes Universais O(1))
 
-1. **Browser Globals Quarantine (Node.js Smoke Test Compliance)**:
-   - `src/*.ts` files must NEVER access `window`, `document`, `localStorage`, or `AudioContext` at the top-level module scope.
-   - All browser interactions must reside inside `index.html` or be strictly guarded by `typeof window !== 'undefined'`. Top-level execution must cleanly succeed under Node.js (`node -e "import('./src/index.js')"`).
+### Axioma I — Intenção & Alinhamento Bilateral (Intent & Questions Gate)
+1. **Consulta Obrigatória de Incerteza (`questions[]`)**:
+   - Antes de gerar detalhes de implementação, toda bifurcação arquitetural com trade-off real (política de erro, modelo de concorrência, escala, desempate de fluxo) DEVE suspender a execução e emitir 1 a 3 perguntas estruturadas.
+   - `"questions": []` é VÁLIDO APENAS se a demanda original já resolver de forma explícita e inequívoca todas as decisões.
+   - Cada pergunta deve conter:
+     - `question`: O trade-off técnico direto.
+     - `options`: 2 a 4 opções mutuamente exclusivas, com a recomendada listada em primeiro lugar prefixada por `(Recommended)`.
+     - `is_multi_select`: `false`.
+2. **Proibição de Especulação Não-Delegada**:
+   - Nunca invente requisitos ou premissas não autorizadas pelo runtime ou ausentes de evidência.
 
-2. **Cognitive Density & Output Token Preservation**:
-   - Do not write massive code bodies into the schema. Define exact signatures, mathematical calculations/formulas, boundary constraints, and behavior assertions.
-   - Prevents compact LLMs from hitting generation limits (`finish_reason: length`).
+### Axioma II — Fronteira Fechada & Sanitização de Ingresso (Boundary & Ingress)
+1. **Não-Vacuidade de Importações (Zero Ghost Imports)**:
+   - Todo símbolo declarado em `"imports": [{"from": "./sibling.js", "names": ["SymbolName"]}]` DEVE ser consumido no schema (como tipo de campo, parâmetro, retorno ou invocado no corpo). Símbolos não consumidos são rejeitados (`vacuous_import`).
+2. **Fechamento de Ponto de Entrada (Barrel Completo)**:
+   - Todo símbolo em `exports[]` DEVE ser re-exportado nominalmente a partir de `src/index.ts` usando extensão `.js` (`NodeNext`). `barrelFrom` é `./<target>.js` (ou `null` se o alvo for o próprio barrel).
+3. **Quarentena de Globais de Browser**:
+   - `src/*.ts` NUNCA acessa `window`, `document`, `localStorage` ou `AudioContext` no escopo do módulo.
+4. **Sanitização Defensiva de Entrada**:
+   - Validar números contra não-finitos (`!Number.isFinite(x)`), números negativos e transbordamento de ponto flutuante (`x * scale > Number.MAX_SAFE_INTEGER`).
+   - Validar tipos em coleções dinâmicas heterogêneas (`typeof val === "bigint"`).
+   - Tipos primitivos no schema SEMPRE em minúsculo (`bigint`, `number`, `string`, `boolean`).
 
-3. **Collision-Free Barrel Re-exports (TS2308 / TS2440 Shield)**:
-   - Exported types, interfaces, and classes must use domain-prefixed, unique names (e.g. `UserSessionState`, `MatrixCoordinate`, `EngineConfig`).
-   - Never use generic collided identifiers like `State`, `Config`, `Props`, or `Result`.
+### Axioma III — Computação Determinística & Estado Vivo (Deterministic State & Computation)
+1. **Aritmética Segura & Bounds Numéricos**:
+   - Guardar divisões por zero com `if (divisor <= 0n) throw new RangeError(...)`.
+   - Monotonicidade de taxas/descontos: o piso com desconto nunca pode ultrapassar a taxa base original (`const clamped = disc < min ? min : disc; return clamped > base ? base : clamped`).
+   - Saturação numérica e clamping SEMPRE com condicionais procedurais explícitas (`if (val > max) val = max; if (val < min) val = min;`). NUNCA usar ternários aninhados (`no-nested-ternary`).
+2. **Modularidade e Complexidade Ciclomática ($\le 12$)**:
+   - Métodos com fluxos compostos devem ser decompostos em métodos auxiliares privados declarados em `methods[]` (ex: `_isValid`, `_computeChecksum`, `_resolveGraph`).
+3. **Integridade de Estado Vivo (Zero Dead State)**:
+   - Todo campo privado mutável (coleções `Map`/`Set`, contadores) DEVE possuir mutação operacional (`.set()`, `.add()`, `.clear()`, `++`, `+=`) no fluxo principal de negócio, e não apenas no construtor ou em métodos de `reset`.
+   - Campos atribuídos apenas no construtor DEVEM ser declarados como `readonly`.
+   - Proteção de Heap (OOM): coleções que ingerem chaves dinâmicas devem ter capacidade máxima (`maxEntries`/`maxHeapAccounts`).
 
-4. **Strict TypeScript & Schema Typing Invariants (TS2341 / TS2564)**:
-   - Types in schema must be lowercase primitives: `bigint`, `number`, `string`, `boolean` (NEVER `BigInt`, `Number`, `String` as type annotations).
-   - NEVER use `Math.min()`, `Math.max()`, `Math.floor()`, or `Math.ceil()` on `bigint` values. Clamp with explicit conditional statements (`if (tokens > maxTokens) tokens = maxTokens`).
-   - Outside a class (e.g. in helper functions or behavior asserts), NEVER access private fields (`_name`); use public getters (`bucket.tokens`) to avoid TS2341.
-   - Every `privateFields[]` entry must be assigned in `ctorBody` (TS2564 otherwise). A class with private fields never has an empty `ctorBody`.
-   - Private class fields assigned only in constructor must be declared with `readonly` (e.g. `private readonly _maxTokens: bigint`).
-   - Prefer default parameter initializers (e.g. `nowMs: bigint = BigInt(Date.now())`) over union with `undefined` and internal ternaries.
-   - When validating a `number` parameter before BigInt conversion or rate calculation, guard against non-finite values, unsafe float overflow, and positive underflow to zero via `!Number.isFinite(x)`, `x * scale > Number.MAX_SAFE_INTEGER`, and `x > 0 && Math.round(x * scale) === 0` (e.g. `if (!Number.isFinite(mbps) || mbps < 0 || mbps * 8000 > Number.MAX_SAFE_INTEGER || (mbps > 0 && Math.round(mbps * 8000) === 0)) throw new RangeError(...)`).
-   - **Division by Zero Guard**: When dividing by a variable BigInt denominator, guard against division by zero with `if (divisor <= 0n) throw new RangeError("Division by zero or negative divisor")`.
-   - **Discount Monotonicity Invariant**: When applying an absolute floor ($P$) to a discounted rate or fee derived from a base ($B$), the result must never exceed the original base: clamp with `const clamped = disc < minFloor ? minFloor : disc; return clamped > base ? base : clamped;` so small base rates are never penalized by high volume.
-   - **Heterogeneous Collection Type-Guards**: In constructors or public methods receiving dynamic maps (`Record<string, bigint>`), guard values with `if (typeof bal !== 'bigint' || bal < 0n) throw new RangeError(...)` against untyped JavaScript runtime callers.
-
-5. **Schema Closure & Declaration Integrity (TS2339 / TS2552 / TS2554)**:
-   - `kind` is ONLY `"class"` or `"function"`. NEVER `"interface"` or `"enum"` inside `exports[]` (types have no runtime presence in smoke imports).
-   - **Sibling Module Resolution (`imports[]`)**: When an export depends on classes or functions from existing files in `src/`, declare top-level `"imports": [{"from": "./sibling.js", "names": ["ClassName"]}]`. NEVER re-declare existing sibling classes as inline structural types in `"types"`.
-   - Named data shapes go in top-level `"types": [{"name": "PascalCaseName", "shape": "{ field: string; count: number }"}]`.
-   - Every type must be a lowercase primitive, a JS builtin (`Map`, `Set`, `Uint8Array`), a class in `exports[]`, imported via `imports[]`, or declared in `"types"`. Undeclared types trigger TS2552.
-   - No unbound type parameters `<T>`. Use concrete types or `unknown`.
-   - Every helper method (e.g. `this._calcDistance()`, `this._insert()`) called inside any method body MUST be explicitly declared in `methods[]` with its signature and body. Calling unlisted methods triggers TS2339.
-   - For optional parameters, declare as default initializers or union (`"string | undefined"`) and ensure `behavior[]` asserts supply all required arguments.
-   - `barrelFrom` is the target path with `src/` dropped and `.ts` replaced by `.js`: `src/domain.ts` → `./domain.js`. If the target is the barrel itself (`src/index.ts`), `barrelFrom` MUST be `null`.
-
-6. **Optimize — Hardware-Aligned Physics, $O(1)$ Math & Zero Allocations**:
-   - **Closed-Form $O(1)$ Math**: Replace iterative loops (`for`/`while`) or step-by-step increments for time delta, rate replenishment, or metric scaling with direct closed-form mathematical equations (e.g. `(timeDiff * rate) / 1000n`).
-   - **Monotonic Time & Drift Guard**: When tracking time deltas (`now - lastUpdate`), guard against negative clock drift (NTP skew) with `if (nowMs <= this._lastUpdateMs) return` without rewinding the time cursor.
-   - **Zero Hot-Path Allocations**: Eliminate transient heap allocations (arrays, temporary objects, closures) inside high-frequency execution methods (`update()`, `consume()`, `allow()`).
-   - **Concurrency & Synchronization**: When managing shared memory buffers or lock flags, use hardware-atomic CAS (`Atomics.compareExchange()`) over `Int32Array` mapped on `ArrayBuffer`.
-   - **Bounded Memory & Dynamic Ingestion (OOM Protection)**: Any class with in-memory collections (`Map`, `Set`) that ingests dynamic keys provided by external callers (e.g. `userId`, `accountId`, `ip`, `orderId`) MUST enforce a maximum capacity (`maxEntries`) via constructor parameter and guard before insertion (`if (this._map.size >= this._maxEntries) return false;`) to prevent V8 JavaScript heap exhaustion. Ring buffers advance pointers using circular modulo arithmetic (`(ptr + step) % maxBytes`) for continuous $O(1)$ recycling without leaks.
-
-7. **Adversarial — Headless Executable Falsification Asserts (`behavior[]`)**:
-   - Supply 3-4 executable regression tests exercising the implementation under active falsification pressure:
-     1. **Nominal Case**: Standard happy-path transition and output verification.
-     2. **Boundary/Exhaustion Case**: Edge condition verification (e.g. zero balance, buffer saturated, capacity boundary).
-     3. **Adversarial Stress Case**: Non-trivial domain edge case (e.g. clock rewind / negative delta `timeDiff <= 0n` maintaining state integrity, overflow protection, rejection of negative/invalid inputs).
-   - Each assert is compiled and executed once, headless. `await` is supported for async exports (assert resolved values, not raw `Promise`).
-   - NEVER sleep or read a wall clock (`setTimeout`, `Date.now()`, `performance.now()`, `Math.random()`). Asserts must be strictly deterministic.
-
-8. **State-of-Art Exploration & Mandatory User Alignment (`questions[]`)**:
-   - Your primary role is to build *excellent* solutions, not merely *correct* ones. Before generating any implementation detail, interrogate the user's real product objective.
-   - You MUST ALWAYS emit 1 to 3 questions in `questions[]` unless the demand already explicitly and unambiguously resolves ALL of the following dimensions:
-     - **Use case & deployment context**: What is this component for and where will it run? (e.g., "HTTP API throttling for single-threaded Node.js" vs "shared-memory ring buffer for multi-process IPC")
-     - **Performance & scale contract**: What throughput, burst capacity, or latency profile is expected?
-     - **Boundary & failure-mode policy**: What is the correct behavior at the edges? (e.g., empty bucket, capacity overflow, clock drift/NTP rewind, negative time delta)
-     - **Concurrency model**: Is this single-threaded, shared between Workers, or requires lock-free atomics?
-   - `"questions": []` is ONLY valid when the demand contains explicit, unambiguous answers to ALL relevant dimensions above. An implied or assumed answer does NOT count — if you had to infer it, you MUST ask.
-   - NEVER self-resolve contextual uncertainties silently. If the answer would change the architecture, you MUST ask the user.
-   - Each question MUST have:
-     - `question`: A clear product/engineering question that exposes a real architectural trade-off.
-     - `options`: 2–4 concrete, mutually exclusive options. The recommended choice goes first, prefixed `(Recommended)`.
-     - `is_multi_select`: `false` for mutually exclusive options.
-   - **Interaction & Clarification Lifecycle**:
-      - If the user selects/provides a concrete architectural choice, the pipeline proceeds with `AEGIS_BRIEFING_ANSWERS`.
-
-9. **Non-Vacuous Import Invariant (TS6133 / Zero Ghost Imports)**:
-   - When declaring top-level `"imports": [{"from": "./sibling.js", "names": ["SymbolName"]}]`, every imported symbol MUST be actively utilized within the schema. It must appear as a field type in `privateFields`, a parameter type in `ctorParams`, a method parameter/return type, or be directly invoked inside method bodies. Declaring unused "ghost" imports triggers validation failure.
-
-10. **Mutable State Lifecycle Invariant (Zero Dead State)**:
-    - Any private collection (`Map`, `Set`) or counter field that is NOT declared `readonly` represents active mutable runtime state.
-    - If a class declares a non-readonly state field (e.g. `_failureCounts: Map<string, number>`, `_quarantine: Set<string>`), the class methods MUST include at least one state-modifying operation (`.set()`, `.add()`, `.clear()`, `.delete()`, `++`, `+=`, `=`). A mutable field that is only initialized in the constructor and read in guards without ever being mutated indicates an incomplete implementation. If a field is static reference data, declare it `readonly`.
-
-11. **Behavior Assert Semantic Completeness**:
-    - When an export receives an external mutable dependency in its constructor (e.g. `bus: SettlementBus`, `guard: ThrottleGuard`), the `behavior[]` asserts must verify both the return value of the operation AND any mutational effects promised on the injected dependency (e.g. `assert: env.totalVolume === 100n && bus.getBalance("a1") === 900n`).
-
-12. **Procedural Numerical Clamping (Zero Nested Ternaries)**:
-    - When bounding or saturating numerical values within a range (e.g. 0 <= x <= 15), ALWAYS use procedural conditional statements (`let val = raw; if (val > 15) val = 15; if (val < 0) val = 0;`) instead of nested ternary operators (`a ? b : (c ? d : e)`). Nested ternaries violate ESLint `no-nested-ternary` rules.
+### Axioma IV — Falsificação Simétrica (Symmetric Falsification)
+1. **Completude Adversarial em `behavior[]`**:
+   - Fornecer 2 a 4 asserções executáveis headless cobrindo caso nominal, caso de exaustão/fronteira e caso de estresse.
+2. **Anti-Overfitting de Coleções (Ruído & Permutações)**:
+   - Para métodos que resolvem lotes, grafos, ciclos, reconciliações ou pares, o teste comportamental DEVE incluir elementos fora de ordem e ao menos 1 elemento de ruído/linear para impedir implementações com índices fixos (`arr[0]`).
+3. **Verificação de Efeitos Colaterais em Dependências Injetadas**:
+   - Se um método promete alterar o estado de uma dependência injetada (ex: `bus: SettlementBus`), a asserção DEVE validar tanto o retorno quanto o estado resultante na dependência.
+4. **Determinismo Temporal**:
+   - NUNCA usar `setTimeout`, `Date.now()` ou `Math.random()` dentro das asserções.
 
 ---
 
@@ -114,6 +81,9 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
   "targets": [
     "src/<domain>.ts",
     "src/index.ts"
+  ],
+  "imports": [
+    {"from": "./sibling.js", "names": ["SiblingClass"]}
   ],
   "types": [
     {"name": "PascalCaseShapeName", "shape": "{ field: string; count: number }"}
@@ -133,13 +103,13 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
       "kind": "class",
       "name": "PascalCaseClassName",
       "privateFields": [
-        {"name": "_fieldName", "type": "bigint|number|string|boolean"}
+        {"name": "_fieldName", "type": "bigint|number|string|boolean", "readonly": true}
       ],
       "ctorParams": [
         {"name": "paramName", "type": "bigint|number|string|boolean"}
       ],
       "ctorBody": [
-        "this._fieldName = paramName"
+        "this._fieldName = paramName;"
       ],
       "methods": [
         {
@@ -155,7 +125,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
         {
           "name": "propertyName",
           "returns": "type",
-          "body": "return this._fieldName"
+          "body": "return this._fieldName;"
         }
       ]
     },
@@ -176,7 +146,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
       "desc": "Short description of the behavioral contract",
       "exports": ["PascalCaseClassName"],
       "prelude": [
-        "const instance = new PascalCaseClassName(...)"
+        "const instance = new PascalCaseClassName(...);"
       ],
       "assert": "instance.method() === expected"
     }
