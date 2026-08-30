@@ -88,8 +88,8 @@ aegis_briefing_model() {
 }
 
 aegis_briefing_max_exports() {
-  local n="${AEGIS_BRIEFING_MAX_EXPORTS:-2}"
-  [[ "${n}" =~ ^[0-9]+$ ]] && [[ "${n}" -gt 0 ]] || n=2
+  local n="${AEGIS_BRIEFING_MAX_EXPORTS:-4}"
+  [[ "${n}" =~ ^[0-9]+$ ]] && [[ "${n}" -gt 0 ]] || n=4
   printf '%s' "${n}"
 }
 
