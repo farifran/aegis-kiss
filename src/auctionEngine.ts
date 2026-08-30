@@ -24,175 +24,266 @@ export class AuctionEngine {
     this._merkleRoot = 0n;
   }
 
-  _fnv1a64(str: string): bigint {
+  private static _fnv1a64(str: string): bigint {
     let hash = 14695981039346656037n;
     for (let s = 0; s < str.length; s++) {
-    hash = ((hash ^ BigInt(str.charCodeAt(s) & 255)) * 1099511628211n) & 0xFFFFFFFFFFFFFFFFn;
+      hash = ((hash ^ BigInt(str.charCodeAt(s) & 255)) * 1099511628211n) & 0xFFFFFFFFFFFFFFFFn;
     }
     return hash;
   }
 
-  _computeMerkleRoot(leafHashes: bigint[]): bigint {
-    if (leafHashes.length === 0) return 0n;
-    let current = leafHashes.slice();
-    while (current.length > 1) {
-    const nextLevel: bigint[] = [];
-    for (let i = 0; i < current.length; i += 2) {
-    const left = current[i];
-    if (left === undefined) continue;
-    const right = i + 1 < current.length && current[i + 1] !== undefined ? current[i + 1] : left;
-    if (right !== undefined) {
-    const combined = (((left ^ (right >> 32n)) * 1099511628211n) ^ right) & 0xFFFFFFFFFFFFFFFFn;
-    nextLevel.push(combined);
+  private static _computeMerkleRoot(leaves: readonly bigint[]): bigint {
+    if (leaves.length === 0) return 0n;
+    let len = leaves.length;
+    const tree = new BigUint64Array(len);
+    for (let i = 0; i < len; i++) {
+      const leaf = leaves[i];
+      if (leaf !== undefined) tree[i] = leaf;
     }
+
+    while (len > 1) {
+      let nextLen = 0;
+      for (let i = 0; i < len; i += 2) {
+        const left = tree[i] ?? 0n;
+        const right = i + 1 < len ? (tree[i + 1] ?? left) : left;
+        const combined = (((left ^ (right >> 32n)) * 1099511628211n) ^ right) & 0xFFFFFFFFFFFFFFFFn;
+        tree[nextLen] = combined;
+        nextLen++;
+      }
+      len = nextLen;
     }
-    current = nextLevel;
-    }
-    const top = current[0];
-    return top !== undefined ? top : 0n;
+    return tree[0] ?? 0n;
   }
 
-  _buildEdgeMap(orders: readonly TransferIntent[], residualMap: Map<string, bigint>): Map<string, Map<string, bigint>> {
-    const edgeMap = new Map<string, Map<string, bigint>>();
-    for (let i = 0; i < orders.length; i++) {
-    const ord = orders[i];
-    if (ord === undefined) continue;
-    if (ord.amount < 0n) throw new RangeError('Order amount must be non-negative');
-    residualMap.set(ord.id, ord.amount);
-    if (ord.from === ord.to || ord.amount === 0n) continue;
-    if (!edgeMap.has(ord.from)) edgeMap.set(ord.from, new Map());
-    const dests = edgeMap.get(ord.from);
-    if (dests !== undefined) {
-    const prev = dests.get(ord.to);
-    dests.set(ord.to, (prev !== undefined ? prev : 0n) + ord.amount);
-    }
-    }
-    return edgeMap;
+  private _matchBilateralLeg(
+    ordA: TransferIntent,
+    ordB: TransferIntent,
+    resA: bigint,
+    resB: bigint
+  ): bigint {
+    if (ordA.from !== ordB.to || ordA.to !== ordB.from) return 0n;
+    return resA < resB ? resA : resB;
   }
 
-  _deductEdgeOrders(from: string, to: string, amountToDeduct: bigint, ctx: { orders: readonly TransferIntent[]; residualMap: Map<string, bigint> }): void {
-    let remaining = amountToDeduct;
-    for (let i = 0; i < ctx.orders.length && remaining > 0n; i++) {
-    const ord = ctx.orders[i];
-    if (ord === undefined || ord.from !== from || ord.to !== to) continue;
-    const curResidual = ctx.residualMap.get(ord.id) ?? 0n;
-    if (curResidual <= 0n) continue;
-    const deduct = curResidual < remaining ? curResidual : remaining;
-    ctx.residualMap.set(ord.id, curResidual - deduct);
-    remaining = remaining - deduct;
+  private _resolveBilateralCycles(
+    orders: readonly TransferIntent[],
+    residuals: BigInt64Array,
+    leafHashes: bigint[],
+    pMap: Map<string, boolean>
+  ): bigint {
+    let cycleVolume = 0n;
+    const n = orders.length;
+    for (let i = 0; i < n; i++) {
+      const ordA = orders[i];
+      const resA = residuals[i] ?? 0n;
+      if (ordA === undefined || resA <= 0n) continue;
+
+      for (let j = i + 1; j < n; j++) {
+        const ordB = orders[j];
+        const resB = residuals[j] ?? 0n;
+        if (ordB === undefined || resB <= 0n) continue;
+
+        const minFlow = this._matchBilateralLeg(ordA, ordB, resA, resB);
+        if (minFlow > 0n) {
+          residuals[i] = resA - minFlow;
+          residuals[j] = resB - minFlow;
+          cycleVolume += minFlow * 2n;
+          pMap.set(ordA.from, true);
+          pMap.set(ordA.to, true);
+          leafHashes.push(AuctionEngine._fnv1a64(`2cycle:${ordA.id}->${ordB.id}:${minFlow}`));
+        }
+      }
     }
+    return cycleVolume;
   }
 
-  _resolveSingleCycle(a: string, b: string, c: string, edgeMap: Map<string, Map<string, bigint>>): bigint {
-    const bMap = edgeMap.get(a);
-    const cMap = edgeMap.get(b);
-    const aMap = edgeMap.get(c);
-    if (bMap === undefined || cMap === undefined || aMap === undefined) return 0n;
-    if (!aMap.has(a)) return 0n;
-    const vAB = bMap.get(b);
-    const vBC = cMap.get(c);
-    const vCA = aMap.get(a);
-    if (vAB === undefined || vBC === undefined || vCA === undefined) return 0n;
-    let minFlow = vAB;
-    if (vBC < minFlow) minFlow = vBC;
-    if (vCA < minFlow) minFlow = vCA;
-    if (minFlow <= 0n) return 0n;
-    bMap.set(b, vAB - minFlow);
-    cMap.set(c, vBC - minFlow);
-    aMap.set(a, vCA - minFlow);
+  private _checkTriangularFlow(
+    ordA: TransferIntent,
+    ordB: TransferIntent,
+    ordC: TransferIntent,
+    res: { resA: bigint; resB: bigint; resC: bigint }
+  ): bigint {
+    if (ordA.to !== ordB.from || ordB.to !== ordC.from || ordC.to !== ordA.from) return 0n;
+    let minFlow = res.resA;
+    if (res.resB < minFlow) minFlow = res.resB;
+    if (res.resC < minFlow) minFlow = res.resC;
     return minFlow;
   }
 
-  _resolveDirectCycles(edgeMap: Map<string, Map<string, bigint>>, orders: readonly TransferIntent[], residualMap: Map<string, bigint>, participants: Set<string>): bigint {
-    let totalCycle = 0n;
-    const ctx = { orders, residualMap };
-    const nodes = Array.from(edgeMap.keys());
-    for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i];
-    if (a === undefined) continue;
-    const bMap = edgeMap.get(a);
-    if (bMap === undefined) continue;
-    const bKeys = Array.from(bMap.keys());
-    for (let j = 0; j < bKeys.length; j++) {
-    const b = bKeys[j];
-    if (b === undefined) continue;
-    const cMap = edgeMap.get(b);
-    if (cMap === undefined) continue;
-    const cKeys = Array.from(cMap.keys());
-    for (let k = 0; k < cKeys.length; k++) {
-    const c = cKeys[k];
-    if (c === undefined) continue;
-    const minFlow = this._resolveSingleCycle(a, b, c, edgeMap);
+  private _checkTriangleAtJK(
+    idx: [number, number, number],
+    orders: readonly TransferIntent[],
+    ctx: { residuals: BigInt64Array; leafHashes: bigint[]; pMap: Map<string, boolean> }
+  ): bigint {
+    const i = idx[0];
+    const j = idx[1];
+    const k = idx[2];
+    const ordA = orders[i];
+    const ordB = orders[j];
+    const ordC = orders[k];
+    const resA = ctx.residuals[i] ?? 0n;
+    const resB = ctx.residuals[j] ?? 0n;
+    const resC = ctx.residuals[k] ?? 0n;
+    if (ordA === undefined || ordB === undefined || ordC === undefined || resA <= 0n || resB <= 0n || resC <= 0n) {
+      return 0n;
+    }
+    const minFlow = this._checkTriangularFlow(ordA, ordB, ordC, { resA, resB, resC });
     if (minFlow > 0n) {
-    this._deductEdgeOrders(a, b, minFlow, ctx);
-    this._deductEdgeOrders(b, c, minFlow, ctx);
-    this._deductEdgeOrders(c, a, minFlow, ctx);
-    totalCycle = totalCycle + (minFlow * 3n);
-    participants.add(a);
-    participants.add(b);
-    participants.add(c);
+      ctx.residuals[i] = resA - minFlow;
+      ctx.residuals[j] = resB - minFlow;
+      ctx.residuals[k] = resC - minFlow;
+      ctx.pMap.set(ordA.from, true);
+      ctx.pMap.set(ordA.to, true);
+      ctx.pMap.set(ordB.to, true);
+      ctx.leafHashes.push(AuctionEngine._fnv1a64(`3cycle:${ordA.id}->${ordB.id}->${ordC.id}:${minFlow}`));
+      return minFlow * 3n;
     }
-    }
-    }
-    }
-    return totalCycle;
+    return 0n;
   }
 
-  _executePartialFill(orders: readonly TransferIntent[], matchedVolume: bigint, residualMap: Map<string, bigint>, ctx: { participants: Set<string>; leafHashes: bigint[] }): bigint {
+  private _searchTriangleK(
+    i: number,
+    j: number,
+    orders: readonly TransferIntent[],
+    ctx: { residuals: BigInt64Array; leafHashes: bigint[]; pMap: Map<string, boolean> }
+  ): bigint {
+    const n = orders.length;
+    let volume = 0n;
+    for (let k = 0; k < n; k++) {
+      if (k === i || k === j) continue;
+      volume += this._checkTriangleAtJK([i, j, k], orders, ctx);
+    }
+    return volume;
+  }
+
+  private _searchTriangularRing(
+    i: number,
+    orders: readonly TransferIntent[],
+    ctx: { residuals: BigInt64Array; leafHashes: bigint[]; pMap: Map<string, boolean> }
+  ): bigint {
+    const ordA = orders[i];
+    const resA = ctx.residuals[i] ?? 0n;
+    if (ordA === undefined || resA <= 0n) return 0n;
+    const n = orders.length;
+    let volume = 0n;
+
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const ordB = orders[j];
+      const resB = ctx.residuals[j] ?? 0n;
+      if (ordB === undefined || resB <= 0n || ordA.to !== ordB.from) continue;
+      volume += this._searchTriangleK(i, j, orders, ctx);
+    }
+    return volume;
+  }
+
+  private _resolveTriangularCycles(
+    orders: readonly TransferIntent[],
+    residuals: BigInt64Array,
+    leafHashes: bigint[],
+    pMap: Map<string, boolean>
+  ): bigint {
+    let cycleVolume = 0n;
+    const ctx = { residuals, leafHashes, pMap };
+    for (let i = 0; i < orders.length; i++) {
+      cycleVolume += this._searchTriangularRing(i, orders, ctx);
+    }
+    return cycleVolume;
+  }
+
+  private _executePartialFill(
+    orders: readonly TransferIntent[],
+    matchedVolume: bigint,
+    residuals: BigInt64Array,
+    ctx: { leafHashes: bigint[]; pMap: Map<string, boolean> }
+  ): bigint {
     let totalResidualDemand = 0n;
-    for (let i = 0; i < orders.length; i++) {
-    const ord = orders[i];
-    if (ord !== undefined) totalResidualDemand = totalResidualDemand + (residualMap.get(ord.id) ?? 0n);
+    const n = orders.length;
+    for (let i = 0; i < n; i++) {
+      totalResidualDemand += residuals[i] ?? 0n;
     }
-    let totalFractional = 0n;
-    for (let i = 0; i < orders.length; i++) {
-    const ord = orders[i];
-    if (ord === undefined) continue;
-    const residual = residualMap.get(ord.id) ?? 0n;
-    if (residual === 0n) continue;
-    let fillAmount = residual;
-    if (totalResidualDemand > 0n && matchedVolume > 0n && matchedVolume < totalResidualDemand) {
-    fillAmount = (residual * matchedVolume) / totalResidualDemand;
+
+    let fractionalVolume = 0n;
+    for (let i = 0; i < n; i++) {
+      const ord = orders[i];
+      if (ord === undefined) continue;
+      const res = residuals[i] ?? 0n;
+      if (res <= 0n) continue;
+
+      let fill = 0n;
+      if (matchedVolume >= totalResidualDemand) {
+        fill = res;
+      } else if (matchedVolume > 0n && totalResidualDemand > 0n) {
+        fill = (res * matchedVolume) / totalResidualDemand;
+      }
+
+      if (fill >= this._minTolerance) {
+        residuals[i] = res - fill;
+        fractionalVolume += fill;
+        ctx.pMap.set(ord.from, true);
+        ctx.pMap.set(ord.to, true);
+        ctx.leafHashes.push(AuctionEngine._fnv1a64(`partial:${ord.id}:${ord.from}->${ord.to}:${fill}`));
+      }
     }
-    if (fillAmount >= this._minTolerance) {
-    totalFractional = totalFractional + fillAmount;
-    ctx.participants.add(ord.from);
-    ctx.participants.add(ord.to);
-    const str = ord.id + ':' + ord.from + '->' + ord.to + ':' + fillAmount.toString();
-    ctx.leafHashes.push(this._fnv1a64(str));
-    } else {
-    this._residualOrdersCount = this._residualOrdersCount + 1;
-    }
-    }
-    return totalFractional;
+    return fractionalVolume;
   }
 
   processBatch(orders: readonly TransferIntent[], matchedVolume?: bigint): AuctionResult {
     if (this._isLocked) throw new Error('AuctionEngine is locked');
     const matched = matchedVolume !== undefined ? matchedVolume : 0n;
     if (matched < 0n) throw new RangeError('matchedVolume must be non-negative');
-    this._residualOrdersCount = 0;
-    const participants = new Set<string>();
+
+    const n = orders.length;
+    const residuals = new BigInt64Array(n);
+    let initialDemand = 0n;
+    for (let i = 0; i < n; i++) {
+      const ord = orders[i];
+      if (ord === undefined) continue;
+      if (ord.amount < 0n) throw new RangeError('Order amount must be non-negative');
+      residuals[i] = ord.amount;
+      initialDemand += ord.amount;
+    }
+
     const leafHashes: bigint[] = [];
-    const residualMap = new Map<string, bigint>();
-    const edgeMap = this._buildEdgeMap(orders, residualMap);
-    const totalCycle = this._resolveDirectCycles(edgeMap, orders, residualMap, participants);
-    const totalFractional = this._executePartialFill(orders, matched, residualMap, { participants, leafHashes });
-    const merkleRoot = this._computeMerkleRoot(leafHashes);
-    const settledVolume = totalCycle + totalFractional;
+    const pMap = new Map<string, boolean>();
+
+    const biCycle = this._resolveBilateralCycles(orders, residuals, leafHashes, pMap);
+    const triCycle = this._resolveTriangularCycles(orders, residuals, leafHashes, pMap);
+    const totalCycle = biCycle + triCycle;
+
+    const fractionalVolume = this._executePartialFill(orders, matched, residuals, { leafHashes, pMap });
+    const merkleRoot = AuctionEngine._computeMerkleRoot(leafHashes);
+
+    let remainingResidualCount = 0;
+    let remainingResidualSum = 0n;
+    for (let i = 0; i < n; i++) {
+      const r = residuals[i] ?? 0n;
+      if (r > 0n) {
+        remainingResidualCount++;
+        remainingResidualSum += r;
+      }
+    }
+
+    const settledVolume = totalCycle + fractionalVolume;
     this._totalSettledVolume = settledVolume;
     this._cycleVolume = totalCycle;
-    this._fractionalVolume = totalFractional;
-    this._settledParticipantsCount = participants.size;
+    this._fractionalVolume = fractionalVolume;
+    this._settledParticipantsCount = pMap.size;
+    this._residualOrdersCount = remainingResidualCount;
     this._merkleRoot = merkleRoot;
+
+    if (initialDemand !== totalCycle + fractionalVolume + remainingResidualSum) {
+      throw new Error('Conservation violation: initial != cycle + partial + residual');
+    }
+
     return {
-    settledVolume,
-    cycleVolume: totalCycle,
-    fractionalVolume: totalFractional,
-    settledParticipantsCount: participants.size,
-    residualOrdersCount: this._residualOrdersCount,
-    merkleRoot,
-    isLocked: this._isLocked
+      settledVolume,
+      cycleVolume: totalCycle,
+      fractionalVolume,
+      settledParticipantsCount: pMap.size,
+      residualOrdersCount: remainingResidualCount,
+      merkleRoot,
+      isLocked: this._isLocked
     };
   }
 

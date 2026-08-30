@@ -1,7 +1,6 @@
 # =========================================================
-# AEGIS — structural physics (Zero-GC / Dynamic Array Allocation Gate)
-# Declaring empty arrays and dynamic pushing in hot paths causes GC spikes.
-# Hot paths must use pre-allocated typed arrays, static buffers, or in-place indexing.
+# AEGIS — structural physics (Zero-GC / Dynamic Allocation Gate)
+# Dynamic allocations in hot path violate AXIOMA III.
 # =========================================================
 
 id: no-hotpath-dynamic-allocation
@@ -11,9 +10,12 @@ language: TypeScript
 severity: error
 
 message: >
-  Dynamic array allocation or .push() detected in hot path. Hot-path search algorithms must operate on pre-allocated buffers (e.g. Int32Array) or static stack frames.
+  Dynamic heap allocation (.slice(), Array.from(), new Map/Set in loops) detected. Hot-path algorithms must operate on pre-allocated buffers or in-place primitive indexing.
 
 rule:
   any:
-    - pattern: 'const $VAR: ChessMove[] = []'
-    - pattern: '$VAR.push({ from: $FROM, to: $TO, $$$REST })'
+    - pattern: 'Array.from($$$ARGS)'
+    - pattern: '$VAR.slice($$$ARGS)'
+    - pattern: 'new Map($$$ARGS)'
+    - pattern: 'new Set($$$ARGS)'
+

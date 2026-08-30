@@ -88,14 +88,27 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
   $$\text{Domain}(S_{k+1}) = \text{Domain}(S_k) \setminus \text{Consumed}(S_k)$$
 - Nenhuma obrigação, saldo ou transação consumida em $S_k$ pode ser re-liquidada ou duplicada em $S_{k+1}$ (Zero Double Settlement).
 
-### V. Leis Universais de Conservação (Conservation Laws)
-- Toda operação de transformação, leilão, fluxo ou contabilidade deve satisfazer leis de conservação invariantes em `conservationLaws[]`:
-  $$\sum \text{SettledVolume} \le \sum \text{EligibleDemand}$$
+### V. Leis Universais de Conservação & Tripla Partição
+- Toda operação de transformação, leilão, fluxo ou contabilidade deve satisfazer a Lei da Tripla Partição em `conservationLaws[]`:
+  $$\sum \text{Original Obligations} \equiv \sum \text{Cycle Consumed} + \sum \text{Partial Filled} + \sum \text{Residual Remaining}$$
 - Oráculos de falsificação adversarial devem atacar diretamente a matriz de interação $S_i \times S_{i+1}$.
 
-### VI. Fisiologia de Memória Zero-GC
-- Métodos marcados em `hotPath` NUNCA podem instanciar arrays (`[]`), objetos (`{}`), spreads (`...`) ou closures/arrow functions.
-- Toda estrutura intermediária em laços de repetição deve utilizar buffers pré-alocados (`Int32Array`/`BigUint64Array`) ou inteiros compactos (`bigint`/`number`).
+### VI. Identidade Baseada em Posição / Índice (Anti-Colisão de ID)
+- NUNCA assumir unicidade de strings externas (`id: string`) para rastrear saldos mutáveis.
+- O rastreamento interno de resíduos e mutações de coleções deve ser estritamente indexado por posição ($0 \le i < \text{length}$) via arrays paralelos ou typed buffers (`BigUint64Array`/`Int32Array`).
+
+### VII. Completude de Ledger Criptográfico (Ledger Completeness)
+- Toda transação finalizada em qualquer estágio do pipeline (ciclos bilaterais, ciclos triangulares, compensações parciais) DEVE ser incluída nas folhas do acumulador criptográfico (Árvore de Merkle / Hash Chain):
+  $$\forall t \in (\text{CycleSettlements} \cup \text{PartialFills}) \implies \text{hash}(t) \in \text{MerkleLeaves}$$
+
+### VIII. Desambiguação Matemática de Métricas
+- Métricas agregadas no Contract IR devem explicitar:
+  * `scope`: `PER_BATCH` vs `CUMULATIVE_LIFETIME`
+  * `metricType`: `GROSS_OBLIGATION_REMOVAL` ($3 \times \text{MinFlow}$) vs `NET_FLOW_TRANSFER` ($\text{MinFlow}$)
+
+### IX. Fisiologia de Memória Zero-GC
+- Métodos marcados em `hotPath` NUNCA podem instanciar coleções dinâmicas (`new Map()`, `new Set()`), clones (`.slice()`, `Array.from()`), spreads (`...`) ou concatenações de strings em laços.
+- Toda estrutura intermediária em laços de repetição deve utilizar buffers pré-alocados ou inteiros compactos (`bigint`/`number`).
 
 ---
 
@@ -147,15 +160,15 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
     {
       "stage": "cycleResolution",
       "consumes": "orders",
-      "produces": "residualOrders",
-      "guarantee": "residualOrders[i].amount === orders[i].amount - cycleSettled[i]"
+      "produces": "residuals",
+      "guarantee": "residuals[i] === initialAmount[i] - cycleSettled[i]"
     }
   ],
   "conservationLaws": [
     {
-      "id": "CONSERV-TOTAL-DEMAND",
-      "law": "settledVolume <= totalOrderAmount",
-      "oracle": "result.settledVolume <= totalBatchDemand"
+      "id": "CONSERV-TRIPLE-PARTITION",
+      "law": "totalInitial === cycleSettled + fractionalSettled + totalResidual",
+      "oracle": "initialSum === res.cycleVolume + res.fractionalVolume + residualSum"
     }
   ],
   "performanceContract": {
