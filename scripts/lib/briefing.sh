@@ -594,6 +594,8 @@ aegis_briefing_render() {
   local json="${1-}"
   local stable_c
   stable_c="$(aegis_briefing_stable_constraints)"
+  mkdir -p "${AEGIS_ROOT_DIR:-.}/.harness" 2>/dev/null || true
+  printf '%s' "${json}" > "${AEGIS_ROOT_DIR:-.}/.harness/active_contract_ir.json" 2>/dev/null || true
   mkdir -p "${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}" 2>/dev/null || true
   printf '%s' "${json}" > "${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}/active_contract_ir.json" 2>/dev/null || true
   printf '%s' "${json}" | jq -r --arg constraints "${stable_c}" '
