@@ -1,0 +1,634 @@
+{
+  "goal": "Create AuctionEngine and compileAuctionBitmask in src/auctionEngine.ts with pipeline semantics, residual order tracking, universal conservation laws, and re-export in src/index.ts",
+  "targets": [
+    "src/auctionEngine.ts",
+    "src/index.ts"
+  ],
+  "targetJustification": {
+    "additionalFiles": [],
+    "reason": "Default quota of 2 files met"
+  },
+  "publicApiContract": {
+    "strictSignatures": [
+      {
+        "name": "constructor",
+        "signature": "constructor(minTolerance?: bigint)",
+        "forbiddenParams": ["abstractCycleResolver", "dependencyInjector"],
+        "authorizedEffects": []
+      },
+      {
+        "name": "processBatch",
+        "signature": "processBatch(orders: readonly TransferIntent[], matchedVolume?: bigint): AuctionResult",
+        "returns": "AuctionResult"
+      },
+      {
+        "name": "compileAuctionBitmask",
+        "signature": "compileAuctionBitmask(engine: AuctionEngine): number",
+        "returns": "number"
+      }
+    ]
+  },
+  "preconditions": [
+    {
+      "target": "minTolerance",
+      "require": "minTolerance >= 0n",
+      "error": "RangeError",
+      "message": "minTolerance must be non-negative"
+    },
+    {
+      "target": "matchedVolume",
+      "require": "matchedVolume >= 0n",
+      "error": "RangeError",
+      "message": "matchedVolume must be non-negative"
+    },
+    {
+      "target": "order.amount",
+      "require": "amount >= 0n",
+      "error": "RangeError",
+      "message": "amount must be non-negative"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-ALGEBRAIC-CONSERVATION",
+      "predicate": "this.totalSettledVolume === this.cycleVolume + this.fractionalVolume",
+      "checkedAfter": ["constructor", "processBatch"]
+    }
+  ],
+  "postconditions": [
+    {
+      "method": "processBatch",
+      "guarantee": "result.settledVolume === result.cycleVolume + result.fractionalVolume"
+    }
+  ],
+  "pipelineTransitions": [
+    {
+      "stage": "cycleResolution",
+      "consumes": "orders",
+      "produces": "residualMap",
+      "guarantee": "residualMap[id] === initialAmount - cycleSettledAmount"
+    },
+    {
+      "stage": "partialFill",
+      "consumes": "residualMap",
+      "produces": "settledFills",
+      "guarantee": "fillAmount <= residualMap[id]"
+    }
+  ],
+  "conservationLaws": [
+    {
+      "id": "CONSERV-TOTAL-DEMAND",
+      "law": "settledVolume <= totalBatchDemand",
+      "oracle": "res.settledVolume <= 3000n"
+    },
+    {
+      "id": "CONSERV-NO-DOUBLE-SETTLEMENT",
+      "law": "fractionalVolume <= totalResidualDemandAfterCycles",
+      "oracle": "res.fractionalVolume === 0n"
+    }
+  ],
+  "performanceContract": {
+    "axiom": "AXIOMA_III_COMPUTACAO_DETERMINISTICA_ZERO_GC",
+    "hotPath": [
+      "compileAuctionBitmask"
+    ],
+    "maxAllocations": 0,
+    "forbiddenAstNodes": ["ArrayLiteralExpression", "ObjectLiteralExpression", "SpreadElement", "ArrowFunction"]
+  },
+  "claims": [
+    {
+      "id": "CLAIM-CYCLE-CLEARING",
+      "axiom": "AXIOMA_IV_FALSIFICACAO_SIMETRICA_E_PROVAS",
+      "requirement": "Obliterate circular indebtedness cycles (A->B->C->A) by MinFlow with algebraic conservation",
+      "enforcedBy": "typescript.check"
+    },
+    {
+      "id": "CLAIM-RESIDUAL-PARTIAL-FILL",
+      "axiom": "AXIOMA_II_INVARIANTES_NUMERICOS",
+      "requirement": "Calculate deterministic partial fill ratio exclusively on residual non-cleared balances",
+      "enforcedBy": "typescript.check"
+    },
+    {
+      "id": "CLAIM-FNV-MERKLE",
+      "axiom": "AXIOMA_III_COMPUTACAO_DETERMINISTICA_ZERO_GC",
+      "requirement": "64-bit FNV-1a hash tree derivation without external libraries or floats",
+      "enforcedBy": "static_gate.sh"
+    },
+    {
+      "id": "CLAIM-BITMASK",
+      "axiom": "AXIOMA_V_INVARIANTES_DOMINIO",
+      "requirement": "32-bit compact operational observability encoding",
+      "enforcedBy": "test.run"
+    }
+  ],
+  "imports": [],
+  "types": [
+    {
+      "name": "TransferIntent",
+      "shape": "{ id: string; from: string; to: string; amount: bigint; }"
+    },
+    {
+      "name": "AuctionResult",
+      "shape": "{ settledVolume: bigint; cycleVolume: bigint; fractionalVolume: bigint; settledParticipantsCount: number; residualOrdersCount: number; merkleRoot: bigint; isLocked: boolean; }"
+    }
+  ],
+  "questions": [],
+  "exports": [
+    {
+      "kind": "class",
+      "name": "AuctionEngine",
+      "privateFields": [
+        {
+          "name": "_isLocked",
+          "type": "boolean"
+        },
+        {
+          "name": "_minTolerance",
+          "type": "bigint",
+          "readonly": true
+        },
+        {
+          "name": "_totalSettledVolume",
+          "type": "bigint"
+        },
+        {
+          "name": "_cycleVolume",
+          "type": "bigint"
+        },
+        {
+          "name": "_fractionalVolume",
+          "type": "bigint"
+        },
+        {
+          "name": "_settledParticipantsCount",
+          "type": "number"
+        },
+        {
+          "name": "_residualOrdersCount",
+          "type": "number"
+        },
+        {
+          "name": "_merkleRoot",
+          "type": "bigint"
+        }
+      ],
+      "ctorParams": [
+        {
+          "name": "minTolerance?",
+          "type": "bigint"
+        }
+      ],
+      "ctorBody": [
+        "const tol = minTolerance !== undefined ? minTolerance : 1n;",
+        "if (tol < 0n) throw new RangeError('minTolerance must be non-negative');",
+        "this._isLocked = false;",
+        "this._minTolerance = tol;",
+        "this._totalSettledVolume = 0n;",
+        "this._cycleVolume = 0n;",
+        "this._fractionalVolume = 0n;",
+        "this._settledParticipantsCount = 0;",
+        "this._residualOrdersCount = 0;",
+        "this._merkleRoot = 0n;"
+      ],
+      "methods": [
+        {
+          "name": "_fnv1a64",
+          "params": [
+            {
+              "name": "str",
+              "type": "string"
+            }
+          ],
+          "returns": "bigint",
+          "body": [
+            "let hash = 14695981039346656037n;",
+            "for (let s = 0; s < str.length; s++) {",
+            "  hash = ((hash ^ BigInt(str.charCodeAt(s) & 255)) * 1099511628211n) & 0xFFFFFFFFFFFFFFFFn;",
+            "}",
+            "return hash;"
+          ]
+        },
+        {
+          "name": "_computeMerkleRoot",
+          "params": [
+            {
+              "name": "leafHashes",
+              "type": "bigint[]"
+            }
+          ],
+          "returns": "bigint",
+          "body": [
+            "if (leafHashes.length === 0) return 0n;",
+            "let current = leafHashes.slice();",
+            "while (current.length > 1) {",
+            "  const nextLevel: bigint[] = [];",
+            "  for (let i = 0; i < current.length; i += 2) {",
+            "    const left = current[i];",
+            "    if (left === undefined) continue;",
+            "    const right = i + 1 < current.length && current[i + 1] !== undefined ? current[i + 1] : left;",
+            "    if (right !== undefined) {",
+            "      const combined = (((left ^ (right >> 32n)) * 1099511628211n) ^ right) & 0xFFFFFFFFFFFFFFFFn;",
+            "      nextLevel.push(combined);",
+            "    }",
+            "  }",
+            "  current = nextLevel;",
+            "}",
+            "const top = current[0];",
+            "return top !== undefined ? top : 0n;"
+          ]
+        },
+        {
+          "name": "_buildEdgeMap",
+          "params": [
+            {
+              "name": "orders",
+              "type": "readonly TransferIntent[]"
+            },
+            {
+              "name": "residualMap",
+              "type": "Map<string, bigint>"
+            }
+          ],
+          "returns": "Map<string, Map<string, bigint>>",
+          "body": [
+            "const edgeMap = new Map<string, Map<string, bigint>>();",
+            "for (let i = 0; i < orders.length; i++) {",
+            "  const ord = orders[i];",
+            "  if (ord === undefined) continue;",
+            "  if (ord.amount < 0n) throw new RangeError('Order amount must be non-negative');",
+            "  residualMap.set(ord.id, ord.amount);",
+            "  if (ord.from === ord.to || ord.amount === 0n) continue;",
+            "  if (!edgeMap.has(ord.from)) edgeMap.set(ord.from, new Map());",
+            "  const dests = edgeMap.get(ord.from);",
+            "  if (dests !== undefined) {",
+            "    const prev = dests.get(ord.to);",
+            "    dests.set(ord.to, (prev !== undefined ? prev : 0n) + ord.amount);",
+            "  }",
+            "}",
+            "return edgeMap;"
+          ]
+        },
+        {
+          "name": "_deductEdgeOrders",
+          "params": [
+            {
+              "name": "from",
+              "type": "string"
+            },
+            {
+              "name": "to",
+              "type": "string"
+            },
+            {
+              "name": "amountToDeduct",
+              "type": "bigint"
+            },
+            {
+              "name": "ctx",
+              "type": "{ orders: readonly TransferIntent[]; residualMap: Map<string, bigint> }"
+            }
+          ],
+          "returns": "void",
+          "body": [
+            "let remaining = amountToDeduct;",
+            "for (let i = 0; i < ctx.orders.length && remaining > 0n; i++) {",
+            "  const ord = ctx.orders[i];",
+            "  if (ord === undefined || ord.from !== from || ord.to !== to) continue;",
+            "  const curResidual = ctx.residualMap.get(ord.id) ?? 0n;",
+            "  if (curResidual <= 0n) continue;",
+            "  const deduct = curResidual < remaining ? curResidual : remaining;",
+            "  ctx.residualMap.set(ord.id, curResidual - deduct);",
+            "  remaining = remaining - deduct;",
+            "}"
+          ]
+        },
+        {
+          "name": "_resolveSingleCycle",
+          "params": [
+            {
+              "name": "a",
+              "type": "string"
+            },
+            {
+              "name": "b",
+              "type": "string"
+            },
+            {
+              "name": "c",
+              "type": "string"
+            },
+            {
+              "name": "edgeMap",
+              "type": "Map<string, Map<string, bigint>>"
+            }
+          ],
+          "returns": "bigint",
+          "body": [
+            "const bMap = edgeMap.get(a);",
+            "const cMap = edgeMap.get(b);",
+            "const aMap = edgeMap.get(c);",
+            "if (bMap === undefined || cMap === undefined || aMap === undefined) return 0n;",
+            "if (!aMap.has(a)) return 0n;",
+            "const vAB = bMap.get(b);",
+            "const vBC = cMap.get(c);",
+            "const vCA = aMap.get(a);",
+            "if (vAB === undefined || vBC === undefined || vCA === undefined) return 0n;",
+            "let minFlow = vAB;",
+            "if (vBC < minFlow) minFlow = vBC;",
+            "if (vCA < minFlow) minFlow = vCA;",
+            "if (minFlow <= 0n) return 0n;",
+            "bMap.set(b, vAB - minFlow);",
+            "cMap.set(c, vBC - minFlow);",
+            "aMap.set(a, vCA - minFlow);",
+            "return minFlow;"
+          ]
+        },
+        {
+          "name": "_resolveDirectCycles",
+          "params": [
+            {
+              "name": "edgeMap",
+              "type": "Map<string, Map<string, bigint>>"
+            },
+            {
+              "name": "orders",
+              "type": "readonly TransferIntent[]"
+            },
+            {
+              "name": "residualMap",
+              "type": "Map<string, bigint>"
+            },
+            {
+              "name": "participants",
+              "type": "Set<string>"
+            }
+          ],
+          "returns": "bigint",
+          "body": [
+            "let totalCycle = 0n;",
+            "const ctx = { orders, residualMap };",
+            "const nodes = Array.from(edgeMap.keys());",
+            "for (let i = 0; i < nodes.length; i++) {",
+            "  const a = nodes[i];",
+            "  if (a === undefined) continue;",
+            "  const bMap = edgeMap.get(a);",
+            "  if (bMap === undefined) continue;",
+            "  const bKeys = Array.from(bMap.keys());",
+            "  for (let j = 0; j < bKeys.length; j++) {",
+            "    const b = bKeys[j];",
+            "    if (b === undefined) continue;",
+            "    const cMap = edgeMap.get(b);",
+            "    if (cMap === undefined) continue;",
+            "    const cKeys = Array.from(cMap.keys());",
+            "    for (let k = 0; k < cKeys.length; k++) {",
+            "      const c = cKeys[k];",
+            "      if (c === undefined) continue;",
+            "      const minFlow = this._resolveSingleCycle(a, b, c, edgeMap);",
+            "      if (minFlow > 0n) {",
+            "        this._deductEdgeOrders(a, b, minFlow, ctx);",
+            "        this._deductEdgeOrders(b, c, minFlow, ctx);",
+            "        this._deductEdgeOrders(c, a, minFlow, ctx);",
+            "        totalCycle = totalCycle + (minFlow * 3n);",
+            "        participants.add(a);",
+            "        participants.add(b);",
+            "        participants.add(c);",
+            "      }",
+            "    }",
+            "  }",
+            "}",
+            "return totalCycle;"
+          ]
+        },
+        {
+          "name": "_executePartialFill",
+          "params": [
+            {
+              "name": "orders",
+              "type": "readonly TransferIntent[]"
+            },
+            {
+              "name": "matchedVolume",
+              "type": "bigint"
+            },
+            {
+              "name": "residualMap",
+              "type": "Map<string, bigint>"
+            },
+            {
+              "name": "ctx",
+              "type": "{ participants: Set<string>; leafHashes: bigint[] }"
+            }
+          ],
+          "returns": "bigint",
+          "body": [
+            "let totalResidualDemand = 0n;",
+            "for (let i = 0; i < orders.length; i++) {",
+            "  const ord = orders[i];",
+            "  if (ord !== undefined) totalResidualDemand = totalResidualDemand + (residualMap.get(ord.id) ?? 0n);",
+            "}",
+            "let totalFractional = 0n;",
+            "for (let i = 0; i < orders.length; i++) {",
+            "  const ord = orders[i];",
+            "  if (ord === undefined) continue;",
+            "  const residual = residualMap.get(ord.id) ?? 0n;",
+            "  if (residual === 0n) continue;",
+            "  let fillAmount = residual;",
+            "  if (totalResidualDemand > 0n && matchedVolume > 0n && matchedVolume < totalResidualDemand) {",
+            "    fillAmount = (residual * matchedVolume) / totalResidualDemand;",
+            "  }",
+            "  if (fillAmount >= this._minTolerance) {",
+            "    totalFractional = totalFractional + fillAmount;",
+            "    ctx.participants.add(ord.from);",
+            "    ctx.participants.add(ord.to);",
+            "    const str = ord.id + ':' + ord.from + '->' + ord.to + ':' + fillAmount.toString();",
+            "    ctx.leafHashes.push(this._fnv1a64(str));",
+            "  } else {",
+            "    this._residualOrdersCount = this._residualOrdersCount + 1;",
+            "  }",
+            "}",
+            "return totalFractional;"
+          ]
+        },
+        {
+          "name": "processBatch",
+          "params": [
+            {
+              "name": "orders",
+              "type": "readonly TransferIntent[]"
+            },
+            {
+              "name": "matchedVolume?",
+              "type": "bigint"
+            }
+          ],
+          "returns": "AuctionResult",
+          "body": [
+            "if (this._isLocked) throw new Error('AuctionEngine is locked');",
+            "const matched = matchedVolume !== undefined ? matchedVolume : 0n;",
+            "if (matched < 0n) throw new RangeError('matchedVolume must be non-negative');",
+            "this._residualOrdersCount = 0;",
+            "const participants = new Set<string>();",
+            "const leafHashes: bigint[] = [];",
+            "const residualMap = new Map<string, bigint>();",
+            "const edgeMap = this._buildEdgeMap(orders, residualMap);",
+            "const totalCycle = this._resolveDirectCycles(edgeMap, orders, residualMap, participants);",
+            "const totalFractional = this._executePartialFill(orders, matched, residualMap, { participants, leafHashes });",
+            "const merkleRoot = this._computeMerkleRoot(leafHashes);",
+            "const settledVolume = totalCycle + totalFractional;",
+            "this._totalSettledVolume = settledVolume;",
+            "this._cycleVolume = totalCycle;",
+            "this._fractionalVolume = totalFractional;",
+            "this._settledParticipantsCount = participants.size;",
+            "this._merkleRoot = merkleRoot;",
+            "return {",
+            "  settledVolume,",
+            "  cycleVolume: totalCycle,",
+            "  fractionalVolume: totalFractional,",
+            "  settledParticipantsCount: participants.size,",
+            "  residualOrdersCount: this._residualOrdersCount,",
+            "  merkleRoot,",
+            "  isLocked: this._isLocked",
+            "};"
+          ]
+        },
+        {
+          "name": "lock",
+          "params": [],
+          "returns": "void",
+          "body": [
+            "this._isLocked = true;"
+          ]
+        },
+        {
+          "name": "unlock",
+          "params": [],
+          "returns": "void",
+          "body": [
+            "this._isLocked = false;"
+          ]
+        }
+      ],
+      "getters": [
+        {
+          "name": "isLocked",
+          "returns": "boolean",
+          "body": "return this._isLocked;"
+        },
+        {
+          "name": "totalSettledVolume",
+          "returns": "bigint",
+          "body": "return this._totalSettledVolume;"
+        },
+        {
+          "name": "cycleVolume",
+          "returns": "bigint",
+          "body": "return this._cycleVolume;"
+        },
+        {
+          "name": "fractionalVolume",
+          "returns": "bigint",
+          "body": "return this._fractionalVolume;"
+        },
+        {
+          "name": "settledParticipantsCount",
+          "returns": "number",
+          "body": "return this._settledParticipantsCount;"
+        },
+        {
+          "name": "residualOrdersCount",
+          "returns": "number",
+          "body": "return this._residualOrdersCount;"
+        },
+        {
+          "name": "merkleRoot",
+          "returns": "bigint",
+          "body": "return this._merkleRoot;"
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "compileAuctionBitmask",
+      "params": [
+        {
+          "name": "engine",
+          "type": "AuctionEngine"
+        }
+      ],
+      "returns": "number",
+      "body": [
+        "let mask = 0;",
+        "if (engine.isLocked) mask = mask | 1;",
+        "if (engine.cycleVolume > 0n) mask = mask | 2;",
+        "if (engine.fractionalVolume > 0n) mask = mask | 4;",
+        "if (engine.totalSettledVolume > 10000000n) mask = mask | 8;",
+        "const p = engine.settledParticipantsCount > 63 ? 63 : engine.settledParticipantsCount;",
+        "mask = mask | ((p & 63) << 4);",
+        "const r = engine.residualOrdersCount > 63 ? 63 : engine.residualOrdersCount;",
+        "mask = mask | ((r & 63) << 10);",
+        "const top16 = Number((engine.merkleRoot >> 48n) & 65535n);",
+        "mask = mask | ((top16 & 65535) << 16);",
+        "return mask;"
+      ]
+    }
+  ],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./auctionEngine.js",
+  "behavior": [
+    {
+      "desc": "Process 3-cycle circular batch and verify exact volume obliteration and zero double-settlement in partial fill",
+      "exports": [
+        "AuctionEngine",
+        "compileAuctionBitmask"
+      ],
+      "prelude": [
+        "const eng = new AuctionEngine(10n);",
+        "const batch = [{ id: '1', from: 'A', to: 'B', amount: 1000n }, { id: '2', from: 'B', to: 'C', amount: 1000n }, { id: '3', from: 'C', to: 'A', amount: 1000n }];",
+        "const res = eng.processBatch(batch, 3000n);",
+        "const mask = compileAuctionBitmask(eng);"
+      ],
+      "assert": "res.cycleVolume === 3000n && res.fractionalVolume === 0n && res.settledVolume === 3000n && (mask & 2) === 2 && res.settledParticipantsCount === 3"
+    },
+    {
+      "desc": "Process residual linear orders with partial fill and verify Merkle root derivation",
+      "exports": [
+        "AuctionEngine",
+        "compileAuctionBitmask"
+      ],
+      "prelude": [
+        "const eng = new AuctionEngine(10n);",
+        "const batch = [{ id: '1', from: 'A', to: 'B', amount: 1000n }];",
+        "const res = eng.processBatch(batch, 500n);",
+        "const mask = compileAuctionBitmask(eng);"
+      ],
+      "assert": "res.fractionalVolume === 500n && (mask & 4) === 4 && res.merkleRoot > 0n"
+    },
+    {
+      "desc": "Verify lock activation reflects in bitmask bit 0",
+      "exports": [
+        "AuctionEngine",
+        "compileAuctionBitmask"
+      ],
+      "prelude": [
+        "const eng = new AuctionEngine(1n);",
+        "eng.lock();",
+        "const mask = compileAuctionBitmask(eng);"
+      ],
+      "assert": "eng.isLocked === true && (mask & 1) === 1"
+    }
+  ],
+  "proofObligations": [
+    {
+      "id": "PROOF-CONSERVATION-MAX-DEMAND",
+      "axiom": "AXIOMA_IV_FALSIFICACAO_SIMETRICA_E_PROVAS",
+      "invariant": "settledVolume <= totalBatchDemand",
+      "property": "Global conservation of cleared multilateral flow",
+      "prelude": [
+        "const eng = new AuctionEngine(1n);",
+        "const batch = [{ id: '1', from: 'A', to: 'B', amount: 1000n }, { id: '2', from: 'B', to: 'C', amount: 1000n }, { id: '3', from: 'C', to: 'A', amount: 1000n }];",
+        "const res = eng.processBatch(batch, 3000n);"
+      ],
+      "oracle": "res.settledVolume <= 3000n && res.fractionalVolume === 0n"
+    }
+  ]
+}
