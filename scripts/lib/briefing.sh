@@ -681,6 +681,21 @@ aegis_briefing_render() {
         )) | join("\n")
       ))
     else empty end),
+    (if ((.preconditions // []) | length) > 0 or ((.invariants // []) | length) > 0 or ((.postconditions // []) | length) > 0 then
+      ("", "## Formal Hoare Contract (Pre / Inv / Post)", (
+        (if ((.preconditions // []) | length) > 0 then
+          "### Preconditions (Input Guards)\n" + ((.preconditions | map("- " + (.target // "arg") + ": require (" + (.require // "") + ") else throw " + (.error // "RangeError") + (if ((.message // "") | length) > 0 then " (\"" + .message + "\")" else "" end))) | join("\n"))
+         else "" end)
+        + (if ((.invariants // []) | length) > 0 then
+          (if ((.preconditions // []) | length) > 0 then "\n\n" else "" end)
+          + "### Class & State Invariants (Rest State)\n" + ((.invariants | map("- [" + (.id // "INV") + "] " + (.predicate // "") + " (checked after: " + (((.checkedAfter // []) | join(", "))) + ")")) | join("\n"))
+         else "" end)
+        + (if ((.postconditions // []) | length) > 0 then
+          (if (((.preconditions // []) | length) + ((.invariants // []) | length)) > 0 then "\n\n" else "" end)
+          + "### Postconditions (State Transition Guarantees)\n" + ((.postconditions | map("- " + (.method // "method") + ": " + (.guarantee // ""))) | join("\n"))
+         else "" end)
+      ))
+    else empty end),
     (if (.targetJustification // null) != null and (((.targetJustification.additionalFiles // []) | length) > 0) then
       ("", "## Target Justification", (
         "- Additional targets: " + (((.targetJustification.additionalFiles // []) | join(", ")))
