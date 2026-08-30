@@ -359,7 +359,22 @@ aegis_briefing_validate_json() {
                  or ((.id // "") | type != "string" or length == 0)
                  or ((.requirement // "") | type != "string" or length == 0)
                ))
-           then "bad_claims_shape" else empty end)
+           then "bad_claims_shape" else empty end),
+        (if ((.pipelineTransitions // []) | length) > 0
+           and ((.pipelineTransitions // []) | any(
+                 (type != "object")
+                 or ((.stage // "") | type != "string" or length == 0)
+                 or ((.consumes // "") | type != "string" or length == 0)
+                 or ((.produces // "") | type != "string" or length == 0)
+               ))
+           then "bad_pipeline_transitions_shape" else empty end),
+        (if ((.conservationLaws // []) | length) > 0
+           and ((.conservationLaws // []) | any(
+                 (type != "object")
+                 or ((.id // "") | type != "string" or length == 0)
+                 or ((.law // "") | type != "string" or length == 0)
+               ))
+           then "bad_conservation_laws_shape" else empty end)
       ] | first // ""
     ' 2>/dev/null || true
   )"
@@ -694,6 +709,22 @@ aegis_briefing_render() {
           (if (((.preconditions // []) | length) + ((.invariants // []) | length)) > 0 then "\n\n" else "" end)
           + "### Postconditions (State Transition Guarantees)\n" + ((.postconditions | map("- " + (.method // "method") + ": " + (.guarantee // ""))) | join("\n"))
          else "" end)
+      ))
+    else empty end),
+    (if ((.pipelineTransitions // []) | length) > 0 then
+      ("", "## Pipeline Semantics & Compositional Invariants", (
+        (.pipelineTransitions | to_entries | map(
+          "- [" + (.value.stage // ("STAGE-" + (.key + 1 | tostring))) + "] Consumes: " + (.value.consumes // "") + " ──► Produces: " + (.value.produces // "")
+          + (if ((.value.guarantee // "") | length) > 0 then "\n   guarantee: " + .value.guarantee else "" end)
+        )) | join("\n")
+      ))
+    else empty end),
+    (if ((.conservationLaws // []) | length) > 0 then
+      ("", "## Universal Conservation Laws", (
+        (.conservationLaws | to_entries | map(
+          "- [" + (.value.id // ("LAW-" + (.key + 1 | tostring))) + "] " + (.value.law // "")
+          + (if ((.value.oracle // "") | length) > 0 then "\n   oracle: " + .value.oracle else "" end)
+        )) | join("\n")
       ))
     else empty end),
     (if (.targetJustification // null) != null and (((.targetJustification.additionalFiles // []) | length) > 0) then

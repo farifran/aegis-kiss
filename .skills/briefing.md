@@ -83,7 +83,17 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 - Declare em `postconditions[]` a garantia exata de cada método (ex: `undo(make(s)) === s`, `tokensAfter === (ok ? tokensBefore - bits : tokensBefore)`).
 - `proofObligations[]` e `behavior[]` devem ser gerados como instâncias executáveis das pós-condições e dos invariantes de estado.
 
-### IV. Fisiologia de Memória Zero-GC
+### IV. Semântica de Pipeline & Invariantes de Composição
+- Em pipelines multi-estágio ($S_1 \to S_2 \dots$), o domínio de entrada de cada estágio subsequente $S_{k+1}$ é estritamente o resíduo não consumido dos estágios anteriores:
+  $$\text{Domain}(S_{k+1}) = \text{Domain}(S_k) \setminus \text{Consumed}(S_k)$$
+- Nenhuma obrigação, saldo ou transação consumida em $S_k$ pode ser re-liquidada ou duplicada em $S_{k+1}$ (Zero Double Settlement).
+
+### V. Leis Universais de Conservação (Conservation Laws)
+- Toda operação de transformação, leilão, fluxo ou contabilidade deve satisfazer leis de conservação invariantes em `conservationLaws[]`:
+  $$\sum \text{SettledVolume} \le \sum \text{EligibleDemand}$$
+- Oráculos de falsificação adversarial devem atacar diretamente a matriz de interação $S_i \times S_{i+1}$.
+
+### VI. Fisiologia de Memória Zero-GC
 - Métodos marcados em `hotPath` NUNCA podem instanciar arrays (`[]`), objetos (`{}`), spreads (`...`) ou closures/arrow functions.
 - Toda estrutura intermediária em laços de repetição deve utilizar buffers pré-alocados (`Int32Array`/`BigUint64Array`) ou inteiros compactos (`bigint`/`number`).
 
@@ -131,6 +141,21 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
     {
       "method": "consume",
       "guarantee": "result === (tokensBefore >= bits) && tokensAfter === (result ? tokensBefore - bits : tokensBefore)"
+    }
+  ],
+  "pipelineTransitions": [
+    {
+      "stage": "cycleResolution",
+      "consumes": "orders",
+      "produces": "residualOrders",
+      "guarantee": "residualOrders[i].amount === orders[i].amount - cycleSettled[i]"
+    }
+  ],
+  "conservationLaws": [
+    {
+      "id": "CONSERV-TOTAL-DEMAND",
+      "law": "settledVolume <= totalOrderAmount",
+      "oracle": "result.settledVolume <= totalBatchDemand"
     }
   ],
   "performanceContract": {
