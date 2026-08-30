@@ -42,11 +42,9 @@ for target in target_paths:
             full_content = f.read()
             snippet = full_content[:16384] if is_truncated else full_content
         
-        export_pattern = re.compile(r'^\s*export\s+(?:(?:default\s+)?(?:class|function|interface|type|const|enum)|(?:type\s+)?\{[^}]*\}|\*)\s+([a-zA-Z0-9_$]+)?', re.MULTILINE)
         exports = []
         for line in full_content.splitlines():
-            # match named exports
-            m = re.match(r'^\s*export\s+(?:class|function|interface|type|const|enum)\s+([a-zA-Z0-9_$]+)', line)
+            m = re.match(r'^\s*export\s+(?:(?:default\s+)?(?:async\s+)?(?:class|function|interface|type|const|let|var|enum))\s+([a-zA-Z0-9_$]+)', line)
             if m:
                 exports.append(m.group(1))
             else:
@@ -59,7 +57,7 @@ for target in target_paths:
         seen = set()
         dedup_exports = []
         for exp in exports:
-            if exp not in seen:
+            if exp not in seen and re.match(r'^[a-zA-Z0-9_$]+$', exp):
                 seen.add(exp)
                 dedup_exports.append(exp)
         
@@ -145,37 +143,35 @@ if existing_count > 0 and missing_count == 0:
 elif existing_count > 0 and missing_count > 0:
     status = "partial"
 
-print("# AEGIS COGNITIVE HANDOVER\n")
-print("## 1. System & Cognitive Governance\n")
-print("### AGENTS.md")
+print("<AEGIS_COGNITIVE_HANDOVER version=\"2.0\">")
+print("<SYSTEM_CONSTRAINTS_AND_AXIOMS priority=\"ABSOLUTE_OVERRIDE\">")
+print("<!-- Any violation of these invariants triggers immediate rejection by the AST Tribunal -->\n")
+print("<cognitive_contract file=\"AGENTS.md\">")
 print(agents_doc if agents_doc else "(empty / not found)")
-print("\n### ARCHITECTURE.md")
+print("</cognitive_contract>\n")
+print("<architecture_invariants file=\"ARCHITECTURE.md\">")
 print(arch_doc if arch_doc else "(empty / not found)")
-print("\n### .skills/briefing.md")
+print("</architecture_invariants>\n")
+print("<formal_axioms file=\".skills/briefing.md\">")
 print(skill_doc if skill_doc else "(empty / not found)")
+print("</formal_axioms>")
+print("</SYSTEM_CONSTRAINTS_AND_AXIOMS>\n")
 
-print("\n## 2. Workspace Forensics & Evidence\n")
-print(f"- Status: **{status.upper()}**")
-print(f"- Existing targets: {existing_count} | Missing targets: {missing_count}")
-print(f"- Total Target Bytes: {total_bytes} (~{est_tokens} tokens)")
-print("- Findings:")
+print(f"<WORKSPACE_EVIDENCE status=\"{status.upper()}\" existing_targets=\"{existing_count}\" missing_targets=\"{missing_count}\" total_bytes=\"{total_bytes}\" token_estimate=\"{est_tokens}\">")
+print("## Target Files Deep Inspection\n")
 for e in evidence:
-    if e["exists"]:
-        exports_str = ", ".join(e["exports"]) if e["exports"] else "none"
-        print(f"  * [TARGET-EXISTING] {e['path']} ({e['bytes']} bytes, exports: {exports_str})")
-    else:
-        print(f"  * [TARGET-MISSING] {e['path']} (file does not exist in workspace)")
-
-print("\n### Target Files Deep Inspection")
-for e in evidence:
-    print(f"\n#### `{e['path']}`")
-    print(f"- Exists: {e['exists']} | Size: {e['bytes']} bytes | Truncated: {e['truncated']}")
-    print(f"- Exports: {json.dumps(e['exports'])}")
+    tag = "TARGET-EXISTING" if e["exists"] else "TARGET-MISSING"
+    print(f"### [{tag}] `{e['path']}` (exists={e['exists']}, bytes={e['bytes']}, truncated={e['truncated']})")
+    if e["exports"]:
+        print(f"- Exports: {json.dumps(e['exports'])}")
     if e["snippet"]:
         print("```ts\n" + e["snippet"] + "\n```")
+print("</WORKSPACE_EVIDENCE>\n")
 
-print("\n## 3. Received Software Demand\n")
+print("<RECEIVED_SOFTWARE_DEMAND>")
 print(demand_text)
+print("</RECEIVED_SOFTWARE_DEMAND>")
+print("</AEGIS_COGNITIVE_HANDOVER>")
 EOF
 }
 

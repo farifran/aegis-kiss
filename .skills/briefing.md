@@ -125,9 +125,18 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
     "reason": "Omit if default quota of 2 files is met"
   },
   "performanceContract": {
+    "axiom": "AXIOMA_III_COMPUTACAO_DETERMINISTICA_ZERO_GC",
     "hotPath": ["methodName"],
     "maxAllocations": 0
   },
+  "claims": [
+    {
+      "id": "CLAIM-ID",
+      "axiom": "AXIOMA_II_FRONTEIRA_FECHADA | AXIOMA_III_COMPUTACAO_DETERMINISTICA | AXIOMA_V_INVARIANTES_DOMINIO",
+      "requirement": "Description of the domain requirement or invariant",
+      "enforcedBy": "typescript.check | static_gate.sh | test.run"
+    }
+  ],
   "imports": [
     {"from": "./sibling.js", "names": ["SiblingClass"]}
   ],
@@ -200,6 +209,7 @@ Reply **ONLY** with a valid JSON object matching the schema below. Zero markdown
   "proofObligations": [
     {
       "id": "PROOF-ID",
+      "axiom": "AXIOMA_IV_FALSIFICACAO_SIMETRICA_E_PROVAS",
       "invariant": "Mathematical or algebraic statement (e.g. undo(make(s)) === s)",
       "oracle": "instance.makeMove(m) && instance.undoMove() && instance.zobristHash === initialHash"
     }
