@@ -3,17 +3,14 @@ import { AuctionEngine, compileAuctionBitmask, type TransferIntent, type Auction
 import { EpochClearingCoordinator, obterEpochCoordinatorBitmask, type EpochResult } from './epochCoordinator.js';
 
 export {
-  AuctionEngine,
-  compileAuctionBitmask,
-  EpochClearingCoordinator,
-  obterEpochCoordinatorBitmask
+    AuctionEngine,
+    compileAuctionBitmask,
+    EpochClearingCoordinator,
+    obterEpochCoordinatorBitmask
 };
 
 export type {
-  TransferIntent,
-  AuctionResult,
-  EpochResult
+    TransferIntent,
+    AuctionResult,
+    EpochResult
 };
-
-import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
-export { TokenBucket, obterEstadoBitmask };

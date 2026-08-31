@@ -69,7 +69,13 @@ run_contract_invariants() {
   local build_dir="${runtime_dir}/build"
 
   local import_path="src/index.js"
-  if [[ ! -s "src/index.ts" ]] || ! grep -q "export" "src/index.ts" 2>/dev/null; then
+  local first_export
+  first_export="$(jq -r '(.exports[0].name // empty)' "${ir_file}" 2>/dev/null || true)"
+  if [[ -n "${first_export}" ]] && ! grep -q "\b${first_export}\b" "src/index.ts" 2>/dev/null; then
+    local primary_target
+    primary_target="$(jq -r '((.targets // [])[]? | select(. != "src/index.ts")) // "src/index.ts"' "${ir_file}" | head -1 | sed -E 's/\.ts$/.js/')"
+    import_path="${primary_target}"
+  elif [[ ! -s "src/index.ts" ]] || ! grep -q "export" "src/index.ts" 2>/dev/null; then
     local primary_target
     primary_target="$(jq -r '((.targets // [])[]? | select(. != "src/index.ts")) // "src/index.ts"' "${ir_file}" | head -1 | sed -E 's/\.ts$/.js/')"
     import_path="${primary_target}"
@@ -109,14 +115,10 @@ run_contract_invariants() {
     ([ (.proofObligations // []) | to_entries[] | .key as $i | .value as $po |
       "  // Proof Obligation " + ($po.id // ($i|tostring)) + ":\n" +
       "  try {\n" +
-      "    if (typeof AuctionEngine === \"undefined\") {\n" +
-      "      skipped.push(\"PO_SKIP [" + ($po.id // ($i|tostring)) + "] (pending AuctionEngine export)\");\n" +
-      "    } else {\n" +
       lines(($po.prelude // [] | if type == "string" then [.] else . end); "      ") + "\n" +
-      "      const __ok_po" + ($i|tostring) + " = Boolean(" + ($po.oracle // "true") + ");\n" +
-      "      if (!__ok_po" + ($i|tostring) + ") failed.push(\"PO_FAIL [" + ($po.id // ($i|tostring)) + "] (satisfies " + ($po.satisfies // "N/A") + ")\");\n" +
-      "      else passed.push(\"PO_PASS [" + ($po.id // ($i|tostring)) + "]\");\n" +
-      "    }\n" +
+      "    const __ok_po" + ($i|tostring) + " = Boolean(" + ($po.oracle // "true") + ");\n" +
+      "    if (!__ok_po" + ($i|tostring) + ") failed.push(\"PO_FAIL [" + ($po.id // ($i|tostring)) + "] (satisfies " + ($po.satisfies // "N/A") + ")\");\n" +
+      "    else passed.push(\"PO_PASS [" + ($po.id // ($i|tostring)) + "]\");\n" +
       "  } catch (e: any) {\n" +
       "    failed.push(\"PO_EXC [" + ($po.id // ($i|tostring)) + "] (\" + String(e?.message || e) + \")\");\n" +
       "  }\n"
