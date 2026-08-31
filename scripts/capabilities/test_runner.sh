@@ -77,56 +77,81 @@ run_contract_invariants() {
     import_path="src/index.js"
   fi
 
-  # Generate ephemeral harness using jq with dynamic symbol binding (immune to intermediate task TS2305)
-  jq -r --arg importPath "../../${import_path}" '
-    def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
+  # Generate ephemeral harness using Node.js with dynamic symbol binding (immune to intermediate task TS2305)
+  node -e '
+    const fs = require("fs");
+    const ir = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const targets = (ir.targets || ["src/index.ts"]).filter(t => t !== "src/index.ts");
+    const imports = targets.map(t => {
+      const modName = "__mod_" + t.replace(/[^a-zA-Z0-9]/g, "_");
+      const jsPath = "../../" + t.replace(/\.ts$/, ".js").replace(/^\.\//, "");
+      return `import * as ${modName} from "${jsPath}";`;
+    }).join("\n");
+    const mergeArgs = targets.map(t => "__mod_" + t.replace(/[^a-zA-Z0-9]/g, "_")).join(", ");
+    const mergeCode = `const __mod: any = Object.assign({}, __mod_barrel${mergeArgs ? ", " + mergeArgs : ""});`;
+    const exportsBinding = (ir.exports || []).map(e => `const ${e.name}: any = (__mod as any).${e.name};`).join("\n");
+    
+    const lines = (arr, pad) => (Array.isArray(arr) ? arr : [arr]).map(l => pad + l).join("\n");
+    
+    const behaviors = (ir.behavior || []).map((b, i) => {
+      const req = JSON.stringify(b.exports || []);
+      const prelude = b.prelude ? lines(b.prelude, "      ") : "";
+      return `  // Behavior ${i + 1}: ${b.desc || ""}
+  try {
+    const __req_exports = ${req};
+    const __all_present = __req_exports.every((e: string) => typeof (__mod as any)[e] !== "undefined");
+    if (!__all_present) {
+      skipped.push("BEHAVIOR_SKIP: ${b.desc || "behavior_" + i} (pending task export)");
+    } else {
+${prelude}
+      const __ok${i} = Boolean(${b.assert || "true"});
+      if (!__ok${i}) failed.push("BEHAVIOR_FAIL: ${b.desc || "behavior_" + i}");
+      else passed.push("BEHAVIOR_PASS: ${b.desc || "behavior_" + i}");
+    }
+  } catch (e: any) {
+    failed.push("BEHAVIOR_EXC: ${b.desc || "behavior_" + i} (" + String(e?.message || e) + ")");
+  }`;
+    }).join("\n");
 
-    "// Aegis Ephemeral Invariant Harness",
-    ("import * as __mod from '\''" + $importPath + "'\'';"),
-    "",
-    (((.exports // []) | map("const " + .name + ": any = (__mod as any)." + .name + ";")) | join("\n")),
-    "",
-    "export async function __run_invariants() {",
-    "  const passed: string[] = [];",
-    "  const failed: string[] = [];",
-    "  const skipped: string[] = [];",
-    "",
-    ([ (.behavior // []) | to_entries[] | .key as $i | .value as $b |
-      "  // Behavior " + (($i + 1)|tostring) + ": " + ($b.desc // "") + "\n" +
-      "  try {\n" +
-      "    const __req_exports = " + (($b.exports // []) | tojson) + ";\n" +
-      "    const __all_present = __req_exports.every((e: string) => typeof (__mod as any)[e] !== \"undefined\");\n" +
-      "    if (!__all_present) {\n" +
-      "      skipped.push(\"BEHAVIOR_SKIP: " + ($b.desc // ("behavior_" + ($i|tostring))) + " (pending task export)\");\n" +
-      "    } else {\n" +
-      lines(($b.prelude // [] | if type == "string" then [.] else . end); "      ") + "\n" +
-      "      const __ok" + ($i|tostring) + " = Boolean(" + ($b.assert // "true") + ");\n" +
-      "      if (!__ok" + ($i|tostring) + ") failed.push(\"BEHAVIOR_FAIL: " + ($b.desc // ("behavior_" + ($i|tostring))) + "\");\n" +
-      "      else passed.push(\"BEHAVIOR_PASS: " + ($b.desc // ("behavior_" + ($i|tostring))) + "\");\n" +
-      "    }\n" +
-      "  } catch (e: any) {\n" +
-      "    failed.push(\"BEHAVIOR_EXC: " + ($b.desc // ("behavior_" + ($i|tostring))) + " (\" + String(e?.message || e) + \")\");\n" +
-      "  }\n"
-    ] | join("\n")),
-    ([ (.proofObligations // []) | to_entries[] | .key as $i | .value as $po |
-      "  // Proof Obligation " + ($po.id // ($i|tostring)) + ":\n" +
-      "  try {\n" +
-      lines(($po.prelude // [] | if type == "string" then [.] else . end); "      ") + "\n" +
-      "    const __ok_po" + ($i|tostring) + " = Boolean(" + ($po.oracle // "true") + ");\n" +
-      "    if (!__ok_po" + ($i|tostring) + ") failed.push(\"PO_FAIL [" + ($po.id // ($i|tostring)) + "] (satisfies " + ($po.satisfies // "N/A") + ")\");\n" +
-      "    else passed.push(\"PO_PASS [" + ($po.id // ($i|tostring)) + "]\");\n" +
-      "  } catch (e: any) {\n" +
-      "    failed.push(\"PO_EXC [" + ($po.id // ($i|tostring)) + "] (\" + String(e?.message || e) + \")\");\n" +
-      "  }\n"
-    ] | join("\n")),
-    "  if (failed.length > 0) {",
-    "    console.error(\"[AEGIS][INVARIANT_HARNESS] FAILED INVARIANTS:\\n\" + failed.join(\"\\n\"));",
-    "    throw new Error(\"Invariant failures:\\n\" + failed.join(\"\\n\"));",
-    "  }",
-    "  console.log(\"[AEGIS][INVARIANT_HARNESS] INVARIANTS VERIFIED: \" + passed.length + \" passed, \" + skipped.length + \" skipped.\");",
-    "  if (passed.length > 0) console.log(passed.join(\"\\n\"));",
-    "}",
-    "void __run_invariants();"
+    const proofObligations = (ir.proofObligations || []).map((po, i) => {
+      const prelude = po.prelude ? lines(po.prelude, "      ") : "";
+      return `  // Proof Obligation ${po.id || i}:
+  try {
+${prelude}
+    const __ok_po${i} = Boolean(${po.oracle || "true"});
+    if (!__ok_po${i}) failed.push("PO_FAIL [${po.id || i}] (satisfies ${po.satisfies || "N/A"})");
+    else passed.push("PO_PASS [${po.id || i}]");
+  } catch (e: any) {
+    failed.push("PO_EXC [${po.id || i}] (" + String(e?.message || e) + ")");
+  }`;
+    }).join("\n");
+
+    const fullCode = `// Aegis Ephemeral Invariant Harness
+${imports}
+import * as __mod_barrel from "../../src/index.js";
+${mergeCode}
+
+${exportsBinding}
+
+export async function __run_invariants() {
+  const passed: string[] = [];
+  const failed: string[] = [];
+  const skipped: string[] = [];
+
+${behaviors}
+
+${proofObligations}
+
+  if (failed.length > 0) {
+    console.error("[AEGIS][INVARIANT_HARNESS] FAILED INVARIANTS:\\n" + failed.join("\\n"));
+    throw new Error("Invariant failures:\\n" + failed.join("\\n"));
+  }
+  console.log("[AEGIS][INVARIANT_HARNESS] INVARIANTS VERIFIED: " + passed.length + " passed, " + skipped.length + " skipped.");
+  if (passed.length > 0) console.log(passed.join("\\n"));
+}
+void __run_invariants();
+`;
+    process.stdout.write(fullCode);
   ' "${ir_file}" > "${harness_ts}" 2>/dev/null || { rm -f "${harness_ts}"; return 127; }
 
   [[ -s "${harness_ts}" ]] || { rm -f "${harness_ts}"; return 127; }
