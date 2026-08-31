@@ -43,8 +43,11 @@ emit_test_status() {
 }
 
 run_contract_invariants() {
+  local ws_root
+  ws_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P || echo ".")"
   local ir_file=""
   local candidates=(
+    "${ws_root}/.harness/active_contract_ir.json"
     "${AEGIS_ROOT_DIR:-.}/.harness/active_contract_ir.json"
     ".harness/active_contract_ir.json"
     "${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}/active_contract_ir.json"
@@ -68,17 +71,10 @@ run_contract_invariants() {
   local harness_ts="${runtime_dir}/__contract_harness__.ts"
   local build_dir="${runtime_dir}/build"
 
-  local import_path="src/index.js"
-  local first_export
-  first_export="$(jq -r '(.exports[0].name // empty)' "${ir_file}" 2>/dev/null || true)"
-  if [[ -n "${first_export}" ]] && ! grep -q "\b${first_export}\b" "src/index.ts" 2>/dev/null; then
-    local primary_target
-    primary_target="$(jq -r '((.targets // [])[]? | select(. != "src/index.ts")) // "src/index.ts"' "${ir_file}" | head -1 | sed -E 's/\.ts$/.js/')"
-    import_path="${primary_target}"
-  elif [[ ! -s "src/index.ts" ]] || ! grep -q "export" "src/index.ts" 2>/dev/null; then
-    local primary_target
-    primary_target="$(jq -r '((.targets // [])[]? | select(. != "src/index.ts")) // "src/index.ts"' "${ir_file}" | head -1 | sed -E 's/\.ts$/.js/')"
-    import_path="${primary_target}"
+  local import_path
+  import_path="$(jq -r '((.targets // [])[]? | select(. != "src/index.ts")) // (.barrelFrom // "src/index.js")' "${ir_file}" | head -1 | sed -E 's/^\.\///; s/\.ts$/.js/')"
+  if [[ -z "${import_path}" || "${import_path}" == "null" ]]; then
+    import_path="src/index.js"
   fi
 
   # Generate ephemeral harness using jq with dynamic symbol binding (immune to intermediate task TS2305)
@@ -136,7 +132,13 @@ run_contract_invariants() {
   [[ -s "${harness_ts}" ]] || { rm -f "${harness_ts}"; return 127; }
 
   # Compile via local tsc
-  local tsc_bin="node_modules/.bin/tsc"
+  local tsc_bin="${ws_root}/node_modules/.bin/tsc"
+  if [[ ! -x "${tsc_bin}" ]]; then
+    tsc_bin="${AEGIS_ROOT_DIR:-.}/node_modules/.bin/tsc"
+  fi
+  if [[ ! -x "${tsc_bin}" ]]; then
+    tsc_bin="node_modules/.bin/tsc"
+  fi
   if [[ ! -x "${tsc_bin}" ]]; then
     tsc_bin="$(command -v tsc || true)"
   fi
@@ -147,7 +149,7 @@ run_contract_invariants() {
 
   local compile_out=""
   local rc=0
-  compile_out="$("${tsc_bin}" "${harness_ts}" src/*.ts --outDir "${build_dir}" --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck 2>&1)" || rc=$?
+  compile_out="$("${tsc_bin}" "${harness_ts}" --outDir "${build_dir}" --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck 2>&1)" || rc=$?
 
   if [[ "${rc}" -ne 0 ]]; then
     echo "[AEGIS][INVARIANT_HARNESS] TypeScript compilation error in contract test harness:\n${compile_out}"
