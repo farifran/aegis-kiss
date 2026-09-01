@@ -1,22 +1,58 @@
 # Target Project Architecture (`ARCHITECTURE.md`)
 
-Diretrizes exclusivas do projeto alvo (escopo de código, padrões de engenharia e convenções inspiradas no PonyTail).
+Diretrizes exclusivas do projeto alvo e Constituição Operacional do **Aegis Harness**.
 
-## 🏛️ 1. Stack & Dependências (Native-First)
-* **Linguagem & Módulos**: Pure Vanilla TypeScript com **NodeNext ESM** (`import { fn } from './file.js'`).
-* **Ecossistema**: **Zero dependências externas** (apenas a biblioteca padrão e APIs nativas do runtime).
+---
 
-## ⚙️ 2. Padrões de Engenharia & PonyTail
-* **Tipagem Estrita & Zero `any`**: Proibido usar `any` ou `@ts-ignore`. Exigir tipos de retorno explícitos nas funções públicas e estreitamento de tipos seguro (`unknown`).
-* **Imutabilidade de Fronteira & Mutabilidade Interna de Alta Performance**: Exigir imutabilidade estrita na API pública e nas fronteiras de módulo (payloads e retornos marcados com `readonly`). Mutabilidade interna, in-place updates e buffers pré-alocados são permitidos e encorajados quando necessários para zero-GC, bounded memory ou performance incremental em hot paths.
-* **Tratamento de Erros & Cláusulas de Guarda**: Evitar `throw` de literais/strings genéricas ou blocos `catch` vazios. Utilizar erros tipados do domínio ou verificação estrita de premissas. Métodos que recebem grandezas físicas ou consumo (bytes, bits, tokens, durações) DEVEM validar limites de não-negatividade (`arg < 0` ou `arg < 0n`) na guarda inicial.
-* **Nomenclatura & Modularidade com Justification Gate**: Arquivos em `kebab-case` ou `camelCase` atômicos. Símbolos e funções em `camelCase`, tipos e interfaces em `PascalCase`. Tabelas estáticas extensas ou tipos isolados podem ser extraídos para submódulos irmãos (ex: `src/<module>Tables.ts`) para manter a complexidade ciclomática $\le 12$ e a auditabilidade.
+## 🏛️ Os 6 Pilares Universais do Aegis Harness
 
-## ⚙️ 3. Padrões de Domínio, Performance & Invariantes
-* **Contrato de Performance & Zero-GC no Hot Path**: Operações de ciclo crítico (ex.: geração de lances, buscas minimax/alfa-beta, matching de ordens, loops de simulação) devem operar com alocação dinâmica zero na heap. É terminantemente proibido alocar arrays locais (`const arr: T[] = []`), criar objetos literais transientes `{ from, to }` ou invocar `.push()` em hot paths. A representação interna deve operar com inteiros compactos (`number`/`bigint`) e buffers pré-alocados (`Int32Array`/`BigUint64Array`), instanciando objetos de API apenas na fronteira pública.
-* **Hash de Estado Incremental ($O(1)$)**: Transições de estado em hot paths devem atualizar hashes e representações via delta incremental (ex.: XOR bitwise), sendo proibido varrer o estado completo $O(N)$ em transições operacionais.
-* **Recursão Limitada & Guarda de Overflow**: Toda estrutura que acompanha profundidade de busca ou pilhas de estado DEVE possuir capacidade fixa e guarda determinística explícita (`if (this._stateSp >= capacity) throw new RangeError(...)`), impedindo degradações silenciosas.
-* **Obrigações de Prova & Oráculos Combinatórios**: Para sistemas com estado reversível (`make`/`undo`), operações idempotentes ou motores de árvore, as asserções devem validar invariantes algébricas de conservação de estado (ex.: `stateBefore ≡ undo(make(stateBefore))`), integridade estrutural (ex.: número exato de elementos vitais) e oráculos combinatórios canônicos (ex.: $Perft(1) = 20, Perft(2) = 400$).
-* **Cálculos de Dados & BigInt**: Utilizar `BigInt` ou operadores bitwise para manipulação de bits/bytes. Sempre multiplicar por escala prévia (`Math.round(rate * 1_000_000)`) antes de converter para `BigInt` e sempre multiplicar antes de dividir `(tempo * taxa) / escala` para evitar truncamento por zero em divisão inteira.
-* **Encapsulamento & Fonte Única de Verdade**: Manter encapsulamento estrito (getters públicos em vez de acessos diretos a membros privados). Proibido armazenar flags redundantes como campos internos mutáveis quando o valor puder ser computado dinamicamente via getter puro (ex.: `get refillActive(): boolean { return this._tokens < this._maxTokens; }`), eliminando dessincronizações por construção. Todo novo módulo utilitário criado em `src/` DEVE ter suas interfaces e funções públicas re-exportadas em `src/index.ts`.
+> *"O salto definitivo do Aegis acontece quando ele deixa de validar se o código está correto e passa a exigir provas de que o sistema inteiro não pode ficar incorreto sob composição, tempo, falha e observação."*
 
+### 1. Contrato Antes do Código
+Transformar qualquer demanda em um contrato formal explícito antes de qualquer mutação:
+* Entidades e estado canônico;
+* Pré-condições e pós-condições estritas;
+* Invariantes globais de conservação e validade;
+* Unidades e semântica pura sem contaminação de domínios anteriores;
+* Comportamentos estritamente proibidos;
+* Critérios de observabilidade pública.
+**Regra de Ouro:** Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
+
+### 2. Estado Projetado para Provar Composição
+A validação de lotes e operações sequenciais opera obrigatoriamente sobre a transição:
+$$\text{Estado Inicial } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Estado Final } (S_{commit})$$
+* **Proibido Netting Falso:** A solvência e capacidade não podem ser avaliadas apenas pelo somatório final de deltas ($\sum \Delta$). Cada operação deve ser admitida sequencialmente contra o estado projetado do instante anterior.
+* Impede overspending, duplo consumo, dependências circulares e financiamentos retroativos ilegais.
+
+### 3. Validators Baseados em Propriedades (Property-Based Oracles)
+Em vez de testar exemplos pontuais ("funciona neste caso?"), os oráculos provam a preservação de propriedades universais:
+* **Identidade em Abort:** $\text{rollback}(S) \equiv S_{\text{before}}$ (zero efeitos colaterais residuais).
+* **Limites Canônicos:** $\text{capacity} \in [0, \text{max}]$, $\text{balance} \ge 0$.
+* **Congruência Observável:** $\text{result} \equiv \text{observable\_state}$ (o resultado nunca afirma um estado que não existe no motor).
+* **Determinismo Puro:** $\text{f}(S, \text{input}, \text{nowMs}) \equiv \text{f}(S, \text{input}, \text{nowMs})$.
+
+### 4. Red Team Obrigatório na Composição
+Todo componente que passa individualmente é submetido a testes adversariais de interação:
+* **Aliasing:** $A \to A$ (transferência para si mesmo sem corromper balanços nem travar o lote).
+* **Financiamento Circular:** $A \to B$ sem saldo, seguido por $B \to A$ (rejeição estrita da primeira operação).
+* **Ordem & Duplicação:** IDs vazios, IDs duplicados, inversão de eventos.
+* **Skew Temporal:** Relógio regressando sem gerar capacidade artificial.
+
+### 5. Tempo, Efeitos e Observabilidade de Primeira Classe
+* **Proibido `Date.now()` Oculto:** O cursor temporal é dependência explícita e obrigatória (`nowMs: bigint`).
+* **Zero Políticas Mortas:** Proibido expor políticas nominais não implementadas (`logical_clock` sem código, locks sem mutação).
+* **Digest Canônico de Execução:** O hash ou identificador da execução deve vincular a identidade completa de todas as ordens, decisões, estado inicial e estado final.
+
+### 6. Governança Baseada em Provas (Proof-First Promotion)
+O Gate de Promoção não avalia estilo nem aprova código com base em premissas estruturais. A aprovação exige a cadeia de custódia ininterrupta:
+$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validador de Propriedade} \longrightarrow \text{Prova Adversarial (Red Team)}$$
+Se qualquer elo for violado: **`REJECT_PROMOTION`**.
+
+---
+
+## ⚙️ Diretrizes de Engenharia e Código TypeScript (KISS)
+
+1. **Stack & Módulos**: Pure Vanilla TypeScript com **NodeNext ESM** (`import { fn } from './file.js'`). Zero dependências externas de infraestrutura.
+2. **Tipagem Estrita & Zero `any`**: Proibido `any`, `as any`, `@ts-ignore` ou asserções não nulas (`x!`). Tipos em minúsculo (`bigint`, `number`, `string`, `boolean`).
+3. **Aritmética Exata**: `bigint` para grandezas financeiras, contadores e tempo de alta precisão. Proibido `Math.min/max/floor/ceil` em `bigint` (usar condicionais explícitas).
+4. **Re-exportação Nominal**: Toda entidade, tipo e função utilitária pública em `src/` deve ser re-exportada nominalmente em `src/index.ts`.

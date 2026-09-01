@@ -1,23 +1,25 @@
 // src/index.ts
-import { TokenBucket, obterEstadoBitmask, type ClockPolicy } from './tokenBucket.js';
-export { TokenBucket, obterEstadoBitmask };
-
+import { TokenBucket } from './tokenBucket.js';
 import {
   ClearingHouse,
-  obterClearingHouseBitmask,
   type TransferOrder,
+  type OperationStatus,
+  type OperationDecision,
+  type BatchResult,
   type AccountState,
-  type BatchResult
+  type EngineSnapshot
 } from './clearingHouse.js';
 
 export {
-  ClearingHouse,
-  obterClearingHouseBitmask
+  TokenBucket,
+  ClearingHouse
 };
 
 export type {
-  ClockPolicy,
   TransferOrder,
+  OperationStatus,
+  OperationDecision,
+  BatchResult,
   AccountState,
-  BatchResult
+  EngineSnapshot
 };

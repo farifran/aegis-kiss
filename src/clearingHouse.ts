@@ -6,353 +6,411 @@ export interface TransferOrder {
   readonly receiverId: string;
   readonly amount: bigint;
   readonly fee: bigint;
+  readonly capacityCost?: bigint;
 }
 
-export interface AccountState {
-  balance: bigint;
-  bucket: TokenBucket;
-  quarantined: boolean;
+export type OperationStatus =
+  | 'accepted'
+  | 'rejected_invalid'
+  | 'blocked_capacity'
+  | 'blocked_insolvent';
+
+export interface OperationDecision {
+  readonly id: string;
+  readonly status: OperationStatus;
+  readonly reason?: string;
 }
 
 export interface BatchResult {
-  readonly settledCount: number;
+  readonly acceptedCount: number;
   readonly rejectedCount: number;
-  readonly quarantinedCount: number;
+  readonly blockedCount: number;
   readonly settledVolume: bigint;
-  readonly retainedFees: bigint;
-  readonly merkleRoot: bigint;
+  readonly totalFees: bigint;
   readonly rolledBack: boolean;
+  readonly executionDigest: bigint;
+  readonly decisions: readonly OperationDecision[];
 }
 
-interface ClearingHouseSnapshot {
-  readonly accounts: Map<string, { readonly balance: bigint; readonly quarantined: boolean; readonly bucket: { readonly tokens: bigint; readonly lastUpdateMs: bigint } }>;
+export interface AccountState {
+  readonly accountId: string;
+  readonly balance: bigint;
+  readonly capacity: bigint;
+  readonly availableCapacity: bigint;
+}
+
+interface InternalAccount {
+  readonly accountId: string;
+  balance: bigint;
+  readonly bucket: TokenBucket;
+}
+
+export interface EngineSnapshot {
+  readonly balances: Record<string, bigint>;
+  readonly bucketStates: Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }>;
   readonly treasuryBalance: bigint;
-  readonly quarantineCount: number;
+  readonly totalSettledVolume: bigint;
+  readonly totalRetainedFees: bigint;
+}
+
+interface ProjectedState {
+  readonly balances: Record<string, bigint>;
+  readonly capacityUsed: Record<string, bigint>;
+  readonly decisions: OperationDecision[];
+  acceptedCount: number;
+  rejectedCount: number;
+  blockedCount: number;
+  batchVolume: bigint;
+  batchFees: bigint;
+}
+
+interface DigestContext {
+  readonly nowMs: bigint;
+  readonly initTreasury: bigint;
+  readonly finalTreasury: bigint;
+  readonly rolledBack: boolean;
 }
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
 
+function fnv1a(hash: bigint, value: bigint): bigint {
+  let h = hash ^ (value & 0xFFFFFFFFFFFFFFFFn);
+  h = (h * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
+  return h;
+}
+
+function stringToHash(hash: bigint, str: string): bigint {
+  let h = hash;
+  for (let i = 0; i < str.length; i++) {
+    const code = BigInt(str.charCodeAt(i));
+    h = fnv1a(h, code);
+  }
+  return h;
+}
+
 export class ClearingHouse {
-  private readonly _accounts: Map<string, AccountState>;
+  private readonly _accounts: Record<string, InternalAccount>;
   private _treasuryBalance: bigint;
-  private _isLocked: boolean;
-  private _lastRollback: boolean;
   private _totalSettledVolume: bigint;
   private _totalRetainedFees: bigint;
-  private _quarantineCount: number;
-  private _rejectedCount: number;
-  private _lastMerkleRoot: bigint;
-  private _globalChecksum: bigint;
 
   constructor() {
-    this._accounts = new Map<string, AccountState>();
+    this._accounts = Object.create(null) as Record<string, InternalAccount>;
     this._treasuryBalance = 0n;
-    this._isLocked = false;
-    this._lastRollback = false;
     this._totalSettledVolume = 0n;
     this._totalRetainedFees = 0n;
-    this._quarantineCount = 0;
-    this._rejectedCount = 0;
-    this._lastMerkleRoot = 0n;
-    this._globalChecksum = 0n;
   }
 
-  registerAccount(accountId: string, initialBalance: bigint, maxBytes: bigint, mbps: number): void {
-    if (!accountId) throw new TypeError('accountId required');
-    if (initialBalance < 0n) throw new RangeError('initialBalance must be non-negative');
-    const bucket = new TokenBucket(maxBytes, mbps);
-    this._accounts.set(accountId, { balance: initialBalance, bucket, quarantined: false });
-    this._globalChecksum = (this._globalChecksum ^ initialBalance) & 0xFFFFFFFFFFFFFFFFn;
-  }
-
-  private _hashOrderLeaf(ord: TransferOrder, index: number): bigint {
-    let h = FNV_OFFSET;
-    h = ((h ^ BigInt(index)) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
-    h = ((h ^ ord.amount) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
-    h = ((h ^ ord.fee) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
-    return h;
-  }
-
-  private _hashPair(left: bigint, right: bigint): bigint {
-    let h = FNV_OFFSET;
-    h = ((h ^ left) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
-    h = ((h ^ right) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFFn;
-    return h;
-  }
-
-  private _computeBinaryMerkleRoot(orders: readonly TransferOrder[]): bigint {
-    if (orders.length === 0) return 0n;
-    let leaves: bigint[] = [];
-    for (let i = 0; i < orders.length; i++) {
-      const ord = orders[i];
-      if (ord !== undefined) {
-        leaves.push(this._hashOrderLeaf(ord, i));
-      }
-    }
-
-    while (leaves.length > 1) {
-      const nextLevel: bigint[] = [];
-      for (let i = 0; i < leaves.length; i += 2) {
-        const left = leaves[i];
-        if (left !== undefined) {
-          const right = i + 1 < leaves.length && leaves[i + 1] !== undefined ? (leaves[i + 1] as bigint) : left;
-          nextLevel.push(this._hashPair(left, right));
-        }
-      }
-      leaves = nextLevel;
-    }
-
-    return leaves[0] ?? 0n;
-  }
-
-  private _isOrderAdmitted(
-    ord: TransferOrder,
-    now: bigint,
-    batchQuarantined: Set<string>,
-    reservedBits: Map<string, bigint>
-  ): boolean {
-    if (ord.amount <= 0n || ord.fee < 0n) return false;
-    const sender = this._accounts.get(ord.senderId);
-    const receiver = this._accounts.get(ord.receiverId);
-    if (!sender || !receiver || sender.quarantined || receiver.quarantined || batchQuarantined.has(ord.senderId)) {
-      return false;
-    }
-
-    const requiredBits = (ord.amount + ord.fee) * 8n;
-    const currentReserved = reservedBits.get(ord.senderId) ?? 0n;
-    if (sender.bucket.peekTokens(now) < currentReserved + requiredBits) {
-      batchQuarantined.add(ord.senderId);
-      return false;
-    }
-    reservedBits.set(ord.senderId, currentReserved + requiredBits);
-    return true;
-  }
-
-  private _admitOrders(
-    orders: readonly TransferOrder[],
-    now: bigint,
-    batchQuarantined: Set<string>
-  ): { admitted: TransferOrder[]; rejectedCount: number } {
-    const admitted: TransferOrder[] = [];
-    let rejectedCount = 0;
-    const reservedBits = new Map<string, bigint>();
-
-    for (const ord of orders) {
-      if (this._isOrderAdmitted(ord, now, batchQuarantined, reservedBits)) {
-        admitted.push(ord);
-      } else {
-        rejectedCount++;
-      }
-    }
-    return { admitted, rejectedCount };
-  }
-
-  private _computeDeltas(orders: readonly TransferOrder[]): { deltas: Map<string, bigint>; volume: bigint; fees: bigint } {
-    const deltas = new Map<string, bigint>();
-    let volume = 0n;
-    let fees = 0n;
-
-    for (const ord of orders) {
-      const sDelta = (deltas.get(ord.senderId) ?? 0n) - (ord.amount + ord.fee);
-      const rDelta = (deltas.get(ord.receiverId) ?? 0n) + ord.amount;
-      deltas.set(ord.senderId, sDelta);
-      deltas.set(ord.receiverId, rDelta);
-      volume = volume + ord.amount;
-      fees = fees + ord.fee;
-    }
-    return { deltas, volume, fees };
-  }
-
-  private _verifySolvency(deltas: Map<string, bigint>): boolean {
-    for (const [accId, delta] of deltas.entries()) {
-      const acc = this._accounts.get(accId);
-      if (acc && acc.balance + delta < 0n) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private _commitBatch(
-    orders: readonly TransferOrder[],
-    deltas: Map<string, bigint>,
-    batchQuarantined: Set<string>,
-    now: bigint
+  registerAccount(
+    accountId: string,
+    initialBalance: bigint,
+    capacity: bigint,
+    refillPerMs: bigint
   ): void {
-    for (const ord of orders) {
-      const sender = this._accounts.get(ord.senderId);
-      if (sender) {
-        const requiredBits = (ord.amount + ord.fee) * 8n;
-        if (!sender.bucket.consume(requiredBits, now)) {
-          throw new Error('commit effect rejected: token reservation was not effective');
-        }
-      }
+    if (!accountId || accountId.trim() === '') {
+      throw new TypeError('accountId must be a non-empty string');
+    }
+    if (this._accounts[accountId] !== undefined) {
+      throw new Error(`account '${accountId}' already exists`);
+    }
+    if (initialBalance < 0n) {
+      throw new RangeError('initialBalance must be non-negative');
     }
 
-    for (const [accId, delta] of deltas.entries()) {
-      const acc = this._accounts.get(accId);
-      if (acc) acc.balance = acc.balance + delta;
-    }
-
-    for (const qAccId of batchQuarantined) {
-      const acc = this._accounts.get(qAccId);
-      if (acc) acc.quarantined = true;
-    }
-  }
-
-  private _snapshotState(): ClearingHouseSnapshot {
-    const accounts = new Map<string, { readonly balance: bigint; readonly quarantined: boolean; readonly bucket: { readonly tokens: bigint; readonly lastUpdateMs: bigint } }>();
-    for (const [accountId, account] of this._accounts.entries()) {
-      accounts.set(accountId, {
-        balance: account.balance,
-        quarantined: account.quarantined,
-        bucket: account.bucket.snapshot()
-      });
-    }
-    return {
-      accounts,
-      treasuryBalance: this._treasuryBalance,
-      quarantineCount: this._quarantineCount
+    const bucket = new TokenBucket(capacity, refillPerMs, capacity, 0n);
+    this._accounts[accountId] = {
+      accountId,
+      balance: initialBalance,
+      bucket
     };
   }
 
-  private _restoreState(snapshot: ClearingHouseSnapshot): void {
-    for (const [accountId, state] of snapshot.accounts.entries()) {
-      const account = this._accounts.get(accountId);
-      if (account) {
-        account.balance = state.balance;
-        account.quarantined = state.quarantined;
-        account.bucket.restore(state.bucket);
-      }
-    }
-    this._treasuryBalance = snapshot.treasuryBalance;
-    this._quarantineCount = snapshot.quarantineCount;
+  getAccount(accountId: string, nowMs: bigint = 0n): AccountState | null {
+    const acc = this._accounts[accountId];
+    if (!acc) return null;
+    return {
+      accountId: acc.accountId,
+      balance: acc.balance,
+      capacity: acc.bucket.capacity,
+      availableCapacity: acc.bucket.peekTokens(nowMs)
+    };
   }
 
-  processBatch(orders: readonly TransferOrder[], nowMs?: bigint): BatchResult {
-    const now = nowMs !== undefined ? nowMs : BigInt(Date.now());
-    this._lastRollback = false;
+  snapshot(): EngineSnapshot {
+    const balances: Record<string, bigint> = Object.create(null) as Record<string, bigint>;
+    const bucketStates: Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }> = Object.create(null) as Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }>;
 
-    if (this._isLocked) {
-      return {
-        settledCount: 0,
-        rejectedCount: orders.length,
-        quarantinedCount: 0,
-        settledVolume: 0n,
-        retainedFees: 0n,
-        merkleRoot: this._lastMerkleRoot,
-        rolledBack: false
-      };
+    for (const id in this._accounts) {
+      const acc = this._accounts[id];
+      if (acc) {
+        balances[id] = acc.balance;
+        bucketStates[id] = acc.bucket.snapshot();
+      }
     }
-
-    let initialSum = this._treasuryBalance;
-    for (const acc of this._accounts.values()) initialSum = initialSum + acc.balance;
-
-    const batchQuarantined = new Set<string>();
-    const { admitted, rejectedCount } = this._admitOrders(orders, now, batchQuarantined);
-    const { deltas, volume, fees } = this._computeDeltas(admitted);
-
-    if (!this._verifySolvency(deltas)) {
-      this._lastRollback = true;
-      return {
-        settledCount: 0,
-        rejectedCount: orders.length,
-        quarantinedCount: batchQuarantined.size,
-        settledVolume: 0n,
-        retainedFees: 0n,
-        merkleRoot: 0n,
-        rolledBack: true
-      };
-    }
-
-    const snapshot = this._snapshotState();
-    try {
-      this._commitBatch(admitted, deltas, batchQuarantined, now);
-      this._treasuryBalance = this._treasuryBalance + fees;
-    } catch {
-      this._restoreState(snapshot);
-      this._lastRollback = true;
-      return {
-        settledCount: 0,
-        rejectedCount: orders.length,
-        quarantinedCount: batchQuarantined.size,
-        settledVolume: 0n,
-        retainedFees: 0n,
-        merkleRoot: 0n,
-        rolledBack: true
-      };
-    }
-
-    let finalSum = this._treasuryBalance;
-    for (const acc of this._accounts.values()) finalSum = finalSum + acc.balance;
-
-    if (initialSum !== finalSum) {
-      this._restoreState(snapshot);
-      this._lastRollback = true;
-      return {
-        settledCount: 0,
-        rejectedCount: orders.length,
-        quarantinedCount: batchQuarantined.size,
-        settledVolume: 0n,
-        retainedFees: 0n,
-        merkleRoot: 0n,
-        rolledBack: true
-      };
-    }
-
-    this._totalSettledVolume = this._totalSettledVolume + volume;
-    this._totalRetainedFees = this._totalRetainedFees + fees;
-    this._quarantineCount = this.activeQuarantineCount;
-    this._rejectedCount = rejectedCount;
-
-    const merkle = this._computeBinaryMerkleRoot(admitted);
-    this._lastMerkleRoot = merkle;
-    this._globalChecksum = (this._globalChecksum ^ merkle ^ finalSum) & 0xFFFFFFFFFFFFFFFFn;
 
     return {
-      settledCount: admitted.length,
-      rejectedCount,
-      quarantinedCount: batchQuarantined.size,
-      settledVolume: volume,
-      retainedFees: fees,
-      merkleRoot: merkle,
+      balances,
+      bucketStates,
+      treasuryBalance: this._treasuryBalance,
+      totalSettledVolume: this._totalSettledVolume,
+      totalRetainedFees: this._totalRetainedFees
+    };
+  }
+
+  private _restore(snap: EngineSnapshot): void {
+    for (const id in snap.balances) {
+      const acc = this._accounts[id];
+      const bal = snap.balances[id];
+      if (acc && bal !== undefined) {
+        acc.balance = bal;
+      }
+    }
+    for (const id in snap.bucketStates) {
+      const acc = this._accounts[id];
+      const bState = snap.bucketStates[id];
+      if (acc && bState !== undefined) {
+        acc.bucket.restore(bState);
+      }
+    }
+    this._treasuryBalance = snap.treasuryBalance;
+    this._totalSettledVolume = snap.totalSettledVolume;
+    this._totalRetainedFees = snap.totalRetainedFees;
+  }
+
+  private _validateSyntax(ord: TransferOrder, seen: Record<string, boolean>): string | null {
+    if (!ord || !ord.id || ord.id.trim() === '') return 'empty order id';
+    if (seen[ord.id]) return 'duplicate order id in batch';
+    seen[ord.id] = true;
+    if (!ord.senderId || !ord.receiverId) return 'invalid sender or receiver id';
+    if (ord.amount <= 0n || ord.fee < 0n) return 'invalid amount or fee';
+    return null;
+  }
+
+  private _validateEntities(ord: TransferOrder): string | null {
+    if (!this._accounts[ord.senderId] || !this._accounts[ord.receiverId]) {
+      return 'sender or receiver entity does not exist';
+    }
+    const neededCap = ord.capacityCost !== undefined ? ord.capacityCost : (ord.amount + ord.fee);
+    if (neededCap < 0n) return 'negative capacity cost';
+    return null;
+  }
+
+  private _projectSingleOrder(ord: TransferOrder, nowMs: bigint, proj: ProjectedState): void {
+    const sender = this._accounts[ord.senderId];
+    if (!sender) return;
+
+    const neededCap = ord.capacityCost !== undefined ? ord.capacityCost : (ord.amount + ord.fee);
+    const availCap = sender.bucket.peekTokens(nowMs);
+    const usedCap = proj.capacityUsed[ord.senderId] ?? 0n;
+
+    if (availCap < usedCap + neededCap) {
+      proj.blockedCount++;
+      proj.decisions.push({ id: ord.id, status: 'blocked_capacity', reason: 'insufficient capacity' });
+      return;
+    }
+
+    const currentSenderBal = proj.balances[ord.senderId] ?? 0n;
+    const totalCost = ord.amount + ord.fee;
+
+    if (currentSenderBal < totalCost) {
+      proj.blockedCount++;
+      proj.decisions.push({ id: ord.id, status: 'blocked_insolvent', reason: 'insufficient balance' });
+      return;
+    }
+
+    proj.capacityUsed[ord.senderId] = usedCap + neededCap;
+
+    if (ord.senderId === ord.receiverId) {
+      proj.balances[ord.senderId] = currentSenderBal - ord.fee;
+    } else {
+      proj.balances[ord.senderId] = currentSenderBal - totalCost;
+      const currentRecvBal = proj.balances[ord.receiverId] ?? 0n;
+      proj.balances[ord.receiverId] = currentRecvBal + ord.amount;
+    }
+
+    proj.acceptedCount++;
+    proj.batchVolume += ord.amount;
+    proj.batchFees += ord.fee;
+    proj.decisions.push({ id: ord.id, status: 'accepted' });
+  }
+
+  private _verifyConservation(snapBefore: EngineSnapshot, proj: ProjectedState): boolean {
+    let initialSum = snapBefore.treasuryBalance;
+    for (const id in snapBefore.balances) {
+      const b = snapBefore.balances[id];
+      if (b !== undefined) initialSum += b;
+    }
+
+    let projectedSum = snapBefore.treasuryBalance + proj.batchFees;
+    for (const id in proj.balances) {
+      const bal = proj.balances[id];
+      if (bal === undefined || bal < 0n) return false;
+      projectedSum += bal;
+    }
+
+    return initialSum === projectedSum;
+  }
+
+  private _commitProjected(proj: ProjectedState, nowMs: bigint): void {
+    for (const senderId in proj.capacityUsed) {
+      const usedCap = proj.capacityUsed[senderId];
+      if (usedCap !== undefined && usedCap > 0n) {
+        const acc = this._accounts[senderId];
+        if (acc && !acc.bucket.consume(usedCap, nowMs)) {
+          throw new Error(`capacity consume failed for ${senderId}`);
+        }
+      }
+    }
+
+    for (const accId in proj.balances) {
+      const newBal = proj.balances[accId];
+      const acc = this._accounts[accId];
+      if (acc && newBal !== undefined) {
+        acc.balance = newBal;
+      }
+    }
+
+    this._treasuryBalance += proj.batchFees;
+    this._totalSettledVolume += proj.batchVolume;
+    this._totalRetainedFees += proj.batchFees;
+  }
+
+  processBatch(orders: readonly TransferOrder[], nowMs: bigint): BatchResult {
+    if (nowMs < 0n) throw new RangeError('nowMs must be non-negative');
+
+    const snapBefore = this.snapshot();
+    const seenOrderIds: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
+
+    const initBalances: Record<string, bigint> = Object.create(null) as Record<string, bigint>;
+    for (const k in snapBefore.balances) {
+      const v = snapBefore.balances[k];
+      if (v !== undefined) initBalances[k] = v;
+    }
+
+    const proj: ProjectedState = {
+      balances: initBalances,
+      capacityUsed: Object.create(null) as Record<string, bigint>,
+      decisions: [],
+      acceptedCount: 0,
+      rejectedCount: 0,
+      blockedCount: 0,
+      batchVolume: 0n,
+      batchFees: 0n
+    };
+
+    for (const ord of orders) {
+      const synErr = this._validateSyntax(ord, seenOrderIds);
+      if (synErr !== null) {
+        proj.rejectedCount++;
+        proj.decisions.push({ id: ord?.id ?? '', status: 'rejected_invalid', reason: synErr });
+        continue;
+      }
+      const entErr = this._validateEntities(ord);
+      if (entErr !== null) {
+        proj.rejectedCount++;
+        proj.decisions.push({ id: ord.id, status: 'rejected_invalid', reason: entErr });
+        continue;
+      }
+      this._projectSingleOrder(ord, nowMs, proj);
+    }
+
+    if (!this._verifyConservation(snapBefore, proj)) {
+      return this._buildAbortResult(nowMs, snapBefore, proj.decisions, orders);
+    }
+
+    try {
+      this._commitProjected(proj, nowMs);
+    } catch {
+      this._restore(snapBefore);
+      return this._buildAbortResult(nowMs, snapBefore, proj.decisions, orders);
+    }
+
+    const digestCtx: DigestContext = {
+      nowMs,
+      initTreasury: snapBefore.treasuryBalance,
+      finalTreasury: this._treasuryBalance,
       rolledBack: false
     };
+    const digest = this._computeExecutionDigest(digestCtx, proj.decisions, orders);
+
+    return {
+      acceptedCount: proj.acceptedCount,
+      rejectedCount: proj.rejectedCount,
+      blockedCount: proj.blockedCount,
+      settledVolume: proj.batchVolume,
+      totalFees: proj.batchFees,
+      rolledBack: false,
+      executionDigest: digest,
+      decisions: proj.decisions
+    };
   }
 
-  get activeQuarantineCount(): number {
-    let count = 0;
-    for (const acc of this._accounts.values()) {
-      if (acc.quarantined) count++;
+  private _buildAbortResult(
+    nowMs: bigint,
+    snapBefore: EngineSnapshot,
+    decisions: OperationDecision[],
+    orders: readonly TransferOrder[]
+  ): BatchResult {
+    this._restore(snapBefore);
+    const digestCtx: DigestContext = {
+      nowMs,
+      initTreasury: snapBefore.treasuryBalance,
+      finalTreasury: snapBefore.treasuryBalance,
+      rolledBack: true
+    };
+    const digest = this._computeExecutionDigest(digestCtx, decisions, orders);
+
+    let rejectedCount = 0;
+    let blockedCount = 0;
+    for (const d of decisions) {
+      if (d.status === 'rejected_invalid') rejectedCount++;
+      if (d.status === 'blocked_capacity' || d.status === 'blocked_insolvent') blockedCount++;
     }
-    return count;
+
+    return {
+      acceptedCount: 0,
+      rejectedCount,
+      blockedCount,
+      settledVolume: 0n,
+      totalFees: 0n,
+      rolledBack: true,
+      executionDigest: digest,
+      decisions
+    };
+  }
+
+  private _computeExecutionDigest(
+    ctx: DigestContext,
+    decisions: readonly OperationDecision[],
+    orders: readonly TransferOrder[]
+  ): bigint {
+    let h = FNV_OFFSET;
+    h = fnv1a(h, ctx.nowMs);
+    h = fnv1a(h, ctx.initTreasury);
+    h = fnv1a(h, ctx.finalTreasury);
+    h = fnv1a(h, ctx.rolledBack ? 1n : 0n);
+
+    for (let i = 0; i < decisions.length; i++) {
+      const d = decisions[i];
+      const ord = orders[i];
+      if (d) {
+        h = stringToHash(h, d.id);
+        h = stringToHash(h, d.status);
+      }
+      if (ord) {
+        h = stringToHash(h, ord.senderId);
+        h = stringToHash(h, ord.receiverId);
+        h = fnv1a(h, ord.amount);
+        h = fnv1a(h, ord.fee);
+      }
+    }
+
+    return h;
   }
 
   get treasuryBalance(): bigint { return this._treasuryBalance; }
-  get isLocked(): boolean { return this._isLocked; }
-  get lastRollback(): boolean { return this._lastRollback; }
   get totalSettledVolume(): bigint { return this._totalSettledVolume; }
   get totalRetainedFees(): bigint { return this._totalRetainedFees; }
-  get quarantineCount(): number { return this._quarantineCount; }
-  get rejectedCount(): number { return this._rejectedCount; }
-  get lastMerkleRoot(): bigint { return this._lastMerkleRoot; }
-  get globalChecksum(): bigint { return this._globalChecksum; }
-}
-
-export function obterClearingHouseBitmask(house: ClearingHouse): bigint {
-  let mask = 0n;
-  if (house.isLocked) mask = mask | 1n;
-  if (house.quarantineCount > 0) mask = mask | 2n;
-  if (house.lastRollback) mask = mask | 4n;
-  if (house.totalSettledVolume > 10000000n) mask = mask | 8n;
-  const q = BigInt(house.quarantineCount > 63 ? 63 : house.quarantineCount);
-  mask = mask | ((q & 63n) << 4n);
-  const r = BigInt(house.rejectedCount > 63 ? 63 : house.rejectedCount);
-  mask = mask | ((r & 63n) << 10n);
-  const top16 = (house.lastMerkleRoot >> 48n) & 65535n;
-  mask = mask | ((top16 & 65535n) << 16n);
-  const low32 = house.globalChecksum & 4294967295n;
-  mask = mask | ((low32 & 4294967295n) << 32n);
-  return mask;
+  get accountCount(): number { return Object.keys(this._accounts).length; }
 }
