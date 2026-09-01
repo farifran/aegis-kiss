@@ -34,6 +34,14 @@ export class TokenBucket {
     return false;
   }
 
+  peekTokens(nowMs?: bigint): bigint {
+    const now = nowMs !== undefined ? nowMs : BigInt(Date.now());
+    if (now <= this._lastUpdateMs || this._rateBitsPerMs <= 0n) return this._tokens;
+    const timeDiff = now - this._lastUpdateMs;
+    const replenished = this._tokens + timeDiff * this._rateBitsPerMs;
+    return replenished > this._maxTokens ? this._maxTokens : replenished;
+  }
+
   get tokens(): bigint { return this._tokens; }
 
   get maxTokens(): bigint { return this._maxTokens; }
@@ -42,7 +50,7 @@ export class TokenBucket {
 
   get lastUpdateMs(): bigint { return this._lastUpdateMs; }
 
-  get refillActive(): boolean { return this._tokens < this._maxTokens; }
+  get refillActive(): boolean { return this._rateBitsPerMs > 0n && this._tokens < this._maxTokens; }
 }
 
 export function obterEstadoBitmask(bucket: TokenBucket): number {
