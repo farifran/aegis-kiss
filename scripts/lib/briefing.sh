@@ -521,7 +521,7 @@ aegis_briefing_typecheck_json() {
         | .value as $po
         | "async function __proof_obligation_\($i)(): Promise<boolean> {\n"
           + lines(($po.prelude // [] | if type == "string" then [.] else . end); "  ")
-          + "\n  const __ok\($i): boolean = (\(if ($po.oracle == "typecheck" or $po.oracle == "state_diff" or $po.oracle == "conservation" or $po.oracle == "tsc_no_emit") then "true" else ($po.oracle // "true") end));\n  return __ok\($i);\n}" ]
+          + "\n  const __ok\($i): boolean = (\(if ($po.oracle == "typecheck" or $po.oracle == "state_diff" or $po.oracle == "conservation" or $po.oracle == "tsc_no_emit" or $po.oracle == "aggregate_reservation" or $po.oracle == "resource_composition" or $po.oracle == "state_identity_on_abort" or $po.oracle == "commit_atomicity") then "true" else ($po.oracle // "true") end));\n  return __ok\($i);\n}" ]
     + [ (if (((.behavior // []) | length) + ((.proofObligations // []) | length)) > 0 then
           "async function __run_all(): Promise<void> {\n"
           + "  const errs: string[] = [];\n"
