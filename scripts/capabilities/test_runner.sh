@@ -75,12 +75,27 @@ run_contract_invariants() {
     return 127
   fi
 
+  local risk_file risk_json
+  risk_file="$(mktemp "${TMPDIR:-/tmp}/aegis-uaam-risk.XXXXXX")"
+  local risk_compiler="${ws_root}/scripts/lib/uaam_risk_compiler.mjs"
+  if [[ -f "${risk_compiler}" ]]; then
+    risk_json="$(node "${risk_compiler}" "${ir_file}" 2>/dev/null)" || risk_json=""
+  else
+    risk_json='{"version":"uaam-risk-v1","facts":[],"risks":[],"compiledProofObligations":[]}'
+  fi
+  if ! jq -e 'type == "object" and .version == "uaam-risk-v1"' >/dev/null 2>&1 <<<"${risk_json}"; then
+    rm -f "${risk_file}"
+    return 1
+  fi
+  printf '%s\n' "${risk_json}" > "${risk_file}"
+
   # Contract IR v3 is structural input to the proof compiler. A declared
   # operation must have an explicit obligation for every universal domain;
   # otherwise implicit coverage or an LLM-selected N/A could pass the gate.
-  if ! node - "${ir_file}" <<'NODE'
+  if ! node - "${ir_file}" "${risk_file}" <<'NODE'
 const fs = require("fs");
 const ir = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const riskCompilation = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 if (ir.version !== "3.0") process.exit(0);
 
 const domains = new Set(["CONTRACT", "ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE", "OBSERVABILITY"]);
@@ -105,6 +120,13 @@ for (const requirement of Array.isArray(ir.requirements) ? ir.requirements : [])
     ? obligations.some(po => po.id === reference)
     : obligations.some(po => po.target === requirement.target && po.domain === requirement.domain);
   if (!matched) errors.push(`requirement_without_proof_obligation:${requirement.id ?? ""}`);
+}
+for (const risk of Array.isArray(riskCompilation.risks) ? riskCompilation.risks : []) {
+  const matched = obligations.some(po => po.target === risk.target && po.domain === risk.domain)
+    || obligations.some(po => po.sourceRisk === risk.id)
+    || (risk.kind === "contract_coverage" && obligations.some(po => po.kind === "contract_coverage" || po.oracle === "contract_coverage" || po.domain === "CONTRACT"))
+    || (risk.kind === "resource_composition" && obligations.some(po => po.domain === "COMPOSITION" && po.target === "contract"));
+  if (!matched) errors.push(`risk_without_proof_obligation:${risk.id}`);
 }
 const ids = new Set();
 for (const po of obligations) {
@@ -146,8 +168,11 @@ for (const op of Array.isArray(ir.operations) ? ir.operations : []) {
 if (errors.length > 0) { process.stderr.write(`[AEGIS][UAAM][CONTRACT] ${errors.join(",")}\n`); process.exit(1); }
 NODE
   then
+    rm -f "${risk_file}"
     return 1
   fi
+  echo "[AEGIS][UAAM][RISK_MATRIX_JSON]${risk_json}"
+  rm -f "${risk_file}"
 
   local runtime_dir=".harness/runtime"
   mkdir -p "${runtime_dir}" 2>/dev/null || true

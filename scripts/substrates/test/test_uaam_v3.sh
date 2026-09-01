@@ -5,11 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AEGIS_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEST_DIR}"' EXIT
-mkdir -p "${TEST_DIR}/src" "${TEST_DIR}/.harness/runtime" "${TEST_DIR}/scripts/capabilities"
+mkdir -p "${TEST_DIR}/src" "${TEST_DIR}/.harness/runtime" "${TEST_DIR}/scripts/capabilities" "${TEST_DIR}/scripts/lib"
 ln -s "${AEGIS_ROOT}/node_modules" "${TEST_DIR}/node_modules"
 cp "${AEGIS_ROOT}/package.json" "${TEST_DIR}/"
 cp "${AEGIS_ROOT}/scripts/capabilities/test_runner.sh" "${TEST_DIR}/scripts/capabilities/"
 cp "${AEGIS_ROOT}/scripts/capabilities/_emit.sh" "${TEST_DIR}/scripts/capabilities/"
+cp "${AEGIS_ROOT}/scripts/lib/uaam_risk_compiler.mjs" "${TEST_DIR}/scripts/lib/"
 cd "${TEST_DIR}"
 
 cat <<'EOF' > src/index.ts

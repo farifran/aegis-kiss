@@ -11,6 +11,8 @@ Language: [English](README.md) | [Português (Brasil)](README.pt-BR.md)
 
 **Aegis** transforms code demands into a **bounded, inspectable, 6-stage autonomous pipeline** (`discovery` ➔ `forensics` ➔ `build` ➔ `optimize` ➔ `adversarial` ➔ `validation`). Unlike generic IDE extensions, Aegis is a **deterministic governance engine** that mechanically blocks bad code via AST, elevates LLM code reviews from local syntax to **System Design & State Lifecycle Red-Teaming**, holds a measured **71% of each raw-substrate prompt byte-identical from Byte 0** so a provider prefix cache can reuse it, and guarantees **only 100% tested, architecturally aligned patches reach Git**.
 
+For the universal assurance pass, run `npm run aegis:uaam:loop`. It executes independent proof families until all pass or the evidence reaches a bounded no-progress/iteration limit; failures are persisted under `.harness/runtime/uaam_loop`. Set `AEGIS_UAAM_AUTO_REPAIR=true` to delegate failed proofs to the official `run_aegis_loop.sh` mutation pipeline, or set `AEGIS_UAAM_REPAIR_CMD` for an explicitly authorized provider. Every repair receives `AEGIS_UAAM_REPAIR_REQUEST` and is followed by a complete re-proof.
+
 ---
 
 ## ⚡ 30-Second Quickstart

@@ -1,0 +1,140 @@
+{
+  "version": "uaam-loop-v1",
+  "iteration": 1,
+  "status": "SUCCESS",
+  "fingerprint": "c042f34ef49da423a99c8a2105d1c9044f4bebf82c4dba9632416f31a13765e0",
+  "checks": [
+    {
+      "name": "typecheck",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/typecheck.log",
+      "evidence_matrix": null
+    },
+    {
+      "name": "lint",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/lint.log",
+      "evidence_matrix": null
+    },
+    {
+      "name": "uaam_v3",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/uaam_v3.log",
+      "evidence_matrix": [
+        {
+          "id": "PO-CONTRACT-COVERAGE",
+          "kind": "contract_coverage",
+          "domain": "CONTRACT",
+          "status": "STATIC_PROVEN",
+          "required": true,
+          "evidence": "Every declared requirement is linked to a proof obligation with an oracle"
+        },
+        {
+          "id": "PO-ADMISSION",
+          "kind": "generic_invariant",
+          "domain": "ADMISSION",
+          "status": "EXECUTABLY_PROVEN",
+          "required": true,
+          "evidence": "Invalid input rejected"
+        },
+        {
+          "id": "PO-COMPOSITION",
+          "kind": "generic_invariant",
+          "domain": "COMPOSITION",
+          "status": "NOT_APPLICABLE",
+          "required": true,
+          "evidence": "Not applicable by Contract IR: derived:no_shared_resources"
+        },
+        {
+          "id": "PO-LIFECYCLE",
+          "kind": "generic_invariant",
+          "domain": "LIFECYCLE",
+          "status": "EXECUTABLY_PROVEN",
+          "required": true,
+          "evidence": "Expired state absent from next scope"
+        },
+        {
+          "id": "PO-RESULT-CONSISTENCY",
+          "kind": "result_state_consistency",
+          "domain": "OBSERVABILITY",
+          "status": "EXECUTABLY_PROVEN",
+          "required": true,
+          "evidence": "Returned result matches mapped observable state"
+        },
+        {
+          "id": "PO-TEMPORAL",
+          "kind": "temporal_lifecycle",
+          "domain": "LIFECYCLE",
+          "status": "EXECUTABLY_PROVEN",
+          "required": true,
+          "evidence": "Temporal trace satisfies monotonic_clamp"
+        }
+      ]
+    },
+    {
+      "name": "uaam_runtime",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/uaam_runtime.log",
+      "evidence_matrix": null
+    },
+    {
+      "name": "composition",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/composition.log",
+      "evidence_matrix": [
+        {
+          "id": "PO-COMMIT-ATOMIC",
+          "kind": "commit_atomicity",
+          "domain": "STATE_TRANSITION",
+          "status": "DISPROVEN",
+          "required": true,
+          "evidence": "Partial commit detected! Uncontracted mutations on [accounts.acc1]"
+        }
+      ]
+    },
+    {
+      "name": "evidence_compiler",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/evidence_compiler.log",
+      "evidence_matrix": [
+        {
+          "id": "PO-TYPE-001",
+          "kind": "type_safety",
+          "domain": "TYPE_SYSTEM",
+          "status": "STATIC_PROVEN",
+          "required": true,
+          "evidence": "TypeScript AST compiled with zero errors"
+        },
+        {
+          "id": "PO-FAIL-001",
+          "kind": "failure_state",
+          "domain": "STATE_TRANSITION",
+          "status": "EXECUTABLY_PROVEN",
+          "required": true,
+          "evidence": "State diff [rejectedCount] ⊆ allowedFailureEffects"
+        },
+        {
+          "id": "PO-CONS-001",
+          "kind": "resource_conservation",
+          "domain": "RESOURCE_INVARIANT",
+          "status": "DISPROVEN",
+          "required": true,
+          "evidence": "Conservation violated (100n !== 90n)"
+        }
+      ]
+    },
+    {
+      "name": "authority",
+      "status": "passed",
+      "exit_code": 0,
+      "evidence_log": ".harness/runtime/uaam_loop/iteration-1/authority.log",
+      "evidence_matrix": null
+    }
+  ]
+}

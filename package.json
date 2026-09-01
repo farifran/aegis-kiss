@@ -63,6 +63,11 @@
     "aegis:test:uaam-v3": "bash scripts/substrates/test/test_uaam_v3.sh",
     "aegis:test:uaam-runtime": "bash scripts/substrates/test/test_uaam_runtime.sh",
     "aegis:test:uaam-authority": "bash scripts/substrates/test/test_uaam_authority.sh",
+    "aegis:test:uaam-assurance-loop": "bash scripts/substrates/test/test_uaam_assurance_loop.sh",
+    "aegis:test:uaam-complex-loop": "bash scripts/substrates/test/test_uaam_complex_loop.sh",
+    "aegis:test:uaam-repair-loop": "bash scripts/substrates/test/test_uaam_repair_loop.sh",
+    "aegis:test:uaam": "npm run aegis:test:uaam-assurance-loop && npm run aegis:test:uaam-complex-loop && npm run aegis:test:uaam-repair-loop && npm run aegis:test:uaam-v3 && npm run aegis:test:uaam-runtime && npm run aegis:test:uaam-authority",
+    "aegis:uaam:loop": "bash scripts/uaam_assurance_loop.sh",
     "aegis:benchmark:intake-briefing": "bash scripts/substrates/test/test_intake_briefing_loop.sh"
   },
   "devDependencies": {
