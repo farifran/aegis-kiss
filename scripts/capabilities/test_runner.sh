@@ -123,9 +123,9 @@ ${prelude}
       if (poKind === "type_safety" || poOracle === "typecheck" || poOracle === "tsc_no_emit") {
         return `  // Proof Obligation ${poId} (Oracle 1: Type Oracle)
   try {
-    recordEvidence("${poId}", "${poKind}", "STATIC_PROVEN", ${poRequired}, "TypeScript AST compiled with zero errors");
+    recordEvidence("${poId}", "${poKind}", "TYPE_SYSTEM", "STATIC_PROVEN", ${poRequired}, "TypeScript AST compiled with zero errors");
   } catch (e: any) {
-    recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Type failure: " + String(e?.message || e));
+    recordEvidence("${poId}", "${poKind}", "TYPE_SYSTEM", "DISPROVEN", ${poRequired}, "Type failure: " + String(e?.message || e));
   }`;
       }
 
@@ -138,23 +138,23 @@ ${prelude}
     let __failingCall: (() => any) | null = null;
 ${prelude}
     if (!__targetInstance || !__failingCall) {
-      recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Missing __targetInstance or __failingCall in prelude");
+      recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Missing __targetInstance or __failingCall in prelude");
     } else {
       const __obs = ${obsKeys};
       const __allowed = ${allowedEffects};
-      const __snapBefore = __snapState(__targetInstance, __obs);
+      const __snapBefore = __deepSnapState(__targetInstance, __obs);
       __failingCall();
-      const __snapAfter = __snapState(__targetInstance, __obs);
-      const __diffKeys = __diffState(__snapBefore, __snapAfter);
-      const __unallowed = __diffKeys.filter((k: string) => !__allowed.includes(k));
+      const __snapAfter = __deepSnapState(__targetInstance, __obs);
+      const __diffKeys = __flattenDiff(__snapBefore, __snapAfter);
+      const __unallowed = __diffKeys.filter((k: string) => !__allowed.some((a: string) => k === a || k.startsWith(a + ".") || k.startsWith(a + "[")));
       if (__unallowed.length === 0) {
-        recordEvidence("${poId}", "${poKind}", "EXECUTABLY_VERIFIED", ${poRequired}, "State diff [" + __diffKeys.join(", ") + "] ⊆ allowedFailureEffects");
+        recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "EXECUTABLY_VERIFIED", ${poRequired}, "State diff [" + __diffKeys.join(", ") + "] ⊆ allowedFailureEffects");
       } else {
-        recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Uncontracted state mutation on [" + __unallowed.join(", ") + "]");
+        recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Uncontracted state mutation on [" + __unallowed.join(", ") + "]");
       }
     }
   } catch (e: any) {
-    recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Exception in state diff oracle: " + String(e?.message || e));
+    recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Exception in state diff oracle: " + String(e?.message || e));
   }`;
       }
 
@@ -170,9 +170,9 @@ ${prelude}
       // Fallback to direct oracle evaluation if objects not defined in prelude
       const __ok_cons = Boolean(${poOracle === "conservation" || poOracle === "conservation_equation" ? "true" : poOracle});
       if (__ok_cons) {
-        recordEvidence("${poId}", "${poKind}", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation invariant satisfied");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation invariant satisfied");
       } else {
-        recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Conservation invariant violated");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Conservation invariant violated");
       }
     } else {
       const __bKeys: string[] = ${beforeKeys};
@@ -180,13 +180,13 @@ ${prelude}
       const __bSum = __sumProps(__targetBefore, __bKeys);
       const __aSum = __sumProps(__targetAfter, __aKeys);
       if (__bSum === __aSum) {
-        recordEvidence("${poId}", "${poKind}", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation holds (" + __bSum + "n === " + __aSum + "n)");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation holds (" + __bSum + "n === " + __aSum + "n)");
       } else {
-        recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Conservation violated (" + __bSum + "n !== " + __aSum + "n)");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Conservation violated (" + __bSum + "n !== " + __aSum + "n)");
       }
     }
   } catch (e: any) {
-    recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Exception in conservation oracle: " + String(e?.message || e));
+    recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Exception in conservation oracle: " + String(e?.message || e));
   }`;
       }
 
@@ -196,12 +196,12 @@ ${prelude}
 ${prelude}
     const __ok_po${i} = Boolean(${po.oracle || "true"});
     if (!__ok_po${i}) {
-      recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Assertion failed (satisfies ${po.satisfies || "N/A"})");
+      recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "DISPROVEN", ${poRequired}, "Assertion failed (satisfies ${po.satisfies || "N/A"})");
     } else {
-      recordEvidence("${poId}", "${poKind}", "EXECUTABLY_VERIFIED", ${poRequired}, "Verified successfully");
+      recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "EXECUTABLY_VERIFIED", ${poRequired}, "Verified successfully");
     }
   } catch (e: any) {
-    recordEvidence("${poId}", "${poKind}", "DISPROVEN", ${poRequired}, "Exception: " + String(e?.message || e));
+    recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "DISPROVEN", ${poRequired}, "Exception: " + String(e?.message || e));
   }`;
     }).join("\n");
 
@@ -213,23 +213,42 @@ ${mergeCode}
 ${exportsBinding}
 
 type EpistemicStatus = "STATIC_PROVEN" | "EXECUTABLY_VERIFIED" | "DISPROVEN" | "UNPROVEN";
+type ProofDomain = "TYPE_SYSTEM" | "STATE_TRANSITION" | "RESOURCE_INVARIANT" | "BEHAVIORAL_ASSERTION" | "UNASSIGNED";
 
 interface EvidenceEntry {
   id: string;
   kind: string;
+  domain: ProofDomain;
   status: EpistemicStatus;
   required: boolean;
   evidence: string;
 }
 
-function __snapState(instance: any, keys: string[]): Record<string, any> {
+function __deepSnapState(instance: any, keys: string[], depth = 0): Record<string, any> {
   const out: Record<string, any> = {};
-  if (!instance) return out;
-  const kList = keys && keys.length > 0 ? keys : Object.keys(instance);
+  if (!instance || depth > 5) return out;
+  
+  if (instance instanceof Map) {
+    for (const [k, v] of instance.entries()) {
+      out[String(k)] = typeof v === "object" && v !== null ? __deepSnapState(v, [], depth + 1) : (typeof v === "bigint" ? v.toString() + "n" : v);
+    }
+    return out;
+  }
+
+  const kList = keys && keys.length > 0 ? keys : Array.from(new Set([...Object.keys(instance), ...Object.getOwnPropertyNames(instance)]));
   for (const k of kList) {
     try {
       const v = instance[k];
-      out[k] = typeof v === "bigint" ? v.toString() + "n" : v;
+      if (typeof v === "function") continue;
+      if (v instanceof Map) {
+        out[k] = __deepSnapState(v, [], depth + 1);
+      } else if (typeof v === "object" && v !== null) {
+        out[k] = __deepSnapState(v, [], depth + 1);
+      } else if (typeof v === "bigint") {
+        out[k] = v.toString() + "n";
+      } else {
+        out[k] = v;
+      }
     } catch {
       out[k] = "<error>";
     }
@@ -237,9 +256,20 @@ function __snapState(instance: any, keys: string[]): Record<string, any> {
   return out;
 }
 
-function __diffState(before: Record<string, any>, after: Record<string, any>): string[] {
-  const allKeys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
-  return allKeys.filter(k => before[k] !== after[k]);
+function __flattenDiff(before: Record<string, any>, after: Record<string, any>, prefix = ""): string[] {
+  const diffs: string[] = [];
+  const allKeys = Array.from(new Set([...Object.keys(before || {}), ...Object.keys(after || {})]));
+  for (const k of allKeys) {
+    const fullKey = prefix ? prefix + "." + k : k;
+    const vB = before ? before[k] : undefined;
+    const vA = after ? after[k] : undefined;
+    if (typeof vB === "object" && vB !== null && typeof vA === "object" && vA !== null) {
+      diffs.push(...__flattenDiff(vB, vA, fullKey));
+    } else if (vB !== vA) {
+      diffs.push(fullKey);
+    }
+  }
+  return diffs;
 }
 
 function __sumProps(instance: any, keys: string[]): bigint {
@@ -261,25 +291,36 @@ export async function __run_invariants() {
   const skipped: string[] = [];
   const evidenceMatrix: EvidenceEntry[] = [];
 
-  function recordEvidence(id: string, kind: string, status: EpistemicStatus, required: boolean, evidence: string) {
-    evidenceMatrix.push({ id, kind, status, required, evidence });
+  function recordEvidence(id: string, kind: string, domain: ProofDomain, status: EpistemicStatus, required: boolean, evidence: string) {
+    evidenceMatrix.push({ id, kind, domain, status, required, evidence });
   }
 
 ${behaviors}
 
 ${proofObligations}
 
+  // Ensure all declared required obligations were executed
+  const declaredObligations = ${JSON.stringify(ir.proofObligations || [])};
+  for (const decl of declaredObligations) {
+    const poId = decl.id;
+    if (!poId) continue;
+    const found = evidenceMatrix.some(e => e.id === poId);
+    if (!found && decl.required !== false) {
+      recordEvidence(poId, decl.kind || "unknown", "UNASSIGNED", "UNPROVEN", true, "Declared required obligation was never executed");
+    }
+  }
+
   console.log("\\n[AEGIS][EVIDENCE_MATRIX]");
-  console.log("┌──────────┬───────────────────────┬─────────────────────┬────────────────────────────────────────────────────────┐");
-  console.log("│ ID       │ KIND                  │ STATUS              │ EVIDENCE                                               │");
-  console.log("├──────────┼───────────────────────┼─────────────────────┼────────────────────────────────────────────────────────┤");
+  console.log("┌────────────────┬───────────────────────┬─────────────────────┬─────────────────────┬────────────────────────────────────────────────────────┐");
+  console.log("│ ID             │ KIND                  │ DOMAIN              │ STATUS              │ EVIDENCE                                               │");
+  console.log("├────────────────┼───────────────────────┼─────────────────────┼─────────────────────┼────────────────────────────────────────────────────────┤");
   for (const ev of evidenceMatrix) {
-    const pad = (s: string, n: number) => s.padEnd(n, " ").substring(0, n);
+    const pad = (s: string, n: number) => (s || "").padEnd(n, " ").substring(0, n);
     const color = ev.status === "STATIC_PROVEN" || ev.status === "EXECUTABLY_VERIFIED" ? "\\x1b[32m" : "\\x1b[31m";
     const reset = "\\x1b[0m";
-    console.log("│ " + pad(ev.id, 8) + " │ " + pad(ev.kind, 21) + " │ " + color + pad(ev.status, 19) + reset + " │ " + pad(ev.evidence, 54) + " │");
+    console.log("│ " + pad(ev.id, 14) + " │ " + pad(ev.kind, 21) + " │ " + pad(ev.domain, 19) + " │ " + color + pad(ev.status, 19) + reset + " │ " + pad(ev.evidence, 54) + " │");
   }
-  console.log("└──────────┴───────────────────────┴─────────────────────┴────────────────────────────────────────────────────────┘");
+  console.log("└────────────────┴───────────────────────┴─────────────────────┴─────────────────────┴────────────────────────────────────────────────────────┘");
 
   const unprovenOrDisproven = evidenceMatrix.filter(e => e.required && (e.status === "DISPROVEN" || e.status === "UNPROVEN"));
   if (unprovenOrDisproven.length > 0 || failed.length > 0) {
