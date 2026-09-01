@@ -8,6 +8,7 @@
 # readonly
 #
 # Responsibilities:
+# - compile Contract IR v3 universal proof obligations
 # - execute candidate test suite if configured in package.json
 # - execute ephemeral contract invariant harness (proof obligations & behaviors)
 # - prevent recursion with harness tests
@@ -33,11 +34,19 @@ emit_test_status() {
   local status="$1"
   local summary="$2"
   local payload
+  local evidence_matrix='[]'
+  local matrix_line
+  matrix_line="$(printf '%s\n' "${summary}" | sed -n 's/^\[AEGIS\]\[EVIDENCE_MATRIX_JSON\]//p' | tail -1)"
+  if [[ -n "${matrix_line}" ]] && jq -e . >/dev/null 2>&1 <<<"${matrix_line}"; then evidence_matrix="${matrix_line}"; fi
+  local contract_version=""
+  if [[ -f .harness/active_contract_ir.json ]]; then contract_version="$(jq -r '.version // .contractVersion // empty' .harness/active_contract_ir.json 2>/dev/null || true)"; fi
   payload="$(
     jq -nc \
       --arg status "${status}" \
       --arg summary "${summary}" \
-      '{status: $status, summary: $summary}'
+      --arg contract_version "${contract_version}" \
+      --argjson evidence_matrix "${evidence_matrix}" \
+      '{status: $status, summary: $summary, contract_version: (if ($contract_version | length) > 0 then $contract_version else null end), evidence_matrix: $evidence_matrix}'
   )"
   aegis_emit_capability_success "${CAPABILITY_NAME}" "${payload}"
 }
@@ -66,6 +75,64 @@ run_contract_invariants() {
     return 127
   fi
 
+  # Contract IR v3 is structural input to the proof compiler. A declared
+  # operation must have an explicit obligation for every universal domain;
+  # otherwise implicit coverage or an LLM-selected N/A could pass the gate.
+  if ! node - "${ir_file}" <<'NODE'
+const fs = require("fs");
+const ir = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (ir.version !== "3.0") process.exit(0);
+
+const domains = new Set(["ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE"]);
+const operationFields = [["admission", "ADMISSION"], ["failure", "STATE"], ["resources", "RESOURCE"], ["composition", "COMPOSITION"], ["transaction", "COMMIT"], ["lifecycle", "LIFECYCLE"], ["observability", "STATE"]];
+const errors = [];
+if (!Array.isArray(ir.targets) || ir.targets.length === 0) errors.push("targets_required");
+if (!ir.publicContract || typeof ir.publicContract !== "object") errors.push("publicContract_required");
+if (!Array.isArray(ir.operations) || ir.operations.length === 0) errors.push("operations_required");
+if (!Array.isArray(ir.proofObligations)) errors.push("proofObligations_required");
+
+const obligations = Array.isArray(ir.proofObligations) ? ir.proofObligations : [];
+const ids = new Set();
+for (const po of obligations) {
+  if (!po || typeof po !== "object") { errors.push("proof_obligation_object_required"); continue; }
+  if (typeof po.id !== "string" || po.id.length === 0 || ids.has(po.id)) errors.push(`proof_obligation_id_invalid:${po.id ?? ""}`);
+  ids.add(po.id);
+  if (!domains.has(po.domain)) errors.push(`proof_obligation_domain_invalid:${po.id ?? ""}`);
+  if (typeof po.oracle !== "string" || po.oracle.length === 0) errors.push(`proof_obligation_oracle_required:${po.id ?? ""}`);
+  if (po.status !== undefined) errors.push(`proof_obligation_status_forbidden:${po.id ?? ""}`);
+  if (po.notApplicable === true && (typeof po.naJustification !== "string" || !po.naJustification.startsWith("derived:"))) errors.push(`na_not_structurally_derived:${po.id ?? ""}`);
+}
+for (const op of Array.isArray(ir.operations) ? ir.operations : []) {
+  if (!op || typeof op !== "object" || typeof op.id !== "string" || typeof op.target !== "string") { errors.push("operation_id_and_target_required"); continue; }
+  for (const [field, domain] of operationFields) {
+    const value = op[field];
+    const present = value !== undefined && value !== null && (!(Array.isArray(value)) || value.length > 0) && (!(typeof value === "object") || Object.keys(value).length > 0);
+    if (!present) continue;
+    const match = obligations.find(po => po.target === op.target && po.domain === domain);
+    if (!match) errors.push(`missing_explicit_obligation:${op.id}:${domain}`);
+    if (domain === "COMPOSITION" && match?.notApplicable === true && Array.isArray(value.sharedResources) && value.sharedResources.length > 0) errors.push(`composition_na_with_shared_resource:${match.id}`);
+  }
+  if (Array.isArray(op.resources) && op.resources.length > 0) for (const resource of op.resources) {
+    if (!resource || typeof resource !== "object" || typeof resource.resource !== "string" || typeof resource.owner !== "string" || typeof resource.scope !== "string" || typeof resource.capacity !== "string" || !Array.isArray(resource.allowedExits)) errors.push(`resource_boundary_incomplete:${op.id}`);
+  }
+  if (op.composition && typeof op.composition === "object" && Array.isArray(op.composition.sharedResources)) for (const shared of op.composition.sharedResources) {
+    if (!shared || typeof shared !== "object" || typeof shared.resource !== "string" || typeof shared.rule !== "string") errors.push(`composition_rule_incomplete:${op.id}`);
+  }
+  if (op.transaction && typeof op.transaction === "object" && (typeof op.transaction.atomic !== "boolean" || !Array.isArray(op.transaction.phases) || op.transaction.phases.length === 0)) errors.push(`transaction_machine_incomplete:${op.id}`);
+  if (op.transaction && Array.isArray(op.transaction.requiredEffects) && op.transaction.requiredEffects.length > 0) {
+    const commitPo = obligations.find(po => po.target === op.target && po.domain === "COMMIT");
+    if (!commitPo || !Array.isArray(commitPo.requiredEffects) || commitPo.requiredEffects.length !== op.transaction.requiredEffects.length || op.transaction.requiredEffects.some(effect => !commitPo.requiredEffects.includes(effect))) errors.push(`commit_effects_not_explicit:${op.id}`);
+  }
+  const lifecycleValues = Array.isArray(op.lifecycle) ? op.lifecycle : (op.lifecycle ? [op.lifecycle] : []);
+  const lifecycleScopes = new Set(["CALL", "BATCH", "TRANSACTION", "CYCLE", "SESSION", "INSTANCE", "PROCESS", "PERSISTENT"]);
+  for (const lifecycle of lifecycleValues) if (!lifecycle || typeof lifecycle !== "object" || typeof lifecycle.state !== "string" || typeof lifecycle.scope !== "string" || !lifecycleScopes.has(lifecycle.scope)) errors.push(`lifecycle_scope_incomplete:${op.id}`);
+}
+if (errors.length > 0) { process.stderr.write(`[AEGIS][UAAM][CONTRACT] ${errors.join(",")}\n`); process.exit(1); }
+NODE
+  then
+    return 1
+  fi
+
   local runtime_dir=".harness/runtime"
   mkdir -p "${runtime_dir}" 2>/dev/null || true
   local harness_ts="${runtime_dir}/__contract_harness__.ts"
@@ -82,6 +149,12 @@ run_contract_invariants() {
     const fs = require("fs");
     const ir = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const targets = (ir.targets || ["src/index.ts"]).filter(t => t !== "src/index.ts");
+    const firstTargetDir = targets.length > 0 ? targets[0].replace(/[^/]+$/, "") : "src/";
+    const declaredImports = (ir.imports || []).map(spec => {
+      const names = (spec.names || []).filter(name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+      const source = ("../../" + firstTargetDir + (spec.from || "")).replace(/\.ts$/, ".js");
+      return names.length > 0 ? `import { ${names.join(", ")} } from "${source}";` : "";
+    }).filter(Boolean).join("\n");
     const imports = targets.map(t => {
       const modName = "__mod_" + t.replace(/[^a-zA-Z0-9]/g, "_");
       const jsPath = "../../" + t.replace(/\.ts$/, ".js").replace(/^\.\//, "");
@@ -89,7 +162,8 @@ run_contract_invariants() {
     }).join("\n");
     const mergeArgs = targets.map(t => "__mod_" + t.replace(/[^a-zA-Z0-9]/g, "_")).join(", ");
     const mergeCode = `const __mod: any = Object.assign({}, __mod_barrel${mergeArgs ? ", " + mergeArgs : ""});`;
-    const exportsBinding = (ir.exports || []).map(e => `const ${e.name}: any = (__mod as any).${e.name};`).join("\n");
+    const exportNames = (ir.exports || []).map(e => e.name).concat((ir.publicContract?.exports || []).filter(e => typeof e === "string"));
+    const exportsBinding = Array.from(new Set(exportNames)).map(name => `const ${name}: any = (__mod as any).${name};`).join("\n");
     
     const lines = (arr, pad) => (Array.isArray(arr) ? arr : [arr]).map(l => pad + l).join("\n");
     
@@ -113,13 +187,59 @@ ${prelude}
   }`;
     }).join("\n");
 
-    const proofObligations = (ir.proofObligations || []).map((po, i) => {
+    const deriveV3Obligations = (contract) => {
+      if (contract.version !== "3.0") return [];
+      const fields = [["admission", "ADMISSION", "admission_reject"], ["failure", "STATE", "state_diff"], ["resources", "RESOURCE", "resource_conservation"], ["composition", "COMPOSITION", "resource_composition"], ["transaction", "COMMIT", "commit_atomicity"], ["lifecycle", "LIFECYCLE", "lifecycle_expiry"], ["observability", "STATE", "state_diff"]];
+      const explicit = contract.proofObligations || [];
+      return (contract.operations || []).flatMap(op => fields.flatMap(([field, domain, oracle]) => {
+        const value = op[field];
+    const present = value !== undefined && value !== null && (!(Array.isArray(value)) || value.length > 0) && (!(typeof value === "object") || Object.keys(value).length > 0);
+    if (!present) return [];
+    const found = explicit.find(po => po.target === op.target && po.domain === domain);
+        return found ? [{ ...found, requiredEffects: found.requiredEffects || (domain === "COMMIT" ? op.transaction?.requiredEffects : undefined) }] : [{ id: `PO-${op.id}-${domain}`, target: op.target, domain, kind: domain.toLowerCase(), oracle, required: true, requiredEffects: domain === "COMMIT" ? op.transaction?.requiredEffects : undefined, notApplicable: domain === "COMPOSITION" && value && value.sharedResources?.length === 0, naJustification: "derived:no_shared_resources" }];
+      }));
+    };
+    const obligations = (ir.proofObligations || []).concat(deriveV3Obligations(ir).filter(derived => !(ir.proofObligations || []).some(po => po.id === derived.id)));
+    const proofObligations = obligations.map((po, i) => {
       const poId = po.id || ("PO-" + String(i + 1).padStart(3, "0"));
       const poKind = po.kind || po.invariant || "generic_invariant";
       const poRequired = po.required !== false;
       const poOracle = po.oracle || "true";
       const prelude = po.prelude ? lines(po.prelude, "      ") : "";
 
+      if (po.notApplicable === true) {
+        return `  // Proof Obligation ${poId} (structurally derived N/A)
+  recordEvidence("${poId}", "${poKind}", "${po.domain || "UNASSIGNED"}", "NOT_APPLICABLE", ${poRequired}, "Not applicable by Contract IR: ${po.naJustification || "missing justification"}");`;
+      }
+
+      if (po.domain === "ADMISSION" || poKind === "admission" || poOracle === "admission_reject") {
+        return `  // Proof Obligation ${poId} (Admission Oracle)
+  try {
+    let __invalidCall: (() => unknown) | null = null;
+    let __admissionAccepted: (() => boolean) | null = null;
+${prelude}
+    if (!__invalidCall) recordEvidence("${poId}", "${poKind}", "ADMISSION", "UNPROVEN", ${poRequired}, "Missing __invalidCall in prelude");
+    else {
+      let __accepted = false;
+      try { const __result = __invalidCall(); __accepted = typeof __result === "boolean" ? __result : (__admissionAccepted ? __admissionAccepted() : false); } catch (_error) { __accepted = false; }
+      if (__accepted) recordEvidence("${poId}", "${poKind}", "ADMISSION", "DISPROVEN", ${poRequired}, "Invalid input was admitted");
+      else recordEvidence("${poId}", "${poKind}", "ADMISSION", "EXECUTABLY_PROVEN", ${poRequired}, "Invalid input rejected");
+    }
+  } catch (e: unknown) { recordEvidence("${poId}", "${poKind}", "ADMISSION", "DISPROVEN", ${poRequired}, "Exception in admission oracle: " + String(e));
+  }`;
+      }
+
+      if (po.domain === "LIFECYCLE" || poKind === "lifecycle" || poOracle === "lifecycle_expiry") {
+        return `  // Proof Obligation ${poId} (Lifecycle Oracle)
+  try {
+    let __lifecycleCheck: (() => boolean) | null = null;
+${prelude}
+    if (!__lifecycleCheck) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "UNPROVEN", ${poRequired}, "Missing __lifecycleCheck in prelude");
+    else if (__lifecycleCheck()) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "EXECUTABLY_PROVEN", ${poRequired}, "Expired state absent from next scope");
+    else recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Expired state survived its declared boundary");
+  } catch (e: unknown) { recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Exception in lifecycle oracle: " + String(e));
+  }`;
+      }
       if (poKind === "type_safety" || poOracle === "typecheck" || poOracle === "tsc_no_emit") {
         return `  // Proof Obligation ${poId} (Oracle 1: Type Oracle)
   try {
@@ -148,7 +268,7 @@ ${prelude}
       const __diffKeys = __flattenDiff(__snapBefore, __snapAfter);
       const __unallowed = __diffKeys.filter((k: string) => !__allowed.some((a: string) => k === a || k.startsWith(a + ".") || k.startsWith(a + "[")));
       if (__unallowed.length === 0) {
-        recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "EXECUTABLY_VERIFIED", ${poRequired}, "State diff [" + __diffKeys.join(", ") + "] ⊆ allowedFailureEffects");
+        recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "EXECUTABLY_PROVEN", ${poRequired}, "State diff [" + __diffKeys.join(", ") + "] ⊆ allowedFailureEffects");
       } else {
         recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Uncontracted state mutation on [" + __unallowed.join(", ") + "]");
       }
@@ -170,7 +290,7 @@ ${prelude}
       // Fallback to direct oracle evaluation if objects not defined in prelude
       const __ok_cons = Boolean(${poOracle === "conservation" || poOracle === "conservation_equation" ? "true" : poOracle});
       if (__ok_cons) {
-        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation invariant satisfied");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_PROVEN", ${poRequired}, "Conservation invariant satisfied");
       } else {
         recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Conservation invariant violated");
       }
@@ -180,7 +300,7 @@ ${prelude}
       const __bSum = __sumProps(__targetBefore, __bKeys);
       const __aSum = __sumProps(__targetAfter, __aKeys);
       if (__bSum === __aSum) {
-        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Conservation holds (" + __bSum + "n === " + __aSum + "n)");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_PROVEN", ${poRequired}, "Conservation holds (" + __bSum + "n === " + __aSum + "n)");
       } else {
         recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Conservation violated (" + __bSum + "n !== " + __aSum + "n)");
       }
@@ -206,7 +326,7 @@ ${prelude}
       // Direct boolean fallback if available/committed not set
       const __ok_comp = Boolean(${poOracle === "aggregate_reservation" || poOracle === "resource_composition" ? "true" : poOracle});
       if (__ok_comp) {
-        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Resource composition invariant satisfied");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_PROVEN", ${poRequired}, "Resource composition invariant satisfied");
       } else {
         recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Resource composition invariant violated");
       }
@@ -221,7 +341,7 @@ ${prelude}
         __commBig = typeof __committedResources === "bigint" ? __committedResources : BigInt(__committedResources);
       }
       if (__commBig <= __availBig) {
-        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_VERIFIED", ${poRequired}, "Aggregate committed (" + __commBig + "n) <= available (" + __availBig + "n)");
+        recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "EXECUTABLY_PROVEN", ${poRequired}, "Aggregate committed (" + __commBig + "n) <= available (" + __availBig + "n)");
       } else {
         recordEvidence("${poId}", "${poKind}", "RESOURCE_INVARIANT", "DISPROVEN", ${poRequired}, "Aggregate overcommitment: committed (" + __commBig + "n) > available (" + __availBig + "n)");
       }
@@ -234,14 +354,29 @@ ${prelude}
       if (poKind === "commit_atomicity" || poOracle === "state_identity_on_abort" || poOracle === "commit_atomicity") {
         const obsKeys = JSON.stringify(po.observableState || po.expected?.observableState || []);
         const allowedEffects = JSON.stringify(po.allowedFailureEffects || po.expected?.allowedFailureEffects || []);
+        const requiredEffects = JSON.stringify(po.requiredEffects || []);
         return `  // Proof Obligation ${poId} (Oracle 5: Commit Atomicity Oracle)
   try {
     let __targetInstance: any = null;
     let __abortingBatchCall: (() => any) | null = null;
+    let __commitCall: (() => unknown) | null = null;
+    let __appliedEffects: readonly string[] | null = null;
+    let __effectResults: readonly boolean[] | null = null;
 ${prelude}
-    if (!__targetInstance || !__abortingBatchCall) {
+    const __requiredEffects: string[] = ${requiredEffects};
+    let __effectsOk = true;
+    if (__requiredEffects.length > 0) {
+      if (__commitCall) { try { __commitCall(); } catch (_error) { /* failed commit is judged below */ } }
+      const __byNames = Array.isArray(__appliedEffects) && __requiredEffects.every((effect: string) => __appliedEffects?.includes(effect));
+      const __byResults = Array.isArray(__effectResults) && __effectResults.length === __requiredEffects.length && __effectResults.every((applied: boolean) => applied === true);
+      if (!__byNames && !__byResults) {
+        __effectsOk = false;
+        recordEvidence("${poId}", "${poKind}", "COMMIT", "DISPROVEN", ${poRequired}, "Required commit effects were not all applied");
+      }
+    }
+    if (__effectsOk && (!__targetInstance || !__abortingBatchCall)) {
       recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Missing __targetInstance or __abortingBatchCall in prelude");
-    } else {
+    } else if (__effectsOk) {
       const __obs = ${obsKeys};
       const __allowed = ${allowedEffects};
       const __snapBefore = __deepSnapState(__targetInstance, __obs);
@@ -254,7 +389,7 @@ ${prelude}
       const __diffKeys = __flattenDiff(__snapBefore, __snapAfter);
       const __unallowed = __diffKeys.filter((k: string) => !__allowed.some((a: string) => k === a || k.startsWith(a + ".") || k.startsWith(a + "[")));
       if (__unallowed.length === 0) {
-        recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "EXECUTABLY_VERIFIED", ${poRequired}, "Atomicity preserved: state before === state after (diff [] ⊆ allowed)");
+        recordEvidence("${poId}", "${poKind}", "COMMIT", "EXECUTABLY_PROVEN", ${poRequired}, "Atomicity preserved: state before === state after (diff [] ⊆ allowed)");
       } else {
         recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Partial commit detected! Uncontracted mutations on [" + __unallowed.join(", ") + "]");
       }
@@ -272,7 +407,7 @@ ${prelude}
     if (!__ok_po${i}) {
       recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "DISPROVEN", ${poRequired}, "Assertion failed (satisfies ${po.satisfies || "N/A"})");
     } else {
-      recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "EXECUTABLY_VERIFIED", ${poRequired}, "Verified successfully");
+      recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "EXECUTABLY_PROVEN", ${poRequired}, "Verified successfully");
     }
   } catch (e: any) {
     recordEvidence("${poId}", "${poKind}", "BEHAVIORAL_ASSERTION", "DISPROVEN", ${poRequired}, "Exception: " + String(e?.message || e));
@@ -280,14 +415,15 @@ ${prelude}
     }).join("\n");
 
     const fullCode = `// Aegis Ephemeral Evidence Compiler Harness
+${declaredImports}
 ${imports}
 import * as __mod_barrel from "../../src/index.js";
 ${mergeCode}
 
 ${exportsBinding}
 
-type EpistemicStatus = "STATIC_PROVEN" | "EXECUTABLY_VERIFIED" | "DISPROVEN" | "UNPROVEN";
-type ProofDomain = "TYPE_SYSTEM" | "STATE_TRANSITION" | "RESOURCE_INVARIANT" | "BEHAVIORAL_ASSERTION" | "UNASSIGNED";
+type EpistemicStatus = "STATIC_PROVEN" | "EXECUTABLY_PROVEN" | "DISPROVEN" | "UNPROVEN" | "NOT_APPLICABLE";
+type ProofDomain = "TYPE_SYSTEM" | "ADMISSION" | "STATE_TRANSITION" | "STATE" | "RESOURCE_INVARIANT" | "RESOURCE" | "COMPOSITION" | "COMMIT" | "LIFECYCLE" | "BEHAVIORAL_ASSERTION" | "UNASSIGNED";
 
 interface EvidenceEntry {
   id: string;
@@ -374,7 +510,7 @@ ${behaviors}
 ${proofObligations}
 
   // Ensure all declared required obligations were executed
-  const declaredObligations = ${JSON.stringify(ir.proofObligations || [])};
+  const declaredObligations: Array<{ [key: string]: unknown; id?: string; kind?: string; required?: boolean; target?: string; domain?: string }> = ${JSON.stringify(obligations)};
   for (const decl of declaredObligations) {
     const poId = decl.id;
     if (!poId) continue;
@@ -390,11 +526,12 @@ ${proofObligations}
   console.log("├────────────────┼───────────────────────┼─────────────────────┼─────────────────────┼────────────────────────────────────────────────────────┤");
   for (const ev of evidenceMatrix) {
     const pad = (s: string, n: number) => (s || "").padEnd(n, " ").substring(0, n);
-    const color = ev.status === "STATIC_PROVEN" || ev.status === "EXECUTABLY_VERIFIED" ? "\\x1b[32m" : "\\x1b[31m";
+    const color = ev.status === "STATIC_PROVEN" || ev.status === "EXECUTABLY_PROVEN" ? "\\x1b[32m" : "\\x1b[31m";
     const reset = "\\x1b[0m";
     console.log("│ " + pad(ev.id, 14) + " │ " + pad(ev.kind, 21) + " │ " + pad(ev.domain, 19) + " │ " + color + pad(ev.status, 19) + reset + " │ " + pad(ev.evidence, 54) + " │");
   }
   console.log("└────────────────┴───────────────────────┴─────────────────────┴─────────────────────┴────────────────────────────────────────────────────────┘");
+  console.log("[AEGIS][EVIDENCE_MATRIX_JSON]" + JSON.stringify(evidenceMatrix));
 
   const unprovenOrDisproven = evidenceMatrix.filter(e => e.required && (e.status === "DISPROVEN" || e.status === "UNPROVEN"));
   if (unprovenOrDisproven.length > 0 || failed.length > 0) {

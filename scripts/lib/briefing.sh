@@ -229,6 +229,44 @@ aegis_briefing_validate_json() {
   }
   max="$(aegis_briefing_max_exports)"
 
+  # UAAM Contract IR v3 gate. Legacy briefings remain accepted, while v3 is
+  # closed-world: every declared operation facet has an explicit proof
+  # obligation and N/A is structural only.
+  if [[ "$(printf '%s' "${json}" | jq -r '.version // empty' 2>/dev/null || true)" == "3.0" ]]; then
+    local uaam_reason
+    uaam_reason="$(
+      printf '%s' "${json}" | jq -r '
+        def present: . != null and (if type == "array" then length > 0 else true end) and (if type == "object" then length > 0 else true end);
+        def domain_for($field): {admission:"ADMISSION", failure:"STATE", resources:"RESOURCE", composition:"COMPOSITION", transaction:"COMMIT", lifecycle:"LIFECYCLE", observability:"STATE"}[$field];
+        [
+          (if (.goal | type) != "string" or (.goal | length) == 0 then "empty_goal" else empty end),
+          (if (.targets | type) != "array" or (.targets | length) == 0 then "targets_required" else empty end),
+          (if (.publicContract | type) != "object" then "publicContract_required" else empty end),
+          (if (.operations | type) != "array" or (.operations | length) == 0 then "operations_required" else empty end),
+          (if (.proofObligations | type) != "array" then "proofObligations_required" else empty end),
+          (.proofObligations[]? as $po | if (($po.id | type) != "string" or ($po.id | length) == 0) then "proof_obligation_id_required"
+            elif (["ADMISSION","STATE","RESOURCE","COMPOSITION","COMMIT","LIFECYCLE"] | index($po.domain)) == null then "proof_obligation_domain_invalid:\($po.id)"
+            elif (($po.oracle | type) != "string" or ($po.oracle | length) == 0) then "proof_obligation_oracle_required:\($po.id)"
+            elif ($po.notApplicable == true and (($po.naJustification | type) != "string" or (($po.naJustification | startswith("derived:")) | not))) then "na_not_structurally_derived:\($po.id)"
+            elif ($po.status? != null) then "proof_obligation_status_forbidden:\($po.id)" else empty end),
+          (.operations[]? as $op | (["admission","failure","resources","composition","transaction","lifecycle","observability"][] as $field |
+            if ($op[$field] | present) and ([.proofObligations[]? | select(.target == $op.target and .domain == domain_for($field))] | length) == 0
+            then "missing_explicit_obligation:\($op.id):\(domain_for($field))" else empty end)),
+          (.operations[]? as $op | if (($op.resources | type) == "array" and ($op.resources | length) > 0) and ($op.resources | any(type != "object" or (.resource | type) != "string" or (.owner | type) != "string" or (.scope | type) != "string" or (.capacity | type) != "string" or (.allowedExits | type) != "array")) then "resource_boundary_incomplete:\($op.id)" else empty end),
+          (.operations[]? as $op | if (($op.composition | type) == "object" and ($op.composition.sharedResources | type) == "array") and ($op.composition.sharedResources | any(type != "object" or (.resource | type) != "string" or (.rule | type) != "string")) then "composition_rule_incomplete:\($op.id)" else empty end),
+          (.operations[]? as $op | if (($op.transaction | type) == "object") and (($op.transaction.atomic | type) != "boolean" or ($op.transaction.phases | type) != "array" or ($op.transaction.phases | length) == 0) then "transaction_machine_incomplete:\($op.id)" else empty end),
+          (.operations[]? as $op | if (($op.transaction.requiredEffects | type) == "array" and ($op.transaction.requiredEffects | length) > 0) then ([.proofObligations[]? | select(.target == $op.target and .domain == "COMMIT")] | if length == 0 or (.[0].requiredEffects | type) != "array" or (.[0].requiredEffects | length) != ($op.transaction.requiredEffects | length) or (($op.transaction.requiredEffects - .[0].requiredEffects) | length) > 0 then "commit_effects_not_explicit:\($op.id)" else empty end) else empty end),
+          (.operations[]? as $op | ((if ($op.lifecycle | type) == "array" then $op.lifecycle elif ($op.lifecycle | present) then [$op.lifecycle] else [] end)[]? as $life | if (($life | type) != "object" or ($life.state | type) != "string" or ($life.scope | type) != "string" or (["CALL","BATCH","TRANSACTION","CYCLE","SESSION","INSTANCE","PROCESS","PERSISTENT"] | index($life.scope)) == null) then "lifecycle_scope_incomplete:\($op.id)" else empty end))
+        ] | map(select(type == "string")) | first // ""
+      ' 2>/dev/null || true
+    )"
+    if [[ -n "${uaam_reason}" ]]; then
+      printf '%s\n' "${uaam_reason}" >&2
+      return 1
+    fi
+    return 0
+  fi
+
   reason="$(
     printf '%s' "${json}" | jq -r --argjson max "${max}" '
       def bad_type:
@@ -609,7 +647,7 @@ aegis_briefing_render() {
     (((.targets // []) | map("- " + .)) | join("\n")),
     "",
     "## Acceptance",
-    (((.exports // []) | map("- " + .name)) | join("\n")),
+    ((if ((.exports // []) | length) > 0 then ((.exports | map("- " + .name)) | join("\n")) else (((.publicContract.exports // []) | map("- " + .)) | join("\n")) end)),
     "",
     "## Briefing",
     (if ((.imports // []) | length) > 0
@@ -672,6 +710,17 @@ aegis_briefing_render() {
             + "\n   assert: " + ($b.assert // "")
         )) | join("\n")
       ))
+    else empty end),
+    (if .version == "3.0" then
+      ("", "## UAAM Contract IR v3", "Universal domains: ADMISSION, STATE, RESOURCE, COMPOSITION, COMMIT, LIFECYCLE",
+       "### Operations", ((.operations // []) | map("- [" + (.id // "OP") + "] " + (.target // "")
+         + (if (.admission // null) != null then " | ADMISSION" else "" end)
+         + (if (.failure // null) != null then " | STATE" else "" end)
+         + (if (.resources // null) != null then " | RESOURCE" else "" end)
+         + (if (.composition // null) != null then " | COMPOSITION" else "" end)
+         + (if (.transaction // null) != null then " | COMMIT" else "" end)
+         + (if (.lifecycle // null) != null then " | LIFECYCLE" else "" end)) | join("\n")),
+       "### Proof Matrix", ((.proofObligations // []) | map("- [" + (.id // "PO") + "] " + (.domain // "") + " → " + (.oracle // "") + (if .notApplicable == true then " (N/A: " + (.naJustification // "") + ")" else "" end)) | join("\n")))
     else empty end),
     (if ((.proofObligations // []) | length) > 0 then
       ("", "## Proof Obligations & Invariants", (

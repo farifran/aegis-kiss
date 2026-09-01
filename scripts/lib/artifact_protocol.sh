@@ -479,18 +479,25 @@ build_tribunal_tools_gate() {
       ($ts.payload.status // "skipped") as $ts_status
       | ($eslint.payload.status // "skipped") as $es_status
       | ($test.payload.status // "skipped") as $test_status
+      | ($test.payload.contract_version // "") as $contract_version
+      | ($test.payload.evidence_matrix // null) as $evidence_matrix
       | [($ts.payload.errors // [])[] | select(.file != null and in_scope(.file))] as $ts_in_scope
       | [($eslint.payload.errors // [])[] | select(.file != null and in_scope(.file))] as $es_in_scope
+      | (($contract_version == "3.0") and (($evidence_matrix | type) != "array" or ($evidence_matrix | length) == 0 or (($evidence_matrix | map(select(.required == true and ((.status as $s | (["STATIC_PROVEN","EXECUTABLY_PROVEN","NOT_APPLICABLE"] | index($s))) == null))) | length) > 0))) as $uaam_failed
       | {
           typescript_status: $ts_status,
           eslint_status: $es_status,
-          test_status: $test_status,
+          test_status: (if $uaam_failed then "failed" else $test_status end),
+          uaam_contract_version: (if ($contract_version | length) > 0 then $contract_version else null end),
+          uaam_gate: (if $contract_version == "3.0" then (if $uaam_failed then "failed" else "passed" end) else "not_applicable" end),
+          uaam_evidence_matrix: ($evidence_matrix // []),
           typescript_errors_in_scope: $ts_in_scope,
           eslint_errors_in_scope: $es_in_scope,
           mutation_clean: (
             ($ts_status != "failed" or ($ts_in_scope | length) == 0)
             and ($es_status != "failed" or ($es_in_scope | length) == 0)
             and ($test_status != "failed")
+            and ($uaam_failed | not)
           )
         }
     ' 2>/dev/null || printf '%s' '{"mutation_clean":true,"typescript_status":"skipped","eslint_status":"skipped","test_status":"skipped","typescript_errors_in_scope":[],"eslint_errors_in_scope":[]}'
@@ -1532,4 +1539,3 @@ normalize_substrate_output() {
 emit_output() {
   echo "${AEGIS_SUBSTRATE_OUTPUT}"
 }
-
