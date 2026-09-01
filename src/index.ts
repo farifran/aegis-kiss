@@ -16,23 +16,4 @@ export type {
 };
 
 import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
-import {
-    ClearingHouse,
-    obterClearingHouseBitmask,
-    type TransferOrder,
-    type AccountState,
-    type BatchResult
-} from './clearingHouse.js';
-
-export {
-    TokenBucket,
-    obterEstadoBitmask,
-    ClearingHouse,
-    obterClearingHouseBitmask
-};
-
-export type {
-    TransferOrder,
-    AccountState,
-    BatchResult
-};
+export { TokenBucket, obterEstadoBitmask };
