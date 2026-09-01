@@ -1,166 +1,366 @@
 {
   "contractVersion": "2.1",
-  "goal": "Implementar src/cryptoEnvelope.ts com CryptoEnvelopeManager e obterEstadoQuarentenaBitmask para gerenciamento determinístico de envelopes criptográficos, rotação e quarentena estrita de chaves por limites de uso e expiração temporal sem floats, com re-exportação nominal em src/index.ts.",
+  "goal": "Implementar o motor central universal de processamento de lotes de operações (src/clearingHouse.ts) integrado ao TokenBucket (src/tokenBucket.ts) com prova de conservação de soma-zero, controle de vazão por capacidade temporal, composição de reservas, atomicidade estrita de commit (2PC) e telemetria observável em src/index.ts.",
   "targets": [
-    "src/cryptoEnvelope.ts",
+    "src/tokenBucket.ts",
+    "src/clearingHouse.ts",
     "src/index.ts"
   ],
   "imports": [],
   "types": [
     {
-      "name": "KeyMetadata",
-      "shape": "{ readonly keyId: string; readonly keyMaterial: bigint; readonly maxOperations: number; readonly expiresAtMs: bigint; usageCount: number; quarantined: boolean; }"
+      "name": "ClockPolicy",
+      "shape": "'monotonic_reject' | 'monotonic_clamp' | 'allow_backward' | 'logical_clock'"
     },
     {
-      "name": "EncryptedEnvelope",
-      "shape": "{ readonly keyId: string; readonly payloadCipher: bigint; readonly checksum: bigint; readonly timestampMs: bigint; }"
+      "name": "TransferOrder",
+      "shape": "{ readonly id: string; readonly senderId: string; readonly receiverId: string; readonly amount: bigint; readonly fee: bigint; }"
     },
     {
-      "name": "DecryptedMessage",
-      "shape": "{ readonly keyId: string; readonly payloadPlain: bigint; readonly verified: boolean; }"
+      "name": "AccountState",
+      "shape": "{ balance: bigint; bucket: TokenBucket; quarantined: boolean; }"
+    },
+    {
+      "name": "BatchResult",
+      "shape": "{ readonly settledCount: number; readonly rejectedCount: number; readonly quarantinedCount: number; readonly settledVolume: bigint; readonly retainedFees: bigint; readonly merkleRoot: bigint; readonly rolledBack: boolean; }"
+    },
+    {
+      "name": "ClearingHouseSnapshot",
+      "shape": "{ readonly accounts: Map<string, { readonly balance: bigint; readonly quarantined: boolean; readonly bucket: { readonly tokens: bigint; readonly lastUpdateMs: bigint } }>; readonly treasuryBalance: bigint; readonly quarantineCount: number; }"
     }
   ],
   "exports": [
     {
       "kind": "class",
-      "name": "CryptoEnvelopeManager",
+      "name": "TokenBucket",
       "privateFields": [
-        { "name": "_keys", "type": "Map<string, KeyMetadata>", "readonly": true },
-        { "name": "_masterKeyId", "type": "string" },
-        { "name": "_isMasterRotating", "type": "boolean" },
-        { "name": "_isSystemActive", "type": "boolean" },
-        { "name": "_quarantinedCount", "type": "number" },
-        { "name": "_processedCount", "type": "number" },
-        { "name": "_rejectedCount", "type": "number" }
+        { "name": "_maxTokens", "type": "bigint", "readonly": true },
+        { "name": "_rateBitsPerMs", "type": "bigint", "readonly": true },
+        { "name": "_clockPolicy", "type": "ClockPolicy", "readonly": true },
+        { "name": "_tokens", "type": "bigint" },
+        { "name": "_lastUpdateMs", "type": "bigint" }
       ],
-      "ctorParams": [],
+      "ctorParams": [
+        { "name": "maxBytes", "type": "bigint" },
+        { "name": "mbps", "type": "number" },
+        { "name": "clockPolicy?", "type": "ClockPolicy" }
+      ],
       "ctorBody": [
-        "this._keys = new Map<string, KeyMetadata>();",
-        "this._masterKeyId = '';",
-        "this._isMasterRotating = false;",
-        "this._isSystemActive = true;",
-        "this._quarantinedCount = 0;",
-        "this._processedCount = 0;",
-        "this._rejectedCount = 0;"
+        "if (maxBytes < 0n) throw new RangeError('maxBytes must be non-negative');",
+        "if (!Number.isFinite(mbps) || mbps < 0) throw new RangeError('mbps must be a non-negative finite number');",
+        "const policy: ClockPolicy = clockPolicy !== undefined ? clockPolicy : 'monotonic_clamp';",
+        "if (!['monotonic_reject', 'monotonic_clamp', 'allow_backward', 'logical_clock'].includes(policy)) throw new RangeError('invalid clock policy');",
+        "this._maxTokens = maxBytes * 8n;",
+        "this._rateBitsPerMs = BigInt(Math.round(mbps * 8000));",
+        "this._clockPolicy = policy;",
+        "this._tokens = this._maxTokens;",
+        "this._lastUpdateMs = BigInt(Date.now());"
       ],
       "methods": [
         {
-          "name": "registerKey",
-          "params": [
-            { "name": "keyId", "type": "string" },
-            { "name": "keyMaterial", "type": "bigint" },
-            { "name": "maxOps", "type": "number" },
-            { "name": "ttlMs", "type": "bigint" }
-          ],
+          "name": "update",
+          "params": [{ "name": "nowMs?", "type": "bigint" }],
           "returns": "void",
           "body": [
-            "if (!keyId) throw new TypeError('keyId required');",
-            "if (maxOps <= 0) throw new RangeError('maxOps must be positive');",
-            "if (ttlMs <= 0n) throw new RangeError('ttlMs must be positive');",
-            "const now = BigInt(Date.now());",
-            "const expiresAtMs = now + ttlMs;",
-            "this._keys.set(keyId, { keyId, keyMaterial, maxOperations: maxOps, expiresAtMs, usageCount: 0, quarantined: false });",
-            "if (!this._masterKeyId) { this._masterKeyId = keyId; }"
-          ]
-        },
-        {
-          "name": "setMasterKey",
-          "params": [{ "name": "keyId", "type": "string" }],
-          "returns": "void",
-          "body": [
-            "const k = this._keys.get(keyId);",
-            "if (!k || k.quarantined) throw new Error('invalid master key');",
-            "this._masterKeyId = keyId;"
-          ]
-        },
-        {
-          "name": "rotateMasterKey",
-          "params": [{ "name": "newKeyId", "type": "string" }],
-          "returns": "void",
-          "body": [
-            "const k = this._keys.get(newKeyId);",
-            "if (!k || k.quarantined) throw new Error('invalid new master key');",
-            "this._isMasterRotating = true;",
-            "this._masterKeyId = newKeyId;",
-            "this._isMasterRotating = false;"
-          ]
-        },
-        {
-          "name": "sealEnvelope",
-          "params": [
-            { "name": "keyId", "type": "string" },
-            { "name": "plaintext", "type": "bigint" },
-            { "name": "nowMs?", "type": "bigint" }
-          ],
-          "returns": "EncryptedEnvelope | null",
-          "body": [
-            "if (!this._isSystemActive) return null;",
-            "const key = this._keys.get(keyId);",
-            "if (!key) { this._rejectedCount++; return null; }",
             "const now = nowMs !== undefined ? nowMs : BigInt(Date.now());",
-            "if (key.quarantined || now >= key.expiresAtMs || key.usageCount >= key.maxOperations) {",
-            "  if (!key.quarantined) { key.quarantined = true; this._quarantinedCount++; }",
-            "  this._rejectedCount++;",
-            "  return null;",
+            "if (now < this._lastUpdateMs) {",
+            "  if (this._clockPolicy === 'monotonic_reject') throw new RangeError('clock moved backwards');",
+            "  if (this._clockPolicy !== 'allow_backward') return;",
+            "  this._lastUpdateMs = now;",
+            "  return;",
             "}",
-            "key.usageCount++;",
-            "this._processedCount++;",
-            "const xored = (plaintext ^ key.keyMaterial) & 0xFFFFFFFFFFFFFFFFn;",
-            "const cipher = ((xored << 13n) | (xored >> 51n)) & 0xFFFFFFFFFFFFFFFFn;",
-            "let cs = 0xcbf29ce484222325n;",
-            "const fnvPrime = 0x100000001b3n;",
-            "cs = ((cs ^ cipher) * fnvPrime) & 0xFFFFFFFFFFFFFFFFn;",
-            "cs = ((cs ^ key.keyMaterial) * fnvPrime) & 0xFFFFFFFFFFFFFFFFn;",
-            "if (key.usageCount >= key.maxOperations) { key.quarantined = true; this._quarantinedCount++; }",
-            "return { keyId, payloadCipher: cipher, checksum: cs, timestampMs: now };"
+            "if (now === this._lastUpdateMs) return;",
+            "const timeDiff = now - this._lastUpdateMs;",
+            "this._lastUpdateMs = now;",
+            "if (this._rateBitsPerMs > 0n) {",
+            "  const replenished = this._tokens + timeDiff * this._rateBitsPerMs;",
+            "  this._tokens = replenished > this._maxTokens ? this._maxTokens : replenished;",
+            "}"
           ]
         },
         {
-          "name": "openEnvelope",
+          "name": "consume",
           "params": [
-            { "name": "envelope", "type": "EncryptedEnvelope" },
+            { "name": "bits", "type": "bigint" },
             { "name": "nowMs?", "type": "bigint" }
           ],
-          "returns": "DecryptedMessage | null",
+          "returns": "boolean",
           "body": [
-            "if (!this._isSystemActive) return null;",
-            "const key = this._keys.get(envelope.keyId);",
-            "if (!key || key.quarantined) return null;",
+            "if (bits < 0n) throw new RangeError('bits must be non-negative');",
+            "this.update(nowMs);",
+            "if (this._tokens >= bits) {",
+            "  this._tokens = this._tokens - bits;",
+            "  return true;",
+            "}",
+            "return false;"
+          ]
+        },
+        {
+          "name": "peekTokens",
+          "params": [{ "name": "nowMs?", "type": "bigint" }],
+          "returns": "bigint",
+          "body": [
             "const now = nowMs !== undefined ? nowMs : BigInt(Date.now());",
-            "if (now >= key.expiresAtMs) { key.quarantined = true; this._quarantinedCount++; return null; }",
-            "let cs = 0xcbf29ce484222325n;",
-            "const fnvPrime = 0x100000001b3n;",
-            "cs = ((cs ^ envelope.payloadCipher) * fnvPrime) & 0xFFFFFFFFFFFFFFFFn;",
-            "cs = ((cs ^ key.keyMaterial) * fnvPrime) & 0xFFFFFFFFFFFFFFFFn;",
-            "if (cs !== envelope.checksum) return null;",
-            "const unrotated = ((envelope.payloadCipher >> 13n) | (envelope.payloadCipher << 51n)) & 0xFFFFFFFFFFFFFFFFn;",
-            "const plain = (unrotated ^ key.keyMaterial) & 0xFFFFFFFFFFFFFFFFn;",
-            "return { keyId: envelope.keyId, payloadPlain: plain, verified: true };"
+            "if (now < this._lastUpdateMs) {",
+            "  if (this._clockPolicy === 'monotonic_reject') throw new RangeError('clock moved backwards');",
+            "  return this._tokens;",
+            "}",
+            "if (now === this._lastUpdateMs || this._rateBitsPerMs <= 0n) return this._tokens;",
+            "const timeDiff = now - this._lastUpdateMs;",
+            "const replenished = this._tokens + timeDiff * this._rateBitsPerMs;",
+            "return replenished > this._maxTokens ? this._maxTokens : replenished;"
+          ]
+        },
+        {
+          "name": "snapshot",
+          "params": [],
+          "returns": "{ readonly tokens: bigint; readonly lastUpdateMs: bigint }",
+          "body": [
+            "return { tokens: this._tokens, lastUpdateMs: this._lastUpdateMs };"
+          ]
+        },
+        {
+          "name": "restore",
+          "params": [{ "name": "snap", "type": "{ readonly tokens: bigint; readonly lastUpdateMs: bigint }" }],
+          "returns": "void",
+          "body": [
+            "if (snap.tokens < 0n || snap.tokens > this._maxTokens) throw new RangeError('invalid token bucket snapshot');",
+            "this._tokens = snap.tokens;",
+            "this._lastUpdateMs = snap.lastUpdateMs;"
           ]
         }
       ],
       "getters": [
-        { "name": "isSystemActive", "returns": "boolean", "body": "return this._isSystemActive;" },
-        { "name": "isMasterRotating", "returns": "boolean", "body": "return this._isMasterRotating;" },
-        { "name": "quarantinedCount", "returns": "number", "body": "return this._quarantinedCount;" },
-        { "name": "processedCount", "returns": "number", "body": "return this._processedCount;" },
-        { "name": "rejectedCount", "returns": "number", "body": "return this._rejectedCount;" },
-        { "name": "masterKeyId", "returns": "string", "body": "return this._masterKeyId;" }
+        { "name": "tokens", "returns": "bigint", "body": "return this._tokens;" },
+        { "name": "maxTokens", "returns": "bigint", "body": "return this._maxTokens;" },
+        { "name": "rateBitsPerMs", "returns": "bigint", "body": "return this._rateBitsPerMs;" },
+        { "name": "clockPolicy", "returns": "ClockPolicy", "body": "return this._clockPolicy;" },
+        { "name": "lastUpdateMs", "returns": "bigint", "body": "return this._lastUpdateMs;" },
+        { "name": "refillActive", "returns": "boolean", "body": "return this._rateBitsPerMs > 0n && this._tokens < this._maxTokens;" }
       ],
       "body": []
     },
     {
       "kind": "function",
-      "name": "obterEstadoQuarentenaBitmask",
-      "params": [{ "name": "manager", "type": "CryptoEnvelopeManager" }],
+      "name": "obterEstadoBitmask",
+      "params": [{ "name": "bucket", "type": "TokenBucket" }],
       "returns": "number",
       "body": [
         "let mask = 0;",
-        "if (manager.isSystemActive) mask = mask | 1;",
-        "if (manager.quarantinedCount > 0) mask = mask | 2;",
-        "if (manager.isMasterRotating) mask = mask | 4;",
-        "const qLevel = manager.quarantinedCount > 31 ? 31 : manager.quarantinedCount;",
-        "mask = mask | ((qLevel & 31) << 3);",
+        "if (bucket.tokens === 0n) mask = mask | 1;",
+        "if (bucket.refillActive) mask = mask | 2;",
+        "return mask;"
+      ],
+      "ctorBody": [],
+      "methods": [],
+      "getters": []
+    },
+    {
+      "kind": "class",
+      "name": "ClearingHouse",
+      "privateFields": [
+        { "name": "_accounts", "type": "Map<string, AccountState>", "readonly": true },
+        { "name": "_treasuryBalance", "type": "bigint" },
+        { "name": "_isLocked", "type": "boolean" },
+        { "name": "_lastRollback", "type": "boolean" },
+        { "name": "_totalSettledVolume", "type": "bigint" },
+        { "name": "_totalRetainedFees", "type": "bigint" },
+        { "name": "_quarantineCount", "type": "number" },
+        { "name": "_rejectedCount", "type": "number" },
+        { "name": "_lastMerkleRoot", "type": "bigint" },
+        { "name": "_globalChecksum", "type": "bigint" }
+      ],
+      "ctorParams": [],
+      "ctorBody": [
+        "this._accounts = new Map<string, AccountState>();",
+        "this._treasuryBalance = 0n;",
+        "this._isLocked = false;",
+        "this._lastRollback = false;",
+        "this._totalSettledVolume = 0n;",
+        "this._totalRetainedFees = 0n;",
+        "this._quarantineCount = 0;",
+        "this._rejectedCount = 0;",
+        "this._lastMerkleRoot = 0n;",
+        "this._globalChecksum = 0n;"
+      ],
+      "methods": [
+        {
+          "name": "registerAccount",
+          "params": [
+            { "name": "accountId", "type": "string" },
+            { "name": "initialBalance", "type": "bigint" },
+            { "name": "maxBytes", "type": "bigint" },
+            { "name": "mbps", "type": "number" }
+          ],
+          "returns": "void",
+          "body": [
+            "if (!accountId) throw new TypeError('accountId required');",
+            "if (initialBalance < 0n) throw new RangeError('initialBalance must be non-negative');",
+            "const bucket = new TokenBucket(maxBytes, mbps);",
+            "this._accounts.set(accountId, { balance: initialBalance, bucket, quarantined: false });",
+            "this._globalChecksum = (this._globalChecksum ^ initialBalance) & 0xFFFFFFFFFFFFFFFFn;"
+          ]
+        },
+        {
+          "name": "_snapshotState",
+          "params": [],
+          "returns": "ClearingHouseSnapshot",
+          "body": [
+            "const accounts = new Map<string, { readonly balance: bigint; readonly quarantined: boolean; readonly bucket: { readonly tokens: bigint; readonly lastUpdateMs: bigint } }>();",
+            "for (const [accountId, account] of this._accounts.entries()) {",
+            "  accounts.set(accountId, { balance: account.balance, quarantined: account.quarantined, bucket: account.bucket.snapshot() });",
+            "}",
+            "return { accounts, treasuryBalance: this._treasuryBalance, quarantineCount: this._quarantineCount };"
+          ]
+        },
+        {
+          "name": "_restoreState",
+          "params": [{ "name": "snapshot", "type": "ClearingHouseSnapshot" }],
+          "returns": "void",
+          "body": [
+            "for (const [accountId, state] of snapshot.accounts.entries()) {",
+            "  const account = this._accounts.get(accountId);",
+            "  if (account) {",
+            "    account.balance = state.balance;",
+            "    account.quarantined = state.quarantined;",
+            "    account.bucket.restore(state.bucket);",
+            "  }",
+            "}",
+            "this._treasuryBalance = snapshot.treasuryBalance;",
+            "this._quarantineCount = snapshot.quarantineCount;"
+          ]
+        },
+        {
+          "name": "processBatch",
+          "params": [
+            { "name": "orders", "type": "readonly TransferOrder[]" },
+            { "name": "nowMs?", "type": "bigint" }
+          ],
+          "returns": "BatchResult",
+          "body": [
+            "const now = nowMs !== undefined ? nowMs : BigInt(Date.now());",
+            "this._lastRollback = false;",
+            "if (this._isLocked) {",
+            "  return { settledCount: 0, rejectedCount: orders.length, quarantinedCount: 0, settledVolume: 0n, retainedFees: 0n, merkleRoot: this._lastMerkleRoot, rolledBack: false };",
+            "}",
+            "let initialSum = this._treasuryBalance;",
+            "for (const acc of this._accounts.values()) initialSum = initialSum + acc.balance;",
+            "const admitted: TransferOrder[] = [];",
+            "let rejectedCount = 0;",
+            "const quarantinedInBatch = new Set<string>();",
+            "const reservedBits = new Map<string, bigint>();",
+            "for (const ord of orders) {",
+            "  if (ord.amount <= 0n || ord.fee < 0n) { rejectedCount++; continue; }",
+            "  const sender = this._accounts.get(ord.senderId);",
+            "  const receiver = this._accounts.get(ord.receiverId);",
+            "  if (!sender || !receiver || sender.quarantined || receiver.quarantined || quarantinedInBatch.has(ord.senderId)) { rejectedCount++; continue; }",
+            "  const requiredBits = (ord.amount + ord.fee) * 8n;",
+            "  const currentReserved = reservedBits.get(ord.senderId) ?? 0n;",
+            "  if (sender.bucket.peekTokens(now) < currentReserved + requiredBits) {",
+            "    quarantinedInBatch.add(ord.senderId);",
+            "    rejectedCount++;",
+            "    continue;",
+            "  }",
+            "  reservedBits.set(ord.senderId, currentReserved + requiredBits);",
+            "  admitted.push(ord);",
+            "}",
+            "const deltas = new Map<string, bigint>();",
+            "let batchVolume = 0n;",
+            "let batchFees = 0n;",
+            "for (const ord of admitted) {",
+            "  const sDelta = (deltas.get(ord.senderId) ?? 0n) - (ord.amount + ord.fee);",
+            "  const rDelta = (deltas.get(ord.receiverId) ?? 0n) + ord.amount;",
+            "  deltas.set(ord.senderId, sDelta);",
+            "  deltas.set(ord.receiverId, rDelta);",
+            "  batchVolume = batchVolume + ord.amount;",
+            "  batchFees = batchFees + ord.fee;",
+            "}",
+            "let solvent = true;",
+            "for (const [accId, delta] of deltas.entries()) {",
+            "  const acc = this._accounts.get(accId);",
+            "  if (acc && acc.balance + delta < 0n) { solvent = false; break; }",
+            "}",
+            "if (!solvent) {",
+            "  this._lastRollback = true;",
+            "  return { settledCount: 0, rejectedCount: orders.length, quarantinedCount: quarantinedInBatch.size, settledVolume: 0n, retainedFees: 0n, merkleRoot: 0n, rolledBack: true };",
+            "}",
+            "const snapshot = this._snapshotState();",
+            "try {",
+            "  for (const ord of admitted) {",
+            "    const sender = this._accounts.get(ord.senderId);",
+            "    if (sender) {",
+            "      const reqBits = (ord.amount + ord.fee) * 8n;",
+            "      if (!sender.bucket.consume(reqBits, now)) throw new Error('commit rejected');",
+            "    }",
+            "  }",
+            "  for (const [accId, delta] of deltas.entries()) {",
+            "    const acc = this._accounts.get(accId);",
+            "    if (acc) acc.balance = acc.balance + delta;",
+            "  }",
+            "  for (const qId of quarantinedInBatch) {",
+            "    const acc = this._accounts.get(qId);",
+            "    if (acc) acc.quarantined = true;",
+            "  }",
+            "  this._treasuryBalance = this._treasuryBalance + batchFees;",
+            "} catch {",
+            "  this._restoreState(snapshot);",
+            "  this._lastRollback = true;",
+            "  return { settledCount: 0, rejectedCount: orders.length, quarantinedCount: quarantinedInBatch.size, settledVolume: 0n, retainedFees: 0n, merkleRoot: 0n, rolledBack: true };",
+            "}",
+            "let finalSum = this._treasuryBalance;",
+            "for (const acc of this._accounts.values()) finalSum = finalSum + acc.balance;",
+            "if (initialSum !== finalSum) {",
+            "  this._restoreState(snapshot);",
+            "  this._lastRollback = true;",
+            "  return { settledCount: 0, rejectedCount: orders.length, quarantinedCount: quarantinedInBatch.size, settledVolume: 0n, retainedFees: 0n, merkleRoot: 0n, rolledBack: true };",
+            "}",
+            "let merkle = 0xcbf29ce484222325n;",
+            "const fnvPrime = 0x100000001b3n;",
+            "for (const ord of admitted) { merkle = (merkle ^ ord.amount) * fnvPrime & 0xFFFFFFFFFFFFFFFFn; merkle = (merkle ^ ord.fee) * fnvPrime & 0xFFFFFFFFFFFFFFFFn; }",
+            "this._totalSettledVolume = this._totalSettledVolume + batchVolume;",
+            "this._totalRetainedFees = this._totalRetainedFees + batchFees;",
+            "let totalQuarantined = 0;",
+            "for (const acc of this._accounts.values()) { if (acc.quarantined) totalQuarantined++; }",
+            "this._quarantineCount = totalQuarantined;",
+            "this._rejectedCount = rejectedCount;",
+            "this._lastMerkleRoot = merkle;",
+            "this._globalChecksum = (this._globalChecksum ^ merkle ^ finalSum) & 0xFFFFFFFFFFFFFFFFn;",
+            "return { settledCount: admitted.length, rejectedCount, quarantinedCount: quarantinedInBatch.size, settledVolume: batchVolume, retainedFees: batchFees, merkleRoot: merkle, rolledBack: false };"
+          ]
+        }
+      ],
+      "getters": [
+        { "name": "isLocked", "returns": "boolean", "body": "return this._isLocked;" },
+        { "name": "lastRollback", "returns": "boolean", "body": "return this._lastRollback;" },
+        { "name": "totalSettledVolume", "returns": "bigint", "body": "return this._totalSettledVolume;" },
+        { "name": "totalRetainedFees", "returns": "bigint", "body": "return this._totalRetainedFees;" },
+        { "name": "quarantineCount", "returns": "number", "body": "return this._quarantineCount;" },
+        { "name": "rejectedCount", "returns": "number", "body": "return this._rejectedCount;" },
+        { "name": "lastMerkleRoot", "returns": "bigint", "body": "return this._lastMerkleRoot;" },
+        { "name": "globalChecksum", "returns": "bigint", "body": "return this._globalChecksum;" },
+        { "name": "treasuryBalance", "returns": "bigint", "body": "return this._treasuryBalance;" }
+      ],
+      "body": []
+    },
+    {
+      "kind": "function",
+      "name": "obterClearingHouseBitmask",
+      "params": [{ "name": "house", "type": "ClearingHouse" }],
+      "returns": "bigint",
+      "body": [
+        "let mask = 0n;",
+        "if (house.isLocked) mask = mask | 1n;",
+        "if (house.quarantineCount > 0) mask = mask | 2n;",
+        "if (house.lastRollback) mask = mask | 4n;",
+        "if (house.totalSettledVolume > 10000000n) mask = mask | 8n;",
+        "const q = BigInt(house.quarantineCount > 63 ? 63 : house.quarantineCount);",
+        "mask = mask | ((q & 63n) << 4n);",
+        "const r = BigInt(house.rejectedCount > 63 ? 63 : house.rejectedCount);",
+        "mask = mask | ((r & 63n) << 10n);",
+        "const top16 = (house.lastMerkleRoot >> 48n) & 65535n;",
+        "mask = mask | ((top16 & 65535n) << 16n);",
+        "const low32 = house.globalChecksum & 4294967295n;",
+        "mask = mask | ((low32 & 4294967295n) << 32n);",
         "return mask;"
       ],
       "ctorBody": [],
@@ -180,65 +380,102 @@
       "kind": "failure_state",
       "required": true,
       "oracle": "state_diff",
-      "observableState": ["_keys", "_masterKeyId", "_isSystemActive"],
-      "allowedFailureEffects": ["_rejectedCount", "_quarantinedCount"],
+      "observableState": ["_accounts", "_treasuryBalance", "_isLocked"],
+      "allowedFailureEffects": ["_rejectedCount", "_quarantineCount"],
       "prelude": [
-        "const mgr = new CryptoEnvelopeManager();",
-        "mgr.registerKey('k1', 0x123456789abcdef0n, 10, 100000n, 1000n);",
-        "__targetInstance = mgr;",
-        "__failingCall = () => mgr.sealEnvelope('non_existent_key', 0x999n, 1000n);"
+        "const house = new ClearingHouse();",
+        "house.registerAccount('user_a', 10n, 1000n, 10);",
+        "house.registerAccount('user_b', 10n, 1000n, 10);",
+        "__targetInstance = house;",
+        "__failingCall = () => house.processBatch([{ id: '1', senderId: 'user_a', receiverId: 'user_b', amount: 500n, fee: 10n }]);"
       ]
     },
     {
-      "id": "PO-ENCRYPT-ROUNDTRIP",
-      "kind": "generic_invariant",
+      "id": "PO-CONS-001",
+      "kind": "resource_conservation",
       "required": true,
-      "oracle": "dec !== null && dec.verified && dec.payloadPlain === plain",
+      "oracle": "conservation",
+      "resourceBoundary": {
+        "before": ["balance", "treasuryBalance"],
+        "after": ["balance", "treasuryBalance"]
+      },
       "prelude": [
-        "const mgr = new CryptoEnvelopeManager();",
-        "mgr.registerKey('k_round', 0xaabbccddeeff0011n, 5, 60000n, 1000n);",
-        "const plain = 0xdeadbeefcafebaben;",
-        "const env = mgr.sealEnvelope('k_round', plain, 1500n);",
-        "const dec = env ? mgr.openEnvelope(env, 1600n) : null;"
+        "const house = new ClearingHouse();",
+        "house.registerAccount('u1', 100n, 1000n, 10);",
+        "house.registerAccount('u2', 50n, 1000n, 10);",
+        "const initialBal = 150n;",
+        "const initialTreasury = house.treasuryBalance;",
+        "house.processBatch([{ id: 'tx1', senderId: 'u1', receiverId: 'u2', amount: 20n, fee: 5n }]);",
+        "const finalBal = 145n;",
+        "const finalTreasury = house.treasuryBalance;",
+        "__targetBefore = { balance: initialBal, treasuryBalance: initialTreasury };",
+        "__targetAfter = { balance: finalBal, treasuryBalance: finalTreasury };"
       ]
     },
     {
-      "id": "PO-QUARANTINE-LIMIT",
-      "kind": "generic_invariant",
+      "id": "PO-COMP-001",
+      "kind": "resource_composition",
       "required": true,
-      "oracle": "e1 !== null && e2 !== null && e3 === null && mgr.quarantinedCount === 1",
+      "oracle": "aggregate_reservation",
       "prelude": [
-        "const mgr = new CryptoEnvelopeManager();",
-        "mgr.registerKey('k_lim', 0x5555aaaa5555aaaan, 2, 60000n, 1000n);",
-        "const e1 = mgr.sealEnvelope('k_lim', 100n, 1100n);",
-        "const e2 = mgr.sealEnvelope('k_lim', 200n, 1200n);",
-        "const e3 = mgr.sealEnvelope('k_lim', 300n, 1300n);"
+        "const hComp = new ClearingHouse();",
+        "hComp.registerAccount('comp_sender', 1000n, 100n, 0); // 100n bytes = 800 bits maxTokens, refill=0",
+        "hComp.registerAccount('comp_recv', 0n, 100n, 0);",
+        "const orders = [",
+        "  { id: '1', senderId: 'comp_sender', receiverId: 'comp_recv', amount: 60n, fee: 0n }, // 480 bits",
+        "  { id: '2', senderId: 'comp_sender', receiverId: 'comp_recv', amount: 60n, fee: 0n }  // 480 bits. Total = 960 bits > 800 bits!",
+        "];",
+        "const resComp = hComp.processBatch(orders);",
+        "__availableCapacity = 800n;",
+        "__committedResources = BigInt(resComp.settledCount) * 480n; // Se admitir os 2, comete 960n > 800n!"
       ]
     },
     {
-      "id": "PO-QUARANTINE-EXPIRATION",
-      "kind": "generic_invariant",
+      "id": "PO-ATOM-001",
+      "kind": "commit_atomicity",
       "required": true,
-      "oracle": "eValid !== null && eExpired === null && mgr.quarantinedCount === 1",
+      "observableState": ["_accounts", "_treasuryBalance"],
+      "allowedFailureEffects": ["_lastRollback", "_rejectedCount"],
+      "oracle": "state_identity_on_abort",
       "prelude": [
-        "const mgr = new CryptoEnvelopeManager();",
-        "mgr.registerKey('k_exp', 0x1111222233334444n, 10, 5000n); // expira em now + 5000n",
-        "const t0 = BigInt(Date.now());",
-        "const eValid = mgr.sealEnvelope('k_exp', 10n, t0 + 1000n);",
-        "const eExpired = mgr.sealEnvelope('k_exp', 20n, t0 + 10000n);"
+        "const hAtom = new ClearingHouse();",
+        "hAtom.registerAccount('solv_a', 50n, 1000n, 10);",
+        "hAtom.registerAccount('insolv_b', 10n, 1000n, 10);",
+        "__targetInstance = hAtom;",
+        "__abortingBatchCall = () => hAtom.processBatch([",
+        "  { id: '1', senderId: 'solv_a', receiverId: 'insolv_b', amount: 30n, fee: 0n },",
+        "  { id: '2', senderId: 'insolv_b', receiverId: 'solv_a', amount: 200n, fee: 0n } // Insolvente!",
+        "]);"
       ]
     },
     {
-      "id": "PO-BITMASK-COMPACT",
+      "id": "PO-CIRCULAR-001",
       "kind": "generic_invariant",
       "required": true,
-      "oracle": "(m1 & 1) === 1 && (m1 & 2) === 0 && (m2 & 2) === 2 && (m2 >> 3) === 1",
+      "oracle": "res.settledCount === 3 && res.settledVolume === 300n && !res.rolledBack",
       "prelude": [
-        "const mgr = new CryptoEnvelopeManager();",
-        "mgr.registerKey('k_bit', 0x9999888877776666n, 1, 60000n, 1000n);",
-        "const m1 = obterEstadoQuarentenaBitmask(mgr);",
-        "mgr.sealEnvelope('k_bit', 10n, 1100n); // esgota uso -> entra em quarentena",
-        "const m2 = obterEstadoQuarentenaBitmask(mgr);"
+        "const hCirc = new ClearingHouse();",
+        "hCirc.registerAccount('A', 0n, 1000n, 10);",
+        "hCirc.registerAccount('B', 0n, 1000n, 10);",
+        "hCirc.registerAccount('C', 0n, 1000n, 10);",
+        "const orders = [",
+        "  { id: '1', senderId: 'A', receiverId: 'B', amount: 100n, fee: 0n },",
+        "  { id: '2', senderId: 'B', receiverId: 'C', amount: 100n, fee: 0n },",
+        "  { id: '3', senderId: 'C', receiverId: 'A', amount: 100n, fee: 0n }",
+        "];",
+        "const res = hCirc.processBatch(orders);"
+      ]
+    },
+    {
+      "id": "PO-PEEK-001",
+      "kind": "generic_invariant",
+      "required": true,
+      "oracle": "p1 === 800n && p2 === 800n && b.tokens === 800n && b.lastUpdateMs === t0",
+      "prelude": [
+        "const b = new TokenBucket(100n, 10);",
+        "const t0 = b.lastUpdateMs;",
+        "const p1 = b.peekTokens(t0 + 1000n);",
+        "const p2 = b.peekTokens(t0 + 2000n);"
       ]
     }
   ],
