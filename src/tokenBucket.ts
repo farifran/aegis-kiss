@@ -19,8 +19,8 @@ export class TokenBucket {
     const timeDiff = now - this._lastUpdateMs;
     this._lastUpdateMs = now;
     if (this._rateBitsPerMs > 0n) {
-      const replenished = this._tokens + timeDiff * this._rateBitsPerMs;
-      this._tokens = replenished > this._maxTokens ? this._maxTokens : replenished;
+    const replenished = this._tokens + timeDiff * this._rateBitsPerMs;
+    this._tokens = replenished > this._maxTokens ? this._maxTokens : replenished;
     }
   }
 
@@ -28,25 +28,21 @@ export class TokenBucket {
     if (bits < 0n) throw new RangeError('bits must be non-negative');
     this.update(nowMs);
     if (this._tokens >= bits) {
-      this._tokens = this._tokens - bits;
-      return true;
+    this._tokens = this._tokens - bits;
+    return true;
     }
     return false;
   }
 
-  peekTokens(nowMs?: bigint): bigint {
-    const now = nowMs !== undefined ? nowMs : BigInt(Date.now());
-    if (now <= this._lastUpdateMs || this._rateBitsPerMs <= 0n) return this._tokens;
-    const timeDiff = now - this._lastUpdateMs;
-    const replenished = this._tokens + timeDiff * this._rateBitsPerMs;
-    return replenished > this._maxTokens ? this._maxTokens : replenished;
-  }
-
   get tokens(): bigint { return this._tokens; }
+
   get maxTokens(): bigint { return this._maxTokens; }
+
   get rateBitsPerMs(): bigint { return this._rateBitsPerMs; }
+
   get lastUpdateMs(): bigint { return this._lastUpdateMs; }
-  get refillActive(): boolean { return this._rateBitsPerMs > 0n && this._tokens < this._maxTokens; }
+
+  get refillActive(): boolean { return this._tokens < this._maxTokens; }
 }
 
 export function obterEstadoBitmask(bucket: TokenBucket): number {
