@@ -531,6 +531,7 @@ aegis_briefing_typecheck_json() {
     def lines($l; $pad): (($l // []) | map($pad + .) | join("\n"));
 
     [ (.imports[]? | "import { \((.names // []) | join(", ")) } from \"\(.from)\";") ]
+    + [ "var __targetInstance: any = null, __failingCall: any = null, __targetBefore: any = null, __targetAfter: any = null, __availableCapacity: any = null, __committedResources: any = null, __abortingBatchCall: any = null, __batchRunner: any = null;" ]
     + [ (.types[]? | "type \(.name) = \(.shape);") ]
     + [ (.exports[]?
         | if .kind == "class" then
