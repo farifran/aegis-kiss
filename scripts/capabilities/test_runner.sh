@@ -98,11 +98,12 @@ const ir = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const riskCompilation = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 if (ir.version !== "3.0") process.exit(0);
 
-const domains = new Set(["CONTRACT", "ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE", "OBSERVABILITY"]);
+const domains = new Set(["TYPE_SYSTEM", "CONTRACT", "ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE", "OBSERVABILITY"]);
 const operationFields = [["admission", "ADMISSION"], ["failure", "STATE"], ["resources", "RESOURCE"], ["composition", "COMPOSITION"], ["transaction", "COMMIT"], ["lifecycle", "LIFECYCLE"], ["observability", "OBSERVABILITY"]];
 const errors = [];
 if (!Array.isArray(ir.targets) || ir.targets.length === 0) errors.push("targets_required");
 if (!ir.publicContract || typeof ir.publicContract !== "object") errors.push("publicContract_required");
+if (!Array.isArray(ir.requirements) || ir.requirements.length === 0) errors.push("requirements_required");
 if (!Array.isArray(ir.operations) || ir.operations.length === 0) errors.push("operations_required");
 if (!Array.isArray(ir.proofObligations)) errors.push("proofObligations_required");
 
@@ -116,9 +117,11 @@ for (const requirement of Array.isArray(ir.requirements) ? ir.requirements : [])
     continue;
   }
   const reference = requirement && (requirement.proofObligationId || requirement.obligationId);
-  const matched = reference
-    ? obligations.some(po => po.id === reference)
-    : obligations.some(po => po.target === requirement.target && po.domain === requirement.domain);
+  if (typeof reference !== "string" || reference.length === 0) {
+    errors.push(`requirement_proof_reference_required:${requirement.id ?? ""}`);
+    continue;
+  }
+  const matched = obligations.some(po => po.id === reference);
   if (!matched) errors.push(`requirement_without_proof_obligation:${requirement.id ?? ""}`);
 }
 for (const risk of Array.isArray(riskCompilation.risks) ? riskCompilation.risks : []) {

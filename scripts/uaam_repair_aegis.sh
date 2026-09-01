@@ -51,4 +51,52 @@ if [[ -n "${first_target}" && "${first_target}" != "null" ]]; then
 fi
 
 echo "[AEGIS][UAAM_REPAIR] delegating_to=run_aegis_loop.sh target=${target_dir}" >&2
-exec bash run_aegis_loop.sh --max 1 --no-fit "${brief}"
+repair_result="${AEGIS_UAAM_REPAIR_RESULT:-${AEGIS_UAAM_LOOP_DIR:-${ROOT_DIR}/.harness/runtime/uaam_loop}/iteration-${AEGIS_UAAM_ITERATION:-0}/repair_result.json}"
+mkdir -p "$(dirname "${repair_result}")"
+
+set +e
+bash run_aegis_loop.sh --max 1 --no-fit "${brief}"
+provider_rc=$?
+set -e
+
+targets_json="${AEGIS_UAAM_TARGETS:-$(jq -c '(.targets // [])' "${contract_file}")}"
+provider_result="${AEGIS_UAAM_LOOP_DIR:-${ROOT_DIR}/.harness/runtime/uaam_loop}/iteration-${AEGIS_UAAM_ITERATION:-0}/provider_result.json"
+changed_files='[]'
+if [[ -s "${provider_result}" ]]; then
+  changed_files="$(jq -c '(.changedFiles // .scope // []) | map(select(type == "string" and length > 0))' "${provider_result}" 2>/dev/null || printf '[]')"
+fi
+if [[ "${changed_files}" == "[]" ]] && git rev-parse --show-toplevel >/dev/null 2>&1; then
+  changed_files="$(git diff --name-only HEAD -- $(jq -r '.[]' <<<"${targets_json}") 2>/dev/null | jq -R -s 'split("\n") | map(select(length > 0))' )"
+fi
+
+scope_verified=false
+if jq -n -e --argjson changed "${changed_files}" --argjson targets "${targets_json}" '
+  ($changed | length > 0)
+  and ($changed | all(. as $file | $targets | index($file) != null))
+' >/dev/null 2>&1; then
+  scope_verified=true
+fi
+
+diff_hash=""
+if [[ "${changed_files}" != "[]" ]]; then
+  if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    diff_hash="$(git diff --binary HEAD -- $(jq -r '.[]' <<<"${changed_files}") 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+  else
+    diff_hash="$(jq -r '.[]' <<<"${changed_files}" | while IFS= read -r file; do shasum -a 256 "${file}" 2>/dev/null || true; done | shasum -a 256 | awk '{print $1}')"
+  fi
+fi
+
+receipt_status="FAILED"
+if [[ "${provider_rc}" -eq 0 && "${scope_verified}" == "true" && -n "${diff_hash}" ]]; then
+  receipt_status="APPLIED"
+fi
+jq -n \
+  --arg status "${receipt_status}" \
+  --argjson changedFiles "${changed_files}" \
+  --arg diffHash "${diff_hash}" \
+  --argjson scopeVerified "${scope_verified}" \
+  --argjson providerExitCode "${provider_rc}" \
+  '{version:"uaam-repair-result-v1",status:$status,changedFiles:$changedFiles,diffHash:$diffHash,scopeVerified:$scopeVerified,providerExitCode:$providerExitCode}' \
+  > "${repair_result}"
+
+exit "${provider_rc}"

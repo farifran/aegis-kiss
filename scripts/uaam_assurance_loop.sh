@@ -34,6 +34,8 @@ run_check() {
   case "$1" in
     typecheck) npm run aegis:typecheck ;;
     lint) npm run aegis:lint ;;
+    contract) bash scripts/uaam_contract_gate.sh ;;
+    proof) bash scripts/capabilities/test_runner.sh ;;
     uaam_v3) npm run aegis:test:uaam-v3 ;;
     uaam_runtime) npm run aegis:test:uaam-runtime ;;
     composition) npm run aegis:test:compositional-proofs ;;
@@ -43,7 +45,7 @@ run_check() {
   esac
 }
 
-check_names=(typecheck lint uaam_v3 uaam_runtime composition evidence_compiler authority)
+check_names=(typecheck lint contract proof uaam_v3 uaam_runtime composition evidence_compiler authority)
 previous_fingerprint=""
 
 for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
@@ -68,10 +70,11 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
     check_records+=("$(jq -nc \
       --arg name "${check_name}" \
       --arg status "${check_status}" \
+      --arg authority "$(if [[ "${check_name}" == "proof" ]]; then printf authoritative; else printf diagnostic; fi)" \
       --arg log "${log_file#${ROOT_DIR}/}" \
       --argjson exit_code "${check_rc}" \
       --argjson evidence_matrix "${check_matrix}" \
-      '{name:$name,status:$status,exit_code:$exit_code,evidence_log:$log,evidence_matrix:$evidence_matrix}')")
+      '{name:$name,status:$status,authority:$authority,exit_code:$exit_code,evidence_log:$log,evidence_matrix:$evidence_matrix}')")
   done
 
   checks_json="$(printf '%s\n' "${check_records[@]}" | jq -s '.')"
@@ -98,11 +101,13 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   echo "[AEGIS][UAAM_LOOP] UNPROVEN iteration=${iteration} failed_checks=$(printf '%s\n' "${check_records[@]}" | jq -r 'select(.status == "failed") | .name' | paste -sd, -)"
 
   repair_request="${iteration_dir}/repair_request.json"
+  failed_obligations="$(jq '[.[] | select(.status == "failed") | if (.evidence_matrix | type) == "array" then .evidence_matrix[] | select(.required != false and (.status == "DISPROVEN" or .status == "UNPROVEN")) else {id:.name, kind:"check", domain:"HARNESS", status:"UNPROVEN", required:true, evidence:(.name + " failed without structured evidence")} end]' <<<"${checks_json}")"
   jq -n \
     --argjson iteration "${iteration}" \
     --arg evidence "${iteration_dir#${ROOT_DIR}/}/evidence.json" \
     --argjson checks "${checks_json}" \
-    '{version:"uaam-repair-request-v1",iteration:$iteration,evidence_file:$evidence,failed_checks:[$checks[] | select(.status == "failed")],mutation_policy:{mode:"minimal",scope:"authorized_by_repair_provider",reprove_after_mutation:true}}' \
+    --argjson failed_obligations "${failed_obligations}" \
+    '{version:"uaam-repair-request-v1",iteration:$iteration,evidence_file:$evidence,failed_checks:[$checks[] | select(.status == "failed")],failed_obligations:$failed_obligations,mutation_policy:{mode:"minimal",scope:"authorized_by_repair_provider",reprove_after_mutation:true}}' \
     > "${repair_request}"
 
   if [[ -z "${REPAIR_CMD}" ]]; then
@@ -116,26 +121,43 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   fi
 
   repair_log="${iteration_dir}/repair.log"
+  repair_result="${iteration_dir}/repair_result.json"
   repair_rc=0
   AEGIS_UAAM_REPAIR_REQUEST="${repair_request}" \
     AEGIS_UAAM_FAILURE_EVIDENCE="${iteration_dir}/evidence.json" \
     AEGIS_UAAM_ITERATION="${iteration}" \
     AEGIS_UAAM_LOOP_DIR="${LOOP_DIR}" \
+    AEGIS_UAAM_REPAIR_RESULT="${repair_result}" \
+    AEGIS_UAAM_TARGETS="$(jq -c '(.targets // [])' .harness/active_contract_ir.json 2>/dev/null || printf '[]')" \
     bash -c "${REPAIR_CMD}" >"${repair_log}" 2>&1 || repair_rc=$?
-  jq --argjson exit_code "${repair_rc}" --arg log "${repair_log#${ROOT_DIR}/}" \
-    '.repair={status:(if $exit_code == 0 then "APPLIED" else "FAILED" end),exit_code:$exit_code,evidence_log:$log}' \
+  receipt_valid=0
+  if [[ -s "${repair_result}" ]] && jq -e '
+    .status == "APPLIED"
+    and (.changedFiles | type == "array" and length > 0)
+    and (.diffHash | type == "string" and length > 0)
+    and (.scopeVerified == true)
+  ' "${repair_result}" >/dev/null 2>&1; then
+    receipt_valid=1
+  fi
+  jq --argjson exit_code "${repair_rc}" --arg log "${repair_log#${ROOT_DIR}/}" --arg receipt "${repair_result#${ROOT_DIR}/}" --argjson receipt_valid "${receipt_valid}" \
+    '.repair={status:(if $exit_code == 0 and $receipt_valid == 1 then "APPLIED" else "FAILED" end),exit_code:$exit_code,evidence_log:$log,receipt:$receipt,receipt_valid:($receipt_valid == 1)}' \
     "${iteration_dir}/evidence.json" > "${iteration_dir}/evidence.with-repair.json"
   mv "${iteration_dir}/evidence.with-repair.json" "${iteration_dir}/evidence.json"
   cp "${iteration_dir}/evidence.json" "${LOOP_DIR}/latest.json"
 
-  if [[ "${repair_rc}" -ne 0 ]]; then
+  if [[ "${repair_rc}" -ne 0 || "${receipt_valid}" -ne 1 ]]; then
+    repair_reason="repair_failed"
+    [[ -s "${repair_result}" ]] || repair_reason="repair_receipt_missing"
+    [[ "${repair_rc}" -eq 0 && "${receipt_valid}" -eq 0 && -s "${repair_result}" ]] && repair_reason="invalid_repair_receipt"
     jq -n \
       --argjson iteration "${iteration}" \
       --arg fingerprint "${fingerprint}" \
       --argjson repair_exit_code "${repair_rc}" \
-      '{version:"uaam-loop-v1",status:"UNPROVEN",reason:"repair_failed",iteration:$iteration,fingerprint:$fingerprint,repair_exit_code:$repair_exit_code}' \
+      --arg reason "${repair_reason}" \
+      --arg receipt "${repair_result#${ROOT_DIR}/}" \
+      '{version:"uaam-loop-v1",status:"UNPROVEN",reason:$reason,iteration:$iteration,fingerprint:$fingerprint,repair_exit_code:$repair_exit_code,repair_receipt:$receipt}' \
       > "${LOOP_DIR}/result.json"
-    echo "[AEGIS][UAAM_LOOP] UNPROVEN repair_failed exit_code=${repair_rc}" >&2
+    echo "[AEGIS][UAAM_LOOP] UNPROVEN ${repair_reason} exit_code=${repair_rc}" >&2
     exit 1
   fi
 

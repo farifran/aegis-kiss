@@ -9,6 +9,7 @@ trap 'rm -rf "${TEST_DIR}"' EXIT
 mkdir -p "${TEST_DIR}/src" "${TEST_DIR}/.harness" "${TEST_DIR}/scripts/capabilities" "${TEST_DIR}/scripts/lib"
 ln -s "${AEGIS_ROOT}/node_modules" "${TEST_DIR}/node_modules"
 cp "${AEGIS_ROOT}/scripts/uaam_assurance_loop.sh" "${TEST_DIR}/scripts/"
+cp "${AEGIS_ROOT}/scripts/uaam_contract_gate.sh" "${TEST_DIR}/scripts/"
 cp "${AEGIS_ROOT}/scripts/uaam_repair_aegis.sh" "${TEST_DIR}/scripts/"
 cp "${AEGIS_ROOT}/scripts/capabilities/test_runner.sh" "${TEST_DIR}/scripts/capabilities/"
 cp "${AEGIS_ROOT}/scripts/capabilities/_emit.sh" "${TEST_DIR}/scripts/capabilities/"
@@ -133,7 +134,9 @@ jq -e '.status == "SUCCESS" and .iteration == 5' .harness/runtime/uaam_loop/resu
 expected_failures=(4 3 2 1)
 for iteration in 1 2 3 4; do
   jq -e '.repair.status == "APPLIED"' ".harness/runtime/uaam_loop/iteration-${iteration}/evidence.json" >/dev/null
-  jq -e '(.failed_checks | length) >= 1' ".harness/runtime/uaam_loop/iteration-${iteration}/repair_request.json" >/dev/null
+  jq -e '(.failed_checks | length) >= 1 and (.failed_obligations | length) >= 1' ".harness/runtime/uaam_loop/iteration-${iteration}/repair_request.json" >/dev/null
+  jq -e '.repair.receipt_valid == true' ".harness/runtime/uaam_loop/iteration-${iteration}/evidence.json" >/dev/null
+  jq -e '.status == "APPLIED" and (.changedFiles | length) > 0 and .scopeVerified == true' ".harness/runtime/uaam_loop/iteration-${iteration}/repair_result.json" >/dev/null
   jq -e --argjson iteration "${iteration}" '.status == "APPLIED" and .iteration == $iteration and .strategy == "official_mutation_provider_fixture"' \
     ".harness/runtime/uaam_loop/iteration-${iteration}/provider_result.json" >/dev/null
   grep -q 'delegating_to=run_aegis_loop.sh' ".harness/runtime/uaam_loop/iteration-${iteration}/repair.log"
@@ -141,7 +144,7 @@ for iteration in 1 2 3 4; do
   jq -e --argjson expected "${expected_failures[$((iteration - 1))]}" \
     '[.[] | select(.status == "DISPROVEN" or .status == "UNPROVEN")] | length == $expected' <<<"${matrix}" >/dev/null
 done
-jq -e '(.checks | map(select(.status == "passed")) | length) == 7' .harness/runtime/uaam_loop/latest.json >/dev/null
+jq -e '(.checks | map(select(.status == "passed")) | length) == 9' .harness/runtime/uaam_loop/latest.json >/dev/null
 jq -e '[.checks[] | select(.name == "uaam_v3") | .evidence_matrix[] | select(.status == "DISPROVEN" or .status == "UNPROVEN")] | length == 0' \
   .harness/runtime/uaam_loop/latest.json >/dev/null
 
