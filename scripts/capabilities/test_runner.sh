@@ -83,8 +83,8 @@ const fs = require("fs");
 const ir = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (ir.version !== "3.0") process.exit(0);
 
-const domains = new Set(["ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE"]);
-const operationFields = [["admission", "ADMISSION"], ["failure", "STATE"], ["resources", "RESOURCE"], ["composition", "COMPOSITION"], ["transaction", "COMMIT"], ["lifecycle", "LIFECYCLE"], ["observability", "STATE"]];
+const domains = new Set(["CONTRACT", "ADMISSION", "STATE", "RESOURCE", "COMPOSITION", "COMMIT", "LIFECYCLE", "OBSERVABILITY"]);
+const operationFields = [["admission", "ADMISSION"], ["failure", "STATE"], ["resources", "RESOURCE"], ["composition", "COMPOSITION"], ["transaction", "COMMIT"], ["lifecycle", "LIFECYCLE"], ["observability", "OBSERVABILITY"]];
 const errors = [];
 if (!Array.isArray(ir.targets) || ir.targets.length === 0) errors.push("targets_required");
 if (!ir.publicContract || typeof ir.publicContract !== "object") errors.push("publicContract_required");
@@ -92,6 +92,20 @@ if (!Array.isArray(ir.operations) || ir.operations.length === 0) errors.push("op
 if (!Array.isArray(ir.proofObligations)) errors.push("proofObligations_required");
 
 const obligations = Array.isArray(ir.proofObligations) ? ir.proofObligations : [];
+const coverage = obligations.find(po => po && (po.kind === "contract_coverage" || po.oracle === "contract_coverage" || po.domain === "CONTRACT"));
+if (!coverage) errors.push("contract_coverage_required");
+if (coverage?.notApplicable === true) errors.push("contract_coverage_cannot_be_not_applicable");
+for (const requirement of Array.isArray(ir.requirements) ? ir.requirements : []) {
+  if (!requirement || typeof requirement !== "object" || typeof requirement.id !== "string" || requirement.id.length === 0) {
+    errors.push("requirement_id_required");
+    continue;
+  }
+  const reference = requirement && (requirement.proofObligationId || requirement.obligationId);
+  const matched = reference
+    ? obligations.some(po => po.id === reference)
+    : obligations.some(po => po.target === requirement.target && po.domain === requirement.domain);
+  if (!matched) errors.push(`requirement_without_proof_obligation:${requirement.id ?? ""}`);
+}
 const ids = new Set();
 for (const po of obligations) {
   if (!po || typeof po !== "object") { errors.push("proof_obligation_object_required"); continue; }
@@ -101,6 +115,8 @@ for (const po of obligations) {
   if (typeof po.oracle !== "string" || po.oracle.length === 0) errors.push(`proof_obligation_oracle_required:${po.id ?? ""}`);
   if (po.status !== undefined) errors.push(`proof_obligation_status_forbidden:${po.id ?? ""}`);
   if (po.notApplicable === true && (typeof po.naJustification !== "string" || !po.naJustification.startsWith("derived:"))) errors.push(`na_not_structurally_derived:${po.id ?? ""}`);
+  if ((po.kind === "temporal_lifecycle" || po.oracle === "temporal_policy" || po.oracle === "clock_policy") && !new Set(["monotonic_reject", "monotonic_clamp", "allow_backward", "logical_clock"]).has(po.clockPolicy || po.policy)) errors.push(`temporal_clock_policy_invalid:${po.id ?? ""}`);
+  if ((po.kind === "result_state_consistency" || po.oracle === "result_state_consistency") && (!po.mapping || typeof po.mapping !== "object" || Array.isArray(po.mapping) || Object.keys(po.mapping).length === 0)) errors.push(`result_state_mapping_required:${po.id ?? ""}`);
 }
 for (const op of Array.isArray(ir.operations) ? ir.operations : []) {
   if (!op || typeof op !== "object" || typeof op.id !== "string" || typeof op.target !== "string") { errors.push("operation_id_and_target_required"); continue; }
@@ -189,7 +205,7 @@ ${prelude}
 
     const deriveV3Obligations = (contract) => {
       if (contract.version !== "3.0") return [];
-      const fields = [["admission", "ADMISSION", "admission_reject"], ["failure", "STATE", "state_diff"], ["resources", "RESOURCE", "resource_conservation"], ["composition", "COMPOSITION", "resource_composition"], ["transaction", "COMMIT", "commit_atomicity"], ["lifecycle", "LIFECYCLE", "lifecycle_expiry"], ["observability", "STATE", "state_diff"]];
+      const fields = [["admission", "ADMISSION", "admission_reject"], ["failure", "STATE", "state_diff"], ["resources", "RESOURCE", "resource_conservation"], ["composition", "COMPOSITION", "resource_composition"], ["transaction", "COMMIT", "commit_atomicity"], ["lifecycle", "LIFECYCLE", "lifecycle_expiry"], ["observability", "OBSERVABILITY", "result_state_consistency"]];
       const explicit = contract.proofObligations || [];
       return (contract.operations || []).flatMap(op => fields.flatMap(([field, domain, oracle]) => {
         const value = op[field];
@@ -206,6 +222,30 @@ ${prelude}
       const poRequired = po.required !== false;
       const poOracle = po.oracle || "true";
       const prelude = po.prelude ? lines(po.prelude, "      ") : "";
+
+      if (po.domain === "CONTRACT" || poKind === "contract_coverage" || poOracle === "contract_coverage") {
+        const requirements = JSON.stringify(Array.isArray(ir.requirements) ? ir.requirements : []);
+        const declared = JSON.stringify(obligations);
+        return `  // Proof Obligation ${poId} (Contract Coverage Oracle)
+  try {
+    const __requirements = ${requirements};
+    const __declared = ${declared};
+    const __missingRequirements = __requirements.filter((requirement: any) => {
+      const reference = requirement?.proofObligationId || requirement?.obligationId;
+      return reference
+        ? !__declared.some((candidate: any) => candidate?.id === reference)
+        : !__declared.some((candidate: any) => candidate?.target === requirement?.target && candidate?.domain === requirement?.domain);
+    });
+    const __missingMechanisms = __declared.filter((candidate: any) => candidate?.required !== false && candidate?.notApplicable !== true && typeof candidate?.oracle !== "string");
+    if (__missingRequirements.length > 0 || __missingMechanisms.length > 0) {
+      recordEvidence("${poId}", "${poKind}", "CONTRACT", "DISPROVEN", ${poRequired}, "Contract coverage missing requirement or proof mechanism");
+    } else {
+      recordEvidence("${poId}", "${poKind}", "CONTRACT", "STATIC_PROVEN", ${poRequired}, "Every declared requirement is linked to a proof obligation with an oracle");
+    }
+  } catch (e: any) {
+    recordEvidence("${poId}", "${poKind}", "CONTRACT", "DISPROVEN", ${poRequired}, "Exception in contract coverage oracle: " + String(e?.message || e));
+  }`;
+      }
 
       if (po.notApplicable === true) {
         return `  // Proof Obligation ${poId} (structurally derived N/A)
@@ -229,7 +269,7 @@ ${prelude}
   }`;
       }
 
-      if (po.domain === "LIFECYCLE" || poKind === "lifecycle" || poOracle === "lifecycle_expiry") {
+      if ((po.domain === "LIFECYCLE" || poKind === "lifecycle" || poOracle === "lifecycle_expiry") && po.kind !== "temporal_lifecycle" && poOracle !== "temporal_policy" && poOracle !== "clock_policy") {
         return `  // Proof Obligation ${poId} (Lifecycle Oracle)
   try {
     let __lifecycleCheck: (() => boolean) | null = null;
@@ -238,6 +278,23 @@ ${prelude}
     else if (__lifecycleCheck()) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "EXECUTABLY_PROVEN", ${poRequired}, "Expired state absent from next scope");
     else recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Expired state survived its declared boundary");
   } catch (e: unknown) { recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Exception in lifecycle oracle: " + String(e));
+  }`;
+      }
+
+      if (po.kind === "temporal_lifecycle" || poOracle === "temporal_policy" || poOracle === "clock_policy") {
+        const policy = JSON.stringify(po.clockPolicy || po.policy || "");
+        return `  // Proof Obligation ${poId} (Temporal Lifecycle Oracle)
+  try {
+    let __temporalCheck: (() => boolean) | null = null;
+${prelude}
+    const __policy = ${policy};
+    const __validPolicies = ["monotonic_reject", "monotonic_clamp", "allow_backward", "logical_clock"];
+    if (!__validPolicies.includes(__policy)) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "UNPROVEN", ${poRequired}, "Missing or invalid clock policy");
+    else if (!__temporalCheck) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "UNPROVEN", ${poRequired}, "Missing __temporalCheck in prelude");
+    else if (__temporalCheck()) recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "EXECUTABLY_PROVEN", ${poRequired}, "Temporal trace satisfies " + __policy);
+    else recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Temporal trace violates " + __policy);
+  } catch (e: any) {
+    recordEvidence("${poId}", "${poKind}", "LIFECYCLE", "DISPROVEN", ${poRequired}, "Exception in temporal oracle: " + String(e?.message || e));
   }`;
       }
       if (poKind === "type_safety" || poOracle === "typecheck" || poOracle === "tsc_no_emit") {
@@ -396,6 +453,42 @@ ${prelude}
     }
   } catch (e: any) {
     recordEvidence("${poId}", "${poKind}", "STATE_TRANSITION", "DISPROVEN", ${poRequired}, "Exception in commit atomicity oracle: " + String(e?.message || e));
+      }`;
+      }
+
+      if (po.kind === "result_state_consistency" || poOracle === "result_state_consistency") {
+        const mapping = JSON.stringify(po.mapping || {});
+        const defaultRelation = JSON.stringify(po.relation || "equal");
+        return `  // Proof Obligation ${poId} (Result ↔ State Consistency Oracle)
+  try {
+    let __resultTarget: any = null;
+    let __resultCall: (() => unknown) | null = null;
+${prelude}
+    const __mapping = ${mapping};
+    const __defaultRelation = ${defaultRelation};
+    const __entries = Object.entries(__mapping).map(([resultField, raw]: [string, any]) => ({
+      resultField,
+      stateField: typeof raw === "string" ? raw : raw?.state,
+      relation: typeof raw === "string" ? __defaultRelation : (raw?.relation || __defaultRelation)
+    }));
+    if (!__resultTarget || !__resultCall || __entries.length === 0) {
+      recordEvidence("${poId}", "${poKind}", "OBSERVABILITY", "UNPROVEN", ${poRequired}, "Missing result target, result call, or mapping");
+    } else {
+      const __before = new Map<string, unknown>();
+      for (const entry of __entries) __before.set(entry.stateField, __readPath(__resultTarget, entry.stateField));
+      const __result: any = await __resultCall();
+      const __mismatches: string[] = [];
+      for (const entry of __entries) {
+        if (!Object.prototype.hasOwnProperty.call(__result || {}, entry.resultField)) { __mismatches.push(entry.resultField + " missing from result"); continue; }
+        const __afterValue = __readPath(__resultTarget, entry.stateField);
+        const __expected = entry.relation === "delta" ? __subtractValues(__afterValue, __before.get(entry.stateField)) : __afterValue;
+        if (!__sameValue(__result[entry.resultField], __expected)) __mismatches.push(entry.resultField + " != " + entry.stateField);
+      }
+      if (__mismatches.length === 0) recordEvidence("${poId}", "${poKind}", "OBSERVABILITY", "EXECUTABLY_PROVEN", ${poRequired}, "Returned result matches mapped observable state");
+      else recordEvidence("${poId}", "${poKind}", "OBSERVABILITY", "DISPROVEN", ${poRequired}, "Result/state mismatch: " + __mismatches.join(", "));
+    }
+  } catch (e: any) {
+    recordEvidence("${poId}", "${poKind}", "OBSERVABILITY", "DISPROVEN", ${poRequired}, "Exception in result/state oracle: " + String(e?.message || e));
   }`;
       }
 
@@ -423,7 +516,7 @@ ${mergeCode}
 ${exportsBinding}
 
 type EpistemicStatus = "STATIC_PROVEN" | "EXECUTABLY_PROVEN" | "DISPROVEN" | "UNPROVEN" | "NOT_APPLICABLE";
-type ProofDomain = "TYPE_SYSTEM" | "ADMISSION" | "STATE_TRANSITION" | "STATE" | "RESOURCE_INVARIANT" | "RESOURCE" | "COMPOSITION" | "COMMIT" | "LIFECYCLE" | "BEHAVIORAL_ASSERTION" | "UNASSIGNED";
+type ProofDomain = "TYPE_SYSTEM" | "CONTRACT" | "ADMISSION" | "STATE_TRANSITION" | "STATE" | "RESOURCE_INVARIANT" | "RESOURCE" | "COMPOSITION" | "COMMIT" | "LIFECYCLE" | "OBSERVABILITY" | "BEHAVIORAL_ASSERTION" | "UNASSIGNED";
 
 interface EvidenceEntry {
   id: string;
@@ -493,6 +586,22 @@ function __sumProps(instance: any, keys: string[]): bigint {
     } catch { /* ignore */ }
   }
   return sum;
+}
+
+function __readPath(instance: any, path: string): unknown {
+  return path.split(".").reduce((value: any, key: string) => value === null || value === undefined ? undefined : value[key], instance);
+}
+
+function __sameValue(left: unknown, right: unknown): boolean {
+  if (typeof left === "bigint" && typeof right === "bigint") return left === right;
+  if (typeof left === "number" && typeof right === "number") return Object.is(left, right);
+  return Object.is(left, right);
+}
+
+function __subtractValues(after: unknown, before: unknown): unknown {
+  if (typeof after === "bigint" && typeof before === "bigint") return after - before;
+  if (typeof after === "number" && typeof before === "number") return after - before;
+  return undefined;
 }
 
 export async function __run_invariants() {

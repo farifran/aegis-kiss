@@ -237,15 +237,18 @@ aegis_briefing_validate_json() {
     uaam_reason="$(
       printf '%s' "${json}" | jq -r '
         def present: . != null and (if type == "array" then length > 0 else true end) and (if type == "object" then length > 0 else true end);
-        def domain_for($field): {admission:"ADMISSION", failure:"STATE", resources:"RESOURCE", composition:"COMPOSITION", transaction:"COMMIT", lifecycle:"LIFECYCLE", observability:"STATE"}[$field];
+        def domain_for($field): {admission:"ADMISSION", failure:"STATE", resources:"RESOURCE", composition:"COMPOSITION", transaction:"COMMIT", lifecycle:"LIFECYCLE", observability:"OBSERVABILITY"}[$field];
         [
           (if (.goal | type) != "string" or (.goal | length) == 0 then "empty_goal" else empty end),
           (if (.targets | type) != "array" or (.targets | length) == 0 then "targets_required" else empty end),
           (if (.publicContract | type) != "object" then "publicContract_required" else empty end),
           (if (.operations | type) != "array" or (.operations | length) == 0 then "operations_required" else empty end),
           (if (.proofObligations | type) != "array" then "proofObligations_required" else empty end),
+          (if ([.proofObligations[]? | select(.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT")] | length) == 0 then "contract_coverage_required" else empty end),
+          (if ([.proofObligations[]? | select((.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT") and .notApplicable != true)] | length) == 0 then "contract_coverage_cannot_be_not_applicable" else empty end),
+          (.requirements[]? as $requirement | if (($requirement | type) != "object" or ($requirement.id | type) != "string" or ($requirement.id | length) == 0) then "requirement_id_required" elif ($requirement.proofObligationId // $requirement.obligationId) as $reference | ([.proofObligations[]? | select(.id == $reference or (.target == $requirement.target and .domain == $requirement.domain))] | length) == 0 then "requirement_without_proof_obligation:\($requirement.id // "")" else empty end),
           (.proofObligations[]? as $po | if (($po.id | type) != "string" or ($po.id | length) == 0) then "proof_obligation_id_required"
-            elif (["ADMISSION","STATE","RESOURCE","COMPOSITION","COMMIT","LIFECYCLE"] | index($po.domain)) == null then "proof_obligation_domain_invalid:\($po.id)"
+            elif (["CONTRACT","ADMISSION","STATE","RESOURCE","COMPOSITION","COMMIT","LIFECYCLE","OBSERVABILITY"] | index($po.domain)) == null then "proof_obligation_domain_invalid:\($po.id)"
             elif (($po.oracle | type) != "string" or ($po.oracle | length) == 0) then "proof_obligation_oracle_required:\($po.id)"
             elif ($po.notApplicable == true and (($po.naJustification | type) != "string" or (($po.naJustification | startswith("derived:")) | not))) then "na_not_structurally_derived:\($po.id)"
             elif ($po.status? != null) then "proof_obligation_status_forbidden:\($po.id)" else empty end),
@@ -713,7 +716,7 @@ aegis_briefing_render() {
       ))
     else empty end),
     (if .version == "3.0" then
-      ("", "## UAAM Contract IR v3", "Universal domains: ADMISSION, STATE, RESOURCE, COMPOSITION, COMMIT, LIFECYCLE",
+      ("", "## UAAM Contract IR v3", "Universal domains: CONTRACT, ADMISSION, STATE, RESOURCE, COMPOSITION, COMMIT, LIFECYCLE, OBSERVABILITY",
        "### Operations", ((.operations // []) | map("- [" + (.id // "OP") + "] " + (.target // "")
          + (if (.admission // null) != null then " | ADMISSION" else "" end)
          + (if (.failure // null) != null then " | STATE" else "" end)

@@ -978,7 +978,10 @@ readonly AEGIS_JQ_ENRICH_OPTIMIZE='
 
 # Sole source of tool→finding maps for adversarial (mechanical emit is thin; enrich fills).
 readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
-  | .status = (.status // "challenged")
+  # A model may propose attacks, but it never supplies the adversarial status.
+  # Only runtime-produced artifacts carry authority: runtime findings are
+  # challenged and a mechanically clean run may later become verified.
+  | .status = (if (.authority // "model") == "runtime" then (.status // "challenged") else "inconclusive" end)
   | .candidate_result = ($prev_candidate // .candidate_result)
   | (.candidate_result.diff // "") as $cand_diff
   | (.candidate_result.files_changed // []) as $cand_files
@@ -1082,11 +1085,15 @@ readonly AEGIS_JQ_ENRICH_ADVERSARIAL='
       | map(.[0])
     )
   | ((.findings | blocking_findings_of) | length) as $blocking
-  | if ($tools_gate.mutation_clean == true) and ($blocking == 0) then
+  | if (.authority == "runtime") and ($tools_gate.mutation_clean == true) and ($blocking == 0) then
       .status = "verified"
-    elif ($tools_gate.mutation_clean == false) then
+    elif (.authority == "runtime") and ($tools_gate.mutation_clean == false) then
       .status = "challenged"
-    else . end
+    elif ($blocking > 0) then
+      .status = "challenged"
+    else
+      .status = "inconclusive"
+    end
   | .handover_attention = {
       next_attention_targets: (.candidate_result.files_changed // []),
       attention_scope: "bounded falsification",

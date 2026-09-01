@@ -21,7 +21,7 @@ raw_mode_minimal_artifact_instructions() {
       printf '%s' "MINIMAL OPTIMIZE (SYSTEMS & RUNTIME PHYSICS, advise only): emit ONLY status+basis+improvements. status=no_improvement_needed|can_improve. Evaluate strictly on: (1) closed-form O(1) math vs loops, (2) zero hot-path GC allocations, (3) reference confinement, (4) arithmetic density. STRICT KISS: no esoteric bit-packing, no factories/frameworks, max 1 surgical change (<=5 lines). can_improve with 1 sharp item: target_files exact from MUTATION RESULT files_changed, change=imperative surgical edit, why_safe=why behavior unchanged. No edits, no diff. Full contract: skill file."
       ;;
     adversarial)
-      printf '%s' "MINIMAL ADVERSARIAL (DEVIL'S ADVOCATE, DEPTH: ${AEGIS_ADVERSARIAL_DEPTH:-medium}): emit ONLY status+findings. Act as Devil's Advocate falsifying domain invariants (non-negativity, temporal drift, boundary crashes). STRICT KISS: never propose factories/frameworks/layers; emit minimal surgical 1-line fixes. Challenged only for (a) in-scope tool failures or (b) invariant violations with full +line quote in backticks. Prefer verified+[] when clean. Include target_files+fix (imperative) so Mutation can act. Tools may be reused from mutation stamp — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
+      printf '%s' "MINIMAL ADVERSARIAL (DEVIL'S ADVOCATE, DEPTH: ${AEGIS_ADVERSARIAL_DEPTH:-medium}): emit ONLY attacks+basis. Never emit approval, verified, or success status. Act as Devil's Advocate falsifying domain invariants (non-negativity, temporal drift, boundary crashes). STRICT KISS: never propose factories/frameworks/layers; emit minimal surgical 1-line fixes. Each attack must include target_files+fix (imperative) so Mutation can act. An empty attacks array is inconclusive; the runtime decides the final status after executing and checking the attack artifact. Tools may be reused from mutation stamp — trust TOOLS SUMMARY. No mode/candidate_result/handover_attention. Full contract: skill file."
       ;;
     validation)
       printf '%s' "MINIMAL VALIDATION ARTIFACT: emit ONLY {\"verdict\": \"accepted|rejected\", \"basis\": \"...\"}. Prefer 'accepted' when there are no evidence-supported high/medium findings that survive the candidate-diff quotation gate. Reject only for real blocking findings or in-scope tool failures. Ignore baseline TS errors outside files_changed and ignore adversarial hallucinations. The runtime may override the verdict deterministically. Do NOT emit mode/validated_candidate/findings/handover_attention."
@@ -478,5 +478,4 @@ assemble_provider_request() {
 # =========================================================
 # PROVIDER EXECUTION
 # =========================================================
-
 

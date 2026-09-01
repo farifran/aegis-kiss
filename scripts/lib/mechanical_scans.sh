@@ -1179,7 +1179,7 @@ aegis_emit_mechanical_adversarial_findings() {
   fi
   local body
   body="$(
-    jq -nc --argjson f "${findings_json}" '{status:"challenged",findings:$f}'
+    jq -nc --argjson f "${findings_json}" '{status:"challenged",findings:$f,authority:"runtime"}'
   )" || return 1
   aegis_emit_framed_json_artifact "${body}"
 }
@@ -1193,7 +1193,8 @@ aegis_emit_mechanical_adversarial_verified() {
     jq -nc --arg b "${basis}" '{
       status: "verified",
       findings: [],
-      basis: $b
+      basis: $b,
+      authority: "runtime"
     }'
   )" || return 1
   aegis_emit_framed_json_artifact "${body}"
@@ -1201,19 +1202,20 @@ aegis_emit_mechanical_adversarial_verified() {
 
 # Etapa 5/6 — optimize/adversarial agêntico: o assistente preenche o verdict
 # em <stage>_verdict.json e este helper sintetiza o artifact a partir dele.
-# Nunca chama o LLM interno. Verdict schema (aegis.verdict.v1):
-#   {status: "approved"|"rejected", basis: "...", suggestions?: ["..."]}
-# Mapeia para o mesmo shape dos artifacts mecânicos que o validation espera.
+# Nunca chama o LLM interno. Attack schema (aegis.attack.v1):
+#   {attacks: [{...}], basis?: "..."}
+# Legacy status/findings/suggestions are accepted only as input compatibility;
+# the runtime maps them to attacks and owns the final status.
 
 aegis_synthesize_agentic_verdict_artifact() {
   local mode="${1-}"
   local verdict_file="${2-}"
   [[ -f "${verdict_file}" ]] || return 1
-  local status basis suggestions
-  status="$(jq -r '.status // empty' "${verdict_file}" 2>/dev/null || true)"
+  local status basis suggestions attacks
+  status="$(jq -r '.status // "rejected"' "${verdict_file}" 2>/dev/null || true)"
   basis="$(jq -r '.basis // "agentic_verdict"' "${verdict_file}" 2>/dev/null || true)"
   suggestions="$(jq -c '[.suggestions // [] | .[]? | select(type == "string")]' "${verdict_file}" 2>/dev/null || printf '[]')"
-  [[ -n "${status}" ]] || return 1
+  attacks="$(jq -c '[.attacks // [] | .[]?]' "${verdict_file}" 2>/dev/null || printf '[]')"
 
   case "${mode}" in
     optimize)
@@ -1236,34 +1238,47 @@ aegis_synthesize_agentic_verdict_artifact() {
       esac
       ;;
     adversarial)
-      case "${status}" in
-        approved)
-          aegis_emit_mechanical_adversarial_verified "agentic:${basis}" ;;
-        rejected)
-          local findings
-          findings="$(jq -c '
-            if (.findings // [] | length) > 0 then
-              .findings | map(
-                if type == "string" then {severity: "medium", reason: ., fix: .}
-                elif type == "object" then
-                  {
-                    id: (.id // "adversarial_invariant_violation"),
-                    severity: (.severity // "medium"),
-                    reason: (.reason // .finding // "invariant violation detected"),
-                    target_files: (.target_files // []),
-                    fix: (.fix // .suggestion // "")
-                  }
-                else empty end
-              )
-            elif (.suggestions // [] | length) > 0 then
-              .suggestions | map({severity: "medium", reason: ., fix: .})
-            else
-              [{severity: "medium", reason: (.basis // "rejected by adversarial devil advocate"), fix: ""}]
-            end
+      local findings
+      findings="$(jq -c --argjson attacks "${attacks}" '
+        if ($attacks | length) > 0 then
+          $attacks | map(
+            if type == "string" then {severity: "medium", reason: ., fix: .}
+            elif type == "object" then {
+              id: (.id // "adversarial_attack"),
+              severity: (.severity // "medium"),
+              reason: (.reason // .finding // .description // "adversarial attack detected"),
+              target_files: (.target_files // []),
+              fix: (.fix // .suggestion // "")
+            }
+            else empty end
+          )
+        elif ((.findings // []) | length) > 0 then
+          .findings | map(
+            if type == "string" then {severity: "medium", reason: ., fix: .}
+            elif type == "object" then {
+              id: (.id // "adversarial_invariant_violation"),
+              severity: (.severity // "medium"),
+              reason: (.reason // .finding // .description // "invariant violation detected"),
+              target_files: (.target_files // []),
+              fix: (.fix // .suggestion // "")
+            }
+            else empty end
+          )
+        elif ((.suggestions // []) | length) > 0 then
+          .suggestions | map({severity: "medium", reason: ., fix: .})
+        else [] end
           ' "${verdict_file}" 2>/dev/null || printf '[]')"
-          aegis_emit_mechanical_adversarial_findings "${findings}" ;;
-        *) return 1 ;;
-      esac
+      if [[ "${status}" == "approved" && "${findings}" == "[]" ]]; then
+        local inconclusive_body
+        inconclusive_body="$(jq -nc --arg b "agentic:${basis}" '{status:"inconclusive", findings:[], basis:$b, authority:"runtime"}')" || return 1
+        aegis_emit_framed_json_artifact "${inconclusive_body}"
+      elif printf '%s' "${findings}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        aegis_emit_mechanical_adversarial_findings "${findings}"
+      else
+        local inconclusive_body
+        inconclusive_body="$(jq -nc --arg b "agentic:${basis}" '{status:"inconclusive", findings:[], basis:$b, authority:"runtime"}')" || return 1
+        aegis_emit_framed_json_artifact "${inconclusive_body}"
+      fi
       ;;
     *) return 1 ;;
   esac

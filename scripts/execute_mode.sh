@@ -733,6 +733,7 @@ execute_adversarial_mechanical() {
   declare -f build_tribunal_tools_gate >/dev/null 2>&1 || return 1
 
   local handover root="." files="[]" gate clean out="" diff_findings
+  handover="${AEGIS_EPISTEMIC_HANDOVER_FILE_INPUT:-${AEGIS_EPISTEMIC_HANDOVER_FILE:-}}"
 
   # Agentic verdict synthesis
   if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && [[ -f "${AEGIS_AGENTIC_VERDICT_FILE:-}" ]]; then
@@ -743,6 +744,16 @@ execute_adversarial_mechanical() {
         jq -cn '{kind:"adversarial",result:"agentic_verdict"}' >> "${AEGIS_METRICS_FILE}" 2>/dev/null || true
       fi
       AEGIS_SUBSTRATE_OUTPUT="${out}"
+      local agentic_artifact agentic_mechanical_findings
+      agentic_artifact="$(extract_substrate_artifact)"
+      agentic_mechanical_findings="[]"
+      if declare -f aegis_mechanical_adversarial_diff_scan >/dev/null 2>&1; then
+        agentic_mechanical_findings="$(aegis_mechanical_adversarial_diff_scan "${handover}" "${AEGIS_INVESTIGATION_INPUT:-}" ".")" || agentic_mechanical_findings="[]"
+      fi
+      if printf '%s' "${agentic_mechanical_findings}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        agentic_artifact="$(jq -c --argjson mechanical "${agentic_mechanical_findings}" '.findings = ((.findings // []) + $mechanical) | .status = "challenged"' <<<"${agentic_artifact}")"
+        rewrite_substrate_output_with_artifact "${agentic_artifact}"
+      fi
       normalize_substrate_output
       measure "executor_artifact_validation" validate_artifact
       emit_output

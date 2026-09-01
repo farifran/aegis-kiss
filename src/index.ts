@@ -15,7 +15,7 @@ export type {
     EpochResult
 };
 
-import { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
+import { TokenBucket, obterEstadoBitmask, type ClockPolicy } from './tokenBucket.js';
 export { TokenBucket, obterEstadoBitmask };
 
 import {
@@ -32,8 +32,8 @@ export {
 };
 
 export type {
+  ClockPolicy,
   TransferOrder,
   AccountState,
   BatchResult
 };
-
