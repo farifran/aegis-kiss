@@ -6,6 +6,7 @@
   "description": "Deterministic epistemological containment architecture for frontier-model software engineering.",
   "scripts": {
     "aegis:runtime": "bash runtime_aegis.sh",
+    "aegis:cleanup": "bash aegis clean",
     "aegis:typecheck": "tsc --noEmit",
     "aegis:lint": "eslint .",
     "aegis:enforce": "bash scripts/substrates/static_gate.sh --workspace src",

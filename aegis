@@ -2464,6 +2464,15 @@ EOF
   fi
 }
 
+cmd_cleanup() {
+  aegis_log "Iniciando Auto-Cleanup de arquivos transientes em scratch/ e .harness/runtime/..."
+  find scratch/ -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
+  rm -rf .harness/runtime/* 2>/dev/null || true
+  mkdir -p scratch .harness/runtime 2>/dev/null || true
+  touch scratch/.gitkeep 2>/dev/null || true
+  aegis_log "Workspace limpo com sucesso! (Zero resíduos transientes)"
+}
+
 main() {
   local verb="${1:-}"
   case "${verb}" in
@@ -2475,6 +2484,10 @@ main() {
     [0-9]*)
       # Pure issue number: ./aegis 207 -> ./aegis --issue 207
       cmd_run --issue "$@"
+      ;;
+    cleanup|clean|--clean|--cleanup)
+      shift 2>/dev/null || true
+      cmd_cleanup "$@"
       ;;
     context) shift; cmd_context "$@" ;;
     split)   shift; cmd_split "$@" ;;

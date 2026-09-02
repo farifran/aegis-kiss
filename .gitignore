@@ -59,6 +59,8 @@
 tmp/
 temp/
 sandbox/
+scratch/*
+!scratch/.gitkeep
 
 # =========================================================
 # EXECUTOR MATERIALIZATION
