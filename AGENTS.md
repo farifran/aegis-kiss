@@ -9,15 +9,17 @@ Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/p
 Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição deve operar obrigatoriamente como:
 $$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Validar Invariantes} \longrightarrow \text{Promover Atomicamente } (S_{\text{commit}})$$
 
-#### 3. VALIDATORS INDEPENDENTES DA IMPLEMENTAÇÃO (Separação de Autoridade)
-O mesmo código que produz o resultado não pode ser a única autoridade que atesta sua correção. Validadores e oráculos devem auditar propriedades externas e globais de forma independente do algoritmo de execução.
+#### 3. VALIDATOR DE CORRESPONDÊNCIA TRIPLA (Separação de Autoridade & Pós-Commit)
+O harness exige prova formal e independente em 4 etapas:
+$$\text{Requirement} \longleftrightarrow \text{Projected State} \longleftrightarrow \text{Actual State} \longleftrightarrow \text{Observable Result}$$
+Validar invariantes no estado projetado **E** no estado real pós-commit antes de liberar a promoção.
 
 #### 4. ADVERSARIAL OBRIGATÓRIO NA COMPOSIÇÃO (Red Team)
-Testar sistematicamente: ordem de execução, duplicação de IDs, ciclos de financiamento, aliasing ($A \to A$), tempo regressivo, rollback total, falhas parciais e divergência entre resultado e estado observável.
+Testar sistematicamente: ordem de execução, duplicação de IDs, slots nulos/ausentes (100% de cobertura bijetiva), ciclos de financiamento, aliasing ($A \to A$), tempo regressivo, rollback total, falhas parciais e divergência entre resultado e estado observável.
 
 #### 5. GOVERNANCE BASEADO EM EVIDÊNCIA (Prova-First)
 O Gate de Promoção não aprova "código bom"; aprova apenas quando existe a cadeia de custódia ininterrupta:
-$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator} \longrightarrow \text{Prova Adversarial}$$
+$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator Triplo} \longrightarrow \text{Prova Adversarial}$$
 
 #### 6. RUNTIME & PROTOCOL DISCIPLINE
 * **Autoridade Estrita**: Interpretar apenas a autoridade delegada pelo runtime.

@@ -8,7 +8,7 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
-console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL (AEGIS-GRADE) — 10 PROVAS DE PROPRIEDADE');
+console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL (TRIPLE CONGRUENCE) — 11 PROVAS DE PROPRIEDADE');
 
 // 1. Prova 1: Anti-Netting Circular (A=0, B=0; A->B 100, B->A 100)
 {
@@ -68,8 +68,6 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL (AEGIS-GRADE) — 10 PR
   house.registerAccount('UserX', 50n, 1000n, 10n);
   house.registerAccount('UserY', 10n, 1000n, 10n);
 
-  const snapBefore = house.snapshot();
-  // Força uma falha global injetando capacityCost negativo na segunda
   const res = house.processBatch([
     { id: 't1', senderId: 'UserX', receiverId: 'UserY', amount: 30n, fee: 0n },
     { id: 't2', senderId: 'UserX', receiverId: 'UserY', amount: 10n, fee: 0n, capacityCost: -100n }
@@ -184,4 +182,24 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL (AEGIS-GRADE) — 10 PR
   console.log('✅ Prova 10 (Engine-Owned Time Monotonicity & Rollback Reason): APROVADA');
 }
 
-console.log('\n🎯 TODAS AS 10 PROVAS RED TEAM FORAM APROVADAS COM 100% DE SUCESSO!');
+// 11. Prova 11: 100% Slot Coverage (Slots Undefined/Sparse preservam decisions.length === orders.length)
+{
+  const house = new ClearingHouse();
+  house.registerAccount('S1', 200n, 1000n, 10n);
+  house.registerAccount('S2', 200n, 1000n, 10n);
+
+  const rawOrders: any[] = [
+    { id: 'valid1', senderId: 'S1', receiverId: 'S2', amount: 50n, fee: 1n },
+    undefined,
+    { id: 'valid2', senderId: 'S1', receiverId: 'S2', amount: 20n, fee: 1n }
+  ];
+
+  const res = house.processBatch(rawOrders, 2000n);
+  assert(res.decisions.length === rawOrders.length, 'Prova 11: decisions.length deve ser exatamente igual a orders.length');
+  assert(res.decisions[1]?.status === 'rejected_invalid', 'Prova 11: slot undefined deve gerar rejected_invalid');
+  assert(res.decisions[1]?.index === 1, 'Prova 11: índice do slot 1 deve ser preservado');
+  assert(res.committedCount === 2, 'Prova 11: as 2 ordens válidas devem ser committed');
+  console.log('✅ Prova 11 (100% Slot Coverage & Bijective Decisions): APROVADA');
+}
+
+console.log('\n🎯 TODAS AS 11 PROVAS RED TEAM FORAM APROVADAS COM 100% DE SUCESSO!');

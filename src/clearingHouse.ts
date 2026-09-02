@@ -158,11 +158,15 @@ export class ClearingHouse {
     const balances: Record<string, bigint> = Object.create(null) as Record<string, bigint>;
     const bucketStates: Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }> = Object.create(null) as Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }>;
 
-    for (const id in this._accounts) {
-      const acc = this._accounts[id];
-      if (acc) {
-        balances[id] = acc.balance;
-        bucketStates[id] = acc.bucket.snapshot();
+    const sortedIds = Object.keys(this._accounts).sort();
+    for (let i = 0; i < sortedIds.length; i++) {
+      const id = sortedIds[i];
+      if (id) {
+        const acc = this._accounts[id];
+        if (acc) {
+          balances[id] = acc.balance;
+          bucketStates[id] = acc.bucket.snapshot();
+        }
       }
     }
 
@@ -268,7 +272,34 @@ export class ClearingHouse {
       projectedSum += bal;
     }
 
-    if (initialSum !== projectedSum) return 'zero-sum balance conservation violated';
+    if (initialSum !== projectedSum) return 'zero-sum balance conservation violated in projection';
+    return null;
+  }
+
+  private _validateActualState(snapBefore: EngineSnapshot, proj: ProjectedState): string | null {
+    let initialSum = snapBefore.treasuryBalance;
+    for (const id in snapBefore.balances) {
+      const b = snapBefore.balances[id];
+      if (b !== undefined) initialSum += b;
+    }
+
+    let actualSum = this._treasuryBalance;
+    for (const id in this._accounts) {
+      const acc = this._accounts[id];
+      if (acc) {
+        if (acc.balance < 0n) return 'negative balance detected in actual state';
+        if (acc.bucket.tokens < 0n || acc.bucket.tokens > acc.bucket.capacity) {
+          return 'bucket tokens out of bounds in actual state';
+        }
+        actualSum += acc.balance;
+      }
+    }
+
+    const expectedSum = initialSum;
+    if (actualSum !== expectedSum) return 'zero-sum conservation violated in actual state';
+    if (this._treasuryBalance !== snapBefore.treasuryBalance + proj.batchFees) {
+      return 'treasury balance mismatch in actual state';
+    }
     return null;
   }
 
@@ -302,11 +333,15 @@ export class ClearingHouse {
 
     for (let i = 0; i < orders.length; i++) {
       const ord = orders[i];
-      if (!ord) continue;
+      if (!ord) {
+        proj.rejectedCount++;
+        proj.decisions.push({ index: i, id: '', status: 'rejected_invalid', reason: 'null or undefined order slot' });
+        continue;
+      }
       const synErr = this._validateSyntax(ord, seenOrderIds);
       if (synErr !== null) {
         proj.rejectedCount++;
-        proj.decisions.push({ index: i, id: ord?.id ?? '', status: 'rejected_invalid', reason: synErr });
+        proj.decisions.push({ index: i, id: ord.id, status: 'rejected_invalid', reason: synErr });
         continue;
       }
       const entErr = this._validateEntities(ord);
@@ -357,6 +392,12 @@ export class ClearingHouse {
     } catch {
       this._restore(snapBefore);
       return this._buildAbortResult({ nowMs, snapBefore, orders, reason: 'commit transaction failure' }, proj.decisions);
+    }
+
+    const actualErr = this._validateActualState(snapBefore, proj);
+    if (actualErr !== null) {
+      this._restore(snapBefore);
+      return this._buildAbortResult({ nowMs, snapBefore, orders, reason: actualErr }, proj.decisions);
     }
 
     const digestCtx: DigestContext = {
@@ -450,6 +491,9 @@ export class ClearingHouse {
         h = fnv1a(h, ord.amount);
         h = fnv1a(h, ord.fee);
         if (ord.capacityCost !== undefined) h = fnv1a(h, ord.capacityCost);
+      } else {
+        h = fnv1a(h, BigInt(i));
+        h = stringToHash(h, '__undefined_order__');
       }
     }
 
@@ -463,12 +507,16 @@ export class ClearingHouse {
       }
     }
 
-    for (const accId in this._accounts) {
-      const acc = this._accounts[accId];
-      if (acc) {
-        h = stringToHash(h, acc.accountId);
-        h = fnv1a(h, acc.balance);
-        h = fnv1a(h, acc.bucket.tokens);
+    const sortedAccIds = Object.keys(this._accounts).sort();
+    for (let i = 0; i < sortedAccIds.length; i++) {
+      const accId = sortedAccIds[i];
+      if (accId) {
+        const acc = this._accounts[accId];
+        if (acc) {
+          h = stringToHash(h, acc.accountId);
+          h = fnv1a(h, acc.balance);
+          h = fnv1a(h, acc.bucket.tokens);
+        }
       }
     }
 

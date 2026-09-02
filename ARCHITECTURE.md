@@ -24,22 +24,25 @@ $$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots
 * **Proibido Netting Falso:** A solvência e capacidade não podem ser avaliadas apenas pelo somatório final de deltas ($\sum \Delta$). Cada operação deve ser admitida sequencialmente contra o estado projetado do instante anterior.
 * Impede overspending, duplo consumo, dependências circulares e financiamentos retroativos ilegais.
 
-### 3. Validators Independentes da Implementação
-O código que constrói a transição de estado não pode ser o único validador de sua correção.
-* Os oráculos e validadores de invariantes globais operam de forma isolada do algoritmo de mutação.
-* Validam conservação total ($\sum \text{Saldos} + \text{Treasury} \equiv \text{Constante}$), limites de capacidade ($0 \le \text{tokens} \le \text{capacidade}$) e congruência de estado ($resultado \equiv \text{estado observável}$).
+### 3. Validator de Correspondência Tripla (Validação Pós-Commit Independente)
+O código que constrói a transição de estado não pode ser o único validador de sua correção. O harness exige auditoria de 4 vias:
+$$\text{Requirement} \longleftrightarrow \text{Projected State} \longleftrightarrow \text{Actual State} \longleftrightarrow \text{Observable Result}$$
+* **Pré-Commit:** Valida invariantes sobre o estado projetado ($S_{\text{proj}}$).
+* **Pós-Commit:** Valida que o estado real produzido em memória ($S_{\text{actual}}$) obedece à conservação de soma-zero, limites de capacidade e consistência. Se violado, executa rollback forçado.
+* **Resultado Observável:** O resultado público ($BatchResult$) e o digest canônico representam deterministicamente o estado real observável pós-mutação.
 
 ### 4. Adversarial Obrigatório na Composição (Red Team)
 Todo componente que passa individualmente é submetido a testes adversariais sistemáticos de composição:
+* **Cobertura Bijetiva de Slots:** Slots ausentes/nulos (`undefined`) recebem decisão explícita (`rejected_invalid`), garantindo $\text{decisions.length} \equiv \text{orders.length}$.
 * **Aliasing:** $A \to A$ (transferência para si mesmo sem corromper balanços nem travar o lote).
 * **Financiamento Circular:** $A \to B$ sem saldo, seguido por $B \to A$ (rejeição estrita da primeira operação).
-* **Ordem & Duplicação:** IDs vazios, IDs duplicados, inversão de eventos.
+* **Ordem & Determinismo:** Ordenação canônica lexicográfica no digest eliminando dependência de motores JS.
 * **Skew Temporal:** Relógio regressando sem gerar capacidade artificial e mantendo a soberania de tempo do motor.
 * **Rollback Total:** Aborto limpo ($S_{\text{abort}} \equiv S_0$) com conversão estrita de ordens admitidas para `aborted`.
 
 ### 5. Governance Baseado em Evidência (Proof-First Promotion)
 O Gate de Promoção não avalia estilo nem aprova código com base em premissas estruturais. A aprovação exige a cadeia de custódia ininterrupta:
-$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator} \longrightarrow \text{Prova Adversarial (Red Team)}$$
+$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator Triplo} \longrightarrow \text{Prova Adversarial (Red Team)}$$
 Se qualquer elo for violado: **`REJECT_PROMOTION`**.
 
 ---
