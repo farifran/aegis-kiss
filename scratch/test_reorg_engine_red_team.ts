@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { ReorgEngine } from '../src/reorgEngine.js';
 import { type BlockHeader } from '../src/blockTree.js';
 

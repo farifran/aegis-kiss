@@ -23,7 +23,8 @@
   },
   "include": [
     "src",
-    ".harness"
+    ".harness",
+    "scratch"
   ],
   "exclude": [
     "node_modules",

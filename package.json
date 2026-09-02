@@ -73,6 +73,7 @@
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",
     "@eslint/js": "^9.0.0",
+    "@types/node": "^26.4.1",
     "eslint": "^9.0.0",
     "eslint-plugin-boundaries": "^4.0.0",
     "typescript": "^5.0.0",
