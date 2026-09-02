@@ -36,6 +36,3 @@ Testar sistematicamente: ordem de execução, duplicação de IDs, slots nulos/e
 * **KISS Cirúrgico**: Implementações locais, determinísticas e livres de complexidade acidental.
 * **Emissão Direta**: Artefatos técnicos concisos sem preâmbulos conversacionais ou filler prose.
 * **Disciplina de Tipos**: TypeScript estrito, zero `any`, `bigint` para grandezas numéricas e tempo explícito.
-
-#### 9. AUTO-CLEANUP & TRANSIENT INTEGRITY (Higiene de Workspace)
-Arquivos de teste e rascunho em `scratch/` e resíduos de execução em `.harness/runtime/` são estritamente efêmeros e limitados ao ciclo ativo. Ao promover uma demanda ou antes de iniciar uma nova, o sistema executa auto-cleanup (`./aegis clean`), eliminando ruídos, poluição de git e erros de importação residual no IDE.
