@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Deterministic epistemological containment architecture for frontier-model software engineering.",
   "scripts": {
+    "test": "tsx --test src/tests/**/*.test.ts",
     "aegis:runtime": "bash runtime_aegis.sh",
     "aegis:cleanup": "bash aegis clean",
     "aegis:typecheck": "tsc --noEmit",
@@ -77,6 +78,7 @@
     "@types/node": "^26.4.1",
     "eslint": "^9.0.0",
     "eslint-plugin-boundaries": "^4.0.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0"
   }
