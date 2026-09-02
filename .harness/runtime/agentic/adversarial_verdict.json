@@ -1,4 +1,0 @@
-{
-  "status": "approved",
-  "basis": "all invariants hold: strict type checking, no any/@ts-ignore, correct king safety validation, and bounded threefold repetition tracking"
-}
