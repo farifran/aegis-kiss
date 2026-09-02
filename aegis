@@ -2465,11 +2465,42 @@ EOF
 }
 
 cmd_cleanup() {
+  local clean_target=0
+  local auto_confirm=0
+
+  for arg in "$@"; do
+    case "${arg}" in
+      --target|--src|--all|-a) clean_target=1 ;;
+      -y|--yes|--force|-f) auto_confirm=1 ;;
+    esac
+  done
+
+  # Pergunta interativa se não foi passada flag e estiver rodando no terminal
+  if [[ "${clean_target}" -eq 0 && "${auto_confirm}" -eq 0 && -t 0 ]]; then
+    printf '\n'
+    read -r -p "⚠️  Deseja também limpar a pasta alvo 'src/' para iniciar uma nova demanda? [s/N]: " ans
+    if [[ "${ans}" =~ ^[SsYy]$ ]]; then
+      clean_target=1
+    fi
+  fi
+
   aegis_log "Iniciando Auto-Cleanup de arquivos transientes em scratch/ e .harness/runtime/..."
   find scratch/ -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
   rm -rf .harness/runtime/* 2>/dev/null || true
   mkdir -p scratch .harness/runtime 2>/dev/null || true
   touch scratch/.gitkeep 2>/dev/null || true
+
+  if [[ "${clean_target}" -eq 1 ]]; then
+    aegis_log "Limpando pasta alvo 'src/' e inicializando template limpo..."
+    rm -rf src/* 2>/dev/null || true
+    mkdir -p src/tests 2>/dev/null || true
+    cat <<'EOF' > src/index.ts
+// src/index.ts — Ponto de entrada canônico (aguardando nova demanda)
+export {};
+EOF
+    aegis_log "Pasta alvo 'src/' resetada e pronta para a nova demanda (Zero erros TS18003)!"
+  fi
+
   aegis_log "Workspace limpo com sucesso! (Zero resíduos transientes)"
 }
 
