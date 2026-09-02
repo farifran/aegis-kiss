@@ -4,46 +4,29 @@ Diretrizes exclusivas do projeto alvo e Constituição Operacional do **Aegis Ha
 
 ---
 
-## 🏛️ Os 5 Princípios Universais do Aegis Harness
+## 🏛️ As Obrigações Constitucionais do Aegis Harness
 
-> *"O foco central deve ser transformar o Aegis de um sistema que avalia código em um sistema que exige provas de correção das transições de estado sob composição, tempo e falha."*
+> *"O objetivo do Aegis deve ser garantir que toda entrada seja explicada, toda transição seja determinística, todo commit seja verificado após ocorrer e toda afirmação de correção seja comprovada por uma autoridade independente."*
 
-### 1. Contrato → Invariantes → Provas
-Toda demanda é convertida explicitamente em:
-* Entidades e estado canônico;
-* Pré-condições e pós-condições estritas;
-* Invariantes globais de conservação e validade;
-* Unidades e semântica pura sem contaminação de domínios anteriores;
-* Comportamentos estritamente proibidos;
-* Critérios de observabilidade pública.
-**Regra de Ouro:** Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
+---
 
-### 2. Estado Projetado Antes da Mutação
-A validação de lotes e operações sequenciais opera obrigatoriamente sobre a transição:
-$$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Validar Invariantes} \longrightarrow \text{Promover Atomicamente } (S_{\text{commit}})$$
-* **Proibido Netting Falso:** A solvência e capacidade não podem ser avaliadas apenas pelo somatório final de deltas ($\sum \Delta$). Cada operação deve ser admitida sequencialmente contra o estado projetado do instante anterior.
-* Impede overspending, duplo consumo, dependências circulares e financiamentos retroativos ilegais.
+### 1. Determinismo Verificável & Soberania Temporal
+* **Ordem Canônica**: Todo cálculo de digest, hash ou representação de estado deve ordenar canonicamente as estruturas (`Object.keys().sort()`), eliminando qualquer dependência implícita de motores JavaScript.
+* **Tempo Explícito**: Proibido `Date.now()` oculto no interior de componentes. O tempo de execução pertence ao motor e é passado explicitamente como `nowMs: bigint`. Relógios regressivos são rejeitados com política formal.
+* **Isolamento de Estado**: Proibidas variáveis globais ou estado estático oculto.
 
-### 3. Validator de Correspondência Tripla (Validação Pós-Commit Independente)
-O código que constrói a transição de estado não pode ser o único validador de sua correção. O harness exige auditoria de 4 vias:
-$$\text{Requirement} \longleftrightarrow \text{Projected State} \longleftrightarrow \text{Actual State} \longleftrightarrow \text{Observable Result}$$
-* **Pré-Commit:** Valida invariantes sobre o estado projetado ($S_{\text{proj}}$).
-* **Pós-Commit:** Valida que o estado real produzido em memória ($S_{\text{actual}}$) obedece à conservação de soma-zero, limites de capacidade e consistência. Se violado, executa rollback forçado.
-* **Resultado Observável:** O resultado público ($BatchResult$) e o digest canônico representam deterministicamente o estado real observável pós-mutação.
+### 2. Validação Pós-Commit Obrigatória
+A verificação opera obrigatoriamente sobre as 4 etapas de custódia:
+$$\text{Requisito} \longleftrightarrow \text{Estado Projetado } (S_{\text{proj}}) \longleftrightarrow \text{Estado Real Pós-Commit } (S_{\text{actual}}) \longleftrightarrow \text{Resultado Observável } (BatchResult)$$
+* Não basta provar que a projeção era válida; o validador reaudita o estado real após o commit para confirmar conservação estrita e ausência de efeitos colaterais. Se houver divergência: **rollback atômico total**.
 
-### 4. Adversarial Obrigatório na Composição (Red Team)
-Todo componente que passa individualmente é submetido a testes adversariais sistemáticos de composição:
-* **Cobertura Bijetiva de Slots:** Slots ausentes/nulos (`undefined`) recebem decisão explícita (`rejected_invalid`), garantindo $\text{decisions.length} \equiv \text{orders.length}$.
-* **Aliasing:** $A \to A$ (transferência para si mesmo sem corromper balanços nem travar o lote).
-* **Financiamento Circular:** $A \to B$ sem saldo, seguido por $B \to A$ (rejeição estrita da primeira operação).
-* **Ordem & Determinismo:** Ordenação canônica lexicográfica no digest eliminando dependência de motores JS.
-* **Skew Temporal:** Relógio regressando sem gerar capacidade artificial e mantendo a soberania de tempo do motor.
-* **Rollback Total:** Aborto limpo ($S_{\text{abort}} \equiv S_0$) com conversão estrita de ordens admitidas para `aborted`.
+### 3. Cobertura Total da Entrada (Mapeamento Bijetivo)
+* Todo elemento da sequência de entrada possui destino observável explícito: `committed`, `rejected_invalid`, `blocked_capacity`, `blocked_insolvent` ou `aborted`.
+* Nenhum slot nulo, indefinido ou malformado pode desaparecer silenciosamente ($\text{decisions.length} \equiv \text{orders.length}$).
 
-### 5. Governance Baseado em Evidência (Proof-First Promotion)
-O Gate de Promoção não avalia estilo nem aprova código com base em premissas estruturais. A aprovação exige a cadeia de custódia ininterrupta:
-$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator Triplo} \longrightarrow \text{Prova Adversarial (Red Team)}$$
-Se qualquer elo for violado: **`REJECT_PROMOTION`**.
+### 4. Prova Independente (Separação de Autoridades)
+* O algoritmo de aplicação de regras não é a autoridade que atesta a sua própria correção. Validadores independentes recomputam propriedades críticas de conservação, limites e invariantes.
+* O Gate de Promoção só libera transições acompanhadas de provas adversariais que cobrem aliasing ($A \to A$), ciclos intra-lote, saturação de capacidade, recuo de relógio e rollback.
 
 ---
 

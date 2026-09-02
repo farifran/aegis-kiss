@@ -1,27 +1,31 @@
 ### AEGIS COGNITION CONTRACT (AGENTS.md)
 
-> **"O foco central do Aegis é transformar o harness de um sistema que avalia código em um sistema que exige provas de correção das transições de estado sob composição, tempo e falha."**
+> **"O objetivo do Aegis é garantir que toda entrada seja explicada, toda transição seja determinística, todo commit seja verificado após ocorrer e toda afirmação de correção seja comprovada por uma autoridade independente."**
+
+---
 
 #### 1. CONTRATO → INVARIANTES → PROVAS (Requisitos Formais)
 Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/pós-condições estritas e propriedades invariantes que nunca podem ser violadas. Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
 
 #### 2. ESTADO PROJETADO ANTES DA MUTAÇÃO (Composição Segura)
-Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição deve operar obrigatoriamente como:
+Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição opera obrigatoriamente como:
 $$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Validar Invariantes} \longrightarrow \text{Promover Atomicamente } (S_{\text{commit}})$$
 
-#### 3. VALIDATOR DE CORRESPONDÊNCIA TRIPLA (Separação de Autoridade & Pós-Commit)
-O harness exige prova formal e independente em 4 etapas:
+#### 3. VALIDAÇÃO PÓS-COMMIT OBRIGATÓRIA & PROVA INDEPENDENTE
+O mesmo código que produz a mutação não pode ser a autoridade que atesta sua própria correção. O harness audita a correspondência de 4 vias:
 $$\text{Requirement} \longleftrightarrow \text{Projected State} \longleftrightarrow \text{Actual State} \longleftrightarrow \text{Observable Result}$$
-Validar invariantes no estado projetado **E** no estado real pós-commit antes de liberar a promoção.
+Invariantes devem ser verificados no estado projetado **E** no estado real pós-commit antes de autorizar a promoção.
 
-#### 4. ADVERSARIAL OBRIGATÓRIO NA COMPOSIÇÃO (Red Team)
-Testar sistematicamente: ordem de execução, duplicação de IDs, slots nulos/ausentes (100% de cobertura bijetiva), ciclos de financiamento, aliasing ($A \to A$), tempo regressivo, rollback total, falhas parciais e divergência entre resultado e estado observável.
+#### 4. COBERTURA TOTAL DA ENTRADA (Mapeamento Bijetivo)
+Todo elemento de entrada deve possuir um destino observável explícito: `committed`, `rejected_invalid`, `blocked_capacity`, `blocked_insolvent` ou `aborted`. Nenhum slot ou comando pode desaparecer silenciosamente ($\text{decisions.length} \equiv \text{orders.length}$).
 
-#### 5. GOVERNANCE BASEADO EM EVIDÊNCIA (Prova-First)
-O Gate de Promoção não aprova "código bom"; aprova apenas quando existe a cadeia de custódia ininterrupta:
-$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator Triplo} \longrightarrow \text{Prova Adversarial}$$
+#### 5. DETERMINISMO VERIFICÁVEL & SOBERANIA TEMPORAL
+Proibidas dependências implícitas de relógio de sistema, geradores de aleatoriedade, ordem não canônica de enumeração ou estado oculto. O cursor temporal e a ordenação são propriedades explícitas de primeira classe.
 
-#### 6. RUNTIME & PROTOCOL DISCIPLINE
+#### 6. ADVERSARIAL OBRIGATÓRIO NA COMPOSIÇÃO (Red Team)
+Testar sistematicamente: ordem de execução, duplicação de IDs, slots nulos/esparsos, ciclos de financiamento, aliasing ($A \to A$), tempo regressivo, rollback total e congruência entre resultado e digest canônico.
+
+#### 7. RUNTIME & PROTOCOL DISCIPLINE
 * **Autoridade Estrita**: Interpretar apenas a autoridade delegada pelo runtime.
 * **KISS Cirúrgico**: Implementações locais, determinísticas e livres de complexidade acidental.
 * **Emissão Direta**: Artefatos técnicos concisos sem preâmbulos conversacionais ou filler prose.
