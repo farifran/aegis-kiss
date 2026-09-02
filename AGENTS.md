@@ -1,16 +1,26 @@
 ### AEGIS COGNITION CONTRACT (AGENTS.md)
 
-1. RUNTIME AUTHORITY
-Interpret only the authority explicitly delegated by the runtime. Do not assume permissions, repository knowledge, intent, or state beyond the provided capabilities and evidence.
+> **"O foco central do Aegis é transformar o harness de um sistema que avalia código em um sistema que exige provas de correção das transições de estado sob composição, tempo e falha."**
 
-2. EVIDENCE DISCIPLINE (Think Before Coding)
-Reason strictly from runtime-exposed evidence. Validate assumptions explicitly; never invent facts, fill gaps with speculation, or guess missing context. Report missing evidence rather than hallucinating solutions.
+#### 1. CONTRATO → INVARIANTES → PROVAS (Requisitos Formais)
+Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/pós-condições estritas e propriedades invariantes que nunca podem ser violadas. Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
 
-3. KISS & SURGICAL MUTATION (Simplicity First)
-Prefer explicit, local, deterministic implementations. Avoid speculative abstractions, hidden behavior, unnecessary indirection, or premature generalization. Make the minimal, surgical change required by the demand.
+#### 2. ESTADO PROJETADO ANTES DA MUTAÇÃO (Composição Segura)
+Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição deve operar obrigatoriamente como:
+$$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Validar Invariantes} \longrightarrow \text{Promover Atomicamente } (S_{\text{commit}})$$
 
-4. DIRECT PROTOCOL EMISSION
-Emit framed, concise, technical artifacts without conversational preambles, fluff, or filler prose. Focus strictly on code, evidence, and structured output.
+#### 3. VALIDATORS INDEPENDENTES DA IMPLEMENTAÇÃO (Separação de Autoridade)
+O mesmo código que produz o resultado não pode ser a única autoridade que atesta sua correção. Validadores e oráculos devem auditar propriedades externas e globais de forma independente do algoritmo de execução.
 
-5. ERROR & TYPE DISCIPLINE
-Ensure strict type correctness, respect language invariants, handle edge cases explicitly, and avoid unrequested side effects or unnecessary public exports.
+#### 4. ADVERSARIAL OBRIGATÓRIO NA COMPOSIÇÃO (Red Team)
+Testar sistematicamente: ordem de execução, duplicação de IDs, ciclos de financiamento, aliasing ($A \to A$), tempo regressivo, rollback total, falhas parciais e divergência entre resultado e estado observável.
+
+#### 5. GOVERNANCE BASEADO EM EVIDÊNCIA (Prova-First)
+O Gate de Promoção não aprova "código bom"; aprova apenas quando existe a cadeia de custódia ininterrupta:
+$$\text{Requisito} \longrightarrow \text{Contrato IR} \longrightarrow \text{Implementação} \longrightarrow \text{Validator} \longrightarrow \text{Prova Adversarial}$$
+
+#### 6. RUNTIME & PROTOCOL DISCIPLINE
+* **Autoridade Estrita**: Interpretar apenas a autoridade delegada pelo runtime.
+* **KISS Cirúrgico**: Implementações locais, determinísticas e livres de complexidade acidental.
+* **Emissão Direta**: Artefatos técnicos concisos sem preâmbulos conversacionais ou filler prose.
+* **Disciplina de Tipos**: TypeScript estrito, zero `any`, `bigint` para grandezas numéricas e tempo explícito.
