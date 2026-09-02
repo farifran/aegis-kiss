@@ -1,6 +1,6 @@
 {
   "contractVersion": "2.1",
-  "goal": "Implementar o motor universal de lotes em src/clearingHouse.ts integrado ao src/tokenBucket.ts com execução sobre estado projetado sequencial, 2PC atômico com rollback total, digest de execução com identidade estrita e 9 provas do Red Team, com re-exportação nominal em src/index.ts.",
+  "goal": "Implementar o motor universal de lotes Aegis-grade em src/clearingHouse.ts integrado ao src/tokenBucket.ts com admissão vs commit explícito, tempo soberano do engine, validador de invariantes globais, digest canônico completo e 10 provas de propriedade, com re-exportação nominal em src/index.ts.",
   "targets": [
     "src/tokenBucket.ts",
     "src/clearingHouse.ts",
@@ -14,15 +14,15 @@
     },
     {
       "name": "OperationStatus",
-      "shape": "'accepted' | 'rejected_invalid' | 'blocked_capacity' | 'blocked_insolvent'"
+      "shape": "'committed' | 'rejected_invalid' | 'blocked_capacity' | 'blocked_insolvent' | 'aborted'"
     },
     {
       "name": "OperationDecision",
-      "shape": "{ readonly id: string; readonly status: OperationStatus; readonly reason?: string; }"
+      "shape": "{ readonly index: number; readonly id: string; readonly status: OperationStatus; readonly reason?: string; }"
     },
     {
       "name": "BatchResult",
-      "shape": "{ readonly acceptedCount: number; readonly rejectedCount: number; readonly blockedCount: number; readonly settledVolume: bigint; readonly totalFees: bigint; readonly rolledBack: boolean; readonly executionDigest: bigint; readonly decisions: readonly OperationDecision[]; }"
+      "shape": "{ readonly committedCount: number; readonly rejectedCount: number; readonly blockedCount: number; readonly abortedCount: number; readonly settledVolume: bigint; readonly totalFees: bigint; readonly rolledBack: boolean; readonly rollbackReason?: string; readonly executionDigest: bigint; readonly decisions: readonly OperationDecision[]; }"
     },
     {
       "name": "AccountState",
@@ -30,7 +30,7 @@
     },
     {
       "name": "EngineSnapshot",
-      "shape": "{ readonly balances: Record<string, bigint>; readonly bucketStates: Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }>; readonly treasuryBalance: bigint; readonly totalSettledVolume: bigint; readonly totalRetainedFees: bigint; }"
+      "shape": "{ readonly balances: Record<string, bigint>; readonly bucketStates: Record<string, { readonly tokens: bigint; readonly lastUpdateMs: bigint }>; readonly treasuryBalance: bigint; readonly totalSettledVolume: bigint; readonly totalRetainedFees: bigint; readonly lastProcessedMs: bigint; }"
     }
   ],
   "exports": [
@@ -72,7 +72,8 @@
         { "name": "_accounts", "type": "Record<string, any>", "readonly": true },
         { "name": "_treasuryBalance", "type": "bigint" },
         { "name": "_totalSettledVolume", "type": "bigint" },
-        { "name": "_totalRetainedFees", "type": "bigint" }
+        { "name": "_totalRetainedFees", "type": "bigint" },
+        { "name": "_lastProcessedMs", "type": "bigint" }
       ],
       "ctorParams": [],
       "ctorBody": [],
@@ -117,6 +118,7 @@
         { "name": "treasuryBalance", "returns": "bigint", "body": "return this._treasuryBalance;" },
         { "name": "totalSettledVolume", "returns": "bigint", "body": "return this._totalSettledVolume;" },
         { "name": "totalRetainedFees", "returns": "bigint", "body": "return this._totalRetainedFees;" },
+        { "name": "lastProcessedMs", "returns": "bigint", "body": "return this._lastProcessedMs;" },
         { "name": "accountCount", "returns": "number", "body": "return Object.keys(this._accounts).length;" }
       ],
       "body": []
@@ -134,8 +136,8 @@
       "kind": "failure_state",
       "required": true,
       "oracle": "state_diff",
-      "observableState": ["_accounts", "_treasuryBalance"],
-      "allowedFailureEffects": [],
+      "observableState": ["_accounts", "_treasuryBalance", "_lastProcessedMs"],
+      "allowedFailureEffects": ["_lastProcessedMs"],
       "prelude": [
         "const house = new ClearingHouse();",
         "house.registerAccount('user_a', 10n, 1000n, 10n);",
@@ -177,7 +179,7 @@
         "];",
         "const resComp = hComp.processBatch(orders, 10n);",
         "__availableCapacity = 100n;",
-        "__committedResources = BigInt(resComp.acceptedCount) * 60n;"
+        "__committedResources = BigInt(resComp.committedCount) * 60n;"
       ]
     },
     {
@@ -189,17 +191,18 @@
         "const hAtom = new ClearingHouse();",
         "hAtom.registerAccount('solv_a', 50n, 1000n, 10n);",
         "hAtom.registerAccount('insolv_b', 10n, 1000n, 10n);",
+        "hAtom.processBatch([{ id: 'init', senderId: 'solv_a', receiverId: 'insolv_b', amount: 10n, fee: 0n }], 1000n);",
         "__targetInstance = hAtom;",
         "__abortingBatchCall = () => hAtom.processBatch([",
-        "  { id: '1', senderId: 'solv_a', receiverId: 'insolv_b', amount: 30n, fee: 0n, capacityCost: -5n }",
-        "], 10n);"
+        "  { id: '1', senderId: 'solv_a', receiverId: 'insolv_b', amount: 10n, fee: 0n }",
+        "], 500n); // t=500n < 1000n -> aborta por recuo temporal"
       ]
     },
     {
       "id": "PO-CIRCULAR-001",
       "kind": "generic_invariant",
       "required": true,
-      "oracle": "res.acceptedCount === 0 && res.decisions[0].status === 'blocked_insolvent'",
+      "oracle": "res.committedCount === 0 && res.decisions[0].status === 'blocked_insolvent' && res.decisions[0].index === 0",
       "prelude": [
         "const hCirc = new ClearingHouse();",
         "hCirc.registerAccount('A', 0n, 1000n, 10n);",
@@ -215,7 +218,7 @@
       "id": "PO-ALIASING-001",
       "kind": "generic_invariant",
       "required": true,
-      "oracle": "res.acceptedCount === 1 && house.getAccount('Alice', 100n).balance === 485n && house.treasuryBalance === 15n",
+      "oracle": "res.committedCount === 1 && house.getAccount('Alice', 100n).balance === 485n && house.treasuryBalance === 15n",
       "prelude": [
         "const house = new ClearingHouse();",
         "house.registerAccount('Alice', 500n, 1000n, 10n);",

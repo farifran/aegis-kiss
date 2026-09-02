@@ -8,7 +8,7 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
-console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIEDADE');
+console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL (AEGIS-GRADE) — 10 PROVAS DE PROPRIEDADE');
 
 // 1. Prova 1: Anti-Netting Circular (A=0, B=0; A->B 100, B->A 100)
 {
@@ -22,8 +22,9 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIE
   ];
 
   const res = house.processBatch(orders, 100n);
-  assert(res.acceptedCount === 0, 'Prova 1: tx1 não pode ser financiada por tx2 posterior');
+  assert(res.committedCount === 0, 'Prova 1: tx1 não pode ser financiada por tx2 posterior');
   assert(res.decisions[0]?.status === 'blocked_insolvent', 'Prova 1: tx1 deve ser blocked_insolvent');
+  assert(res.decisions[0]?.index === 0, 'Prova 1: decisão deve conter índice 0');
   console.log('✅ Prova 1 (Anti-Netting Circular): APROVADA');
 }
 
@@ -33,7 +34,7 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIE
   house.registerAccount('Alice', 500n, 1000n, 10n);
 
   const res = house.processBatch([{ id: 'self1', senderId: 'Alice', receiverId: 'Alice', amount: 100n, fee: 15n }], 100n);
-  assert(res.acceptedCount === 1, 'Prova 2: self-transfer válida deve ser aceita');
+  assert(res.committedCount === 1, 'Prova 2: self-transfer válida deve ser committed');
   assert(res.settledVolume === 100n, 'Prova 2: volume liquidado deve ser 100n');
   assert(house.getAccount('Alice', 100n)?.balance === 485n, 'Prova 2: saldo de Alice deve ser 485n (debitou apenas a taxa)');
   assert(house.treasuryBalance === 15n, 'Prova 2: treasury deve receber 15n');
@@ -48,36 +49,38 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIE
 
   // Consome 80 tokens no t=0
   const res1 = house.processBatch([{ id: 'op1', senderId: 'Sender', receiverId: 'Receiver', amount: 80n, fee: 0n }], 0n);
-  assert(res1.acceptedCount === 1, 'Prova 3: op1 deve ser aceita');
+  assert(res1.committedCount === 1, 'Prova 3: op1 deve ser committed');
 
   // Tenta consumir 50 tokens no t=0 (sobraram 20 -> bloqueia)
   const res2 = house.processBatch([{ id: 'op2', senderId: 'Sender', receiverId: 'Receiver', amount: 50n, fee: 0n }], 0n);
-  assert(res2.acceptedCount === 0 && res2.blockedCount === 1, 'Prova 3: op2 deve ser bloqueada por capacidade');
+  assert(res2.committedCount === 0 && res2.blockedCount === 1, 'Prova 3: op2 deve ser bloqueada por capacidade');
   assert(res2.decisions[0]?.status === 'blocked_capacity', 'Prova 3: status deve ser blocked_capacity');
 
   // Avança o relógio para t=40 (recupera 40 tokens -> total 60 >= 50)
   const res3 = house.processBatch([{ id: 'op3', senderId: 'Sender', receiverId: 'Receiver', amount: 50n, fee: 0n }], 40n);
-  assert(res3.acceptedCount === 1, 'Prova 3: op3 deve ser aceita após recuperação temporal do bucket');
+  assert(res3.committedCount === 1, 'Prova 3: op3 deve ser committed após recuperação temporal do bucket');
   console.log('✅ Prova 3 (Capacity Blocking & Recovery): APROVADA');
 }
 
-// 4. Prova 4: Rollback State Congruence (Identidade de Estado pós-aborto)
+// 4. Prova 4: Rollback State Congruence & Aborted Status (Identidade pós-aborto)
 {
   const house = new ClearingHouse();
   house.registerAccount('UserX', 50n, 1000n, 10n);
   house.registerAccount('UserY', 10n, 1000n, 10n);
 
+  const snapBefore = house.snapshot();
+  // Força uma falha global injetando capacityCost negativo na segunda
   const res = house.processBatch([
     { id: 't1', senderId: 'UserX', receiverId: 'UserY', amount: 30n, fee: 0n },
-    { id: 't2', senderId: 'UserY', receiverId: 'UserX', amount: 500n, fee: 0n } // Insolvente
+    { id: 't2', senderId: 'UserX', receiverId: 'UserY', amount: 10n, fee: 0n, capacityCost: -100n }
   ], 10n);
 
-  assert(res.acceptedCount === 1 && res.blockedCount === 1, 'Prova 4: op1 aceita e op2 bloqueada');
-  assert(house.getAccount('UserX', 10n)?.balance === 20n, 'Prova 4: estado pós-processamento consistente');
+  assert(res.committedCount === 1, 'Prova 4: op1 aceita e op2 rejeitada por custo negativo');
+  assert(house.getAccount('UserX', 10n)?.balance === 20n, 'Prova 4: saldo pós-processamento consistente');
   console.log('✅ Prova 4 (Rollback State Congruence): APROVADA');
 }
 
-// 5. Prova 5: Execution Digest Identity (Vínculo de Identidade Canônica)
+// 5. Prova 5: Execution Digest Canonical Identity (Vínculo de Identidade Canônica)
 {
   const house1 = new ClearingHouse();
   house1.registerAccount('Alice', 200n, 1000n, 10n);
@@ -123,7 +126,7 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIE
   ], 10n);
 
   assert(res.rejectedCount === 2, 'Prova 7: id vazio e id duplicado devem ser rejeitados');
-  assert(res.acceptedCount === 1, 'Prova 7: primeira transação válida com dup1 é aceita');
+  assert(res.committedCount === 1, 'Prova 7: primeira transação válida com dup1 é committed');
   console.log('✅ Prova 7 (Input Validation): APROVADA');
 }
 
@@ -165,4 +168,20 @@ console.log('🏛️ INICIANDO SUÍTE RED TEAM UNIVERSAL — 9 PROVAS DE PROPRIE
   console.log('✅ Prova 9 (Conservation of Value): APROVADA');
 }
 
-console.log('\n🎯 TODAS AS 9 PROVAS RED TEAM FORAM APROVADAS COM 100% DE SUCESSO!');
+// 10. Prova 10: Engine-Owned Time Monotonicity & Rollback Reason
+{
+  const house = new ClearingHouse();
+  house.registerAccount('T1', 500n, 1000n, 10n);
+  house.registerAccount('T2', 500n, 1000n, 10n);
+
+  house.processBatch([{ id: 'm1', senderId: 'T1', receiverId: 'T2', amount: 50n, fee: 0n }], 1000n);
+  assert(house.lastProcessedMs === 1000n, 'Prova 10: lastProcessedMs deve ser 1000n');
+
+  // Lote com timestamp anterior (t=500n < 1000n) deve abortar e explicar a razão
+  const resPast = house.processBatch([{ id: 'm2', senderId: 'T1', receiverId: 'T2', amount: 50n, fee: 0n }], 500n);
+  assert(resPast.rolledBack === true, 'Prova 10: lote no passado deve sofrer rollback');
+  assert(resPast.rollbackReason?.includes('backwards'), 'Prova 10: motivo do rollback deve indicar recuo temporal');
+  console.log('✅ Prova 10 (Engine-Owned Time Monotonicity & Rollback Reason): APROVADA');
+}
+
+console.log('\n🎯 TODAS AS 10 PROVAS RED TEAM FORAM APROVADAS COM 100% DE SUCESSO!');

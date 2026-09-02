@@ -10,24 +10,28 @@ export interface TransferOrder {
 }
 
 export type OperationStatus =
-  | 'accepted'
+  | 'committed'
   | 'rejected_invalid'
   | 'blocked_capacity'
-  | 'blocked_insolvent';
+  | 'blocked_insolvent'
+  | 'aborted';
 
 export interface OperationDecision {
+  readonly index: number;
   readonly id: string;
   readonly status: OperationStatus;
   readonly reason?: string;
 }
 
 export interface BatchResult {
-  readonly acceptedCount: number;
+  readonly committedCount: number;
   readonly rejectedCount: number;
   readonly blockedCount: number;
+  readonly abortedCount: number;
   readonly settledVolume: bigint;
   readonly totalFees: bigint;
   readonly rolledBack: boolean;
+  readonly rollbackReason?: string;
   readonly executionDigest: bigint;
   readonly decisions: readonly OperationDecision[];
 }
@@ -51,24 +55,35 @@ export interface EngineSnapshot {
   readonly treasuryBalance: bigint;
   readonly totalSettledVolume: bigint;
   readonly totalRetainedFees: bigint;
+  readonly lastProcessedMs: bigint;
 }
 
 interface ProjectedState {
   readonly balances: Record<string, bigint>;
   readonly capacityUsed: Record<string, bigint>;
   readonly decisions: OperationDecision[];
-  acceptedCount: number;
+  committedCount: number;
   rejectedCount: number;
   blockedCount: number;
+  abortedCount: number;
   batchVolume: bigint;
   batchFees: bigint;
 }
 
+interface AbortContext {
+  readonly nowMs: bigint;
+  readonly snapBefore: EngineSnapshot;
+  readonly orders: readonly TransferOrder[];
+  readonly reason: string;
+}
+
 interface DigestContext {
   readonly nowMs: bigint;
+  readonly lastProcessedMs: bigint;
   readonly initTreasury: bigint;
   readonly finalTreasury: bigint;
   readonly rolledBack: boolean;
+  readonly rollbackReason?: string;
 }
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
@@ -94,12 +109,14 @@ export class ClearingHouse {
   private _treasuryBalance: bigint;
   private _totalSettledVolume: bigint;
   private _totalRetainedFees: bigint;
+  private _lastProcessedMs: bigint;
 
   constructor() {
     this._accounts = Object.create(null) as Record<string, InternalAccount>;
     this._treasuryBalance = 0n;
     this._totalSettledVolume = 0n;
     this._totalRetainedFees = 0n;
+    this._lastProcessedMs = 0n;
   }
 
   registerAccount(
@@ -154,7 +171,8 @@ export class ClearingHouse {
       bucketStates,
       treasuryBalance: this._treasuryBalance,
       totalSettledVolume: this._totalSettledVolume,
-      totalRetainedFees: this._totalRetainedFees
+      totalRetainedFees: this._totalRetainedFees,
+      lastProcessedMs: this._lastProcessedMs
     };
   }
 
@@ -176,6 +194,7 @@ export class ClearingHouse {
     this._treasuryBalance = snap.treasuryBalance;
     this._totalSettledVolume = snap.totalSettledVolume;
     this._totalRetainedFees = snap.totalRetainedFees;
+    this._lastProcessedMs = snap.lastProcessedMs;
   }
 
   private _validateSyntax(ord: TransferOrder, seen: Record<string, boolean>): string | null {
@@ -196,7 +215,7 @@ export class ClearingHouse {
     return null;
   }
 
-  private _projectSingleOrder(ord: TransferOrder, nowMs: bigint, proj: ProjectedState): void {
+  private _projectSingleOrder(ord: TransferOrder, index: number, nowMs: bigint, proj: ProjectedState): void {
     const sender = this._accounts[ord.senderId];
     if (!sender) return;
 
@@ -206,7 +225,7 @@ export class ClearingHouse {
 
     if (availCap < usedCap + neededCap) {
       proj.blockedCount++;
-      proj.decisions.push({ id: ord.id, status: 'blocked_capacity', reason: 'insufficient capacity' });
+      proj.decisions.push({ index, id: ord.id, status: 'blocked_capacity', reason: 'insufficient throughput capacity' });
       return;
     }
 
@@ -215,7 +234,7 @@ export class ClearingHouse {
 
     if (currentSenderBal < totalCost) {
       proj.blockedCount++;
-      proj.decisions.push({ id: ord.id, status: 'blocked_insolvent', reason: 'insufficient balance' });
+      proj.decisions.push({ index, id: ord.id, status: 'blocked_insolvent', reason: 'insufficient projected balance' });
       return;
     }
 
@@ -229,13 +248,13 @@ export class ClearingHouse {
       proj.balances[ord.receiverId] = currentRecvBal + ord.amount;
     }
 
-    proj.acceptedCount++;
+    proj.committedCount++;
     proj.batchVolume += ord.amount;
     proj.batchFees += ord.fee;
-    proj.decisions.push({ id: ord.id, status: 'accepted' });
+    proj.decisions.push({ index, id: ord.id, status: 'committed' });
   }
 
-  private _verifyConservation(snapBefore: EngineSnapshot, proj: ProjectedState): boolean {
+  private _validateGlobalInvariants(snapBefore: EngineSnapshot, proj: ProjectedState): string | null {
     let initialSum = snapBefore.treasuryBalance;
     for (const id in snapBefore.balances) {
       const b = snapBefore.balances[id];
@@ -245,11 +264,12 @@ export class ClearingHouse {
     let projectedSum = snapBefore.treasuryBalance + proj.batchFees;
     for (const id in proj.balances) {
       const bal = proj.balances[id];
-      if (bal === undefined || bal < 0n) return false;
+      if (bal === undefined || bal < 0n) return 'negative projected balance detected';
       projectedSum += bal;
     }
 
-    return initialSum === projectedSum;
+    if (initialSum !== projectedSum) return 'zero-sum balance conservation violated';
+    return null;
   }
 
   private _commitProjected(proj: ProjectedState, nowMs: bigint): void {
@@ -274,13 +294,38 @@ export class ClearingHouse {
     this._treasuryBalance += proj.batchFees;
     this._totalSettledVolume += proj.batchVolume;
     this._totalRetainedFees += proj.batchFees;
+    this._lastProcessedMs = nowMs;
+  }
+
+  private _executeProjection(orders: readonly TransferOrder[], nowMs: bigint, proj: ProjectedState): void {
+    const seenOrderIds: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
+
+    for (let i = 0; i < orders.length; i++) {
+      const ord = orders[i];
+      if (!ord) continue;
+      const synErr = this._validateSyntax(ord, seenOrderIds);
+      if (synErr !== null) {
+        proj.rejectedCount++;
+        proj.decisions.push({ index: i, id: ord?.id ?? '', status: 'rejected_invalid', reason: synErr });
+        continue;
+      }
+      const entErr = this._validateEntities(ord);
+      if (entErr !== null) {
+        proj.rejectedCount++;
+        proj.decisions.push({ index: i, id: ord.id, status: 'rejected_invalid', reason: entErr });
+        continue;
+      }
+      this._projectSingleOrder(ord, i, nowMs, proj);
+    }
   }
 
   processBatch(orders: readonly TransferOrder[], nowMs: bigint): BatchResult {
     if (nowMs < 0n) throw new RangeError('nowMs must be non-negative');
 
     const snapBefore = this.snapshot();
-    const seenOrderIds: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
+    if (nowMs < this._lastProcessedMs) {
+      return this._buildAbortResult({ nowMs, snapBefore, orders, reason: 'time moved backwards relative to last processed batch' }, []);
+    }
 
     const initBalances: Record<string, bigint> = Object.create(null) as Record<string, bigint>;
     for (const k in snapBefore.balances) {
@@ -292,42 +337,31 @@ export class ClearingHouse {
       balances: initBalances,
       capacityUsed: Object.create(null) as Record<string, bigint>,
       decisions: [],
-      acceptedCount: 0,
+      committedCount: 0,
       rejectedCount: 0,
       blockedCount: 0,
+      abortedCount: 0,
       batchVolume: 0n,
       batchFees: 0n
     };
 
-    for (const ord of orders) {
-      const synErr = this._validateSyntax(ord, seenOrderIds);
-      if (synErr !== null) {
-        proj.rejectedCount++;
-        proj.decisions.push({ id: ord?.id ?? '', status: 'rejected_invalid', reason: synErr });
-        continue;
-      }
-      const entErr = this._validateEntities(ord);
-      if (entErr !== null) {
-        proj.rejectedCount++;
-        proj.decisions.push({ id: ord.id, status: 'rejected_invalid', reason: entErr });
-        continue;
-      }
-      this._projectSingleOrder(ord, nowMs, proj);
-    }
+    this._executeProjection(orders, nowMs, proj);
 
-    if (!this._verifyConservation(snapBefore, proj)) {
-      return this._buildAbortResult(nowMs, snapBefore, proj.decisions, orders);
+    const invErr = this._validateGlobalInvariants(snapBefore, proj);
+    if (invErr !== null) {
+      return this._buildAbortResult({ nowMs, snapBefore, orders, reason: invErr }, proj.decisions);
     }
 
     try {
       this._commitProjected(proj, nowMs);
     } catch {
       this._restore(snapBefore);
-      return this._buildAbortResult(nowMs, snapBefore, proj.decisions, orders);
+      return this._buildAbortResult({ nowMs, snapBefore, orders, reason: 'commit transaction failure' }, proj.decisions);
     }
 
     const digestCtx: DigestContext = {
       nowMs,
+      lastProcessedMs: this._lastProcessedMs,
       initTreasury: snapBefore.treasuryBalance,
       finalTreasury: this._treasuryBalance,
       rolledBack: false
@@ -335,9 +369,10 @@ export class ClearingHouse {
     const digest = this._computeExecutionDigest(digestCtx, proj.decisions, orders);
 
     return {
-      acceptedCount: proj.acceptedCount,
+      committedCount: proj.committedCount,
       rejectedCount: proj.rejectedCount,
       blockedCount: proj.blockedCount,
+      abortedCount: 0,
       settledVolume: proj.batchVolume,
       totalFees: proj.batchFees,
       rolledBack: false,
@@ -347,36 +382,48 @@ export class ClearingHouse {
   }
 
   private _buildAbortResult(
-    nowMs: bigint,
-    snapBefore: EngineSnapshot,
-    decisions: OperationDecision[],
-    orders: readonly TransferOrder[]
+    ctx: AbortContext,
+    decisions: OperationDecision[]
   ): BatchResult {
-    this._restore(snapBefore);
-    const digestCtx: DigestContext = {
-      nowMs,
-      initTreasury: snapBefore.treasuryBalance,
-      finalTreasury: snapBefore.treasuryBalance,
-      rolledBack: true
-    };
-    const digest = this._computeExecutionDigest(digestCtx, decisions, orders);
+    this._restore(ctx.snapBefore);
+    const updatedDecisions: OperationDecision[] = [];
 
     let rejectedCount = 0;
     let blockedCount = 0;
+    let abortedCount = 0;
+
     for (const d of decisions) {
-      if (d.status === 'rejected_invalid') rejectedCount++;
-      if (d.status === 'blocked_capacity' || d.status === 'blocked_insolvent') blockedCount++;
+      if (d.status === 'committed') {
+        abortedCount++;
+        updatedDecisions.push({ index: d.index, id: d.id, status: 'aborted', reason: `aborted due to batch rollback: ${ctx.reason}` });
+      } else {
+        if (d.status === 'rejected_invalid') rejectedCount++;
+        if (d.status === 'blocked_capacity' || d.status === 'blocked_insolvent') blockedCount++;
+        updatedDecisions.push(d);
+      }
     }
 
+    const digestCtx: DigestContext = {
+      nowMs: ctx.nowMs,
+      lastProcessedMs: ctx.snapBefore.lastProcessedMs,
+      initTreasury: ctx.snapBefore.treasuryBalance,
+      finalTreasury: ctx.snapBefore.treasuryBalance,
+      rolledBack: true,
+      rollbackReason: ctx.reason
+    };
+    const digest = this._computeExecutionDigest(digestCtx, updatedDecisions, ctx.orders);
+
     return {
-      acceptedCount: 0,
+      committedCount: 0,
       rejectedCount,
       blockedCount,
+      abortedCount,
       settledVolume: 0n,
       totalFees: 0n,
       rolledBack: true,
+      rollbackReason: ctx.reason,
       executionDigest: digest,
-      decisions
+      decisions: updatedDecisions
     };
   }
 
@@ -387,22 +434,41 @@ export class ClearingHouse {
   ): bigint {
     let h = FNV_OFFSET;
     h = fnv1a(h, ctx.nowMs);
+    h = fnv1a(h, ctx.lastProcessedMs);
     h = fnv1a(h, ctx.initTreasury);
     h = fnv1a(h, ctx.finalTreasury);
     h = fnv1a(h, ctx.rolledBack ? 1n : 0n);
+    if (ctx.rollbackReason) h = stringToHash(h, ctx.rollbackReason);
 
-    for (let i = 0; i < decisions.length; i++) {
-      const d = decisions[i];
+    for (let i = 0; i < orders.length; i++) {
       const ord = orders[i];
-      if (d) {
-        h = stringToHash(h, d.id);
-        h = stringToHash(h, d.status);
-      }
       if (ord) {
+        h = fnv1a(h, BigInt(i));
+        h = stringToHash(h, ord.id);
         h = stringToHash(h, ord.senderId);
         h = stringToHash(h, ord.receiverId);
         h = fnv1a(h, ord.amount);
         h = fnv1a(h, ord.fee);
+        if (ord.capacityCost !== undefined) h = fnv1a(h, ord.capacityCost);
+      }
+    }
+
+    for (let i = 0; i < decisions.length; i++) {
+      const d = decisions[i];
+      if (d) {
+        h = fnv1a(h, BigInt(d.index));
+        h = stringToHash(h, d.id);
+        h = stringToHash(h, d.status);
+        if (d.reason) h = stringToHash(h, d.reason);
+      }
+    }
+
+    for (const accId in this._accounts) {
+      const acc = this._accounts[accId];
+      if (acc) {
+        h = stringToHash(h, acc.accountId);
+        h = fnv1a(h, acc.balance);
+        h = fnv1a(h, acc.bucket.tokens);
       }
     }
 
@@ -412,5 +478,6 @@ export class ClearingHouse {
   get treasuryBalance(): bigint { return this._treasuryBalance; }
   get totalSettledVolume(): bigint { return this._totalSettledVolume; }
   get totalRetainedFees(): bigint { return this._totalRetainedFees; }
+  get lastProcessedMs(): bigint { return this._lastProcessedMs; }
   get accountCount(): number { return Object.keys(this._accounts).length; }
 }
