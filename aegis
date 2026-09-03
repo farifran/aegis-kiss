@@ -41,6 +41,8 @@ source "${ROOT}/scripts/lib/demand.sh"
 source "${ROOT}/scripts/lib/briefing.sh"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/final_receipt.sh"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/lib/proof_governance.sh"
 
 AEGIS_LOG_TAG="CLI"
 
@@ -74,6 +76,8 @@ Comandos:
   ./aegis split <file>  Divide mecanicamente uma Issue em Markdown em micro-unidades
                         atômicas de 1 target por vez (100% offline, 0 tokens).
   ./aegis context       Onde o alvo está: branch, worktree e contratos provados (offline).
+  ./aegis proofs [--profile fast|targeted|release|forensic] [--run]
+                        Valida a governança e imprime ou executa o plano verificável.
 
 Opções:
   --issue N             Volta a correr uma issue existente (keep-progress).
@@ -837,8 +841,21 @@ commit_unit_checkpoint() {
     return 1
   fi
 
+  if [[ -f "${ROOT}/.harness/proof_registry.json" ]] \
+    && ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json"; then
+    aegis_warn "proof governance bloqueou o checkpoint ${task_label}"
+    while IFS= read -r p; do
+      [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
+    done <<< "${paths}"
+    rm -f "${msg_file}" 2>/dev/null || true
+    printf ''
+    return 1
+  fi
+
   if ! git commit -F "${msg_file}" >/dev/null 2>&1; then
-    git reset --quiet HEAD 2>/dev/null || true
+    while IFS= read -r p; do
+      [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
+    done <<< "${paths}"
     rm -f "${msg_file}" 2>/dev/null || true
     printf ''
     return 1
@@ -1964,8 +1981,10 @@ EOF
       squash_msg="${COMMIT_MSG_FILE}.batch-squash"
       aegis_record_render_message "${issue}" "${squash_summary}" "${squash_accept}" \
         "1/${unit_total}" > "${squash_msg}"
-      # Soft-reset unit checkpoints; keep tree; one new commit.
-      if git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
+      if ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json" >/dev/null 2>&1; then
+        aegis_warn "auto-squash bloqueado: proof governance — commits por unit mantêm-se"
+      # Soft-reset unit checkpoints only after governance accepts the promotion.
+      elif git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
         && ! git diff --cached --quiet 2>/dev/null \
         && git commit -F "${squash_msg}" >/dev/null 2>&1; then
         last_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
@@ -2063,6 +2082,19 @@ EOF
   while IFS= read -r p; do
     [[ -n "${p}" ]] && git add -- "${p}" || true
   done <<< "${paths}"
+
+  # Governance is an admission gate, not a post-hoc report. Validate before
+  # either the interactive gate or the no-TTY handover can authorize this
+  # staged promotion.
+  if [[ -f "${ROOT}/.harness/proof_registry.json" ]] \
+    && ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json"; then
+    aegis_warn "proof governance bloqueou o commit da issue ${issue}"
+    while IFS= read -r p; do
+      [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
+    done <<< "${paths}"
+    emit_result_json "UNPROVEN" "${issue}" "" "proof_governance"
+    return 1
+  fi
 
   printf '\n[GATE] issue#%s\n' "${issue}"
   git diff --cached --stat -- "${target}" || true
@@ -2539,6 +2571,54 @@ EOF
   aegis_log "Workspace limpo com sucesso! (Zero resíduos transientes)"
 }
 
+cmd_proofs() {
+  local profile="fast"
+  local changed=""
+  local run=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --profile)
+        profile="${2:-}"
+        shift 2
+        ;;
+      --changed)
+        changed="${2:-}"
+        shift 2
+        ;;
+      --run)
+        run=1
+        shift
+        ;;
+      -h|--help)
+        printf 'Uso: ./aegis proofs [--profile fast|targeted|release|forensic] [--changed "arquivo\\n..."]\n'
+        return 0
+        ;;
+      *)
+        aegis_fatal "unknown_proofs_flag:$1"
+        ;;
+    esac
+  done
+
+  case "${profile}" in
+    fast|targeted|release|forensic) ;;
+    *) aegis_fatal "unknown_proof_profile:${profile}" ;;
+  esac
+
+  aegis_proof_governance_validate \
+    "${ROOT}/.harness/proof_registry.json" \
+    "${ROOT}/.harness/active_contract_ir.json"
+
+  if [[ -z "${changed}" ]]; then
+    changed="$(git status --porcelain --untracked-files=all | cut -c4- | grep -v '^$' || true)"
+  fi
+  if [[ "${run}" -eq 1 ]]; then
+    bash "${ROOT}/scripts/proof_runner.sh" --profile "${profile}" --changed "${changed}"
+    return $?
+  fi
+  aegis_proof_profile_plan "${profile}" "${ROOT}/.harness/proof_registry.json" "${changed}"
+}
+
 main() {
   local verb="${1:-}"
   case "${verb}" in
@@ -2556,6 +2636,7 @@ main() {
       cmd_cleanup "$@"
       ;;
     context) shift; cmd_context "$@" ;;
+    proofs|proof-governance) shift; cmd_proofs "$@" ;;
     split)   shift; cmd_split "$@" ;;
     setup)   shift; cmd_setup "$@" ;;
     go|run)  shift; cmd_run "$@" ;;

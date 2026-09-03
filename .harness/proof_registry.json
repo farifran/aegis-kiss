@@ -1,0 +1,80 @@
+{
+  "schema": "aegis.proof_registry.v1",
+  "policy": {
+    "mode": "enforced",
+    "maxActiveProofsPerProfile": {
+      "fast": 3,
+      "targeted": 5,
+      "release": 8,
+      "forensic": 12
+    }
+  },
+  "profiles": [
+    { "id": "fast", "proofIds": ["PO-TYPE-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001"] },
+    { "id": "targeted", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] },
+    { "id": "release", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] },
+    { "id": "forensic", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] }
+  ],
+  "proofs": [
+    {
+      "id": "PO-TYPE-001",
+      "risk": "type drift and invalid public shapes",
+      "coverageKey": "typescript.strict.type_safety",
+      "authority": "compiler",
+      "cost": "low",
+      "cadence": "always",
+      "status": "active",
+      "targets": ["src"],
+      "executionKey": "typecheck",
+      "command": "npm run aegis:typecheck"
+    },
+    {
+      "id": "PO-FAIL-001",
+      "risk": "partial state after rejected input",
+      "coverageKey": "engine.rejected_input.state_diff",
+      "authority": "black_box_state_diff",
+      "cost": "medium",
+      "cadence": "targeted",
+      "status": "active",
+      "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
+      "executionKey": "engine-suite",
+      "command": "npm test"
+    },
+    {
+      "id": "PO-REORG-REVOKE-001",
+      "risk": "false confirmation after chain reorganization",
+      "coverageKey": "engine.reorg.revocation",
+      "authority": "black_box_reorg_oracle",
+      "cost": "medium",
+      "cadence": "always",
+      "status": "active",
+      "targets": ["src/blockTree.ts", "src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
+      "executionKey": "engine-suite",
+      "command": "npm test"
+    },
+    {
+      "id": "PO-IDEMPOTENCY-001",
+      "risk": "duplicate notifications during replay",
+      "coverageKey": "engine.alert.idempotency",
+      "authority": "black_box_replay_oracle",
+      "cost": "medium",
+      "cadence": "always",
+      "status": "active",
+      "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
+      "executionKey": "engine-suite",
+      "command": "npm test"
+    },
+    {
+      "id": "PO-RECOVERY-001",
+      "risk": "state divergence after snapshot restore",
+      "coverageKey": "engine.snapshot.restore_congruence",
+      "authority": "independent_snapshot_oracle",
+      "cost": "medium",
+      "cadence": "release",
+      "status": "active",
+      "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
+      "executionKey": "engine-suite",
+      "command": "npm test"
+    }
+  ]
+}
