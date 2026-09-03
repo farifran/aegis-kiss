@@ -228,6 +228,36 @@ aegis_briefing_system_prompt() {
   printf 'You convert a software demand into JSON. Output ONLY a valid JSON object matching the briefing schema.\n'
 }
 
+# Small, deterministic classifier for questions that are plainly about the
+# harness rather than the user's software.  This is intentionally narrow: it
+# catches process language such as "organize tests in the repository" without
+# rejecting legitimate domain questions about persistence, performance, or
+# failure behavior.
+aegis_briefing_question_scope_reason() {
+  local json="${1-}"
+  printf '%s' "${json}" | jq -r '
+    [
+      .questions[]? as $q
+      | if (($q | type) != "object") then "question_not_object"
+        elif (($q.scope // "") != "DEMAND") then "question_scope_must_be_DEMAND"
+        elif (($q.question | type) != "string") then "question_text_required"
+        else
+          ($q.question | ascii_downcase) as $text
+          | if (
+              ($text | test("(^|[^[:alnum:]_])(aegis|harness|receipt|receipts|working tree|evidence orchestration|token budget|runtime directory|pipeline metrics|provider|supervisor model|mutation model)([^[:alnum:]_]|$)"))
+              or (($text | test("(^|[^[:alnum:]_])(teste|testes|test|tests|suite|suíte)([^[:alnum:]_]|$)"))
+                  and ($text | test("organiza|consolida|reposit|repo|commit|versiona")))
+              or (($text | test("benchmark|benchmarks"))
+                  and ($text | test("reposit|repo|commit|runtime|harness|evidence|Aegis|artefato")))
+            )
+            then "question_out_of_demand:\($q.question)"
+            else empty
+            end
+        end
+    ] | first // ""
+  ' 2>/dev/null || printf 'question_scope_check_failed\n'
+}
+
 # Field-level gate. Prints the reason to stderr on rejection.
 aegis_briefing_validate_json() {
   local json="${1-}"
@@ -253,6 +283,14 @@ aegis_briefing_validate_json() {
           (if (.targets | type) != "array" or (.targets | length) == 0 then "targets_required" else empty end),
           (if (.publicContract | type) != "object" then "publicContract_required" else empty end),
           (if (.operations | type) != "array" or (.operations | length) == 0 then "operations_required" else empty end),
+          (if ((.questions // []) | length) > 3 then "too_many_questions" else empty end),
+          (if ((.questions // []) | any(
+                (type != "object")
+                or ((.question // "") | type != "string" or length == 0)
+                or (.scope != "DEMAND")
+                or (((.options // []) | if type == "array" then . else [] end) | length < 2)
+                or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+              )) then "bad_questions_shape" else empty end),
           (if (.proofObligations | type) != "array" then "proofObligations_required" else empty end),
           (if ([.proofObligations[]? | select(.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT")] | length) == 0 then "contract_coverage_required" else empty end),
           (if ([.proofObligations[]? | select((.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT") and .notApplicable != true)] | length) == 0 then "contract_coverage_cannot_be_not_applicable" else empty end),
@@ -273,7 +311,7 @@ aegis_briefing_validate_json() {
           (if ((.questions // []) | any(
                 (type != "object")
                 or ((.question // "") | type != "string" or length == 0)
-                or (.scope? != null and .scope != "DEMAND")
+                or (.scope != "DEMAND")
                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
                 or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
               )) then "bad_questions_shape" else empty end),
@@ -289,6 +327,11 @@ aegis_briefing_validate_json() {
     )"
     if [[ -n "${uaam_reason}" ]]; then
       printf '%s\n' "${uaam_reason}" >&2
+      return 1
+    fi
+    reason="$(aegis_briefing_question_scope_reason "${json}")"
+    if [[ -n "${reason}" ]]; then
+      printf '%s\n' "${reason}" >&2
       return 1
     fi
     return 0
@@ -384,11 +427,12 @@ aegis_briefing_validate_json() {
            and ((.questions // []) | any(
                  (type != "object")
                  or ((.question // "") | type != "string" or length == 0)
-                 or (.scope? != null and .scope != "DEMAND")
+                 or (.scope != "DEMAND")
                  or (((.options // []) | if type == "array" then . else [] end) | length < 2)
                  or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
                ))
            then "bad_questions_shape" else empty end),
+        (if ((.questions // []) | length) > 3 then "too_many_questions" else empty end),
         (if ((.contractReconciliation.pendingQuestions // []) | length) > 0
            and ((.contractReconciliation.pendingQuestions // []) | any(
                  (type != "object")
@@ -458,6 +502,11 @@ aegis_briefing_validate_json() {
     printf '%s\n' "${reason}" >&2
     return 1
   fi
+  reason="$(aegis_briefing_question_scope_reason "${json}")"
+  if [[ -n "${reason}" ]]; then
+    printf '%s\n' "${reason}" >&2
+    return 1
+  fi
   return 0
 }
 
@@ -483,6 +532,10 @@ aegis_briefing_quality_check() {
     q_len="$(printf '%s' "${json}" | jq -r '(.questions // []) | length' 2>/dev/null || printf '0')"
     if [[ "${q_len}" == "0" ]]; then
       printf 'missing_questions:supervisor_must_surface_tradeoffs\n' >&2
+      return 1
+    fi
+    if [[ "${q_len}" -gt 3 ]]; then
+      printf 'too_many_questions\n' >&2
       return 1
     fi
     if [[ "${q_len}" != "0" ]] && ! printf '%s' "${json}" | jq -e \
@@ -1252,13 +1305,14 @@ The questions array is exclusively for decisions about the user's software deman
     if [[ -n "${fail_reason}" && "${fail_reason}" == invalid_briefing:* ]]; then
       local clean_feedback
       clean_feedback="$(printf '%s' "${fail_reason}" | sed -E 's|/tmp/[^/]+/||g')"
-      if [[ "${clean_feedback}" == *"missing_questions"* ]]; then
+      if [[ "${clean_feedback}" == *"missing_questions"* \
+         || "${clean_feedback}" == *"too_many_questions"* \
+         || "${clean_feedback}" == *"question_scope"* \
+         || "${clean_feedback}" == *"question_out_of_demand"* ]]; then
         current_user_prompt="${user_prompt}
 
-[QUALITY GATE FAILURE: MISSING ARCHITECTURAL QUESTIONS]
-Your previous response contained \"questions\": []. This is REJECTED.
-Per Axiom I (Intent & Questions Gate), you MUST always surface 1–3 questions in \"questions\" that explore the user's real product objective, use case, performance contract, failure-mode policy, and concurrency model — unless the demand already explicitly resolves ALL of these dimensions.
-Generate \"questions\" now. Do not assume or self-resolve any architectural dimension."
+[QUALITY GATE FAILURE: QUESTION SCOPE OR COUNT]
+Your previous questions were invalid. Return at most 3 questions, each with scope=DEMAND, and keep them strictly about the user's product/domain behavior and architecture. Remove questions about Aegis, harness operation, test/repository organization, commits, runtime, providers, tokens, receipts, benchmarks as process, or evidence orchestration."
       else
         current_user_prompt="${user_prompt}
 

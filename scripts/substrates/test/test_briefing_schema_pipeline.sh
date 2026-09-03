@@ -140,6 +140,20 @@ if aegis_briefing_validate_json "${bad_question_scope_schema}" 2>/dev/null; then
   exit 1
 fi
 
+internal_question_schema="$(printf '%s' "${schema_with_questions}" \
+  | jq -c '.questions[0].question = "Como os testes devem ser organizados e consolidados no repositório?"')"
+if aegis_briefing_validate_json "${internal_question_schema}" 2>/dev/null; then
+  echo "FAIL: validate_json accepted a repository test-governance question" >&2
+  exit 1
+fi
+
+too_many_questions_schema="$(printf '%s' "${schema_with_questions}" \
+  | jq -c '.questions += [.questions[0], .questions[0], .questions[0]]')"
+if aegis_briefing_validate_json "${too_many_questions_schema}" 2>/dev/null; then
+  echo "FAIL: validate_json accepted more than three demand questions" >&2
+  exit 1
+fi
+
 reconciliation_schema="$(printf '%s' "${schema_with_questions}" | jq -c \
   '.questions = [] | .contractReconciliation = {
     status: "divergent",

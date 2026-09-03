@@ -116,10 +116,10 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 
 ### Question scope
 
-The `questions` array belongs exclusively to the software demand. Every question
-there must clarify product or domain behavior, architecture, inputs, failure
-policy, performance, concurrency, persistence, or another user-visible design
-decision required by the demand.
+The `questions` array belongs exclusively to the software demand. Generate at
+most 1–3 questions. Every question there must clarify product or domain
+behavior, architecture, inputs, failure policy, performance, concurrency,
+persistence, or another user-visible design decision required by the demand.
 
 Do not put Aegis-process questions in `questions`: model/provider selection,
 token budgets, runtime directories, receipts, commits, harness gates,
