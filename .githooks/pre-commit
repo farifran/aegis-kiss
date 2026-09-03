@@ -2,4 +2,8 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-exec bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
+bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
+
+if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${ROOT_DIR}"; then
+  exec bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${ROOT_DIR}"
+fi

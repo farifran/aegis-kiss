@@ -546,6 +546,11 @@ promote_validated_candidate() {
     fi
     aegis_fatal "validated_candidate_promotion_failed"
   fi
+  if ! bash scripts/formal_promotion_authorization.sh create \
+    "${AEGIS_RUNTIME_ROOT}" "${validation_artifact_file}"; then
+    rm -f "${validation_artifact_file}" "${promotion_log}"
+    aegis_fatal "formal_promotion_authorization_failed"
+  fi
   rm -f "${validation_artifact_file}" "${promotion_log}"
 }
 
