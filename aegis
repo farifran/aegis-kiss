@@ -39,6 +39,8 @@ source "${ROOT}/scripts/lib/record.sh"
 source "${ROOT}/scripts/lib/demand.sh"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/briefing.sh"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/lib/final_receipt.sh"
 
 AEGIS_LOG_TAG="CLI"
 
@@ -889,7 +891,8 @@ emit_result_json() {
     --arg issue "${2}" \
     --arg commit "${3}" \
     --arg reason "${4}" \
-    '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason}'
+    --arg receipt "${5-}" \
+    '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason,receipt:(if $receipt == "" then null else $receipt end)}'
 }
 
 # Etapa 1/3 — pausa de intake agêntico. Entrega a evidência real (discovery &
@@ -1754,6 +1757,7 @@ cmd_run() {
     local unit_total unit_idx unit_file u_status unit_sha task_n
     local issue_body_live="" ran_any=0 batch_start_commit=""
     local brief_corrected=0
+    local squash_accept squash_summary squash_msg=""
     local -a batch_accepts=()
     unit_total="$(count_micro_units "${micros_dir}")"
     unit_idx=0
@@ -1949,7 +1953,6 @@ EOF
     # num único commit de feature limpo e consolidado, eliminando a poluição do git log.
     if [[ -n "${batch_start_commit}" ]] \
       && [[ "$(git rev-parse HEAD 2>/dev/null || true)" != "${batch_start_commit}" ]]; then
-      local squash_accept squash_summary squash_msg
       squash_accept="$(
         printf '%s\n' "${batch_accepts[@]+"${batch_accepts[@]}"}" \
           | awk 'NF && !seen[$0]++' \
@@ -1969,9 +1972,16 @@ EOF
         aegis_log "auto-squash: ${unit_total} commits atômicos fundidos com sucesso em ${last_commit}"
       else
         aegis_warn "auto-squash falhou — commits por unit mantêm-se"
-      fi
-      rm -f "${squash_msg}" 2>/dev/null || true
     fi
+    rm -f "${squash_msg}" 2>/dev/null || true
+
+  fi
+
+  aegis_write_final_receipt "${last_commit}" "${issue}" "${target}" \
+    "${ROOT}/.harness/active_contract_ir.json" \
+    "${RUNTIME_DIR}/epistemic_handover.json" \
+    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl" \
+    >/dev/null 2>&1 || aegis_warn "final_receipt_unavailable — execução não foi marcada como verificável"
 
     # Ephemeral -F inputs (unit-* / batch-squash); never leave as repo litter.
     rm -f "${COMMIT_MSG_FILE}".unit-* "${COMMIT_MSG_FILE}.batch-squash" 2>/dev/null || true
@@ -1982,7 +1992,7 @@ EOF
         "${unit_total}" "${unit_total}" "${last_commit}"
     )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
 
-    emit_result_json "SUCCESS" "${issue}" "${last_commit}" ""
+    emit_result_json "SUCCESS" "${issue}" "${last_commit}" "" "${RUNTIME_DIR}/final_receipt.json"
     return 0
   fi
 
@@ -2092,6 +2102,12 @@ EOF
   committed="$(git rev-parse --short HEAD)"
   aegis_log "commit ${committed}"
 
+  aegis_write_final_receipt "${committed}" "${issue}" "${target}" \
+    "${ROOT}/.harness/active_contract_ir.json" \
+    "${RUNTIME_DIR}/epistemic_handover.json" \
+    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl" \
+    >/dev/null 2>&1 || aegis_warn "final_receipt_unavailable — execução não foi marcada como verificável"
+
   gh_run issue close "${issue}" --comment "$(
     printf '### AEGIS OUTCOME\n- status: SUCCESS\n- commit: `%s`\n- paths: %s\n' \
       "${committed}" "$(printf '%s' "${paths}" | tr '\n' ' ')"
@@ -2100,7 +2116,7 @@ EOF
   # Clean transient micro plan files upon success
   clear_micro_plan_cache
 
-  emit_result_json "SUCCESS" "${issue}" "${committed}" ""
+  emit_result_json "SUCCESS" "${issue}" "${committed}" "" "${RUNTIME_DIR}/final_receipt.json"
 }
 
 cmd_split() {
