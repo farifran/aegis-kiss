@@ -52,6 +52,22 @@ aegis_receipt_scope_digest() {
     | aegis_receipt_sha256
 }
 
+aegis_final_receipt_assert_verified() {
+  local receipt_file="${1-}"
+  [[ -s "${receipt_file}" ]] || return 1
+  jq -e '
+    .schema == "aegis.final_receipt.v1"
+    and .verification_status == "VERIFIED"
+    and .verified == true
+    and .contract.status == "equivalent"
+    and .post_commit.contract_matches_commit == true
+    and .post_commit.required_targets_present == true
+    and .post_commit.scope_matches_candidate == true
+    and .post_commit.candidate_patch_matches_commit == true
+    and .post_commit.clean == true
+  ' "${receipt_file}" >/dev/null 2>&1
+}
+
 # Args: commit issue target contract_file handover_file outcome_file metrics_file
 aegis_write_final_receipt() {
   local commit="${1-}"
@@ -66,13 +82,13 @@ aegis_write_final_receipt() {
   local receipt_file="${runtime_dir}/final_receipt.json"
   local receipt_archive_dir="${runtime_dir}/final_receipts"
   local receipt_archive_file
-  local candidate_json contract_json recon_json outcome_json
+  local candidate_json contract_json committed_contract_json recon_json outcome_json
   local files_json candidate_diff candidate_digest actual_patch actual_patch_digest
-  local contract_digest tree_digest state_digest commit_files_json
+  local contract_digest committed_contract_digest tree_digest state_digest commit_files_json
   local contract_equivalent validation_verdict findings_count blocking_findings
   local outcome_status pipeline_status uaam_status invariant_count proof_count
   local invariant_status scope_matches_commit candidate_matches_commit post_commit_clean
-  local all_verified tmp_file resolved_commit
+  local all_verified contract_matches_commit required_targets_present committed_contract_present tmp_file resolved_commit
   local -a files=()
   local file
 
@@ -90,6 +106,34 @@ aegis_write_final_receipt() {
     fi
   )" || return 1
   contract_equivalent="$(printf '%s' "${recon_json}" | jq -r 'if .equivalent == true then "true" else "false" end')"
+
+  committed_contract_json="$(git -C "${repository_root}" show "${commit}:.harness/active_contract_ir.json" 2>/dev/null || true)"
+  committed_contract_present="false"
+  committed_contract_digest=""
+  contract_matches_commit="false"
+  required_targets_present="false"
+  if [[ -n "${committed_contract_json}" ]] \
+    && jq -e '.' >/dev/null 2>&1 <<<"${committed_contract_json}"; then
+    committed_contract_present="true"
+    committed_contract_digest="$(
+      if declare -F aegis_briefing_contract_digest >/dev/null 2>&1; then
+        aegis_briefing_contract_digest "${committed_contract_json}"
+      else
+        printf '%s' "${committed_contract_json}" | jq -S -c . | aegis_receipt_sha256
+      fi
+    )" || return 1
+    contract_matches_commit="$(
+      [[ "${contract_digest}" == "${committed_contract_digest}" ]] && printf true || printf false
+    )"
+    required_targets_present=true
+    while IFS= read -r file; do
+      [[ -n "${file}" ]] || continue
+      if ! git -C "${repository_root}" cat-file -e "${commit}:${file}" 2>/dev/null; then
+        required_targets_present=false
+        break
+      fi
+    done < <(printf '%s' "${contract_json}" | jq -r '.targets[]? // empty')
+  fi
 
   candidate_json="$(jq -c '(.artifact_snapshot.operational_context.validated_candidate // .validated_candidate // {})' \
     "${handover_file}" 2>/dev/null)" || return 1
@@ -148,6 +192,8 @@ aegis_write_final_receipt() {
 
   all_verified="false"
   if [[ "${contract_equivalent}" == "true" ]] \
+    && [[ "${contract_matches_commit}" == "true" ]] \
+    && [[ "${required_targets_present}" == "true" ]] \
     && [[ "${validation_verdict}" == "accepted" ]] \
     && [[ "${blocking_findings}" == "0" ]] \
     && [[ "${outcome_status}" == "SUCCESS" ]] \
@@ -168,6 +214,7 @@ aegis_write_final_receipt() {
     --arg issue "${issue}" \
     --arg target "${target}" \
     --arg contract_digest "${contract_digest}" \
+    --arg committed_contract_digest "${committed_contract_digest}" \
     --arg contract_status "$(if [[ "${contract_equivalent}" == "true" ]]; then printf equivalent; else printf unreconciled; fi)" \
     --argjson contract_reconciliation "${recon_json}" \
     --arg candidate_digest "${candidate_digest}" \
@@ -176,6 +223,9 @@ aegis_write_final_receipt() {
     --arg commit "${commit}" \
     --arg tree_digest "${tree_digest}" \
     --arg state_digest "${state_digest}" \
+    --argjson committed_contract_present "${committed_contract_present}" \
+    --argjson contract_matches_commit "${contract_matches_commit}" \
+    --argjson required_targets_present "${required_targets_present}" \
     --argjson candidate_files "${files_json}" \
     --argjson commit_files "${commit_files_json}" \
     --argjson scope_matches_commit "${scope_matches_commit}" \
@@ -198,11 +248,14 @@ aegis_write_final_receipt() {
       verified: ($verification_status == "VERIFIED"),
       issue: $issue,
       target: $target,
-      contract: {digest: $contract_digest, status: $contract_status, reconciliation: $contract_reconciliation},
+      contract: {digest: $contract_digest, committed_digest: $committed_contract_digest, status: $contract_status, reconciliation: $contract_reconciliation},
       candidate: {digest: $candidate_digest, files_changed: $candidate_files},
       commit: {sha: $commit, tree_digest: $tree_digest, diff_digest: $actual_patch_digest},
       post_commit: {
         state_digest: $state_digest,
+        contract_present_in_commit: $committed_contract_present,
+        contract_matches_commit: $contract_matches_commit,
+        required_targets_present: $required_targets_present,
         files_changed: $commit_files,
         scope_matches_candidate: $scope_matches_commit,
         candidate_patch_matches_commit: $candidate_matches_commit,

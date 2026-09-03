@@ -1996,11 +1996,16 @@ EOF
 
   fi
 
-  aegis_write_final_receipt "${last_commit}" "${issue}" "${target}" \
+  local final_receipt_file=""
+  if ! final_receipt_file="$(aegis_write_final_receipt "${last_commit}" "${issue}" "${target}" \
     "${ROOT}/.harness/active_contract_ir.json" \
     "${RUNTIME_DIR}/epistemic_handover.json" \
-    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl" \
-    >/dev/null 2>&1 || aegis_warn "final_receipt_unavailable — execução não foi marcada como verificável"
+    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl")" \
+    || ! aegis_final_receipt_assert_verified "${final_receipt_file}"; then
+    aegis_warn "pós-commit não verificável — a demanda permanece aberta"
+    emit_result_json "UNPROVEN" "${issue}" "${last_commit}" "post_commit_validation" "${RUNTIME_DIR}/final_receipt.json"
+    return 1
+  fi
 
     # Ephemeral -F inputs (unit-* / batch-squash); never leave as repo litter.
     rm -f "${COMMIT_MSG_FILE}".unit-* "${COMMIT_MSG_FILE}.batch-squash" 2>/dev/null || true
@@ -2134,11 +2139,16 @@ EOF
   committed="$(git rev-parse --short HEAD)"
   aegis_log "commit ${committed}"
 
-  aegis_write_final_receipt "${committed}" "${issue}" "${target}" \
+  local final_receipt_file=""
+  if ! final_receipt_file="$(aegis_write_final_receipt "${committed}" "${issue}" "${target}" \
     "${ROOT}/.harness/active_contract_ir.json" \
     "${RUNTIME_DIR}/epistemic_handover.json" \
-    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl" \
-    >/dev/null 2>&1 || aegis_warn "final_receipt_unavailable — execução não foi marcada como verificável"
+    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl")" \
+    || ! aegis_final_receipt_assert_verified "${final_receipt_file}"; then
+    aegis_warn "pós-commit não verificável — a demanda permanece aberta"
+    emit_result_json "UNPROVEN" "${issue}" "${committed}" "post_commit_validation" "${RUNTIME_DIR}/final_receipt.json"
+    return 1
+  fi
 
   gh_run issue close "${issue}" --comment "$(
     printf '### AEGIS OUTCOME\n- status: SUCCESS\n- commit: `%s`\n- paths: %s\n' \

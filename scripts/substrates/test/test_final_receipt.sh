@@ -22,7 +22,14 @@ git -C "${repo_dir}" config user.email "aegis-test@example.invalid"
 git -C "${repo_dir}" config user.name "Aegis Test"
 mkdir -p "${repo_dir}/src" "${repo_dir}/.harness"
 printf '%s\n' 'export const value = 1;' > "${repo_dir}/src/feature.ts"
+jq -n '{
+  goal: "Update feature",
+  targets: ["src/feature.ts"],
+  exports: [{kind:"const",name:"value"}],
+  contractReconciliation: {equivalent:true,status:"equivalent"}
+}' > "${repo_dir}/.harness/active_contract_ir.json"
 git -C "${repo_dir}" add src/feature.ts
+git -C "${repo_dir}" add .harness/active_contract_ir.json
 git -C "${repo_dir}" commit -qm "baseline"
 
 printf '%s\n' 'export const value = 2;' > "${repo_dir}/src/feature.ts"
@@ -31,12 +38,6 @@ git -C "${repo_dir}" add src/feature.ts
 git -C "${repo_dir}" commit -qm "managed change"
 commit="$(git -C "${repo_dir}" rev-parse --short HEAD)"
 
-jq -n '{
-  goal: "Update feature",
-  targets: ["src/feature.ts"],
-  exports: [{kind:"const",name:"value"}],
-  contractReconciliation: {equivalent:true,status:"equivalent"}
-}' > "${repo_dir}/.harness/active_contract_ir.json"
 jq -n --arg diff "${candidate_diff}" '{
   artifact_snapshot: {operational_context: {
     verdict: "accepted",
@@ -57,6 +58,8 @@ jq -e '
   .verification_status == "VERIFIED"
   and .verified == true
   and .contract.status == "equivalent"
+  and .post_commit.contract_matches_commit == true
+  and .post_commit.required_targets_present == true
   and .post_commit.scope_matches_candidate == true
   and .post_commit.candidate_patch_matches_commit == true
   and .post_commit.clean == true
@@ -71,6 +74,22 @@ aegis_write_final_receipt "${commit}" "test" "src/feature.ts" \
   "${runtime_dir}/epistemic_handover.json" \
   "${runtime_dir}/last_outcome.json" "${runtime_dir}/pipeline_metrics.jsonl" >/dev/null
 jq -e '.verification_status == "UNPROVEN" and .verified == false' "${receipt}" >/dev/null
+if aegis_final_receipt_assert_verified "${receipt}"; then
+  echo "[AEGIS][TEST][FAIL] unproven receipt was accepted" >&2
+  exit 1
+fi
+
+git -C "${repo_dir}" rm --cached -q .harness/active_contract_ir.json
+git -C "${repo_dir}" commit -qm "commit without contract"
+missing_contract_commit="$(git -C "${repo_dir}" rev-parse --short HEAD)"
+aegis_write_final_receipt "${missing_contract_commit}" "test" "src/feature.ts" \
+  "${repo_dir}/.harness/active_contract_ir.json" \
+  "${runtime_dir}/epistemic_handover.json" \
+  "${runtime_dir}/last_outcome.json" "${runtime_dir}/pipeline_metrics.jsonl" >/dev/null
+jq -e '
+  .verification_status == "UNPROVEN"
+  and .post_commit.contract_present_in_commit == false
+  and .post_commit.contract_matches_commit == false
+' "${receipt}" >/dev/null
 
 echo "[AEGIS][TEST][PASS] final receipt binding passed"
-
