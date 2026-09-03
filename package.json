@@ -75,7 +75,11 @@
     "aegis:test:uaam-repair-loop": "bash scripts/substrates/test/test_uaam_repair_loop.sh",
     "aegis:test:uaam": "npm run aegis:test:uaam-assurance-loop && npm run aegis:test:uaam-complex-loop && npm run aegis:test:uaam-repair-loop && npm run aegis:test:uaam-v3 && npm run aegis:test:uaam-runtime && npm run aegis:test:uaam-authority",
     "aegis:uaam:loop": "bash scripts/uaam_assurance_loop.sh",
-    "aegis:benchmark:intake-briefing": "bash scripts/substrates/test/test_intake_briefing_loop.sh"
+    "aegis:benchmark:intake-briefing": "bash scripts/substrates/test/test_intake_briefing_loop.sh",
+    "aegis:test:engine-smoke": "tsx --test src/tests/reorgEngine.test.ts",
+    "aegis:test:engine-wal": "tsx --test src/tests/reorgEngine.wal.test.ts",
+    "aegis:test:engine-adversarial": "tsx --test src/tests/reorgEngine.adversarial.test.ts",
+    "aegis:benchmark:reorg-engine": "tsx src/benchmarks/reorgEngine.benchmark.ts"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",

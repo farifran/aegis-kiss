@@ -5,7 +5,11 @@
     "src/blockTree.ts",
     "src/reorgEngine.ts",
     "src/stateWal.ts",
-    "src/index.ts"
+    "src/index.ts",
+    "src/tests/reorgEngine.test.ts",
+    "src/tests/reorgEngine.wal.test.ts",
+    "src/tests/reorgEngine.adversarial.test.ts",
+    "src/benchmarks/reorgEngine.benchmark.ts"
   ],
   "preconditions": [
     "Blockos possuem hash, altura inteira não negativa, timestamp bigint não negativo e transações não vazias.",
@@ -224,6 +228,34 @@
         "recovered.restore(snapshot);",
         "const res = recovered.processBlock({ hash: 'b3', prevHash: 'b2', height: 3, txids: [], timestampMs: 130n }, 130n);"
       ]
+    },
+    {
+      "id": "PO-WAL-001",
+      "kind": "durable_recovery",
+      "required": true,
+      "oracle": "wal_replay_and_torn_record_recovery",
+      "prelude": []
+    },
+    {
+      "id": "PO-ADVERSARIAL-001",
+      "kind": "adversarial_composition",
+      "required": true,
+      "oracle": "invalid_input_aliasing_capacity_and_deep_threshold",
+      "prelude": []
+    },
+    {
+      "id": "PO-INVARIANT-001",
+      "kind": "invariant_report",
+      "required": true,
+      "oracle": "verifyInvariants_valid_true_after_each_supported_transition",
+      "prelude": []
+    },
+    {
+      "id": "PO-BENCHMARK-001",
+      "kind": "performance_baseline",
+      "required": true,
+      "oracle": "reproducible_benchmark_digest_and_metrics",
+      "prelude": []
     }
   ],
   "behavior": []

@@ -2553,7 +2553,7 @@ cmd_cleanup() {
 
   aegis_log "Iniciando Auto-Cleanup de arquivos transientes em scratch/ e .harness/runtime/..."
   find scratch/ -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
-  rm -rf .harness/runtime/* 2>/dev/null || true
+  find .harness/runtime/ -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
   mkdir -p scratch .harness/runtime 2>/dev/null || true
   touch scratch/.gitkeep 2>/dev/null || true
 

@@ -63,18 +63,15 @@ printf '%s\n' "${plan}" | jq -r '.proofs[] | [.id, .executionKey] | @tsv' \
       continue
     fi
 
-    case "${execution_key}" in
-      typecheck)
-        command=(npm run aegis:typecheck)
-        ;;
-      engine-suite)
-        command=(npm test)
-        ;;
-      *)
-        echo "[AEGIS][PROOF][FATAL] execution_key_not_allowlisted:${execution_key}" >&2
-        exit 1
-        ;;
-    esac
+    command_string="$(jq -r --arg id "${proof_id}" '.proofs[] | select(.id == $id) | .command' "$(aegis_proof_registry_path)")"
+    if [[ "${command_string}" =~ ^npm[[:space:]]+run[[:space:]]+([a-zA-Z0-9:_-]+)$ ]]; then
+      command=(npm run "${BASH_REMATCH[1]}")
+    elif [[ "${command_string}" =~ ^bash[[:space:]]+([a-zA-Z0-9_./-]+)$ ]]; then
+      command=(bash "${BASH_REMATCH[1]}")
+    else
+      echo "[AEGIS][PROOF][FATAL] untrusted_proof_command:${proof_id}" >&2
+      exit 1
+    fi
 
     printf '%s\n' "[AEGIS][PROOF] run execution=${execution_key} proof=${proof_id}"
     if "${command[@]}"; then

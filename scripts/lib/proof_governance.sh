@@ -48,7 +48,7 @@ aegis_proof_governance_validate() {
       and (.status | IN("experimental", "active", "retired"))
       and (.targets | type == "array" and length > 0)
       and (.executionKey | type == "string" and test("^[a-z0-9][a-z0-9_-]+$"))
-      and (.command | type == "string" and length > 0)
+      and (.command | type == "string" and test("^(npm run [A-Za-z0-9:_-]+|bash [A-Za-z0-9_./-]+)$"))
       and (if .status == "experimental" then (.expiresOn | type == "string" and length > 0) else true end)
     )
     and all(.profiles[];

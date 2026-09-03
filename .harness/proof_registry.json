@@ -4,16 +4,16 @@
     "mode": "enforced",
     "maxActiveProofsPerProfile": {
       "fast": 3,
-      "targeted": 5,
+      "targeted": 7,
       "release": 8,
       "forensic": 12
     }
   },
   "profiles": [
     { "id": "fast", "proofIds": ["PO-TYPE-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001"] },
-    { "id": "targeted", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] },
-    { "id": "release", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] },
-    { "id": "forensic", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001"] }
+    { "id": "targeted", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001", "PO-ADVERSARIAL-001", "PO-INVARIANT-001"] },
+    { "id": "release", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001", "PO-WAL-001", "PO-ADVERSARIAL-001", "PO-INVARIANT-001"] },
+    { "id": "forensic", "proofIds": ["PO-TYPE-001", "PO-FAIL-001", "PO-REORG-REVOKE-001", "PO-IDEMPOTENCY-001", "PO-RECOVERY-001", "PO-WAL-001", "PO-ADVERSARIAL-001", "PO-INVARIANT-001", "PO-BENCHMARK-001"] }
   ],
   "proofs": [
     {
@@ -37,8 +37,8 @@
       "cadence": "targeted",
       "status": "active",
       "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
-      "executionKey": "engine-suite",
-      "command": "npm test"
+      "executionKey": "adversarial-suite",
+      "command": "npm run aegis:test:engine-adversarial"
     },
     {
       "id": "PO-REORG-REVOKE-001",
@@ -49,8 +49,8 @@
       "cadence": "always",
       "status": "active",
       "targets": ["src/blockTree.ts", "src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
-      "executionKey": "engine-suite",
-      "command": "npm test"
+      "executionKey": "smoke-suite",
+      "command": "npm run aegis:test:engine-smoke"
     },
     {
       "id": "PO-IDEMPOTENCY-001",
@@ -61,8 +61,8 @@
       "cadence": "always",
       "status": "active",
       "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
-      "executionKey": "engine-suite",
-      "command": "npm test"
+      "executionKey": "smoke-suite",
+      "command": "npm run aegis:test:engine-smoke"
     },
     {
       "id": "PO-RECOVERY-001",
@@ -73,8 +73,56 @@
       "cadence": "release",
       "status": "active",
       "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.test.ts"],
-      "executionKey": "engine-suite",
-      "command": "npm test"
+      "executionKey": "smoke-suite",
+      "command": "npm run aegis:test:engine-smoke"
+    },
+    {
+      "id": "PO-WAL-001",
+      "risk": "loss or duplication of durable state after crash",
+      "coverageKey": "engine.wal.recovery",
+      "authority": "black_box_file_replay",
+      "cost": "high",
+      "cadence": "release",
+      "status": "active",
+      "targets": ["src/stateWal.ts", "src/tests/reorgEngine.wal.test.ts"],
+      "executionKey": "wal-suite",
+      "command": "npm run aegis:test:engine-wal"
+    },
+    {
+      "id": "PO-ADVERSARIAL-001",
+      "risk": "boundary failures, aliasing and capacity loss",
+      "coverageKey": "engine.adversarial.composition",
+      "authority": "black_box_adversarial",
+      "cost": "medium",
+      "cadence": "targeted",
+      "status": "active",
+      "targets": ["src/reorgEngine.ts", "src/blockTree.ts", "src/tests/reorgEngine.adversarial.test.ts"],
+      "executionKey": "adversarial-suite",
+      "command": "npm run aegis:test:engine-adversarial"
+    },
+    {
+      "id": "PO-INVARIANT-001",
+      "risk": "internal indexes diverging from canonical state",
+      "coverageKey": "engine.invariants.report",
+      "authority": "black_box_invariant_report",
+      "cost": "medium",
+      "cadence": "targeted",
+      "status": "active",
+      "targets": ["src/reorgEngine.ts", "src/tests/reorgEngine.adversarial.test.ts"],
+      "executionKey": "adversarial-suite",
+      "command": "npm run aegis:test:engine-adversarial"
+    },
+    {
+      "id": "PO-BENCHMARK-001",
+      "risk": "performance regression in block ingestion",
+      "coverageKey": "engine.performance.reproducible_baseline",
+      "authority": "local_measurement",
+      "cost": "high",
+      "cadence": "forensic",
+      "status": "active",
+      "targets": ["src/benchmarks/reorgEngine.benchmark.ts", "src/reorgEngine.ts", "src/blockTree.ts"],
+      "executionKey": "benchmark-engine",
+      "command": "npm run aegis:benchmark:reorg-engine"
     }
   ]
 }
