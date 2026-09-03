@@ -19,6 +19,7 @@ export class BlockTree {
   private _tipHash: string | null;
   private _tipHeight: number;
   private readonly _maxOrphanDepth: number;
+  private _hasOrphans: boolean;
 
   constructor(maxOrphanDepth: number = 100) {
     if (maxOrphanDepth <= 0) throw new RangeError('maxOrphanDepth must be positive');
@@ -26,11 +27,20 @@ export class BlockTree {
     this._tipHash = null;
     this._tipHeight = -1;
     this._maxOrphanDepth = maxOrphanDepth;
+    this._hasOrphans = false;
   }
 
   get tipHash(): string | null { return this._tipHash; }
   get tipHeight(): number { return this._tipHeight; }
   get blockCount(): number { return Object.keys(this._blocks).length; }
+
+  get orphanCount(): number {
+    let count = 0;
+    for (const hash in this._blocks) {
+      if (!this.isBlockOnCanonicalChain(hash)) count += 1;
+    }
+    return count;
+  }
 
   getBlock(hash: string): BlockHeader | null {
     const b = this._blocks[hash];
@@ -80,15 +90,31 @@ export class BlockTree {
     return null;
   }
 
+  private _validateBlockTransactions(block: BlockHeader): void {
+    if (!Array.isArray(block.txids)) throw new TypeError('block txids must be an array');
+    for (let i = 0; i < block.txids.length; i++) {
+      const txid = block.txids[i];
+      if (!txid || txid.trim() === '') throw new TypeError('block txids cannot contain empty values');
+    }
+  }
+
+  private _validateBlockParent(block: BlockHeader): void {
+    if (block.prevHash === block.hash) throw new Error('block cannot reference itself');
+    if (block.prevHash === '') return;
+    const parent = this._blocks[block.prevHash];
+    if (!parent) throw new Error(`parent block '${block.prevHash}' not found in tree`);
+    if (block.height !== parent.height + 1) throw new Error('block height must immediately follow its parent');
+  }
+
   private _validateNewBlock(block: BlockHeader): void {
     if (!block.hash || block.hash.trim() === '') throw new TypeError('block hash cannot be empty');
     if (block.height < 0) throw new RangeError('block height must be non-negative');
+    if (block.timestampMs < 0n) throw new RangeError('block timestamp must be non-negative');
+    this._validateBlockTransactions(block);
     if (this._blocks[block.hash] !== undefined) {
       throw new Error(`block '${block.hash}' already exists`);
     }
-    if (block.height > 0 && block.prevHash !== '' && !this._blocks[block.prevHash]) {
-      throw new Error(`parent block '${block.prevHash}' not found in tree`);
-    }
+    this._validateBlockParent(block);
   }
 
   private _computeReorg(prevTipHash: string, newBlock: BlockHeader): ReorgResult {
@@ -97,7 +123,7 @@ export class BlockTree {
     const connectedReversed = this._getAncestorsChain(newBlock.hash, commonAncestor);
     const connected = connectedReversed.reverse();
 
-    this._pruneOldOrphans();
+    if (this._hasOrphans) this._pruneOldOrphans();
 
     return {
       isReorg: true,
@@ -114,6 +140,8 @@ export class BlockTree {
 
     if (!this._isBetterTip(block.height, block.hash)) {
       const activeTip = this._tipHash ? this._blocks[this._tipHash] : block;
+      this._hasOrphans = true;
+      this._pruneOldOrphans();
       return {
         isReorg: false,
         commonAncestorHash: null,
@@ -128,7 +156,7 @@ export class BlockTree {
     this._tipHeight = block.height;
 
     if (prevTipHash === null || block.prevHash === prevTipHash) {
-      this._pruneOldOrphans();
+      if (this._hasOrphans) this._pruneOldOrphans();
       return {
         isReorg: false,
         commonAncestorHash: prevTipHash,
@@ -159,15 +187,48 @@ export class BlockTree {
     return this._tipHeight - b.height + 1;
   }
 
+  getCanonicalChain(): readonly BlockHeader[] {
+    if (this._tipHash === null) return [];
+    return this._getAncestorsChain(this._tipHash, null).reverse();
+  }
+
   private _pruneOldOrphans(): void {
-    if (this._tipHeight <= this._maxOrphanDepth) return;
+    if (!this._hasOrphans) return;
     const minRetainHeight = this._tipHeight - this._maxOrphanDepth;
+    const orphanHashes: string[] = [];
     for (const hash in this._blocks) {
       const b = this._blocks[hash];
       if (b && b.height < minRetainHeight && !this.isBlockOnCanonicalChain(hash)) {
-        delete this._blocks[hash];
+        orphanHashes.push(hash);
       }
     }
+    orphanHashes.sort((a, b) => this._compareBlockHashes(a, b));
+
+    const allOrphanHashes: string[] = [];
+    for (const hash in this._blocks) {
+      if (!this.isBlockOnCanonicalChain(hash)) allOrphanHashes.push(hash);
+    }
+    allOrphanHashes.sort((a, b) => this._compareBlockHashes(a, b));
+
+    const retainedOrphanCount = Math.max(0, this._maxOrphanDepth - orphanHashes.length);
+    const overflowCount = Math.max(0, allOrphanHashes.length - retainedOrphanCount);
+    for (let i = 0; i < overflowCount; i++) {
+      const hash = allOrphanHashes[i];
+      if (hash !== undefined) delete this._blocks[hash];
+    }
+    this._hasOrphans = allOrphanHashes.length > overflowCount;
+  }
+
+  private _compareBlockHashes(leftHash: string, rightHash: string): number {
+    const left = this._blocks[leftHash];
+    const right = this._blocks[rightHash];
+    if (!left || !right) {
+      if (leftHash < rightHash) return -1;
+      return leftHash > rightHash ? 1 : 0;
+    }
+    if (left.height !== right.height) return left.height - right.height;
+    if (leftHash < rightHash) return -1;
+    return leftHash > rightHash ? 1 : 0;
   }
 
   snapshot(): { readonly blocks: Record<string, BlockHeader>; readonly tipHash: string | null; readonly tipHeight: number } {
@@ -191,5 +252,12 @@ export class BlockTree {
     }
     this._tipHash = snap.tipHash;
     this._tipHeight = snap.tipHeight;
+    this._hasOrphans = false;
+    for (const hash in this._blocks) {
+      if (!this.isBlockOnCanonicalChain(hash)) {
+        this._hasOrphans = true;
+        break;
+      }
+    }
   }
 }

@@ -12,7 +12,11 @@ import {
   type SubscriptionState,
   type EngineBlockResult,
   type EngineBatchResult,
-  type EngineSnapshot
+  type EngineSnapshot,
+  type ReorgEngineOptions,
+  type InvariantViolation,
+  type InvariantReport,
+  type BlockAdmissionResult
 } from './reorgEngine.js';
 
 export {
@@ -28,5 +32,9 @@ export type {
   SubscriptionState,
   EngineBlockResult,
   EngineBatchResult,
-  EngineSnapshot
+  EngineSnapshot,
+  ReorgEngineOptions,
+  InvariantViolation,
+  InvariantReport,
+  BlockAdmissionResult
 };

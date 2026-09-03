@@ -4,7 +4,33 @@
   "targets": [
     "src/blockTree.ts",
     "src/reorgEngine.ts",
+    "src/stateWal.ts",
     "src/index.ts"
+  ],
+  "preconditions": [
+    "Blockos possuem hash, altura inteira não negativa, timestamp bigint não negativo e transações não vazias.",
+    "Um bloco com prevHash não vazio referencia um pai existente e imediatamente anterior em altura.",
+    "O cursor nowMs é bigint não negativo e nunca retrocede.",
+    "threshold, maxOrphanDepth e maxPendingBlocks são inteiros positivos."
+  ],
+  "invariants": [
+    "INV-CANONICAL-DEPTH: confirmações = tipHeight - blockHeight + 1 somente para blocos da cadeia canônica.",
+    "INV-REORG-REVOCATION: bloco desconectado revoga alerta ativo e emite REORG_REVOKED exatamente uma vez por transição.",
+    "INV-ATOMIC-PROJECTION: estado vivo só muda depois que o estado projetado satisfaz as invariantes.",
+    "INV-CAPACITY-COVERAGE: committed + rejected + blocked_capacity + aborted = processed.",
+    "INV-WAL-RECOVERY: o último registro íntegro do journal restaura topologia, assinaturas, contadores e cursor.",
+    "INV-IDEMPOTENT-ALERT: uma assinatura alertada não recebe CONFIRMED novamente sem uma revogação válida.",
+    "INV-ORPHAN-BOUND: a quantidade de órfãos retidos não excede maxOrphanDepth."
+  ],
+  "postconditions": [
+    "Toda transição aceita deixa verifyInvariants().valid igual a true.",
+    "Falha de validação ou capacidade não altera o estado comprometido correspondente.",
+    "Um commit durável possui um registro WAL íntegro antes da promoção do estado vivo.",
+    "restore e replay produzem o mesmo snapshot canônico para o mesmo estado persistido."
+  ],
+  "performanceContracts": [
+    "A entrada de blocos é limitada por maxPendingBlocks e não pode crescer indefinidamente em memória.",
+    "A ordenação de decisões e o digest são determinísticos e independentes do relógio implícito do sistema."
   ],
   "imports": [],
   "types": [
@@ -34,7 +60,19 @@
     },
     {
       "name": "EngineBatchResult",
-      "shape": "{ readonly processedCount: number; readonly committedCount: number; readonly rejectedCount: number; readonly abortedCount: number; readonly totalAlerts: number; readonly executionDigest: bigint; readonly blockResults: readonly EngineBlockResult[]; }"
+      "shape": "{ readonly processedCount: number; readonly committedCount: number; readonly rejectedCount: number; readonly blockedCapacityCount: number; readonly abortedCount: number; readonly totalAlerts: number; readonly executionDigest: bigint; readonly blockResults: readonly EngineBlockResult[]; }"
+    },
+    {
+      "name": "ReorgEngineOptions",
+      "shape": "{ readonly journalPath?: string; readonly maxPendingBlocks?: number; }"
+    },
+    {
+      "name": "BlockAdmissionResult",
+      "shape": "{ readonly acceptedCount: number; readonly rejectedInvalidCount: number; readonly blockedCapacityCount: number; readonly pendingCount: number; }"
+    },
+    {
+      "name": "InvariantReport",
+      "shape": "{ readonly valid: boolean; readonly violations: readonly { readonly id: string; readonly message: string }[]; }"
     },
     {
       "name": "EngineSnapshot",
@@ -67,7 +105,8 @@
       "getters": [
         { "name": "tipHash", "returns": "string | null", "body": "return this._tipHash;" },
         { "name": "tipHeight", "returns": "number", "body": "return this._tipHeight;" },
-        { "name": "blockCount", "returns": "number", "body": "return Object.keys(this._blocks).length;" }
+        { "name": "blockCount", "returns": "number", "body": "return Object.keys(this._blocks).length;" },
+        { "name": "orphanCount", "returns": "number", "body": "count non-canonical blocks" }
       ],
       "body": []
     },
@@ -76,9 +115,9 @@
       "name": "ReorgEngine",
       "privateFields": [
         { "name": "_tree", "type": "BlockTree", "readonly": true },
-        { "name": "_subscriptions", "type": "Record<string, any>", "readonly": true },
+        { "name": "_subscriptions", "type": "Record<string, InternalSubscription>", "readonly": true },
         { "name": "_txToSubs", "type": "Record<string, string[]>", "readonly": true },
-        { "name": "_txToBlockMap", "type": "Record<string, any>", "readonly": true },
+        { "name": "_txToBlockMap", "type": "Record<string, { readonly blockHash: string; readonly height: number }>", "readonly": true },
         { "name": "_blockHashToSubs", "type": "Record<string, string[]>", "readonly": true },
         { "name": "_canonicalHeightToHash", "type": "Record<number, string>", "readonly": true },
         { "name": "_totalAlertsEmitted", "type": "bigint" },
@@ -86,7 +125,8 @@
         { "name": "_eventSequence", "type": "bigint" }
       ],
       "ctorParams": [
-        { "name": "maxOrphanDepth", "type": "number", "default": "100" }
+        { "name": "maxOrphanDepth", "type": "number", "default": "100" },
+        { "name": "options", "type": "ReorgEngineOptions", "default": "{}" }
       ],
       "ctorBody": [],
       "methods": [
@@ -95,6 +135,9 @@
         { "name": "getSubscription", "params": [{ "name": "subscriptionId", "type": "string" }], "returns": "SubscriptionState | null", "body": [] },
         { "name": "processBlock", "params": [{ "name": "block", "type": "BlockHeader" }, { "name": "nowMs", "type": "bigint" }], "returns": "EngineBlockResult", "body": [] },
         { "name": "processBatch", "params": [{ "name": "blocks", "type": "readonly BlockHeader[]" }, { "name": "nowMs", "type": "bigint" }], "returns": "EngineBatchResult", "body": [] },
+        { "name": "enqueueBlocks", "params": [{ "name": "blocks", "type": "readonly BlockHeader[]" }, { "name": "nowMs", "type": "bigint" }], "returns": "BlockAdmissionResult", "body": [] },
+        { "name": "drainPending", "params": [], "returns": "EngineBatchResult", "body": [] },
+        { "name": "verifyInvariants", "params": [], "returns": "InvariantReport", "body": [] },
         { "name": "snapshot", "params": [], "returns": "EngineSnapshot", "body": [] },
         { "name": "restore", "params": [{ "name": "snap", "type": "EngineSnapshot" }], "returns": "void", "body": [] }
       ],
@@ -103,7 +146,10 @@
         { "name": "tipHeight", "returns": "number", "body": "return this._tree.tipHeight;" },
         { "name": "subscriptionCount", "returns": "number", "body": "return Object.keys(this._subscriptions).length;" },
         { "name": "totalAlertsEmitted", "returns": "bigint", "body": "return this._totalAlertsEmitted;" },
-        { "name": "lastProcessedMs", "returns": "bigint", "body": "return this._lastProcessedMs;" }
+        { "name": "lastProcessedMs", "returns": "bigint", "body": "return this._lastProcessedMs;" },
+        { "name": "pendingCount", "returns": "number", "body": "return this._pendingBlocks.length;" },
+        { "name": "maxPendingBlocks", "returns": "number", "body": "return this._maxPendingBlocks;" },
+        { "name": "orphanCount", "returns": "number", "body": "return this._tree.orphanCount;" }
       ],
       "body": []
     }
