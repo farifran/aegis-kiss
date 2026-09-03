@@ -7,9 +7,6 @@ import {
 
 import {
   ReorgEngine,
-  type ReorgEngineOptions,
-  type InvariantReport,
-  type BlockAdmissionResult,
   type AlertEventType,
   type AlertEvent,
   type SubscriptionState,
@@ -18,12 +15,9 @@ import {
   type EngineSnapshot
 } from './reorgEngine.js';
 
-import { FileStateWal, type StateWal } from './stateWal.js';
-
 export {
   BlockTree,
-  ReorgEngine,
-  FileStateWal
+  ReorgEngine
 };
 
 export type {
@@ -34,9 +28,5 @@ export type {
   SubscriptionState,
   EngineBlockResult,
   EngineBatchResult,
-  EngineSnapshot,
-  ReorgEngineOptions,
-  InvariantReport,
-  BlockAdmissionResult,
-  StateWal
+  EngineSnapshot
 };
