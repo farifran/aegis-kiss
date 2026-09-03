@@ -181,6 +181,110 @@ aegis_proof_materialize_staged_path() {
   done < <(git -C "${repository_root}" ls-files --cached -- "${target}")
 }
 
+aegis_proof_staged_path_exists() {
+  local repository_root="${1:-}"
+  local target="${2:-}"
+  aegis_proof_safe_repository_path "${target}" || return 1
+  git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null \
+    || [[ -n "$(git -C "${repository_root}" ls-files --cached -- "${target}" | head -1)" ]]
+}
+
+# An evolution may add or change evidence, but it may not silently remove a
+# previously active proof or its source target.  The only exception is an
+# explicit retirement in the candidate contract, tied to the demand that
+# authorizes it.  Git history remains the durable audit log; this metadata is
+# per-transition, not a growing registry of old tests.
+aegis_proof_continuity_validate_staged() {
+  local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
+  local continuity_root old_registry old_contract new_registry new_contract proof_id target old_proof new_proof rc=0
+
+  git -C "${repository_root}" rev-parse --verify HEAD >/dev/null 2>&1 || return 0
+  for target in .harness/proof_registry.json .harness/active_contract_ir.json; do
+    git -C "${repository_root}" cat-file -e "HEAD:${target}" 2>/dev/null || return 0
+    git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || {
+      echo "[AEGIS][CONTINUITY][FATAL] staged_metadata_missing:${target}" >&2
+      return 1
+    }
+  done
+
+  continuity_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-proof-continuity.XXXXXX")" || return 1
+  old_registry="${continuity_root}/old-registry.json"
+  old_contract="${continuity_root}/old-contract.json"
+  new_registry="${continuity_root}/new-registry.json"
+  new_contract="${continuity_root}/new-contract.json"
+  git -C "${repository_root}" show HEAD:.harness/proof_registry.json > "${old_registry}"
+  git -C "${repository_root}" show HEAD:.harness/active_contract_ir.json > "${old_contract}"
+  git -C "${repository_root}" show :.harness/proof_registry.json > "${new_registry}"
+  git -C "${repository_root}" show :.harness/active_contract_ir.json > "${new_contract}"
+
+  jq -e '
+    if has("continuity") then
+      (.continuity | type == "object")
+      and ((.continuity.retirements // []) | type == "array")
+      and ((.continuity.retirements // []) | all(
+        type == "object"
+        and (.kind | IN("proof", "target"))
+        and (.id | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.demandEvidence | type == "string" and length > 0)
+        and (if has("successor") then (.successor | type == "string" and length > 0) else true end)
+      ))
+      and (((.continuity.retirements // []) | map(.kind + "\u0000" + .id) | unique | length) == ((.continuity.retirements // []) | length))
+      and ((.continuity.proofChanges // []) | type == "array")
+      and ((.continuity.proofChanges // []) | all(
+        type == "object"
+        and (.id | type == "string" and length > 0)
+        and (.reason | type == "string" and length > 0)
+        and (.demandEvidence | type == "string" and length > 0)
+      ))
+      and (((.continuity.proofChanges // []) | map(.id) | unique | length) == ((.continuity.proofChanges // []) | length))
+    else true end
+  ' "${new_contract}" >/dev/null 2>&1 || {
+    echo "[AEGIS][CONTINUITY][FATAL] malformed_retirement_record" >&2
+    rc=1
+  }
+
+  if [[ "${rc}" -eq 0 ]]; then
+    while IFS= read -r proof_id; do
+      [[ -n "${proof_id}" ]] || continue
+      if ! jq -e --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id)' "${new_registry}" >/dev/null 2>&1; then
+        if ! jq -e --arg id "${proof_id}" '(.continuity.retirements // []) | any(.kind == "proof" and .id == $id)' "${new_contract}" >/dev/null 2>&1; then
+          echo "[AEGIS][CONTINUITY][FATAL] active_proof_removed_without_retirement:${proof_id}" >&2
+          rc=1
+        fi
+      else
+        old_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,command,targets:(.targets | sort)}' "${old_registry}")"
+        new_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,command,targets:(.targets | sort)}' "${new_registry}")"
+        if [[ "${old_proof}" != "${new_proof}" ]] \
+          && ! jq -e --arg id "${proof_id}" '(.continuity.proofChanges // []) | any(.id == $id)' "${new_contract}" >/dev/null 2>&1; then
+          echo "[AEGIS][CONTINUITY][FATAL] active_proof_changed_without_record:${proof_id}" >&2
+          rc=1
+        fi
+      fi
+    done < <(jq -r '.proofs[] | select(.status != "retired") | .id' "${old_registry}")
+  fi
+
+  if [[ "${rc}" -eq 0 ]]; then
+    while IFS= read -r target; do
+      [[ -n "${target}" ]] || continue
+      if ! aegis_proof_staged_path_exists "${repository_root}" "${target}"; then
+        if ! jq -e --arg id "${target}" '(.continuity.retirements // []) | any(.kind == "target" and .id == $id)' "${new_contract}" >/dev/null 2>&1; then
+          echo "[AEGIS][CONTINUITY][FATAL] target_removed_without_retirement:${target}" >&2
+          rc=1
+        fi
+      fi
+    done < <(
+      {
+        jq -r '(.targets[]? // empty)' "${old_contract}"
+        jq -r '.proofs[] | select(.status != "retired") | .targets[]' "${old_registry}"
+      } | sort -u
+    )
+  fi
+
+  rm -rf "${continuity_root}"
+  return "${rc}"
+}
+
 aegis_proof_governance_validate_staged() {
   local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
   local staged_root registry_file contract_file target command_path rc=0

@@ -85,6 +85,12 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 
 ### IV. Composição, Conservação e Identidade — somente quando aplicável
 - Se a demanda descreve pipeline, saldo, fluxo, ledger, topologia ou métrica agregada, declare a lei de composição ou conservação que o domínio exige. Não invente uma lei financeira, uma árvore de Merkle ou uma representação por índice para domínios que não a pedem.
+
+### V. Continuidade de Evidências — somente quando a demanda remove escopo
+- Trate o contrato anterior como estado de partida: uma demanda evolui esse estado; não o reconstrói seletivamente.
+- Se a demanda retirar uma prova ativa ou um target previamente contratado, declare `continuity.retirements[]` no contrato final. Cada item deve conter `kind` (`proof` ou `target`), `id`, `reason` e `demandEvidence`; `successor` é opcional quando uma prova/target substitui o anterior.
+- Se uma prova ativa mantiver o mesmo ID, mas mudar risco, cobertura, autoridade, comando ou targets, declare `continuity.proofChanges[]` com `id`, `reason` e `demandEvidence`.
+- Não use aposentadoria para reduzir custo, limpar arquivos ou simplificar a implementação. Ela só é válida quando a demanda remove o risco ou o escopo observável correspondente.
 - Escolha a identidade e a estrutura de dados a partir do contrato: IDs externos podem ser válidos quando sua unicidade é garantida; índices, buffers tipados ou hashes são escolhas condicionais, não axiomas universais.
 
 ### V. Performance e memória — somente quando exigidas

@@ -43,7 +43,9 @@ cat > "${staged_repo}/.harness/active_contract_ir.json" <<'EOF'
 {"targets":["src/proof.ts"],"proofObligations":[{"id":"PO-FIXTURE-001"}]}
 EOF
 git -C "${staged_repo}" add .
+git -C "${staged_repo}" commit -qm "fixture baseline"
 AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${staged_repo}"
+AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}"
 
 jq '.proofs[0].command = "npm run missing-script"' "${staged_repo}/.harness/proof_registry.json" \
   > "${staged_repo}/.harness/invalid-command.json"
@@ -54,14 +56,59 @@ if AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${sta
   exit 1
 fi
 
-sed -i.bak 's/missing-script/fixture-proof/' "${staged_repo}/.harness/proof_registry.json"
-rm -f "${staged_repo}/.harness/proof_registry.json.bak"
-git -C "${staged_repo}" add .harness/proof_registry.json
+git -C "${staged_repo}" restore --source=HEAD --staged --worktree .harness/proof_registry.json
+
+jq '.scripts["fixture-proof-v2"] = "node -e \"process.exit(0)\""' "${staged_repo}/package.json" > "${staged_repo}/next-package.json"
+mv "${staged_repo}/next-package.json" "${staged_repo}/package.json"
+jq '.proofs[0].command = "npm run fixture-proof-v2"' "${staged_repo}/.harness/proof_registry.json" > "${staged_repo}/next-registry.json"
+mv "${staged_repo}/next-registry.json" "${staged_repo}/.harness/proof_registry.json"
+git -C "${staged_repo}" add package.json .harness/proof_registry.json
+AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${staged_repo}"
+if AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}" >/dev/null 2>&1; then
+  echo "silent active proof change was accepted" >&2
+  exit 1
+fi
+jq '.continuity = {proofChanges:[{id:"PO-FIXTURE-001",reason:"fixture command evolution",demandEvidence:"fixture demand"}]}' \
+  "${staged_repo}/.harness/active_contract_ir.json" > "${staged_repo}/next-contract.json"
+mv "${staged_repo}/next-contract.json" "${staged_repo}/.harness/active_contract_ir.json"
+git -C "${staged_repo}" add .harness/active_contract_ir.json
+AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}"
+git -C "${staged_repo}" restore --source=HEAD --staged --worktree package.json .harness/proof_registry.json .harness/active_contract_ir.json
+
 git -C "${staged_repo}" rm --cached -q src/proof.ts
 if AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${staged_repo}" >/dev/null 2>&1; then
   echo "staged missing target was accepted" >&2
   exit 1
 fi
+git -C "${staged_repo}" restore --staged src/proof.ts
+
+# A coherent new registry is still rejected when it silently retires an older
+# obligation.  Adding the two retirement records is the only valid evolution.
+printf 'export const successor = true;\n' > "${staged_repo}/src/successor.ts"
+jq '
+  .profiles[0].proofIds = ["PO-SUCCESSOR-001"]
+  | .proofs[0].status = "retired"
+  | .proofs += [{"id":"PO-SUCCESSOR-001","risk":"successor risk","coverageKey":"fixture.successor","authority":"fixture","cost":"low","cadence":"always","status":"active","targets":["src/successor.ts"],"executionKey":"fixture-proof","command":"npm run fixture-proof"}]
+' "${staged_repo}/.harness/proof_registry.json" > "${staged_repo}/.harness/next-registry.json"
+mv "${staged_repo}/.harness/next-registry.json" "${staged_repo}/.harness/proof_registry.json"
+cat > "${staged_repo}/.harness/active_contract_ir.json" <<'EOF'
+{"targets":["src/successor.ts"],"proofObligations":[{"id":"PO-SUCCESSOR-001"}]}
+EOF
+git -C "${staged_repo}" add .harness src/successor.ts
+git -C "${staged_repo}" rm --cached -q src/proof.ts
+AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${staged_repo}"
+if AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}" >/dev/null 2>&1; then
+  echo "silent proof retirement was accepted" >&2
+  exit 1
+fi
+
+jq '.continuity = {retirements:[
+  {kind:"proof",id:"PO-FIXTURE-001",reason:"fixture replacement",demandEvidence:"fixture demand",successor:"PO-SUCCESSOR-001"},
+  {kind:"target",id:"src/proof.ts",reason:"fixture replacement",demandEvidence:"fixture demand",successor:"src/successor.ts"}
+]}' "${staged_repo}/.harness/active_contract_ir.json" > "${staged_repo}/.harness/next-contract.json"
+mv "${staged_repo}/.harness/next-contract.json" "${staged_repo}/.harness/active_contract_ir.json"
+git -C "${staged_repo}" add .harness/active_contract_ir.json
+AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}"
 
 jq '.proofs[1].coverageKey = .proofs[0].coverageKey' "${valid_registry}" > "${work_dir}/duplicate.json"
 if AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate "${work_dir}/duplicate.json" "${valid_contract}" >/dev/null 2>&1; then

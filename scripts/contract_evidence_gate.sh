@@ -24,6 +24,7 @@ fi
 
 if [[ "${mode}" == "staged" ]]; then
   AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate_staged "${ROOT_DIR}"
+  AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_continuity_validate_staged "${ROOT_DIR}"
 else
   AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate \
     "${ROOT_DIR}/.harness/proof_registry.json" \
