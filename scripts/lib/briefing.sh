@@ -228,6 +228,57 @@ aegis_briefing_system_prompt() {
   printf 'You convert a software demand into JSON. Output ONLY a valid JSON object matching the briefing schema.\n'
 }
 
+# Stable identity for the briefing boundary. It binds the raw demand, target,
+# workspace evidence and briefing policy without persisting the evidence.
+aegis_briefing_protocol_digest() {
+  local goal="${1-}"
+  local target="${2-}"
+  local evidence="${3-}"
+  local policy_file="${AEGIS_ROOT_DIR:-.}/AGENTS.md"
+  local briefing_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
+  {
+    printf 'aegis.briefing.v1\n'
+    printf 'goal:%s\n' "${goal}"
+    printf 'target:%s\n' "${target}"
+    if [[ -f "${policy_file}" ]]; then
+      printf '\n--- AGENTS.md ---\n'
+      cat "${policy_file}"
+    fi
+    if [[ -f "${briefing_file}" ]]; then
+      printf '\n--- .skills/briefing.md ---\n'
+      cat "${briefing_file}"
+    fi
+    printf '\nevidence:%s\n' "${evidence}"
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+# Verifies that an IDE-submitted Contract IR came from the briefing handover
+# for the same demand. Question IDs are intentionally checked as sets so
+# ordering changes do not invalidate an otherwise identical contract.
+aegis_briefing_validate_handover() {
+  local json="${1-}"
+  local expected_digest="${2-}"
+  [[ -n "${json}" && -n "${expected_digest}" ]] || return 1
+  printf '%s' "${json}" | jq -e --arg expected "${expected_digest}" '
+    (.briefing | type) == "object"
+    and .briefing.schema == "aegis.briefing.v1"
+    and .briefing.source == ".skills/briefing.md"
+    and .briefing.max_questions == 3
+    and .briefing.question_scope == "DEMAND"
+    and .briefing.digest == $expected
+    and (.briefing.questionIds | type) == "array"
+    and (.briefing.answeredQuestionIds | type) == "array"
+    and ((.briefing.questionIds | all(type == "string" and length > 0)))
+    and ((.briefing.answeredQuestionIds | all(type == "string" and length > 0)))
+    and ((.briefing.questionIds | unique | length) == (.briefing.questionIds | length))
+    and ((.briefing.answeredQuestionIds | unique | length) == (.briefing.answeredQuestionIds | length))
+    and (((.briefing.answeredQuestionIds - .briefing.questionIds) | length) == 0)
+    and (([.questions[]?.id] - .briefing.questionIds | length) == 0)
+    and (((.questions // []) | length) == 0
+         or ((.briefing.questionIds | length) > (.briefing.answeredQuestionIds | length)))
+  ' >/dev/null 2>&1
+}
+
 # Small, deterministic classifier for questions that are plainly about the
 # harness rather than the user's software.  This is intentionally narrow: it
 # catches process language such as "organize tests in the repository" without
@@ -286,11 +337,13 @@ aegis_briefing_validate_json() {
           (if ((.questions // []) | length) > 3 then "too_many_questions" else empty end),
           (if ((.questions // []) | any(
                 (type != "object")
+                or ((.id // "") | type != "string" or length == 0)
                 or ((.question // "") | type != "string" or length == 0)
                 or (.scope != "DEMAND")
                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
                 or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
               )) then "bad_questions_shape" else empty end),
+          (if ((.questions // []) | map(.id) | unique | length) != ((.questions // []) | length) then "duplicate_question_id" else empty end),
           (if (.proofObligations | type) != "array" then "proofObligations_required" else empty end),
           (if ([.proofObligations[]? | select(.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT")] | length) == 0 then "contract_coverage_required" else empty end),
           (if ([.proofObligations[]? | select((.kind == "contract_coverage" or .oracle == "contract_coverage" or .domain == "CONTRACT") and .notApplicable != true)] | length) == 0 then "contract_coverage_cannot_be_not_applicable" else empty end),
@@ -317,6 +370,7 @@ aegis_briefing_validate_json() {
               )) then "bad_questions_shape" else empty end),
           (if ((.contractReconciliation.pendingQuestions // []) | any(
                 (type != "object")
+                or ((.id // "") | type != "string" or length == 0)
                 or ((.question // "") | type != "string" or length == 0)
                 or (.scope != "AEGIS_RECONCILIATION")
                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -426,6 +480,7 @@ aegis_briefing_validate_json() {
         (if ((.questions // []) | length) > 0
            and ((.questions // []) | any(
                  (type != "object")
+                 or ((.id // "") | type != "string" or length == 0)
                  or ((.question // "") | type != "string" or length == 0)
                  or (.scope != "DEMAND")
                  or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -433,9 +488,11 @@ aegis_briefing_validate_json() {
                ))
            then "bad_questions_shape" else empty end),
         (if ((.questions // []) | length) > 3 then "too_many_questions" else empty end),
+        (if ((.questions // []) | map(.id) | unique | length) != ((.questions // []) | length) then "duplicate_question_id" else empty end),
         (if ((.contractReconciliation.pendingQuestions // []) | length) > 0
            and ((.contractReconciliation.pendingQuestions // []) | any(
                  (type != "object")
+                 or ((.id // "") | type != "string" or length == 0)
                  or ((.question // "") | type != "string" or length == 0)
                  or (.scope != "AEGIS_RECONCILIATION")
                  or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -1149,6 +1206,7 @@ aegis_briefing_reconcile_ide_contract() {
 
   questions="$(printf '%s' "${comparison}" | jq -c '
     [{
+      id: "Q-RECONCILIATION-001",
       question: ("O contrato fornecido pelo IDE diverge da reconstrução independente do Aegis nos campos: " + ([.differences[]?.field] | join(", ")) + ". A execução será bloqueada até a divergência ser resolvida. Como deseja proceder?"),
       scope: "AEGIS_RECONCILIATION",
       options: [
@@ -1312,7 +1370,7 @@ The questions array is exclusively for decisions about the user's software deman
         current_user_prompt="${user_prompt}
 
 [QUALITY GATE FAILURE: QUESTION SCOPE OR COUNT]
-Your previous questions were invalid. Return at most 3 questions, each with scope=DEMAND, and keep them strictly about the user's product/domain behavior and architecture. Remove questions about Aegis, harness operation, test/repository organization, commits, runtime, providers, tokens, receipts, benchmarks as process, or evidence orchestration."
+Your previous questions were invalid. Return at most 3 questions, each with a unique stable id such as Q-DOMAIN-001, scope=DEMAND, and keep them strictly about the user's product/domain behavior and architecture. Remove questions about Aegis, harness operation, test/repository organization, commits, runtime, providers, tokens, receipts, benchmarks as process, or evidence orchestration."
       else
         current_user_prompt="${user_prompt}
 
@@ -1376,6 +1434,14 @@ aegis_briefing_generate() {
   [[ -n "${goal}" ]] || return 1
 
   if aegis_briefing_is_schema_json "${goal}"; then
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && [[ "${AEGIS_IDE_CONTRACT_RECONSTRUCTION:-1}" != "0" ]]; then
+      [[ -n "${AEGIS_EXPECTED_BRIEFING_DIGEST:-}" ]] \
+        && aegis_briefing_validate_handover "${goal}" "${AEGIS_EXPECTED_BRIEFING_DIGEST}" || {
+          printf 'briefing_provenance_invalid\n' >&2
+          return 1
+        }
+    fi
     # In IDE/agentic mode the supplied schema is the IDE's idealized proposal.
     # Keep the old direct-schema path available outside agentic execution, but
     # use an independent Aegis reconstruction before accepting an IDE contract.

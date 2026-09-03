@@ -32,6 +32,7 @@ ide_contract='{
   "invariants": [{"id": "INV-TIP", "predicate": "tip is canonical"}],
   "proofObligations": [{"id": "PO-TIP", "kind": "state", "oracle": "tip is canonical"}],
   "questions": [{
+    "id": "Q-DOMAIN-001",
     "question": "Should the engine expose the current canonical tip?",
     "scope": "DEMAND",
     "options": ["(Recommended) Expose the tip", "Keep the tip internal"],

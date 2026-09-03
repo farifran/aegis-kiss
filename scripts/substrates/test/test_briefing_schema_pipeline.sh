@@ -87,6 +87,7 @@ schema_with_questions='{
   "types": [],
   "questions": [
     {
+      "id": "Q-DOMAIN-001",
       "question": "Should capacity wrap around circularly or throw an error on overflow?",
       "scope": "DEMAND",
       "options": [
@@ -119,6 +120,30 @@ aegis_briefing_validate_json "${schema_with_questions}" || {
   echo "FAIL: aegis_briefing_validate_json rejected valid schema with questions" >&2
   exit 1
 }
+
+# The IDE handover must carry the digest issued by Aegis and stable question IDs.
+briefing_digest="$(aegis_briefing_protocol_digest "Create src/testRing.ts with TestRing" "src/testRing.ts src/index.ts" "fixture-evidence")"
+pending_handover="$(printf '%s' "${schema_with_questions}" | jq -c \
+  --arg digest "${briefing_digest}" \
+  '.briefing = {schema:"aegis.briefing.v1", source:".skills/briefing.md", digest:$digest, max_questions:3, question_scope:"DEMAND", questionIds:["Q-DOMAIN-001"], answeredQuestionIds:[]}')"
+aegis_briefing_validate_handover "${pending_handover}" "${briefing_digest}" || {
+  echo "FAIL: valid preliminary IDE handover was rejected" >&2
+  exit 1
+}
+final_handover="$(printf '%s' "${pending_handover}" | jq -c '.questions = [] | .briefing.answeredQuestionIds = ["Q-DOMAIN-001"]')"
+aegis_briefing_validate_handover "${final_handover}" "${briefing_digest}" || {
+  echo "FAIL: valid answered IDE handover was rejected" >&2
+  exit 1
+}
+if aegis_briefing_validate_handover "${final_handover}" "wrong-digest" 2>/dev/null; then
+  echo "FAIL: stale briefing digest was accepted" >&2
+  exit 1
+fi
+duplicate_question_id_schema="$(printf '%s' "${schema_with_questions}" | jq -c '.questions += [.questions[0]]')"
+if aegis_briefing_validate_json "${duplicate_question_id_schema}" 2>/dev/null; then
+  echo "FAIL: duplicate demand question ID was accepted" >&2
+  exit 1
+fi
 
 # Validate that bad questions shape is rejected
 bad_questions_schema='{
@@ -158,6 +183,7 @@ reconciliation_schema="$(printf '%s' "${schema_with_questions}" | jq -c \
   '.questions = [] | .contractReconciliation = {
     status: "divergent",
     pendingQuestions: [{
+      id: "Q-RECONCILIATION-001",
       question: "The IDE contract diverges from the independent reconstruction. What should happen?",
       scope: "AEGIS_RECONCILIATION",
       options: ["(Recommended) Resubmit the corrected contract", "Block and review"],
@@ -212,6 +238,18 @@ if ! grep -q 'questions_pending_user_input' aegis; then
 fi
 if ! grep -q 'contract_reconciliation_pending' aegis; then
   echo "FAIL: contract_reconciliation_pending gate missing in aegis" >&2
+  exit 1
+fi
+if ! grep -q 'perguntas.*demanda' AGENTS.md || ! grep -q 'Decisões internas do Aegis' AGENTS.md; then
+  echo "FAIL: IDE intake scope policy missing in AGENTS.md" >&2
+  exit 1
+fi
+if ! grep -q 'demanda bruta.*briefing preliminar.*perguntas da demanda.*contrato final' AGENTS.md; then
+  echo "FAIL: briefing-before-questions order missing in AGENTS.md" >&2
+  exit 1
+fi
+if ! grep -q 'briefing_provenance_invalid' aegis || ! grep -q 'PROTOCOLO OBRIGATÓRIO ANTES DAS PERGUNTAS' aegis; then
+  echo "FAIL: briefing provenance handover gate missing in aegis" >&2
   exit 1
 fi
 

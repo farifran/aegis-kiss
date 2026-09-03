@@ -5,10 +5,15 @@
 ---
 
 #### 1. ALINHAMENTO INTERATIVO DE AMBIGUIDADES (Discovery & Briefing Interativo)
-Ao receber uma nova demanda com pontos ambíguos, trade-offs arquiteturais ou requisitos subespecificados, o assistente **DEVE** acionar a ferramenta interativa `ask_question` antes da consolidação do contrato:
-* Formular perguntas objetivas de múltipla escolha.
-* Listar a opção ideal em primeiro lugar com o prefixo `(Recommended)`, permitindo ao usuário confirmar todas as recomendações de imediato com um único clique.
-* Incorporar as respostas no Contract IR e no design de invariantes.
+Antes de formular qualquer pergunta, o assistente **DEVE** carregar e seguir o briefing do projeto (`.skills/briefing.md`) ou um briefing preliminar emitido pelo Aegis. A sequência obrigatória é:
+
+`demanda bruta → briefing preliminar → perguntas da demanda → contrato final`.
+
+* O briefing é a fonte das perguntas; o assistente não pode inventar perguntas diretamente a partir da demanda bruta.
+* As perguntas devem ser objetivas, de múltipla escolha e limitadas às ambiguidades do comportamento, arquitetura, entradas, falhas, desempenho, concorrência ou persistência da demanda.
+* As respostas devem ser incorporadas ao Contract IR antes da execução.
+* Se o briefing não estiver disponível ou o contrato não referenciá-lo, a execução deve ser bloqueada.
+* Decisões internas do Aegis são resolvidas pelo harness e não aparecem como perguntas do produto.
 
 #### 2. CONTRATO → INVARIANTES → PROVAS (Requisitos Formais)
 Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/pós-condições estritas e propriedades invariantes que nunca podem ser violadas. Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.

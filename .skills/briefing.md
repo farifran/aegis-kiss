@@ -134,6 +134,15 @@ must never be merged into `questions`.
 ```json
 {
   "goal": "<One concise sentence naming the files to create and primary purpose>",
+  "briefing": {
+    "schema": "aegis.briefing.v1",
+    "source": ".skills/briefing.md",
+    "digest": "<digest supplied by Aegis for this demand and briefing policy>",
+    "max_questions": 3,
+    "question_scope": "DEMAND",
+    "questionIds": ["Q-DOMAIN-001"],
+    "answeredQuestionIds": ["Q-DOMAIN-001"]
+  },
   "targets": [
     "src/<domain>.ts",
     "src/index.ts"
@@ -210,6 +219,7 @@ must never be merged into `questions`.
   ],
   "questions": [
     {
+      "id": "Q-DOMAIN-001",
       "question": "Concise technical question or architectural decision?",
       "scope": "DEMAND",
       "options": [

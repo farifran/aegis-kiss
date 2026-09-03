@@ -967,12 +967,15 @@ emit_pending_assistant() {
 
   local context_json
   context_json="$(aegis_intake_discover_context "${target}")"
+  local briefing_digest
+  briefing_digest="$(aegis_briefing_protocol_digest "${goal}" "${target}" "${evidence}")"
 
   jq -cn \
     --arg schema "aegis.pending_assistant.v1" \
     --arg stage "intake" \
     --arg prose "${goal}" \
     --arg target "${target}" \
+    --arg briefing_digest "${briefing_digest}" \
     --argjson context "${context_json}" \
     --arg evidence "${evidence}" \
     '{
@@ -982,13 +985,26 @@ emit_pending_assistant() {
       target: $target,
       targets_evidence: $context.targets,
       pocket_map: $context.topology,
-      evidence: $evidence
+      evidence: $evidence,
+      briefing: {
+        schema: "aegis.briefing.v1",
+        source: ".skills/briefing.md",
+        digest: $briefing_digest,
+        max_questions: 3,
+        question_scope: "DEMAND",
+        protocol_stage: "briefing_before_questions"
+      }
     }' > "${pending_file}" 2>/dev/null || true
 
   printf '\n=== PENDING ASSISTANT (intake) ===\n'
   printf 'Prose recebida:\n%s\n\nTargets:\n%s\n\nEvidência estruturada (discovery & forensics):\n' \
     "${goal}" "${target}"
   jq '.targets_evidence' "${pending_file}" 2>/dev/null || printf '%b\n' "${evidence}"
+  printf '\nPROTOCOLO OBRIGATÓRIO ANTES DAS PERGUNTAS:\n'
+  printf '  1. Leia .skills/briefing.md e use-o como fonte das ambiguidades.\n'
+  printf '  2. Formule apenas perguntas sobre a demanda, com no máximo 3 itens e IDs estáveis.\n'
+  printf '  3. Só então apresente as perguntas ao usuário pelo mecanismo do IDE.\n'
+  printf '  4. Retorne o Contract IR com briefing.digest="%s", questionIds e answeredQuestionIds.\n' "${briefing_digest}"
   printf '\nDetalha a demanda como schema JSON (issue detalhada pelo agente) e retoma com:\n'
   printf '  ./aegis --resume --goal \x27<schema-json>\x27 --target \x27%s\x27\n' "${target}"
   emit_result_json "PENDING_ASSISTANT" "" "" "agentic_requires_schema_json"
@@ -1253,8 +1269,13 @@ cmd_run() {
     if [[ "${resume}" -eq 1 ]]; then
       local pending_file="${RUNTIME_DIR}/pending_assistant.json"
       local pending_stage=""
+      local pending_briefing_digest=""
+      local pending_target=""
+      local pending_computed_digest=""
       if [[ -f "${pending_file}" ]]; then
         pending_stage="$(jq -r '.stage // "intake"' "${pending_file}" 2>/dev/null || printf 'intake')"
+        pending_briefing_digest="$(jq -r '.briefing.digest // empty' "${pending_file}" 2>/dev/null || true)"
+        pending_target="$(jq -r '.target // empty' "${pending_file}" 2>/dev/null || true)"
         if [[ -z "${original_demand}" ]]; then
           original_demand="$(jq -r '.prose // empty' "${pending_file}" 2>/dev/null || true)"
         fi
@@ -1262,6 +1283,22 @@ cmd_run() {
       # Etapa 1/3 (intake): o assistente devolveu schema JSON e retoma do intake.
       if [[ "${pending_stage}" == "intake" || "${pending_stage}" == "" ]] && [[ -f "${pending_file}" ]]; then
         aegis_log "resume: a consumir estado pendente do intake..."
+        if aegis_briefing_is_schema_json "${goal}"; then
+          [[ -n "${pending_briefing_digest}" ]] \
+            || aegis_fatal "briefing_provenance_missing — o handover não contém o digest do briefing"
+          [[ -z "${target}" || "${target}" == "${pending_target}" ]] \
+            || aegis_fatal "briefing_provenance_invalid — o alvo do resume diverge do alvo do briefing"
+          pending_computed_digest="$(aegis_briefing_protocol_digest \
+            "$(jq -r '.prose // empty' "${pending_file}" 2>/dev/null || true)" \
+            "${pending_target}" \
+            "$(jq -r '.evidence // empty' "${pending_file}" 2>/dev/null || true)")"
+          [[ "${pending_briefing_digest}" == "${pending_computed_digest}" ]] \
+            || aegis_fatal "briefing_provenance_invalid — o digest persistido não corresponde à demanda, alvo, evidência e políticas atuais"
+          aegis_briefing_validate_handover "${goal}" "${pending_briefing_digest}" \
+            || aegis_fatal "briefing_provenance_invalid — o Contract IR não comprova briefing, IDs e respostas correspondentes"
+          export AEGIS_EXPECTED_BRIEFING_DIGEST="${pending_briefing_digest}"
+          aegis_log "resume: proveniência do briefing validada (digest + question IDs)"
+        fi
         if [[ -z "${target}" ]]; then
           target="$(jq -r '.target // empty' "${pending_file}" 2>/dev/null || true)"
           aegis_log "resume: target restaurado: ${target}"
