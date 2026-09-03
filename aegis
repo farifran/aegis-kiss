@@ -54,6 +54,14 @@ readonly DRAFT_FILE="${RUNTIME_DIR}/draft.md"
 readonly MICROS_DIR="${ROOT}/.harness/micros_auto"
 readonly MICROS_MANUAL_DIR="${ROOT}/.harness/micros"
 
+aegis_install_contract_evidence_hook() {
+  [[ -x "${ROOT}/.githooks/pre-commit" ]] || {
+    aegis_warn "hook de evidência ausente ou sem permissão de execução"
+    return 1
+  }
+  git config --local core.hooksPath .githooks
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -841,8 +849,7 @@ commit_unit_checkpoint() {
     return 1
   fi
 
-  if [[ -f "${ROOT}/.harness/proof_registry.json" ]] \
-    && ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json"; then
+  if ! bash "${ROOT}/scripts/contract_evidence_gate.sh" --staged; then
     aegis_warn "proof governance bloqueou o checkpoint ${task_label}"
     while IFS= read -r p; do
       [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
@@ -929,6 +936,13 @@ aegis_finalize_commit() {
   local outcome_file="${AEGIS_OUTCOME_FILE:-${runtime_dir}/last_outcome.json}"
   local metrics_file="${AEGIS_METRICS_FILE:-${runtime_dir}/pipeline_metrics.jsonl}"
   local final_receipt_file=""
+
+  if ! bash "${root}/scripts/contract_evidence_gate.sh"; then
+    aegis_warn "evidência contratual inválida após o commit — a demanda permanece aberta"
+    emit_result_json "UNPROVEN" "${issue}" "${commit}" "post_commit_contract_evidence" \
+      "${runtime_dir}/final_receipt.json"
+    return 1
+  fi
 
   if ! final_receipt_file="$(
     AEGIS_ROOT_DIR="${root}" AEGIS_RUNTIME_DIR="${runtime_dir}" \
@@ -2086,7 +2100,7 @@ EOF
       squash_msg="${COMMIT_MSG_FILE}.batch-squash"
       aegis_record_render_message "${issue}" "${squash_summary}" "${squash_accept}" \
         "1/${unit_total}" > "${squash_msg}"
-      if ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json" >/dev/null 2>&1; then
+      if ! bash "${ROOT}/scripts/contract_evidence_gate.sh" --staged >/dev/null 2>&1; then
         aegis_warn "auto-squash bloqueado: proof governance — commits por unit mantêm-se"
       # Soft-reset unit checkpoints only after governance accepts the promotion.
       elif git reset --soft "${batch_start_commit}" >/dev/null 2>&1 \
@@ -2181,8 +2195,7 @@ EOF
   # Governance is an admission gate, not a post-hoc report. Validate before
   # either the interactive gate or the no-TTY handover can authorize this
   # staged promotion.
-  if [[ -f "${ROOT}/.harness/proof_registry.json" ]] \
-    && ! aegis_proof_governance_validate "${ROOT}/.harness/proof_registry.json" "${ROOT}/.harness/active_contract_ir.json"; then
+  if ! bash "${ROOT}/scripts/contract_evidence_gate.sh" --staged; then
     aegis_warn "proof governance bloqueou o commit da issue ${issue}"
     while IFS= read -r p; do
       [[ -n "${p}" ]] && git reset --quiet HEAD -- "${p}" 2>/dev/null || true
@@ -2706,6 +2719,7 @@ cmd_proofs() {
 
 main() {
   local verb="${1:-}"
+  aegis_install_contract_evidence_hook || exit 1
   case "${verb}" in
     --agent|--agentic|--assistant)
       export AEGIS_AGENTIC=1

@@ -23,6 +23,43 @@ aegis_proof_contract_path() {
   printf '%s' "${AEGIS_PROOF_CONTRACT_FILE:-${AEGIS_ROOT_DIR:-.}/.harness/active_contract_ir.json}"
 }
 
+aegis_proof_safe_repository_path() {
+  local path="${1:-}"
+  [[ -n "${path}" && "${path}" != /* && ! "${path}" =~ (^|/)\.\.(/|$) ]]
+}
+
+# A proof command is part of its definition, not an opaque string.  We do not
+# execute it here; this merely proves that the staged/working tree can resolve
+# the declared entry point before a commit is allowed to claim the proof.
+aegis_proof_commands_resolve() {
+  local registry_file="${1:-}"
+  local root_dir="${2:-.}"
+  local command_string command_name command_path
+
+  while IFS= read -r command_string; do
+    [[ -n "${command_string}" ]] || continue
+    if [[ "${command_string}" =~ ^npm[[:space:]]+run[[:space:]]+([A-Za-z0-9:_-]+)$ ]]; then
+      command_name="${BASH_REMATCH[1]}"
+      jq -e --arg name "${command_name}" \
+        '(.scripts[$name] | type == "string" and length > 0)' \
+        "${root_dir}/package.json" >/dev/null 2>&1 || {
+          echo "[AEGIS][PROOF][FATAL] unresolved_npm_proof_command:${command_name}" >&2
+          return 1
+        }
+    elif [[ "${command_string}" =~ ^bash[[:space:]]+([A-Za-z0-9_./-]+)$ ]]; then
+      command_path="${BASH_REMATCH[1]}"
+      aegis_proof_safe_repository_path "${command_path}" \
+        && [[ -f "${root_dir}/${command_path}" ]] || {
+          echo "[AEGIS][PROOF][FATAL] unresolved_bash_proof_command:${command_path}" >&2
+          return 1
+        }
+    else
+      echo "[AEGIS][PROOF][FATAL] untrusted_proof_command" >&2
+      return 1
+    fi
+  done < <(jq -r '.proofs[] | select(.status != "retired") | .command' "${registry_file}")
+}
+
 aegis_proof_governance_validate() {
   local registry_file="${1:-$(aegis_proof_registry_path)}"
   local contract_file="${2:-$(aegis_proof_contract_path)}"
@@ -59,6 +96,8 @@ aegis_proof_governance_validate() {
     echo "[AEGIS][PROOF][FATAL] malformed_registry" >&2
     return 1
   }
+
+  aegis_proof_commands_resolve "${registry_file}" "${root_dir}" || return 1
 
   duplicate_ids="$(jq -r '[.proofs[].id] | group_by(.)[] | select(length > 1) | .[0]' "${registry_file}")"
   [[ -z "${duplicate_ids}" ]] || { echo "[AEGIS][PROOF][FATAL] duplicate_proof_id:${duplicate_ids}" >&2; return 1; }
@@ -114,6 +153,90 @@ aegis_proof_governance_validate() {
   }
 
   echo "[AEGIS][PROOF] governance: PASS"
+}
+
+# Validates the exact tree in Git's index.  This closes the gap where an agent
+# runs checks against the working tree and then stages a deletion before a
+# direct `git commit`.  Only declared contract/proof files plus command entry
+# points are materialized in a temporary tree; no source is changed.
+aegis_proof_materialize_staged_path() {
+  local repository_root="${1:-}"
+  local staged_root="${2:-}"
+  local target="${3:-}"
+  local staged_file
+
+  aegis_proof_safe_repository_path "${target}" || return 1
+  if git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null; then
+    mkdir -p "${staged_root}/$(dirname "${target}")"
+    git -C "${repository_root}" show ":${target}" > "${staged_root}/${target}"
+    return 0
+  fi
+
+  staged_file="$(git -C "${repository_root}" ls-files --cached -- "${target}" | head -1)"
+  [[ -n "${staged_file}" ]] || return 1
+  while IFS= read -r staged_file; do
+    [[ -n "${staged_file}" ]] || continue
+    mkdir -p "${staged_root}/$(dirname "${staged_file}")"
+    git -C "${repository_root}" show ":${staged_file}" > "${staged_root}/${staged_file}"
+  done < <(git -C "${repository_root}" ls-files --cached -- "${target}")
+}
+
+aegis_proof_governance_validate_staged() {
+  local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
+  local staged_root registry_file contract_file target command_path rc=0
+
+  git -C "${repository_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "[AEGIS][PROOF][FATAL] staged_validation_requires_git_repository" >&2
+    return 1
+  }
+  for target in .harness/proof_registry.json .harness/active_contract_ir.json; do
+    git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || {
+      echo "[AEGIS][PROOF][FATAL] staged_metadata_missing:${target}" >&2
+      return 1
+    }
+  done
+
+  staged_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-staged-proof.XXXXXX")" || return 1
+  registry_file="${staged_root}/.harness/proof_registry.json"
+  contract_file="${staged_root}/.harness/active_contract_ir.json"
+  mkdir -p "${staged_root}/.harness"
+  git -C "${repository_root}" show :.harness/proof_registry.json > "${registry_file}"
+  git -C "${repository_root}" show :.harness/active_contract_ir.json > "${contract_file}"
+
+  while IFS= read -r target; do
+    [[ -n "${target}" ]] || continue
+    if ! aegis_proof_materialize_staged_path "${repository_root}" "${staged_root}" "${target}"; then
+      echo "[AEGIS][PROOF][FATAL] staged_target_missing:${target}" >&2
+      rc=1
+      break
+    fi
+  done < <(
+    jq -r '(.targets[]? // empty), (.proofs[]? | select(.status != "retired") | .targets[]?)' \
+      "${contract_file}" "${registry_file}" | sort -u
+  )
+
+  if [[ "${rc}" -eq 0 ]]; then
+    if git -C "${repository_root}" cat-file -e :package.json 2>/dev/null; then
+      git -C "${repository_root}" show :package.json > "${staged_root}/package.json"
+    fi
+    while IFS= read -r command_path; do
+      [[ -n "${command_path}" ]] || continue
+      if ! aegis_proof_safe_repository_path "${command_path}" \
+        || ! git -C "${repository_root}" cat-file -e ":${command_path}" 2>/dev/null; then
+        echo "[AEGIS][PROOF][FATAL] staged_command_target_missing:${command_path}" >&2
+        rc=1
+        break
+      fi
+      mkdir -p "${staged_root}/$(dirname "${command_path}")"
+      git -C "${repository_root}" show ":${command_path}" > "${staged_root}/${command_path}"
+    done < <(jq -r '.proofs[] | select(.status != "retired") | .command | select(startswith("bash ")) | ltrimstr("bash ")' "${registry_file}")
+  fi
+
+  if [[ "${rc}" -eq 0 ]]; then
+    AEGIS_ROOT_DIR="${staged_root}" aegis_proof_governance_validate "${registry_file}" "${contract_file}" >/dev/null || rc=1
+  fi
+  rm -rf "${staged_root}"
+  return "${rc}"
 }
 
 aegis_proof_profile_plan() {
