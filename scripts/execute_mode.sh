@@ -854,6 +854,11 @@ execute_substrate() {
         raw_model="${OPENAI_MODEL_OPTIMIZE:-${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}}"
       elif [[ "${AEGIS_MODE}" == "adversarial" ]]; then
         raw_model="${OPENAI_MODEL_ADVERSARIAL:-${AEGIS_SUPERVISOR_MODEL:-z-ai/glm-5.2}}"
+      elif [[ "${AEGIS_MODE}" == "validation" ]]; then
+        raw_model="${AEGIS_VALIDATION_MODEL:-}"
+        [[ -n "${raw_model}" ]] || aegis_fatal "validation_model_required_for_independent_llm"
+        [[ "${raw_model}" != "${AEGIS_AIDER_MODEL:-}" && "${raw_model}" != "${AEGIS_MUTATION_MODEL:-}" ]] \
+          || aegis_fatal "validation_model_must_differ_from_mutation_model"
       fi
       substrate_output="$(
         invoke_raw_substrate \

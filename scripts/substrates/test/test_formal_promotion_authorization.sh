@@ -14,10 +14,22 @@ test_cleanup_extra() {
 mkdir -p "${repo}/src" "${repo}/.harness"
 printf 'export const version = 1;\n' > "${repo}/src/index.ts"
 cat > "${repo}/.harness/active_contract_ir.json" <<'EOF'
-{"targets":["src"]}
+{"targets":["src"],"proofObligations":[{"id":"PO-FIXTURE-001"}]}
 EOF
 cat > "${repo}/.harness/proof_registry.json" <<'EOF'
-{"proofs":[{"status":"active","targets":["src"]}]}
+{
+  "schema":"aegis.proof_registry.v1",
+  "policy":{"mode":"enforced","maxActiveProofsPerProfile":{"fast":1}},
+  "profiles":[{"id":"fast","proofIds":["PO-FIXTURE-001"]}],
+  "proofs":[{
+    "id":"PO-FIXTURE-001","risk":"fixture risk","coverageKey":"fixture.coverage",
+    "authority":"fixture","cost":"low","cadence":"always","status":"active",
+    "targets":["src"],"executionKey":"fixture-proof","command":"npm run fixture-proof"
+  }]
+}
+EOF
+cat > "${repo}/package.json" <<'EOF'
+{"scripts":{"fixture-proof":"node -e \"process.exit(0)\""}}
 EOF
 git -C "${repo}" init -q
 git -C "${repo}" add .
@@ -27,6 +39,13 @@ printf 'export const version = 2;\n' > "${repo}/src/index.ts"
 jq -n '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:["src/index.ts"]}}' > "${artifact}"
 
 bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}"
+receipt="$(git -C "${repo}" rev-parse --git-path aegis/precommit_receipt.json)"
+jq -e '
+  .schema == "aegis.precommit_receipt.v1"
+  and .status == "PROVEN"
+  and .proofProfile == "fast"
+  and .validationAuthority.kind == "deterministic_tribunal"
+' "${receipt}" >/dev/null
 git -C "${repo}" add src/index.ts
 bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" requires "${repo}"
 bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" verify "${repo}"
@@ -36,5 +55,18 @@ git -C "${repo}" add src/index.ts
 if bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" verify "${repo}" >/dev/null 2>&1; then
   fail "changed_staged_content_was_authorized"
 fi
+
+# A model validator may supplement the tribunal, but it cannot be the same
+# identity as the mutation model.
+if AEGIS_VALIDATION_LLM=1 AEGIS_VALIDATION_MODEL="model-a" AEGIS_AIDER_MODEL="model-a" \
+  bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}" >/dev/null 2>&1; then
+  fail "self_validating_model_was_accepted"
+fi
+
+# The receipt is a commit-boundary control, not a source-directory heuristic.
+# Moving orchestration logic outside src must not create a bypass.
+printf 'evidence\n' > "${repo}/README.md"
+git -C "${repo}" add README.md
+bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" requires "${repo}"
 
 echo "[PASS] formal promotion authorization"

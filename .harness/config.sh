@@ -237,6 +237,10 @@ export AEGIS_ADVERSARIAL_DEPTH
 # Validation is a deterministic tribunal (enrich + alignment). Default
 # skips the raw LLM; set AEGIS_VALIDATION_LLM=1 only for residual/debug.
 : "${AEGIS_VALIDATION_LLM:=0}"
+# An optional model validator must be independently named. It never defaults
+# to the mutation model: an empty value is a hard failure when the LLM path is
+# requested, rather than silently letting an author review itself.
+: "${AEGIS_VALIDATION_MODEL:=${OPENAI_MODEL_VALIDATION:-}}"
 
 export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
@@ -245,6 +249,7 @@ export AEGIS_PROVIDER_RESPONSE_TIMEOUT
 export AEGIS_MAX_MUTATION_ATTEMPTS
 export AEGIS_MUTATION_FEEDBACK_LOOP
 export AEGIS_VALIDATION_LLM
+export AEGIS_VALIDATION_MODEL
 
 # =========================================================
 # CLEANUP POLICY

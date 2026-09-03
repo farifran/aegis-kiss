@@ -125,6 +125,13 @@ fi
 plan="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_plan fast "${valid_registry}")"
 jq -e '.profile == "fast" and .count == 3 and ([.proofs[].id] | length == 3)' <<<"${plan}" >/dev/null
 
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'src/stateWal.ts')"
+jq -e '.profile == "release" and ([.matchedProofs[].id] | index("PO-WAL-001"))' <<<"${auto_profile}" >/dev/null
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'src/benchmarks/reorgEngine.benchmark.ts')"
+jq -e '.profile == "forensic" and ([.matchedProofs[].id] | index("PO-BENCHMARK-001"))' <<<"${auto_profile}" >/dev/null
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'.harness/active_contract_ir.json')"
+jq -e '.profile == "release"' <<<"${auto_profile}" >/dev/null
+
 key="$(AEGIS_ROOT_DIR="${ROOT_DIR}" AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_key PO-TYPE-001 fast "${valid_contract}" "${valid_registry}" "src/reorgEngine.ts")"
 AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_store "${key}" PO-TYPE-001 PROVEN compiler >/dev/null
 AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_lookup "${key}"

@@ -66,7 +66,9 @@ validation_mechanical_path_ok() {
     && grep -Eq 'aegis_emit_mechanical_validation_substrate' scripts/execute_mode.sh \
     && grep -Eq 'AEGIS_JQ_ENRICH_VALIDATION' scripts/lib/artifact_protocol.sh \
     && grep -Eq 'aegis_candidate_alignment_gate' scripts/lib/*.sh \
-    && grep -Eq 'AEGIS_VALIDATION_LLM' .harness/config.sh
+    && grep -Eq 'AEGIS_VALIDATION_LLM' .harness/config.sh \
+    && grep -Eq 'AEGIS_VALIDATION_MODEL' .harness/config.sh \
+    && grep -Eq 'validation_model_must_differ_from_mutation_model' scripts/execute_mode.sh
 }
 
 # Mutation target resolution lives in the aider module split (targets.sh),

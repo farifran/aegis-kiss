@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${AEGIS_ROOT_DIR:-${SCRIPT_ROOT}}"
 cd "${ROOT_DIR}"
 # shellcheck disable=SC1091
-source scripts/lib/proof_governance.sh
+source "${SCRIPT_ROOT}/scripts/lib/proof_governance.sh"
 
 profile="fast"
 changed=""
@@ -13,7 +14,7 @@ while [[ $# -gt 0 ]]; do
     --profile) profile="${2:-}"; shift 2 ;;
     --changed) changed="${2:-}"; shift 2 ;;
     -h|--help)
-      printf 'Uso: ./scripts/proof_runner.sh [--profile fast|targeted|release|forensic] [--changed "arquivo\\n..."]\n'
+      printf 'Uso: ./scripts/proof_runner.sh [--profile auto|fast|targeted|release|forensic] [--changed "arquivo\\n..."]\n'
       exit 0
       ;;
     *)
@@ -24,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  fast|targeted|release|forensic) ;;
+  auto|fast|targeted|release|forensic) ;;
   *) echo "[AEGIS][PROOF][FATAL] unknown_proof_profile:${profile}" >&2; exit 1 ;;
 esac
 
@@ -34,6 +35,16 @@ AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate \
 
 if [[ -z "${changed}" ]]; then
   changed="$(git status --porcelain --untracked-files=all | cut -c4- | grep -v '^$' || true)"
+fi
+
+if [[ "${profile}" == "auto" ]]; then
+  profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change \
+    "$(aegis_proof_registry_path)" "${changed}" | jq -r '.profile')"
+  case "${profile}" in
+    fast|targeted|release|forensic) ;;
+    *) echo "[AEGIS][PROOF][FATAL] automatic_profile_resolution_failed" >&2; exit 1 ;;
+  esac
+  printf '%s\n' "[AEGIS][PROOF] selected profile=${profile} from diff"
 fi
 
 plan="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_plan "${profile}" \

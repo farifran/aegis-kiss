@@ -82,6 +82,7 @@ aegis_proof_governance_validate() {
       and (.authority | type == "string" and length > 0)
       and (.cost | IN("low", "medium", "high"))
       and (.cadence | IN("always", "targeted", "release", "forensic"))
+      and (if has("minimumProfile") then (.minimumProfile | IN("fast", "targeted", "release", "forensic")) else true end)
       and (.status | IN("experimental", "active", "retired"))
       and (.targets | type == "array" and length > 0)
       and (.executionKey | type == "string" and test("^[a-z0-9][a-z0-9_-]+$"))
@@ -360,6 +361,46 @@ aegis_proof_profile_plan() {
          then any($proof.targets[]; ($changed | split("\n")) | index(.) != null)
          else true end)}
     ] | {profile:$profile, proofs:map(select(.selected)), count:(map(select(.selected)) | length)}
+  ' "${registry_file}"
+}
+
+# Selects the smallest sufficient profile from the files that actually changed.
+# The mapping is declared by each proof's cadence/cost, never inferred from a
+# domain keyword. This keeps the harness universal: a project says which risk
+# lives behind each target; Aegis merely composes the required evidence.
+aegis_proof_profile_for_change() {
+  local registry_file="${1:-$(aegis_proof_registry_path)}"
+  local changed_files="${2:-}"
+  [[ -s "${registry_file}" ]] || return 1
+
+  jq -c --arg changed "${changed_files}" '
+    def rank($profile):
+      if $profile == "fast" then 0
+      elif $profile == "targeted" then 1
+      elif $profile == "release" then 2
+      else 3 end;
+    def profile_for_proof:
+      if .minimumProfile? != null then .minimumProfile
+      elif .cadence == "forensic" then "forensic"
+      elif .cadence == "release" or .cost == "high" then "release"
+      elif .cadence == "targeted" or .cost == "medium" then "targeted"
+      else "fast" end;
+    ($changed | split("\n") | map(select(length > 0)) | unique) as $files |
+    [ .proofs[]
+      | select(.status != "retired")
+      | . as $proof
+      | select(any($proof.targets[] as $target | $files[]? as $file |
+          $file == $target
+          or ($file | startswith($target + "/"))
+          or ($target | startswith($file + "/"))))
+      | {id, targets, requiredProfile: profile_for_proof}
+    ] as $matched |
+    (if any($files[]?; . == ".harness/active_contract_ir.json" or . == ".harness/proof_registry.json")
+      then "release"
+      elif ($matched | length) == 0 then "fast"
+      else ($matched | max_by(rank(.requiredProfile)) | .requiredProfile)
+     end) as $profile |
+    {profile:$profile, matchedProofs:$matched, changedFiles:$files}
   ' "${registry_file}"
 }
 
