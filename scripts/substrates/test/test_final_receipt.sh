@@ -9,6 +9,7 @@ cd "${ROOT_DIR}"
 
 source scripts/lib/briefing.sh
 source scripts/lib/final_receipt.sh
+source "${ROOT_DIR}/aegis"
 
 repo_dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_receipt_repo.XXXXXX")"
 runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_receipt_runtime.XXXXXX")"
@@ -66,18 +67,51 @@ jq -e '
   and .proofs.invariant_status == "not_applicable"
 ' "${receipt}" >/dev/null
 
+gh_calls="${runtime_dir}/gh.calls"
+gh_run() {
+  printf '%s\n' "$*" >> "${gh_calls}"
+  return 0
+}
+
+verified_result="$(
+  AEGIS_ROOT_DIR="${repo_dir}" \
+  AEGIS_RUNTIME_DIR="${runtime_dir}" \
+  AEGIS_CONTRACT_FILE="${repo_dir}/.harness/active_contract_ir.json" \
+  AEGIS_HANDOVER_FILE="${runtime_dir}/epistemic_handover.json" \
+  AEGIS_OUTCOME_FILE="${runtime_dir}/last_outcome.json" \
+  AEGIS_METRICS_FILE="${runtime_dir}/pipeline_metrics.jsonl" \
+    aegis_finalize_commit "${commit}" "test" "src/feature.ts" "src/feature.ts"
+)"
+printf '%s' "${verified_result}" | jq -e \
+  '.status == "SUCCESS" and .commit == "'"${commit}"'"' >/dev/null
+[[ "$(grep -c '^issue close ' "${gh_calls}" || true)" -eq 1 ]] \
+  || fail "verified finalization did not close the issue exactly once"
+
 jq '.contractReconciliation.equivalent = false' \
   "${repo_dir}/.harness/active_contract_ir.json" > "${repo_dir}/.harness/active_contract_ir.next"
 mv "${repo_dir}/.harness/active_contract_ir.next" "${repo_dir}/.harness/active_contract_ir.json"
-aegis_write_final_receipt "${commit}" "test" "src/feature.ts" \
-  "${repo_dir}/.harness/active_contract_ir.json" \
-  "${runtime_dir}/epistemic_handover.json" \
-  "${runtime_dir}/last_outcome.json" "${runtime_dir}/pipeline_metrics.jsonl" >/dev/null
+set +e
+unproven_result="$(
+  AEGIS_ROOT_DIR="${repo_dir}" \
+  AEGIS_RUNTIME_DIR="${runtime_dir}" \
+  AEGIS_CONTRACT_FILE="${repo_dir}/.harness/active_contract_ir.json" \
+  AEGIS_HANDOVER_FILE="${runtime_dir}/epistemic_handover.json" \
+  AEGIS_OUTCOME_FILE="${runtime_dir}/last_outcome.json" \
+  AEGIS_METRICS_FILE="${runtime_dir}/pipeline_metrics.jsonl" \
+    aegis_finalize_commit "${commit}" "test" "src/feature.ts" "src/feature.ts"
+)"
+unproven_rc=$?
+set -e
+[[ "${unproven_rc}" -ne 0 ]] || fail "unproven finalization unexpectedly succeeded"
+printf '%s' "${unproven_result}" | jq -e \
+  '.status == "UNPROVEN" and .reason == "post_commit_validation"' >/dev/null
 jq -e '.verification_status == "UNPROVEN" and .verified == false' "${receipt}" >/dev/null
 if aegis_final_receipt_assert_verified "${receipt}"; then
   echo "[AEGIS][TEST][FAIL] unproven receipt was accepted" >&2
   exit 1
 fi
+[[ "$(grep -c '^issue close ' "${gh_calls}" || true)" -eq 1 ]] \
+  || fail "unproven finalization closed the issue"
 
 git -C "${repo_dir}" rm --cached -q .harness/active_contract_ir.json
 git -C "${repo_dir}" commit -qm "commit without contract"

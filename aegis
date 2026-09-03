@@ -912,6 +912,51 @@ emit_result_json() {
     '{schema:"aegis.go.v1",status:$status,issue:$issue,commit:$commit,reason:$reason,receipt:(if $receipt == "" then null else $receipt end)}'
 }
 
+# The only promotion path: a commit may close its issue only after the final
+# receipt has independently proved the committed contract, targets, patch,
+# scope and clean post-commit tree. Environment overrides keep this function
+# deterministic and directly testable in an isolated repository.
+aegis_finalize_commit() {
+  local commit="${1-}"
+  local issue="${2-}"
+  local target="${3-}"
+  local paths="${4-}"
+  local batch_total="${5-}"
+  local root="${AEGIS_ROOT_DIR:-${ROOT}}"
+  local runtime_dir="${AEGIS_RUNTIME_DIR:-${RUNTIME_DIR}}"
+  local contract_file="${AEGIS_CONTRACT_FILE:-${root}/.harness/active_contract_ir.json}"
+  local handover_file="${AEGIS_HANDOVER_FILE:-${runtime_dir}/epistemic_handover.json}"
+  local outcome_file="${AEGIS_OUTCOME_FILE:-${runtime_dir}/last_outcome.json}"
+  local metrics_file="${AEGIS_METRICS_FILE:-${runtime_dir}/pipeline_metrics.jsonl}"
+  local final_receipt_file=""
+
+  if ! final_receipt_file="$(
+    AEGIS_ROOT_DIR="${root}" AEGIS_RUNTIME_DIR="${runtime_dir}" \
+      aegis_write_final_receipt "${commit}" "${issue}" "${target}" \
+        "${contract_file}" "${handover_file}" "${outcome_file}" "${metrics_file}"
+  )" || ! aegis_final_receipt_assert_verified "${final_receipt_file}"; then
+    aegis_warn "pós-commit não verificável — a demanda permanece aberta"
+    emit_result_json "UNPROVEN" "${issue}" "${commit}" "post_commit_validation" \
+      "${runtime_dir}/final_receipt.json"
+    return 1
+  fi
+
+  if [[ -n "${batch_total}" ]]; then
+    gh_run issue close "${issue}" --comment "$(
+      printf '### AEGIS OUTCOME\n- status: SUCCESS\n- batch: %s/%s tasks\n- last_commit: `%s`\n' \
+        "${batch_total}" "${batch_total}" "${commit}"
+    )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
+  else
+    gh_run issue close "${issue}" --comment "$(
+      printf '### AEGIS OUTCOME\n- status: SUCCESS\n- commit: `%s`\n- paths: %s\n' \
+        "${commit}" "$(printf '%s' "${paths}" | tr '\n' ' ')"
+    )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
+  fi
+
+  emit_result_json "SUCCESS" "${issue}" "${commit}" "" \
+    "${runtime_dir}/final_receipt.json"
+}
+
 # Etapa 1/3 — pausa de intake agêntico. Entrega a evidência real (discovery &
 # forensics) ao assistente e pede a demanda como schema JSON. Persiste o
 # estado pendente para --resume consumir. Não é um erro: é handover.
@@ -1996,27 +2041,12 @@ EOF
 
   fi
 
-  local final_receipt_file=""
-  if ! final_receipt_file="$(aegis_write_final_receipt "${last_commit}" "${issue}" "${target}" \
-    "${ROOT}/.harness/active_contract_ir.json" \
-    "${RUNTIME_DIR}/epistemic_handover.json" \
-    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl")" \
-    || ! aegis_final_receipt_assert_verified "${final_receipt_file}"; then
-    aegis_warn "pós-commit não verificável — a demanda permanece aberta"
-    emit_result_json "UNPROVEN" "${issue}" "${last_commit}" "post_commit_validation" "${RUNTIME_DIR}/final_receipt.json"
-    return 1
-  fi
+    aegis_finalize_commit "${last_commit}" "${issue}" "${target}" "" "${unit_total}" \
+      || return 1
 
     # Ephemeral -F inputs (unit-* / batch-squash); never leave as repo litter.
     rm -f "${COMMIT_MSG_FILE}".unit-* "${COMMIT_MSG_FILE}.batch-squash" 2>/dev/null || true
     rm -rf "${micros_dir}" >/dev/null 2>&1 || true
-
-    gh_run issue close "${issue}" --comment "$(
-      printf '### AEGIS OUTCOME\n- status: SUCCESS\n- batch: %s/%s tasks\n- last_commit: `%s`\n' \
-        "${unit_total}" "${unit_total}" "${last_commit}"
-    )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
-
-    emit_result_json "SUCCESS" "${issue}" "${last_commit}" "" "${RUNTIME_DIR}/final_receipt.json"
     return 0
   fi
 
@@ -2139,26 +2169,11 @@ EOF
   committed="$(git rev-parse --short HEAD)"
   aegis_log "commit ${committed}"
 
-  local final_receipt_file=""
-  if ! final_receipt_file="$(aegis_write_final_receipt "${committed}" "${issue}" "${target}" \
-    "${ROOT}/.harness/active_contract_ir.json" \
-    "${RUNTIME_DIR}/epistemic_handover.json" \
-    "${OUTCOME_FILE}" "${RUNTIME_DIR}/pipeline_metrics.jsonl")" \
-    || ! aegis_final_receipt_assert_verified "${final_receipt_file}"; then
-    aegis_warn "pós-commit não verificável — a demanda permanece aberta"
-    emit_result_json "UNPROVEN" "${issue}" "${committed}" "post_commit_validation" "${RUNTIME_DIR}/final_receipt.json"
-    return 1
-  fi
-
-  gh_run issue close "${issue}" --comment "$(
-    printf '### AEGIS OUTCOME\n- status: SUCCESS\n- commit: `%s`\n- paths: %s\n' \
-      "${committed}" "$(printf '%s' "${paths}" | tr '\n' ' ')"
-  )" >/dev/null 2>&1 || aegis_warn "issue #${issue} não fechada (gh falhou)"
+  aegis_finalize_commit "${committed}" "${issue}" "${target}" "${paths}" \
+    || return 1
 
   # Clean transient micro plan files upon success
   clear_micro_plan_cache
-
-  emit_result_json "SUCCESS" "${issue}" "${committed}" "" "${RUNTIME_DIR}/final_receipt.json"
 }
 
 cmd_split() {
