@@ -114,6 +114,23 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 
 ## 📋 Universal Contract IR Output Schema
 
+### Question scope
+
+The `questions` array belongs exclusively to the software demand. Every question
+there must clarify product or domain behavior, architecture, inputs, failure
+policy, performance, concurrency, persistence, or another user-visible design
+decision required by the demand.
+
+Do not put Aegis-process questions in `questions`: model/provider selection,
+token budgets, runtime directories, receipts, commits, harness gates,
+benchmarks, or evidence orchestration are not demand questions.
+
+When the IDE contract is compared with an independent Aegis reconstruction,
+reconciliation questions belong only in
+`contractReconciliation.pendingQuestions`, with `scope` equal to
+`AEGIS_RECONCILIATION`. Those questions are a separate blocking protocol and
+must never be merged into `questions`.
+
 ```json
 {
   "goal": "<One concise sentence naming the files to create and primary purpose>",
@@ -194,6 +211,7 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
   "questions": [
     {
       "question": "Concise technical question or architectural decision?",
+      "scope": "DEMAND",
       "options": [
         "(Recommended) Default decision",
         "Alternative option"

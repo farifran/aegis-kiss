@@ -269,7 +269,21 @@ aegis_briefing_validate_json() {
           (.operations[]? as $op | if (($op.composition | type) == "object" and ($op.composition.sharedResources | type) == "array") and ($op.composition.sharedResources | any(type != "object" or (.resource | type) != "string" or (.rule | type) != "string")) then "composition_rule_incomplete:\($op.id)" else empty end),
           (.operations[]? as $op | if (($op.transaction | type) == "object") and (($op.transaction.atomic | type) != "boolean" or ($op.transaction.phases | type) != "array" or ($op.transaction.phases | length) == 0) then "transaction_machine_incomplete:\($op.id)" else empty end),
           (.operations[]? as $op | if (($op.transaction.requiredEffects | type) == "array" and ($op.transaction.requiredEffects | length) > 0) then ([.proofObligations[]? | select(.target == $op.target and .domain == "COMMIT")] | if length == 0 or (.[0].requiredEffects | type) != "array" or (.[0].requiredEffects | length) != ($op.transaction.requiredEffects | length) or (($op.transaction.requiredEffects - .[0].requiredEffects) | length) > 0 then "commit_effects_not_explicit:\($op.id)" else empty end) else empty end),
-          (.operations[]? as $op | ((if ($op.lifecycle | type) == "array" then $op.lifecycle elif ($op.lifecycle | present) then [$op.lifecycle] else [] end)[]? as $life | if (($life | type) != "object" or ($life.state | type) != "string" or ($life.scope | type) != "string" or (["CALL","BATCH","TRANSACTION","CYCLE","SESSION","INSTANCE","PROCESS","PERSISTENT"] | index($life.scope)) == null) then "lifecycle_scope_incomplete:\($op.id)" else empty end))
+          (.operations[]? as $op | ((if ($op.lifecycle | type) == "array" then $op.lifecycle elif ($op.lifecycle | present) then [$op.lifecycle] else [] end)[]? as $life | if (($life | type) != "object" or ($life.state | type) != "string" or ($life.scope | type) != "string" or (["CALL","BATCH","TRANSACTION","CYCLE","SESSION","INSTANCE","PROCESS","PERSISTENT"] | index($life.scope)) == null) then "lifecycle_scope_incomplete:\($op.id)" else empty end)),
+          (if ((.questions // []) | any(
+                (type != "object")
+                or ((.question // "") | type != "string" or length == 0)
+                or (.scope? != null and .scope != "DEMAND")
+                or (((.options // []) | if type == "array" then . else [] end) | length < 2)
+                or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+              )) then "bad_questions_shape" else empty end),
+          (if ((.contractReconciliation.pendingQuestions // []) | any(
+                (type != "object")
+                or ((.question // "") | type != "string" or length == 0)
+                or (.scope != "AEGIS_RECONCILIATION")
+                or (((.options // []) | if type == "array" then . else [] end) | length < 2)
+                or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+              )) then "bad_reconciliation_questions_shape" else empty end)
         ] | map(select(type == "string")) | first // ""
       ' 2>/dev/null || true
     )"
@@ -370,10 +384,20 @@ aegis_briefing_validate_json() {
            and ((.questions // []) | any(
                  (type != "object")
                  or ((.question // "") | type != "string" or length == 0)
+                 or (.scope? != null and .scope != "DEMAND")
                  or (((.options // []) | if type == "array" then . else [] end) | length < 2)
                  or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
                ))
            then "bad_questions_shape" else empty end),
+        (if ((.contractReconciliation.pendingQuestions // []) | length) > 0
+           and ((.contractReconciliation.pendingQuestions // []) | any(
+                 (type != "object")
+                 or ((.question // "") | type != "string" or length == 0)
+                 or (.scope != "AEGIS_RECONCILIATION")
+                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
+                 or (((.options // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+               ))
+           then "bad_reconciliation_questions_shape" else empty end),
         (if ((.behavior // []) | length) > 0
            and ((.behavior // []) | any(
                  (type != "object")
@@ -459,6 +483,11 @@ aegis_briefing_quality_check() {
     q_len="$(printf '%s' "${json}" | jq -r '(.questions // []) | length' 2>/dev/null || printf '0')"
     if [[ "${q_len}" == "0" ]]; then
       printf 'missing_questions:supervisor_must_surface_tradeoffs\n' >&2
+      return 1
+    fi
+    if [[ "${q_len}" != "0" ]] && ! printf '%s' "${json}" | jq -e \
+      '((.questions // []) | all(.scope == "DEMAND"))' >/dev/null 2>&1; then
+      printf 'question_scope_must_be_DEMAND\n' >&2
       return 1
     fi
   fi
@@ -701,6 +730,18 @@ aegis_briefing_render() {
     (if ((.questions // []) | length) > 0 then
       ("", "## Architectural Decisions & Questions", (
         (.questions | to_entries | map(
+          (.key + 1 | tostring) as $n
+          | .value as $q
+          | $n + ". " + ($q.question // "")
+            + (if (($q.options // []) | length) > 0
+               then "\n" + (($q.options | map("   - [ ] " + .)) | join("\n"))
+               else "" end)
+        )) | join("\n\n")
+      ))
+    else empty end),
+    (if ((.contractReconciliation.pendingQuestions // []) | length) > 0 then
+      ("", "## Contract Reconciliation Questions", (
+        (.contractReconciliation.pendingQuestions | to_entries | map(
           (.key + 1 | tostring) as $n
           | .value as $q
           | $n + ". " + ($q.question // "")
@@ -1056,6 +1097,7 @@ aegis_briefing_reconcile_ide_contract() {
   questions="$(printf '%s' "${comparison}" | jq -c '
     [{
       question: ("O contrato fornecido pelo IDE diverge da reconstrução independente do Aegis nos campos: " + ([.differences[]?.field] | join(", ")) + ". A execução será bloqueada até a divergência ser resolvida. Como deseja proceder?"),
+      scope: "AEGIS_RECONCILIATION",
       options: [
         "(Recommended) Corrigir o contrato do IDE e reenviá-lo",
         "Bloquear a execução e revisar a divergência"
@@ -1065,8 +1107,7 @@ aegis_briefing_reconcile_ide_contract() {
   ' 2>/dev/null)" || return 1
   resolved="$(jq -c --argjson questions "${questions}" --argjson reconciliation "${comparison}" \
     --arg original_goal "${original_goal}" \
-    '.questions = ($questions + (.questions // []))
-     | .contractReconciliation = ($reconciliation + {status: "divergent", original_demand: $original_goal})' \
+    '.contractReconciliation = ($reconciliation + {status: "divergent", original_demand: $original_goal, pendingQuestions: $questions})' \
     <<< "${ide_json}")" || return 1
   export AEGIS_CONTRACT_RECONCILIATION_STATUS="divergent"
   export AEGIS_LAST_SCHEMA_JSON="${resolved}"
@@ -1101,7 +1142,10 @@ aegis_briefing_expand_json() {
     return 1
   fi
 
-  local user_prompt="Demand: ${goal}\nTargets: ${target}"
+  local user_prompt="Demand: ${goal}\nTargets: ${target}
+
+[QUESTION SCOPE RULE]
+The questions array is exclusively for decisions about the user's software demand and domain. Ask only about product behavior, architecture, inputs, failures, performance, concurrency, persistence, or other user-visible requirements. Never put Aegis internals, model/provider choice, tokens, runtime, receipts, commits, harness gates, benchmarks, or evidence orchestration in questions. Use scope=DEMAND for every question."
   if [[ -n "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
     user_prompt="${user_prompt}\n\n[OPERATOR ANSWERS TO ARCHITECTURAL QUESTIONS]\n${AEGIS_BRIEFING_ANSWERS}\n\nCRITICAL: The operator has answered all architectural questions above. You MUST set \"questions\": [] in your JSON output — do not generate any new questions."
   fi

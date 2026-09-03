@@ -12,6 +12,15 @@ cd "${ROOT_DIR}"
 
 source scripts/lib/briefing.sh
 
+# Rendering is allowed to publish the active contract for a real run. Keep
+# this substrate test hermetic so arbitrary fixture schemas never overwrite
+# the repository's active contract.
+briefing_test_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis_briefing_schema.XXXXXX")"
+cleanup() { rm -rf "${briefing_test_root}"; }
+trap cleanup EXIT
+export AEGIS_ROOT_DIR="${briefing_test_root}"
+export AEGIS_RUNTIME_DIR="${briefing_test_root}/.harness/runtime"
+
 # 1. Test Optimize Transformation on linear buffer pointer
 raw_linear_schema='{
   "goal": "Create src/testRing.ts and src/index.ts implementing a linear queue",
@@ -79,6 +88,7 @@ schema_with_questions='{
   "questions": [
     {
       "question": "Should capacity wrap around circularly or throw an error on overflow?",
+      "scope": "DEMAND",
       "options": [
         "(Recommended) Wrap around using modulo arithmetic",
         "Throw RangeError on capacity overflow"
@@ -122,6 +132,38 @@ if aegis_briefing_validate_json "${bad_questions_schema}" 2>/dev/null; then
   exit 1
 fi
 
+# Demand questions and Aegis reconciliation questions have separate scopes.
+bad_question_scope_schema="$(printf '%s' "${schema_with_questions}" \
+  | jq -c '.questions[0].scope = "AEGIS_RECONCILIATION"')"
+if aegis_briefing_validate_json "${bad_question_scope_schema}" 2>/dev/null; then
+  echo "FAIL: validate_json accepted an Aegis question in questions[]" >&2
+  exit 1
+fi
+
+reconciliation_schema="$(printf '%s' "${schema_with_questions}" | jq -c \
+  '.questions = [] | .contractReconciliation = {
+    status: "divergent",
+    pendingQuestions: [{
+      question: "The IDE contract diverges from the independent reconstruction. What should happen?",
+      scope: "AEGIS_RECONCILIATION",
+      options: ["(Recommended) Resubmit the corrected contract", "Block and review"],
+      is_multi_select: false
+    }]
+  }')"
+aegis_briefing_validate_json "${reconciliation_schema}" || {
+  echo "FAIL: validate_json rejected structured reconciliation questions" >&2
+  exit 1
+}
+reconciliation_body="$(aegis_briefing_generate "${reconciliation_schema}")"
+if ! printf '%s' "${reconciliation_body}" | grep -q '## Contract Reconciliation Questions'; then
+  echo "FAIL: reconciliation questions were not rendered separately" >&2
+  exit 1
+fi
+if printf '%s' "${reconciliation_body}" | grep -q '## Architectural Decisions & Questions'; then
+  echo "FAIL: reconciliation questions leaked into demand question section" >&2
+  exit 1
+fi
+
 # Render and verify ## Architectural Decisions & Questions section is present
 q_body="$(aegis_briefing_generate "${schema_with_questions}")"
 if ! printf '%s' "${q_body}" | grep -q '## Architectural Decisions & Questions'; then
@@ -152,6 +194,10 @@ if ! grep -q 'PENDING_USER_QUESTIONS' aegis; then
 fi
 if ! grep -q 'questions_pending_user_input' aegis; then
   echo "FAIL: questions_pending_user_input reason code missing in aegis" >&2
+  exit 1
+fi
+if ! grep -q 'contract_reconciliation_pending' aegis; then
+  echo "FAIL: contract_reconciliation_pending gate missing in aegis" >&2
   exit 1
 fi
 
@@ -253,4 +299,3 @@ echo "[AEGIS][TEST][PASS] briefing schema pipeline: sibling module imports valid
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: non-vacuous import invariant enforced"
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: mandatory questions gate enforced"
 exit 0
-

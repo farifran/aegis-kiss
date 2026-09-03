@@ -1299,6 +1299,28 @@ cmd_run() {
         _questions_md="$(printf '%s' "${body}" \
           | awk '/^## Architectural Decisions & Questions/ {p=1; next} /^## / && p {p=0} p' \
           | sed '/^[[:space:]]*$/d' || true)"
+        local _reconciliation_md
+        _reconciliation_md="$(printf '%s' "${body}" \
+          | awk '/^## Contract Reconciliation Questions/ {p=1; next} /^## / && p {p=0} p' \
+          | sed '/^[[:space:]]*$/d' || true)"
+
+        # Reconciliation is an Aegis protocol question, not a demand question.
+        # It cannot be answered through AEGIS_BRIEFING_ANSWERS because that
+        # variable is reserved for the product/domain decisions above.
+        if [[ -n "${_reconciliation_md}" ]]; then
+          if [[ -n "${AEGIS_LAST_SCHEMA_JSON:-}" ]]; then
+            mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+            printf '%s' "${AEGIS_LAST_SCHEMA_JSON}" > "${RUNTIME_DIR}/preliminary_briefing_schema.json" 2>/dev/null || true
+          fi
+          printf '\n══════════════════════════════════════════════════════════════\n'
+          printf '=== PENDING CONTRACT RECONCILIATION (contract_reconciliation_pending) ===\n'
+          printf '══════════════════════════════════════════════════════════════\n'
+          printf 'O contrato do IDE diverge da reconstrução independente do Aegis.\n'
+          printf 'Corrija e reenvie o contrato; respostas de perguntas da demanda não resolvem esta pendência.\n\n'
+          printf '%s\n\n' "${_reconciliation_md}"
+          emit_result_json "PENDING_CONTRACT_RECONCILIATION" "" "" "contract_reconciliation_pending"
+          return 0
+        fi
         if [[ -n "${_questions_md}" ]] && [[ -z "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
           if [[ -t 0 ]]; then
             # TTY: interactive Q&A — collect answers then re-run briefing

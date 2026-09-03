@@ -30,7 +30,13 @@ ide_contract='{
   "barrelFile": "src/index.ts",
   "barrelFrom": "./reorgEngine.js",
   "invariants": [{"id": "INV-TIP", "predicate": "tip is canonical"}],
-  "proofObligations": [{"id": "PO-TIP", "kind": "state", "oracle": "tip is canonical"}]
+  "proofObligations": [{"id": "PO-TIP", "kind": "state", "oracle": "tip is canonical"}],
+  "questions": [{
+    "question": "Should the engine expose the current canonical tip?",
+    "scope": "DEMAND",
+    "options": ["(Recommended) Expose the tip", "Keep the tip internal"],
+    "is_multi_select": false
+  }]
 }'
 
 equivalent_reconstruction='{
@@ -60,14 +66,18 @@ aegis_briefing_reconstruct_contract() {
 export RECONSTRUCTION_JSON="${equivalent_reconstruction}"
 equivalent_result="$(aegis_briefing_reconcile_ide_contract \
   "${ide_contract}" "Create the engine" "src/reorgEngine.ts" '{}')"
-printf '%s' "${equivalent_result}" | jq -e '.questions | length == 0' >/dev/null
+printf '%s' "${equivalent_result}" | jq -e \
+  '.questions | length == 1 and .[0].scope == "DEMAND"' >/dev/null
 jq -e '.schema == "aegis.contract_reconciliation.v1" and .equivalent == true' \
   "${runtime_dir}/contract_reconciliation.json" >/dev/null
 
 export RECONSTRUCTION_JSON="${different_reconstruction}"
 divergent_result="$(aegis_briefing_reconcile_ide_contract \
   "${ide_contract}" "Create the engine" "src/reorgEngine.ts" '{}')"
-printf '%s' "${divergent_result}" | jq -e '.questions | length == 1' >/dev/null
+printf '%s' "${divergent_result}" | jq -e \
+  '.questions | length == 1 and .[0].scope == "DEMAND"' >/dev/null
+printf '%s' "${divergent_result}" | jq -e \
+  '.contractReconciliation.pendingQuestions | length == 1 and .[0].scope == "AEGIS_RECONCILIATION"' >/dev/null
 printf '%s' "${divergent_result}" \
   | jq -e '.contractReconciliation.equivalent == false and (.contractReconciliation.differences | map(.field) | index("targets") != null)' \
   >/dev/null
