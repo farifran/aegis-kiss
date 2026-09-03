@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+# AEGIS TEST: IDE contract proposal + independent reconstruction.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+cd "${ROOT_DIR}"
+
+source scripts/lib/briefing.sh
+
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis_contract_reconcile.XXXXXX")"
+cleanup() { rm -rf "${runtime_dir}"; }
+trap cleanup EXIT
+export AEGIS_ROOT_DIR="${ROOT_DIR}"
+export AEGIS_RUNTIME_DIR="${runtime_dir}"
+
+ide_contract='{
+  "goal": "Create src/reorgEngine.ts",
+  "targets": ["src/reorgEngine.ts", "src/index.ts"],
+  "exports": [{
+    "kind": "class",
+    "name": "ReorgEngine",
+    "privateFields": [{"name": "_tip", "type": "string"}],
+    "ctorParams": [],
+    "ctorBody": ["this._tip = \"\""],
+    "methods": [{"name": "processBlock", "params": [], "returns": "void", "body": ["return"]}],
+    "getters": [{"name": "tip", "returns": "string", "body": "return this._tip"}]
+  }],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./reorgEngine.js",
+  "invariants": [{"id": "INV-TIP", "predicate": "tip is canonical"}],
+  "proofObligations": [{"id": "PO-TIP", "kind": "state", "oracle": "tip is canonical"}]
+}'
+
+equivalent_reconstruction='{
+  "goal": "Create src/reorgEngine.ts",
+  "targets": ["src/index.ts", "src/reorgEngine.ts"],
+  "exports": [{
+    "kind": "class",
+    "name": "ReorgEngine",
+    "privateFields": [{"name": "_tip", "type": "string"}],
+    "ctorParams": [],
+    "ctorBody": ["this._tip = \"genesis\""],
+    "methods": [{"name": "processBlock", "params": [], "returns": "void", "body": ["this._tip = \"next\""]}],
+    "getters": [{"name": "tip", "returns": "string", "body": "return this._tip"}]
+  }],
+  "barrelFile": "src/index.ts",
+  "barrelFrom": "./reorgEngine.js",
+  "invariants": [{"id": "OTHER-ID", "predicate": "tip is canonical"}],
+  "proofObligations": [{"id": "OTHER-PO", "kind": "state", "oracle": "tip is canonical"}]
+}'
+
+different_reconstruction="$(printf '%s' "${equivalent_reconstruction}" | jq -c '.targets = ["src/other.ts", "src/index.ts"]')"
+
+aegis_briefing_reconstruct_contract() {
+  printf '%s' "${RECONSTRUCTION_JSON}"
+}
+
+export RECONSTRUCTION_JSON="${equivalent_reconstruction}"
+equivalent_result="$(aegis_briefing_reconcile_ide_contract \
+  "${ide_contract}" "Create the engine" "src/reorgEngine.ts" '{}')"
+printf '%s' "${equivalent_result}" | jq -e '.questions | length == 0' >/dev/null
+jq -e '.schema == "aegis.contract_reconciliation.v1" and .equivalent == true' \
+  "${runtime_dir}/contract_reconciliation.json" >/dev/null
+
+export RECONSTRUCTION_JSON="${different_reconstruction}"
+divergent_result="$(aegis_briefing_reconcile_ide_contract \
+  "${ide_contract}" "Create the engine" "src/reorgEngine.ts" '{}')"
+printf '%s' "${divergent_result}" | jq -e '.questions | length == 1' >/dev/null
+printf '%s' "${divergent_result}" \
+  | jq -e '.contractReconciliation.equivalent == false and (.contractReconciliation.differences | map(.field) | index("targets") != null)' \
+  >/dev/null
+jq -e '.equivalent == false and (.differences | length) > 0' \
+  "${runtime_dir}/contract_reconciliation.json" >/dev/null
+
+if aegis_briefing_reconcile_ide_contract \
+  '{"goal":"bad","targets":[],"exports":[]}' "Create the engine" "src/reorgEngine.ts" '{}' \
+  >/dev/null 2>&1; then
+  echo "FAIL: invalid IDE contract was accepted" >&2
+  exit 1
+fi
+
+echo "[AEGIS][TEST][PASS] IDE contract reconciliation passed"

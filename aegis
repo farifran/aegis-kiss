@@ -973,6 +973,7 @@ aegis_is_ai_agent() {
 cmd_run() {
   local goal="" target="" issue="" assume_yes=0 force_task="" intake_relaxed=0 resume=0
   local brief_why=""
+  local original_demand=""
   local -a accepts=() changes=()
 
   while [[ $# -gt 0 ]]; do
@@ -1031,6 +1032,15 @@ cmd_run() {
   if aegis_is_agentic_execution; then
     export AEGIS_AGENTIC=1
     aegis_log "ambiente agêntico detectado (assistente AI) — operando em modo handover mecânico (sem perguntas TTY)"
+  fi
+
+  # Keep the prose that preceded an IDE-supplied Contract IR available to the
+  # independent Aegis reconstruction. Without this binding, the second model
+  # would only be reviewing the IDE's proposal against itself.
+  if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+    if ! aegis_briefing_is_schema_json "${goal}"; then
+      original_demand="${goal}"
+    fi
   fi
 
   # Interactive Setup Wizard trigger rule:
@@ -1180,6 +1190,9 @@ cmd_run() {
       local pending_stage=""
       if [[ -f "${pending_file}" ]]; then
         pending_stage="$(jq -r '.stage // "intake"' "${pending_file}" 2>/dev/null || printf 'intake')"
+        if [[ -z "${original_demand}" ]]; then
+          original_demand="$(jq -r '.prose // empty' "${pending_file}" 2>/dev/null || true)"
+        fi
       fi
       # Etapa 1/3 (intake): o assistente devolveu schema JSON e retoma do intake.
       if [[ "${pending_stage}" == "intake" || "${pending_stage}" == "" ]] && [[ -f "${pending_file}" ]]; then
@@ -1191,6 +1204,9 @@ cmd_run() {
         rm -f "${pending_file}"
       fi
       # Etapa 5/6 (pipeline): o pending mantém-se — o resume continua via run_aegis.sh --resume.
+    fi
+    if [[ -n "${original_demand}" ]]; then
+      export AEGIS_IDE_ORIGINAL_DEMAND="${original_demand}"
     fi
     if aegis_briefing_enabled; then
       local brief_err intake_context_json=""
@@ -1243,6 +1259,9 @@ cmd_run() {
             if [[ -n "${AEGIS_LAST_SCHEMA_JSON:-}" ]]; then
               mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
               printf '%s' "${AEGIS_LAST_SCHEMA_JSON}" > "${RUNTIME_DIR}/preliminary_briefing_schema.json" 2>/dev/null || true
+            elif [[ -f "${RUNTIME_DIR}/active_contract_ir.json" ]]; then
+              cp "${RUNTIME_DIR}/active_contract_ir.json" \
+                "${RUNTIME_DIR}/preliminary_briefing_schema.json" 2>/dev/null || true
             fi
             printf '\n══════════════════════════════════════════════════════════════\n'
             printf '=== PENDING USER QUESTIONS (questions_pending_user_input) ===\n'

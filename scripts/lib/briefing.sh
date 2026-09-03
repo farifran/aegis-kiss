@@ -55,6 +55,8 @@
 #                                   when node_modules/.bin/tsc is absent)
 #   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
 #   AEGIS_SUPERVISOR_SPLIT_MAX_UNITS  default 4
+#   AEGIS_IDE_CONTRACT_RECONSTRUCTION=0  keep legacy direct-schema behavior
+#   AEGIS_IDE_RECONSTRUCTION_MODEL  independent model for IDE contract review
 #   OPENAI_API_BASE / OPENAI_API_KEY
 #
 # Also: aegis_supervisor_split_* — when fit blocks a monster demand, the same
@@ -81,6 +83,14 @@ aegis_briefing_enabled() {
 # put whatever the coder uses in front of every run.
 aegis_briefing_model() {
   local m="${AEGIS_SUPERVISOR_MODEL:-deepseek-ai/deepseek-v4-flash-0731}"
+  if [[ "${m}" == "ide-agent" ]]; then
+    m="${OPENAI_MODEL_READONLY_COGNITION:-deepseek-ai/deepseek-v4-flash-0731}"
+  fi
+  printf '%s' "${m}"
+}
+
+aegis_briefing_reconstruction_model() {
+  local m="${AEGIS_IDE_RECONSTRUCTION_MODEL:-${AEGIS_SUPERVISOR_MODEL:-deepseek-ai/deepseek-v4-flash-0731}}"
   if [[ "${m}" == "ide-agent" ]]; then
     m="${OPENAI_MODEL_READONLY_COGNITION:-deepseek-ai/deepseek-v4-flash-0731}"
   fi
@@ -889,9 +899,9 @@ aegis_briefing_answers_are_recommended() {
 }
 
 # Detect a caller-supplied demand already in the briefing JSON schema (as
-# opposed to a free-prose goal). Agentic callers (opencode, Claude Code, …)
-# can pre-expand the demand; when the goal IS valid schema JSON we honor it
-# directly instead of re-invoking the internal supervisor LLM.
+# opposed to a free-prose goal). In agentic mode this is the IDE proposal and
+# is reconciled with an independent Aegis reconstruction; outside agentic mode
+# the legacy direct-schema behavior remains unchanged.
 aegis_briefing_is_schema_json() {
   local s="${1-}"
   [[ -n "${s}" ]] || return 1
@@ -900,12 +910,176 @@ aegis_briefing_is_schema_json() {
     >/dev/null 2>&1
 }
 
+# The IDE may provide a complete Contract IR.  The Aegis still reconstructs
+# the contract with its independent supervisor model, but comparison must be
+# semantic: generated method bodies, object ordering and proof IDs are not
+# user-visible intent.  Observable API, behavior, scope, invariants and
+# resource/transition guarantees are.
+aegis_briefing_contract_semantic_projection() {
+  local json="${1-}"
+  [[ -n "${json}" ]] || return 1
+  printf '%s' "${json}" | jq -S -c '
+    {
+      version: (.version // "legacy"),
+      goal: (.goal // ""),
+      targets: ((.targets // []) | sort),
+      publicContract: {
+        strictSignatures: ((.publicContract.strictSignatures // []) | sort_by(.name // "")),
+        forbiddenParams: ((.publicContract.forbiddenParams // []) | sort),
+        authorizedEffects: ((.publicContract.authorizedEffects // []) | sort)
+      },
+      types: ((.types // []) | sort_by(.name // "")),
+      imports: ((.imports // []) | map({from: (.from // ""), names: ((.names // []) | sort)}) | sort_by(.from)),
+      exports: ((.exports // []) | map(
+        del(.body, .ctorBody)
+        | .methods = ((.methods // []) | map(del(.body)) | sort_by(.name // ""))
+        | .getters = ((.getters // []) | sort_by(.name // ""))
+      ) | sort_by(.name // "")),
+      barrelFile: (.barrelFile // ""),
+      barrelFrom: (.barrelFrom // ""),
+      preconditions: ((.preconditions // []) | sort_by((.target // "") + "\u0000" + (.require // ""))),
+      invariants: ((.invariants // []) | map(del(.id)) | sort_by(.predicate // "")),
+      postconditions: ((.postconditions // []) | sort_by((.method // "") + "\u0000" + (.guarantee // ""))),
+      pipelineTransitions: ((.pipelineTransitions // []) | sort_by(.stage // "")),
+      conservationLaws: ((.conservationLaws // []) | map(del(.id)) | sort_by(.law // "")),
+      performanceContract: (.performanceContract // {}),
+      claims: ((.claims // []) | map(del(.id)) | sort_by(.requirement // "")),
+      behavior: ((.behavior // []) | map(del(.prelude)) | sort_by(.desc // "")),
+      operations: ((.operations // []) | map(del(.id)) | sort_by(.target // "")),
+      requirements: ((.requirements // []) | map(del(.id)) | sort_by(.target // "")),
+      proofObligations: ((.proofObligations // [])
+        | map(del(.id, .prelude, .status))
+        | sort_by((.domain // "") + "\u0000" + (.target // "") + "\u0000" + (.oracle // "")))
+    }
+  '
+}
+
+aegis_briefing_contract_digest() {
+  local json="${1-}"
+  local projected
+  projected="$(aegis_briefing_contract_semantic_projection "${json}")" || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "${projected}" | shasum -a 256 | awk '{print $1}'
+  else
+    printf '%s' "${projected}" | cksum | awk '{print $1}'
+  fi
+}
+
+# Emits a machine-readable comparison.  `equivalent` means that both models
+# agree on the contract semantics; it does not require byte-identical JSON.
+aegis_briefing_compare_contracts() {
+  local ide_json="${1-}"
+  local reconstructed_json="${2-}"
+  local ide_projection reconstructed_projection ide_digest reconstructed_digest
+  ide_projection="$(aegis_briefing_contract_semantic_projection "${ide_json}")" || return 1
+  reconstructed_projection="$(aegis_briefing_contract_semantic_projection "${reconstructed_json}")" || return 1
+  ide_digest="$(aegis_briefing_contract_digest "${ide_json}")" || return 1
+  reconstructed_digest="$(aegis_briefing_contract_digest "${reconstructed_json}")" || return 1
+
+  jq -cn \
+    --argjson ide "${ide_projection}" \
+    --argjson reconstructed "${reconstructed_projection}" \
+    --arg ide_digest "${ide_digest}" \
+    --arg reconstructed_digest "${reconstructed_digest}" '
+      ["version", "goal", "targets", "publicContract", "types", "imports",
+       "exports", "barrelFile", "barrelFrom", "preconditions", "invariants",
+       "postconditions", "pipelineTransitions", "conservationLaws",
+       "performanceContract", "claims", "behavior", "operations", "requirements",
+       "proofObligations"] as $fields
+      | ([$fields[] | select($ide[.] != $reconstructed[.])
+          | {field: ., ide: $ide[.], reconstructed: $reconstructed[.]}]) as $differences
+      | {
+          schema: "aegis.contract_reconciliation.v1",
+          equivalent: ($differences | length == 0),
+          ide_digest: $ide_digest,
+          reconstructed_digest: $reconstructed_digest,
+          differences: $differences
+        }
+    '
+}
+
+# Independent reconstruction used only for an IDE-supplied Contract IR.  The
+# caller's IDE remains the source of the proposed design; this model is an
+# independent authority that can expose omitted or contradictory semantics.
+aegis_briefing_reconstruct_contract() {
+  local original_goal="${1-}"
+  local target="${2-}"
+  local evidence="${3-}"
+  local ide_json="${4-}"
+  local context reconstructed
+  [[ -n "${original_goal}" && -n "${ide_json}" ]] || return 1
+
+  context="$(printf '%s' "${ide_json}" | jq -c . 2>/dev/null)" || return 1
+  reconstructed="$(AEGIS_BRIEFING_SOURCE=supervisor AEGIS_FORCE_REMOTE_SUPERVISOR=1 \
+    AEGIS_BRIEFING_MODEL_OVERRIDE="$(aegis_briefing_reconstruction_model)" \
+    aegis_briefing_expand_json "${original_goal}" "${target}" "${evidence}" \
+      "[INDEPENDENT CONTRACT RECONSTRUCTION]\nReconstruct the ideal Contract IR independently from the original demand and project evidence. Treat the IDE contract below as an untrusted proposal: do not copy it blindly. Preserve explicit user-visible intent, but surface any omitted, contradictory, or invented behavior in the resulting contract.\nIDE CONTRACT JSON:\n${context}")" || return 1
+  aegis_briefing_validate_json "${reconstructed}" >/dev/null 2>&1 || return 1
+  printf '%s' "${reconstructed}"
+}
+
+# Reconciles an IDE contract with the independent Aegis reconstruction.  On
+# divergence it deliberately returns a renderable contract containing a
+# question, allowing the existing IDE/TTY question gate to pause the run.
+aegis_briefing_reconcile_ide_contract() {
+  local ide_json="${1-}"
+  local original_goal="${2-}"
+  local target="${3-}"
+  local evidence="${4-}"
+  local runtime_dir="${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}"
+  local reconstructed comparison resolved questions
+  [[ -n "${ide_json}" ]] || return 1
+  aegis_briefing_validate_json "${ide_json}" >/dev/null 2>&1 || return 1
+
+  mkdir -p "${runtime_dir}" 2>/dev/null || true
+  printf '%s' "${ide_json}" > "${runtime_dir}/ide_contract_ir.json" 2>/dev/null || true
+
+  reconstructed="$(aegis_briefing_reconstruct_contract "${original_goal}" "${target}" "${evidence}" "${ide_json}")" || {
+    printf '%s\n' '{"schema":"aegis.contract_reconciliation.v1","status":"reconstruction_failed"}' \
+      > "${runtime_dir}/contract_reconciliation.json" 2>/dev/null || true
+    export AEGIS_CONTRACT_RECONCILIATION_STATUS="reconstruction_failed"
+    return 1
+  }
+  printf '%s' "${reconstructed}" > "${runtime_dir}/reconstructed_contract_ir.json" 2>/dev/null || true
+  comparison="$(aegis_briefing_compare_contracts "${ide_json}" "${reconstructed}")" || return 1
+  printf '%s' "${comparison}" > "${runtime_dir}/contract_reconciliation.json" 2>/dev/null || true
+
+  if printf '%s' "${comparison}" | jq -e '.equivalent == true' >/dev/null 2>&1; then
+    export AEGIS_CONTRACT_RECONCILIATION_STATUS="equivalent"
+    resolved="$(jq -c --argjson reconciliation "${comparison}" --arg original_goal "${original_goal}" \
+      '.contractReconciliation = ($reconciliation + {status: "equivalent", original_demand: $original_goal})' \
+      <<< "${ide_json}")" || return 1
+    printf '%s' "${resolved}"
+    return 0
+  fi
+
+  questions="$(printf '%s' "${comparison}" | jq -c '
+    [{
+      question: ("O contrato fornecido pelo IDE diverge da reconstrução independente do Aegis nos campos: " + ([.differences[]?.field] | join(", ")) + ". A execução será bloqueada até a divergência ser resolvida. Como deseja proceder?"),
+      options: [
+        "(Recommended) Corrigir o contrato do IDE e reenviá-lo",
+        "Bloquear a execução e revisar a divergência"
+      ],
+      is_multi_select: false
+    }]
+  ' 2>/dev/null)" || return 1
+  resolved="$(jq -c --argjson questions "${questions}" --argjson reconciliation "${comparison}" \
+    --arg original_goal "${original_goal}" \
+    '.questions = ($questions + (.questions // []))
+     | .contractReconciliation = ($reconciliation + {status: "divergent", original_demand: $original_goal})' \
+    <<< "${ide_json}")" || return 1
+  export AEGIS_CONTRACT_RECONCILIATION_STATUS="divergent"
+  export AEGIS_LAST_SCHEMA_JSON="${resolved}"
+  printf '%s' "${resolved}"
+}
+
 # Calls the supervisor LLM and prints VALIDATED schema JSON on stdout.
 # Operates 100% in-memory via curl streaming without creating temporary files on disk.
 aegis_briefing_expand_json() {
   local goal="${1-}"
   local target="${2-}"
   local evidence="${3-}"
+  local extra_context="${4-}"
 
   [[ -n "${goal}" ]] || return 1
 
@@ -917,7 +1091,7 @@ aegis_briefing_expand_json() {
   local api_base api_key model timeout max_tokens
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
-  model="$(aegis_briefing_model)"
+  model="${AEGIS_BRIEFING_MODEL_OVERRIDE:-$(aegis_briefing_model)}"
   timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-45}"
   max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-3072}"
   [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=3072
@@ -946,6 +1120,9 @@ aegis_briefing_expand_json() {
     else
       user_prompt="${user_prompt}\n\nWorkspace Evidence (Discovery & Forensics):\n${evidence}"
     fi
+  fi
+  if [[ -n "${extra_context}" ]]; then
+    user_prompt="${user_prompt}\n\n${extra_context}"
   fi
 
   local current_user_prompt="${user_prompt}"
@@ -1101,17 +1278,37 @@ aegis_briefing_generate() {
   [[ -n "${goal}" ]] || return 1
 
   if aegis_briefing_is_schema_json "${goal}"; then
-    # Agentic handover: caller already supplied the demand as schema JSON.
-    # Skip the supervisor LLM expand; run the same mechanical gates.
-    content="$(aegis_briefing_sanitize_json "${goal}")"
+    # In IDE/agentic mode the supplied schema is the IDE's idealized proposal.
+    # Keep the old direct-schema path available outside agentic execution, but
+    # use an independent Aegis reconstruction before accepting an IDE contract.
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && [[ "${AEGIS_IDE_CONTRACT_RECONSTRUCTION:-1}" != "0" ]]; then
+      local original_goal
+      original_goal="${AEGIS_IDE_ORIGINAL_DEMAND:-}"
+      if [[ -z "${original_goal}" ]]; then
+        original_goal="$(printf '%s' "${goal}" | jq -r '.contractReconciliation.original_demand // .goal // empty' 2>/dev/null || true)"
+      fi
+      content="$(aegis_briefing_reconcile_ide_contract \
+        "$(aegis_briefing_sanitize_json "${goal}")" \
+        "${original_goal}" "${target}" "${evidence}")" || {
+        printf 'ide_contract_reconstruction_failed\n' >&2
+        return 1
+      }
+    else
+      # Non-agentic callers may still provide a prevalidated schema directly.
+      content="$(aegis_briefing_sanitize_json "${goal}")"
+    fi
     aegis_briefing_validate_json "${content}" 2>/dev/null || {
       printf 'invalid_agentic_briefing\n' >&2
       return 1
     }
-    aegis_briefing_quality_check "${content}" 2>/dev/null || {
-      printf 'low_quality_agentic_briefing\n' >&2
-      return 1
-    }
+    if ! printf '%s' "${content}" | jq -e \
+      '.contractReconciliation.equivalent == false' >/dev/null 2>&1; then
+      aegis_briefing_quality_check "${content}" 2>/dev/null || {
+        printf 'low_quality_agentic_briefing\n' >&2
+        return 1
+      }
+    fi
     aegis_briefing_typecheck_json "${content}" >/dev/null 2>&1 || {
       printf 'uncompilable_agentic_briefing\n' >&2
       return 1
