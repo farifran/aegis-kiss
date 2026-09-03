@@ -7,10 +7,11 @@
 #### 1. ALINHAMENTO INTERATIVO DE AMBIGUIDADES (Discovery & Briefing Interativo)
 Antes de formular qualquer pergunta, o assistente **DEVE** carregar e seguir o briefing do projeto (`.skills/briefing.md`) ou um briefing preliminar emitido pelo Aegis. A sequência obrigatória é:
 
-`demanda bruta → briefing preliminar → perguntas da demanda → contrato final`.
+`demanda bruta → briefing preliminar → contrato candidato → revisão independente do Aegis → perguntas aprovadas (se houver) → contrato final`.
 
-* O briefing é a fonte das perguntas; o assistente não pode inventar perguntas diretamente a partir da demanda bruta.
-* As perguntas devem ser objetivas, de múltipla escolha e limitadas às ambiguidades do comportamento, arquitetura, entradas, falhas, desempenho, concorrência ou persistência da demanda.
+* O briefing é a fonte das perguntas; o assistente não pode inventar perguntas diretamente a partir da demanda bruta nem apresentá-las ao utilizador antes da revisão independente.
+* `questions: []` é o resultado preferível quando a demanda, o protocolo aplicável ou um default KISS já determinam a decisão.
+* Uma pergunta só é válida se uma ambiguidade de negócio não resolvida alterar o contrato observável, o risco externo ou uma invariante. Ela deve declarar a evidência da demanda, o impacto contratual e a razão do default recomendado.
 * As respostas devem ser incorporadas ao Contract IR antes da execução.
 * Se o briefing não estiver disponível ou o contrato não referenciá-lo, a execução deve ser bloqueada.
 * Decisões internas do Aegis são resolvidas pelo harness e não aparecem como perguntas do produto.

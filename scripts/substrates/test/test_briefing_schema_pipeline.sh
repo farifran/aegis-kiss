@@ -88,6 +88,11 @@ schema_with_questions='{
   "questions": [
     {
       "id": "Q-DOMAIN-001",
+      "decision": "Overflow behavior changes the public API result",
+      "demandEvidence": "The demand requires a bounded queue but does not state overflow behavior.",
+      "whyUnresolved": "Both wrapping and throwing preserve the stated capacity bound.",
+      "contractImpact": ["TestRing.push overflow postcondition"],
+      "recommendedRationale": "Modulo wrap preserves a fixed-size queue without an exceptional control path.",
       "question": "Should capacity wrap around circularly or throw an error on overflow?",
       "scope": "DEMAND",
       "options": [
@@ -142,6 +147,10 @@ fi
 duplicate_question_id_schema="$(printf '%s' "${schema_with_questions}" | jq -c '.questions += [.questions[0]]')"
 if aegis_briefing_validate_json "${duplicate_question_id_schema}" 2>/dev/null; then
   echo "FAIL: duplicate demand question ID was accepted" >&2
+  exit 1
+fi
+if aegis_briefing_validate_question_review "${schema_with_questions}" '{"questionReview":[]}' 2>/dev/null; then
+  echo "FAIL: candidate question was accepted without independent review" >&2
   exit 1
 fi
 
@@ -244,12 +253,17 @@ if ! grep -q 'perguntas.*demanda' AGENTS.md || ! grep -q 'Decisões internas do 
   echo "FAIL: IDE intake scope policy missing in AGENTS.md" >&2
   exit 1
 fi
-if ! grep -q 'demanda bruta.*briefing preliminar.*perguntas da demanda.*contrato final' AGENTS.md; then
+if ! grep -q 'contrato candidato.*revisão independente.*perguntas aprovadas' AGENTS.md; then
   echo "FAIL: briefing-before-questions order missing in AGENTS.md" >&2
   exit 1
 fi
-if ! grep -q 'briefing_provenance_invalid' aegis || ! grep -q 'PROTOCOLO OBRIGATÓRIO ANTES DAS PERGUNTAS' aegis; then
+if ! grep -q 'briefing_provenance_invalid' aegis || ! grep -q 'NÃO abra o modal ao usuário ainda' aegis; then
   echo "FAIL: briefing provenance handover gate missing in aegis" >&2
+  exit 1
+fi
+if ! grep -q 'somente quando aplicável' .skills/briefing.md \
+  || grep -q 'Toda transação finalizada.*Merkle' .skills/briefing.md; then
+  echo "FAIL: briefing still treats a domain-specific profile as universal" >&2
   exit 1
 fi
 
@@ -260,24 +274,22 @@ if ! grep -q 'AEGIS_BRIEFING_ANSWERS:-' aegis; then
 fi
 
 
-# 6. Test mandatory questions quality gate: supervisor + no answers + questions:[] = FAIL
+# 6. No question is required when the preliminary contract has no unresolved ambiguity.
 (
   export AEGIS_BRIEFING_SOURCE=supervisor
   unset AEGIS_BRIEFING_ANSWERS 2>/dev/null || true
   no_questions_schema='{"goal":"test","targets":["src/index.ts"],"questions":[],"exports":[{"kind":"function","name":"f","params":[],"returns":"void","body":[]}]}'
-  if aegis_briefing_quality_check "${no_questions_schema}" 2>/dev/null; then
-    echo "FAIL: quality_check accepted questions:[] from supervisor without answers" >&2
+  if ! aegis_briefing_quality_check "${no_questions_schema}" 2>/dev/null; then
+    echo "FAIL: quality_check rejected questions:[] when no ambiguity exists" >&2
     exit 1
   fi
 )
 
-# 7. Test mandatory questions gate is bypassed when AEGIS_BRIEFING_ANSWERS is set
+# 7. Test question candidates without admission evidence are rejected
 (
-  export AEGIS_BRIEFING_SOURCE=supervisor
-  export AEGIS_BRIEFING_ANSWERS="1: use HTTP throttling"
-  no_questions_schema='{"goal":"test","targets":["src/index.ts"],"questions":[],"exports":[{"kind":"function","name":"f","params":[],"returns":"void","body":[]}]}'
-  if ! aegis_briefing_quality_check "${no_questions_schema}" 2>/dev/null; then
-    echo "FAIL: quality_check rejected questions:[] when answers already provided" >&2
+  incomplete_question_schema="$(printf '%s' "${schema_with_questions}" | jq -c 'del(.questions[0].whyUnresolved)')"
+  if aegis_briefing_validate_json "${incomplete_question_schema}" 2>/dev/null; then
+    echo "FAIL: validate_json accepted a question without ambiguity evidence" >&2
     exit 1
   fi
 )
@@ -349,5 +361,5 @@ fi
 
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: sibling module imports validated and resolved"
 echo "[AEGIS][TEST][PASS] briefing schema pipeline: non-vacuous import invariant enforced"
-echo "[AEGIS][TEST][PASS] briefing schema pipeline: mandatory questions gate enforced"
+echo "[AEGIS][TEST][PASS] briefing schema pipeline: optional questions and admission evidence enforced"
 exit 0

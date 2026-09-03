@@ -1000,11 +1000,12 @@ emit_pending_assistant() {
   printf 'Prose recebida:\n%s\n\nTargets:\n%s\n\nEvidência estruturada (discovery & forensics):\n' \
     "${goal}" "${target}"
   jq '.targets_evidence' "${pending_file}" 2>/dev/null || printf '%b\n' "${evidence}"
-  printf '\nPROTOCOLO OBRIGATÓRIO ANTES DAS PERGUNTAS:\n'
+  printf '\nPROTOCOLO OBRIGATÓRIO PARA CANDIDATAS A PERGUNTA:\n'
   printf '  1. Leia .skills/briefing.md e use-o como fonte das ambiguidades.\n'
-  printf '  2. Formule apenas perguntas sobre a demanda, com no máximo 3 itens e IDs estáveis.\n'
-  printf '  3. Só então apresente as perguntas ao usuário pelo mecanismo do IDE.\n'
-  printf '  4. Retorne o Contract IR com briefing.digest="%s", questionIds e answeredQuestionIds.\n' "${briefing_digest}"
+  printf '  2. Construa o Contract IR preliminar e use questions:[] quando defaults KISS/protocolo resolverem a decisão.\n'
+  printf '  3. Se houver candidatas, declare evidência, ambiguidade real, impacto contratual e razão do recomendado.\n'
+  printf '  4. NÃO abra o modal ao usuário ainda: retorne o contrato para a revisão independente do Aegis.\n'
+  printf '  5. Retorne o Contract IR com briefing.digest="%s", questionIds e answeredQuestionIds.\n' "${briefing_digest}"
   printf '\nDetalha a demanda como schema JSON (issue detalhada pelo agente) e retoma com:\n'
   printf '  ./aegis --resume --goal \x27<schema-json>\x27 --target \x27%s\x27\n' "${target}"
   emit_result_json "PENDING_ASSISTANT" "" "" "agentic_requires_schema_json"
@@ -1390,8 +1391,8 @@ cmd_run() {
             printf '\n══════════════════════════════════════════════════════════════\n'
             printf '=== PENDING USER QUESTIONS (questions_pending_user_input) ===\n'
             printf '══════════════════════════════════════════════════════════════\n'
-            printf 'O Supervisor identificou questões obrigatórias para alinhar o objectivo.\n'
-            printf 'Apresente as perguntas ao utilizador (ex: via modal/ask_question).\n\n'
+            printf 'O Aegis aprovou apenas as questões que continuam abertas após a revisão independente.\n'
+            printf 'Apresente-as ao utilizador (ex: via modal/ask_question).\n\n'
             printf '%s\n\n' "${_questions_md}"
             printf 'PROTOCOLO DE INTERAÇÃO:\n'
             printf '  1. Se o utilizador der uma decisão concreta, retome com:\n'

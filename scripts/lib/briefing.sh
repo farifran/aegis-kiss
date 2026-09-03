@@ -338,6 +338,12 @@ aegis_briefing_validate_json() {
           (if ((.questions // []) | any(
                 (type != "object")
                 or ((.id // "") | type != "string" or length == 0)
+                or ((.decision // "") | type != "string" or length == 0)
+                or ((.demandEvidence // "") | type != "string" or length == 0)
+                or ((.whyUnresolved // "") | type != "string" or length == 0)
+                or (((.contractImpact // []) | if type == "array" then . else [] end) | length == 0)
+                or (((.contractImpact // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+                or ((.recommendedRationale // "") | type != "string" or length == 0)
                 or ((.question // "") | type != "string" or length == 0)
                 or (.scope != "DEMAND")
                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -363,6 +369,13 @@ aegis_briefing_validate_json() {
           (.operations[]? as $op | ((if ($op.lifecycle | type) == "array" then $op.lifecycle elif ($op.lifecycle | present) then [$op.lifecycle] else [] end)[]? as $life | if (($life | type) != "object" or ($life.state | type) != "string" or ($life.scope | type) != "string" or (["CALL","BATCH","TRANSACTION","CYCLE","SESSION","INSTANCE","PROCESS","PERSISTENT"] | index($life.scope)) == null) then "lifecycle_scope_incomplete:\($op.id)" else empty end)),
           (if ((.questions // []) | any(
                 (type != "object")
+                or ((.id // "") | type != "string" or length == 0)
+                or ((.decision // "") | type != "string" or length == 0)
+                or ((.demandEvidence // "") | type != "string" or length == 0)
+                or ((.whyUnresolved // "") | type != "string" or length == 0)
+                or (((.contractImpact // []) | if type == "array" then . else [] end) | length == 0)
+                or (((.contractImpact // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+                or ((.recommendedRationale // "") | type != "string" or length == 0)
                 or ((.question // "") | type != "string" or length == 0)
                 or (.scope != "DEMAND")
                 or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -481,6 +494,12 @@ aegis_briefing_validate_json() {
            and ((.questions // []) | any(
                  (type != "object")
                  or ((.id // "") | type != "string" or length == 0)
+                 or ((.decision // "") | type != "string" or length == 0)
+                 or ((.demandEvidence // "") | type != "string" or length == 0)
+                 or ((.whyUnresolved // "") | type != "string" or length == 0)
+                 or (((.contractImpact // []) | if type == "array" then . else [] end) | length == 0)
+                 or (((.contractImpact // []) | if type == "array" then . else [] end) | any(type != "string" or length == 0))
+                 or ((.recommendedRationale // "") | type != "string" or length == 0)
                  or ((.question // "") | type != "string" or length == 0)
                  or (.scope != "DEMAND")
                  or (((.options // []) | if type == "array" then . else [] end) | length < 2)
@@ -579,28 +598,6 @@ aegis_briefing_validate_json() {
 aegis_briefing_quality_check() {
   local json="${1-}"
   [[ -n "${json}" ]] || return 1
-
-  # Mandatory questions contract: when the Supervisor generates the briefing
-  # without pre-supplied operator answers, questions:[] is a quality failure.
-  # The Supervisor MUST always surface architectural trade-offs for operator alignment.
-  if [[ "${AEGIS_BRIEFING_SOURCE:-}" == "supervisor" ]] \
-     && [[ -z "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
-    local q_len
-    q_len="$(printf '%s' "${json}" | jq -r '(.questions // []) | length' 2>/dev/null || printf '0')"
-    if [[ "${q_len}" == "0" ]]; then
-      printf 'missing_questions:supervisor_must_surface_tradeoffs\n' >&2
-      return 1
-    fi
-    if [[ "${q_len}" -gt 3 ]]; then
-      printf 'too_many_questions\n' >&2
-      return 1
-    fi
-    if [[ "${q_len}" != "0" ]] && ! printf '%s' "${json}" | jq -e \
-      '((.questions // []) | all(.scope == "DEMAND"))' >/dev/null 2>&1; then
-      printf 'question_scope_must_be_DEMAND\n' >&2
-      return 1
-    fi
-  fi
 
   printf '%s' "${json}" | jq -e '
     ([.exports[]?.body[]?
@@ -1164,9 +1161,56 @@ aegis_briefing_reconstruct_contract() {
   reconstructed="$(AEGIS_BRIEFING_SOURCE=supervisor AEGIS_FORCE_REMOTE_SUPERVISOR=1 \
     AEGIS_BRIEFING_MODEL_OVERRIDE="$(aegis_briefing_reconstruction_model)" \
     aegis_briefing_expand_json "${original_goal}" "${target}" "${evidence}" \
-      "[INDEPENDENT CONTRACT RECONSTRUCTION]\nReconstruct the ideal Contract IR independently from the original demand and project evidence. Treat the IDE contract below as an untrusted proposal: do not copy it blindly. Preserve explicit user-visible intent, but surface any omitted, contradictory, or invented behavior in the resulting contract.\nIDE CONTRACT JSON:\n${context}")" || return 1
+      "[INDEPENDENT CONTRACT RECONSTRUCTION]\nReconstruct the ideal Contract IR independently from the original demand and project evidence. Treat the IDE contract below as an untrusted proposal: do not copy it blindly. Preserve explicit user-visible intent, but surface any omitted, contradictory, or invented behavior in the resulting contract.\n\n[QUESTION REVIEW]\nSet questions:[] in this independent reconstruction. The IDE contract may contain candidate questions; review them instead. For every candidate question, add questionReview with exactly one object of this form: {id, verdict, rationale, derivedDecision?}. verdict=ASK only when a business decision remains unresolved after explicit demand facts, applicable protocol, and KISS defaults; it must change observable contract behavior, external risk, or an invariant. verdict=DERIVE when the demand, protocol, or safe default settles the decision; derivedDecision must state that resolution. Do not ask users to choose implementation strategies that an expert can derive.\nIDE CONTRACT JSON:\n${context}")" || return 1
   aegis_briefing_validate_json "${reconstructed}" >/dev/null 2>&1 || return 1
   printf '%s' "${reconstructed}"
+}
+
+# Candidate questions are admissible only after an independent authority
+# classifies every one as a real business ambiguity (ASK) or a derived default
+# (DERIVE). The latter is preserved as receipt metadata, never shown to users.
+aegis_briefing_validate_question_review() {
+  local ide_json="${1-}"
+  local reconstructed_json="${2-}"
+  local count
+  count="$(printf '%s' "${ide_json}" | jq -r '(.questions // []) | length' 2>/dev/null || printf '0')"
+  [[ "${count}" != "0" ]] || return 0
+  printf '%s' "${ide_json}" | jq -en --argjson ide "${ide_json}" --argjson reconstructed "${reconstructed_json}" '
+    [$ide.questions[]?.id] as $candidate_ids
+    | ($reconstructed.questionReview // []) as $reviews
+    | ($reviews | type) == "array"
+    and ($reviews | length) == ($candidate_ids | length)
+    and ($reviews | all(
+          (type == "object")
+          and (.id | type) == "string"
+          and (.id as $id | ($candidate_ids | index($id)) != null)
+          and (.verdict == "ASK" or .verdict == "DERIVE")
+          and (.rationale | type) == "string" and (.rationale | length) > 0
+          and (if .verdict == "DERIVE"
+               then (.derivedDecision | type) == "string" and (.derivedDecision | length) > 0
+               else true end)
+        ))
+    and (([$reviews[].id] | unique | length) == ($reviews | length))
+    and (([$reviews[].id] | sort) == ($candidate_ids | sort))
+  ' >/dev/null 2>&1
+}
+
+aegis_briefing_apply_question_review() {
+  local ide_json="${1-}"
+  local reconstructed_json="${2-}"
+  jq -c --argjson reconstructed "${reconstructed_json}" '
+    (.questions // []) as $candidates
+    | (($reconstructed.questionReview // []) | INDEX(.id)) as $review
+    | [ $candidates[]? | . as $candidate | $review[$candidate.id] as $result
+        | select($result.verdict == "ASK") ] as $approved
+    | [ $candidates[]? | . as $candidate | $review[$candidate.id] as $result
+        | select($result.verdict == "DERIVE")
+        | {id: $candidate.id, decision: $candidate.decision, status: "DERIVED", resolution: $result.derivedDecision, rationale: $result.rationale} ] as $derived
+    | .questions = $approved
+    | if ($derived | length) == 0 then del(.questionResolution)
+      else .questionResolution = {derived: $derived}
+      end
+  ' <<< "${ide_json}"
 }
 
 # Reconciles an IDE contract with the independent Aegis reconstruction.  On
@@ -1178,7 +1222,7 @@ aegis_briefing_reconcile_ide_contract() {
   local target="${3-}"
   local evidence="${4-}"
   local runtime_dir="${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}"
-  local reconstructed comparison resolved questions
+  local reconstructed reviewed comparison resolved questions
   [[ -n "${ide_json}" ]] || return 1
   aegis_briefing_validate_json "${ide_json}" >/dev/null 2>&1 || return 1
 
@@ -1192,14 +1236,22 @@ aegis_briefing_reconcile_ide_contract() {
     return 1
   }
   printf '%s' "${reconstructed}" > "${runtime_dir}/reconstructed_contract_ir.json" 2>/dev/null || true
-  comparison="$(aegis_briefing_compare_contracts "${ide_json}" "${reconstructed}")" || return 1
+  aegis_briefing_validate_question_review "${ide_json}" "${reconstructed}" || {
+    printf '%s\n' '{"schema":"aegis.contract_reconciliation.v1","status":"question_review_unproven"}' \
+      > "${runtime_dir}/contract_reconciliation.json" 2>/dev/null || true
+    export AEGIS_CONTRACT_RECONCILIATION_STATUS="question_review_unproven"
+    return 1
+  }
+  reviewed="$(aegis_briefing_apply_question_review "${ide_json}" "${reconstructed}")" || return 1
+  printf '%s' "${reviewed}" > "${runtime_dir}/reviewed_ide_contract_ir.json" 2>/dev/null || true
+  comparison="$(aegis_briefing_compare_contracts "${reviewed}" "${reconstructed}")" || return 1
   printf '%s' "${comparison}" > "${runtime_dir}/contract_reconciliation.json" 2>/dev/null || true
 
   if printf '%s' "${comparison}" | jq -e '.equivalent == true' >/dev/null 2>&1; then
     export AEGIS_CONTRACT_RECONCILIATION_STATUS="equivalent"
     resolved="$(jq -c --argjson reconciliation "${comparison}" --arg original_goal "${original_goal}" \
       '.contractReconciliation = ($reconciliation + {status: "equivalent", original_demand: $original_goal})' \
-      <<< "${ide_json}")" || return 1
+      <<< "${reviewed}")" || return 1
     printf '%s' "${resolved}"
     return 0
   fi
@@ -1219,7 +1271,7 @@ aegis_briefing_reconcile_ide_contract() {
   resolved="$(jq -c --argjson questions "${questions}" --argjson reconciliation "${comparison}" \
     --arg original_goal "${original_goal}" \
     '.contractReconciliation = ($reconciliation + {status: "divergent", original_demand: $original_goal, pendingQuestions: $questions})' \
-    <<< "${ide_json}")" || return 1
+    <<< "${reviewed}")" || return 1
   export AEGIS_CONTRACT_RECONCILIATION_STATUS="divergent"
   export AEGIS_LAST_SCHEMA_JSON="${resolved}"
   printf '%s' "${resolved}"
@@ -1255,8 +1307,8 @@ aegis_briefing_expand_json() {
 
   local user_prompt="Demand: ${goal}\nTargets: ${target}
 
-[QUESTION SCOPE RULE]
-The questions array is exclusively for decisions about the user's software demand and domain. Ask only about product behavior, architecture, inputs, failures, performance, concurrency, persistence, or other user-visible requirements. Never put Aegis internals, model/provider choice, tokens, runtime, receipts, commits, harness gates, benchmarks, or evidence orchestration in questions. Use scope=DEMAND for every question."
+[QUESTION ADMISSION RULE]
+The questions array defaults to []. First extract explicit demand facts, then derive applicable protocol and KISS defaults. Ask a question only when a business decision remains unresolved after those steps and changes observable contract behavior, external risk, or an invariant. Never ask the user to select an implementation strategy that can be derived from the demand or an applicable protocol. Each candidate needs: id, decision, demandEvidence, whyUnresolved, contractImpact (non-empty array), recommendedRationale, question, scope=DEMAND, and options. Never put Aegis internals, model/provider choice, tokens, runtime, receipts, commits, harness gates, benchmarks, or evidence orchestration in questions."
   if [[ -n "${AEGIS_BRIEFING_ANSWERS:-}" ]]; then
     user_prompt="${user_prompt}\n\n[OPERATOR ANSWERS TO ARCHITECTURAL QUESTIONS]\n${AEGIS_BRIEFING_ANSWERS}\n\nCRITICAL: The operator has answered all architectural questions above. You MUST set \"questions\": [] in your JSON output — do not generate any new questions."
   fi
@@ -1363,14 +1415,15 @@ The questions array is exclusively for decisions about the user's software deman
     if [[ -n "${fail_reason}" && "${fail_reason}" == invalid_briefing:* ]]; then
       local clean_feedback
       clean_feedback="$(printf '%s' "${fail_reason}" | sed -E 's|/tmp/[^/]+/||g')"
-      if [[ "${clean_feedback}" == *"missing_questions"* \
-         || "${clean_feedback}" == *"too_many_questions"* \
+      if [[ "${clean_feedback}" == *"too_many_questions"* \
+         || "${clean_feedback}" == *"bad_questions_shape"* \
+         || "${clean_feedback}" == *"duplicate_question_id"* \
          || "${clean_feedback}" == *"question_scope"* \
          || "${clean_feedback}" == *"question_out_of_demand"* ]]; then
         current_user_prompt="${user_prompt}
 
-[QUALITY GATE FAILURE: QUESTION SCOPE OR COUNT]
-Your previous questions were invalid. Return at most 3 questions, each with a unique stable id such as Q-DOMAIN-001, scope=DEMAND, and keep them strictly about the user's product/domain behavior and architecture. Remove questions about Aegis, harness operation, test/repository organization, commits, runtime, providers, tokens, receipts, benchmarks as process, or evidence orchestration."
+[QUALITY GATE FAILURE: QUESTION ADMISSION]
+Questions are optional: return questions:[] unless a business ambiguity remains unresolved after explicit demand facts and protocol/KISS defaults. For every candidate return a unique stable id such as Q-DOMAIN-001; decision; demandEvidence; whyUnresolved; non-empty contractImpact; recommendedRationale; scope=DEMAND; and two or more options. Do not ask for an implementation strategy that can be derived from the demand. Remove questions about Aegis, harness operation, test/repository organization, commits, runtime, providers, tokens, receipts, benchmarks as process, or evidence orchestration."
       else
         current_user_prompt="${user_prompt}
 

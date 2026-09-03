@@ -83,32 +83,13 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 - Declare em `postconditions[]` a garantia exata de cada método (ex: `undo(make(s)) === s`, `tokensAfter === (ok ? tokensBefore - bits : tokensBefore)`).
 - `proofObligations[]` e `behavior[]` devem ser gerados como instâncias executáveis das pós-condições e dos invariantes de estado.
 
-### IV. Semântica de Pipeline & Invariantes de Composição
-- Em pipelines multi-estágio ($S_1 \to S_2 \dots$), o domínio de entrada de cada estágio subsequente $S_{k+1}$ é estritamente o resíduo não consumido dos estágios anteriores:
-  $$\text{Domain}(S_{k+1}) = \text{Domain}(S_k) \setminus \text{Consumed}(S_k)$$
-- Nenhuma obrigação, saldo ou transação consumida em $S_k$ pode ser re-liquidada ou duplicada em $S_{k+1}$ (Zero Double Settlement).
+### IV. Composição, Conservação e Identidade — somente quando aplicável
+- Se a demanda descreve pipeline, saldo, fluxo, ledger, topologia ou métrica agregada, declare a lei de composição ou conservação que o domínio exige. Não invente uma lei financeira, uma árvore de Merkle ou uma representação por índice para domínios que não a pedem.
+- Escolha a identidade e a estrutura de dados a partir do contrato: IDs externos podem ser válidos quando sua unicidade é garantida; índices, buffers tipados ou hashes são escolhas condicionais, não axiomas universais.
 
-### V. Leis Universais de Conservação & Tripla Partição
-- Toda operação de transformação, leilão, fluxo ou contabilidade deve satisfazer a Lei da Tripla Partição em `conservationLaws[]`:
-  $$\sum \text{Original Obligations} \equiv \sum \text{Cycle Consumed} + \sum \text{Partial Filled} + \sum \text{Residual Remaining}$$
-- Oráculos de falsificação adversarial devem atacar diretamente a matriz de interação $S_i \times S_{i+1}$.
-
-### VI. Identidade Baseada em Posição / Índice (Anti-Colisão de ID)
-- NUNCA assumir unicidade de strings externas (`id: string`) para rastrear saldos mutáveis.
-- O rastreamento interno de resíduos e mutações de coleções deve ser estritamente indexado por posição ($0 \le i < \text{length}$) via arrays paralelos ou typed buffers (`BigUint64Array`/`Int32Array`).
-
-### VII. Completude de Ledger Criptográfico (Ledger Completeness)
-- Toda transação finalizada em qualquer estágio do pipeline (ciclos bilaterais, ciclos triangulares, compensações parciais) DEVE ser incluída nas folhas do acumulador criptográfico (Árvore de Merkle / Hash Chain):
-  $$\forall t \in (\text{CycleSettlements} \cup \text{PartialFills}) \implies \text{hash}(t) \in \text{MerkleLeaves}$$
-
-### VIII. Desambiguação Matemática de Métricas
-- Métricas agregadas no Contract IR devem explicitar:
-  * `scope`: `PER_BATCH` vs `CUMULATIVE_LIFETIME`
-  * `metricType`: `GROSS_OBLIGATION_REMOVAL` ($3 \times \text{MinFlow}$) vs `NET_FLOW_TRANSFER` ($\text{MinFlow}$)
-
-### IX. Fisiologia de Memória Zero-GC
-- Métodos marcados em `hotPath` NUNCA podem instanciar coleções dinâmicas (`new Map()`, `new Set()`), clones (`.slice()`, `Array.from()`), spreads (`...`) ou concatenações de strings em laços.
-- Toda estrutura intermediária em laços de repetição deve utilizar buffers pré-alocados ou inteiros compactos (`bigint`/`number`).
+### V. Performance e memória — somente quando exigidas
+- Só declare `hotPath`, orçamento de alocação, buffers pré-alocados ou Zero-GC quando a demanda trouxer volume, latência, memória ou uma restrição operacional que justifique o custo.
+- Caso contrário, prefira a implementação local mais simples que preserve as pré-condições, invariantes e pós-condições.
 
 ---
 
@@ -116,10 +97,26 @@ Qualquer componente de software em qualquer domínio (motores de busca, algoritm
 
 ### Question scope
 
-The `questions` array belongs exclusively to the software demand. Generate at
-most 1–3 questions. Every question there must clarify product or domain
-behavior, architecture, inputs, failure policy, performance, concurrency,
-persistence, or another user-visible design decision required by the demand.
+The `questions` array belongs exclusively to the software demand. It defaults
+to `[]`; generate at most 1–3 candidates only when the demand leaves a
+business decision genuinely unresolved. Do not ask for an implementation
+choice when the demand, an applicable protocol, or a KISS default already
+determines it.
+
+Before adding a candidate, first extract explicit facts from the demand and
+derive the state-of-the-art default. A candidate is valid only if two
+plausible business outcomes remain, the choice changes observable contract
+behavior, external risk, or an invariant, and the user—not the harness—owns
+that choice. Every candidate must carry `decision`, `demandEvidence`,
+`whyUnresolved`, `contractImpact`, and `recommendedRationale`. The IDE must
+submit candidates to Aegis for independent review before displaying them to
+the user.
+
+The independent reconstruction returns `questionReview`: `ASK` admits a
+candidate to the user; `DERIVE` removes it and records the applicable default.
+The IDE must not treat a candidate as approved merely because it produced it.
+For each candidate, the reconstruction emits `{id, verdict: "ASK"|"DERIVE",
+rationale, derivedDecision?}`; `derivedDecision` is required for `DERIVE`.
 
 Do not put Aegis-process questions in `questions`: model/provider selection,
 token budgets, runtime directories, receipts, commits, harness gates,
@@ -220,7 +217,12 @@ must never be merged into `questions`.
   "questions": [
     {
       "id": "Q-DOMAIN-001",
-      "question": "Concise technical question or architectural decision?",
+      "decision": "Business decision that changes the observable contract",
+      "demandEvidence": "Concrete demand wording that leaves two outcomes plausible",
+      "whyUnresolved": "Why the demand, protocol, and KISS default cannot settle it",
+      "contractImpact": ["public API or invariant affected by the answer"],
+      "recommendedRationale": "Why the first option is the safest KISS default",
+      "question": "Concise business decision that remains unresolved?",
       "scope": "DEMAND",
       "options": [
         "(Recommended) Default decision",
