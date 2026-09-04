@@ -860,7 +860,9 @@ main() {
       break
     fi
     # Agentic pause check for optimize / adversarial
-    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && { [[ "${mode}" == "optimize" ]] || [[ "${mode}" == "adversarial" ]]; }; then
+    if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
+      && [[ "${AEGIS_AGENTIC_REQUIRE_VERDICTS:-false}" == "1" || "${AEGIS_AGENTIC_REQUIRE_VERDICTS:-false}" == "true" ]] \
+      && { [[ "${mode}" == "optimize" ]] || [[ "${mode}" == "adversarial" ]]; }; then
       local _vfile
       _vfile="$(agentic_verdict_file_for "${mode}")"
       if [[ -n "${_vfile}" && ! -f "${_vfile}" ]]; then

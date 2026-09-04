@@ -1622,7 +1622,7 @@ aegis_briefing_generate() {
     # Keep the old direct-schema path available outside agentic execution, but
     # use an independent Aegis reconstruction before accepting an IDE contract.
     if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
-      && [[ "${AEGIS_IDE_CONTRACT_RECONSTRUCTION:-1}" != "0" ]]; then
+      && aegis_briefing_ide_reconstruction_required "${goal}"; then
       local original_goal
       original_goal="${AEGIS_IDE_ORIGINAL_DEMAND:-}"
       if [[ -z "${original_goal}" ]]; then

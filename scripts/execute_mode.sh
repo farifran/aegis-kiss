@@ -656,6 +656,15 @@ execute_mechanical_mode() {
           return 0
         fi
       fi
+      if [[ "${AEGIS_AGENTIC:-0}" == "1" ]]; then
+        declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 \
+          || aegis_fatal "optimize_passthrough_unavailable"
+        out="$(aegis_emit_mechanical_optimize_passthrough "agentic_mechanical_review")" || out=""
+        [[ -n "${out}" ]] || aegis_fatal "agentic_optimize_passthrough_failed"
+        aegis_log "optimize_agentic: revisão mecânica KISS — sem nova rodada de modelo"
+        AEGIS_SUBSTRATE_OUTPUT="${out}"
+        return 0
+      fi
       if [[ "${AEGIS_OPTIMIZE_BUILD_COUNT:-0}" -ge 1 ]]; then
         declare -f aegis_emit_mechanical_optimize_passthrough >/dev/null 2>&1 || aegis_fatal "optimize_passthrough_unavailable"
         out="$(aegis_emit_mechanical_optimize_passthrough "optimize_passthrough_after_refine")" || out=""
