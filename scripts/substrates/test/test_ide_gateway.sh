@@ -23,9 +23,18 @@ fi
 
 output="$(bash "${ROOT_DIR}/aegis" proofs)"
 printf '%s\n' "${output}" | grep -qx '\[AEGIS\]\[PROOF\] NOT_APPLICABLE (no project contract or proof registry)'
+git check-ignore -q .harness/runtime/ide_validation.json
+
+search_cmd() {
+  if command -v rg >/dev/null 2>&1; then
+    rg -n -i "$@"
+  else
+    grep -n -i -E "$@"
+  fi
+}
 
 for forbidden in "a""ider" "raw_""llm" "run_""aegis"; do
-  if rg -n -i "${forbidden}" \
+  if search_cmd "${forbidden}" \
     "${ROOT_DIR}/aegis" \
     "${ROOT_DIR}/scripts/ide_gateway.sh" \
     "${ROOT_DIR}/package.json" >/dev/null; then

@@ -111,15 +111,28 @@ authorize() {
   local staged_files artifact
   staged_files="$(git -C "${ROOT_DIR}" diff --cached --name-only | sort -u)"
   [[ -n "${staged_files}" ]] || fatal 'authorization_requires_staged_changes'
+  if grep -q '^\.harness/runtime/' <<< "${staged_files}"; then
+    fatal 'staged_transient_runtime_artifact'
+  fi
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    if [[ -f "${ROOT_DIR}/${path}" ]]; then
+      git -C "${ROOT_DIR}" add -- "${path}"
+    elif [[ ! -e "${ROOT_DIR}/${path}" ]]; then
+      git -C "${ROOT_DIR}" rm --quiet --cached --ignore-unmatch -- "${path}"
+    fi
+  done <<< "${staged_files}"
+  staged_files="$(git -C "${ROOT_DIR}" diff --cached --name-only | sort -u)"
+  [[ -n "${staged_files}" ]] || fatal 'authorization_requires_staged_changes'
   bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
   run_verify --profile auto
-  mkdir -p "${RUNTIME_DIR}"
-  artifact="${RUNTIME_DIR}/ide_validation.json"
+  artifact="$(mktemp "${TMPDIR:-/tmp}/aegis-ide-validation.XXXXXX.json")"
   jq -n --rawfile files <(printf '%s\n' "${staged_files}") \
     '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:($files | split("\n") | map(select(length > 0)))}}' \
     > "${artifact}"
   bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${ROOT_DIR}" "${artifact}"
   bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${ROOT_DIR}"
+  rm -f "${artifact}"
   printf '[AEGIS][IDE] promotion=AUTHORIZED receipt=.git/aegis/precommit_receipt.json\n'
 }
 

@@ -47,21 +47,16 @@ manifest_from_worktree() {
 }
 
 manifest_from_index() {
-  local files="${1:-}" path content_file
-  content_file="$(mktemp)"
-  trap 'rm -f "${content_file}"' RETURN
+  local files="${1:-}" path
   while IFS= read -r path; do
     [[ -n "${path}" ]] || continue
     printf 'path=%s\n' "${path}"
     if git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null; then
-      git -C "${repository_root}" show ":${path}" > "${content_file}"
-      shasum -a 256 "${content_file}" | awk '{print $1}'
+      git -C "${repository_root}" show ":${path}" | shasum -a 256 | awk '{print $1}'
     else
       printf 'missing\n'
     fi
   done <<< "${files}" | shasum -a 256 | awk '{print $1}'
-  rm -f "${content_file}"
-  trap - RETURN
 }
 
 file_digest_from_worktree() {
@@ -71,13 +66,10 @@ file_digest_from_worktree() {
 }
 
 file_digest_from_index() {
-  local path="${1:-}" content_file
+  local path="${1:-}"
   git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null \
     || fatal "receipt_input_missing_from_index:${path}"
-  content_file="$(mktemp)"
-  git -C "${repository_root}" show ":${path}" > "${content_file}"
-  shasum -a 256 "${content_file}" | awk '{print $1}'
-  rm -f "${content_file}"
+  git -C "${repository_root}" show ":${path}" | shasum -a 256 | awk '{print $1}'
 }
 
 absent_metadata_digest() {
@@ -205,10 +197,43 @@ create_baseline_authorization() {
   [[ -n "${files}" ]] || fatal "baseline_authorization_requires_staged_changes"
   while IFS= read -r path; do safe_path "${path}" || fatal "unsafe_staged_path:${path}"; done <<< "${files}"
 
+  # Synchronize staged files with worktree state so the tribunal verifies
+  # the exact bytes that are staged for commit.
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    if [[ -f "${repository_root}/${path}" ]]; then
+      git -C "${repository_root}" add -- "${path}"
+    elif [[ ! -e "${repository_root}/${path}" ]]; then
+      git -C "${repository_root}" rm --quiet --cached --ignore-unmatch -- "${path}"
+    fi
+  done <<< "${files}"
+  files="$(git -C "${repository_root}" diff --cached --name-only | sort -u)"
+  [[ -n "${files}" ]] || fatal "baseline_authorization_requires_staged_changes"
+
   base="$(git -C "${repository_root}" rev-parse HEAD)"
   worktree_manifest="$(manifest_from_worktree "${files}")"
   index_manifest="$(manifest_from_index "${files}")"
-  [[ "${worktree_manifest}" == "${index_manifest}" ]] || fatal "baseline_worktree_index_mismatch"
+  if [[ "${worktree_manifest}" != "${index_manifest}" ]]; then
+    echo "[AEGIS][FORMAL][ERROR] baseline_worktree_index_mismatch: files differ between index and worktree:" >&2
+    while IFS= read -r path; do
+      [[ -n "${path}" ]] || continue
+      local w_hash i_hash
+      if [[ -f "${repository_root}/${path}" ]]; then
+        w_hash="$(shasum -a 256 "${repository_root}/${path}" | awk '{print $1}')"
+      else
+        w_hash="missing"
+      fi
+      if git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null; then
+        i_hash="$(git -C "${repository_root}" show ":${path}" | shasum -a 256 | awk '{print $1}')"
+      else
+        i_hash="missing"
+      fi
+      if [[ "${w_hash}" != "${i_hash}" ]]; then
+        echo "  - ${path} (worktree=${w_hash:0:8}, index=${i_hash:0:8})" >&2
+      fi
+    done <<< "${files}"
+    fatal "baseline_worktree_index_mismatch"
+  fi
   git -C "${repository_root}" diff --cached --check || fatal "baseline_staged_diff_invalid"
 
   if jq -e '.scripts["aegis:typecheck"] | type == "string"' "${repository_root}/package.json" >/dev/null 2>&1; then

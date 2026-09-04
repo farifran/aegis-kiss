@@ -143,5 +143,17 @@ printf 'export const version = 2;\n' > "${hook_repo}/src/index.ts"
 git -C "${hook_repo}" add src/index.ts
 git -C "${hook_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm promoted
 [[ "$(git -C "${hook_repo}" log -1 --format=%s)" == "promoted" ]] || fail "hook_did_not_authorize_direct_commit"
+if git -C "${hook_repo}" ls-files .harness/runtime | grep -q .; then
+  fail "transient_runtime_artifact_was_staged"
+fi
+
+# Staging a file and then modifying it further on disk (e.g. IDE auto-save or
+# format) must synchronize and promote without baseline_worktree_index_mismatch.
+printf 'export const version = 3;\n' > "${hook_repo}/src/index.ts"
+git -C "${hook_repo}" add src/index.ts
+printf 'export const version = 4;\n' > "${hook_repo}/src/index.ts"
+git -C "${hook_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm "promoted-with-worktree-sync"
+[[ "$(git -C "${hook_repo}" log -1 --format=%s)" == "promoted-with-worktree-sync" ]] || fail "worktree_sync_commit_failed"
+[[ "$(git -C "${hook_repo}" show HEAD:src/index.ts)" == $'export const version = 4;' ]] || fail "committed_content_not_synced"
 
 echo "[PASS] formal promotion authorization"

@@ -9,29 +9,7 @@
 # RUNTIME TRANSIENT STATE
 # =========================================================
 
-.harness/runtime/epistemic_handover.json
-.harness/runtime/last_good_epistemic_handover.json
-.harness/runtime/last_fatal
-.harness/runtime/last_outcome.json
-.harness/runtime/pipeline_metrics.jsonl
-.harness/runtime/briefing_loop_report*.jsonl
-.harness/runtime/evidence_cache/
-.harness/runtime/candidate_tools_stamp/
-.harness/runtime/capability_env/
-.harness/runtime/capability_payloads/
-.harness/runtime/loop/
-.harness/runtime/issue_cache/
-.harness/runtime/commit.msg
-.harness/runtime/commit.msg.*
-.harness/runtime/draft.md
-.harness/runtime/layer0_cached.json
-.harness/runtime/layer0_git.hash
-.harness/runtime/*.swp
-
-.harness/runtime/*.tmp
-.harness/runtime/*.bak
-.harness/runtime/*.snapshot
-.harness/runtime/*.err
+.harness/runtime/
 
 # Local machine secrets/config
 .harness/local.env
