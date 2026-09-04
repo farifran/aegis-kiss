@@ -74,6 +74,29 @@ file_digest_from_index() {
   rm -f "${content_file}"
 }
 
+absent_metadata_digest() {
+  local path="${1:-}"
+  printf 'aegis.metadata.absent.v1:%s\n' "${path}" | shasum -a 256 | awk '{print $1}'
+}
+
+metadata_digest_from_worktree() {
+  local path="${1:-}"
+  if [[ -f "${repository_root}/${path}" ]]; then
+    file_digest_from_worktree "${path}"
+  else
+    absent_metadata_digest "${path}"
+  fi
+}
+
+metadata_digest_from_index() {
+  local path="${1:-}"
+  if git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null; then
+    file_digest_from_index "${path}"
+  else
+    absent_metadata_digest "${path}"
+  fi
+}
+
 validation_authority_json() {
   local validation_llm="$(printf '%s' "${AEGIS_VALIDATION_LLM:-0}" | tr '[:upper:]' '[:lower:]')"
   case "${validation_llm}" in
@@ -88,6 +111,34 @@ validation_authority_json() {
   esac
 }
 
+write_receipt() {
+  local base="${1:-}" files="${2:-}" manifest="${3:-}" artifact_digest="${4:-}"
+  local contract_digest="${5:-}" registry_digest="${6:-}" profile="${7:-}"
+  local proof_plan_digest="${8:-}" authority="${9:-}" proof_plan="${10:-}"
+  local auth_file auth_dir now expires
+
+  auth_file="$(authorization_path)"
+  auth_dir="$(dirname "${auth_file}")"
+  now="$(date +%s)"
+  expires=$((now + 900))
+  mkdir -p "${auth_dir}"
+  jq -n \
+    --arg base "${base}" \
+    --arg files "${files}" \
+    --arg manifest "${manifest}" \
+    --arg artifact_digest "${artifact_digest}" \
+    --arg contract_digest "${contract_digest}" \
+    --arg registry_digest "${registry_digest}" \
+    --arg profile "${profile}" \
+    --arg proof_plan_digest "${proof_plan_digest}" \
+    --argjson authority "${authority}" \
+    --argjson proof_plan "${proof_plan}" \
+    --argjson expires "${expires}" \
+    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,expiresAtEpoch:$expires}' \
+    > "${auth_file}"
+  echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
+}
+
 profile_for_files() {
   local files="${1:-}" profile_json
   profile_json="$(AEGIS_ROOT_DIR="${repository_root}" aegis_proof_profile_for_change \
@@ -97,6 +148,12 @@ profile_for_files() {
 }
 
 create_authorization() {
+  if [[ ! -e "${repository_root}/.harness/active_contract_ir.json" \
+    && ! -e "${repository_root}/.harness/proof_registry.json" ]]; then
+    create_baseline_authorization
+    return
+  fi
+
   [[ -s "${artifact_file}" ]] || fatal "missing_validation_artifact"
   jq -e '
     .mode == "validation" and .verdict == "accepted"
@@ -105,7 +162,7 @@ create_authorization() {
   ' "${artifact_file}" >/dev/null 2>&1 || fatal "validation_not_accepted"
 
   local files base manifest artifact_digest auth_file auth_dir now expires
-  local contract_digest registry_digest authority profile_json profile profile_plan proof_plan_digest
+  local contract_digest registry_digest authority profile_json profile profile_plan proof_plan proof_plan_digest
   files="$(jq -r '.validated_candidate.files_changed[]' "${artifact_file}" | sort -u)"
   while IFS= read -r path; do safe_path "${path}" || fatal "unsafe_candidate_path:${path}"; done <<< "${files}"
   base="$(git -C "${repository_root}" rev-parse HEAD)"
@@ -130,26 +187,41 @@ create_authorization() {
     fatal "required_proof_profile_failed:${profile}"
   fi
   proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
-  auth_file="$(authorization_path)"
-  auth_dir="$(dirname "${auth_file}")"
-  now="$(date +%s)"
-  expires=$((now + 900))
-  mkdir -p "${auth_dir}"
-  jq -n \
-    --arg base "${base}" \
-    --arg files "${files}" \
-    --arg manifest "${manifest}" \
-    --arg artifact_digest "${artifact_digest}" \
-    --arg contract_digest "${contract_digest}" \
-    --arg registry_digest "${registry_digest}" \
-    --arg profile "${profile}" \
-    --arg proof_plan_digest "${proof_plan_digest}" \
-    --argjson authority "${authority}" \
-    --argjson proof_plan "${proof_plan}" \
-    --argjson expires "${expires}" \
-    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,expiresAtEpoch:$expires}' \
-    > "${auth_file}"
-  echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
+  write_receipt "${base}" "${files}" "${manifest}" "${artifact_digest}" \
+    "${contract_digest}" "${registry_digest}" "${profile}" "${proof_plan_digest}" \
+    "${authority}" "${proof_plan}"
+}
+
+create_baseline_authorization() {
+  local files base worktree_manifest index_manifest artifact_digest authority profile proof_plan proof_plan_digest
+
+  files="$(git -C "${repository_root}" diff --cached --name-only | sort -u)"
+  [[ -n "${files}" ]] || fatal "baseline_authorization_requires_staged_changes"
+  while IFS= read -r path; do safe_path "${path}" || fatal "unsafe_staged_path:${path}"; done <<< "${files}"
+
+  base="$(git -C "${repository_root}" rev-parse HEAD)"
+  worktree_manifest="$(manifest_from_worktree "${files}")"
+  index_manifest="$(manifest_from_index "${files}")"
+  [[ "${worktree_manifest}" == "${index_manifest}" ]] || fatal "baseline_worktree_index_mismatch"
+  git -C "${repository_root}" diff --cached --check || fatal "baseline_staged_diff_invalid"
+
+  if jq -e '.scripts["aegis:typecheck"] | type == "string"' "${repository_root}/package.json" >/dev/null 2>&1; then
+    (cd "${repository_root}" && npm run aegis:typecheck) || fatal "baseline_typecheck_failed"
+  fi
+  if jq -e '.scripts["aegis:lint"] | type == "string"' "${repository_root}/package.json" >/dev/null 2>&1; then
+    (cd "${repository_root}" && npm run aegis:lint) || fatal "baseline_lint_failed"
+  fi
+
+  artifact_digest="$(printf 'aegis.baseline.validation.v1\nbase=%s\nfiles=%s\nmanifest=%s\n' \
+    "${base}" "${files}" "${index_manifest}" | shasum -a 256 | awk '{print $1}')"
+  authority="$(jq -n '{kind:"deterministic_tribunal",id:"mechanical_validation.v1"}')"
+  profile="fast"
+  proof_plan="$(jq -n '{profile:"fast",count:0,proofs:[]}')"
+  proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
+  write_receipt "${base}" "${files}" "${index_manifest}" "${artifact_digest}" \
+    "$(metadata_digest_from_worktree .harness/active_contract_ir.json)" \
+    "$(metadata_digest_from_worktree .harness/proof_registry.json)" \
+    "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}"
 }
 
 requires_authorization() {
@@ -217,8 +289,8 @@ verify_authorization() {
   [[ "${expected}" == "${manifest}" ]] || fatal "formal_promotion_manifest_mismatch"
   expected_contract_digest="$(jq -r '.contractDigest' "${auth_file}")"
   expected_registry_digest="$(jq -r '.proofRegistryDigest' "${auth_file}")"
-  contract_digest="$(file_digest_from_index .harness/active_contract_ir.json)"
-  registry_digest="$(file_digest_from_index .harness/proof_registry.json)"
+  contract_digest="$(metadata_digest_from_index .harness/active_contract_ir.json)"
+  registry_digest="$(metadata_digest_from_index .harness/proof_registry.json)"
   [[ "${expected_contract_digest}" == "${contract_digest}" ]] || fatal "formal_promotion_contract_digest_mismatch"
   [[ "${expected_registry_digest}" == "${registry_digest}" ]] || fatal "formal_promotion_registry_digest_mismatch"
 }

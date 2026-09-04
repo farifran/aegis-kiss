@@ -14,9 +14,33 @@ trap cleanup EXIT
 
 valid_registry="${work_dir}/registry.json"
 valid_contract="${work_dir}/contract.json"
-cp .harness/proof_registry.json "${valid_registry}"
-jq '.targets = ["src/reorgEngine.ts", "src/blockTree.ts", "src/index.ts"]' \
-  .harness/active_contract_ir.json > "${valid_contract}"
+cat > "${valid_registry}" <<'EOF'
+{
+  "schema": "aegis.proof_registry.v1",
+  "policy": {
+    "mode": "enforced",
+    "maxActiveProofsPerProfile": {"fast": 1, "targeted": 1, "release": 1, "forensic": 1}
+  },
+  "profiles": [
+    {"id": "fast", "proofIds": ["PO-FIXTURE-FAST"]},
+    {"id": "targeted", "proofIds": ["PO-FIXTURE-TARGETED"]},
+    {"id": "release", "proofIds": ["PO-FIXTURE-RELEASE"]},
+    {"id": "forensic", "proofIds": ["PO-FIXTURE-FORENSIC"]}
+  ],
+  "proofs": [
+    {"id": "PO-FIXTURE-FAST", "risk": "fixture type safety", "coverageKey": "fixture.type", "authority": "compiler", "cost": "low", "cadence": "always", "status": "active", "targets": ["src/index.ts"], "executionKey": "fixture-fast", "command": "npm run aegis:typecheck"},
+    {"id": "PO-FIXTURE-TARGETED", "risk": "fixture briefing behavior", "coverageKey": "fixture.briefing", "authority": "targeted-check", "cost": "medium", "cadence": "targeted", "status": "active", "targets": ["scripts/lib/briefing.sh"], "executionKey": "fixture-targeted", "command": "npm run aegis:typecheck"},
+    {"id": "PO-FIXTURE-RELEASE", "risk": "fixture governance behavior", "coverageKey": "fixture.governance", "authority": "release-check", "cost": "high", "cadence": "release", "status": "active", "targets": ["scripts/lib/proof_governance.sh"], "executionKey": "fixture-release", "command": "npm run aegis:typecheck"},
+    {"id": "PO-FIXTURE-FORENSIC", "risk": "fixture forensic behavior", "coverageKey": "fixture.forensic", "authority": "forensic-check", "cost": "high", "cadence": "forensic", "status": "active", "targets": ["scripts/proof_governance.sh"], "executionKey": "fixture-forensic", "command": "npm run aegis:typecheck"}
+  ]
+}
+EOF
+cat > "${valid_contract}" <<'EOF'
+{
+  "targets": ["src/index.ts"],
+  "proofObligations": [{"id": "PO-FIXTURE-FAST"}]
+}
+EOF
 
 AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate "${valid_registry}" "${valid_contract}" >/dev/null
 
@@ -123,17 +147,19 @@ if AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate "${valid_registr
 fi
 
 plan="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_plan fast "${valid_registry}")"
-jq -e '.profile == "fast" and .count == 3 and ([.proofs[].id] | length == 3)' <<<"${plan}" >/dev/null
+jq -e '.profile == "fast" and .count == 1 and .proofs[0].id == "PO-FIXTURE-FAST"' <<<"${plan}" >/dev/null
 
-auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'src/stateWal.ts')"
-jq -e '.profile == "release" and ([.matchedProofs[].id] | index("PO-WAL-001"))' <<<"${auto_profile}" >/dev/null
-auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'src/benchmarks/reorgEngine.benchmark.ts')"
-jq -e '.profile == "forensic" and ([.matchedProofs[].id] | index("PO-BENCHMARK-001"))' <<<"${auto_profile}" >/dev/null
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/lib/briefing.sh')"
+jq -e '.profile == "targeted" and ([.matchedProofs[].id] | index("PO-FIXTURE-TARGETED"))' <<<"${auto_profile}" >/dev/null
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/lib/proof_governance.sh')"
+jq -e '.profile == "release" and ([.matchedProofs[].id] | index("PO-FIXTURE-RELEASE"))' <<<"${auto_profile}" >/dev/null
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/proof_governance.sh')"
+jq -e '.profile == "forensic" and ([.matchedProofs[].id] | index("PO-FIXTURE-FORENSIC"))' <<<"${auto_profile}" >/dev/null
 auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'.harness/active_contract_ir.json')"
 jq -e '.profile == "release"' <<<"${auto_profile}" >/dev/null
 
-key="$(AEGIS_ROOT_DIR="${ROOT_DIR}" AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_key PO-TYPE-001 fast "${valid_contract}" "${valid_registry}" "src/reorgEngine.ts")"
-AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_store "${key}" PO-TYPE-001 PROVEN compiler >/dev/null
+key="$(AEGIS_ROOT_DIR="${ROOT_DIR}" AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_key PO-FIXTURE-FAST fast "${valid_contract}" "${valid_registry}" "src/index.ts")"
+AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_store "${key}" PO-FIXTURE-FAST PROVEN compiler >/dev/null
 AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_lookup "${key}"
 
 echo "[AEGIS][TEST][PASS] proof governance passed"

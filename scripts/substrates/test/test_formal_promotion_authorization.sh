@@ -97,4 +97,20 @@ if ! bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" require
   fail "partial_reset_bypassed_formal_authorization"
 fi
 
+# A universal harness baseline has no product contract or proof registry yet,
+# but it still needs a receipt before its own scripts can be promoted.
+baseline_repo="${temp_dir}/baseline-repo"
+mkdir -p "${baseline_repo}/src"
+printf 'export const version = 1;\n' > "${baseline_repo}/src/index.ts"
+git -C "${baseline_repo}" init -q
+git -C "${baseline_repo}" add .
+git -C "${baseline_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
+
+printf 'export const version = 2;\n' > "${baseline_repo}/src/index.ts"
+git -C "${baseline_repo}" add src/index.ts
+bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" create "${baseline_repo}"
+baseline_receipt="$(git -C "${baseline_repo}" rev-parse --git-path aegis/precommit_receipt.json)"
+jq -e '.proofProfile == "fast" and (.proofs | length) == 0' "${baseline_receipt}" >/dev/null
+bash "${AEGIS_TEST_ROOT}/scripts/formal_promotion_authorization.sh" verify "${baseline_repo}"
+
 echo "[PASS] formal promotion authorization"
