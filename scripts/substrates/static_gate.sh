@@ -76,7 +76,7 @@ run_ast_rules_on_path() {
   [[ "${#rules[@]}" -gt 0 ]] || return 0
 
   for rule in "${rules[@]}"; do
-    # short report keeps aider reflection payloads small
+    # Keep diagnostics concise for the IDE review surface.
     rc=0
     out="$("${sg_bin}" scan \
       -r "${rule}" \

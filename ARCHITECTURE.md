@@ -12,7 +12,7 @@ Aegis core
 → contrato, escopo, provas, receipt, promoção e verificação pós-commit
 
 Adaptadores do projeto
-→ TypeScript, Aider, testes, benchmarks e verificadores especializados
+→ compilador, linter, testes, benchmarks e verificadores especializados
 ```
 
 ## Invariantes do core
@@ -37,12 +37,13 @@ Uma revisão por segundo modelo é uma prova semântica cara. Ela só é acionad
 por `release`, `forensic` ou política explícita do contrato. O caminho normal
 do IDE valida o Contract IR mecanicamente e segue para a mutação.
 
-## Adaptador TypeScript/Aider
+## Adaptadores do projeto
 
-Esta distribuição tem TypeScript e Aider como adaptadores padrão:
+Esta distribuição usa TypeScript como adaptador local de estrutura. Todo
+executor de código pertence ao IDE; o core não chama modelos, providers ou
+subprocessos de edição.
 
 ```text
-Aider        → mutação delimitada no candidato descartável
 TypeScript   → typecheck, lint, smoke e testes do projeto
 Aegis core   → decide quando essas evidências são necessárias e as vincula ao receipt
 ```

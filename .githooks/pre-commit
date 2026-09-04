@@ -5,5 +5,13 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
 
 if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${ROOT_DIR}"; then
+  # VS Code may stage a file after the IDE has issued its receipt, or the
+  # short-lived receipt may expire while the commit message is being written.
+  # Revalidate the exact index instead of asking the operator to repeat a
+  # separate command. This remains fail-closed: authorize itself runs the
+  # tribunal and only then writes a new receipt.
+  if ! bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${ROOT_DIR}" >/dev/null 2>&1; then
+    bash "${ROOT_DIR}/aegis" authorize
+  fi
   exec bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${ROOT_DIR}"
 fi

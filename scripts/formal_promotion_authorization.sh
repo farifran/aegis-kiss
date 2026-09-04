@@ -19,7 +19,13 @@ git -C "${repository_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || fatal "not_git_repository"
 
 authorization_path() {
-  git -C "${repository_root}" rev-parse --git-path aegis/precommit_receipt.json
+  local path
+  path="$(git -C "${repository_root}" rev-parse --git-path aegis/precommit_receipt.json)"
+  if [[ "${path}" == /* ]]; then
+    printf '%s\n' "${path}"
+  else
+    printf '%s/%s\n' "${repository_root}" "${path}"
+  fi
 }
 
 safe_path() {
@@ -103,7 +109,7 @@ validation_authority_json() {
     1|true|yes|on|llm)
       local validator="${AEGIS_VALIDATION_MODEL:-}"
       [[ -n "${validator}" ]] || fatal "validation_model_required_for_independent_llm"
-      [[ "${validator}" != "${AEGIS_AIDER_MODEL:-}" && "${validator}" != "${AEGIS_MUTATION_MODEL:-}" ]] \
+      [[ "${validator}" != "${AEGIS_MUTATION_MODEL:-}" ]] \
         || fatal "validation_model_must_differ_from_mutation_model"
       jq -n --arg id "${validator}" '{kind:"independent_model",id:$id}'
       ;;

@@ -29,7 +29,7 @@ cat > "${valid_registry}" <<'EOF'
   ],
   "proofs": [
     {"id": "PO-FIXTURE-FAST", "risk": "fixture type safety", "coverageKey": "fixture.type", "authority": "compiler", "cost": "low", "cadence": "always", "status": "active", "targets": ["src/index.ts"], "executionKey": "fixture-fast", "command": "npm run aegis:typecheck"},
-    {"id": "PO-FIXTURE-TARGETED", "risk": "fixture briefing behavior", "coverageKey": "fixture.briefing", "authority": "targeted-check", "cost": "medium", "cadence": "targeted", "status": "active", "targets": ["scripts/lib/briefing.sh"], "executionKey": "fixture-targeted", "command": "npm run aegis:typecheck"},
+    {"id": "PO-FIXTURE-TARGETED", "risk": "fixture IDE gateway behavior", "coverageKey": "fixture.ide_gateway", "authority": "targeted-check", "cost": "medium", "cadence": "targeted", "status": "active", "targets": ["scripts/ide_gateway.sh"], "executionKey": "fixture-targeted", "command": "npm run aegis:typecheck"},
     {"id": "PO-FIXTURE-RELEASE", "risk": "fixture governance behavior", "coverageKey": "fixture.governance", "authority": "release-check", "cost": "high", "cadence": "release", "status": "active", "targets": ["scripts/lib/proof_governance.sh"], "executionKey": "fixture-release", "command": "npm run aegis:typecheck"},
     {"id": "PO-FIXTURE-FORENSIC", "risk": "fixture forensic behavior", "coverageKey": "fixture.forensic", "authority": "forensic-check", "cost": "high", "cadence": "forensic", "status": "active", "targets": ["scripts/proof_governance.sh"], "executionKey": "fixture-forensic", "command": "npm run aegis:typecheck"}
   ]
@@ -149,7 +149,7 @@ fi
 plan="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_plan fast "${valid_registry}")"
 jq -e '.profile == "fast" and .count == 1 and .proofs[0].id == "PO-FIXTURE-FAST"' <<<"${plan}" >/dev/null
 
-auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/lib/briefing.sh')"
+auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/ide_gateway.sh')"
 jq -e '.profile == "targeted" and ([.matchedProofs[].id] | index("PO-FIXTURE-TARGETED"))' <<<"${auto_profile}" >/dev/null
 auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/lib/proof_governance.sh')"
 jq -e '.profile == "release" and ([.matchedProofs[].id] | index("PO-FIXTURE-RELEASE"))' <<<"${auto_profile}" >/dev/null

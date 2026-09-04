@@ -37,16 +37,6 @@
 .harness/local.env
 
 # =========================================================
-# AIDER EPHEMERAL STATE
-# =========================================================
-
-.aider.chat.history.md
-.aider.input.history
-.aider.llm.history
-
-.aider.tags.cache*/
-
-# =========================================================
 # EXECUTION ARTIFACTS
 # =========================================================
 
@@ -98,7 +88,6 @@ __pycache__/
 
 .cache/
 .npm/
-.aider*
 
 # macOS
 .DS_Store

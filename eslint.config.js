@@ -188,9 +188,9 @@ export default [
       ],
 
       // ---------------------------------------------------
-      // TYPE DISCIPLINE (mutation lint-gate consumes these)
+      // TYPE DISCIPLINE
       // Floor models invent any / @ts-ignore under pressure —
-      // error severity so aider's --auto-lint loop rejects them.
+      // Error severity keeps unsafe escapes out of the verified diff.
       // ---------------------------------------------------
 
       "@typescript-eslint/no-explicit-any": "error",
