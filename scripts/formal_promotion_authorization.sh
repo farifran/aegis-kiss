@@ -155,11 +155,37 @@ create_authorization() {
 requires_authorization() {
   local changed
   changed="$(git -C "${repository_root}" diff --cached --name-only)"
+  is_complete_baseline_reset_staged && return 1
   # A commit is the durable boundary of a demand, not merely a source-code
   # boundary. Requiring the receipt for every non-empty staged transition
   # prevents an IDE from bypassing the formal route by moving logic into a
   # script, contract, or configuration file.
   [[ -n "${changed}" ]]
+}
+
+is_complete_baseline_reset_staged() {
+  local contract_path=".harness/active_contract_ir.json"
+  local registry_path=".harness/proof_registry.json"
+  local target reset_index
+
+  # A reset is valid only when the *previous* governed unit existed and the
+  # index removes both its metadata files. This cannot turn an arbitrary
+  # source deletion into a receipt bypass.
+  git -C "${repository_root}" cat-file -e "HEAD:${contract_path}" 2>/dev/null || return 1
+  git -C "${repository_root}" cat-file -e "HEAD:${registry_path}" 2>/dev/null || return 1
+  ! git -C "${repository_root}" cat-file -e ":${contract_path}" 2>/dev/null || return 1
+  ! git -C "${repository_root}" cat-file -e ":${registry_path}" 2>/dev/null || return 1
+
+  # Every former target other than the deliberately recreated entry point
+  # must be absent from the staged state.
+  while IFS= read -r target; do
+    [[ -n "${target}" && "${target}" != "src/index.ts" ]] || continue
+    ! git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || return 1
+  done < <(git -C "${repository_root}" show "HEAD:${contract_path}" | jq -r '.targets[]?')
+
+  git -C "${repository_root}" cat-file -e ':src/index.ts' 2>/dev/null || return 1
+  reset_index="$(git -C "${repository_root}" show :src/index.ts)"
+  [[ "${reset_index}" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
 }
 
 verify_authorization() {
