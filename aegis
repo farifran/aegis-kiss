@@ -86,7 +86,7 @@ Comandos:
   ./aegis context       Onde o alvo está: branch, worktree e contratos provados (offline).
   ./aegis proofs [--profile fast|targeted|release|forensic] [--run]
                         Valida a governança e imprime ou executa o plano verificável.
-  ./aegis clean         Remove somente artefatos transientes do harness; nunca altera o produto.
+  ./aegis clean [--src] Remove artefatos transientes; --src também reinicia produto e evidências da demanda.
 
 Opções:
   --issue N             Volta a correr uma issue existente (keep-progress).
@@ -2637,28 +2637,41 @@ EOF
 }
 
 cmd_cleanup() {
-  # `clean` is harness hygiene, never product lifecycle management.  The old
-  # interactive `src/` reset made an accidental affirmative answer delete the
-  # implementation while durable contract/proof metadata still referenced it.
-  # Keep the boundary explicit: product replacement is a reviewed demand, not
-  # a cleanup side effect.
+  local clean_target=0
+  local clean_root="${AEGIS_CLEAN_ROOT:-${ROOT}}"
+
+  # Product reset is supported, but it is transactional at the harness level:
+  # source, active contract and demand-specific proof registry are one unit.
+  # This prevents a fresh src/ from inheriting pointers to an old demand.
   for arg in "$@"; do
     case "${arg}" in
-      --target|--src|--all|-a)
-        aegis_fatal "clean_never_removes_product: use a reviewed demand or Git to change src/"
-        ;;
+      --target|--src|--all|-a) clean_target=1 ;;
       -y|--yes|--force|-f) ;;
       *) aegis_fatal "unknown_clean_option:${arg}" ;;
     esac
   done
 
   aegis_log "Iniciando Auto-Cleanup de arquivos transientes em scratch/ e .harness/runtime/..."
-  find scratch/ -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
-  find .harness/runtime/ -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
-  mkdir -p scratch .harness/runtime 2>/dev/null || true
-  touch scratch/.gitkeep 2>/dev/null || true
+  find "${clean_root}/scratch" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
+  find "${clean_root}/.harness/runtime" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+  mkdir -p "${clean_root}/scratch" "${clean_root}/.harness/runtime" 2>/dev/null || true
+  touch "${clean_root}/scratch/.gitkeep" 2>/dev/null || true
 
-  aegis_log "Harness limpo com sucesso! Produto, contrato e provas foram preservados."
+  if [[ "${clean_target}" -eq 1 ]]; then
+    aegis_log "Reiniciando src/ e retirando contrato e provas da demanda anterior..."
+    mkdir -p "${clean_root}/src"
+    find "${clean_root}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    mkdir -p "${clean_root}/src/tests"
+    cat > "${clean_root}/src/index.ts" <<'EOF'
+// Ponto de entrada canônico para a próxima demanda.
+export {};
+EOF
+    rm -f "${clean_root}/.harness/active_contract_ir.json" \
+      "${clean_root}/.harness/proof_registry.json"
+    aegis_log "Produto e evidências específicas da demanda anterior foram reiniciados juntos."
+  fi
+
+  aegis_log "Harness limpo com sucesso."
 }
 
 cmd_proofs() {

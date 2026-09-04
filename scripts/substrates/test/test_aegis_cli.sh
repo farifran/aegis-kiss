@@ -165,7 +165,7 @@ git -C "${net_new_repo}" commit --quiet -m "feat: initial"
 
 rm -rf "${net_new_repo}"
 
-# --- cleanup is transient-only; it must never erase product evidence ---
+# --- cleanup preserves product by default; --src resets product and evidence together ---
 src_before="$(find src -type f -exec shasum -a 256 {} \; | sort)"
 mkdir -p scratch .harness/runtime
 printf 'transient\n' > scratch/aegis-clean-fixture.tmp
@@ -177,12 +177,19 @@ src_after="$(find src -type f -exec shasum -a 256 {} \; | sort)"
 [[ ! -e scratch/aegis-clean-fixture.tmp && ! -e .harness/runtime/aegis-clean-fixture.tmp ]] \
   || fail "clean retained transient artifacts"
 
-set +e
-clean_product_out="$("${aegis_cli}" clean --src 2>&1)"
-clean_product_rc=$?
-set -e
-[[ "${clean_product_rc}" -ne 0 ]] || fail "clean --src should be refused"
-printf '%s\n' "${clean_product_out}" | grep -q 'clean_never_removes_product' \
-  || fail "clean --src did not explain the safety boundary"
+reset_root="$(mktemp -d)"
+mkdir -p "${reset_root}/src/tests" "${reset_root}/scratch" "${reset_root}/.harness/runtime"
+printf 'old product\n' > "${reset_root}/src/old.ts"
+printf '{}\n' > "${reset_root}/.harness/active_contract_ir.json"
+printf '{}\n' > "${reset_root}/.harness/proof_registry.json"
+printf 'transient\n' > "${reset_root}/scratch/aegis-clean-fixture.tmp"
+AEGIS_CLEAN_ROOT="${reset_root}" "${aegis_cli}" clean --src >/dev/null
+[[ -f "${reset_root}/src/index.ts" && ! -e "${reset_root}/src/old.ts" ]] \
+  || fail "clean --src did not reset the product"
+[[ ! -e "${reset_root}/.harness/active_contract_ir.json" && ! -e "${reset_root}/.harness/proof_registry.json" ]] \
+  || fail "clean --src retained stale demand evidence"
+[[ ! -e "${reset_root}/scratch/aegis-clean-fixture.tmp" ]] \
+  || fail "clean --src retained transient artifacts"
+rm -rf "${reset_root}"
 
-echo "[AEGIS][TEST][PASS] aegis cli: demand shape, accept guard, decline path, net-new, safe cleanup"
+echo "[AEGIS][TEST][PASS] aegis cli: demand shape, accept guard, decline path, net-new, coherent cleanup"
