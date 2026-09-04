@@ -221,14 +221,14 @@ export AEGIS_ADVERSARIAL_DEPTH
 # PROVIDER POLICY
 # =========================================================
 
-: "${AEGIS_PROVIDER_MAX_RETRIES:=3}"
+: "${AEGIS_PROVIDER_MAX_RETRIES:=1}"
 : "${AEGIS_PROVIDER_RETRY_DELAY:=2}"
 : "${AEGIS_PROVIDER_CONNECT_TIMEOUT:=15}"
-: "${AEGIS_PROVIDER_RESPONSE_TIMEOUT:=120}"
+: "${AEGIS_PROVIDER_RESPONSE_TIMEOUT:=60}"
 
 # Local mutation feedback (no rediscovery): max re-entries into the
 # mutation→optimize→adversarial→validation stack after a rejected verdict.
-: "${AEGIS_MAX_MUTATION_ATTEMPTS:=${AEGIS_MAX_BUILD_ATTEMPTS:-2}}"
+: "${AEGIS_MAX_MUTATION_ATTEMPTS:=${AEGIS_MAX_BUILD_ATTEMPTS:-1}}"
 : "${AEGIS_MUTATION_FEEDBACK_LOOP:=${AEGIS_BUILD_FEEDBACK_LOOP:-true}}"
 
 # Optimize engine is raw (not aider). Live short-circuit knobs live in

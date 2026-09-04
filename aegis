@@ -86,6 +86,7 @@ Comandos:
   ./aegis context       Onde o alvo está: branch, worktree e contratos provados (offline).
   ./aegis proofs [--profile fast|targeted|release|forensic] [--run]
                         Valida a governança e imprime ou executa o plano verificável.
+  ./aegis clean         Remove somente artefatos transientes do harness; nunca altera o produto.
 
 Opções:
   --issue N             Volta a correr uma issue existente (keep-progress).
@@ -1451,6 +1452,12 @@ cmd_run() {
       else
         # Function-scoped: reused below for intake_failed diagnostics.
         brief_why="$(tail -n 1 "${brief_err}" 2>/dev/null || true)"
+        if [[ "${brief_why}" == "independent_contract_review_unproven" ]]; then
+          aegis_warn "revisão independente indisponível — contrato e contexto foram preservados; promoção permanece UNPROVEN"
+          emit_result_json "UNPROVEN" "" "" "independent_contract_review_unproven"
+          rm -f "${brief_err}"
+          return 0
+        fi
         if [[ "${intake_relaxed}" -eq 1 ]]; then
           aegis_warn "briefing: recusado (${brief_why:-?}) — relaxed: corpo mecânico"
         else
@@ -2630,24 +2637,20 @@ EOF
 }
 
 cmd_cleanup() {
-  local clean_target=0
-  local auto_confirm=0
-
+  # `clean` is harness hygiene, never product lifecycle management.  The old
+  # interactive `src/` reset made an accidental affirmative answer delete the
+  # implementation while durable contract/proof metadata still referenced it.
+  # Keep the boundary explicit: product replacement is a reviewed demand, not
+  # a cleanup side effect.
   for arg in "$@"; do
     case "${arg}" in
-      --target|--src|--all|-a) clean_target=1 ;;
-      -y|--yes|--force|-f) auto_confirm=1 ;;
+      --target|--src|--all|-a)
+        aegis_fatal "clean_never_removes_product: use a reviewed demand or Git to change src/"
+        ;;
+      -y|--yes|--force|-f) ;;
+      *) aegis_fatal "unknown_clean_option:${arg}" ;;
     esac
   done
-
-  # Pergunta interativa se não foi passada flag e estiver rodando no terminal
-  if [[ "${clean_target}" -eq 0 && "${auto_confirm}" -eq 0 && -t 0 ]]; then
-    printf '\n'
-    read -r -p "⚠️  Deseja também limpar a pasta alvo 'src/' para iniciar uma nova demanda? [s/N]: " ans
-    if [[ "${ans}" =~ ^[SsYy]$ ]]; then
-      clean_target=1
-    fi
-  fi
 
   aegis_log "Iniciando Auto-Cleanup de arquivos transientes em scratch/ e .harness/runtime/..."
   find scratch/ -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
@@ -2655,18 +2658,7 @@ cmd_cleanup() {
   mkdir -p scratch .harness/runtime 2>/dev/null || true
   touch scratch/.gitkeep 2>/dev/null || true
 
-  if [[ "${clean_target}" -eq 1 ]]; then
-    aegis_log "Limpando pasta alvo 'src/' e inicializando template limpo..."
-    rm -rf src/* 2>/dev/null || true
-    mkdir -p src/tests 2>/dev/null || true
-    cat <<'EOF' > src/index.ts
-// src/index.ts — Ponto de entrada canônico (aguardando nova demanda)
-export {};
-EOF
-    aegis_log "Pasta alvo 'src/' resetada e pronta para a nova demanda (Zero erros TS18003)!"
-  fi
-
-  aegis_log "Workspace limpo com sucesso! (Zero resíduos transientes)"
+  aegis_log "Harness limpo com sucesso! Produto, contrato e provas foram preservados."
 }
 
 cmd_proofs() {

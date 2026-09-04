@@ -31,10 +31,12 @@ export AEGIS_REQUIRE_MODEL=1
 
 source ".harness/config.sh"
 
-# Per-request timeout + wall-clock watchdog (max of 300s or 3× request).
+# The request timeout is already the primary bound.  Keep only a small
+# watchdog margin so a simple demand cannot spend six minutes in one Aider
+# invocation merely because the child process stopped making progress.
 : "${AEGIS_AIDER_TIMEOUT:=${AEGIS_PROVIDER_RESPONSE_TIMEOUT:-120}}"
-_aider_wallclock_floor=$(( AEGIS_AIDER_TIMEOUT * 3 ))
-[[ "${_aider_wallclock_floor}" -lt 300 ]] && _aider_wallclock_floor=300
+: "${AEGIS_AIDER_WATCHDOG_GRACE_SEC:=15}"
+_aider_wallclock_floor=$(( AEGIS_AIDER_TIMEOUT + AEGIS_AIDER_WATCHDOG_GRACE_SEC ))
 : "${AEGIS_AIDER_MAX_SECONDS:=${_aider_wallclock_floor}}"
 unset _aider_wallclock_floor
 

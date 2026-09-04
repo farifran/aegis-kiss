@@ -71,6 +71,34 @@ equivalent_reconstruction='{
 
 different_reconstruction="$(printf '%s' "${equivalent_reconstruction}" | jq -c '.targets = ["src/other.ts", "src/index.ts"]')"
 
+# Fast/targeted IDE contracts are checked mechanically.  A remote reviewer is
+# reserved for an explicit or high-risk policy, otherwise a tiny demand would
+# pay a second model call before mutation.
+unset AEGIS_IDE_CONTRACT_RECONSTRUCTION 2>/dev/null || true
+if aegis_briefing_ide_reconstruction_required "${ide_contract}"; then
+  echo "FAIL: ordinary IDE contract unexpectedly requires reconstruction" >&2
+  exit 1
+fi
+if ! AEGIS_IDE_CONTRACT_RECONSTRUCTION=always \
+  aegis_briefing_ide_reconstruction_required "${ide_contract}"; then
+  echo "FAIL: explicit independent review was not selected" >&2
+  exit 1
+fi
+high_risk_contract="$(printf '%s' "${ide_contract}" | jq -c '.verificationProfile = "release"')"
+if ! aegis_briefing_ide_reconstruction_required "${high_risk_contract}"; then
+  echo "FAIL: release contract did not select independent review" >&2
+  exit 1
+fi
+compact_projection="$(aegis_briefing_contract_semantic_projection "${ide_contract}")"
+printf '%s' "${compact_projection}" | jq -e '
+  (.publicApi.exports[0].name == "ReorgEngine")
+  and (tostring | contains("ctorBody") | not)
+  and (tostring | contains("privateFields") | not)
+' >/dev/null || {
+  echo "FAIL: semantic review projection retained implementation detail" >&2
+  exit 1
+}
+
 aegis_briefing_reconstruct_contract() {
   printf '%s' "${RECONSTRUCTION_JSON}"
 }

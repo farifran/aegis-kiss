@@ -49,13 +49,16 @@
 #   AEGIS_BRIEFING=0                disable the pre-pass entirely
 #   AEGIS_SUPERVISOR_MODEL          default z-ai/glm-5.2 — the
 #                                   coder model is NOT inherited on purpose
-#   AEGIS_BRIEFING_TIMEOUT_SEC      default 90 (wall clock for the call)
+#   AEGIS_BRIEFING_TIMEOUT_SEC      default 45 (wall clock for the call)
 #   AEGIS_BRIEFING_MAX_EXPORTS      default 2
 #   AEGIS_BRIEFING_TYPECHECK=0      skip the tsc gate (it fails open anyway
 #                                   when node_modules/.bin/tsc is absent)
 #   AEGIS_SUPERVISOR_SPLIT=0        disable LLM multi-unit split (mechanical only)
 #   AEGIS_SUPERVISOR_SPLIT_MAX_UNITS  default 4
-#   AEGIS_IDE_CONTRACT_RECONSTRUCTION=0  keep legacy direct-schema behavior
+#   AEGIS_IDE_CONTRACT_RECONSTRUCTION=auto|always|never
+#                                   auto is the default: reconstruct only when
+#                                   the Contract IR explicitly requests a
+#                                   release/forensic independent review.
 #   AEGIS_IDE_RECONSTRUCTION_MODEL  independent model for IDE contract review
 #   OPENAI_API_BASE / OPENAI_API_KEY
 #
@@ -95,6 +98,39 @@ aegis_briefing_reconstruction_model() {
     m="${OPENAI_MODEL_READONLY_COGNITION:-deepseek-ai/deepseek-v4-flash-0731}"
   fi
   printf '%s' "${m}"
+}
+
+# A second model is an expensive semantic authority, not a parser.  The IDE
+# contract already passes deterministic shape/provenance gates, so the normal
+# fast path must stay local.  A demand can opt into independent reconstruction
+# explicitly, or do so through a release/forensic review profile.
+aegis_briefing_ide_reconstruction_required() {
+  local json="${1-}" mode profile
+  mode="${AEGIS_IDE_CONTRACT_RECONSTRUCTION:-auto}"
+  case "${mode}" in
+    0|false|no|never|off) return 1 ;;
+    1|true|yes|always|on) return 0 ;;
+    auto|"") ;;
+    *) printf 'invalid_ide_contract_reconstruction_mode:%s\n' "${mode}" >&2; return 1 ;;
+  esac
+
+  profile="$(printf '%s' "${json}" | jq -r '
+    .independentReview.profile
+    // .reviewPolicy.profile
+    // .verificationProfile
+    // .riskProfile
+    // empty
+  ' 2>/dev/null || true)"
+  case "${profile}" in
+    release|forensic|high|critical) return 0 ;;
+  esac
+
+  # A contract may make the requirement explicit without coupling its domain
+  # vocabulary to this harness.
+  printf '%s' "${json}" | jq -e '
+    (.independentReview.required == true)
+    or (.reviewPolicy.independentReconstruction == "required")
+  ' >/dev/null 2>&1
 }
 
 aegis_briefing_max_exports() {
@@ -194,8 +230,31 @@ aegis_briefing_sanitize_json() {
   printf '%s' "${json}"
 }
 
-# The schema doubles as the instruction in .skills/briefing.md, with AGENTS.md + ARCHITECTURE.md at Byte 0.
+# The checked-in schema remains the source of truth, but sending its long
+# worked examples on every small demand is costly and teaches implementation
+# detail rather than contract reasoning.  The compact prompt covers the
+# validated shape; AEGIS_BRIEFING_FULL_SCHEMA_PROMPT=1 is available for
+# diagnosis or provider comparison.
 aegis_briefing_system_prompt() {
+  case "${AEGIS_BRIEFING_FULL_SCHEMA_PROMPT:-0}" in
+    0|false|no|off|"")
+      cat <<'EOF'
+Return only one JSON Contract IR for the software demand. It must contain a
+non-empty goal, safe relative targets, exports and optional types/imports,
+plus questions, preconditions, invariants, postconditions, behavior and proof
+obligations when the demand makes them applicable. Each export has kind
+(class/function), name, typed parameters, return type and implementation body
+for the TypeScript adapter. Keep questions:[] unless an unresolved business
+choice changes observable behavior, external risk or an invariant. Questions
+must use scope DEMAND and include evidence, impact, recommendation and two or
+more options. Derive KISS defaults; never ask about harness workflow, commits,
+test organization, tokens or model choice. Keep public API, failure behavior,
+time/ordering and resource limits explicit when applicable. Output JSON only.
+EOF
+      return 0
+      ;;
+  esac
+
   local agents_file="${AEGIS_ROOT_DIR:-.}/AGENTS.md"
   local arch_file="${AEGIS_ROOT_DIR:-.}/ARCHITECTURE.md"
   local skill_file="${AEGIS_ROOT_DIR:-.}/.skills/briefing.md"
@@ -205,7 +264,11 @@ aegis_briefing_system_prompt() {
     out="$(cat "${agents_file}")"
   fi
 
-  if [[ -f "${arch_file}" ]]; then
+  # AGENTS plus the selected briefing schema are the executable prompt
+  # contract. Architecture is reference material and can be large; injecting
+  # it into every small demand wastes context without changing the schema.
+  if [[ "${AEGIS_BRIEFING_INCLUDE_ARCHITECTURE:-0}" == "1" ]] \
+    && [[ -f "${arch_file}" ]]; then
     if [[ -n "${out}" ]]; then
       out="${out}"$'\n\n---\n\n'"$(cat "${arch_file}")"
     else
@@ -1071,28 +1134,28 @@ aegis_briefing_contract_semantic_projection() {
       version: (.version // "legacy"),
       goal: (.goal // ""),
       targets: ((.targets // []) | sort),
-      publicContract: {
-        strictSignatures: ((.publicContract.strictSignatures // []) | sort_by(.name // "")),
-        forbiddenParams: ((.publicContract.forbiddenParams // []) | sort),
-        authorizedEffects: ((.publicContract.authorizedEffects // []) | sort)
+      # Only externally observable API belongs in the semantic contract.  A
+      # legacy TS projection can still carry bodies/fields for the mutation
+      # adapter, but those implementation details must never inflate a review
+      # prompt or create artificial disagreement between authorities.
+      publicApi: {
+        strictSignatures: ((.publicApi.strictSignatures // .publicContract.strictSignatures // .publicApiContract.strictSignatures // []) | sort_by(.name // "")),
+        exports: ((.publicApi.exports // .publicContract.exports // .publicApiContract.exports //
+          [(.exports // [])[]? |
+            {kind: (.kind // ""), name: (.name // ""),
+             methods: [(.methods // [])[]? | {name, params: ((.params // []) | map({name, type})), returns: (.returns // "void")}],
+             getters: [(.getters // [])[]? | {name, returns: (.returns // "unknown")}]
+            }
+          ]) | sort_by(.name // "")),
+        forbiddenParams: ((.publicApi.forbiddenParams // .publicContract.forbiddenParams // .publicApiContract.forbiddenParams // []) | sort),
+        authorizedEffects: ((.publicApi.authorizedEffects // .publicContract.authorizedEffects // .publicApiContract.authorizedEffects // []) | sort)
       },
-      types: ((.types // []) | sort_by(.name // "")),
-      imports: ((.imports // []) | map({from: (.from // ""), names: ((.names // []) | sort)}) | sort_by(.from)),
-      exports: ((.exports // []) | map(
-        del(.body, .ctorBody)
-        | .methods = ((.methods // []) | map(del(.body)) | sort_by(.name // ""))
-        | .getters = ((.getters // []) | sort_by(.name // ""))
-      ) | sort_by(.name // "")),
-      barrelFile: (.barrelFile // ""),
-      barrelFrom: (.barrelFrom // ""),
       preconditions: ((.preconditions // []) | sort_by((.target // "") + "\u0000" + (.require // ""))),
       invariants: ((.invariants // []) | map(del(.id)) | sort_by(.predicate // "")),
       postconditions: ((.postconditions // []) | sort_by((.method // "") + "\u0000" + (.guarantee // ""))),
-      pipelineTransitions: ((.pipelineTransitions // []) | sort_by(.stage // "")),
-      conservationLaws: ((.conservationLaws // []) | map(del(.id)) | sort_by(.law // "")),
+      nondeterminism: (.nondeterminism // .temporalPolicy // {}),
+      externalEffects: ((.externalEffects // []) | sort),
       performanceContract: (.performanceContract // {}),
-      claims: ((.claims // []) | map(del(.id)) | sort_by(.requirement // "")),
-      behavior: ((.behavior // []) | map(del(.prelude)) | sort_by(.desc // "")),
       operations: ((.operations // []) | map(del(.id)) | sort_by(.target // "")),
       requirements: ((.requirements // []) | map(del(.id)) | sort_by(.target // "")),
       proofObligations: ((.proofObligations // [])
@@ -1129,10 +1192,9 @@ aegis_briefing_compare_contracts() {
     --argjson reconstructed "${reconstructed_projection}" \
     --arg ide_digest "${ide_digest}" \
     --arg reconstructed_digest "${reconstructed_digest}" '
-      ["version", "goal", "targets", "publicContract", "types", "imports",
-       "exports", "barrelFile", "barrelFrom", "preconditions", "invariants",
-       "postconditions", "pipelineTransitions", "conservationLaws",
-       "performanceContract", "claims", "behavior", "operations", "requirements",
+      ["version", "goal", "targets", "publicApi", "preconditions", "invariants",
+       "postconditions", "nondeterminism", "externalEffects",
+       "performanceContract", "operations", "requirements",
        "proofObligations"] as $fields
       | ([$fields[] | select($ide[.] != $reconstructed[.])
           | {field: ., ide: $ide[.], reconstructed: $reconstructed[.]}]) as $differences
@@ -1146,6 +1208,40 @@ aegis_briefing_compare_contracts() {
     '
 }
 
+# The independent authority reconstructs the observable contract, not the TS
+# implementation plan.  This tiny schema is deliberately sufficient for a
+# semantic comparison and question review, while avoiding code generation,
+# tsc materialization and thousands of irrelevant prompt tokens.
+aegis_briefing_validate_semantic_projection() {
+  local json="${1-}"
+  printf '%s' "${json}" | jq -e '
+    type == "object"
+    and (.goal | type == "string" and length > 0)
+    and (.targets | type == "array" and length > 0 and all(type == "string" and length > 0))
+    and (.publicApi | type == "object")
+    and ((.preconditions // []) | type == "array")
+    and ((.invariants // []) | type == "array")
+    and ((.postconditions // []) | type == "array")
+    and ((.proofObligations // []) | type == "array")
+    and ((.questionReview // []) | type == "array")
+  ' >/dev/null 2>&1
+}
+
+aegis_briefing_semantic_review_system_prompt() {
+  cat <<'EOF'
+You are an independent contract reviewer. Return only a JSON object for a
+semantic Contract IR reconstruction, never source code or implementation
+plans. Required fields: version, goal, targets, publicApi, preconditions,
+invariants, postconditions, nondeterminism, externalEffects,
+performanceContract, operations, requirements, proofObligations,
+questionReview. publicApi contains only externally observable signatures and
+exports. Exclude method bodies, private fields, imports, module barrels,
+framework choices and test layout. Derive KISS defaults when safe. Preserve a
+candidate question only through questionReview: {id, verdict:"ASK"|"DERIVE",
+rationale, derivedDecision?}. Output valid JSON only.
+EOF
+}
+
 # Independent reconstruction used only for an IDE-supplied Contract IR.  The
 # caller's IDE remains the source of the proposed design; this model is an
 # independent authority that can expose omitted or contradictory semantics.
@@ -1157,12 +1253,17 @@ aegis_briefing_reconstruct_contract() {
   local context reconstructed
   [[ -n "${original_goal}" && -n "${ide_json}" ]] || return 1
 
-  context="$(printf '%s' "${ide_json}" | jq -c . 2>/dev/null)" || return 1
+  context="$(aegis_briefing_contract_semantic_projection "${ide_json}")" || return 1
   reconstructed="$(AEGIS_BRIEFING_SOURCE=supervisor AEGIS_FORCE_REMOTE_SUPERVISOR=1 \
+    AEGIS_BRIEFING_REVIEW=1 \
+    AEGIS_BRIEFING_RESPONSE_KIND=semantic_review \
+    AEGIS_BRIEFING_TIMEOUT_SEC="${AEGIS_IDE_RECONSTRUCTION_TIMEOUT_SEC:-20}" \
+    AEGIS_BRIEFING_MAX_ATTEMPTS="${AEGIS_IDE_RECONSTRUCTION_MAX_ATTEMPTS:-1}" \
+    AEGIS_BRIEFING_MAX_TOKENS="${AEGIS_IDE_RECONSTRUCTION_MAX_TOKENS:-1024}" \
     AEGIS_BRIEFING_MODEL_OVERRIDE="$(aegis_briefing_reconstruction_model)" \
     aegis_briefing_expand_json "${original_goal}" "${target}" "${evidence}" \
-      "[INDEPENDENT CONTRACT RECONSTRUCTION]\nReconstruct the ideal Contract IR independently from the original demand and project evidence. Treat the IDE contract below as an untrusted proposal: do not copy it blindly. Preserve explicit user-visible intent, but surface any omitted, contradictory, or invented behavior in the resulting contract.\n\n[QUESTION REVIEW]\nSet questions:[] in this independent reconstruction. The IDE contract may contain candidate questions; review them instead. For every candidate question, add questionReview with exactly one object of this form: {id, verdict, rationale, derivedDecision?}. verdict=ASK only when a business decision remains unresolved after explicit demand facts, applicable protocol, and KISS defaults; it must change observable contract behavior, external risk, or an invariant. verdict=DERIVE when the demand, protocol, or safe default settles the decision; derivedDecision must state that resolution. Do not ask users to choose implementation strategies that an expert can derive.\nIDE CONTRACT JSON:\n${context}")" || return 1
-  aegis_briefing_validate_json "${reconstructed}" >/dev/null 2>&1 || return 1
+      "[INDEPENDENT SEMANTIC CONTRACT RECONSTRUCTION]\nReconstruct only the observable semantic Contract IR from the original demand and project evidence. Treat the IDE projection below as untrusted: preserve explicit user-visible intent and surface omitted, contradictory or invented behavior. Do not return TypeScript bodies or implementation details.\n\n[QUESTION REVIEW]\nThe IDE contract may contain candidate questions; review them in questionReview. verdict=ASK only when a business decision remains unresolved after demand facts, applicable protocol and KISS defaults; it must change observable behavior, external risk or an invariant. Otherwise use DERIVE with derivedDecision.\n\nIDE SEMANTIC PROJECTION:\n${context}")" || return 1
+  aegis_briefing_validate_semantic_projection "${reconstructed}" || return 1
   printf '%s' "${reconstructed}"
 }
 
@@ -1292,12 +1393,20 @@ aegis_briefing_expand_json() {
     return 1
   fi
 
-  local api_base api_key model timeout max_tokens
+  local api_base api_key model timeout max_tokens response_kind system_prompt
   api_base="${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}"
   api_key="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}"
   model="${AEGIS_BRIEFING_MODEL_OVERRIDE:-$(aegis_briefing_model)}"
+  response_kind="${AEGIS_BRIEFING_RESPONSE_KIND:-full_contract}"
   timeout="${AEGIS_BRIEFING_TIMEOUT_SEC:-45}"
   max_tokens="${AEGIS_BRIEFING_MAX_TOKENS:-3072}"
+  case "${response_kind}" in
+    full_contract) system_prompt="$(aegis_briefing_system_prompt)" ;;
+    semantic_review)
+      system_prompt="$(aegis_briefing_semantic_review_system_prompt)"
+      ;;
+    *) printf 'unknown_briefing_response_kind\n' >&2; return 1 ;;
+  esac
   [[ "${max_tokens}" =~ ^[0-9]+$ ]] && [[ "${max_tokens}" -ge 256 ]] || max_tokens=3072
 
   if [[ -z "${api_key}" ]]; then
@@ -1333,7 +1442,10 @@ The questions array defaults to []. First extract explicit demand facts, then de
   fi
 
   local current_user_prompt="${user_prompt}"
-  local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-2}"
+  # A failed schema is evidence to surface, not a reason to silently spend a
+  # second full remote budget. Operators can opt into another attempt for a
+  # known volatile provider.
+  local max_attempts="${AEGIS_BRIEFING_MAX_ATTEMPTS:-1}"
   [[ "${max_attempts}" =~ ^[0-9]+$ ]] && [[ "${max_attempts}" -ge 1 ]] || max_attempts=2
   local attempt=1
   local http_code="000"
@@ -1348,7 +1460,7 @@ The questions array defaults to []. First extract explicit demand facts, then de
     local req_payload
     req_payload="$(jq -n \
       --arg model "${model}" \
-      --arg sys "$(aegis_briefing_system_prompt)" \
+      --arg sys "${system_prompt}" \
       --arg user "${current_user_prompt}" \
       --argjson max_tokens "${max_tokens}" \
       '{
@@ -1378,9 +1490,16 @@ The questions array defaults to []. First extract explicit demand facts, then de
     content="$(aegis_briefing_extract_content "${resp_body}")"
     if [[ -n "$(printf '%s' "${content}" | tr -d '[:space:]')" ]]; then
       content="$(aegis_briefing_sanitize_json "${content}")"
-      why="$(aegis_briefing_validate_json "${content}" 2>&1 >/dev/null | tail -n 1 || true)"
+      why=""
+      if [[ "${response_kind}" == "semantic_review" ]]; then
+        aegis_briefing_validate_semantic_projection "${content}" || why="invalid_semantic_review"
+      else
+        why="$(aegis_briefing_validate_json "${content}" 2>&1 >/dev/null | tail -n 1 || true)"
+      fi
       if [[ -z "${why}" ]]; then
-        if ! aegis_briefing_quality_check "${content}" 2>/dev/null; then
+        if [[ "${response_kind}" == "semantic_review" ]]; then
+          break
+        elif ! aegis_briefing_quality_check "${content}" 2>/dev/null; then
           local _qc_err
           _qc_err="$(aegis_briefing_quality_check "${content}" 2>&1 >/dev/null || true)"
           why="${_qc_err:-low_quality}"
@@ -1469,7 +1588,11 @@ Please fix the schema methods, types, or behavior asserts to resolve this error.
   )"
 
   content="$(aegis_briefing_sanitize_json "${content}")"
-  aegis_briefing_validate_json "${content}" || return 1
+  if [[ "${response_kind}" == "semantic_review" ]]; then
+    aegis_briefing_validate_semantic_projection "${content}" || return 1
+  else
+    aegis_briefing_validate_json "${content}" || return 1
+  fi
 
   printf '%s' "${content}"
   return 0
@@ -1488,7 +1611,7 @@ aegis_briefing_generate() {
 
   if aegis_briefing_is_schema_json "${goal}"; then
     if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] \
-      && [[ "${AEGIS_IDE_CONTRACT_RECONSTRUCTION:-1}" != "0" ]]; then
+      && aegis_briefing_ide_reconstruction_required "${goal}"; then
       [[ -n "${AEGIS_EXPECTED_BRIEFING_DIGEST:-}" ]] \
         && aegis_briefing_validate_handover "${goal}" "${AEGIS_EXPECTED_BRIEFING_DIGEST}" || {
           printf 'briefing_provenance_invalid\n' >&2
@@ -1508,7 +1631,10 @@ aegis_briefing_generate() {
       content="$(aegis_briefing_reconcile_ide_contract \
         "$(aegis_briefing_sanitize_json "${goal}")" \
         "${original_goal}" "${target}" "${evidence}")" || {
-        printf 'ide_contract_reconstruction_failed\n' >&2
+        # Keep the IDE proposal and the failure receipt in runtime.  A failed
+        # optional high-risk authority is UNPROVEN, not a reason to discard
+        # discovery or restart intake from the raw demand.
+        printf 'independent_contract_review_unproven\n' >&2
         return 1
       }
     else

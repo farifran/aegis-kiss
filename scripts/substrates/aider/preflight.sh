@@ -657,10 +657,15 @@ run_mutation_preflight_with_fix_attempts() {
   shift
   local mutation_targets=("$@")
 
-  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=3}"
-  : "${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS:=3}"
+  # A candidate gets one focused correction by default.  More attempts are an
+  # explicit high-risk policy, never an accidental multiplication of model
+  # calls from independent tools and intent loops.
+  : "${AEGIS_MUTATION_PREFLIGHT_FIX_ATTEMPTS:=1}"
+  : "${AEGIS_MUTATION_INTENT_FIX_ATTEMPTS:=1}"
+  : "${AEGIS_MUTATION_PREFLIGHT_TOTAL_FIX_ATTEMPTS:=1}"
   local tools_fix_count=0
   local intent_fix_count=0
+  local total_fix_count=0
   local check_index=0
   local diff_content=""
   local intent_mode
@@ -724,6 +729,11 @@ run_mutation_preflight_with_fix_attempts() {
       fi
     fi
 
+    if [[ "${total_fix_count}" -ge "${AEGIS_MUTATION_PREFLIGHT_TOTAL_FIX_ATTEMPTS}" ]]; then
+      rollback_execution_surface
+      aegis_fatal "mutation_preflight_failed:total_fix_budget"
+    fi
+
     # --- schedule one Aider fix ---
     if [[ "${fix_phase}" == "intent" ]]; then
       intent_fix_count=$((intent_fix_count + 1))
@@ -746,6 +756,7 @@ run_mutation_preflight_with_fix_attempts() {
         "${resolved_edit_format}" \
         "${mutation_targets[@]}"
     fi
+    total_fix_count=$((total_fix_count + 1))
 
     AEGIS_AIDER_INVOCATION_PHASE="${fix_phase:-fix}" \
       invoke_aider "${fix_prompt}" "${resolved_edit_format}" "${mutation_targets[@]}"
@@ -793,4 +804,3 @@ run_mutation_preflight_with_fix_attempts() {
   fi
   printf '%s' "${diff_content}"
 }
-

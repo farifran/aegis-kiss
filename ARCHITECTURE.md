@@ -1,39 +1,58 @@
-# Target Project Architecture (`ARCHITECTURE.md`)
+# Arquitetura do Aegis
 
-Diretrizes exclusivas do projeto alvo e Constituição Operacional do **Aegis Harness**.
+O Aegis é um harness de evidências. Ele governa como uma demanda é explicada,
+verificada e promovida; não substitui o IDE nem define regras de negócio do
+produto.
 
----
+```text
+IDE
+→ descoberta, leitura, perguntas, edição e feedback imediato
 
-## 🏛️ As Obrigações Constitucionais do Aegis Harness
+Aegis core
+→ contrato, escopo, provas, receipt, promoção e verificação pós-commit
 
-> *"O objetivo do Aegis deve ser garantir que toda entrada seja explicada, toda transição seja determinística, todo commit seja verificado após ocorrer e toda afirmação de correção seja comprovada por uma autoridade independente."*
+Adaptadores do projeto
+→ TypeScript, Aider, testes, benchmarks e verificadores especializados
+```
 
----
+## Invariantes do core
 
-### 1. Determinismo Verificável & Soberania Temporal
-* **Ordem Canônica**: Todo cálculo de digest, hash ou representação de estado deve ordenar canonicamente as estruturas (`Object.keys().sort()`), eliminando qualquer dependência implícita de motores JavaScript.
-* **Tempo Explícito**: Proibido `Date.now()` oculto no interior de componentes. O tempo de execução pertence ao motor e é passado explicitamente como `nowMs: bigint`. Relógios regressivos são rejeitados com política formal.
-* **Isolamento de Estado**: Proibidas variáveis globais ou estado estático oculto.
+1. Toda alteração pertence ao escopo do contrato ativo.
+2. Toda obrigação contratual possui uma prova ativa e rastreável.
+3. O diff promovido é o mesmo diff validado.
+4. A autoridade de validação é distinta da autoridade de mutação.
+5. Todo commit não vazio possui receipt verificável.
+6. O estado real pós-commit é confrontado novamente com contrato e resultado.
 
-### 2. Validação Pós-Commit Obrigatória
-A verificação opera obrigatoriamente sobre as 4 etapas de custódia:
-$$\text{Requisito} \longleftrightarrow \text{Estado Projetado } (S_{\text{proj}}) \longleftrightarrow \text{Estado Real Pós-Commit } (S_{\text{actual}}) \longleftrightarrow \text{Resultado Observável } (BatchResult)$$
-* Não basta provar que a projeção era válida; o validador reaudita o estado real após o commit para confirmar conservação estrita e ausência de efeitos colaterais. Se houver divergência: **rollback atômico total**.
+## Perfis de evidência
 
-### 3. Cobertura Total da Entrada (Mapeamento Bijetivo)
-* Todo elemento da sequência de entrada possui destino observável explícito: `committed`, `rejected_invalid`, `blocked_capacity`, `blocked_insolvent` ou `aborted`.
-* Nenhum slot nulo, indefinido ou malformado pode desaparecer silenciosamente ($\text{decisions.length} \equiv \text{orders.length}$).
+| Perfil | Objetivo |
+| --- | --- |
+| `fast` | Saúde local: checks baratos e determinísticos. |
+| `targeted` | Provas diretamente afetadas pelo diff. |
+| `release` | Contrato completo, recuperação e revisão independente quando requerida. |
+| `forensic` | Caos, benchmark, red team e investigação de risco alto. |
 
-### 4. Prova Independente (Separação de Autoridades)
-* O algoritmo de aplicação de regras não é a autoridade que atesta a sua própria correção. Validadores independentes recomputam propriedades críticas de conservação, limites e invariantes.
-* O Gate de Promoção só libera transições acompanhadas de provas adversariais que cobrem aliasing ($A \to A$), ciclos intra-lote, saturação de capacidade, recuo de relógio e rollback.
+Uma revisão por segundo modelo é uma prova semântica cara. Ela só é acionada
+por `release`, `forensic` ou política explícita do contrato. O caminho normal
+do IDE valida o Contract IR mecanicamente e segue para a mutação.
 
----
+## Adaptador TypeScript/Aider
 
-## ⚙️ Diretrizes de Engenharia e Código TypeScript (KISS)
+Esta distribuição tem TypeScript e Aider como adaptadores padrão:
 
-1. **Stack & Módulos**: Pure Vanilla TypeScript com **NodeNext ESM** (`import { fn } from './file.js'`). Zero dependências externas de infraestrutura.
-2. **Tipagem Estrita & Zero `any`**: Proibido `any`, `as any`, `@ts-ignore` ou asserções não nulas (`x!`). Tipos em minúsculo (`bigint`, `number`, `string`, `boolean`).
-3. **Aritmética Exata**: `bigint` para grandezas financeiras, contadores e tempo de alta precisão. Proibido `Math.min/max/floor/ceil` em `bigint` (usar condicionais explícitas).
-4. **Alocação Zero no Caminho Crítico**: Proibido `new Map()`, `new Set()`, `.slice()` ou spreads em loops dentro de métodos de processamento.
-5. **Re-exportação Nominal**: Toda entidade, tipo e função utilitária pública em `src/` deve ser re-exportada nominalmente em `src/index.ts`.
+```text
+Aider        → mutação delimitada no candidato descartável
+TypeScript   → typecheck, lint, smoke e testes do projeto
+Aegis core   → decide quando essas evidências são necessárias e as vincula ao receipt
+```
+
+Essas capacidades são importantes para este projeto, mas não são leis
+universais para qualquer software que use o Aegis.
+
+## Orçamento de execução
+
+Cada etapa adicional deve justificar risco, autoridade, custo, frequência e
+chave de cache. O sistema limita retries de rede, correções do mutador e tempo
+total de pipeline; falha de uma autoridade produz `UNPROVEN`, nunca um ciclo
+silencioso de recomeço.

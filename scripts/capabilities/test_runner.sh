@@ -52,16 +52,14 @@ emit_test_status() {
 }
 
 run_contract_invariants() {
-  local ws_root
-  ws_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P || echo ".")"
+  # This capability runs inside a disposable candidate surface during
+  # preflight.  It must never climb back into the harness checkout and execute
+  # stale obligations from another demand: that is both incorrect evidence and
+  # an unnecessary full validation before the receipt profile is selected.
   local ir_file=""
   local candidates=(
-    "${ws_root}/.harness/active_contract_ir.json"
-    "${AEGIS_ROOT_DIR:-.}/.harness/active_contract_ir.json"
     ".harness/active_contract_ir.json"
-    "${AEGIS_RUNTIME_DIR:-${AEGIS_ROOT_DIR:-.}/.harness/runtime}/active_contract_ir.json"
     ".harness/runtime/active_contract_ir.json"
-    "../../.harness/active_contract_ir.json"
   )
 
   for cand in "${candidates[@]}"; do
@@ -75,7 +73,8 @@ run_contract_invariants() {
     return 127
   fi
 
-  local risk_file risk_json
+  local ws_root risk_file risk_json
+  ws_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P || echo ".")"
   risk_file="$(mktemp "${TMPDIR:-/tmp}/aegis-uaam-risk.XXXXXX")"
   local risk_compiler="${ws_root}/scripts/lib/uaam_risk_compiler.mjs"
   if [[ -f "${risk_compiler}" ]]; then

@@ -102,6 +102,15 @@ declare -a EXECUTION_MODES
 
 PIPELINE_STATUS="SUCCESS"
 PIPELINE_REASON=""
+PIPELINE_STARTED_EPOCH=0
+PIPELINE_DEADLINE_EPOCH=0
+
+pipeline_budget_remaining() {
+  local now
+  [[ "${PIPELINE_DEADLINE_EPOCH}" -gt 0 ]] || return 0
+  now="$(date +%s)"
+  [[ "${now}" -lt "${PIPELINE_DEADLINE_EPOCH}" ]]
+}
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -782,6 +791,14 @@ main() {
   resolve_pipeline_input
   check_dependencies
 
+  # One run-level budget prevents nested retry policies from multiplying into
+  # an unbounded wall-clock cost.  It is checked between modes; individual
+  # substrate timeouts remain responsible for interrupting a live request.
+  PIPELINE_STARTED_EPOCH="$(date +%s)"
+  local pipeline_budget_seconds="${AEGIS_PIPELINE_MAX_SECONDS:-600}"
+  [[ "${pipeline_budget_seconds}" =~ ^[1-9][0-9]*$ ]] || pipeline_budget_seconds=600
+  PIPELINE_DEADLINE_EPOCH=$((PIPELINE_STARTED_EPOCH + pipeline_budget_seconds))
+
   # Optional demand fit check gate
   if [[ "${AEGIS_FIT_CHECK:-0}" == "1" || "${AEGIS_FIT_CHECK:-0}" == "true" ]] \
     && [[ "${PIPELINE}" == "mutation" && "${RESUME}" != "true" ]]; then
@@ -835,6 +852,13 @@ main() {
   fi
 
   for mode in "${EXECUTION_MODES[@]}"; do
+    if ! pipeline_budget_remaining; then
+      PIPELINE_STATUS="HALTED"
+      PIPELINE_REASON="pipeline_time_budget_exhausted"
+      MODE_STATUS["${mode}"]="halted"
+      mark_remaining_skipped
+      break
+    fi
     # Agentic pause check for optimize / adversarial
     if [[ "${AEGIS_AGENTIC:-0}" == "1" ]] && { [[ "${mode}" == "optimize" ]] || [[ "${mode}" == "adversarial" ]]; }; then
       local _vfile

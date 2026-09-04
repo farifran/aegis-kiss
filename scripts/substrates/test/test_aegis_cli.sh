@@ -165,4 +165,24 @@ git -C "${net_new_repo}" commit --quiet -m "feat: initial"
 
 rm -rf "${net_new_repo}"
 
-echo "[AEGIS][TEST][PASS] aegis cli: demand shape, accept guard, decline path, net-new"
+# --- cleanup is transient-only; it must never erase product evidence ---
+src_before="$(find src -type f -exec shasum -a 256 {} \; | sort)"
+mkdir -p scratch .harness/runtime
+printf 'transient\n' > scratch/aegis-clean-fixture.tmp
+printf 'transient\n' > .harness/runtime/aegis-clean-fixture.tmp
+"${aegis_cli}" clean >/dev/null
+src_after="$(find src -type f -exec shasum -a 256 {} \; | sort)"
+[[ "${src_before}" == "${src_after}" ]] \
+  || fail "clean changed product files"
+[[ ! -e scratch/aegis-clean-fixture.tmp && ! -e .harness/runtime/aegis-clean-fixture.tmp ]] \
+  || fail "clean retained transient artifacts"
+
+set +e
+clean_product_out="$("${aegis_cli}" clean --src 2>&1)"
+clean_product_rc=$?
+set -e
+[[ "${clean_product_rc}" -ne 0 ]] || fail "clean --src should be refused"
+printf '%s\n' "${clean_product_out}" | grep -q 'clean_never_removes_product' \
+  || fail "clean --src did not explain the safety boundary"
+
+echo "[AEGIS][TEST][PASS] aegis cli: demand shape, accept guard, decline path, net-new, safe cleanup"
