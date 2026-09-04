@@ -242,6 +242,11 @@ export AEGIS_ADVERSARIAL_DEPTH
 # requested, rather than silently letting an author review itself.
 : "${AEGIS_VALIDATION_MODEL:=${OPENAI_MODEL_VALIDATION:-}}"
 
+# The IDE already provides interactive reasoning. Do not split a normal run
+# into extra optimize/adversarial handovers unless an operator explicitly
+# requests those verdict files for a high-risk review.
+: "${AEGIS_AGENTIC_REQUIRE_VERDICTS:=false}"
+
 export AEGIS_PROVIDER_MAX_RETRIES
 export AEGIS_PROVIDER_RETRY_DELAY
 export AEGIS_PROVIDER_CONNECT_TIMEOUT
@@ -250,6 +255,7 @@ export AEGIS_MAX_MUTATION_ATTEMPTS
 export AEGIS_MUTATION_FEEDBACK_LOOP
 export AEGIS_VALIDATION_LLM
 export AEGIS_VALIDATION_MODEL
+export AEGIS_AGENTIC_REQUIRE_VERDICTS
 
 # =========================================================
 # CLEANUP POLICY

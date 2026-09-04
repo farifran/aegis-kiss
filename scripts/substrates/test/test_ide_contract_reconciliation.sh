@@ -79,6 +79,11 @@ if aegis_briefing_ide_reconstruction_required "${ide_contract}"; then
   echo "FAIL: ordinary IDE contract unexpectedly requires reconstruction" >&2
   exit 1
 fi
+agentic_generate_block="$(sed -n '1618,1640p' scripts/lib/briefing.sh)"
+printf '%s\n' "${agentic_generate_block}" | grep -q 'aegis_briefing_ide_reconstruction_required' \
+  || { echo "FAIL: agentic contract path bypasses auto reconstruction policy" >&2; exit 1; }
+printf '%s\n' "${agentic_generate_block}" | grep -q 'AEGIS_IDE_CONTRACT_RECONSTRUCTION:-1' \
+  && { echo "FAIL: agentic contract path forces reconstruction by default" >&2; exit 1; }
 if ! AEGIS_IDE_CONTRACT_RECONSTRUCTION=always \
   aegis_briefing_ide_reconstruction_required "${ide_contract}"; then
   echo "FAIL: explicit independent review was not selected" >&2
