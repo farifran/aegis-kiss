@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="${AEGIS_ROOT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mode="working"
 
 if [[ "${1:-}" == "--staged" && $# -eq 1 ]]; then
@@ -12,14 +11,10 @@ elif [[ $# -ne 0 ]]; then
   exit 1
 fi
 
-if [[ ! -e "${ROOT_DIR}/.harness/proof_registry.json" && ! -e "${ROOT_DIR}/.harness/active_contract_ir.json" ]]; then
-  exit 0
-fi
-
-source "${SCRIPT_DIR}/lib/proof_governance.sh"
+source "${ROOT_DIR}/scripts/lib/proof_governance.sh"
 
 validate_v2_working() {
-  node "${SCRIPT_DIR}/validate_contract_ir_v2.mjs" --root "${ROOT_DIR}" >/dev/null
+  node "${ROOT_DIR}/scripts/validate_contract_ir_v2.mjs" --root "${ROOT_DIR}" >/dev/null
 }
 
 validate_v2_staged() {
@@ -56,12 +51,15 @@ validate_v2_staged() {
     done < <(aegis_contract_targets "${staged_root}/.harness/active_contract_ir.json")
   fi
   if [[ "${rc}" -eq 0 ]]; then
-    node "${SCRIPT_DIR}/validate_contract_ir_v2.mjs" --root "${staged_root}" >/dev/null || rc=1
+    node "${ROOT_DIR}/scripts/validate_contract_ir_v2.mjs" --root "${staged_root}" >/dev/null || rc=1
   fi
   rm -rf "${staged_root}"
   return "${rc}"
 }
 
+if [[ ! -e "${ROOT_DIR}/.harness/proof_registry.json" && ! -e "${ROOT_DIR}/.harness/active_contract_ir.json" ]]; then
+  exit 0
+fi
 
 if [[ ! -e "${ROOT_DIR}/.harness/proof_registry.json" || ! -e "${ROOT_DIR}/.harness/active_contract_ir.json" ]]; then
   echo "[AEGIS][PROOF][FATAL] incomplete_contract_evidence_metadata" >&2

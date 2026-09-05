@@ -12,7 +12,6 @@
     "aegis:enforce": "bash scripts/substrates/static_gate.sh --workspace src",
     "aegis:proof-governance": "bash scripts/proof_governance.sh",
     "aegis:proofs": "bash scripts/proof_runner.sh",
-    "aegis:proof:token-bucket": "tsx test/tokenBucket.proof.ts",
     "aegis:verify-structure": "npm run aegis:typecheck && npm run aegis:lint && npm run aegis:enforce",
     "aegis:verify": "bash aegis verify",
     "aegis:authorize": "bash aegis authorize",
