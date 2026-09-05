@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.contract_ir.v2",
+  "title": "Aegis Semantic Contract IR v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "clarifiedDemandDigest", "architecture", "scope", "behavior", "invariants", "proofObligations"],
+  "properties": {
+    "schema": { "const": "aegis.contract_ir.v2" },
+    "clarifiedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyDigest", "appliedRuleIds", "amendmentIds"],
+      "properties": {
+        "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "appliedRuleIds": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true },
+        "amendmentIds": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedPaths"],
+      "properties": {
+        "authorizedPaths": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+" }, "uniqueItems": true }
+      }
+    },
+    "behavior": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/statement" }
+    },
+    "preconditions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/statement" }
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/invariant" }
+    },
+    "postconditions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/statement" }
+    },
+    "failureSemantics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/statement" }
+    },
+    "proofObligations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/proofObligation" }
+    }
+  },
+  "$defs": {
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9-]+$" },
+        "statement": { "type": "string", "minLength": 1 }
+      }
+    },
+    "invariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "proofIds"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^INV-[A-Z0-9][A-Z0-9-]+$" },
+        "statement": { "type": "string", "minLength": 1 },
+        "proofIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^PO-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true }
+      }
+    },
+    "proofObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "risk", "statement"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^PO-[A-Z0-9][A-Z0-9-]+$" },
+        "risk": { "type": "string", "minLength": 1 },
+        "statement": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

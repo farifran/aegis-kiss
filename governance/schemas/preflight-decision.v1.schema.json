@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_decision.v1",
+  "title": "Aegis Preflight Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "normalizedDemandDigest", "architecturePolicyDigest", "status", "findings", "questions"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_decision.v1" },
+    "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "architecturePolicyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "questions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/question" }
+    }
+  },
+  "$defs": {
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startByte", "endByte"],
+      "properties": {
+        "startByte": { "type": "integer", "minimum": 0 },
+        "endByte": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "status", "evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^PF-[A-Z0-9][A-Z0-9-]+$" },
+        "kind": { "enum": ["input", "reference", "scope", "architecture", "repository"] },
+        "status": { "enum": ["PROVEN", "UNPROVEN", "DISPROVEN", "NOT_APPLICABLE"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "sourceRange": { "$ref": "#/$defs/range" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "prompt", "evidence", "impact", "recommendation"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+        "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE", "DEMAND"] },
+        "prompt": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 },
+        "impact": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 },
+        "sourceRange": { "$ref": "#/$defs/range" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "CLARIFIED" } }, "required": ["status"] },
+      "then": { "properties": { "questions": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "NEEDS_CONFIRMATION" } }, "required": ["status"] },
+      "then": { "properties": { "questions": { "minItems": 1, "maxItems": 3 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
+      "then": { "properties": { "questions": { "maxItems": 0 } } }
+    }
+  ]
+}

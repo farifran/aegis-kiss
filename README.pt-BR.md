@@ -28,6 +28,10 @@ Comandos disponíveis:
 
 - `./aegis "<demanda>"`: registra a proveniência da demanda para o IDE.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
+- `./aegis evidence --path …`: cria um inventário mecânico opcional, limitado
+  e transitório para receipt ou investigação forensic. Ele só lê caminhos
+  declarados explicitamente, nunca envia código para prompts e não tem cache
+  entre demandas.
 - `./aegis verify [--profile …]`: executa verificações estruturais e provas aplicáveis.
 - `./aegis proofs [--profile …]`: executa somente o perfil de provas escolhido.
 - `./aegis authorize`: opcionalmente cria o receipt antes do commit; o hook

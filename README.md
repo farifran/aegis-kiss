@@ -27,6 +27,10 @@ Available commands:
 
 - `./aegis "<demand>"`: records demand provenance for the IDE.
 - `./aegis status`: shows evidence state and working-tree state.
+- `./aegis evidence --path …`: creates an optional, bounded and transient
+  mechanical inventory for a receipt or forensic investigation. It only reads
+  explicitly declared paths, never sends code to a prompt and has no cache
+  between demands.
 - `./aegis verify [--profile …]`: runs structural checks and applicable proofs.
 - `./aegis proofs [--profile …]`: runs only the selected proof profile.
 - `./aegis authorize`: optionally creates the receipt before committing; the

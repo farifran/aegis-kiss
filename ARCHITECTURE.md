@@ -37,6 +37,21 @@ Uma revisão por segundo modelo é uma prova semântica cara. Ela só é acionad
 por `release`, `forensic` ou política explícita do contrato. O caminho normal
 do IDE valida o Contract IR mecanicamente e segue para a mutação.
 
+## Inventário mecânico opcional
+
+`./aegis evidence --path <caminho>` produz uma fotografia limitada do estado
+de caminhos explicitamente declarados. É um instrumento para receipts,
+reexecução e investigação; não é um supervisor, não escolhe arquivos e não
+entra automaticamente no contexto de um modelo.
+
+O inventário limita quantidade de arquivos, bytes totais e bytes por arquivo.
+Os previews são lidos parcialmente e codificados em base64, portanto servem
+também para arquivos que não sejam TypeScript. O resultado vive somente em
+`.harness/runtime/`, é sobrescrito a cada inventário, apagado no início de uma
+nova demanda e removido por `aegis clean`. Não existe cache entre demandas.
+Quando o limite de arquivos impedir cobertura completa, o resultado é marcado
+como incompleto e jamais deve ser tratado como prova total.
+
 ## Adaptadores do projeto
 
 Esta distribuição usa TypeScript como adaptador local de estrutura. Todo

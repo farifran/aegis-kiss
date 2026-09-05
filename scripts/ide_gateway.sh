@@ -16,6 +16,8 @@ usage() {
 Uso no IDE:
   ./aegis "<demanda>" [--target <caminho>]
   ./aegis status
+  ./aegis evidence --path <caminho> [--path <caminho> ...]
+                    [--max-files <n>] [--max-total-bytes <n>] [--max-file-bytes <n>]
   ./aegis verify [--profile auto|fast|targeted|release|forensic]
   ./aegis proofs [--profile auto|fast|targeted|release|forensic]
   ./aegis authorize
@@ -23,6 +25,9 @@ Uso no IDE:
 
 O IDE descobre, pergunta e altera o código. Aegis registra a demanda,
 valida contrato/provas e cria a autorização de promoção.
+
+`evidence` é um inventário mecânico opcional para receipt, reexecução ou
+forensics. Ele nunca escolhe escopo nem injeta arquivos em prompts.
 EOF
 }
 
@@ -60,6 +65,7 @@ record_intake() {
   done
 
   mkdir -p "${RUNTIME_DIR}"
+  rm -f "${RUNTIME_DIR}/mechanical_inventory.json"
   local demand_digest base_commit state
   demand_digest="$(printf '%s' "${demand}" | shasum -a 256 | awk '{print $1}')"
   base_commit="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
@@ -169,6 +175,7 @@ command_name="${1:-}"
 case "${command_name}" in
   -h|--help|help|'') usage ;;
   status) shift; [[ $# -eq 0 ]] || fatal 'status_does_not_accept_arguments'; status ;;
+  evidence) shift; exec bash "${ROOT_DIR}/scripts/evidence_inventory.sh" "$@" ;;
   verify) shift; run_verify "$@" ;;
   proofs) shift; run_proofs "$@" ;;
   authorize) shift; [[ $# -eq 0 ]] || fatal 'authorize_does_not_accept_arguments'; authorize ;;

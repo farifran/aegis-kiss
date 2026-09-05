@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.architecture_policy.v1",
+  "title": "Aegis Architecture Policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "policyVersion", "origin", "rules"],
+  "properties": {
+    "schema": { "const": "aegis.architecture_policy.v1" },
+    "policyVersion": { "type": "integer", "minimum": 1 },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath", "sourceDigest", "normalizerVersion"],
+      "properties": {
+        "sourcePath": { "type": "string", "minLength": 1 },
+        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "normalizerVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    },
+    "amendments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/amendment" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "level", "statement", "appliesWhen", "sourceRanges"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        "level": { "enum": ["hard", "default", "preference"] },
+        "statement": { "type": "string", "minLength": 1 },
+        "appliesWhen": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "sourceRanges": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceRange" }
+        }
+      }
+    },
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ruleId", "status", "reason", "approvedBy"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$" },
+        "ruleId": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        "status": { "const": "approved" },
+        "reason": { "type": "string", "minLength": 1 },
+        "approvedBy": { "const": "user" }
+      }
+    },
+    "sourceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startByte", "endByte"],
+      "properties": {
+        "startByte": { "type": "integer", "minimum": 0 },
+        "endByte": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

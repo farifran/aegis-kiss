@@ -4,20 +4,41 @@
 
 ---
 
-#### 1. ALINHAMENTO INTERATIVO DE AMBIGUIDADES (Discovery & Briefing Interativo)
-Antes de formular qualquer pergunta, o assistente **DEVE** carregar e seguir o briefing do projeto (`.skills/briefing.md`) ou um briefing preliminar emitido pelo Aegis. A sequência obrigatória é:
+#### 1. PREFLIGHT, ALINHAMENTO E CONTRATO
+O processamento começa por uma normalização mecânica da demanda. Essa etapa
+não carrega o `AGENTS.md`, o `ARCHITECTURE.md` ou o briefing inteiro em um
+prompt: ela só usa uma projeção curta e versionada da política de preflight.
 
-`demanda bruta → briefing preliminar → contrato candidato → revisão independente do Aegis → perguntas aprovadas (se houver) → contrato final`.
+A sequência obrigatória é:
 
-* O briefing é a fonte das perguntas; o assistente não pode inventar perguntas diretamente a partir da demanda bruta nem apresentá-las ao utilizador antes da revisão independente.
-* `questions: []` é o resultado preferível quando a demanda, o protocolo aplicável ou um default KISS já determinam a decisão.
-* Uma pergunta só é válida se uma ambiguidade de negócio não resolvida alterar o contrato observável, o risco externo ou uma invariante. Ela deve declarar a evidência da demanda, o impacto contratual e a razão do default recomendado.
-* As respostas devem ser incorporadas ao Contract IR antes da execução.
-* Se o briefing não estiver disponível ou o contrato não referenciá-lo, a execução deve ser bloqueada.
-* Decisões internas do Aegis são resolvidas pelo harness e não aparecem como perguntas do produto.
+`demanda bruta → normalização mecânica → fatos de preflight → revisão de preflight → perguntas aprovadas (se houver) → demanda esclarecida → briefing → contrato candidato → revisão independente → contrato final`.
+
+* A normalização mecânica trata codificação, formato, ranges e referências
+  literais; ela não infere comportamento nem altera significado.
+* A revisão de preflight pode formular perguntas de `INPUT`, `SCOPE` ou
+  `ARCHITECTURE` antes do briefing quando a resposta for necessária para
+  entender a demanda, delimitar a entrega ou resolver conflito arquitetural.
+* Uma pergunta de `DEMAND` pertence ao briefing/contrato e só é válida quando
+  uma ambiguidade de negócio altera comportamento observável, risco externo ou
+  invariante. Ela declara evidência, impacto contratual e default recomendado.
+* `questions: []` é o resultado preferível quando a demanda, o protocolo
+  aplicável ou um default KISS já determinam a decisão.
+* Toda resposta que alterar comportamento, escopo ou regra arquitetural deve
+  ser incorporada à demanda esclarecida; se alterar comportamento observável,
+  deve também aparecer no Contract IR.
+* Conflitos com regras arquiteturais `hard` bloqueiam a execução até uma
+  emenda explícita e aprovada; regras `default` podem gerar confirmação;
+  preferências não viram perguntas desnecessárias.
+* Decisões internas do Aegis são resolvidas pelo harness e nunca aparecem como
+  perguntas do produto.
 
 #### 2. CONTRATO → INVARIANTES → PROVAS (Requisitos Formais)
 Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/pós-condições estritas e propriedades invariantes que nunca podem ser violadas. Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
+
+Para novas demandas, o único formato ativo é `aegis.contract_ir.v2`. Contratos
+`v1` pertencem apenas ao histórico Git: não são convertidos automaticamente e
+não recebem compatibilidade de execução. O corte para `v2` começa de estado
+governado limpo, preservando a trilha histórica no Git.
 
 #### 3. ESTADO PROJETADO ANTES DA MUTAÇÃO (Composição Segura)
 Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição opera obrigatoriamente como:
