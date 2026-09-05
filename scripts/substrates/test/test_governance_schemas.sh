@@ -17,6 +17,7 @@ const files = [
   'preflight-decision.v2.schema.json',
   'preflight-resolution.v2.schema.json',
   'ide-preflight.v2.schema.json',
+  'ide-semantic-request.v2.schema.json',
   'contract-ir.v2.schema.json',
   'preflight-review.v2.schema.json',
   'preflight-review-request.v2.schema.json',
@@ -99,7 +100,7 @@ NODE
 
 grep -Fqx '#### 1. PREFLIGHT, ALINHAMENTO E CONTRATO' "${ROOT_DIR}/AGENTS.md"
 grep -Fqx '# Briefing e implementação' "${ROOT_DIR}/.skills/briefing.md"
-grep -Fq 'não consulte arquivos, código ou documentação do repositório nesta fase.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
+grep -Fq 'Não consulte o repositório.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
 if [[ -e "${ROOT_DIR}/governance/prompts/contract.v2.md" || -e "${ROOT_DIR}/scripts/build_contract_prompt.mjs" || -e "${ROOT_DIR}/scripts/finalize_contract.mjs" ]]; then
   echo 'separate contract compiler still exists' >&2
   exit 1

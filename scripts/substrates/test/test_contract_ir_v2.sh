@@ -27,18 +27,31 @@ node --input-type=module - "$WORK_DIR" <<'NODE'
 import { readFileSync } from 'node:fs';
 const work = process.argv[2];
 const { validateContract } = await import(process.cwd() + '/scripts/lib/contract_validator.mjs');
+const { canonicalDigest } = await import(process.cwd() + '/scripts/lib/canonical_json.mjs');
 const previousContract = JSON.parse(readFileSync(work + '/.harness/active_contract_ir.json', 'utf8'));
 const clarified = JSON.parse(readFileSync(work + '/.harness/active_clarified_demand.json', 'utf8'));
 const policyText = readFileSync(work + '/governance/architecture.policy.json', 'utf8');
 const policy = JSON.parse(policyText);
+const mismatchedScope = structuredClone(previousContract);
+mismatchedScope.scope.authorizedPaths.push('README.md');
+let scopeRejected = false;
+try {
+  validateContract({ root: work, contract: mismatchedScope, clarified, policy, policyText, previousContract, phase: 'compile' });
+} catch (error) {
+  scopeRejected = error instanceof Error && error.message === 'scope_binding_mismatch';
+}
+if (!scopeRejected) throw new Error('scope mismatch was accepted');
 const nextContract = structuredClone(previousContract);
+const nextClarified = structuredClone(clarified);
+nextClarified.scope.included = ['src/health.ts'];
+nextContract.clarifiedDemandDigest = canonicalDigest(nextClarified);
 nextContract.scope.authorizedPaths = ['src/health.ts'];
 nextContract.invariants[0].proofIds = ['PO-HEALTH-002'];
 nextContract.proofObligations = [{ id: 'PO-HEALTH-002', risk: 'superfície pública incorreta', statement: 'A nova exportação é verificável.' }];
 nextContract.requirementCoverage[0].contractIds = ['BEH-HEALTH-001', 'INV-HEALTH-001', 'PO-HEALTH-002'];
 let rejected = false;
 try {
-  validateContract({ root: work, contract: nextContract, clarified, policy, policyText, previousContract, phase: 'compile' });
+  validateContract({ root: work, contract: nextContract, clarified: nextClarified, policy, policyText, previousContract, phase: 'compile' });
 } catch (error) {
   rejected = error instanceof Error && error.message === 'target_retirement_undeclared:src/index.ts';
 }
@@ -49,7 +62,7 @@ nextContract.continuity = {
     { kind: 'proof', id: 'PO-HEALTH-001', reason: 'Prova substituída.', demandEvidence: 'Demanda esclarecida.', successor: 'PO-HEALTH-002' },
   ],
 };
-validateContract({ root: work, contract: nextContract, clarified, policy, policyText, previousContract, phase: 'compile' });
+validateContract({ root: work, contract: nextContract, clarified: nextClarified, policy, policyText, previousContract, phase: 'compile' });
 NODE
 
 jq '.requirementCoverage[0].contractIds = ["INV-UNKNOWN-001"]' "$WORK_DIR/.harness/active_contract_ir.json" > "$WORK_DIR/invalid.json"

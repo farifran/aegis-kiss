@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
+import { performance } from 'node:perf_hooks';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
@@ -14,6 +15,8 @@ import { assertSchema } from './lib/schema_validator.mjs';
 const rootDirectory = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const clarifiedDemandPath = resolve(rootDirectory, '.harness/active_clarified_demand.json');
 const activeContractPath = resolve(rootDirectory, '.harness/active_contract_ir.json');
+const startedAtEpochMs = Date.now();
+const started = performance.now();
 
 function fail(code) {
   process.stderr.write(`[AEGIS][PREFLIGHT][FATAL] ${code}\n`);
@@ -97,6 +100,7 @@ function validateEnvelope(envelope) {
   if (canonicalDigest(factBody) !== digest) fail('mechanical_facts_digest_mismatch');
   if (sha256(envelope.prompt) !== envelope.promptDigest) fail('preflight_prompt_digest_mismatch');
   const expectedContextDigest = canonicalDigest({
+    baseCommit: envelope.baseCommit,
     normalizedDemandDigest: envelope.normalizedDemand.digest,
     mechanicalFactsDigest: envelope.mechanicalFacts.digest,
     architecturePolicyDigest: envelope.architecture.policyDigest,
@@ -319,8 +323,15 @@ try {
 process.stdout.write(`${JSON.stringify({
   schema: 'aegis.preflight_finalization.v2',
   status: 'SEMANTIC_STATE_PERSISTED',
+  executionId: envelope.executionId,
+  baseCommit: envelope.baseCommit,
   interpretationStatus,
   clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
   contractDigest: canonicalDigest(contract),
+  timing: {
+    phase: 'finalization',
+    startedAtEpochMs,
+    durationMs: Math.round((performance.now() - started) * 1000) / 1000,
+  },
   paths: ['.harness/active_clarified_demand.json', '.harness/active_contract_ir.json'],
 })}\n`);

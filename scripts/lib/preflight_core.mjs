@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -9,6 +10,21 @@ const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|
 
 export function digest(value) {
   return sha256(value);
+}
+
+function currentCommit(root) {
+  try {
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function executionId(baseCommit, normalizedDemandDigest) {
+  return sha256(`base=${baseCommit ?? 'UNVERSIONED'}\ndemand=${normalizedDemandDigest}\n`);
 }
 
 function byteLength(value) {
@@ -230,7 +246,9 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
     }
   }
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);
+  const baseCommit = currentCommit(root);
   const contextDigest = canonicalDigest({
+    baseCommit,
     normalizedDemandDigest: normalizedDemand.digest,
     mechanicalFactsDigest: mechanicalFacts.digest,
     architecturePolicyDigest: architecture.policyDigest,
@@ -241,10 +259,17 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
   prompt = inject(prompt, 'normalized_demand', { units: normalizedDemand.units });
   prompt = inject(prompt, 'mechanical_facts', { target: mechanicalFacts.target, references: mechanicalFacts.references });
   prompt = inject(prompt, 'architecture_rules', { candidateRules: architecture.candidateRules });
-  prompt = inject(prompt, 'previous_contract', previousContract);
+  const previousContractProjection = previousContract === null ? null : {
+    architecture: { amendmentIds: previousContract.architecture.amendmentIds },
+    scope: previousContract.scope,
+    proofObligations: previousContract.proofObligations,
+  };
+  prompt = inject(prompt, 'previous_contract', previousContractProjection);
   const envelope = {
     schema: 'aegis.ide_preflight.v2',
     status: 'PENDING_SEMANTIC_COMPILATION',
+    executionId: executionId(baseCommit, normalizedDemand.digest),
+    baseCommit,
     normalizedDemand,
     mechanicalFacts,
     architecture,
@@ -255,4 +280,23 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
     prompt,
   };
   return envelope;
+}
+
+export function semanticRequest(envelope, timing) {
+  return {
+    schema: 'aegis.ide_semantic_request.v2',
+    status: envelope.status,
+    executionId: envelope.executionId,
+    baseCommit: envelope.baseCommit,
+    contextDigest: envelope.contextDigest,
+    promptDigest: envelope.promptDigest,
+    timing,
+    protocol: {
+      decisionPath: '.harness/runtime/preflight_decision.json',
+      finalize: './aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json',
+      promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],
+      forbidden: ['repository reads during semantic compilation', 'manual pre-commit execution', 'verification before authorize'],
+    },
+    prompt: envelope.prompt,
+  };
 }

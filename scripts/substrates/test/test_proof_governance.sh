@@ -71,6 +71,16 @@ git -C "${staged_repo}" commit -qm "fixture baseline"
 AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_governance_validate_staged "${staged_repo}"
 AEGIS_ROOT_DIR="${staged_repo}" aegis_proof_continuity_validate_staged "${staged_repo}"
 
+printf 'outside contract\n' > "${staged_repo}/README.md"
+git -C "${staged_repo}" add README.md
+if AEGIS_ROOT_DIR="${staged_repo}" aegis_staged_scope_validate \
+  "${staged_repo}" "${staged_repo}/.harness/active_contract_ir.json" >/dev/null 2>&1; then
+  echo "staged path outside contract was accepted" >&2
+  exit 1
+fi
+git -C "${staged_repo}" restore --staged README.md
+rm -f "${staged_repo}/README.md"
+
 jq '.proofs[0].command = "npm run missing-script"' "${staged_repo}/.harness/proof_registry.json" \
   > "${staged_repo}/.harness/invalid-command.json"
 mv "${staged_repo}/.harness/invalid-command.json" "${staged_repo}/.harness/proof_registry.json"
@@ -156,7 +166,7 @@ jq -e '.profile == "release" and ([.matchedProofs[].id] | index("PO-FIXTURE-RELE
 auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'scripts/proof_governance.sh')"
 jq -e '.profile == "forensic" and ([.matchedProofs[].id] | index("PO-FIXTURE-FORENSIC"))' <<<"${auto_profile}" >/dev/null
 auto_profile="$(AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_profile_for_change "${valid_registry}" $'.harness/active_contract_ir.json')"
-jq -e '.profile == "release"' <<<"${auto_profile}" >/dev/null
+jq -e '.profile == "fast" and (.matchedProofs | length) == 0' <<<"${auto_profile}" >/dev/null
 
 key="$(AEGIS_ROOT_DIR="${ROOT_DIR}" AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_key PO-FIXTURE-FAST fast "${valid_contract}" "${valid_registry}" "src/index.ts")"
 AEGIS_RUNTIME_DIR="${runtime_dir}" aegis_proof_cache_store "${key}" PO-FIXTURE-FAST PROVEN compiler >/dev/null

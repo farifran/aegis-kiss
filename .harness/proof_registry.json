@@ -31,7 +31,8 @@
       "proofIds": [
         "PO-TB-INVARIANT-001",
         "PO-TB-BEHAVIOR-001",
-        "PO-TB-BITMASK-001"
+        "PO-TB-BITMASK-001",
+        "PO-AEGIS-FLOW-001"
       ]
     },
     {
@@ -39,7 +40,8 @@
       "proofIds": [
         "PO-TB-INVARIANT-001",
         "PO-TB-BEHAVIOR-001",
-        "PO-TB-BITMASK-001"
+        "PO-TB-BITMASK-001",
+        "PO-AEGIS-FLOW-001"
       ]
     }
   ],
@@ -85,6 +87,24 @@
       ],
       "executionKey": "token-bucket-proof",
       "command": "npm run aegis:proof:token-bucket"
+    },
+    {
+      "id": "PO-AEGIS-FLOW-001",
+      "risk": "Execuções agregadas, escopo excedido ou verificações redundantes",
+      "coverageKey": "aegis.flow.governance",
+      "authority": "deterministic_tribunal",
+      "cost": "high",
+      "cadence": "release",
+      "minimumProfile": "release",
+      "status": "active",
+      "targets": [
+        "aegis",
+        "scripts",
+        "governance",
+        ".githooks"
+      ],
+      "executionKey": "aegis-harness-suite",
+      "command": "npm run aegis:test"
     }
   ]
 }

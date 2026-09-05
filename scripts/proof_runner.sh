@@ -29,9 +29,11 @@ case "${profile}" in
   *) echo "[AEGIS][PROOF][FATAL] unknown_proof_profile:${profile}" >&2; exit 1 ;;
 esac
 
-AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate \
-  "$(aegis_proof_registry_path)" \
-  "$(aegis_proof_contract_path)" >/dev/null
+if [[ "${AEGIS_PROOF_GOVERNANCE_VALIDATED:-0}" != "1" ]]; then
+  AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate \
+    "$(aegis_proof_registry_path)" \
+    "$(aegis_proof_contract_path)" >/dev/null
+fi
 
 if [[ -z "${changed}" ]]; then
   changed="$(git status --porcelain --untracked-files=all | cut -c4- | grep -v '^$' || true)"

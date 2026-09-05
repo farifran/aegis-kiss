@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
 
 if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${ROOT_DIR}"; then
   # VS Code may stage a file after the IDE has issued its receipt, or the

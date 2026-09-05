@@ -30,6 +30,9 @@ jq -e '
   .schema == "aegis.precommit_receipt.v1"
   and .status == "PROVEN"
   and .proofProfile == "fast"
+  and (.executionId | test("^[a-f0-9]{64}$"))
+  and (.issuedAtEpoch | type == "number")
+  and (.verificationDurationMs | type == "number")
   and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$"))
   and (.architecturePolicyDigest | test("^[a-f0-9]{64}$"))
   and .validationAuthority.kind == "deterministic_tribunal"
@@ -101,6 +104,7 @@ mkdir -p "${hook_repo}/src" "${hook_repo}/.githooks" "${hook_repo}/scripts/lib"
 for file_name in \
   aegis \
   .githooks/pre-commit \
+  .githooks/post-commit \
   scripts/ide_gateway.sh \
   scripts/contract_evidence_gate.sh \
   scripts/formal_promotion_authorization.sh \
@@ -110,7 +114,7 @@ for file_name in \
   mkdir -p "${hook_repo}/$(dirname "${file_name}")"
   cp "${ROOT_DIR}/${file_name}" "${hook_repo}/${file_name}"
 done
-chmod +x "${hook_repo}/aegis" "${hook_repo}/.githooks/pre-commit"
+chmod +x "${hook_repo}/aegis" "${hook_repo}/.githooks/pre-commit" "${hook_repo}/.githooks/post-commit"
 printf 'export const version = 1;\n' > "${hook_repo}/src/index.ts"
 printf '{"scripts":{}}\n' > "${hook_repo}/package.json"
 git -C "${hook_repo}" init -q
@@ -121,6 +125,8 @@ printf 'export const version = 2;\n' > "${hook_repo}/src/index.ts"
 git -C "${hook_repo}" add src/index.ts
 git -C "${hook_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm promoted
 [[ "$(git -C "${hook_repo}" log -1 --format=%s)" == "promoted" ]] || fail "hook_did_not_authorize_direct_commit"
+postcommit_receipt="$(git -C "${hook_repo}" rev-parse --path-format=absolute --git-path aegis/postcommit_receipt.json)"
+jq -e '.schema == "aegis.postcommit_receipt.v1" and .status == "PROVEN" and (.executionId | length) == 64' "${postcommit_receipt}" >/dev/null
 if git -C "${hook_repo}" ls-files .harness/runtime | grep -q .; then
   fail "transient_runtime_artifact_was_staged"
 fi

@@ -11,7 +11,7 @@ envelope_file="${WORK_DIR}/envelope.json"
 cp -r "${ROOT_DIR}/governance" "${WORK_DIR}/"
 cp "${ROOT_DIR}/ARCHITECTURE.md" "${WORK_DIR}/ARCHITECTURE.md"
 printf '\357\273\277# Criar\r\nUse BigInt(Date.now()) em `src/clock.ts`.\rConsulte https://example.test/spec\n' \
-  | AEGIS_ROOT="${WORK_DIR}" node "${ROOT_DIR}/scripts/preflight.mjs" --target src > "${envelope_file}"
+  | AEGIS_ROOT="${WORK_DIR}" node "${ROOT_DIR}/scripts/preflight.mjs" --internal-envelope --target src > "${envelope_file}"
 
 node --input-type=module - "${envelope_file}" "${WORK_DIR}" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -83,7 +83,16 @@ fi
 AEGIS_ROOT="${WORK_DIR}" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision decision.json --independent-review review.json < "${envelope_file}" > "${WORK_DIR}/result.json"
 
-jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "SEMANTIC_STATE_PERSISTED" and .interpretationStatus == "NOT_REQUIRED" and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$")) and (.contractDigest | test("^[a-f0-9]{64}$"))' "${WORK_DIR}/result.json" >/dev/null
+jq -e --slurpfile envelope "${envelope_file}" '
+  .schema == "aegis.preflight_finalization.v2"
+  and .status == "SEMANTIC_STATE_PERSISTED"
+  and .executionId == $envelope[0].executionId
+  and .baseCommit == $envelope[0].baseCommit
+  and .timing.phase == "finalization"
+  and .interpretationStatus == "NOT_REQUIRED"
+  and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$"))
+  and (.contractDigest | test("^[a-f0-9]{64}$"))
+' "${WORK_DIR}/result.json" >/dev/null
 jq -e '.schema == "aegis.clarified_demand.v2" and (.inputCoverage | length) > 0 and (.architecture.ruleAssessments | length) > 0' "${WORK_DIR}/.harness/active_clarified_demand.json" >/dev/null
 jq -e '.schema == "aegis.contract_ir.v2" and .scope.authorizedPaths == ["src/clock.ts"] and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$"))' "${WORK_DIR}/.harness/active_contract_ir.json" >/dev/null
 

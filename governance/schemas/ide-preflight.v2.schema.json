@@ -3,10 +3,17 @@
   "$id": "aegis.ide_preflight.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "contextDigest", "promptDigest", "prompt"],
+  "required": ["schema", "status", "executionId", "baseCommit", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "contextDigest", "promptDigest", "prompt"],
   "properties": {
     "schema": { "const": "aegis.ide_preflight.v2" },
     "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
+    "executionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "baseCommit": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-f0-9]{40,64}$" }
+      ]
+    },
     "normalizedDemand": { "$ref": "aegis.normalized_demand.v2" },
     "mechanicalFacts": { "$ref": "#/$defs/mechanicalFacts" },
     "architecture": { "$ref": "#/$defs/architecture" },

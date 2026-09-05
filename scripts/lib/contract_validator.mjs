@@ -98,6 +98,7 @@ export function validateContract({ root, contract, clarified, policy, policyText
   exactIds(contract.architecture.appliedRuleIds, appliedRuleIds, 'invalid_architecture_binding');
   requireCondition(contract.architecture.appliedRuleIds.every((id) => policyRuleIds.has(id)), 'invalid_architecture_binding');
   requireCondition(contract.architecture.amendmentIds.every((id) => policyAmendmentIds.has(id)), 'invalid_architecture_binding');
+  exactIds(contract.scope.authorizedPaths, clarified.scope.included, 'scope_binding_mismatch');
   validateContinuity(previousContract, contract);
 
   if (phase === 'promotion') {

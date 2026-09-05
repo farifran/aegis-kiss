@@ -76,6 +76,7 @@ build_preflight() {
   rm -f "${RUNTIME_DIR}/mechanical_inventory.json"
   local -a preflight_args=()
   [[ -n "${target}" ]] && preflight_args+=(--target "${target}")
+  [[ "${AEGIS_PREFLIGHT_OUTPUT:-public}" == "internal" ]] && preflight_args+=(--internal-envelope)
   printf '%s' "${demand}" | node "${ROOT_DIR}/scripts/preflight.mjs" "${preflight_args[@]}"
 }
 
@@ -117,7 +118,7 @@ finalize_preflight() {
   [[ -n "${target}" ]] && intake_args+=(--target "${target}")
   [[ -n "${resolution}" ]] && finalize_args+=(--resolution "${resolution}")
   [[ -n "${independent_review}" ]] && finalize_args+=(--independent-review "${independent_review}")
-  build_preflight "${demand}" "${intake_args[@]}" \
+  AEGIS_PREFLIGHT_OUTPUT=internal build_preflight "${demand}" "${intake_args[@]}" \
     | node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}"
 }
 

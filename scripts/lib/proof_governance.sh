@@ -33,6 +33,47 @@ aegis_contract_targets() {
   jq -r 'if .schema == "aegis.contract_ir.v2" then .scope.authorizedPaths[]? else .targets[]? end' "${contract_file}"
 }
 
+aegis_path_within_scope() {
+  local path="${1:-}" declared="${2:-}"
+  [[ "${path}" == "${declared}" || "${path}" == "${declared}/"* ]]
+}
+
+# Every persistent staged path must be part of the semantic scope. Only the
+# three generated governance records are implicit; all code, tests, prompts,
+# configuration and harness files must be named by the contract.
+aegis_staged_scope_validate() {
+  local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
+  local staged_contract="${2:-}"
+  local path declared allowed
+  [[ -s "${staged_contract}" ]] || return 1
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    case "${path}" in
+      .harness/active_contract_ir.json|.harness/active_clarified_demand.json|.harness/proof_registry.json)
+        continue
+        ;;
+    esac
+    allowed=0
+    while IFS= read -r declared; do
+      [[ -n "${declared}" ]] || continue
+      if aegis_path_within_scope "${path}" "${declared}"; then
+        allowed=1
+        break
+      fi
+    done < <(
+      {
+        aegis_contract_targets "${staged_contract}"
+        jq -r '(.continuity.retirements // [])[] | select(.kind == "target") | .id' "${staged_contract}"
+      } | sort -u
+    )
+    if [[ "${allowed}" -ne 1 ]]; then
+      echo "[AEGIS][SCOPE][FATAL] staged_path_outside_contract:${path}" >&2
+      return 1
+    fi
+  done < <(git -C "${repository_root}" diff --cached --name-only | sort -u)
+}
+
 # A proof command is part of its definition, not an opaque string.  We do not
 # execute it here; this merely proves that the staged/working tree can resolve
 # the declared entry point before a commit is allowed to claim the proof.
@@ -354,15 +395,21 @@ aegis_proof_profile_plan() {
   local changed_files="${3:-}"
   local plan
   plan="$(jq -c --arg profile "${profile}" --arg changed "${changed_files}" '
+    def overlaps($targets; $files):
+      any($targets[] as $target | $files[]? as $file |
+        $file == $target
+        or ($file | startswith($target + "/"))
+        or ($target | startswith($file + "/")));
     . as $r |
+    ($changed | split("\n") | map(select(length > 0)) | unique) as $files |
     ($r.profiles[] | select(.id == $profile)) as $p |
     [ $p.proofIds[] as $id |
       $r.proofs[] | select(.id == $id and .status != "retired") |
       . as $proof |
       {id:$proof.id, risk:$proof.risk, authority:$proof.authority, cost:$proof.cost, cadence:$proof.cadence,
        executionKey:$proof.executionKey, command:$proof.command,
-       targets:$proof.targets, selected:(if $profile == "targeted" and ($changed | length) > 0
-         then any($proof.targets[]; ($changed | split("\n")) | index(.) != null)
+       targets:$proof.targets, selected:(if $profile == "targeted" and ($files | length) > 0
+         then overlaps($proof.targets; $files)
          else true end)}
     ] | {profile:$profile, proofs:map(select(.selected)), count:(map(select(.selected)) | length)}
   ' "${registry_file}")" || return 1
@@ -401,9 +448,7 @@ aegis_proof_profile_for_change() {
           or ($target | startswith($file + "/"))))
       | {id, targets, requiredProfile: profile_for_proof}
     ] as $matched |
-    (if any($files[]?; . == ".harness/active_contract_ir.json" or . == ".harness/proof_registry.json")
-      then "release"
-      elif ($matched | length) == 0 then "fast"
+    (if ($matched | length) == 0 then "fast"
       else ($matched | max_by(rank(.requiredProfile)) | .requiredProfile)
      end) as $profile |
     {profile:$profile, matchedProofs:$matched, changedFiles:$files}

@@ -58,6 +58,9 @@ validate_v2_staged() {
   if [[ "${rc}" -eq 0 ]]; then
     node "${SCRIPT_DIR}/validate_contract_ir_v2.mjs" --root "${staged_root}" >/dev/null || rc=1
   fi
+  if [[ "${rc}" -eq 0 ]]; then
+    aegis_staged_scope_validate "${ROOT_DIR}" "${staged_root}/.harness/active_contract_ir.json" || rc=1
+  fi
   rm -rf "${staged_root}"
   return "${rc}"
 }

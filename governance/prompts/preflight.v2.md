@@ -1,45 +1,25 @@
-Produza somente um objeto JSON válido com `schema: "aegis.preflight_decision.v2"` e a estrutura definida abaixo. Use exclusivamente o contexto fornecido; não consulte arquivos, código ou documentação do repositório nesta fase.
+Responda somente com um JSON `aegis.preflight_decision.v2`. Não consulte o repositório.
 
-Regras obrigatórias:
-- Copie exatamente `contextDigest` no campo homônimo. Não reproduza outros digests.
-- Preserve toda exigência explícita. Não invente comportamento nem complete lacunas sem evidência.
-- Corrija apenas forma, ortografia e organização sem alterar significado.
-- Recomende a menor solução que satisfaça a demanda e exponha falhas relevantes.
-- Avalie exatamente uma vez cada regra em `candidateRules` como `APPLIED`, `NOT_APPLICABLE` ou `CONFLICT`, citando `sourceUnitIds` quando houver evidência na demanda.
-- Regra `hard` em conflito exige `status: "BLOCKED"`.
-- Se o resultado for `CLARIFIED`, produza `clarifiedDemandBody` e `contractBody` na mesma resposta.
-- Classifique exatamente uma vez cada unidade como `REQUIREMENT`, `CONTEXT` ou `REJECTED_INVALID` em `inputCoverage`.
-- Toda unidade `REQUIREMENT` deve apontar para ao menos um requisito; as demais não apontam para requisitos.
-- Todo requisito de origem `USER`, `SAFE_CORRECTION` ou `USER_CLARIFICATION` deve ser rastreável por `inputCoverage`.
-- Prefira `questions: []`. Faça de uma a três perguntas somente quando indispensáveis para corrigir a entrada, delimitar escopo ou resolver conflito arquitetural. Não pergunte decisões internas do harness.
-- Cada pergunta deve conter evidência, impacto, recomendação, unidades de origem e `interpretedAnswer`: a interpretação concreta recomendada como resposta.
-- Em `NEEDS_CONFIRMATION`, aplique todas as `interpretedAnswer` e produza `provisionalClarifiedDemandBody` e `provisionalContractBody`. A confirmação do usuário deve poder promover esses corpos sem nova chamada semântica.
-- Em `contractBody`, autorize somente os menores caminhos necessários; cada invariante aponta para provas e cada requisito aparece exatamente uma vez em `requirementCoverage`.
-- O contrato descreve comportamento observável e riscos verificáveis, nunca código, comandos, imports, tipos privados ou decisões internas do harness.
-- Preserve os targets e as obrigações de prova do contrato anterior. Remoções ou mudanças exigem `continuity` com evidência da demanda.
-- Use `NEEDS_CONFIRMATION` quando houver perguntas e `BLOCKED` somente quando não existir continuação segura.
+Regras:
+- copie `contextDigest` exatamente;
+- preserve toda exigência explícita e não preencha lacunas sem evidência;
+- corrija somente forma/ortografia; escolha a menor solução suficiente e falhas explícitas;
+- avalie cada `candidateRule` exatamente uma vez; conflito `hard` implica `BLOCKED`;
+- classifique cada UNIT exatamente uma vez em `inputCoverage`; `REQUIREMENT` aponta para requisito, as demais não;
+- use 0 perguntas quando houver interpretação segura; caso contrário use 1–3 perguntas INPUT/SCOPE/ARCHITECTURE, cada uma com `interpretedAnswer`;
+- `NEEDS_CONFIRMATION` usa somente corpos `provisional*`; `CLARIFIED` usa somente corpos finais; `BLOCKED` não usa corpos;
+- `clarifiedDemandBody.scope.included` deve ser idêntico a `contractBody.scope.authorizedPaths` e incluir todo arquivo persistente necessário, inclusive teste/configuração; metadados `.harness/active_*` e `.harness/proof_registry.json` são geridos pelo Aegis e não entram no escopo;
+- preserve targets e provas do contrato anterior; remoções ou alterações exigem `continuity` com evidência da demanda;
+- contrato descreve comportamento e riscos observáveis, sem imports, comandos ou tipos privados.
 
-Forma semântica dos corpos:
-- Objeto principal: `{schema, contextDigest, status, ruleAssessments, findings, questions, clarifiedDemandBody?, contractBody?, provisionalClarifiedDemandBody?, provisionalContractBody?}`.
-- `ruleAssessments`: `[{ruleId, verdict, evidence, sourceUnitIds}]`, com `verdict` igual a `APPLIED`, `NOT_APPLICABLE` ou `CONFLICT`.
-- `findings`: `[{id, kind, status, evidence, sourceUnitIds}]`, onde `kind` é `input`, `reference`, `scope`, `architecture` ou `repository`, e `status` é `PROVEN`, `UNPROVEN`, `DISPROVEN` ou `NOT_APPLICABLE`.
-- `questions`: `[{id, scope, prompt, evidence, impact, recommendation, interpretedAnswer, sourceUnitIds}]`, com `scope` igual a `INPUT`, `SCOPE` ou `ARCHITECTURE`.
-- `clarifiedDemandBody`: `{intent, requirements:[{id,statement,provenance}], scope:{included,excluded}, inputCoverage:[{unitId,disposition,requirementIds,rationale}], acceptanceCriteria?, failureSemantics?}`.
-- `contractBody`: `{scope:{authorizedPaths}, behavior:[{id,statement}], preconditions?, invariants:[{id,statement,proofIds}], postconditions?, failureSemantics?, proofObligations:[{id,risk,statement}], requirementCoverage:[{requirementId,contractIds}], continuity?}`.
-- Em `CLARIFIED`, use `clarifiedDemandBody` e `contractBody`; em `NEEDS_CONFIRMATION`, use somente as versões prefixadas por `provisional`; em `BLOCKED`, não emita corpos.
-- `provenance` é `USER`, `SAFE_CORRECTION`, `USER_CLARIFICATION`, `ARCHITECTURE_DEFAULT` ou `KISS_DERIVATION`. IDs usam os prefixos `REQ-`, `BEH-`, `PRE-`, `INV-`, `POST-`, `FAIL-` e `PO-` conforme o papel.
+Forma exata para `CLARIFIED` (arrays opcionais podem ser omitidos quando vazios):
+{"schema":"aegis.preflight_decision.v2","contextDigest":"<64 hex>","status":"CLARIFIED","ruleAssessments":[{"ruleId":"ARCH-...","verdict":"APPLIED|NOT_APPLICABLE|CONFLICT","evidence":"...","sourceUnitIds":["UNIT-0001"]}],"findings":[{"id":"PF-...","kind":"input|reference|scope|architecture|repository","status":"PROVEN|UNPROVEN|DISPROVEN|NOT_APPLICABLE","evidence":"...","sourceUnitIds":["UNIT-0001"]}],"questions":[],"clarifiedDemandBody":{"intent":"...","requirements":[{"id":"REQ-...","statement":"...","provenance":"USER|SAFE_CORRECTION|USER_CLARIFICATION|ARCHITECTURE_DEFAULT|KISS_DERIVATION"}],"scope":{"included":["path"],"excluded":[]},"inputCoverage":[{"unitId":"UNIT-0001","disposition":"REQUIREMENT|CONTEXT|REJECTED_INVALID","requirementIds":["REQ-..."],"rationale":"..."}],"acceptanceCriteria":["..."],"failureSemantics":[{"id":"FAIL-...","trigger":"...","observableOutcome":"..."}]},"contractBody":{"scope":{"authorizedPaths":["path"]},"behavior":[{"id":"BEH-...","statement":"..."}],"preconditions":[{"id":"PRE-...","statement":"..."}],"invariants":[{"id":"INV-...","statement":"...","proofIds":["PO-..."]}],"postconditions":[{"id":"POST-...","statement":"..."}],"failureSemantics":[{"id":"FAIL-...","statement":"..."}],"proofObligations":[{"id":"PO-...","risk":"...","statement":"..."}],"requirementCoverage":[{"requirementId":"REQ-...","contractIds":["BEH-...","INV-...","PO-..."]}],"continuity":{"retirements":[{"kind":"proof|target","id":"...","reason":"...","demandEvidence":"...","successor":"..."}],"proofChanges":[{"id":"PO-...","reason":"...","demandEvidence":"..."}]}}}
 
-Context digest:
-{{context_digest}}
+Para `NEEDS_CONFIRMATION`, mantenha cabeçalho/avaliações/findings, use `questions:[{"id":"Q-...","scope":"INPUT|SCOPE|ARCHITECTURE","prompt":"...","evidence":"...","impact":"...","recommendation":"...","interpretedAnswer":"...","sourceUnitIds":["UNIT-0001"]}]` e renomeie os dois corpos para `provisionalClarifiedDemandBody` e `provisionalContractBody`.
 
-Demanda normalizada:
-{{normalized_demand}}
-
-Fatos mecânicos:
-{{mechanical_facts}}
-
-Regras arquiteturais candidatas:
-{{architecture_rules}}
-
-Contrato anterior, ou null:
-{{previous_contract}}
+Contexto:
+contextDigest={{context_digest}}
+normalizedDemand={{normalized_demand}}
+mechanicalFacts={{mechanical_facts}}
+candidateRules={{architecture_rules}}
+previousContract={{previous_contract}}

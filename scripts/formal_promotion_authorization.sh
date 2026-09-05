@@ -59,6 +59,19 @@ manifest_from_index() {
   done <<< "${files}" | shasum -a 256 | awk '{print $1}'
 }
 
+manifest_from_commit() {
+  local commit="${1:-}" files="${2:-}" path
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    printf 'path=%s\n' "${path}"
+    if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
+      git -C "${repository_root}" show "${commit}:${path}" | shasum -a 256 | awk '{print $1}'
+    else
+      printf 'missing\n'
+    fi
+  done <<< "${files}" | shasum -a 256 | awk '{print $1}'
+}
+
 file_digest_from_worktree() {
   local path="${1:-}"
   [[ -f "${repository_root}/${path}" ]] || fatal "receipt_input_missing:${path}"
@@ -124,6 +137,32 @@ clarified_digest_from_index() {
   fi
 }
 
+metadata_digest_from_commit() {
+  local commit="${1:-}" path="${2:-}"
+  if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
+    git -C "${repository_root}" show "${commit}:${path}" | shasum -a 256 | awk '{print $1}'
+  else
+    absent_metadata_digest "${path}"
+  fi
+}
+
+canonical_json_digest_from_commit() {
+  local commit="${1:-}" path="${2:-}"
+  if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
+    git -C "${repository_root}" show "${commit}:${path}" | jq -S -c . | shasum -a 256 | awk '{print $1}'
+  else
+    absent_metadata_digest "${path}"
+  fi
+}
+
+execution_id_for_base() {
+  local base="${1:-}" demand_digest="ABSENT"
+  if [[ -f "${repository_root}/.harness/active_clarified_demand.json" ]]; then
+    demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/.harness/active_clarified_demand.json")"
+  fi
+  printf 'base=%s\ndemand=%s\n' "${base}" "${demand_digest}" | shasum -a 256 | awk '{print $1}'
+}
+
 validation_authority_json() {
   local validation_llm="$(printf '%s' "${AEGIS_VALIDATION_LLM:-0}" | tr '[:upper:]' '[:lower:]')"
   case "${validation_llm}" in
@@ -142,12 +181,14 @@ write_receipt() {
   local base="${1:-}" files="${2:-}" manifest="${3:-}" artifact_digest="${4:-}"
   local contract_digest="${5:-}" registry_digest="${6:-}" clarified_digest="${7:-}" policy_digest="${8:-}"
   local profile="${9:-}" proof_plan_digest="${10:-}" authority="${11:-}" proof_plan="${12:-}"
-  local auth_file auth_dir now expires
+  local duration_ms="${13:-0}"
+  local auth_file auth_dir now expires execution_id
 
   auth_file="$(authorization_path)"
   auth_dir="$(dirname "${auth_file}")"
   now="$(date +%s)"
   expires=$((now + 900))
+  execution_id="$(execution_id_for_base "${base}")"
   mkdir -p "${auth_dir}"
   jq -n \
     --arg base "${base}" \
@@ -160,10 +201,13 @@ write_receipt() {
     --arg policy_digest "${policy_digest}" \
     --arg profile "${profile}" \
     --arg proof_plan_digest "${proof_plan_digest}" \
+    --arg execution_id "${execution_id}" \
     --argjson authority "${authority}" \
     --argjson proof_plan "${proof_plan}" \
+    --argjson issued "${now}" \
     --argjson expires "${expires}" \
-    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,expiresAtEpoch:$expires}' \
+    --argjson duration_ms "${duration_ms}" \
+    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
     > "${auth_file}"
   echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
 }
@@ -189,6 +233,8 @@ create_authorization() {
   # This is the sole structural tribunal for an authorization. The IDE has
   # already synchronized the index; running it here binds the receipt to one
   # verification pass instead of repeating type, lint and proof work.
+  local started_seconds duration_ms
+  started_seconds="$(date +%s)"
   run_structure_verification
   AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
     || fatal "promotion_contract_evidence_verification_failed"
@@ -229,13 +275,15 @@ create_authorization() {
   # deterministic plan, not bulky test output.
   if ! AEGIS_ROOT_DIR="${repository_root}" \
     AEGIS_RUNTIME_DIR="${repository_root}/.harness/runtime" \
+    AEGIS_PROOF_GOVERNANCE_VALIDATED=1 \
     bash "${script_root}/proof_runner.sh" --profile "${profile}" --changed "${files}"; then
     fatal "required_proof_profile_failed:${profile}"
   fi
   proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
+  duration_ms="$(( ($(date +%s) - started_seconds) * 1000 ))"
   write_receipt "${base}" "${files}" "${manifest}" "${artifact_digest}" \
     "${contract_digest}" "${registry_digest}" "${clarified_digest}" "${policy_digest}" "${profile}" "${proof_plan_digest}" \
-    "${authority}" "${proof_plan}"
+    "${authority}" "${proof_plan}" "${duration_ms}"
 }
 
 create_baseline_authorization() {
@@ -345,6 +393,7 @@ verify_authorization() {
   jq -e --arg base "${base}" --argjson now "${now}" '
     .schema == "aegis.precommit_receipt.v1"
     and .status == "PROVEN"
+    and (.executionId | type == "string" and length == 64)
     and .baseCommit == $base
     and (.expiresAtEpoch | type == "number" and . >= $now)
     and (.files | type == "array" and length > 0 and all(type == "string" and length > 0))
@@ -357,6 +406,8 @@ verify_authorization() {
     and (.validationAuthority.id | type == "string" and length > 0)
     and (.proofProfile | IN("fast", "targeted", "release", "forensic"))
     and (.proofPlanDigest | type == "string" and length == 64)
+    and (.issuedAtEpoch | type == "number")
+    and (.verificationDurationMs | type == "number" and . >= 0)
   ' "${auth_file}" >/dev/null 2>&1 || fatal "formal_promotion_authorization_invalid_or_expired"
   files="$(jq -r '.files[]' "${auth_file}" | sort -u)"
   staged_files="$(git -C "${repository_root}" diff --cached --name-only | sort -u)"
@@ -378,9 +429,61 @@ verify_authorization() {
   [[ "${expected_policy_digest}" == "${policy_digest}" ]] || fatal "formal_promotion_architecture_policy_digest_mismatch"
 }
 
+verify_committed_transition() {
+  local auth_file postcommit_path head base files committed_files expected_manifest actual_manifest
+  local expected_contract expected_registry expected_clarified expected_policy
+  auth_file="$(authorization_path)"
+  [[ -s "${auth_file}" ]] || fatal "postcommit_receipt_missing"
+  jq -e '
+    .schema == "aegis.precommit_receipt.v1"
+    and .status == "PROVEN"
+    and (.executionId | type == "string" and length == 64)
+    and (.baseCommit | type == "string" and length >= 40)
+    and (.files | type == "array" and length > 0)
+    and (.worktreeManifest | type == "string" and length == 64)
+  ' "${auth_file}" >/dev/null 2>&1 || fatal "postcommit_receipt_invalid"
+  head="$(git -C "${repository_root}" rev-parse HEAD)"
+  base="$(jq -r '.baseCommit' "${auth_file}")"
+  [[ "$(git -C "${repository_root}" rev-parse "${head}^")" == "${base}" ]] \
+    || fatal "postcommit_base_mismatch"
+  files="$(jq -r '.files[]' "${auth_file}" | sort -u)"
+  committed_files="$(git -C "${repository_root}" diff-tree --no-commit-id --name-only -r "${head}" | sort -u)"
+  [[ "${files}" == "${committed_files}" ]] || fatal "postcommit_files_mismatch"
+  expected_manifest="$(jq -r '.worktreeManifest' "${auth_file}")"
+  actual_manifest="$(manifest_from_commit "${head}" "${files}")"
+  [[ "${expected_manifest}" == "${actual_manifest}" ]] || fatal "postcommit_manifest_mismatch"
+
+  expected_contract="$(jq -r '.contractDigest' "${auth_file}")"
+  expected_registry="$(jq -r '.proofRegistryDigest' "${auth_file}")"
+  expected_clarified="$(jq -r '.clarifiedDemandDigest' "${auth_file}")"
+  expected_policy="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
+  [[ "${expected_contract}" == "$(metadata_digest_from_commit "${head}" .harness/active_contract_ir.json)" ]] \
+    || fatal "postcommit_contract_digest_mismatch"
+  [[ "${expected_registry}" == "$(metadata_digest_from_commit "${head}" .harness/proof_registry.json)" ]] \
+    || fatal "postcommit_registry_digest_mismatch"
+  [[ "${expected_clarified}" == "$(canonical_json_digest_from_commit "${head}" .harness/active_clarified_demand.json)" ]] \
+    || fatal "postcommit_clarified_demand_digest_mismatch"
+  [[ "${expected_policy}" == "$(metadata_digest_from_commit "${head}" governance/architecture.policy.json)" ]] \
+    || fatal "postcommit_architecture_policy_digest_mismatch"
+
+  postcommit_path="$(git -C "${repository_root}" rev-parse --git-path aegis/postcommit_receipt.json)"
+  [[ "${postcommit_path}" == /* ]] || postcommit_path="${repository_root}/${postcommit_path}"
+  mkdir -p "$(dirname "${postcommit_path}")"
+  jq -n \
+    --arg execution_id "$(jq -r '.executionId' "${auth_file}")" \
+    --arg commit "${head}" \
+    --arg base "${base}" \
+    --arg manifest "${actual_manifest}" \
+    --argjson verified "$(date +%s)" \
+    '{schema:"aegis.postcommit_receipt.v1",status:"PROVEN",executionId:$execution_id,commit:$commit,baseCommit:$base,committedManifest:$manifest,verifiedAtEpoch:$verified}' \
+    > "${postcommit_path}"
+  echo "[AEGIS][FORMAL] postcommit=PROVEN execution=$(jq -r '.executionId' "${auth_file}")" >&2
+}
+
 case "${command_name}" in
   create) create_authorization ;;
   requires) requires_authorization ;;
   verify) verify_authorization ;;
+  verify-commit) verify_committed_transition ;;
   *) fatal "unknown_formal_promotion_command:${command_name}" ;;
 esac

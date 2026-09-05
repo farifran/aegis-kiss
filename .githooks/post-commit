@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+RECEIPT="$(git -C "${ROOT_DIR}" rev-parse --git-path aegis/precommit_receipt.json)"
+[[ "${RECEIPT}" == /* ]] || RECEIPT="${ROOT_DIR}/${RECEIPT}"
+[[ -s "${RECEIPT}" ]] || exit 0
+PARENT="$(git -C "${ROOT_DIR}" rev-parse HEAD^ 2>/dev/null || true)"
+[[ -n "${PARENT}" && "$(jq -r '.baseCommit // empty' "${RECEIPT}")" == "${PARENT}" ]] || exit 0
+exec bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify-commit "${ROOT_DIR}"

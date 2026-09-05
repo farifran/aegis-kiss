@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.ide_semantic_request.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "executionId", "baseCommit", "contextDigest", "promptDigest", "timing", "protocol", "prompt"],
+  "properties": {
+    "schema": { "const": "aegis.ide_semantic_request.v2" },
+    "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
+    "executionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "baseCommit": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-f0-9]{40,64}$" }
+      ]
+    },
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "startedAtEpochMs", "durationMs"],
+      "properties": {
+        "phase": { "const": "preflight" },
+        "startedAtEpochMs": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisionPath", "finalize", "promotion", "forbidden"],
+      "properties": {
+        "decisionPath": { "const": ".harness/runtime/preflight_decision.json" },
+        "finalize": { "const": "./aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json" },
+        "promotion": {
+          "const": ["implement authorized scope", "stage persistent changes", "./aegis authorize", "git commit"]
+        },
+        "forbidden": {
+          "const": ["repository reads during semantic compilation", "manual pre-commit execution", "verification before authorize"]
+        }
+      }
+    },
+    "prompt": { "type": "string", "minLength": 1 }
+  }
+}

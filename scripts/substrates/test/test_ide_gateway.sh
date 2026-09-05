@@ -12,17 +12,36 @@ cleanup() {
 trap cleanup EXIT
 
 output="$(bash "${ROOT_DIR}/aegis" $'Criar uma biblioteca\r\ndeterminística.' --target src)"
+[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -le 10000 ]] || {
+  echo 'semantic request exceeded compact transport budget' >&2
+  exit 1
+}
 printf '%s' "${output}" | jq -e '
-  .schema == "aegis.ide_preflight.v2"
+  .schema == "aegis.ide_semantic_request.v2"
   and .status == "PENDING_SEMANTIC_COMPILATION"
-  and (.normalizedDemand.digest | length == 64)
-  and (.mechanicalFacts.digest | length == 64)
+  and (.executionId | length == 64)
+  and ((.baseCommit == null) or (.baseCommit | length >= 40))
   and (.contextDigest | length == 64)
-  and ((.previousContract == null and .previousContractDigest == null) or (.previousContract != null and (.previousContractDigest | length == 64)))
-  and (.architecture.candidateRules | type == "array")
+  and (.promptDigest | length == 64)
+  and .timing.phase == "preflight"
+  and (.timing.durationMs >= 0)
+  and .protocol.decisionPath == ".harness/runtime/preflight_decision.json"
+  and .protocol.promotion == ["implement authorized scope", "stage persistent changes", "./aegis authorize", "git commit"]
+  and (.protocol.forbidden | index("verification before authorize"))
   and (.prompt | contains("\r") | not)
-  and (has("demand") | not)
+  and (has("normalizedDemand") | not)
+  and (has("mechanicalFacts") | not)
+  and (has("architecture") | not)
+  and (has("previousContract") | not)
 ' >/dev/null
+printf '%s' "${output}" | node --input-type=module -e '
+  import { readFileSync } from "node:fs";
+  import { assertSchema } from "./scripts/lib/schema_validator.mjs";
+  const request = JSON.parse(readFileSync(0, "utf8"));
+  assertSchema("aegis.ide_semantic_request.v2", request);
+  if (!request.prompt.includes("\"trigger\":\"...\",\"observableOutcome\":\"...\"")) throw new Error("clarified failure shape absent");
+  if (!request.prompt.includes("\"id\":\"PF-...\"")) throw new Error("finding id shape absent");
+'
 [[ ! -e "${RUNTIME_DIR}/ide_intake.json" ]] || {
   echo 'legacy intake artifact was persisted' >&2
   exit 1
@@ -33,7 +52,10 @@ node --input-type=module - "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}
 import { readFileSync, writeFileSync } from 'node:fs';
 const [envelopePath, decisionPath] = process.argv.slice(2);
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
-const assessments = envelope.architecture.candidateRules.map((rule) => ({
+const context = envelope.prompt.match(/candidateRules=(\{.*\})\npreviousContract=/s);
+if (context === null) throw new Error('semantic prompt does not expose candidate rules');
+const candidates = JSON.parse(context[1]).candidateRules;
+const assessments = candidates.map((rule) => ({
   ruleId: rule.id,
   verdict: 'NOT_APPLICABLE',
   evidence: 'Não aplicável à biblioteca pedida.',
@@ -44,7 +66,7 @@ const clarifiedDemandBody = {
   intent: requirement.statement,
   requirements: [requirement],
   scope: { included: ['src'], excluded: [] },
-  inputCoverage: envelope.normalizedDemand.units.map((unit) => ({ unitId: unit.id, disposition: 'REQUIREMENT', requirementIds: [requirement.id], rationale: 'Requisito.' })),
+  inputCoverage: [{ unitId: 'UNIT-0001', disposition: 'REQUIREMENT', requirementIds: [requirement.id], rationale: 'Requisito.' }],
 };
 writeFileSync(decisionPath, JSON.stringify({
   schema: 'aegis.preflight_decision.v2',
@@ -76,7 +98,7 @@ if bash "${ROOT_DIR}/aegis" 'demanda' --target ../outside >/dev/null 2>&1; then
   exit 1
 fi
 
-output="$(bash "${ROOT_DIR}/aegis" proofs)"
+output="$(bash "${ROOT_DIR}/aegis" proofs --profile fast)"
 if [[ -e "${ROOT_DIR}/.harness/active_contract_ir.json" && -e "${ROOT_DIR}/.harness/proof_registry.json" ]]; then
   printf '%s\n' "${output}" | grep -q '\[AEGIS\]\[PROOF\]'
 else
