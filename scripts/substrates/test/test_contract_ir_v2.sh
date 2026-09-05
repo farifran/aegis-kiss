@@ -7,16 +7,16 @@ WORK_DIR="${ROOT_DIR}/scratch/contract-ir-v2"
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
-mkdir -p "$WORK_DIR/.harness"
+mkdir -p "$WORK_DIR/src/.aegis"
 policy_digest="$(shasum -a 256 "$ROOT_DIR/governance/architecture.policy.json" | awk '{print $1}')"
-cat > "$WORK_DIR/.harness/active_clarified_demand.json" <<EOF
-{"schema":"aegis.clarified_demand.v2","normalizedDemandDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","intent":"Exportar HealthStatus.","requirements":[{"id":"REQ-HEALTH-001","statement":"Exportar HealthStatus em src/index.ts.","provenance":"USER"}],"scope":{"included":["src/index.ts"],"excluded":[]},"inputCoverage":[{"unitId":"UNIT-0001","disposition":"REQUIREMENT","requirementIds":["REQ-HEALTH-001"],"rationale":"Requisito explícito."}],"architecture":{"policyDigest":"${policy_digest}","ruleAssessments":[{"ruleId":"ARCH-FAILURE-EXPLICIT","verdict":"NOT_APPLICABLE","evidence":"Sem efeito externo.","sourceUnitIds":[]},{"ruleId":"ARCH-DETERMINISTIC-TIME","verdict":"NOT_APPLICABLE","evidence":"Sem tempo.","sourceUnitIds":[]}]}}
+cat > "$WORK_DIR/src/.aegis/clarified-demand.json" <<EOF
+{"schema":"aegis.clarified_demand.v2","changeKind":"PRODUCT","normalizedDemandDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","intent":"Exportar HealthStatus.","requirements":[{"id":"REQ-HEALTH-001","statement":"Exportar HealthStatus em src/index.ts.","provenance":"USER"}],"scope":{"included":["src/index.ts"],"excluded":[]},"inputCoverage":[{"unitId":"UNIT-0001","disposition":"REQUIREMENT","requirementIds":["REQ-HEALTH-001"],"rationale":"Requisito explícito."}],"architecture":{"policyDigest":"${policy_digest}","ruleAssessments":[{"ruleId":"ARCH-FAILURE-EXPLICIT","verdict":"NOT_APPLICABLE","evidence":"Sem efeito externo.","sourceUnitIds":[]},{"ruleId":"ARCH-DETERMINISTIC-TIME","verdict":"NOT_APPLICABLE","evidence":"Sem tempo.","sourceUnitIds":[]}]}}
 EOF
-clarified_digest="$(node --input-type=module -e 'const { canonicalDigest } = await import(process.cwd()+"/scripts/lib/canonical_json.mjs"); const fs = await import("node:fs"); process.stdout.write(canonicalDigest(JSON.parse(fs.readFileSync(process.argv[1],"utf8"))))' "$WORK_DIR/.harness/active_clarified_demand.json")"
-cat > "$WORK_DIR/.harness/proof_registry.json" <<'EOF'
+clarified_digest="$(node --input-type=module -e 'const { canonicalDigest } = await import(process.cwd()+"/scripts/lib/canonical_json.mjs"); const fs = await import("node:fs"); process.stdout.write(canonicalDigest(JSON.parse(fs.readFileSync(process.argv[1],"utf8"))))' "$WORK_DIR/src/.aegis/clarified-demand.json")"
+cat > "$WORK_DIR/src/.aegis/proof-registry.json" <<'EOF'
 {"proofs":[{"id":"PO-HEALTH-001"}]}
 EOF
-jq -n --arg clarified "$clarified_digest" --arg policy "$policy_digest" '{schema:"aegis.contract_ir.v2",clarifiedDemandDigest:$clarified,architecture:{policyDigest:$policy,appliedRuleIds:[],amendmentIds:[]},scope:{authorizedPaths:["src/index.ts"]},behavior:[{id:"BEH-HEALTH-001",statement:"HealthStatus é exportado."}],invariants:[{id:"INV-HEALTH-001",statement:"A exportação é somente de tipo.",proofIds:["PO-HEALTH-001"]}],proofObligations:[{id:"PO-HEALTH-001",risk:"superfície pública incorreta",statement:"A exportação é verificável."}],requirementCoverage:[{requirementId:"REQ-HEALTH-001",contractIds:["BEH-HEALTH-001","INV-HEALTH-001","PO-HEALTH-001"]}]}' > "$WORK_DIR/.harness/active_contract_ir.json"
+jq -n --arg clarified "$clarified_digest" --arg policy "$policy_digest" '{schema:"aegis.contract_ir.v2",changeKind:"PRODUCT",clarifiedDemandDigest:$clarified,architecture:{policyDigest:$policy,appliedRuleIds:[],amendmentIds:[]},scope:{authorizedPaths:["src/index.ts"]},behavior:[{id:"BEH-HEALTH-001",statement:"HealthStatus é exportado."}],invariants:[{id:"INV-HEALTH-001",statement:"A exportação é somente de tipo.",proofIds:["PO-HEALTH-001"]}],proofObligations:[{id:"PO-HEALTH-001",risk:"superfície pública incorreta",statement:"A exportação é verificável."}],requirementCoverage:[{requirementId:"REQ-HEALTH-001",contractIds:["BEH-HEALTH-001","INV-HEALTH-001","PO-HEALTH-001"]}]}' > "$WORK_DIR/src/.aegis/contract-ir.json"
 mkdir -p "$WORK_DIR/governance" "$WORK_DIR/src"
 cp "$ROOT_DIR/governance/architecture.policy.json" "$WORK_DIR/governance/architecture.policy.json"
 cp "$ROOT_DIR/ARCHITECTURE.md" "$WORK_DIR/ARCHITECTURE.md"
@@ -28,8 +28,8 @@ import { readFileSync } from 'node:fs';
 const work = process.argv[2];
 const { validateContract } = await import(process.cwd() + '/scripts/lib/contract_validator.mjs');
 const { canonicalDigest } = await import(process.cwd() + '/scripts/lib/canonical_json.mjs');
-const previousContract = JSON.parse(readFileSync(work + '/.harness/active_contract_ir.json', 'utf8'));
-const clarified = JSON.parse(readFileSync(work + '/.harness/active_clarified_demand.json', 'utf8'));
+const previousContract = JSON.parse(readFileSync(work + '/src/.aegis/contract-ir.json', 'utf8'));
+const clarified = JSON.parse(readFileSync(work + '/src/.aegis/clarified-demand.json', 'utf8'));
 const policyText = readFileSync(work + '/governance/architecture.policy.json', 'utf8');
 const policy = JSON.parse(policyText);
 const mismatchedScope = structuredClone(previousContract);
@@ -65,8 +65,8 @@ nextContract.continuity = {
 validateContract({ root: work, contract: nextContract, clarified: nextClarified, policy, policyText, previousContract, phase: 'compile' });
 NODE
 
-jq '.requirementCoverage[0].contractIds = ["INV-UNKNOWN-001"]' "$WORK_DIR/.harness/active_contract_ir.json" > "$WORK_DIR/invalid.json"
-mv "$WORK_DIR/invalid.json" "$WORK_DIR/.harness/active_contract_ir.json"
+jq '.requirementCoverage[0].contractIds = ["INV-UNKNOWN-001"]' "$WORK_DIR/src/.aegis/contract-ir.json" > "$WORK_DIR/invalid.json"
+mv "$WORK_DIR/invalid.json" "$WORK_DIR/src/.aegis/contract-ir.json"
 if node "$ROOT_DIR/scripts/validate_contract_ir_v2.mjs" --root "$WORK_DIR" >/dev/null 2>&1; then
   echo 'contract validator accepted unknown requirement mapping' >&2
   exit 1

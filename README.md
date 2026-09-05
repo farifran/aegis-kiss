@@ -16,19 +16,23 @@ Aegis  → contract/evidence coherence, proof profiles, receipt and promotion
 
 ```bash
 ./aegis "Describe the requested change" --target src
-# The IDE performs one semantic compilation; Aegis finalizes demand + contract.
+# The IDE performs one semantic compilation; Aegis finalizes demand + contract + proofs.
 
-./aegis verify
 git add <files>
+./aegis authorize
 git commit -m "..."
 ```
 
 Available commands:
 
-- `./aegis "<demand>"`: returns an in-memory normalized preflight envelope for
-  the IDE; it does not persist the raw demand.
+- `./aegis "<demand>"`: starts a `PRODUCT` execution, freezes a clean baseline
+  in transient runtime state and returns the compact semantic request. Every
+  persistent product artifact must live in `src/`.
+- `./aegis harness "<demand>"`: explicitly starts maintenance of Aegis itself;
+  only this mode may authorize paths outside `src/`.
 - `./aegis finalize …`: validates one semantic decision and persists the
-  clarified demand and Contract IR v2 together. Confirming a proposed
+  clarified demand, Contract IR v2 and proof registry together. It consumes
+  the frozen intake instead of rediscovering a mutable worktree. Confirming a proposed
   interpretation is mechanical; only a correction requires another model call.
 - `./aegis review …`: prepares an optional independent semantic review for a
   high-risk or forensic execution.
@@ -37,10 +41,12 @@ Available commands:
   mechanical inventory for a receipt or forensic investigation. It only reads
   explicitly declared paths, never sends code to a prompt and has no cache
   between demands.
-- `./aegis verify [--profile …]`: runs structural checks and applicable proofs.
-- `./aegis proofs [--profile …]`: runs only the selected proof profile.
-- `./aegis authorize`: optionally creates the receipt before committing; the
-  pre-commit hook automatically renews it for the exact staged diff.
+- `./aegis authorize`: is the single promotion gate. It selects the profile,
+  runs structural checks and applicable proofs once, then binds a receipt to
+  the exact staged diff. The pre-commit hook only reissues an expired or stale
+  receipt when the index actually changed.
+- `./aegis report`: derives a compact forensic report from Git and the
+  pre/post-commit receipts; it does not ask a model to invent measurements.
 - `./aegis clean [--src|--all]`: starts a new demand by atomically clearing
   transient runtime state, `src/` and the active contract/proof metadata.
   `--src` and `--all` remain equivalent compatibility aliases.
@@ -48,6 +54,10 @@ Available commands:
 There is no autonomous CLI coder, provider configuration or TTY workflow.
 Surgical-edit discipline is retained by requiring a minimal diff, local
 checks, proof execution, a staged manifest and a receipt.
+
+Demand-specific governance records live in `src/.aegis/` beside the product
+state they govern. `.harness/` contains only universal rules and ignored
+runtime data, so executing a product demand never rewrites the harness core.
 
 ## Evidence profiles
 

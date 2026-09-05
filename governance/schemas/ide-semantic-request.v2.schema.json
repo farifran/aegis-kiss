@@ -3,17 +3,13 @@
   "$id": "aegis.ide_semantic_request.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "executionId", "baseCommit", "contextDigest", "promptDigest", "timing", "protocol", "prompt"],
+  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "contextDigest", "promptDigest", "timing", "protocol", "prompt"],
   "properties": {
     "schema": { "const": "aegis.ide_semantic_request.v2" },
     "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
+    "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
     "executionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "baseCommit": {
-      "oneOf": [
-        { "type": "null" },
-        { "type": "string", "pattern": "^[a-f0-9]{40,64}$" }
-      ]
-    },
+    "baseCommit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "timing": {

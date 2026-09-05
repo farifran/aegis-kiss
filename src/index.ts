@@ -1,1 +1,2 @@
-export { TokenBucket, obterEstadoBitmask } from './tokenBucket.js';
+// Ponto de entrada canônico para a próxima demanda.
+export {};

@@ -56,26 +56,26 @@ bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${repo}"
 # A full clean is a valid boundary without a receipt only when it retires the
 # whole governed unit: prior targets, contract and proof registry together.
 reset_repo="${temp_dir}/reset-repo"
-mkdir -p "${reset_repo}/src" "${reset_repo}/.harness"
+mkdir -p "${reset_repo}/src/.aegis"
 printf 'export const feature = 1;\n' > "${reset_repo}/src/feature.ts"
 printf 'export const index = 1;\n' > "${reset_repo}/src/index.ts"
 printf '%s\n' '{"targets":["src/feature.ts","src/index.ts"]}' \
-  > "${reset_repo}/.harness/active_contract_ir.json"
-printf '%s\n' '{"proofs":[]}' > "${reset_repo}/.harness/proof_registry.json"
+  > "${reset_repo}/src/.aegis/contract-ir.json"
+printf '%s\n' '{"proofs":[]}' > "${reset_repo}/src/.aegis/proof-registry.json"
 git -C "${reset_repo}" init -q
 git -C "${reset_repo}" add .
 git -C "${reset_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
 
 rm -f "${reset_repo}/src/feature.ts" \
-  "${reset_repo}/.harness/active_contract_ir.json" \
-  "${reset_repo}/.harness/proof_registry.json"
+  "${reset_repo}/src/.aegis/contract-ir.json" \
+  "${reset_repo}/src/.aegis/proof-registry.json"
 printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${reset_repo}/src/index.ts"
 git -C "${reset_repo}" add -A
 if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${reset_repo}"; then
   fail "complete_baseline_reset_still_required_a_receipt"
 fi
 
-git -C "${reset_repo}" restore --source=HEAD --staged --worktree .harness/active_contract_ir.json .harness/proof_registry.json
+git -C "${reset_repo}" restore --source=HEAD --staged --worktree src/.aegis/contract-ir.json src/.aegis/proof-registry.json
 git -C "${reset_repo}" add -A
 if ! bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${reset_repo}"; then
   fail "partial_reset_bypassed_formal_authorization"
@@ -139,5 +139,7 @@ printf 'export const version = 4;\n' > "${hook_repo}/src/index.ts"
 git -C "${hook_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm "promoted-with-worktree-sync"
 [[ "$(git -C "${hook_repo}" log -1 --format=%s)" == "promoted-with-worktree-sync" ]] || fail "worktree_sync_commit_failed"
 [[ "$(git -C "${hook_repo}" show HEAD:src/index.ts)" == $'export const version = 4;' ]] || fail "committed_content_not_synced"
+AEGIS_ROOT="${hook_repo}" node "${ROOT_DIR}/scripts/forensic_report.mjs" \
+  | jq -e '.schema == "aegis.forensic_report.v1" and .status == "PROVEN" and .transition.worktreeClean == true' >/dev/null
 
 echo "[PASS] formal promotion authorization"

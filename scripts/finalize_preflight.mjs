@@ -9,12 +9,20 @@ import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { validateContract } from './lib/contract_validator.mjs';
-import { loadArchitecture } from './lib/preflight_core.mjs';
+import { loadArchitecture, repositorySnapshot } from './lib/preflight_core.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 
 const rootDirectory = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
-const clarifiedDemandPath = resolve(rootDirectory, '.harness/active_clarified_demand.json');
-const activeContractPath = resolve(rootDirectory, '.harness/active_contract_ir.json');
+const evidenceDirectory = resolve(rootDirectory, 'src/.aegis');
+const clarifiedDemandPath = resolve(evidenceDirectory, 'clarified-demand.json');
+const activeContractPath = resolve(evidenceDirectory, 'contract-ir.json');
+const proofRegistryPath = resolve(evidenceDirectory, 'proof-registry.json');
+const runtimeDirectory = resolve(rootDirectory, '.harness/runtime');
+const evidenceScope = [
+  'src/.aegis/clarified-demand.json',
+  'src/.aegis/contract-ir.json',
+  'src/.aegis/proof-registry.json',
+];
 const startedAtEpochMs = Date.now();
 const started = performance.now();
 
@@ -24,10 +32,7 @@ function fail(code) {
 }
 
 function isSafeRelativePath(value) {
-  return typeof value === 'string'
-    && value.length > 0
-    && !value.startsWith('/')
-    && !value.split(/[\\/]/u).includes('..');
+  return typeof value === 'string' && value.length > 0 && !value.startsWith('/') && !value.split(/[\\/]/u).includes('..');
 }
 
 function isInsideRoot(path) {
@@ -88,25 +93,47 @@ function assertValidSchema(schemaId, value, code) {
 
 function exactIds(actual, expected, code) {
   if (actual.length !== new Set(actual).size) fail(code);
-  const left = [...actual].sort();
-  const right = [...expected].sort();
-  if (JSON.stringify(left) !== JSON.stringify(right)) fail(code);
+  if (JSON.stringify([...actual].sort()) !== JSON.stringify([...expected].sort())) fail(code);
+}
+
+function ids(prefix, length) {
+  return Array.from({ length }, (_, index) => `${prefix}-${String(index + 1).padStart(4, '0')}`);
+}
+
+function proofId(coverageKey) {
+  const suffix = coverageKey.toUpperCase().replace(/[^A-Z0-9]+/gu, '-').replace(/^-|-$/gu, '');
+  if (suffix.length === 0) fail('invalid_proof_coverage_key');
+  return `PO-${suffix}`;
+}
+
+function unitIds(envelope, indexes, code) {
+  const units = envelope.normalizedDemand.units;
+  if (!indexes.every((index) => index < units.length)) fail(code);
+  return indexes.map((index) => units[index].id);
+}
+
+function requireIndexes(indexes, length, code) {
+  if (!indexes.every((index) => index < length)) fail(code);
 }
 
 function validateEnvelope(envelope) {
   assertValidSchema('aegis.ide_preflight.v2', envelope, 'malformed_preflight_envelope');
+  if (envelope.baseCommit !== envelope.baseline.commit) fail('baseline_commit_mismatch');
   if (sha256(envelope.normalizedDemand.text) !== envelope.normalizedDemand.digest) fail('normalized_demand_digest_mismatch');
   const { digest, ...factBody } = envelope.mechanicalFacts;
   if (canonicalDigest(factBody) !== digest) fail('mechanical_facts_digest_mismatch');
   if (sha256(envelope.prompt) !== envelope.promptDigest) fail('preflight_prompt_digest_mismatch');
   const expectedContextDigest = canonicalDigest({
-    baseCommit: envelope.baseCommit,
+    changeKind: envelope.changeKind,
+    baseline: envelope.baseline,
     normalizedDemandDigest: envelope.normalizedDemand.digest,
     mechanicalFactsDigest: envelope.mechanicalFacts.digest,
     architecturePolicyDigest: envelope.architecture.policyDigest,
     previousContractDigest: envelope.previousContractDigest,
   });
   if (expectedContextDigest !== envelope.contextDigest) fail('preflight_context_digest_mismatch');
+  const currentBaseline = repositorySnapshot(rootDirectory);
+  if (!currentBaseline.clean || canonicalJson(currentBaseline) !== canonicalJson(envelope.baseline)) fail('preflight_baseline_changed');
   if (envelope.previousContract === null) {
     if (envelope.previousContractDigest !== null || existsSync(activeContractPath)) fail('previous_contract_mismatch');
   } else {
@@ -127,60 +154,179 @@ function validateEnvelope(envelope) {
     fail('architecture_policy_unavailable');
   }
   if (currentArchitecture.policyDigest !== envelope.architecture.policyDigest) fail('stale_architecture_policy');
-  const unitIds = envelope.normalizedDemand.units.map((unit) => unit.id);
-  if (unitIds.length !== new Set(unitIds).size) fail('duplicate_input_unit');
-  const byteLength = Buffer.byteLength(envelope.normalizedDemand.text, 'utf8');
-  if (!envelope.normalizedDemand.units.every((unit) => (
-    unit.range.startByte < unit.range.endByte && unit.range.endByte <= byteLength
-  ))) fail('invalid_input_range');
+  const unitIdsInEnvelope = envelope.normalizedDemand.units.map((unit) => unit.id);
+  if (unitIdsInEnvelope.length !== new Set(unitIdsInEnvelope).size) fail('duplicate_input_unit');
+  const length = Buffer.byteLength(envelope.normalizedDemand.text, 'utf8');
+  if (!envelope.normalizedDemand.units.every((unit) => unit.range.startByte < unit.range.endByte && unit.range.endByte <= length)) {
+    fail('invalid_input_range');
+  }
 }
 
-function validateRuleAssessments(envelope, assessments) {
-  const candidates = envelope.architecture.candidateRules;
-  exactIds(assessments.map((item) => item.ruleId), candidates.map((item) => item.id), 'architecture_assessment_incomplete');
-  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
-  if (!assessments.every((assessment) => assessment.sourceUnitIds.every((id) => unitIds.has(id)))) {
-    fail('architecture_assessment_unknown_unit');
-  }
+function ruleAssessments(envelope, decision) {
+  const assessments = decision.rules.map(([ruleId, verdict, evidence, indexes]) => ({
+    ruleId,
+    verdict,
+    evidence,
+    sourceUnitIds: unitIds(envelope, indexes, 'architecture_assessment_unknown_unit'),
+  }));
+  exactIds(
+    assessments.map((item) => item.ruleId),
+    envelope.architecture.candidateRules.map((item) => item.id),
+    'architecture_assessment_incomplete',
+  );
+  return assessments;
 }
 
 function validateDecision(envelope, decision) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
-  validateRuleAssessments(envelope, decision.ruleAssessments);
-  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
-  const sourceCollections = [
-    ...decision.findings.map((item) => item.sourceUnitIds),
-    ...decision.questions.map((item) => item.sourceUnitIds),
-  ];
-  if (!sourceCollections.every((ids) => ids.every((id) => unitIds.has(id)))) fail('decision_unknown_unit');
-  const hardRuleIds = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
-  const hardConflict = decision.ruleAssessments.some((item) => item.verdict === 'CONFLICT' && hardRuleIds.has(item.ruleId));
-  if (hardConflict && decision.status !== 'BLOCKED') fail('hard_conflict_not_blocked');
+  const assessments = ruleAssessments(envelope, decision);
+  for (const question of decision.questions) unitIds(envelope, question[6], 'decision_unknown_unit');
+  const hardRules = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
+  if (assessments.some((item) => item.verdict === 'CONFLICT' && hardRules.has(item.ruleId)) && decision.status !== 'BLOCKED') {
+    fail('hard_conflict_not_blocked');
+  }
+  return assessments;
 }
 
-function validateClarifiedDemand(envelope, clarified, ruleAssessments) {
-  assertValidSchema('aegis.clarified_demand.v2', clarified, 'malformed_clarified_demand');
-  if (clarified.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('clarified_demand_digest_mismatch');
-  if (clarified.architecture.policyDigest !== envelope.architecture.policyDigest) fail('clarified_architecture_digest_mismatch');
-  if (canonicalJson(clarified.architecture.ruleAssessments) !== canonicalJson(ruleAssessments)) {
-    fail('clarified_architecture_assessment_mismatch');
+function assembleSemanticState(envelope, decision, assessments) {
+  if (decision.proofs.length > 10) fail('proof_profile_budget_exceeded');
+  const requirementIds = ids('REQ', decision.requirements.length);
+  const behaviorIds = ids('BEH', decision.behaviors.length);
+  const preconditionIds = ids('PRE', decision.preconditions.length);
+  const invariantIds = ids('INV', decision.invariants.length);
+  const postconditionIds = ids('POST', decision.postconditions.length);
+  const failureIds = ids('FAIL', decision.failures.length);
+  const proofIds = decision.proofs.map((proof) => proofId(proof[0]));
+  if (proofIds.length !== new Set(proofIds).size) fail('duplicate_proof_coverage_key');
+
+  const inputCoverage = new Map();
+  for (let requirementIndex = 0; requirementIndex < decision.requirements.length; requirementIndex += 1) {
+    const unitIndexes = decision.requirements[requirementIndex][2];
+    const provenance = decision.requirements[requirementIndex][1];
+    if (['USER', 'SAFE_CORRECTION', 'USER_CLARIFICATION'].includes(provenance) && unitIndexes.length === 0) {
+      fail('source_requirement_without_input_coverage');
+    }
+    for (const unitId of unitIds(envelope, unitIndexes, 'requirement_unknown_unit')) {
+      const current = inputCoverage.get(unitId) ?? [];
+      current.push(requirementIds[requirementIndex]);
+      inputCoverage.set(unitId, current);
+    }
+  }
+  const contextIndexes = decision.contextUnits.map(([unitIndex]) => unitIndex);
+  if (contextIndexes.length !== new Set(contextIndexes).size) fail('input_unit_multiply_classified');
+  for (const [unitIndex, disposition, rationale] of decision.contextUnits) {
+    const [unitId] = unitIds(envelope, [unitIndex], 'context_unknown_unit');
+    if (inputCoverage.has(unitId)) fail('input_unit_multiply_classified');
+    inputCoverage.set(unitId, { disposition, rationale });
+  }
+  exactIds([...inputCoverage.keys()], envelope.normalizedDemand.units.map((unit) => unit.id), 'input_coverage_incomplete');
+
+  const requirementCoverage = requirementIds.map((requirementId) => ({ requirementId, contractIds: [] }));
+  const addCoverage = (clauseIds, clauses, requirementIndexPosition) => {
+    clauses.forEach((clause, clauseIndex) => {
+      requireIndexes(clause[requirementIndexPosition], requirementIds.length, 'contract_unknown_requirement');
+      clause[requirementIndexPosition].forEach((requirementIndex) => requirementCoverage[requirementIndex].contractIds.push(clauseIds[clauseIndex]));
+    });
+  };
+  addCoverage(behaviorIds, decision.behaviors, 1);
+  addCoverage(preconditionIds, decision.preconditions, 1);
+  addCoverage(invariantIds, decision.invariants, 1);
+  addCoverage(postconditionIds, decision.postconditions, 1);
+  addCoverage(failureIds, decision.failures, 2);
+  addCoverage(proofIds, decision.proofs, 3);
+  if (decision.proofs.some((proof) => proof[3].length === 0)) fail('proof_without_requirement');
+  if (requirementCoverage.some((entry) => entry.contractIds.length === 0)) fail('requirement_without_contract_coverage');
+  if (requirementCoverage.some((entry) => !entry.contractIds.some((id) => id.startsWith('PO-')))) fail('requirement_without_proof');
+
+  decision.invariants.forEach((invariant) => {
+    requireIndexes(invariant[2], proofIds.length, 'invariant_unknown_proof');
+    if (invariant[2].length === 0) fail('invariant_without_proof');
+  });
+  const scope = new Set(decision.scope);
+  const withinScope = (path) => [...scope].some((declared) => path === declared || path.startsWith(`${declared}/`));
+  for (const proof of decision.proofs) {
+    if (!withinScope(proof[4]) || !proof[5].every((target) => withinScope(target))) fail('proof_path_outside_scope');
+  }
+  if (envelope.changeKind === 'PRODUCT' && decision.scope.some((path) => path !== 'src' && !path.startsWith('src/'))) {
+    fail('product_scope_outside_src');
   }
 
-  const inputUnitIds = envelope.normalizedDemand.units.map((unit) => unit.id);
-  exactIds(clarified.inputCoverage.map((entry) => entry.unitId), inputUnitIds, 'input_coverage_incomplete');
-  const requirements = new Map(clarified.requirements.map((requirement) => [requirement.id, requirement]));
-  if (requirements.size !== clarified.requirements.length) fail('duplicate_requirement_id');
-  for (const entry of clarified.inputCoverage) {
-    if (entry.disposition === 'REQUIREMENT' && entry.requirementIds.length === 0) fail('requirement_unit_without_requirement');
-    if (entry.disposition !== 'REQUIREMENT' && entry.requirementIds.length !== 0) fail('non_requirement_unit_with_requirement');
-    if (!entry.requirementIds.every((id) => requirements.has(id))) fail('input_coverage_unknown_requirement');
-  }
-  const covered = new Set(clarified.inputCoverage.flatMap((entry) => entry.requirementIds));
-  const sourceProvenance = new Set(['USER', 'SAFE_CORRECTION', 'USER_CLARIFICATION']);
-  if (clarified.requirements.some((requirement) => sourceProvenance.has(requirement.provenance) && !covered.has(requirement.id))) {
-    fail('source_requirement_without_input_coverage');
-  }
+  const clarifiedDemand = {
+    schema: 'aegis.clarified_demand.v2',
+    changeKind: envelope.changeKind,
+    normalizedDemandDigest: envelope.normalizedDemand.digest,
+    intent: decision.intent,
+    requirements: decision.requirements.map(([statement, provenance], index) => ({ id: requirementIds[index], statement, provenance })),
+    scope: { included: [...new Set([...decision.scope, ...evidenceScope])], excluded: decision.excluded },
+    inputCoverage: envelope.normalizedDemand.units.map((unit) => {
+      const coverage = inputCoverage.get(unit.id);
+      if (Array.isArray(coverage)) {
+        return { unitId: unit.id, disposition: 'REQUIREMENT', requirementIds: coverage, rationale: 'mapped_by_semantic_compiler' };
+      }
+      return { unitId: unit.id, disposition: coverage.disposition, requirementIds: [], rationale: coverage.rationale };
+    }),
+    architecture: { policyDigest: envelope.architecture.policyDigest, ruleAssessments: assessments },
+    acceptanceCriteria: decision.acceptance,
+    failureSemantics: decision.failures.map(([trigger, observableOutcome], index) => ({ id: failureIds[index], trigger, observableOutcome })),
+  };
+
+  const continuity = {
+    retirements: decision.continuity.retirements.map(([kind, id, reason, demandEvidence, successor]) => ({
+      kind, id, reason, demandEvidence, ...(successor === null ? {} : { successor }),
+    })),
+    proofChanges: decision.continuity.proofChanges.map(([id, reason, demandEvidence]) => ({ id, reason, demandEvidence })),
+  };
+  const statements = (clauses, clauseIds) => clauses.map(([statement], index) => ({ id: clauseIds[index], statement }));
+  const contract = {
+    schema: 'aegis.contract_ir.v2',
+    changeKind: envelope.changeKind,
+    clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
+    architecture: {
+      policyDigest: envelope.architecture.policyDigest,
+      appliedRuleIds: assessments.filter((assessment) => assessment.verdict === 'APPLIED').map((assessment) => assessment.ruleId),
+      amendmentIds: envelope.previousContract?.architecture.amendmentIds ?? [],
+    },
+    scope: { authorizedPaths: [...new Set([...decision.scope, ...evidenceScope])] },
+    behavior: statements(decision.behaviors, behaviorIds),
+    preconditions: statements(decision.preconditions, preconditionIds),
+    invariants: decision.invariants.map(([statement, , proofIndexes], index) => ({
+      id: invariantIds[index], statement, proofIds: proofIndexes.map((proofIndex) => proofIds[proofIndex]),
+    })),
+    postconditions: statements(decision.postconditions, postconditionIds),
+    failureSemantics: decision.failures.map(([trigger, observableOutcome], index) => ({
+      id: failureIds[index], statement: `${trigger} => ${observableOutcome}`,
+    })),
+    proofObligations: decision.proofs.map(([, risk, statement], index) => ({ id: proofIds[index], risk, statement })),
+    requirementCoverage,
+    continuity,
+  };
+
+  const rank = { always: 0, targeted: 1, release: 2, forensic: 3 };
+  const profiles = ['fast', 'targeted', 'release', 'forensic'].map((id, profileRank) => ({
+    id,
+    proofIds: decision.proofs.flatMap((proof, index) => rank[proof[7]] <= profileRank ? [proofIds[index]] : []),
+  }));
+  if (profiles.some((profile) => profile.proofIds.length === 0)) fail('proof_profile_without_baseline_proof');
+  const proofs = decision.proofs.map(([coverageKey, risk, , , entrypoint, targets, cost, cadence], index) => ({
+    id: proofIds[index],
+    risk,
+    coverageKey,
+    authority: 'deterministic_tribunal',
+    cost,
+    cadence,
+    status: 'active',
+    targets: [...new Set([...targets, entrypoint])],
+    executionKey: `proof-${sha256(entrypoint).slice(0, 12)}`,
+    command: entrypoint.endsWith('.ts') ? `node --import tsx ${entrypoint}` : `bash ${entrypoint}`,
+  }));
+  const proofRegistry = {
+    schema: 'aegis.proof_registry.v1',
+    policy: { mode: 'enforced', maxActiveProofsPerProfile: { fast: 10, targeted: 10, release: 10, forensic: 10 } },
+    profiles,
+    proofs,
+  };
+  return { clarifiedDemand, contract, proofRegistry };
 }
 
 function validateResolution(envelope, decisionFile, resolution) {
@@ -189,36 +335,9 @@ function validateResolution(envelope, decisionFile, resolution) {
   if (resolution.preflightPromptDigest !== envelope.promptDigest) fail('resolution_prompt_digest_mismatch');
   exactIds(
     resolution.answers.map((answer) => answer.questionId),
-    decisionFile.value.questions.map((question) => question.id),
+    decisionFile.value.questions.map((_, index) => `Q-${String(index + 1).padStart(4, '0')}`),
     'resolution_answers_mismatch',
   );
-}
-
-function assembleClarifiedDemand(envelope, decision, body) {
-  return {
-    schema: 'aegis.clarified_demand.v2',
-    normalizedDemandDigest: envelope.normalizedDemand.digest,
-    ...body,
-    architecture: {
-      policyDigest: envelope.architecture.policyDigest,
-      ruleAssessments: decision.ruleAssessments,
-    },
-  };
-}
-
-function assembleContract(envelope, decision, clarifiedDemand, body) {
-  return {
-    schema: 'aegis.contract_ir.v2',
-    clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
-    architecture: {
-      policyDigest: envelope.architecture.policyDigest,
-      appliedRuleIds: decision.ruleAssessments
-        .filter((assessment) => assessment.verdict === 'APPLIED')
-        .map((assessment) => assessment.ruleId),
-      amendmentIds: envelope.previousContract?.architecture.amendmentIds ?? [],
-    },
-    ...body,
-  };
 }
 
 function validateIndependentReview(envelope, decisionFile, review) {
@@ -226,21 +345,20 @@ function validateIndependentReview(envelope, decisionFile, review) {
   if (review.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('review_demand_digest_mismatch');
   if (review.decisionDigest !== sha256(decisionFile.bytes)) fail('review_decision_digest_mismatch');
   if (review.producerId === review.reviewerId) fail('review_authority_not_independent');
-  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
-  if (!review.findings.every((finding) => finding.sourceUnitIds.every((id) => unitIds.has(id)))) fail('review_unknown_unit');
+  const knownUnits = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
+  if (!review.findings.every((finding) => finding.sourceUnitIds.every((id) => knownUnits.has(id)))) fail('review_unknown_unit');
   if (review.verdict !== 'APPROVED') fail('independent_review_rejected');
 }
 
-async function persistSemanticState(clarifiedDemand, contract) {
-  await mkdir(resolve(rootDirectory, '.harness'), { recursive: true });
-  const clarifiedTemporaryPath = `${clarifiedDemandPath}.${process.pid}.tmp`;
-  const contractTemporaryPath = `${activeContractPath}.${process.pid}.tmp`;
-  await Promise.all([
-    writeFile(clarifiedTemporaryPath, `${canonicalJson(clarifiedDemand)}\n`, 'utf8'),
-    writeFile(contractTemporaryPath, `${canonicalJson(contract)}\n`, 'utf8'),
-  ]);
-  await rename(clarifiedTemporaryPath, clarifiedDemandPath);
-  await rename(contractTemporaryPath, activeContractPath);
+async function persistSemanticState(clarifiedDemand, contract, proofRegistry) {
+  await mkdir(evidenceDirectory, { recursive: true });
+  const records = [
+    [clarifiedDemandPath, clarifiedDemand],
+    [activeContractPath, contract],
+    [proofRegistryPath, proofRegistry],
+  ];
+  await Promise.all(records.map(([path, value]) => writeFile(`${path}.${process.pid}.tmp`, `${canonicalJson(value)}\n`, 'utf8')));
+  for (const [path] of records) await rename(`${path}.${process.pid}.tmp`, path);
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -255,24 +373,19 @@ try {
 validateEnvelope(envelope);
 
 const decisionFile = await readJson(options.decision, 'unreadable_decision');
-validateDecision(envelope, decisionFile.value);
+const assessments = validateDecision(envelope, decisionFile.value);
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
   validateIndependentReview(envelope, decisionFile, review.value);
 }
-
 if (decisionFile.value.status === 'BLOCKED') {
   process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
   process.exit(0);
 }
 
-let clarifiedDemandBody;
-let contractBody;
 let interpretationStatus = 'NOT_REQUIRED';
 if (decisionFile.value.status === 'CLARIFIED') {
   if (options.resolution.length > 0) fail('resolution_not_allowed');
-  clarifiedDemandBody = decisionFile.value.clarifiedDemandBody;
-  contractBody = decisionFile.value.contractBody;
 } else {
   if (options.resolution.length === 0) fail('resolution_required');
   const resolution = await readJson(options.resolution, 'unreadable_resolution');
@@ -286,52 +399,41 @@ if (decisionFile.value.status === 'CLARIFIED') {
     })}\n`);
     process.exit(0);
   }
-  clarifiedDemandBody = decisionFile.value.provisionalClarifiedDemandBody;
-  contractBody = decisionFile.value.provisionalContractBody;
   interpretationStatus = 'INTERPRETATION_CONFIRMED';
 }
 
-const clarifiedDemand = assembleClarifiedDemand(envelope, decisionFile.value, clarifiedDemandBody);
-validateClarifiedDemand(envelope, clarifiedDemand, decisionFile.value.ruleAssessments);
-const contract = assembleContract(envelope, decisionFile.value, clarifiedDemand, contractBody);
+const { clarifiedDemand, contract, proofRegistry } = assembleSemanticState(envelope, decisionFile.value, assessments);
 let policyText;
 let policy;
 try {
   policyText = await readFile(resolve(rootDirectory, 'governance/architecture.policy.json'), 'utf8');
   policy = JSON.parse(policyText);
-} catch {
-  fail('architecture_policy_unavailable');
-}
-try {
-  validateContract({
-    root: rootDirectory,
-    contract,
-    clarified: clarifiedDemand,
-    policy,
-    policyText,
-    previousContract: envelope.previousContract,
-    phase: 'compile',
-  });
+  validateContract({ root: rootDirectory, contract, clarified: clarifiedDemand, policy, policyText, previousContract: envelope.previousContract, phase: 'compile' });
 } catch (error) {
   fail(error instanceof Error ? error.message : 'contract_validation_failed');
 }
 try {
-  await persistSemanticState(clarifiedDemand, contract);
+  await persistSemanticState(clarifiedDemand, contract, proofRegistry);
 } catch {
   fail('semantic_state_persistence_failed');
 }
-process.stdout.write(`${JSON.stringify({
+const result = {
   schema: 'aegis.preflight_finalization.v2',
   status: 'SEMANTIC_STATE_PERSISTED',
   executionId: envelope.executionId,
   baseCommit: envelope.baseCommit,
+  changeKind: envelope.changeKind,
   interpretationStatus,
   clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
   contractDigest: canonicalDigest(contract),
-  timing: {
-    phase: 'finalization',
-    startedAtEpochMs,
-    durationMs: Math.round((performance.now() - started) * 1000) / 1000,
-  },
-  paths: ['.harness/active_clarified_demand.json', '.harness/active_contract_ir.json'],
-})}\n`);
+  proofRegistryDigest: canonicalDigest(proofRegistry),
+  timing: { phase: 'finalization', startedAtEpochMs, durationMs: Math.round((performance.now() - started) * 1000) / 1000 },
+  paths: ['src/.aegis/clarified-demand.json', 'src/.aegis/contract-ir.json', 'src/.aegis/proof-registry.json'],
+};
+try {
+  await mkdir(runtimeDirectory, { recursive: true });
+  await writeFile(resolve(runtimeDirectory, 'finalization.json'), `${JSON.stringify(result)}\n`, 'utf8');
+} catch {
+  fail('finalization_telemetry_persistence_failed');
+}
+process.stdout.write(`${JSON.stringify(result)}\n`);

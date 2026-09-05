@@ -5,6 +5,9 @@ command_name="${1:-}"
 repository_root="${2:-}"
 artifact_file="${3:-}"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+contract_record="src/.aegis/contract-ir.json"
+clarified_record="src/.aegis/clarified-demand.json"
+registry_record="src/.aegis/proof-registry.json"
 
 # shellcheck disable=SC1091
 source "${script_root}/lib/proof_governance.sh"
@@ -122,18 +125,18 @@ canonical_json_digest_from_index() {
 }
 
 clarified_digest_from_worktree() {
-  if [[ -f "${repository_root}/.harness/active_clarified_demand.json" ]]; then
-    canonical_json_digest_from_worktree .harness/active_clarified_demand.json
+  if [[ -f "${repository_root}/${clarified_record}" ]]; then
+    canonical_json_digest_from_worktree "${clarified_record}"
   else
-    absent_metadata_digest .harness/active_clarified_demand.json
+    absent_metadata_digest "${clarified_record}"
   fi
 }
 
 clarified_digest_from_index() {
-  if git -C "${repository_root}" cat-file -e ':.harness/active_clarified_demand.json' 2>/dev/null; then
-    canonical_json_digest_from_index .harness/active_clarified_demand.json
+  if git -C "${repository_root}" cat-file -e ":${clarified_record}" 2>/dev/null; then
+    canonical_json_digest_from_index "${clarified_record}"
   else
-    absent_metadata_digest .harness/active_clarified_demand.json
+    absent_metadata_digest "${clarified_record}"
   fi
 }
 
@@ -156,11 +159,12 @@ canonical_json_digest_from_commit() {
 }
 
 execution_id_for_base() {
-  local base="${1:-}" demand_digest="ABSENT"
-  if [[ -f "${repository_root}/.harness/active_clarified_demand.json" ]]; then
-    demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/.harness/active_clarified_demand.json")"
+  local base="${1:-}" demand_digest="ABSENT" change_kind="BASELINE"
+  if [[ -f "${repository_root}/${clarified_record}" ]]; then
+    demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/${clarified_record}")"
+    change_kind="$(jq -r '.changeKind' "${repository_root}/${clarified_record}")"
   fi
-  printf 'base=%s\ndemand=%s\n' "${base}" "${demand_digest}" | shasum -a 256 | awk '{print $1}'
+  printf 'base=%s\ndemand=%s\nkind=%s\n' "${base}" "${demand_digest}" "${change_kind}" | shasum -a 256 | awk '{print $1}'
 }
 
 validation_authority_json() {
@@ -215,7 +219,7 @@ write_receipt() {
 profile_for_files() {
   local files="${1:-}" profile_json
   profile_json="$(AEGIS_ROOT_DIR="${repository_root}" aegis_proof_profile_for_change \
-    "${repository_root}/.harness/proof_registry.json" "${files}")" \
+    "${repository_root}/${registry_record}" "${files}")" \
     || fatal "automatic_profile_resolution_failed"
   printf '%s' "${profile_json}"
 }
@@ -238,8 +242,8 @@ create_authorization() {
   run_structure_verification
   AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
     || fatal "promotion_contract_evidence_verification_failed"
-  if [[ ! -e "${repository_root}/.harness/active_contract_ir.json" \
-    && ! -e "${repository_root}/.harness/proof_registry.json" ]]; then
+  if [[ ! -e "${repository_root}/${contract_record}" \
+    && ! -e "${repository_root}/${registry_record}" ]]; then
     create_baseline_authorization
     return
   fi
@@ -258,8 +262,8 @@ create_authorization() {
   base="$(git -C "${repository_root}" rev-parse HEAD)"
   manifest="$(manifest_from_worktree "${files}")"
   artifact_digest="$(shasum -a 256 "${artifact_file}" | awk '{print $1}')"
-  contract_digest="$(file_digest_from_worktree .harness/active_contract_ir.json)"
-  registry_digest="$(file_digest_from_worktree .harness/proof_registry.json)"
+  contract_digest="$(file_digest_from_worktree "${contract_record}")"
+  registry_digest="$(file_digest_from_worktree "${registry_record}")"
   clarified_digest="$(clarified_digest_from_worktree)"
   policy_digest="$(metadata_digest_from_worktree governance/architecture.policy.json)"
   authority="$(validation_authority_json)"
@@ -267,7 +271,7 @@ create_authorization() {
   profile="$(printf '%s' "${profile_json}" | jq -r '.profile')"
   case "${profile}" in fast|targeted|release|forensic) ;; *) fatal "invalid_automatic_profile" ;; esac
   proof_plan="$(AEGIS_ROOT_DIR="${repository_root}" aegis_proof_profile_plan "${profile}" \
-    "${repository_root}/.harness/proof_registry.json" "${files}")" \
+    "${repository_root}/${registry_record}" "${files}")" \
     || fatal "proof_plan_generation_failed"
 
   # A receipt is issued only after the profile selected from this exact diff
@@ -339,8 +343,8 @@ create_baseline_authorization() {
   proof_plan="$(jq -n '{profile:"fast",count:0,proofs:[]}')"
   proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
   write_receipt "${base}" "${files}" "${index_manifest}" "${artifact_digest}" \
-    "$(metadata_digest_from_worktree .harness/active_contract_ir.json)" \
-    "$(metadata_digest_from_worktree .harness/proof_registry.json)" \
+    "$(metadata_digest_from_worktree "${contract_record}")" \
+    "$(metadata_digest_from_worktree "${registry_record}")" \
     "$(clarified_digest_from_worktree)" \
     "$(metadata_digest_from_worktree governance/architecture.policy.json)" \
     "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}"
@@ -358,8 +362,8 @@ requires_authorization() {
 }
 
 is_complete_baseline_reset_staged() {
-  local contract_path=".harness/active_contract_ir.json"
-  local registry_path=".harness/proof_registry.json"
+  local contract_path="${contract_record}"
+  local registry_path="${registry_record}"
   local target reset_index
 
   # A reset is valid only when the *previous* governed unit existed and the
@@ -419,8 +423,8 @@ verify_authorization() {
   expected_registry_digest="$(jq -r '.proofRegistryDigest' "${auth_file}")"
   expected_clarified_digest="$(jq -r '.clarifiedDemandDigest' "${auth_file}")"
   expected_policy_digest="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
-  contract_digest="$(metadata_digest_from_index .harness/active_contract_ir.json)"
-  registry_digest="$(metadata_digest_from_index .harness/proof_registry.json)"
+  contract_digest="$(metadata_digest_from_index "${contract_record}")"
+  registry_digest="$(metadata_digest_from_index "${registry_record}")"
   clarified_digest="$(clarified_digest_from_index)"
   policy_digest="$(metadata_digest_from_index governance/architecture.policy.json)"
   [[ "${expected_contract_digest}" == "${contract_digest}" ]] || fatal "formal_promotion_contract_digest_mismatch"
@@ -457,11 +461,11 @@ verify_committed_transition() {
   expected_registry="$(jq -r '.proofRegistryDigest' "${auth_file}")"
   expected_clarified="$(jq -r '.clarifiedDemandDigest' "${auth_file}")"
   expected_policy="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
-  [[ "${expected_contract}" == "$(metadata_digest_from_commit "${head}" .harness/active_contract_ir.json)" ]] \
+  [[ "${expected_contract}" == "$(metadata_digest_from_commit "${head}" "${contract_record}")" ]] \
     || fatal "postcommit_contract_digest_mismatch"
-  [[ "${expected_registry}" == "$(metadata_digest_from_commit "${head}" .harness/proof_registry.json)" ]] \
+  [[ "${expected_registry}" == "$(metadata_digest_from_commit "${head}" "${registry_record}")" ]] \
     || fatal "postcommit_registry_digest_mismatch"
-  [[ "${expected_clarified}" == "$(canonical_json_digest_from_commit "${head}" .harness/active_clarified_demand.json)" ]] \
+  [[ "${expected_clarified}" == "$(canonical_json_digest_from_commit "${head}" "${clarified_record}")" ]] \
     || fatal "postcommit_clarified_demand_digest_mismatch"
   [[ "${expected_policy}" == "$(metadata_digest_from_commit "${head}" governance/architecture.policy.json)" ]] \
     || fatal "postcommit_architecture_policy_digest_mismatch"

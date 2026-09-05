@@ -17,20 +17,24 @@ Aegis  → coerência contrato/evidência, perfis de prova, receipt e promoção
 
 ```bash
 ./aegis "Descreva a mudança solicitada" --target src
-# O IDE faz uma compilação semântica e o Aegis finaliza demanda + contrato.
+# O IDE faz uma compilação semântica e o Aegis finaliza demanda + contrato + provas.
 
-./aegis verify
 git add <arquivos>
+./aegis authorize
 git commit -m "..."
 ```
 
 Comandos disponíveis:
 
-- `./aegis "<demanda>"`: devolve ao IDE um envelope de preflight normalizado
-  em memória; não persiste a demanda bruta.
+- `./aegis "<demanda>"`: inicia uma execução `PRODUCT`, congela um baseline
+  limpo no runtime transitório e devolve o pedido semântico compacto. Todo
+  artefato persistente do produto deve ficar em `src/`.
+- `./aegis harness "<demanda>"`: inicia explicitamente a manutenção do Aegis;
+  somente esse modo pode autorizar mudanças no core do harness.
 - `./aegis finalize …`: valida uma única decisão semântica e persiste juntos a
-  demanda esclarecida e o Contract IR v2. Confirmar uma interpretação proposta
-  é mecânico; somente uma correção exige nova chamada ao modelo.
+  demanda esclarecida, o Contract IR v2 e o registro de provas. Ele consome o
+  intake congelado, sem redescobrir uma árvore mutável. Confirmar uma
+  interpretação é mecânico; somente uma correção exige nova chamada ao modelo.
 - `./aegis review …`: prepara uma revisão semântica independente opcional para
   execução de alto risco ou forense.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
@@ -38,16 +42,20 @@ Comandos disponíveis:
   e transitório para receipt ou investigação forensic. Ele só lê caminhos
   declarados explicitamente, nunca envia código para prompts e não tem cache
   entre demandas.
-- `./aegis verify [--profile …]`: executa verificações estruturais e provas aplicáveis.
-- `./aegis proofs [--profile …]`: executa somente o perfil de provas escolhido.
-- `./aegis authorize`: opcionalmente cria o receipt antes do commit; o hook
-  pre-commit o renova automaticamente para o diff exato em stage.
-- `./aegis clean [--src|--all]`: remove estado transiente; `--src` também
-  reinicia produto, contrato e registro de provas como uma única unidade.
+- `./aegis authorize`: é o único portão de promoção. Seleciona o perfil pelo
+  diff, executa estrutura e provas uma vez e vincula o receipt ao stage exato.
+- `./aegis report`: deriva um relatório forense compacto de Git e dos receipts,
+  sem pedir a um modelo que invente medições.
+- `./aegis clean [--src|--all]`: reinicia runtime, produto, contrato e registro
+  de provas como uma única unidade.
 
 Não há codificador CLI autônomo, configuração de provedores ou fluxo TTY. A
 disciplina de edição cirúrgica permanece: diff mínimo, checks locais, provas,
 manifesto do stage e receipt.
+
+Registros de governança específicos da demanda ficam em `src/.aegis/`, junto
+do estado do produto que governam. `.harness/` contém apenas regras universais
+e runtime ignorado; executar uma demanda não reescreve o core do harness.
 
 ## Perfis de evidência
 

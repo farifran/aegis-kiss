@@ -13,6 +13,10 @@ A sequência obrigatória é:
 
 `demanda bruta → normalização mecânica → fatos de preflight → compilação semântica única (demanda esclarecida + contrato candidato) → perguntas aprovadas (se houver) → confirmação mecânica ou revisão semântica → revisão independente opcional → demanda e contrato finais → plano de implementação`.
 
+O primeiro intake exige worktree limpo e congela, em runtime transitório, o
+commit base, o manifesto vazio e o contexto semântico. A finalização consome
+esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
+
 * A normalização mecânica trata codificação, formato, ranges e referências
   literais; ela não infere comportamento nem altera significado.
 * A revisão de preflight pode formular perguntas de `INPUT`, `SCOPE` ou
@@ -31,11 +35,16 @@ A sequência obrigatória é:
   confirmação promove-os sem nova chamada; correção exige revisão semântica.
 * Digests, vínculo arquitetural e metadados canônicos são montados e validados
   mecanicamente pelo Aegis, não reconstruídos pelo modelo.
+* O modelo emite apenas um delta semântico compacto. IDs, cobertura bijetiva,
+  Contract IR e registro de provas são montados mecanicamente pelo Aegis.
 * Conflitos com regras arquiteturais `hard` bloqueiam a execução até uma
   emenda explícita e aprovada; regras `default` podem gerar confirmação;
   preferências não viram perguntas desnecessárias.
 * Decisões internas do Aegis são resolvidas pelo harness e nunca aparecem como
   perguntas do produto.
+* O modo padrão `PRODUCT` admite artefatos persistentes exclusivamente em
+  `src/`, inclusive testes, provas e benchmarks. Alterações no próprio harness
+  exigem o modo explícito `HARNESS`.
 
 #### 2. CONTRATO → INVARIANTES → PROVAS (Requisitos Formais)
 Toda demanda deve ser convertida explicitamente em requisitos canônicos, pré/pós-condições estritas e propriedades invariantes que nunca podem ser violadas. Nada deve ser implementado sem rastreabilidade bidirecional para o contrato.
@@ -53,6 +62,9 @@ $$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots
 O mesmo código que produz a mutação não pode ser a autoridade que atesta sua própria correção. O harness audita a correspondência de 4 vias:
 $$\text{Requirement} \longleftrightarrow \text{Projected State} \longleftrightarrow \text{Actual State} \longleftrightarrow \text{Observable Result}$$
 Invariantes devem ser verificados no estado projetado **E** no estado real pós-commit antes de autorizar a promoção.
+`authorize` é a única passagem de promoção: seleciona o perfil pelo diff,
+executa cada prova física uma vez e vincula o receipt ao índice. O hook apenas
+renova a autorização quando o índice ou a validade realmente divergir.
 
 #### 5. COBERTURA TOTAL DA ENTRADA (Mapeamento Bijetivo)
 Todo elemento de entrada deve possuir um destino observável explícito: `committed`, `rejected_invalid`, `blocked_capacity`, `blocked_insolvent` ou `aborted`. Nenhum slot ou comando pode desaparecer silenciosamente ($\text{decisions.length} \equiv \text{orders.length}$).

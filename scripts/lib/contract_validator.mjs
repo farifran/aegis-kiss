@@ -85,6 +85,7 @@ export function validateContract({ root, contract, clarified, policy, policyText
   assertSchema('aegis.architecture_policy.v1', policy);
 
   requireCondition(contract.clarifiedDemandDigest === canonicalDigest(clarified), 'clarified_demand_digest_mismatch');
+  requireCondition(contract.changeKind === clarified.changeKind, 'change_kind_mismatch');
   const architectureSource = readFileSync(safePath(root, policy.origin.sourcePath));
   requireCondition(sha256(architectureSource) === policy.origin.sourceDigest, 'stale_architecture_policy');
   requireCondition(contract.architecture.policyDigest === sha256(policyText), 'architecture_policy_digest_mismatch');
@@ -99,7 +100,13 @@ export function validateContract({ root, contract, clarified, policy, policyText
   requireCondition(contract.architecture.appliedRuleIds.every((id) => policyRuleIds.has(id)), 'invalid_architecture_binding');
   requireCondition(contract.architecture.amendmentIds.every((id) => policyAmendmentIds.has(id)), 'invalid_architecture_binding');
   exactIds(contract.scope.authorizedPaths, clarified.scope.included, 'scope_binding_mismatch');
-  validateContinuity(previousContract, contract);
+  if (contract.changeKind === 'PRODUCT') {
+    requireCondition(
+      contract.scope.authorizedPaths.every((path) => path === 'src' || path.startsWith('src/')),
+      'product_scope_outside_src',
+    );
+  }
+  if (phase === 'compile') validateContinuity(previousContract, contract);
 
   if (phase === 'promotion') {
     for (const target of contract.scope.authorizedPaths) {

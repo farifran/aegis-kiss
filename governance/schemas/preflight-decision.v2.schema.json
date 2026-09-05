@@ -3,77 +3,162 @@
   "$id": "aegis.preflight_decision.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "contextDigest", "status", "ruleAssessments", "findings", "questions"],
+  "required": ["schema", "contextDigest", "status", "rules", "questions"],
   "properties": {
     "schema": { "const": "aegis.preflight_decision.v2" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
-    "ruleAssessments": { "type": "array", "items": { "$ref": "aegis.clarified_demand.v2#/$defs/ruleAssessment" } },
-    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
-    "clarifiedDemandBody": { "$ref": "aegis.clarified_demand_body.v2" },
-    "contractBody": { "$ref": "aegis.contract_body.v2" },
-    "provisionalClarifiedDemandBody": { "$ref": "aegis.clarified_demand_body.v2" },
-    "provisionalContractBody": { "$ref": "aegis.contract_body.v2" }
+    "intent": { "type": "string", "minLength": 1 },
+    "scope": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/path" }, "uniqueItems": true },
+    "excluded": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "requirements": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/requirement" } },
+    "contextUnits": { "type": "array", "items": { "$ref": "#/$defs/contextUnit" } },
+    "acceptance": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "failures": { "type": "array", "items": { "$ref": "#/$defs/failure" } },
+    "behaviors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/clause" } },
+    "preconditions": { "type": "array", "items": { "$ref": "#/$defs/clause" } },
+    "invariants": { "type": "array", "items": { "$ref": "#/$defs/invariant" } },
+    "postconditions": { "type": "array", "items": { "$ref": "#/$defs/clause" } },
+    "proofs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/proof" } },
+    "continuity": { "$ref": "#/$defs/continuity" }
   },
   "$defs": {
-    "finding": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "kind", "status", "evidence", "sourceUnitIds"],
-      "properties": {
-        "id": { "type": "string", "pattern": "^PF-[A-Z0-9][A-Z0-9-]+$" },
-        "kind": { "enum": ["input", "reference", "scope", "architecture", "repository"] },
-        "status": { "enum": ["PROVEN", "UNPROVEN", "DISPROVEN", "NOT_APPLICABLE"] },
-        "evidence": { "type": "string", "minLength": 1 },
-        "sourceUnitIds": { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
-      }
+    "path": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+" },
+    "entrypoint": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+\\.(?:ts|sh)$" },
+    "indexes": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true },
+    "sourceIndexes": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true },
+    "rule": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "prefixItems": [
+        { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        { "enum": ["APPLIED", "NOT_APPLICABLE", "CONFLICT"] },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/indexes" }
+      ]
     },
     "question": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "scope", "prompt", "evidence", "impact", "recommendation", "interpretedAnswer", "sourceUnitIds"],
+      "type": "array", "minItems": 7, "maxItems": 7,
+      "prefixItems": [
+        { "enum": ["INPUT", "SCOPE", "ARCHITECTURE"] },
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/sourceIndexes" }
+      ]
+    },
+    "requirement": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "prefixItems": [
+        { "type": "string", "minLength": 1 },
+        { "enum": ["USER", "SAFE_CORRECTION", "USER_CLARIFICATION", "ARCHITECTURE_DEFAULT", "KISS_DERIVATION"] },
+        { "$ref": "#/$defs/indexes" }
+      ]
+    },
+    "contextUnit": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "prefixItems": [
+        { "type": "integer", "minimum": 0 },
+        { "enum": ["CONTEXT", "REJECTED_INVALID"] },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "failure": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "prefixItems": [
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/indexes" }
+      ]
+    },
+    "clause": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "prefixItems": [
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/indexes" }
+      ]
+    },
+    "invariant": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "prefixItems": [
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/indexes" },
+        { "$ref": "#/$defs/indexes" }
+      ]
+    },
+    "proof": {
+      "type": "array", "minItems": 8, "maxItems": 8,
+      "prefixItems": [
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+        { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/indexes" },
+        { "$ref": "#/$defs/entrypoint" },
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/path" }, "uniqueItems": true },
+        { "enum": ["low", "medium", "high"] },
+        { "enum": ["always", "targeted", "release", "forensic"] }
+      ]
+    },
+    "continuity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["retirements", "proofChanges"],
       "properties": {
-        "id": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
-        "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE"] },
-        "prompt": { "type": "string", "minLength": 1 },
-        "evidence": { "type": "string", "minLength": 1 },
-        "impact": { "type": "string", "minLength": 1 },
-        "recommendation": { "type": "string", "minLength": 1 },
-        "interpretedAnswer": { "type": "string", "minLength": 1 },
-        "sourceUnitIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+        "retirements": {
+          "type": "array",
+          "items": {
+            "type": "array", "minItems": 5, "maxItems": 5,
+            "prefixItems": [
+              { "enum": ["proof", "target"] },
+              { "type": "string", "minLength": 1 },
+              { "type": "string", "minLength": 1 },
+              { "type": "string", "minLength": 1 },
+              { "type": ["string", "null"] }
+            ]
+          }
+        },
+        "proofChanges": {
+          "type": "array",
+          "items": {
+            "type": "array", "minItems": 3, "maxItems": 3,
+            "prefixItems": [
+              { "type": "string", "pattern": "^PO-[A-Z0-9][A-Z0-9-]+$" },
+              { "type": "string", "minLength": 1 },
+              { "type": "string", "minLength": 1 }
+            ]
+          }
+        }
       }
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "status": { "const": "CLARIFIED" } }, "required": ["status"] },
+      "if": { "properties": { "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION"] } }, "required": ["status"] },
       "then": {
-        "required": ["clarifiedDemandBody", "contractBody"],
-        "not": { "anyOf": [{ "required": ["provisionalClarifiedDemandBody"] }, { "required": ["provisionalContractBody"] }] },
-        "properties": { "questions": { "maxItems": 0 } }
+        "required": ["intent", "scope", "excluded", "requirements", "contextUnits", "acceptance", "failures", "behaviors", "preconditions", "invariants", "postconditions", "proofs", "continuity"]
       }
     },
     {
+      "if": { "properties": { "status": { "const": "CLARIFIED" } }, "required": ["status"] },
+      "then": { "properties": { "questions": { "maxItems": 0 } } }
+    },
+    {
       "if": { "properties": { "status": { "const": "NEEDS_CONFIRMATION" } }, "required": ["status"] },
-      "then": {
-        "required": ["provisionalClarifiedDemandBody", "provisionalContractBody"],
-        "not": { "anyOf": [{ "required": ["clarifiedDemandBody"] }, { "required": ["contractBody"] }] },
-        "properties": { "questions": { "minItems": 1, "maxItems": 3 } }
-      }
+      "then": { "properties": { "questions": { "minItems": 1, "maxItems": 3 } } }
     },
     {
       "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
       "then": {
-        "not": {
-          "anyOf": [
-            { "required": ["clarifiedDemandBody"] },
-            { "required": ["contractBody"] },
-            { "required": ["provisionalClarifiedDemandBody"] },
-            { "required": ["provisionalContractBody"] }
-          ]
-        },
-        "properties": { "questions": { "maxItems": 0 } }
+        "properties": { "questions": { "maxItems": 0 } },
+        "not": { "anyOf": [
+          { "required": ["intent"] }, { "required": ["scope"] }, { "required": ["excluded"] },
+          { "required": ["requirements"] }, { "required": ["contextUnits"] }, { "required": ["acceptance"] },
+          { "required": ["failures"] }, { "required": ["behaviors"] }, { "required": ["preconditions"] },
+          { "required": ["invariants"] }, { "required": ["postconditions"] }, { "required": ["proofs"] },
+          { "required": ["continuity"] }
+        ] }
       }
     }
   ]

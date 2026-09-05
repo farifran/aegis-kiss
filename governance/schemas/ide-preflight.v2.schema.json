@@ -3,16 +3,22 @@
   "$id": "aegis.ide_preflight.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "executionId", "baseCommit", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "contextDigest", "promptDigest", "prompt"],
+  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "baseline", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "contextDigest", "promptDigest", "prompt", "timing"],
   "properties": {
     "schema": { "const": "aegis.ide_preflight.v2" },
     "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
+    "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
     "executionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "baseCommit": {
-      "oneOf": [
-        { "type": "null" },
-        { "type": "string", "pattern": "^[a-f0-9]{40,64}$" }
-      ]
+    "baseCommit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktreeDigest", "clean"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+        "worktreeDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "clean": { "const": true }
+      }
     },
     "normalizedDemand": { "$ref": "aegis.normalized_demand.v2" },
     "mechanicalFacts": { "$ref": "#/$defs/mechanicalFacts" },
@@ -31,7 +37,17 @@
     },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "prompt": { "type": "string", "minLength": 1 }
+    "prompt": { "type": "string", "minLength": 1 },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "startedAtEpochMs", "durationMs"],
+      "properties": {
+        "phase": { "const": "preflight" },
+        "startedAtEpochMs": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      }
+    }
   },
   "$defs": {
     "fact": {

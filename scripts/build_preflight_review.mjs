@@ -6,7 +6,6 @@ import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { sha256 } from './lib/canonical_json.mjs';
-import { buildPreflight } from './lib/preflight_core.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
@@ -17,12 +16,11 @@ function fail(code) {
 }
 
 function parseArguments(argv) {
-  const options = { decision: '', producerId: '', reviewerId: '', target: '' };
+  const options = { decision: '', producerId: '', reviewerId: '' };
   const names = new Map([
     ['--decision', 'decision'],
     ['--producer-id', 'producerId'],
     ['--reviewer-id', 'reviewerId'],
-    ['--target', 'target'],
   ]);
   for (let index = 0; index < argv.length; index += 2) {
     const key = names.get(argv[index]);
@@ -68,9 +66,10 @@ const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 let preflight;
 try {
-  preflight = await buildPreflight(Buffer.concat(chunks), options.target, root);
-} catch (error) {
-  fail(error instanceof Error ? error.message : 'preflight_failed');
+  preflight = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  assertSchema('aegis.ide_preflight.v2', preflight);
+} catch {
+  fail('invalid_preflight_envelope');
 }
 if (decision.contextDigest !== preflight.contextDigest) fail('decision_context_mismatch');
 const context = {

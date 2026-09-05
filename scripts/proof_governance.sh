@@ -7,8 +7,8 @@ export AEGIS_ROOT_DIR
 
 source "${ROOT_DIR}/scripts/lib/proof_governance.sh"
 
-registry_file="${ROOT_DIR}/.harness/proof_registry.json"
-contract_file="${ROOT_DIR}/.harness/active_contract_ir.json"
+registry_file="${ROOT_DIR}/src/.aegis/proof-registry.json"
+contract_file="${ROOT_DIR}/src/.aegis/contract-ir.json"
 
 # A clean universal baseline has no project-specific proof registry yet.  That
 # is a valid state; governance becomes mandatory as soon as a project adds

@@ -81,6 +81,8 @@ printf '%s\n' "${plan}" | jq -r '.proofs[] | [.id, .executionKey] | @tsv' \
       command=(npm run "${BASH_REMATCH[1]}")
     elif [[ "${command_string}" =~ ^bash[[:space:]]+([a-zA-Z0-9_./-]+)$ ]]; then
       command=(bash "${BASH_REMATCH[1]}")
+    elif [[ "${command_string}" =~ ^node[[:space:]]+--import[[:space:]]+tsx[[:space:]]+([a-zA-Z0-9_./-]+\.ts)$ ]]; then
+      command=(node --import tsx "${BASH_REMATCH[1]}")
     else
       echo "[AEGIS][PROOF][FATAL] untrusted_proof_command:${proof_id}" >&2
       exit 1

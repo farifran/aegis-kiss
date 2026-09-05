@@ -70,6 +70,7 @@ NODE
 
 node --input-type=module <<'NODE'
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -79,6 +80,11 @@ fs.mkdirSync(join(fixture, 'governance/prompts'), { recursive: true });
 for (const path of ['ARCHITECTURE.md', 'governance/architecture.policy.json', 'governance/prompts/preflight.v2.md']) {
   fs.copyFileSync(join(process.cwd(), path), join(fixture, path));
 }
+execFileSync('git', ['-C', fixture, 'init', '-q']);
+execFileSync('git', ['-C', fixture, 'config', 'user.name', 'Aegis']);
+execFileSync('git', ['-C', fixture, 'config', 'user.email', 'aegis@example.invalid']);
+execFileSync('git', ['-C', fixture, 'add', '.']);
+execFileSync('git', ['-C', fixture, 'commit', '-qm', 'baseline']);
 const originalReadFileSync = fs.readFileSync;
 const fixtureReads = [];
 fs.readFileSync = function trackedRead(path, ...args) {
@@ -100,7 +106,7 @@ NODE
 
 grep -Fqx '#### 1. PREFLIGHT, ALINHAMENTO E CONTRATO' "${ROOT_DIR}/AGENTS.md"
 grep -Fqx '# Briefing e implementação' "${ROOT_DIR}/.skills/briefing.md"
-grep -Fq 'Não consulte o repositório.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
+grep -Fq 'não leia o repositório.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
 if [[ -e "${ROOT_DIR}/governance/prompts/contract.v2.md" || -e "${ROOT_DIR}/scripts/build_contract_prompt.mjs" || -e "${ROOT_DIR}/scripts/finalize_contract.mjs" ]]; then
   echo 'separate contract compiler still exists' >&2
   exit 1

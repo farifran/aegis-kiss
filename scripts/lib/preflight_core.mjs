@@ -23,8 +23,32 @@ function currentCommit(root) {
   }
 }
 
-function executionId(baseCommit, normalizedDemandDigest) {
-  return sha256(`base=${baseCommit ?? 'UNVERSIONED'}\ndemand=${normalizedDemandDigest}\n`);
+function executionId(baseCommit, normalizedDemandDigest, changeKind) {
+  return sha256(`base=${baseCommit ?? 'UNVERSIONED'}\ndemand=${normalizedDemandDigest}\nkind=${changeKind}\n`);
+}
+
+export function repositorySnapshot(root) {
+  const commit = currentCommit(root);
+  if (commit === null) throw new Error('preflight_requires_git_repository');
+  let status;
+  try {
+    status = execFileSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    throw new Error('worktree_status_unavailable');
+  }
+  const entries = status
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .filter((line) => !line.slice(3).startsWith('.harness/runtime/'))
+    .sort();
+  return {
+    commit,
+    worktreeDigest: sha256(entries.join('\n')),
+    clean: entries.length === 0,
+  };
 }
 
 function byteLength(value) {
@@ -222,7 +246,10 @@ function inject(template, placeholder, value) {
   return template.replace(token, JSON.stringify(value));
 }
 
-export async function buildPreflight(rawBytes, requestedTarget, root) {
+export async function buildPreflight(rawBytes, requestedTarget, root, changeKind = 'PRODUCT') {
+  if (!['PRODUCT', 'HARNESS'].includes(changeKind)) throw new Error('invalid_change_kind');
+  const baseline = repositorySnapshot(root);
+  if (!baseline.clean) throw new Error('preflight_requires_clean_worktree');
   const normalizedDemand = normalizeDemand(rawBytes);
   const target = requestedTarget.length === 0
     ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
@@ -234,7 +261,7 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
   };
   const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
   const architecture = loadArchitecture(root);
-  const previousContractPath = resolve(root, '.harness/active_contract_ir.json');
+  const previousContractPath = resolve(root, 'src/.aegis/contract-ir.json');
   let previousContract = null;
   if (existsSync(previousContractPath)) {
     try {
@@ -246,9 +273,9 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
     }
   }
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);
-  const baseCommit = currentCommit(root);
   const contextDigest = canonicalDigest({
-    baseCommit,
+    changeKind,
+    baseline,
     normalizedDemandDigest: normalizedDemand.digest,
     mechanicalFactsDigest: mechanicalFacts.digest,
     architecturePolicyDigest: architecture.policyDigest,
@@ -256,10 +283,12 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
   });
   let prompt = readFileSync(resolve(root, 'governance/prompts/preflight.v2.md'), 'utf8');
   prompt = inject(prompt, 'context_digest', contextDigest);
+  prompt = inject(prompt, 'change_kind', changeKind);
   prompt = inject(prompt, 'normalized_demand', { units: normalizedDemand.units });
   prompt = inject(prompt, 'mechanical_facts', { target: mechanicalFacts.target, references: mechanicalFacts.references });
   prompt = inject(prompt, 'architecture_rules', { candidateRules: architecture.candidateRules });
   const previousContractProjection = previousContract === null ? null : {
+    changeKind: previousContract.changeKind,
     architecture: { amendmentIds: previousContract.architecture.amendmentIds },
     scope: previousContract.scope,
     proofObligations: previousContract.proofObligations,
@@ -268,8 +297,10 @@ export async function buildPreflight(rawBytes, requestedTarget, root) {
   const envelope = {
     schema: 'aegis.ide_preflight.v2',
     status: 'PENDING_SEMANTIC_COMPILATION',
-    executionId: executionId(baseCommit, normalizedDemand.digest),
-    baseCommit,
+    changeKind,
+    executionId: executionId(baseline.commit, normalizedDemand.digest, changeKind),
+    baseCommit: baseline.commit,
+    baseline,
     normalizedDemand,
     mechanicalFacts,
     architecture,
@@ -286,6 +317,7 @@ export function semanticRequest(envelope, timing) {
   return {
     schema: 'aegis.ide_semantic_request.v2',
     status: envelope.status,
+    changeKind: envelope.changeKind,
     executionId: envelope.executionId,
     baseCommit: envelope.baseCommit,
     contextDigest: envelope.contextDigest,

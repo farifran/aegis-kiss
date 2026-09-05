@@ -16,9 +16,9 @@ function fail(code) {
 function parseArguments(argv) {
   const options = {
     root: defaultRoot,
-    contract: '.harness/active_contract_ir.json',
-    clarified: '.harness/active_clarified_demand.json',
-    registry: '.harness/proof_registry.json',
+    contract: 'src/.aegis/contract-ir.json',
+    clarified: 'src/.aegis/clarified-demand.json',
+    registry: 'src/.aegis/proof-registry.json',
     policy: 'governance/architecture.policy.json',
     phase: 'promotion',
   };

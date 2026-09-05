@@ -12,7 +12,7 @@ elif [[ $# -ne 0 ]]; then
   exit 1
 fi
 
-if [[ ! -e "${ROOT_DIR}/.harness/proof_registry.json" && ! -e "${ROOT_DIR}/.harness/active_contract_ir.json" ]]; then
+if [[ ! -e "${ROOT_DIR}/src/.aegis/proof-registry.json" && ! -e "${ROOT_DIR}/src/.aegis/contract-ir.json" ]]; then
   exit 0
 fi
 
@@ -26,9 +26,9 @@ validate_v2_staged() {
   local staged_root target architecture_source rc=0
   staged_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-staged-contract.XXXXXX")"
   for target in \
-    .harness/active_contract_ir.json \
-    .harness/active_clarified_demand.json \
-    .harness/proof_registry.json \
+    src/.aegis/contract-ir.json \
+    src/.aegis/clarified-demand.json \
+    src/.aegis/proof-registry.json \
     governance/architecture.policy.json; do
     if ! git -C "${ROOT_DIR}" cat-file -e ":${target}" 2>/dev/null; then
       echo "[AEGIS][CONTRACT][FATAL] staged_contract_input_missing:${target}" >&2
@@ -53,25 +53,25 @@ validate_v2_staged() {
         rc=1
         break
       fi
-    done < <(aegis_contract_targets "${staged_root}/.harness/active_contract_ir.json")
+    done < <(aegis_contract_targets "${staged_root}/src/.aegis/contract-ir.json")
   fi
   if [[ "${rc}" -eq 0 ]]; then
     node "${SCRIPT_DIR}/validate_contract_ir_v2.mjs" --root "${staged_root}" >/dev/null || rc=1
   fi
   if [[ "${rc}" -eq 0 ]]; then
-    aegis_staged_scope_validate "${ROOT_DIR}" "${staged_root}/.harness/active_contract_ir.json" || rc=1
+    aegis_staged_scope_validate "${ROOT_DIR}" "${staged_root}/src/.aegis/contract-ir.json" || rc=1
   fi
   rm -rf "${staged_root}"
   return "${rc}"
 }
 
 
-if [[ ! -e "${ROOT_DIR}/.harness/proof_registry.json" || ! -e "${ROOT_DIR}/.harness/active_contract_ir.json" ]]; then
+if [[ ! -e "${ROOT_DIR}/src/.aegis/proof-registry.json" || ! -e "${ROOT_DIR}/src/.aegis/contract-ir.json" ]]; then
   echo "[AEGIS][PROOF][FATAL] incomplete_contract_evidence_metadata" >&2
   exit 1
 fi
 
-if ! jq -e '.schema == "aegis.contract_ir.v2"' "${ROOT_DIR}/.harness/active_contract_ir.json" >/dev/null 2>&1; then
+if ! jq -e '.schema == "aegis.contract_ir.v2"' "${ROOT_DIR}/src/.aegis/contract-ir.json" >/dev/null 2>&1; then
   echo "[AEGIS][CONTRACT][FATAL] legacy_contract_ir_not_supported" >&2
   exit 1
 fi
@@ -83,6 +83,6 @@ if [[ "${mode}" == "staged" ]]; then
 else
   validate_v2_working
   AEGIS_ROOT_DIR="${ROOT_DIR}" aegis_proof_governance_validate \
-    "${ROOT_DIR}/.harness/proof_registry.json" \
-    "${ROOT_DIR}/.harness/active_contract_ir.json"
+    "${ROOT_DIR}/src/.aegis/proof-registry.json" \
+    "${ROOT_DIR}/src/.aegis/contract-ir.json"
 fi

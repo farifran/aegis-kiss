@@ -4,9 +4,10 @@
   "title": "Aegis Semantic Contract IR v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "clarifiedDemandDigest", "architecture", "scope", "behavior", "invariants", "proofObligations", "requirementCoverage"],
+  "required": ["schema", "changeKind", "clarifiedDemandDigest", "architecture", "scope", "behavior", "invariants", "proofObligations", "requirementCoverage"],
   "properties": {
     "schema": { "const": "aegis.contract_ir.v2" },
+    "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
     "clarifiedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "architecture": {
       "type": "object",

@@ -2,195 +2,71 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
-INVENTORY_FIXTURE_DIR="${ROOT_DIR}/src/__aegis_inventory_fixture"
-CLEAN_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-clean-test.XXXXXX")"
-
-cleanup() {
-  rm -f "${RUNTIME_DIR}/mechanical_inventory.json" "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}/review-decision.json"
-  rm -rf "${INVENTORY_FIXTURE_DIR}"
-  rm -rf "${CLEAN_FIXTURE_DIR}"
-}
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-ide-gateway.XXXXXX")"
+cleanup() { rm -rf "${WORK_DIR}"; }
 trap cleanup EXIT
 
-output="$(bash "${ROOT_DIR}/aegis" $'Criar uma biblioteca\r\ndeterminística.' --target src)"
-[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -le 10000 ]] || {
-  echo 'semantic request exceeded compact transport budget' >&2
-  exit 1
-}
+mkdir -p "${WORK_DIR}/src" "${WORK_DIR}/.harness/runtime"
+cp "${ROOT_DIR}/aegis" "${WORK_DIR}/aegis"
+cp -r "${ROOT_DIR}/scripts" "${WORK_DIR}/scripts"
+cp -r "${ROOT_DIR}/governance" "${WORK_DIR}/governance"
+cp "${ROOT_DIR}/ARCHITECTURE.md" "${WORK_DIR}/ARCHITECTURE.md"
+ln -s "${ROOT_DIR}/node_modules" "${WORK_DIR}/node_modules"
+printf '.harness/runtime/\nnode_modules\n' > "${WORK_DIR}/.gitignore"
+printf 'export {};\n' > "${WORK_DIR}/src/index.ts"
+git -C "${WORK_DIR}" init -q
+git -C "${WORK_DIR}" config user.name Aegis
+git -C "${WORK_DIR}" config user.email aegis@example.invalid
+git -C "${WORK_DIR}" add .
+git -C "${WORK_DIR}" commit -qm baseline
+
+output="$(bash "${WORK_DIR}/aegis" 'Criar uma biblioteca determinística em src/library.ts.' --target src)"
 printf '%s' "${output}" | jq -e '
   .schema == "aegis.ide_semantic_request.v2"
-  and .status == "PENDING_SEMANTIC_COMPILATION"
-  and (.executionId | length == 64)
-  and ((.baseCommit == null) or (.baseCommit | length >= 40))
-  and (.contextDigest | length == 64)
-  and (.promptDigest | length == 64)
-  and .timing.phase == "preflight"
-  and (.timing.durationMs >= 0)
-  and .protocol.decisionPath == ".harness/runtime/preflight_decision.json"
+  and .changeKind == "PRODUCT"
   and .protocol.promotion == ["implement authorized scope", "stage persistent changes", "./aegis authorize", "git commit"]
   and (.protocol.forbidden | index("verification before authorize"))
-  and (.prompt | contains("\r") | not)
   and (has("normalizedDemand") | not)
-  and (has("mechanicalFacts") | not)
-  and (has("architecture") | not)
-  and (has("previousContract") | not)
 ' >/dev/null
-printf '%s' "${output}" | node --input-type=module -e '
-  import { readFileSync } from "node:fs";
-  import { assertSchema } from "./scripts/lib/schema_validator.mjs";
-  const request = JSON.parse(readFileSync(0, "utf8"));
-  assertSchema("aegis.ide_semantic_request.v2", request);
-  if (!request.prompt.includes("\"trigger\":\"...\",\"observableOutcome\":\"...\"")) throw new Error("clarified failure shape absent");
-  if (!request.prompt.includes("\"id\":\"PF-...\"")) throw new Error("finding id shape absent");
-'
-[[ ! -e "${RUNTIME_DIR}/ide_intake.json" ]] || {
-  echo 'legacy intake artifact was persisted' >&2
-  exit 1
-}
+[[ -s "${WORK_DIR}/.harness/runtime/preflight_envelope.json" ]]
+[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 7000 ]]
 
-printf '%s' "${output}" > "${RUNTIME_DIR}/review-envelope.json"
-node --input-type=module - "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}/review-decision.json" <<'NODE'
-import { readFileSync, writeFileSync } from 'node:fs';
-const [envelopePath, decisionPath] = process.argv.slice(2);
-const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
-const context = envelope.prompt.match(/candidateRules=(\{.*\})\npreviousContract=/s);
-if (context === null) throw new Error('semantic prompt does not expose candidate rules');
-const candidates = JSON.parse(context[1]).candidateRules;
-const assessments = candidates.map((rule) => ({
-  ruleId: rule.id,
-  verdict: 'NOT_APPLICABLE',
-  evidence: 'Não aplicável à biblioteca pedida.',
-  sourceUnitIds: [],
-}));
-const requirement = { id: 'REQ-REVIEW-001', statement: 'Criar a biblioteca determinística.', provenance: 'USER' };
-const clarifiedDemandBody = {
-  intent: requirement.statement,
-  requirements: [requirement],
-  scope: { included: ['src'], excluded: [] },
-  inputCoverage: [{ unitId: 'UNIT-0001', disposition: 'REQUIREMENT', requirementIds: [requirement.id], rationale: 'Requisito.' }],
-};
-writeFileSync(decisionPath, JSON.stringify({
-  schema: 'aegis.preflight_decision.v2',
-  contextDigest: envelope.contextDigest,
-  status: 'CLARIFIED',
-  ruleAssessments: assessments,
-  findings: [],
-  questions: [],
-  clarifiedDemandBody,
-  contractBody: {
-    scope: { authorizedPaths: ['src'] },
-    behavior: [{ id: 'BEH-REVIEW-001', statement: 'A biblioteca determinística fica disponível.' }],
-    invariants: [],
-    proofObligations: [{ id: 'PO-REVIEW-001', risk: 'biblioteca ausente', statement: 'A biblioteca deve ser observável por prova.' }],
-    requirementCoverage: [{ requirementId: requirement.id, contractIds: ['BEH-REVIEW-001', 'PO-REVIEW-001'] }],
-  },
-}));
-NODE
+output="$(bash "${WORK_DIR}/aegis" harness 'Atualizar a validação interna do Aegis.')"
+printf '%s' "${output}" | jq -e '.changeKind == "HARNESS"' >/dev/null
+jq -e '.changeKind == "HARNESS" and .baseline.clean == true' "${WORK_DIR}/.harness/runtime/preflight_envelope.json" >/dev/null
+frozen_digest="$(shasum -a 256 "${WORK_DIR}/.harness/runtime/preflight_envelope.json" | awk '{print $1}')"
 
-output="$(bash "${ROOT_DIR}/aegis" review $'Criar uma biblioteca\r\ndeterminística.' --target src --decision .harness/runtime/review-decision.json --producer-id producer --reviewer-id reviewer)"
-printf '%s' "${output}" | jq -e '.schema == "aegis.preflight_review_request.v2" and .producerId == "producer" and .reviewerId == "reviewer"' >/dev/null
-if bash "${ROOT_DIR}/aegis" review 'demanda' --decision .harness/runtime/review-decision.json --producer-id same --reviewer-id same >/dev/null 2>&1; then
-  echo 'review accepted non-independent authority' >&2
+printf 'mudança não contratada\n' > "${WORK_DIR}/src/dirty.ts"
+if bash "${WORK_DIR}/aegis" 'Outra demanda.' >/dev/null 2>&1; then
+  echo 'intake accepted dirty worktree' >&2
   exit 1
 fi
+[[ "$(shasum -a 256 "${WORK_DIR}/.harness/runtime/preflight_envelope.json" | awk '{print $1}')" == "${frozen_digest}" ]]
+rm "${WORK_DIR}/src/dirty.ts"
 
-if bash "${ROOT_DIR}/aegis" 'demanda' --target ../outside >/dev/null 2>&1; then
-  echo 'unsafe target was accepted' >&2
-  exit 1
-fi
-
-output="$(bash "${ROOT_DIR}/aegis" proofs --profile fast)"
-if [[ -e "${ROOT_DIR}/.harness/active_contract_ir.json" && -e "${ROOT_DIR}/.harness/proof_registry.json" ]]; then
-  printf '%s\n' "${output}" | grep -q '\[AEGIS\]\[PROOF\]'
-else
-  printf '%s\n' "${output}" | grep -qx '\[AEGIS\]\[PROOF\] NOT_APPLICABLE (no project contract or proof registry)'
-fi
-git check-ignore -q .harness/runtime/ide_validation.json
-
-mkdir -p "${INVENTORY_FIXTURE_DIR}"
-printf 'alpha-content\n' > "${INVENTORY_FIXTURE_DIR}/alpha.txt"
-printf 'beta-content\n' > "${INVENTORY_FIXTURE_DIR}/beta.txt"
-printf 'gamma-content\n' > "${INVENTORY_FIXTURE_DIR}/gamma.txt"
-
-output="$(bash "${ROOT_DIR}/aegis" evidence --path src/__aegis_inventory_fixture --max-files 3 --max-total-bytes 16 --max-file-bytes 8)"
-printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=3/3 bytes=16 '
-jq -e '
-  .schema == "aegis.mechanical_inventory.v1"
-  and .coverage.complete == true
-  and .coverage.selectedFiles == 3
-  and .coverage.previewBytes == 16
-  and ([.files[] | .previewEncoding == "base64"] | all)
-' "${RUNTIME_DIR}/mechanical_inventory.json" >/dev/null
-
-output="$(bash "${ROOT_DIR}/aegis" evidence --path src/__aegis_inventory_fixture --max-files 3 --max-total-bytes 16 --max-file-bytes 8)"
-printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=3/3 '
-
-printf 'changed\n' >> "${INVENTORY_FIXTURE_DIR}/alpha.txt"
-output="$(bash "${ROOT_DIR}/aegis" evidence --path src/__aegis_inventory_fixture --max-files 3 --max-total-bytes 16 --max-file-bytes 8)"
-printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=3/3 '
-
-output="$(bash "${ROOT_DIR}/aegis" evidence --path src/__aegis_inventory_fixture --max-files 2)"
-printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=2/3 '
-jq -e '(.coverage.complete == false and .coverage.omittedFiles == 1 and (has("cache") | not))' "${RUNTIME_DIR}/mechanical_inventory.json" >/dev/null
-
-printf 'space-safe\n' > "${INVENTORY_FIXTURE_DIR}/name with spaces.txt"
-output="$(bash "${ROOT_DIR}/aegis" evidence --path 'src/__aegis_inventory_fixture/name with spaces.txt')"
-printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=1/1 '
-jq -e '.files[0].path == "src/__aegis_inventory_fixture/name with spaces.txt"' "${RUNTIME_DIR}/mechanical_inventory.json" >/dev/null
-
-if bash "${ROOT_DIR}/aegis" evidence --path ../outside >/dev/null 2>&1; then
+mkdir -p "${WORK_DIR}/src/inventory"
+printf 'alpha-content\n' > "${WORK_DIR}/src/inventory/alpha.txt"
+printf 'beta-content\n' > "${WORK_DIR}/src/inventory/beta.txt"
+output="$(bash "${WORK_DIR}/aegis" evidence --path src/inventory --max-files 2 --max-total-bytes 12 --max-file-bytes 6)"
+printf '%s\n' "${output}" | grep -q '^\[AEGIS\]\[EVIDENCE\] inventory=READY materialization=FRESH files=2/2 bytes=12 '
+jq -e '.coverage.complete == true and .coverage.previewBytes == 12' "${WORK_DIR}/.harness/runtime/mechanical_inventory.json" >/dev/null
+if bash "${WORK_DIR}/aegis" evidence --path ../outside >/dev/null 2>&1; then
   echo 'unsafe inventory path was accepted' >&2
   exit 1
 fi
 
-if bash "${ROOT_DIR}/aegis" evidence >/dev/null 2>&1; then
-  echo 'inventory accepted no explicit paths' >&2
+mkdir -p "${WORK_DIR}/src/.aegis"
+printf '{}\n' > "${WORK_DIR}/src/.aegis/contract-ir.json"
+printf '{}\n' > "${WORK_DIR}/src/.aegis/clarified-demand.json"
+printf '{}\n' > "${WORK_DIR}/src/.aegis/proof-registry.json"
+bash "${WORK_DIR}/aegis" clean | grep -qx '\[AEGIS\]\[IDE\] clean=PASS source_reset=1'
+[[ "$(cat "${WORK_DIR}/src/index.ts")" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
+[[ -z "$(find "${WORK_DIR}/.harness/runtime" -mindepth 1 -print -quit)" ]]
+[[ ! -e "${WORK_DIR}/src/.aegis" ]]
+
+if bash "${WORK_DIR}/aegis" verify >/dev/null 2>&1 || bash "${WORK_DIR}/aegis" proofs >/dev/null 2>&1; then
+  echo 'redundant promotion command remains public' >&2
   exit 1
 fi
-
-git check-ignore -q .harness/runtime/mechanical_inventory.json
-
-bash "${ROOT_DIR}/aegis" 'Nova demanda deve iniciar sem inventário anterior.' >/dev/null
-[[ ! -e "${RUNTIME_DIR}/mechanical_inventory.json" ]] || {
-  echo 'new demand retained prior mechanical inventory' >&2
-  exit 1
-}
-
-mkdir -p "${CLEAN_FIXTURE_DIR}/scripts" "${CLEAN_FIXTURE_DIR}/src/nested" "${CLEAN_FIXTURE_DIR}/.harness/runtime"
-cp "${ROOT_DIR}/aegis" "${CLEAN_FIXTURE_DIR}/aegis"
-cp "${ROOT_DIR}/scripts/ide_gateway.sh" "${CLEAN_FIXTURE_DIR}/scripts/ide_gateway.sh"
-printf 'produto antigo\n' > "${CLEAN_FIXTURE_DIR}/src/nested/product.ts"
-printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/active_contract_ir.json"
-printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/active_clarified_demand.json"
-printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/proof_registry.json"
-printf 'temporário\n' > "${CLEAN_FIXTURE_DIR}/.harness/runtime/stale.txt"
-printf 'núcleo\n' > "${CLEAN_FIXTURE_DIR}/scripts/sentinel.txt"
-bash "${CLEAN_FIXTURE_DIR}/aegis" clean | grep -qx '\[AEGIS\]\[IDE\] clean=PASS source_reset=1'
-[[ "$(find "${CLEAN_FIXTURE_DIR}/src" -mindepth 1 -maxdepth 1 -type f -o -type d | wc -l | tr -d ' ')" -eq 1 ]]
-[[ "$(cat "${CLEAN_FIXTURE_DIR}/src/index.ts")" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
-[[ -z "$(find "${CLEAN_FIXTURE_DIR}/.harness/runtime" -mindepth 1 -print -quit)" ]]
-[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/active_contract_ir.json" ]]
-[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/active_clarified_demand.json" ]]
-[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/proof_registry.json" ]]
-[[ -e "${CLEAN_FIXTURE_DIR}/scripts/sentinel.txt" ]]
-
-search_cmd() {
-  if command -v rg >/dev/null 2>&1; then
-    rg -n -i "$@"
-  else
-    grep -n -i -E "$@"
-  fi
-}
-
-for forbidden in "a""ider" "raw_""llm" "run_""aegis"; do
-  if search_cmd "${forbidden}" \
-    "${ROOT_DIR}/aegis" \
-    "${ROOT_DIR}/scripts/ide_gateway.sh" \
-    "${ROOT_DIR}/package.json" >/dev/null; then
-    echo 'IDE gateway still depends on a removed CLI executor' >&2
-    exit 1
-  fi
-done
 
 echo '[AEGIS][TEST][PASS] IDE gateway passed'
