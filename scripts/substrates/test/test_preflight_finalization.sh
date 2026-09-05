@@ -234,16 +234,48 @@ printf '%s' "${blocked_output}" | jq -e '.status == "BLOCKED"' >/dev/null
   exit 1
 }
 
+# Cenário 4: demanda de implementação com uma fonte de tempo implícita. É uma
+# sonda forense: ela mede o que o preflight atual prova e expõe o que ainda
+# não está presente na política injetada.
+token_bucket_demand='Crie src/tokenBucket.ts com a classe TokenBucket. Use bigint com BigInt(Date.now()). Construtor aceita (maxBytes: bigint, mbps: number) e converte para rateBitsPerMs (mbps*8000). Em update(), acumule timeDiff*rateBitsPerMs limitando ao maxTokens. Em consume(bits: bigint), atualize e deduza saldo. Exporte a função obterEstadoBitmask(bucket: TokenBucket): number com bit 0 se tokens==0n e bit 1 se refil ativo. Re-exporte no src/index.ts.'
+token_preflight_started="$(now_ns)"
+token_preflight="$(bash "${ROOT_DIR}/aegis" "${token_bucket_demand}" --target src)"
+token_preflight_elapsed="$(elapsed_ms "${token_preflight_started}" "$(now_ns)")"
+token_prompt="$(printf '%s' "${token_preflight}" | jq -r '.prompt')"
+token_normalized_digest="$(printf '%s' "${token_preflight}" | jq -r '.normalizedDemandDigest')"
+token_facts_digest="$(printf '%s' "${token_preflight}" | jq -r '.mechanicalFactsDigest')"
+token_policy_digest="$(printf '%s' "${token_preflight}" | jq -r '.architecturePolicyDigest')"
+token_prompt_digest="$(printf '%s' "${token_preflight}" | jq -r '.promptDigest')"
+token_normalized_text="$(prompt_block "${token_prompt}" '<DEMANDA_NORMALIZADA>' '</DEMANDA_NORMALIZADA>' | jq -r '.text')"
+token_facts="$(prompt_block "${token_prompt}" '<FATOS_MECÂNICOS>' '</FATOS_MECÂNICOS>')"
+token_architecture="$(prompt_block "${token_prompt}" '<REGRAS_ARQUITETURAIS_CANDIDATAS>' '</REGRAS_ARQUITETURAIS_CANDIDATAS>')"
+printf '%s' "${token_preflight}" | jq -e '
+  .status == "PENDING_SEMANTIC_PREFLIGHT"
+  and (.prompt | contains("BigInt(Date.now())"))
+  and (.prompt | contains("src/tokenBucket.ts"))
+' >/dev/null
+printf '%s' "${token_facts}" | jq -e '
+  .target.status == "PROVEN"
+  and ([.references[] | select(.value == "src/tokenBucket.ts" and .status == "DISPROVEN" and .evidence == "path_not_found")] | length == 1)
+  and ([.references[] | select(.value == "src/index.ts" and .status == "PROVEN")] | length == 1)
+' >/dev/null
+if printf '%s' "${token_architecture}" | jq -e '([.candidateRules[].id] | index("ARCH-DETERMINISTIC-TIME")) != null' >/dev/null; then
+  token_time_policy_status="PROVEN"
+else
+  token_time_policy_status="UNPROVEN"
+fi
+
 mkdir -p "${RUNTIME_DIR}"
 {
   printf '# Relatório forense — Preflight v1\n\n'
-  printf 'Escopo: três demandas sintéticas executadas ponta a ponta. O relatório é transitório em .harness/runtime/; ./aegis clean o remove.\n\n'
+  printf 'Escopo: três demandas sintéticas concluídas ponta a ponta e uma sonda forense de política. O relatório é transitório em .harness/runtime/; ./aegis clean o remove.\n\n'
   printf 'A revisão semântica usa fixtures controladas para testar o protocolo. Nenhum modelo foi chamado; tempos de raciocínio do IDE: N/A. Os tempos medidos são das etapas mecânicas e da finalização local.\n\n'
   printf '| Cenário | Preflight mecânico (ms) | Decisão fixture (ms) | Finalização local (ms) | Estado final |\n'
   printf '| --- | ---: | ---: | ---: | --- |\n'
   printf '| 1. Inequívoca | %s | %s | %s | CLARIFIED_DEMAND_PERSISTED |\n' "${direct_preflight_elapsed}" "${direct_decision_elapsed}" "${direct_finalize_elapsed}"
   printf '| 2. Confirmação | %s | %s | %s | CLARIFIED_DEMAND_PERSISTED |\n' "${confirmation_preflight_elapsed}" "${confirmation_decision_elapsed}" "${confirmation_finalize_elapsed}"
-  printf '| 3. Bloqueada | %s | %s | %s | BLOCKED; estado anterior preservado |\n\n' "${blocked_preflight_elapsed}" "${blocked_decision_elapsed}" "${blocked_finalize_elapsed}"
+  printf '| 3. Bloqueada | %s | %s | %s | BLOCKED; estado anterior preservado |\n' "${blocked_preflight_elapsed}" "${blocked_decision_elapsed}" "${blocked_finalize_elapsed}"
+  printf '| 4. TokenBucket | %s | N/A | N/A | PENDING_SEMANTIC_PREFLIGHT; tempo determinístico %s |\n\n' "${token_preflight_elapsed}" "${token_time_policy_status}"
 
   printf '## 1. Demanda inequívoca\n\nDemanda bruta:\n\n    %s\n\n' "${direct_demand}"
   printf 'Demanda normalizada:\n\n    %s\n\n' "${direct_normalized_text}"
@@ -275,6 +307,15 @@ mkdir -p "${RUNTIME_DIR}"
   printf 'Decisão fixture:\n\n'
   printf '%s\n\n' "${blocked_decision}" | sed 's/^/    /'
   printf 'Decisão e resultado:\n\n- Decisão controlada BLOCKED; achado PF-REFERENCE-001 em DISPROVEN.\n- Não houve demanda esclarecida, pergunta, resposta, persistência ou alteração de arquivos do produto.\n- A digest da demanda esclarecida anterior permaneceu idêntica.\n'
+
+  printf '\n## 4. TokenBucket com fonte de tempo implícita\n\nDemanda bruta:\n\n    %s\n\n' "${token_bucket_demand}"
+  printf 'Demanda normalizada:\n\n    %s\n\n' "${token_normalized_text}"
+  printf 'Preflight mecânico:\n\n- Demanda, BigInt(Date.now()), src/tokenBucket.ts e src/index.ts foram preservados no prompt.\n- Fatos: src existe; src/tokenBucket.ts está ausente; src/index.ts existe.\n- Digests: demanda %s; fatos %s; política %s; prompt %s.\n\n' "${token_normalized_digest}" "${token_facts_digest}" "${token_policy_digest}" "${token_prompt_digest}"
+  printf 'Fatos mecânicos:\n\n'
+  printf '%s\n\n' "${token_facts}" | sed 's/^/    /'
+  printf 'Política arquitetural candidata:\n\n'
+  printf '%s\n\n' "${token_architecture}" | sed 's/^/    /'
+  printf 'Resultado forense:\n\n- A etapa mecânica passou e não alterou arquivos do produto nem persistiu a demanda bruta.\n- Nenhuma decisão semântica foi simulada: este cenário mede o prompt real do preflight.\n- Cobertura da regra de tempo determinístico no pacote injetado: %s.\n- Com o estado atual, BigInt(Date.now()) não é classificado mecanicamente como conflito; portanto a decisão arquitetural sobre relógio permanece UNPROVEN e não é correto finalizar esta demanda automaticamente.\n' "${token_time_policy_status}"
 } > "${REPORT_PATH}"
 
 [[ -s "${REPORT_PATH}" ]] || {
@@ -282,5 +323,5 @@ mkdir -p "${RUNTIME_DIR}"
   exit 1
 }
 
-printf '[AEGIS][TEST] preflight finalization scenarios: PASS (3 demands)\n'
+printf '[AEGIS][TEST] preflight finalization scenarios: PASS (4 demands)\n'
 printf '[AEGIS][TEST] forensic_report=%s\n' "${REPORT_PATH}"
