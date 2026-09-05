@@ -41,8 +41,9 @@ Available commands:
 - `./aegis proofs [--profile …]`: runs only the selected proof profile.
 - `./aegis authorize`: optionally creates the receipt before committing; the
   pre-commit hook automatically renews it for the exact staged diff.
-- `./aegis clean [--src|--all]`: removes transient runtime state; `--src` also
-  resets the product and its contract/proof pair together.
+- `./aegis clean [--src|--all]`: starts a new demand by atomically clearing
+  transient runtime state, `src/` and the active contract/proof metadata.
+  `--src` and `--all` remain equivalent compatibility aliases.
 
 There is no autonomous CLI coder, provider configuration or TTY workflow.
 Surgical-edit discipline is retained by requiring a minimal diff, local

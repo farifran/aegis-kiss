@@ -4,10 +4,12 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 INVENTORY_FIXTURE_DIR="${ROOT_DIR}/src/__aegis_inventory_fixture"
+CLEAN_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-clean-test.XXXXXX")"
 
 cleanup() {
   rm -f "${RUNTIME_DIR}/mechanical_inventory.json" "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}/review-decision.json"
   rm -rf "${INVENTORY_FIXTURE_DIR}"
+  rm -rf "${CLEAN_FIXTURE_DIR}"
 }
 trap cleanup EXIT
 
@@ -154,6 +156,24 @@ bash "${ROOT_DIR}/aegis" 'Nova demanda deve iniciar sem inventário anterior.' >
   echo 'new demand retained prior mechanical inventory' >&2
   exit 1
 }
+
+mkdir -p "${CLEAN_FIXTURE_DIR}/scripts" "${CLEAN_FIXTURE_DIR}/src/nested" "${CLEAN_FIXTURE_DIR}/.harness/runtime"
+cp "${ROOT_DIR}/aegis" "${CLEAN_FIXTURE_DIR}/aegis"
+cp "${ROOT_DIR}/scripts/ide_gateway.sh" "${CLEAN_FIXTURE_DIR}/scripts/ide_gateway.sh"
+printf 'produto antigo\n' > "${CLEAN_FIXTURE_DIR}/src/nested/product.ts"
+printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/active_contract_ir.json"
+printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/active_clarified_demand.json"
+printf '{}\n' > "${CLEAN_FIXTURE_DIR}/.harness/proof_registry.json"
+printf 'temporário\n' > "${CLEAN_FIXTURE_DIR}/.harness/runtime/stale.txt"
+printf 'núcleo\n' > "${CLEAN_FIXTURE_DIR}/scripts/sentinel.txt"
+bash "${CLEAN_FIXTURE_DIR}/aegis" clean | grep -qx '\[AEGIS\]\[IDE\] clean=PASS source_reset=1'
+[[ "$(find "${CLEAN_FIXTURE_DIR}/src" -mindepth 1 -maxdepth 1 -type f -o -type d | wc -l | tr -d ' ')" -eq 1 ]]
+[[ "$(cat "${CLEAN_FIXTURE_DIR}/src/index.ts")" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
+[[ -z "$(find "${CLEAN_FIXTURE_DIR}/.harness/runtime" -mindepth 1 -print -quit)" ]]
+[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/active_contract_ir.json" ]]
+[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/active_clarified_demand.json" ]]
+[[ ! -e "${CLEAN_FIXTURE_DIR}/.harness/proof_registry.json" ]]
+[[ -e "${CLEAN_FIXTURE_DIR}/scripts/sentinel.txt" ]]
 
 search_cmd() {
   if command -v rg >/dev/null 2>&1; then

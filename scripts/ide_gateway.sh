@@ -210,23 +210,20 @@ authorize() {
 }
 
 clean() {
-  local clear_source=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --src|--all) clear_source=1; shift ;;
+      --src|--all) shift ;;
       *) fatal "unknown_clean_flag:$1" ;;
     esac
   done
   mkdir -p "${RUNTIME_DIR}"
   find "${RUNTIME_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  if [[ "${clear_source}" -eq 1 ]]; then
-    [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
-    find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    rm -f "${ROOT_DIR}/.harness/active_contract_ir.json" "${ROOT_DIR}/.harness/proof_registry.json" \
-      "${ROOT_DIR}/.harness/active_clarified_demand.json"
-    printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
-  fi
-  printf '[AEGIS][IDE] clean=PASS source_reset=%s\n' "${clear_source}"
+  [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
+  find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  rm -f "${ROOT_DIR}/.harness/active_contract_ir.json" "${ROOT_DIR}/.harness/proof_registry.json" \
+    "${ROOT_DIR}/.harness/active_clarified_demand.json"
+  printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
+  printf '[AEGIS][IDE] clean=PASS source_reset=1\n'
 }
 
 status() {
