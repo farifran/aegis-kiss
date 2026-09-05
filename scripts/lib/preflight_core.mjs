@@ -67,6 +67,24 @@ function classifyLine(line, inCode) {
   return 'paragraph';
 }
 
+function sentenceRanges(line, inCode) {
+  if (inCode || line.startsWith('\x60\x60\x60') || /^(?:#{1,6}\s+|[-+*]|\d+[.)])\s+/u.test(line)) {
+    return [[0, line.length]];
+  }
+  const ranges = [];
+  let start = 0;
+  let inInlineCode = false;
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] === '\x60') inInlineCode = !inInlineCode;
+    if (inInlineCode || !'.!?'.includes(line[index])) continue;
+    if (index + 1 < line.length && !/\s/u.test(line[index + 1])) continue;
+    ranges.push([start, index + 1]);
+    start = index + 1;
+  }
+  if (start < line.length) ranges.push([start, line.length]);
+  return ranges;
+}
+
 function extractUnits(text) {
   const units = [];
   let utf16Start = 0;
@@ -76,14 +94,21 @@ function extractUnits(text) {
     if (rawLine.length === 0) continue;
     const line = rawLine.endsWith('\n') ? rawLine.slice(0, -1) : rawLine;
     const startsFence = line.startsWith('\x60\x60\x60');
-    if (line.trim().length > 0) {
+    for (const [start, end] of sentenceRanges(line, inCode)) {
+      const fragment = line.slice(start, end);
+      const leading = fragment.length - fragment.trimStart().length;
+      const trailing = fragment.length - fragment.trimEnd().length;
+      const unitText = fragment.trim();
+      if (unitText.length === 0) continue;
+      const unitStart = utf16Start + start + leading;
+      const unitEnd = utf16Start + end - trailing;
       units.push({
         id: 'UNIT-' + String(units.length + 1).padStart(4, '0'),
-        kind: classifyLine(line, inCode),
-        text: line,
+        kind: classifyLine(unitText, inCode),
+        text: unitText,
         range: {
-          startByte: byteOffset(text, utf16Start),
-          endByte: byteOffset(text, utf16Start + rawLine.length),
+          startByte: byteOffset(text, unitStart),
+          endByte: byteOffset(text, unitEnd),
         },
       });
     }
@@ -236,7 +261,9 @@ export function loadArchitecture(root) {
     schema: 'aegis.preflight_architecture.v2',
     policyDigest: digest(policyText),
     sourceStatus: 'CURRENT',
-    candidateRules: policy.rules.map(({ id, level, statement, appliesWhen, appliesMode }) => ({ id, level, statement, appliesWhen, appliesMode })),
+    candidateRules: policy.rules.map(({ id, level, statement, appliesWhen, appliesMode, forbiddenReferences = [] }) => ({
+      id, level, statement, appliesWhen, appliesMode, forbiddenReferences,
+    })),
   };
 }
 
@@ -326,6 +353,7 @@ export function semanticRequest(envelope, timing) {
     protocol: {
       decisionPath: '.harness/runtime/preflight_decision.json',
       finalize: './aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json',
+      revision: 'quando finalize retornar SEMANTIC_REVISION_REQUIRED, corrija somente a decisão usando as correções e repita finalize sem redescobrir o repositório',
       promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],
       forbidden: ['repository reads during semantic compilation', 'manual pre-commit execution', 'verification before authorize'],
     },

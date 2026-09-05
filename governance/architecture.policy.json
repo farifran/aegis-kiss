@@ -3,7 +3,7 @@
   "policyVersion": 1,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "5ca664b8d173ed4d421923f2ccb8a498af42c708f3cc93cf4abab373fd85cb20"
+    "sourceDigest": "076dfedb8be5715dcea09adddf634672d7f69cbefd249cd8b06de490530c39ef"
   },
   "rules": [
     {
@@ -17,8 +17,8 @@
       "appliesMode": "any",
       "sourceRanges": [
         {
-          "startByte": 1077,
-          "endByte": 1315
+          "startByte": 1075,
+          "endByte": 1316
         }
       ]
     },
@@ -30,10 +30,13 @@
         "time-dependent"
       ],
       "appliesMode": "any",
+      "forbiddenReferences": [
+        "Date.now"
+      ],
       "sourceRanges": [
         {
           "startByte": 1316,
-          "endByte": 1620
+          "endByte": 1657
         }
       ]
     }

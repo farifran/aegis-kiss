@@ -35,8 +35,14 @@ canônica de regras aplicáveis. Esta seção é sua projeção humana inicial.
   preservado ou rollback verificável.
 - **ARCH-DETERMINISTIC-TIME** (`hard`; `time-dependent`): comportamento que
   depende de tempo deve receber uma referência temporal explícita ou usar uma
-  fonte reproduzível. O relógio do sistema não pode alterar o resultado de
-  forma implícita; uma exceção requer emenda arquitetural aprovada.
+fonte reproduzível. O relógio do sistema — por exemplo, `Date.now()` — não
+pode alterar o resultado de forma implícita; uma exceção requer emenda
+arquitetural aprovada.
+
+Antes de persistir contrato, uma reconciliação mecânica independente confere
+sinais `hard`, origem dos requisitos e identificadores introduzidos. Ela só
+aceita contrato, pede confirmação de uma interpretação ou devolve a decisão
+para revisão; nunca corrige silenciosamente a decisão do modelo.
 
 ## Perfis de evidência
 

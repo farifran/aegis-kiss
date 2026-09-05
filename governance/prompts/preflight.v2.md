@@ -1,6 +1,6 @@
 Retorne somente JSON `aegis.preflight_decision.v2`; não leia o repositório.
 
-Preserve toda exigência explícita. Não invente fatos nem preencha lacunas sem evidência. Corrija apenas forma/ortografia, prefira a menor solução suficiente e torne falhas observáveis. Avalie cada regra candidata exatamente uma vez. Conflito hard exige `BLOCKED`. Pergunte somente quando a resposta muda entendimento, escopo ou arquitetura; use 0 perguntas quando houver interpretação segura e no máximo 3. Em `PRODUCT`, todo arquivo persistente, teste, prova e benchmark deve ficar em `src/`; manutenção do Aegis só é válida em `HARNESS`.
+Preserve toda exigência explícita. Não invente fatos nem reescreva uma API, valor inicial, retorno ou fonte de tempo sem confirmação. Corrija apenas forma/ortografia, prefira a menor solução suficiente e torne falhas observáveis. Avalie cada regra candidata exatamente uma vez. Quando um `forbiddenReferences` de regra hard aparecer nos fatos, use `NEEDS_CONFIRMATION` e uma pergunta `ARCHITECTURE` com a interpretação segura proposta; não marque `CLARIFIED`. Pergunte somente quando a resposta muda entendimento, escopo ou arquitetura; use 0 perguntas quando houver interpretação segura e no máximo 3. Em `PRODUCT`, todo arquivo persistente, teste, prova e benchmark deve ficar em `src/`; manutenção do Aegis só é válida em `HARNESS`.
 
 O Aegis cria IDs, cobertura e registro de provas. Você fornece um delta compacto usando índices zero-based:
 - `rules`: `[ruleId,verdict,evidência,[unitIndexes]]`
@@ -14,7 +14,7 @@ O Aegis cria IDs, cobertura e registro de provas. Você fornece um delta compact
 - `continuity.retirements`: `[proof|target,id,razão,evidência,sucessorOuNull]`
 - `continuity.proofChanges`: `[proofId,razão,evidência]`
 
-Cada UNIT deve aparecer exatamente uma vez: ligada a um ou mais requisitos, ou em `contextUnits`. Cada requisito deve apontar para ao menos uma cláusula e uma prova. Cada invariante deve apontar para prova. `coverageKey` é estável, minúscula e específica ao risco. O entrypoint é um `.ts` em `src/` ou `.sh`; targets incluem os arquivos que invalidam a prova. Preserve provas/targets anteriores ou declare continuidade.
+Cada UNIT deve aparecer exatamente uma vez: ligada a um ou mais requisitos, ou em `contextUnits`. Use `USER` somente para comportamento já expresso nas UNITs. Qualquer derivação deve usar `KISS_DERIVATION` ou `ARCHITECTURE_DEFAULT`; se ela alterar API pública, retorno, valor inicial ou fonte de tempo, inclua uma pergunta que a descreva como interpretação. Cada requisito deve apontar para ao menos uma cláusula e uma prova. Cada invariante deve apontar para prova. `coverageKey` é estável, minúscula e específica ao risco. O entrypoint é um `.ts` em `src/` ou `.sh`; targets incluem os arquivos que invalidam a prova. Preserve provas/targets anteriores ou declare continuidade.
 
 Para `CLARIFIED` ou `NEEDS_CONFIRMATION`, emita todos estes campos: `schema`, `contextDigest`, `status`, `rules`, `questions`, `intent`, `scope`, `excluded`, `requirements`, `contextUnits`, `acceptance`, `failures`, `behaviors`, `preconditions`, `invariants`, `postconditions`, `proofs`, `continuity`. Para `BLOCKED`, emita apenas os cinco primeiros. `CLARIFIED` exige `questions:[]`; `NEEDS_CONFIRMATION` inclui os corpos provisórios nos mesmos campos e a confirmação os promove sem outra chamada.
 

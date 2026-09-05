@@ -177,11 +177,97 @@ function ruleAssessments(envelope, decision) {
   return assessments;
 }
 
+function codeTerms(text) {
+  const terms = new Set();
+  const standardTypes = new Set(['bigint', 'boolean', 'number', 'string', 'void', 'null', 'undefined', 'true', 'false']);
+  for (const match of text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/gu)) {
+    const value = match[0];
+    const camelOrPascal = /[A-Z]/u.test(value.slice(1)) && value !== value.toUpperCase();
+    if (standardTypes.has(value) || camelOrPascal || value.includes('_') || value.includes('$')) terms.add(value);
+  }
+  for (const match of text.matchAll(/(?:\(|,)\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:/gu)) terms.add(match[1]);
+  return terms;
+}
+
+function termsForUnits(envelope, indexes) {
+  return new Set(indexes.flatMap((index) => [...codeTerms(envelope.normalizedDemand.units[index].text)]));
+}
+
+function questionCoversUnits(decision, unitIndexes, scope) {
+  const expected = new Set(unitIndexes);
+  return decision.questions.some((question) => (
+    (scope === undefined || question[0] === scope)
+    && question[6].some((index) => expected.has(index))
+  ));
+}
+
+function reconciliationFindings(envelope, decision, assessments) {
+  const findings = [];
+  const unitIndexById = new Map(envelope.normalizedDemand.units.map((unit, index) => [unit.id, index]));
+  const assessmentById = new Map(assessments.map((assessment) => [assessment.ruleId, assessment]));
+
+  for (const rule of envelope.architecture.candidateRules) {
+    if (rule.level !== 'hard' || (rule.forbiddenReferences ?? []).length === 0) continue;
+    const signalUnits = envelope.mechanicalFacts.references
+      .filter((reference) => (rule.forbiddenReferences ?? []).includes(reference.value))
+      .map((reference) => unitIndexById.get(reference.unitId))
+      .filter((index) => index !== undefined);
+    if (signalUnits.length === 0 || decision.status === 'BLOCKED') continue;
+    if (decision.status !== 'NEEDS_CONFIRMATION') {
+      findings.push({ code: 'hard_reference_requires_confirmation', ruleId: rule.id, unitIndexes: signalUnits });
+      continue;
+    }
+    if (assessmentById.get(rule.id)?.verdict !== 'APPLIED') {
+      findings.push({ code: 'hard_reference_requires_safe_interpretation', ruleId: rule.id, unitIndexes: signalUnits });
+    }
+    if (!questionCoversUnits(decision, signalUnits, 'ARCHITECTURE')) {
+      findings.push({ code: 'hard_reference_question_missing', ruleId: rule.id, unitIndexes: signalUnits });
+    }
+  }
+
+  for (const [index, requirement] of decision.requirements.entries()) {
+    const [statement, provenance, sourceIndexes] = requirement;
+    if (provenance !== 'USER') continue;
+    const sourceTerms = termsForUnits(envelope, sourceIndexes);
+    const introduced = [...codeTerms(statement)].filter((term) => !sourceTerms.has(term));
+    if (introduced.length > 0) {
+      findings.push({ code: 'user_requirement_introduces_identifier', requirementIndex: index, identifiers: introduced, unitIndexes: sourceIndexes });
+    }
+  }
+
+  const clauses = [
+    ...decision.behaviors.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
+    ...decision.preconditions.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
+    ...decision.postconditions.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
+  ];
+  for (const [statement, requirementIndexes] of clauses) {
+    const sourceIndexes = [...new Set(requirementIndexes.flatMap((index) => decision.requirements[index][2]))];
+    const sourceTerms = termsForUnits(envelope, sourceIndexes);
+    const introduced = [...codeTerms(statement)].filter((term) => !sourceTerms.has(term));
+    if (introduced.length > 0 && !questionCoversUnits(decision, sourceIndexes)) {
+      findings.push({ code: 'derived_contract_requires_confirmation', identifiers: introduced, unitIndexes: sourceIndexes });
+    }
+  }
+  return findings;
+}
+
+function validateScopeAndProofPaths(envelope, decision) {
+  const scope = new Set(decision.scope);
+  const withinScope = (path) => [...scope].some((declared) => path === declared || path.startsWith(`${declared}/`));
+  if (envelope.changeKind === 'PRODUCT' && decision.scope.some((path) => path !== 'src' && !path.startsWith('src/'))) {
+    fail('product_scope_outside_src');
+  }
+  for (const proof of decision.proofs) {
+    if (!withinScope(proof[4]) || !proof[5].every((target) => withinScope(target))) fail('proof_path_outside_scope');
+  }
+}
+
 function validateDecision(envelope, decision) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
   const assessments = ruleAssessments(envelope, decision);
   for (const question of decision.questions) unitIds(envelope, question[6], 'decision_unknown_unit');
+  validateScopeAndProofPaths(envelope, decision);
   const hardRules = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
   if (assessments.some((item) => item.verdict === 'CONFLICT' && hardRules.has(item.ruleId)) && decision.status !== 'BLOCKED') {
     fail('hard_conflict_not_blocked');
@@ -243,15 +329,6 @@ function assembleSemanticState(envelope, decision, assessments) {
     requireIndexes(invariant[2], proofIds.length, 'invariant_unknown_proof');
     if (invariant[2].length === 0) fail('invariant_without_proof');
   });
-  const scope = new Set(decision.scope);
-  const withinScope = (path) => [...scope].some((declared) => path === declared || path.startsWith(`${declared}/`));
-  for (const proof of decision.proofs) {
-    if (!withinScope(proof[4]) || !proof[5].every((target) => withinScope(target))) fail('proof_path_outside_scope');
-  }
-  if (envelope.changeKind === 'PRODUCT' && decision.scope.some((path) => path !== 'src' && !path.startsWith('src/'))) {
-    fail('product_scope_outside_src');
-  }
-
   const clarifiedDemand = {
     schema: 'aegis.clarified_demand.v2',
     changeKind: envelope.changeKind,
@@ -373,10 +450,22 @@ try {
 validateEnvelope(envelope);
 
 const decisionFile = await readJson(options.decision, 'unreadable_decision');
+const decisionDigest = sha256(decisionFile.bytes);
 const assessments = validateDecision(envelope, decisionFile.value);
+const reconciliation = reconciliationFindings(envelope, decisionFile.value, assessments);
+if (reconciliation.length > 0) {
+  process.stdout.write(`${JSON.stringify({
+    schema: 'aegis.preflight_finalization.v2',
+    status: 'SEMANTIC_REVISION_REQUIRED',
+    corrections: reconciliation,
+  })}\n`);
+  process.exit(0);
+}
+let independentReviewDigest = null;
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
   validateIndependentReview(envelope, decisionFile, review.value);
+  independentReviewDigest = sha256(review.bytes);
 }
 if (decisionFile.value.status === 'BLOCKED') {
   process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
@@ -427,6 +516,11 @@ const result = {
   clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
   contractDigest: canonicalDigest(contract),
   proofRegistryDigest: canonicalDigest(proofRegistry),
+  semantic: {
+    reconciler: 'mechanical_reconciliation.v1',
+    decisionDigest,
+    independentReviewDigest,
+  },
   timing: { phase: 'finalization', startedAtEpochMs, durationMs: Math.round((performance.now() - started) * 1000) / 1000 },
   paths: ['src/.aegis/clarified-demand.json', 'src/.aegis/contract-ir.json', 'src/.aegis/proof-registry.json'],
 };

@@ -40,6 +40,10 @@ esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
 * Conflitos com regras arquiteturais `hard` bloqueiam a execução até uma
   emenda explícita e aprovada; regras `default` podem gerar confirmação;
   preferências não viram perguntas desnecessárias.
+* Uma referência explícita da demanda que a política `hard` proíba nunca é
+  reescrita silenciosamente: o preflight deve propor a interpretação compatível
+  e pedir confirmação. Sem confirmação, a demanda permanece bloqueada ou volta
+  para revisão.
 * Decisões internas do Aegis são resolvidas pelo harness e nunca aparecem como
   perguntas do produto.
 * O modo padrão `PRODUCT` admite artefatos persistentes exclusivamente em

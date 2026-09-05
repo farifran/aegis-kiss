@@ -54,7 +54,7 @@ NODE
 }
 
 prepare_repository "${WORK_DIR}/direct"
-demand=$'\357\273\277# Criar\r\nUse BigInt(Date.now()) em `src/clock.ts`.\rConsulte https://example.test/spec\n'
+demand=$'\357\273\277# Criar\r\nUse bigint de Clock.now() em `src/clock.ts`.\rConsulte https://example.test/spec\n'
 printf '%s' "${demand}" | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
   --kind PRODUCT --save-envelope --target src > "${WORK_DIR}/direct-request.json"
 envelope="${WORK_DIR}/direct/.harness/runtime/preflight_envelope.json"
@@ -68,7 +68,7 @@ jq -e '
 jq -e '
   .baseline.clean == true
   and (.normalizedDemand.text | contains("\r") | not)
-  and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Date.now"))
+  and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Clock.now"))
   and (.mechanicalFacts.references | any(.kind == "url" and .status == "UNPROVEN"))
 ' "${envelope}" >/dev/null
 
@@ -127,7 +127,7 @@ rm "${WORK_DIR}/direct/src/drift.ts"
 AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
   < "${envelope}" > "${WORK_DIR}/direct/.harness/runtime/result.json"
-jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .changeKind == "PRODUCT" and (.proofRegistryDigest | test("^[a-f0-9]{64}$"))' \
+jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .changeKind == "PRODUCT" and (.proofRegistryDigest | test("^[a-f0-9]{64}$")) and (.semantic.reconciler == "mechanical_reconciliation.v1") and (.semantic.decisionDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/direct/.harness/runtime/result.json" >/dev/null
 jq -e '.changeKind == "PRODUCT" and .scope.authorizedPaths == ["src/clock.ts", "src/clock.proof.ts", "src/.aegis/clarified-demand.json", "src/.aegis/contract-ir.json", "src/.aegis/proof-registry.json"]' \
   "${WORK_DIR}/direct/src/.aegis/contract-ir.json" >/dev/null
@@ -156,5 +156,73 @@ AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/finalize_preflight.mj
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   < "${confirm_envelope}" > "${WORK_DIR}/confirm/.harness/runtime/result.json"
 jq -e '.interpretationStatus == "INTERPRETATION_CONFIRMED"' "${WORK_DIR}/confirm/.harness/runtime/result.json" >/dev/null
+
+# A hard architecture signal cannot be silently rewritten into a new public API.
+# The mechanical reconciler must request revision first, then accept the same
+# interpretation only after the user confirms it.
+prepare_repository "${WORK_DIR}/hard-signal"
+token_demand='Crie src/tokenBucket.ts com a classe TokenBucket. Use bigint com BigInt(Date.now()). Construtor aceita (maxBytes: bigint, mbps: number) e converte para rateBitsPerMs (mbps*8000). Em update(), acumule timeDiff*rateBitsPerMs limitando ao maxTokens. Em consume(bits: bigint), atualize e deduza saldo. Exporte a função obterEstadoBitmask(bucket: TokenBucket): number com bit 0 se tokens==0n e bit 1 se refil ativo. Re-exporte no src/index.ts.'
+printf '%s' "${token_demand}" | AEGIS_ROOT="${WORK_DIR}/hard-signal" node "${ROOT_DIR}/scripts/preflight.mjs" \
+  --kind PRODUCT --save-envelope --internal-envelope > "${WORK_DIR}/hard-signal-envelope-copy.json"
+hard_envelope="${WORK_DIR}/hard-signal/.harness/runtime/preflight_envelope.json"
+jq -e '(.normalizedDemand.units | length) >= 7 and (.architecture.candidateRules[] | select(.id == "ARCH-DETERMINISTIC-TIME") | .forbiddenReferences == ["Date.now"])' \
+  "${hard_envelope}" >/dev/null
+node --input-type=module - "${hard_envelope}" "${WORK_DIR}/hard-signal/.harness/runtime/decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [envelopePath, destination] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const allUnits = envelope.normalizedDemand.units.map((_, index) => index);
+writeFileSync(destination, JSON.stringify({
+  schema: 'aegis.preflight_decision.v2',
+  contextDigest: envelope.contextDigest,
+  status: 'CLARIFIED',
+  rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'APPLIED', 'A regra foi considerada.', allUnits]),
+  questions: [],
+  intent: 'Implementar TokenBucket determinístico.',
+  scope: ['src/tokenBucket.ts', 'src/tokenBucket.proof.ts', 'src/index.ts'],
+  excluded: [],
+  requirements: [['TokenBucket aceita (maxBytes: bigint, mbps: number, initialTime: bigint).', 'USER', allUnits]],
+  contextUnits: [],
+  acceptance: ['A API é observável.'],
+  failures: [['Tempo regressivo', 'RangeError', [0]]],
+  behaviors: [['update(now: bigint) atualiza o saldo.', [0]]],
+  preconditions: [['initialTime e now são bigint.', [0]]],
+  invariants: [['0n <= tokens.', [0], [0]]],
+  postconditions: [['consume(bits: bigint, now: bigint) retorna boolean.', [0]]],
+  proofs: [['token_bucket.behavior', 'Saldo incorreto', 'Provar saldo.', [0], 'src/tokenBucket.proof.ts', ['src/tokenBucket.ts'], 'low', 'always']],
+  continuity: { retirements: [], proofChanges: [] },
+}));
+NODE
+AEGIS_ROOT="${WORK_DIR}/hard-signal" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json < "${hard_envelope}" > "${WORK_DIR}/hard-signal/.harness/runtime/revision.json"
+jq -e '.status == "SEMANTIC_REVISION_REQUIRED" and ([.corrections[].code] | index("hard_reference_requires_confirmation")) and ([.corrections[].code] | index("user_requirement_introduces_identifier"))' \
+  "${WORK_DIR}/hard-signal/.harness/runtime/revision.json" >/dev/null
+node --input-type=module - "${WORK_DIR}/hard-signal/.harness/runtime/decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const decision = JSON.parse(readFileSync(path, 'utf8'));
+decision.status = 'NEEDS_CONFIRMATION';
+decision.requirements[0][1] = 'ARCHITECTURE_DEFAULT';
+decision.questions = [['ARCHITECTURE', 'A demanda pede Date.now(), mas a arquitetura exige tempo explícito. Confirmar initialTime e now?', 'Date.now foi detectado.', 'Altera a API pública.', 'Usar initialTime e now explícitos.', 'Interpretado: substituir Date.now por parâmetros explícitos.', decision.requirements[0][2]]];
+writeFileSync(path, JSON.stringify(decision));
+NODE
+node --input-type=module - "${WORK_DIR}/hard-signal/.harness/runtime/decision.json" "${hard_envelope}" "${WORK_DIR}/hard-signal/.harness/runtime/resolution.json" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const [decisionPath, envelopePath, resolutionPath] = process.argv.slice(2);
+const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(resolutionPath, JSON.stringify({
+  schema: 'aegis.preflight_resolution.v2',
+  decisionDigest: digest(readFileSync(decisionPath)),
+  preflightPromptDigest: envelope.promptDigest,
+  answers: [{ questionId: 'Q-0001', action: 'CONFIRM_INTERPRETATION' }],
+}));
+NODE
+AEGIS_ROOT="${WORK_DIR}/hard-signal" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
+  < "${hard_envelope}" > "${WORK_DIR}/hard-signal/.harness/runtime/result.json"
+jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .interpretationStatus == "INTERPRETATION_CONFIRMED"' \
+  "${WORK_DIR}/hard-signal/.harness/runtime/result.json" >/dev/null
 
 echo '[AEGIS][TEST] preflight v2: PASS'

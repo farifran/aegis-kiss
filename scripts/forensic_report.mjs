@@ -44,6 +44,7 @@ const postcommit = readReceipt('postcommit_receipt.json');
 if (postcommit.commit !== head || postcommit.executionId !== precommit.executionId) fail('receipt_not_bound_to_head');
 if (JSON.stringify([...precommit.files].sort()) !== JSON.stringify(files)) fail('receipt_files_mismatch');
 const runtimeTiming = {};
+const semantic = {};
 for (const [name, path] of [
   ['preflight', resolve(root, '.harness/runtime/preflight_envelope.json')],
   ['finalization', resolve(root, '.harness/runtime/finalization.json')],
@@ -57,6 +58,13 @@ for (const [name, path] of [
   }
   if (value.executionId !== precommit.executionId) fail(`${name}_execution_mismatch`);
   runtimeTiming[name] = value.timing;
+  if (name === 'preflight') semantic.promptDigest = value.promptDigest;
+  if (name === 'finalization') {
+    semantic.reconciler = value.semantic?.reconciler;
+    semantic.decisionDigest = value.semantic?.decisionDigest;
+    semantic.independentReviewDigest = value.semantic?.independentReviewDigest;
+    semantic.interpretationStatus = value.interpretationStatus;
+  }
 }
 
 const report = {
@@ -82,6 +90,7 @@ const report = {
     authorizedAtEpoch: precommit.issuedAtEpoch,
     postcommitVerifiedAtEpoch: postcommit.verifiedAtEpoch,
     runtimeTiming,
+    semantic,
   },
 };
 process.stdout.write(`${JSON.stringify(report)}\n`);
