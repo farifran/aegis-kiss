@@ -18,13 +18,10 @@ printf '%s' "${first}" | jq -e '
   and .rawByteLength > .normalizedByteLength
   and (.text | contains("\r") | not)
   and .transformations == [{kind:"CRLF_TO_LF",count:6}]
-  and ([.sourceMap[] | select((.raw.endByte - .raw.startByte) == 2 and (.normalized.endByte - .normalized.startByte) == 1)] | length == 6)
-  and ([.blocks[].kind] | index("heading") and index("list") and index("code"))
   and ([.references[] | select(.kind == "path" and .value == "src/example.ts")] | length == 1)
   and ([.references[] | select(.kind == "symbol" and .value == "parseInput")] | length == 1)
   and ([.references[] | select(.kind == "url" and .value == "https://example.test/spec")] | length == 1)
   and ([.references[] | select(.value == "example.test/spec")] | length == 0)
-  and .correctionCandidates == []
 ' >/dev/null
 
 if printf '\377' | "${NORMALIZER[@]}" >/dev/null 2>&1; then

@@ -168,7 +168,6 @@ authorize() {
   staged_files="$(git -C "${ROOT_DIR}" diff --cached --name-only | sort -u)"
   [[ -n "${staged_files}" ]] || fatal 'authorization_requires_staged_changes'
   bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
-  run_verify --profile auto
   artifact="$(mktemp "${TMPDIR:-/tmp}/aegis-ide-validation.XXXXXX.json")"
   jq -n --rawfile files <(printf '%s\n' "${staged_files}") \
     '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:($files | split("\n") | map(select(length > 0)))}}' \

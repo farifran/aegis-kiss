@@ -16,7 +16,7 @@ Aegis  → contract/evidence coherence, proof profiles, receipt and promotion
 
 ```bash
 ./aegis "Describe the requested change" --target src
-# The IDE creates or updates the demand contract and the code.
+# The IDE finalizes the clarified demand, then creates a Contract IR v2 and code.
 
 ./aegis verify
 git add <files>
@@ -55,5 +55,9 @@ checks, proof execution, a staged manifest and a receipt.
 The project declares domain-specific proofs in its contract and proof
 registry. The Aegis core does not accumulate blockchain, payment or other
 domain tests.
+
+`npm test` keeps only fast harness checks. Run
+`npm run aegis:test:preflight-forensic` when investigating preflight behavior;
+its report is transient and removed by `./aegis clean`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the formal model.

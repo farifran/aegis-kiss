@@ -4,7 +4,7 @@
   "title": "Aegis Normalized Demand v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizerVersion", "rawDigest", "normalizedDigest", "rawByteLength", "normalizedByteLength", "text", "sourceMap", "transformations", "blocks", "correctionCandidates"],
+  "required": ["schema", "normalizerVersion", "rawDigest", "normalizedDigest", "rawByteLength", "normalizedByteLength", "text", "transformations", "references"],
   "properties": {
     "schema": { "const": "aegis.normalized_demand.v1" },
     "normalizerVersion": { "type": "string", "minLength": 1 },
@@ -13,22 +13,9 @@
     "rawByteLength": { "type": "integer", "minimum": 1 },
     "normalizedByteLength": { "type": "integer", "minimum": 1 },
     "text": { "type": "string" },
-    "sourceMap": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/sourceMapSegment" }
-    },
-    "blocks": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/block" }
-    },
     "transformations": {
       "type": "array",
       "items": { "$ref": "#/$defs/transformation" }
-    },
-    "correctionCandidates": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/correctionCandidate" }
     },
     "references": {
       "type": "array",
@@ -45,24 +32,6 @@
         "endByte": { "type": "integer", "minimum": 0 }
       }
     },
-    "sourceMapSegment": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["raw", "normalized"],
-      "properties": {
-        "raw": { "$ref": "#/$defs/range" },
-        "normalized": { "$ref": "#/$defs/range" }
-      }
-    },
-    "block": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "range"],
-      "properties": {
-        "kind": { "enum": ["paragraph", "heading", "list", "code", "quote", "link"] },
-        "range": { "$ref": "#/$defs/range" }
-      }
-    },
     "transformation": {
       "type": "object",
       "additionalProperties": false,
@@ -71,29 +40,6 @@
         "kind": { "const": "CRLF_TO_LF" },
         "count": { "type": "integer", "minimum": 1 }
       }
-    },
-    "correctionCandidate": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "kind", "range", "suggestion", "semanticEffect", "status"],
-      "properties": {
-        "id": { "type": "string", "pattern": "^CORR-[A-Z0-9][A-Z0-9-]+$" },
-        "kind": { "enum": ["formatting", "spelling", "reference", "semantic"] },
-        "range": { "$ref": "#/$defs/range" },
-        "suggestion": { "type": "string", "minLength": 1 },
-        "semanticEffect": { "enum": ["none", "possible", "yes"] },
-        "status": { "enum": ["applied", "pending_confirmation", "requires_investigation"] }
-      },
-      "allOf": [
-        {
-          "if": { "properties": { "semanticEffect": { "const": "none" } }, "required": ["semanticEffect"] },
-          "then": { "properties": { "status": { "enum": ["applied", "pending_confirmation", "requires_investigation"] } } }
-        },
-        {
-          "if": { "properties": { "semanticEffect": { "enum": ["possible", "yes"] } }, "required": ["semanticEffect"] },
-          "then": { "properties": { "status": { "enum": ["pending_confirmation", "requires_investigation"] } } }
-        }
-      ]
     },
     "reference": {
       "type": "object",

@@ -50,7 +50,6 @@ jq -e '
 jq -e '
   .properties.schema.const == "aegis.normalized_demand.v1"
   and (.required | index("rawByteLength") and index("normalizedByteLength") and index("transformations"))
-  and (."$defs".correctionCandidate.properties.semanticEffect.enum == ["none", "possible", "yes"])
   and (."$defs".reference.properties.kind.enum == ["path", "symbol", "url", "attachment"])
 ' "${SCHEMA_DIR}/normalized-demand.v1.schema.json" >/dev/null
 
@@ -76,6 +75,7 @@ jq -e '
 jq -e '
   .properties.schema.const == "aegis.contract_ir.v2"
   and (.properties.clarifiedDemandDigest.type == "string")
+  and (.required | index("requirementCoverage"))
   and (."$defs".invariant.properties.proofIds.items.pattern == "^PO-[A-Z0-9][A-Z0-9-]+$")
 ' "${SCHEMA_DIR}/contract-ir.v2.schema.json" >/dev/null
 

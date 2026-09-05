@@ -11,9 +11,9 @@ de execução por si só.
 | `./aegis "<demanda>"` | Ativa | Emite prompt de preflight com demanda normalizada, fatos mecânicos e política compacta no `stdout`; não persiste a demanda bruta. | A demanda esclarecida será a primeira saída durável após confirmação. |
 | `.skills/briefing.md` | Ativa | Mistura intenção, Contract IR e detalhes de implementação TypeScript. | Refatoração pendente, fora desta modificação; quando iniciada, receberá demanda esclarecida e emitirá somente compromisso semântico. |
 | `ARCHITECTURE.md` | Ativa | Projeção humana inicial, com range rastreável da regra estruturada. | `governance/architecture.policy.json` é a política canônica; o normalizador seleciona regras por tags e detecta fonte desatualizada. |
-| `.harness/active_contract_ir.json` | Ativa quando há produto governado | A validação atual assegura targets e vínculos com provas, mas não valida pré/pós-condições nem invariantes. | Migrará gradualmente de `v1` para o schema semântico `v2`. |
-| `.harness/proof_registry.json` | Ativa quando há produto governado | Já valida identidade, risco, autoridade, custo, cadência, target e comando. | Permanece a autoridade da execução de provas; será ligado a invariantes do contrato `v2`. |
-| `.git/aegis/precommit_receipt.json` | Ativa na autorização | Liga índice, manifesto, contrato, registro, artefato de validação e perfil. | Continuará sendo o recibo; passará a referenciar os digests de demanda esclarecida e política arquitetural. |
+| `.harness/active_contract_ir.json` | Ativa quando há produto governado | Aceita exclusivamente `aegis.contract_ir.v2`; valida escopo, comportamento, invariantes, obrigações e cobertura de cada requisito esclarecido. | Evolução explícita pelo próprio contrato, nunca conversão automática de `v1`. |
+| `.harness/proof_registry.json` | Ativa quando há produto governado | Valida identidade, risco, autoridade, custo, cadência, target e comando; toda obrigação e invariante de `v2` precisa apontar para ele. | Permanece a autoridade da execução de provas. |
+| `.git/aegis/precommit_receipt.json` | Ativa na autorização | Liga índice, manifesto, contrato, registro, demanda esclarecida, política arquitetural, artefato de validação e perfil. | O recibo verifica novamente todos esses digests contra o índice. |
 
 ## Separação obrigatória
 
@@ -52,10 +52,10 @@ provas. Antes de ativar os gates de `v2`, o operador reinicia o estado
 governado com ação explícita. O Git preserva contratos e receipts históricos;
 o runtime novo começa sem metadados ativos herdados.
 
-O normalizador e o intake `v2` já estão ativos. O preflight semântico e a
-migração de Contract IR continuam pendentes; nenhum gate de promoção escolhe
-automaticamente os novos schemas até essas etapas serem implementadas e
-testadas.
+O normalizador, o intake `v2`, o preflight semântico e a migração de Contract
+IR já estão ativos. O gate rejeita contrato legado, valida o `v2` no worktree
+e no índice, e o receipt preserva os vínculos da demanda esclarecida e da
+política arquitetural.
 
 ## Critério de encerramento desta fase
 

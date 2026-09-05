@@ -21,10 +21,12 @@
     "aegis:test:demand-normalizer": "bash scripts/substrates/test/test_demand_normalizer.sh",
     "aegis:test:architecture-normalizer": "bash scripts/substrates/test/test_architecture_normalizer.sh",
     "aegis:test:preflight-builder": "bash scripts/substrates/test/test_preflight_builder.sh",
-    "aegis:test:preflight-finalization": "bash scripts/substrates/test/test_preflight_finalization.sh",
+    "aegis:test:preflight-fast": "bash scripts/substrates/test/test_preflight_fast.sh",
+    "aegis:test:preflight-forensic": "bash scripts/substrates/test/test_preflight_finalization.sh",
+    "aegis:test:contract-ir-v2": "bash scripts/substrates/test/test_contract_ir_v2.sh",
     "aegis:test:ide-gateway": "bash scripts/substrates/test/test_ide_gateway.sh",
     "aegis:test:governance-schemas": "bash scripts/substrates/test/test_governance_schemas.sh",
-    "aegis:test": "npm run aegis:test:governance-schemas && npm run aegis:test:demand-normalizer && npm run aegis:test:architecture-normalizer && npm run aegis:test:preflight-builder && npm run aegis:test:preflight-finalization && npm run aegis:test:proof-governance && npm run aegis:test:formal-promotion && npm run aegis:test:ide-gateway"
+    "aegis:test": "npm run aegis:test:governance-schemas && npm run aegis:test:demand-normalizer && npm run aegis:test:architecture-normalizer && npm run aegis:test:preflight-builder && npm run aegis:test:preflight-fast && npm run aegis:test:contract-ir-v2 && npm run aegis:test:proof-governance && npm run aegis:test:formal-promotion && npm run aegis:test:ide-gateway"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",

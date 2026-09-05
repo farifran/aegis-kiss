@@ -11,10 +11,16 @@ relatório forense transitório produzido durante a execução.
 | Referência obrigatória ausente | Fato mecânico `DISPROVEN` e bloqueio | `BLOCKED` sem alterar a demanda esclarecida válida anterior. |
 | TokenBucket com relógio implícito | Referências, `BigInt(Date.now())` e regra hard de tempo | A decisão deve declarar o conflito e terminar em `BLOCKED`; `CLARIFIED` é rejeitado. |
 
-Também é verificada a rejeição de uma resposta cujo identificador não pertence
-à pergunta aprovada. A cobertura está em
-`scripts/substrates/test/test_preflight_finalization.sh` e é executada por
-`npm test`. O laudo detalhado fica em
+O teste rápido `scripts/substrates/test/test_preflight_fast.sh`, executado por
+`npm test`, prova a finalização e persistência do caminho canônico. A auditoria
+abaixo também verifica a rejeição de uma resposta cujo identificador não
+pertence à pergunta aprovada. Ela roda apenas sob demanda:
+
+```bash
+npm run aegis:test:preflight-forensic
+```
+
+O laudo detalhado fica em
 `.harness/runtime/preflight_forensic_report.md`, contém a demanda bruta,
 normalização, fatos, decisão, resolução, demanda esclarecida, alterações de
 estado e tempos. Ele é removido por `./aegis clean`.

@@ -42,11 +42,13 @@ printf 'export const version = 2;\n' > "${repo}/src/index.ts"
 jq -n '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:["src/index.ts"]}}' > "${artifact}"
 
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}"
-receipt="$(git -C "${repo}" rev-parse --git-path aegis/precommit_receipt.json)"
+receipt="$(git -C "${repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
 jq -e '
   .schema == "aegis.precommit_receipt.v1"
   and .status == "PROVEN"
   and .proofProfile == "fast"
+  and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$"))
+  and (.architecturePolicyDigest | test("^[a-f0-9]{64}$"))
   and .validationAuthority.kind == "deterministic_tribunal"
 ' "${receipt}" >/dev/null
 git -C "${repo}" add src/index.ts
@@ -112,7 +114,7 @@ git -C "${baseline_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@ex
 printf 'export const version = 2;\n' > "${baseline_repo}/src/index.ts"
 git -C "${baseline_repo}" add src/index.ts
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${baseline_repo}"
-baseline_receipt="$(git -C "${baseline_repo}" rev-parse --git-path aegis/precommit_receipt.json)"
+baseline_receipt="$(git -C "${baseline_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
 jq -e '.proofProfile == "fast" and (.proofs | length) == 0' "${baseline_receipt}" >/dev/null
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${baseline_repo}"
 

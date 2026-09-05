@@ -28,6 +28,11 @@ aegis_proof_safe_repository_path() {
   [[ -n "${path}" && "${path}" != /* && ! "${path}" =~ (^|/)\.\.(/|$) ]]
 }
 
+aegis_contract_targets() {
+  local contract_file="${1:-$(aegis_proof_contract_path)}"
+  jq -r 'if .schema == "aegis.contract_ir.v2" then .scope.authorizedPaths[]? else .targets[]? end' "${contract_file}"
+}
+
 # A proof command is part of its definition, not an opaque string.  We do not
 # execute it here; this merely proves that the staged/working tree can resolve
 # the declared entry point before a commit is allowed to claim the proof.
@@ -122,7 +127,7 @@ aegis_proof_governance_validate() {
   done < <(jq -r '.proofs[] | select(.status != "retired") | .targets[]' "${registry_file}")
 
   missing_contract_targets=""
-  missing_contract_targets="$(jq -r '.targets[]? // empty' "${contract_file}" | while IFS= read -r proof_target; do
+  missing_contract_targets="$(aegis_contract_targets "${contract_file}" | while IFS= read -r proof_target; do
     [[ -e "${root_dir}/${proof_target}" ]] || printf '%s\n' "${proof_target}"
   done)"
   [[ -z "${missing_contract_targets}" ]] || {
@@ -276,7 +281,7 @@ aegis_proof_continuity_validate_staged() {
       fi
     done < <(
       {
-        jq -r '(.targets[]? // empty)' "${old_contract}"
+        aegis_contract_targets "${old_contract}"
         jq -r '.proofs[] | select(.status != "retired") | .targets[]' "${old_registry}"
       } | sort -u
     )
@@ -316,8 +321,7 @@ aegis_proof_governance_validate_staged() {
       break
     fi
   done < <(
-    jq -r '(.targets[]? // empty), (.proofs[]? | select(.status != "retired") | .targets[]?)' \
-      "${contract_file}" "${registry_file}" | sort -u
+    { aegis_contract_targets "${contract_file}"; jq -r '.proofs[]? | select(.status != "retired") | .targets[]?' "${registry_file}"; } | sort -u
   )
 
   if [[ "${rc}" -eq 0 ]]; then

@@ -32,96 +32,13 @@ function range(startByte, endByte) {
   return { startByte, endByte };
 }
 
-function addSegment(segments, rawStart, rawEnd, normalizedStart, normalizedEnd) {
-  const previous = segments.at(-1);
-  const rawLength = rawEnd - rawStart;
-  const normalizedLength = normalizedEnd - normalizedStart;
-  const previousRawLength = previous === undefined ? -1 : previous.raw.endByte - previous.raw.startByte;
-  const previousNormalizedLength = previous === undefined ? -1 : previous.normalized.endByte - previous.normalized.startByte;
-  if (
-    previous !== undefined
-    && previous.raw.endByte === rawStart
-    && previous.normalized.endByte === normalizedStart
-    && rawLength === normalizedLength
-    && previousRawLength === previousNormalizedLength
-  ) {
-    previous.raw.endByte = rawEnd;
-    previous.normalized.endByte = normalizedEnd;
-    return;
-  }
-  segments.push({ raw: range(rawStart, rawEnd), normalized: range(normalizedStart, normalizedEnd) });
-}
-
 function normalizeLineEndings(rawText) {
-  const text = [];
-  const sourceMap = [];
-  let rawOffset = 0;
-  let normalizedOffset = 0;
-  let crlfCount = 0;
-
-  for (let index = 0; index < rawText.length;) {
-    const unit = rawText.codePointAt(index);
-    if (unit === undefined) break;
-    const character = String.fromCodePoint(unit);
-    const rawUnit = character === '\r' && rawText[index + 1] === '\n' ? '\r\n' : character;
-    const normalizedUnit = rawUnit === '\r\n' ? '\n' : rawUnit;
-    const rawLength = byteLength(rawUnit);
-    const normalizedLength = byteLength(normalizedUnit);
-    text.push(normalizedUnit);
-    addSegment(
-      sourceMap,
-      rawOffset,
-      rawOffset + rawLength,
-      normalizedOffset,
-      normalizedOffset + normalizedLength,
-    );
-    rawOffset += rawLength;
-    normalizedOffset += normalizedLength;
-    index += rawUnit.length;
-    if (rawUnit === '\r\n') crlfCount += 1;
-  }
+  const crlfCount = (rawText.match(/\r\n/gu) ?? []).length;
 
   return {
-    text: text.join(''),
-    sourceMap,
+    text: rawText.replace(/\r\n/gu, '\n'),
     transformations: crlfCount === 0 ? [] : [{ kind: 'CRLF_TO_LF', count: crlfCount }],
   };
-}
-
-function classifyLine(line) {
-  const content = line.endsWith('\n') ? line.slice(0, -1) : line;
-  if (/^#{1,6}\s+/.test(content)) return 'heading';
-  if (/^>\s?/.test(content)) return 'quote';
-  if (/^(?:[-+*]|\d+[.)])\s+/.test(content)) return 'list';
-  if (/^\[[^\]]+\]\([^\s)]+\)$/.test(content)) return 'link';
-  return 'paragraph';
-}
-
-function extractBlocks(text) {
-  const lines = text.match(/.*(?:\n|$)/gu) ?? [];
-  const blocks = [];
-  let offset = 0;
-  let codeFence = false;
-  for (const line of lines) {
-    if (line.length === 0) continue;
-    const endOffset = offset + byteLength(line);
-    const content = line.endsWith('\n') ? line.slice(0, -1) : line;
-    let kind;
-    if (codeFence || /^```/.test(content)) {
-      kind = 'code';
-      if (/^```/.test(content)) codeFence = !codeFence;
-    } else {
-      kind = classifyLine(line);
-    }
-    const previous = blocks.at(-1);
-    if (previous !== undefined && previous.kind === kind && previous.range.endByte === offset) {
-      previous.range.endByte = endOffset;
-    } else {
-      blocks.push({ kind, range: range(offset, endOffset) });
-    }
-    offset = endOffset;
-  }
-  return blocks;
 }
 
 function normalizedByteOffset(text, utf16Offset) {
@@ -210,10 +127,7 @@ process.stdin.on('end', () => {
     rawByteLength: rawBytes.length,
     normalizedByteLength: byteLength(normalized.text),
     text: normalized.text,
-    sourceMap: normalized.sourceMap,
     transformations: normalized.transformations,
-    blocks: extractBlocks(normalized.text),
-    correctionCandidates: [],
     references: extractReferences(normalized.text),
   };
   process.stdout.write(`${JSON.stringify(output)}\n`);
