@@ -8,11 +8,11 @@ cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 mkdir -p "$WORK_DIR/.harness"
-cat > "$WORK_DIR/.harness/active_clarified_demand.json" <<'EOF'
-{"schema":"aegis.clarified_demand.v1","normalizedDemandDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","intent":"Exportar HealthStatus.","requirements":[{"id":"REQ-HEALTH-001","statement":"Exportar HealthStatus em src/index.ts.","provenance":"USER"}],"scope":{"included":["src/index.ts"],"excluded":[]}}
-EOF
-clarified_digest="$(node -e 'const fs=require("fs"),crypto=require("crypto"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex"))' "$WORK_DIR/.harness/active_clarified_demand.json")"
 policy_digest="$(shasum -a 256 "$ROOT_DIR/governance/architecture.policy.json" | awk '{print $1}')"
+cat > "$WORK_DIR/.harness/active_clarified_demand.json" <<EOF
+{"schema":"aegis.clarified_demand.v2","normalizedDemandDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","intent":"Exportar HealthStatus.","requirements":[{"id":"REQ-HEALTH-001","statement":"Exportar HealthStatus em src/index.ts.","provenance":"USER"}],"scope":{"included":["src/index.ts"],"excluded":[]},"inputCoverage":[{"unitId":"UNIT-0001","disposition":"REQUIREMENT","requirementIds":["REQ-HEALTH-001"],"rationale":"Requisito explícito."}],"architecture":{"policyDigest":"${policy_digest}","ruleAssessments":[{"ruleId":"ARCH-FAILURE-EXPLICIT","verdict":"NOT_APPLICABLE","evidence":"Sem efeito externo.","sourceUnitIds":[]},{"ruleId":"ARCH-DETERMINISTIC-TIME","verdict":"NOT_APPLICABLE","evidence":"Sem tempo.","sourceUnitIds":[]}]}}
+EOF
+clarified_digest="$(node --input-type=module -e 'const { canonicalDigest } = await import(process.cwd()+"/scripts/lib/canonical_json.mjs"); const fs = await import("node:fs"); process.stdout.write(canonicalDigest(JSON.parse(fs.readFileSync(process.argv[1],"utf8"))))' "$WORK_DIR/.harness/active_clarified_demand.json")"
 cat > "$WORK_DIR/.harness/proof_registry.json" <<'EOF'
 {"proofs":[{"id":"PO-HEALTH-001"}]}
 EOF
@@ -22,6 +22,35 @@ cp "$ROOT_DIR/governance/architecture.policy.json" "$WORK_DIR/governance/archite
 cp "$ROOT_DIR/ARCHITECTURE.md" "$WORK_DIR/ARCHITECTURE.md"
 cp "$ROOT_DIR/src/index.ts" "$WORK_DIR/src/index.ts"
 node "$ROOT_DIR/scripts/validate_contract_ir_v2.mjs" --root "$WORK_DIR" >/dev/null
+
+node --input-type=module - "$WORK_DIR" <<'NODE'
+import { readFileSync } from 'node:fs';
+const work = process.argv[2];
+const { validateContract } = await import(process.cwd() + '/scripts/lib/contract_validator.mjs');
+const previousContract = JSON.parse(readFileSync(work + '/.harness/active_contract_ir.json', 'utf8'));
+const clarified = JSON.parse(readFileSync(work + '/.harness/active_clarified_demand.json', 'utf8'));
+const policyText = readFileSync(work + '/governance/architecture.policy.json', 'utf8');
+const policy = JSON.parse(policyText);
+const nextContract = structuredClone(previousContract);
+nextContract.scope.authorizedPaths = ['src/health.ts'];
+nextContract.invariants[0].proofIds = ['PO-HEALTH-002'];
+nextContract.proofObligations = [{ id: 'PO-HEALTH-002', risk: 'superfície pública incorreta', statement: 'A nova exportação é verificável.' }];
+nextContract.requirementCoverage[0].contractIds = ['BEH-HEALTH-001', 'INV-HEALTH-001', 'PO-HEALTH-002'];
+let rejected = false;
+try {
+  validateContract({ root: work, contract: nextContract, clarified, policy, policyText, previousContract, phase: 'compile' });
+} catch (error) {
+  rejected = error instanceof Error && error.message === 'target_retirement_undeclared:src/index.ts';
+}
+if (!rejected) throw new Error('undeclared continuity was accepted');
+nextContract.continuity = {
+  retirements: [
+    { kind: 'target', id: 'src/index.ts', reason: 'Escopo substituído.', demandEvidence: 'Demanda esclarecida.' },
+    { kind: 'proof', id: 'PO-HEALTH-001', reason: 'Prova substituída.', demandEvidence: 'Demanda esclarecida.', successor: 'PO-HEALTH-002' },
+  ],
+};
+validateContract({ root: work, contract: nextContract, clarified, policy, policyText, previousContract, phase: 'compile' });
+NODE
 
 jq '.requirementCoverage[0].contractIds = ["INV-UNKNOWN-001"]' "$WORK_DIR/.harness/active_contract_ir.json" > "$WORK_DIR/invalid.json"
 mv "$WORK_DIR/invalid.json" "$WORK_DIR/.harness/active_contract_ir.json"

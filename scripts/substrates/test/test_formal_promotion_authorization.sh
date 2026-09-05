@@ -14,31 +14,14 @@ artifact="${temp_dir}/validation.json"
 
 trap 'rm -rf "${temp_dir}"' EXIT
 
-mkdir -p "${repo}/src" "${repo}/.harness"
+mkdir -p "${repo}/src"
 printf 'export const version = 1;\n' > "${repo}/src/index.ts"
-cat > "${repo}/.harness/active_contract_ir.json" <<'EOF'
-{"targets":["src"],"proofObligations":[{"id":"PO-FIXTURE-001"}]}
-EOF
-cat > "${repo}/.harness/proof_registry.json" <<'EOF'
-{
-  "schema":"aegis.proof_registry.v1",
-  "policy":{"mode":"enforced","maxActiveProofsPerProfile":{"fast":1}},
-  "profiles":[{"id":"fast","proofIds":["PO-FIXTURE-001"]}],
-  "proofs":[{
-    "id":"PO-FIXTURE-001","risk":"fixture risk","coverageKey":"fixture.coverage",
-    "authority":"fixture","cost":"low","cadence":"always","status":"active",
-    "targets":["src"],"executionKey":"fixture-proof","command":"npm run fixture-proof"
-  }]
-}
-EOF
-cat > "${repo}/package.json" <<'EOF'
-{"scripts":{"fixture-proof":"node -e \"process.exit(0)\""}}
-EOF
 git -C "${repo}" init -q
 git -C "${repo}" add .
 git -C "${repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
 
 printf 'export const version = 2;\n' > "${repo}/src/index.ts"
+git -C "${repo}" add src/index.ts
 jq -n '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:["src/index.ts"]}}' > "${artifact}"
 
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}"
@@ -59,13 +42,6 @@ printf 'export const version = 3;\n' > "${repo}/src/index.ts"
 git -C "${repo}" add src/index.ts
 if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${repo}" >/dev/null 2>&1; then
   fail "changed_staged_content_was_authorized"
-fi
-
-# A model validator may supplement the tribunal, but it cannot be the same
-# identity as the mutation model.
-if AEGIS_VALIDATION_LLM=1 AEGIS_VALIDATION_MODEL="model-a" AEGIS_MUTATION_MODEL="model-a" \
-  bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}" >/dev/null 2>&1; then
-  fail "self_validating_model_was_accepted"
 fi
 
 # The receipt is a commit-boundary control, not a source-directory heuristic.

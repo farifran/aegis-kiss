@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_resolution.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "decisionDigest", "preflightPromptDigest", "answers"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_resolution.v2" },
+    "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "preflightPromptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "answers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questionId", "action"],
+        "properties": {
+          "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "action": { "enum": ["CONFIRM_INTERPRETATION", "CORRECT_INTERPRETATION"] },
+          "correction": { "type": "string", "minLength": 1 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "action": { "const": "CORRECT_INTERPRETATION" } }, "required": ["action"] },
+            "then": { "required": ["correction"] },
+            "else": { "not": { "required": ["correction"] } }
+          }
+        ]
+      }
+    }
+  }
+}

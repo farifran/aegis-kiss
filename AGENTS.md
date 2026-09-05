@@ -11,7 +11,7 @@ prompt: ela só usa uma projeção curta e versionada da política de preflight.
 
 A sequência obrigatória é:
 
-`demanda bruta → normalização mecânica → fatos de preflight → revisão de preflight → perguntas aprovadas (se houver) → demanda esclarecida → briefing → contrato candidato → revisão independente → contrato final`.
+`demanda bruta → normalização mecânica → fatos de preflight → compilação semântica única (demanda esclarecida + contrato candidato) → perguntas aprovadas (se houver) → confirmação mecânica ou revisão semântica → revisão independente opcional → demanda e contrato finais → plano de implementação`.
 
 * A normalização mecânica trata codificação, formato, ranges e referências
   literais; ela não infere comportamento nem altera significado.
@@ -26,6 +26,11 @@ A sequência obrigatória é:
 * Toda resposta que alterar comportamento, escopo ou regra arquitetural deve
   ser incorporada à demanda esclarecida; se alterar comportamento observável,
   deve também aparecer no Contract IR.
+* A primeira compilação semântica deve produzir os dois corpos. Se houver
+  pergunta, ela também registra a resposta interpretada e os corpos provisórios:
+  confirmação promove-os sem nova chamada; correção exige revisão semântica.
+* Digests, vínculo arquitetural e metadados canônicos são montados e validados
+  mecanicamente pelo Aegis, não reconstruídos pelo modelo.
 * Conflitos com regras arquiteturais `hard` bloqueiam a execução até uma
   emenda explícita e aprovada; regras `default` podem gerar confirmação;
   preferências não viram perguntas desnecessárias.

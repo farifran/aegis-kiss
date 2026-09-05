@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.normalized_demand.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "digest", "text", "units", "references"],
+  "properties": {
+    "schema": { "const": "aegis.normalized_demand.v2" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "text": { "type": "string", "minLength": 1 },
+    "units": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/unit" } },
+    "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } }
+  },
+  "$defs": {
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startByte", "endByte"],
+      "properties": {
+        "startByte": { "type": "integer", "minimum": 0 },
+        "endByte": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "text", "range"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" },
+        "kind": { "enum": ["heading", "paragraph", "list", "quote", "code"] },
+        "text": { "type": "string", "minLength": 1 },
+        "range": { "$ref": "#/$defs/range" }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "unitId", "range"],
+      "properties": {
+        "kind": { "enum": ["path", "symbol", "url"] },
+        "value": { "type": "string", "minLength": 1 },
+        "unitId": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" },
+        "range": { "$ref": "#/$defs/range" }
+      }
+    }
+  }
+}

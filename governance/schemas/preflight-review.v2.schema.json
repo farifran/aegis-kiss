@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_review.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "verdict", "findings"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_review.v2" },
+    "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "producerId": { "type": "string", "minLength": 1 },
+    "reviewerId": { "type": "string", "minLength": 1 },
+    "verdict": { "enum": ["APPROVED", "REJECTED"] },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "evidence", "sourceUnitIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^REVIEW-[A-Z0-9][A-Z0-9-]+$" },
+          "kind": { "enum": ["OMISSION", "INVENTION", "RULE_ASSESSMENT", "QUESTION_QUALITY", "COVERAGE", "CONTRACT"] },
+          "evidence": { "type": "string", "minLength": 1 },
+          "sourceUnitIds": { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "verdict": { "const": "REJECTED" } }, "required": ["verdict"] }, "then": { "properties": { "findings": { "minItems": 1 } } } }
+  ]
+}

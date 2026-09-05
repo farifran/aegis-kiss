@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_review_request.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "promptDigest", "prompt"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_review_request.v2" },
+    "status": { "const": "PENDING_INDEPENDENT_REVIEW" },
+    "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "producerId": { "type": "string", "minLength": 1 },
+    "reviewerId": { "type": "string", "minLength": 1 },
+    "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prompt": { "type": "string", "minLength": 1 }
+  }
+}

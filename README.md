@@ -16,7 +16,7 @@ Aegis  → contract/evidence coherence, proof profiles, receipt and promotion
 
 ```bash
 ./aegis "Describe the requested change" --target src
-# The IDE finalizes the clarified demand, then creates a Contract IR v2 and code.
+# The IDE performs one semantic compilation; Aegis finalizes demand + contract.
 
 ./aegis verify
 git add <files>
@@ -27,6 +27,11 @@ Available commands:
 
 - `./aegis "<demand>"`: returns an in-memory normalized preflight envelope for
   the IDE; it does not persist the raw demand.
+- `./aegis finalize …`: validates one semantic decision and persists the
+  clarified demand and Contract IR v2 together. Confirming a proposed
+  interpretation is mechanical; only a correction requires another model call.
+- `./aegis review …`: prepares an optional independent semantic review for a
+  high-risk or forensic execution.
 - `./aegis status`: shows evidence state and working-tree state.
 - `./aegis evidence --path …`: creates an optional, bounded and transient
   mechanical inventory for a receipt or forensic investigation. It only reads
@@ -56,8 +61,7 @@ The project declares domain-specific proofs in its contract and proof
 registry. The Aegis core does not accumulate blockchain, payment or other
 domain tests.
 
-`npm test` keeps only fast harness checks. Run
-`npm run aegis:test:preflight-forensic` when investigating preflight behavior;
-its report is transient and removed by `./aegis clean`.
+`npm test` keeps deterministic harness checks. `./aegis review …` prepares the
+optional independent-model review only for high-risk or forensic executions.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the formal model.

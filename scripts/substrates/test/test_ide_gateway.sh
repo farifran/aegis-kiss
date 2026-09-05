@@ -6,23 +6,71 @@ RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 INVENTORY_FIXTURE_DIR="${ROOT_DIR}/src/__aegis_inventory_fixture"
 
 cleanup() {
-  rm -f "${RUNTIME_DIR}/ide_intake.json" "${RUNTIME_DIR}/mechanical_inventory.json"
+  rm -f "${RUNTIME_DIR}/mechanical_inventory.json" "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}/review-decision.json"
   rm -rf "${INVENTORY_FIXTURE_DIR}"
 }
 trap cleanup EXIT
 
 output="$(bash "${ROOT_DIR}/aegis" $'Criar uma biblioteca\r\ndeterminística.' --target src)"
 printf '%s' "${output}" | jq -e '
-  .schema == "aegis.ide_preflight.v1"
-  and .status == "PENDING_SEMANTIC_PREFLIGHT"
-  and (.normalizedDemandDigest | length == 64)
+  .schema == "aegis.ide_preflight.v2"
+  and .status == "PENDING_SEMANTIC_COMPILATION"
+  and (.normalizedDemand.digest | length == 64)
+  and (.mechanicalFacts.digest | length == 64)
+  and (.contextDigest | length == 64)
+  and .previousContract == null
+  and .previousContractDigest == null
+  and (.architecture.candidateRules | type == "array")
   and (.prompt | contains("\r") | not)
   and (has("demand") | not)
 ' >/dev/null
 [[ ! -e "${RUNTIME_DIR}/ide_intake.json" ]] || {
-  echo 'intake persisted raw demand' >&2
+  echo 'legacy intake artifact was persisted' >&2
   exit 1
 }
+
+printf '%s' "${output}" > "${RUNTIME_DIR}/review-envelope.json"
+node --input-type=module - "${RUNTIME_DIR}/review-envelope.json" "${RUNTIME_DIR}/review-decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [envelopePath, decisionPath] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const assessments = envelope.architecture.candidateRules.map((rule) => ({
+  ruleId: rule.id,
+  verdict: 'NOT_APPLICABLE',
+  evidence: 'Não aplicável à biblioteca pedida.',
+  sourceUnitIds: [],
+}));
+const requirement = { id: 'REQ-REVIEW-001', statement: 'Criar a biblioteca determinística.', provenance: 'USER' };
+const clarifiedDemandBody = {
+  intent: requirement.statement,
+  requirements: [requirement],
+  scope: { included: ['src'], excluded: [] },
+  inputCoverage: envelope.normalizedDemand.units.map((unit) => ({ unitId: unit.id, disposition: 'REQUIREMENT', requirementIds: [requirement.id], rationale: 'Requisito.' })),
+};
+writeFileSync(decisionPath, JSON.stringify({
+  schema: 'aegis.preflight_decision.v2',
+  contextDigest: envelope.contextDigest,
+  status: 'CLARIFIED',
+  ruleAssessments: assessments,
+  findings: [],
+  questions: [],
+  clarifiedDemandBody,
+  contractBody: {
+    scope: { authorizedPaths: ['src'] },
+    behavior: [{ id: 'BEH-REVIEW-001', statement: 'A biblioteca determinística fica disponível.' }],
+    invariants: [],
+    proofObligations: [{ id: 'PO-REVIEW-001', risk: 'biblioteca ausente', statement: 'A biblioteca deve ser observável por prova.' }],
+    requirementCoverage: [{ requirementId: requirement.id, contractIds: ['BEH-REVIEW-001', 'PO-REVIEW-001'] }],
+  },
+}));
+NODE
+
+output="$(bash "${ROOT_DIR}/aegis" review $'Criar uma biblioteca\r\ndeterminística.' --target src --decision .harness/runtime/review-decision.json --producer-id producer --reviewer-id reviewer)"
+printf '%s' "${output}" | jq -e '.schema == "aegis.preflight_review_request.v2" and .producerId == "producer" and .reviewerId == "reviewer"' >/dev/null
+if bash "${ROOT_DIR}/aegis" review 'demanda' --decision .harness/runtime/review-decision.json --producer-id same --reviewer-id same >/dev/null 2>&1; then
+  echo 'review accepted non-independent authority' >&2
+  exit 1
+fi
 
 if bash "${ROOT_DIR}/aegis" 'demanda' --target ../outside >/dev/null 2>&1; then
   echo 'unsafe target was accepted' >&2

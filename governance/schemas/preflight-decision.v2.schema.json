@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_decision.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "contextDigest", "status", "ruleAssessments", "findings", "questions"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_decision.v2" },
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
+    "ruleAssessments": { "type": "array", "items": { "$ref": "aegis.clarified_demand.v2#/$defs/ruleAssessment" } },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "clarifiedDemandBody": { "$ref": "aegis.clarified_demand_body.v2" },
+    "contractBody": { "$ref": "aegis.contract_body.v2" },
+    "provisionalClarifiedDemandBody": { "$ref": "aegis.clarified_demand_body.v2" },
+    "provisionalContractBody": { "$ref": "aegis.contract_body.v2" }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "status", "evidence", "sourceUnitIds"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^PF-[A-Z0-9][A-Z0-9-]+$" },
+        "kind": { "enum": ["input", "reference", "scope", "architecture", "repository"] },
+        "status": { "enum": ["PROVEN", "UNPROVEN", "DISPROVEN", "NOT_APPLICABLE"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "sourceUnitIds": { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "prompt", "evidence", "impact", "recommendation", "interpretedAnswer", "sourceUnitIds"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+        "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE"] },
+        "prompt": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 },
+        "impact": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 },
+        "interpretedAnswer": { "type": "string", "minLength": 1 },
+        "sourceUnitIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "CLARIFIED" } }, "required": ["status"] },
+      "then": {
+        "required": ["clarifiedDemandBody", "contractBody"],
+        "not": { "anyOf": [{ "required": ["provisionalClarifiedDemandBody"] }, { "required": ["provisionalContractBody"] }] },
+        "properties": { "questions": { "maxItems": 0 } }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "NEEDS_CONFIRMATION" } }, "required": ["status"] },
+      "then": {
+        "required": ["provisionalClarifiedDemandBody", "provisionalContractBody"],
+        "not": { "anyOf": [{ "required": ["clarifiedDemandBody"] }, { "required": ["contractBody"] }] },
+        "properties": { "questions": { "minItems": 1, "maxItems": 3 } }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["clarifiedDemandBody"] },
+            { "required": ["contractBody"] },
+            { "required": ["provisionalClarifiedDemandBody"] },
+            { "required": ["provisionalContractBody"] }
+          ]
+        },
+        "properties": { "questions": { "maxItems": 0 } }
+      }
+    }
+  ]
+}

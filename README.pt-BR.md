@@ -17,7 +17,7 @@ Aegis  → coerência contrato/evidência, perfis de prova, receipt e promoção
 
 ```bash
 ./aegis "Descreva a mudança solicitada" --target src
-# O IDE finaliza a demanda esclarecida e então cria o Contract IR v2 e o código.
+# O IDE faz uma compilação semântica e o Aegis finaliza demanda + contrato.
 
 ./aegis verify
 git add <arquivos>
@@ -28,6 +28,11 @@ Comandos disponíveis:
 
 - `./aegis "<demanda>"`: devolve ao IDE um envelope de preflight normalizado
   em memória; não persiste a demanda bruta.
+- `./aegis finalize …`: valida uma única decisão semântica e persiste juntos a
+  demanda esclarecida e o Contract IR v2. Confirmar uma interpretação proposta
+  é mecânico; somente uma correção exige nova chamada ao modelo.
+- `./aegis review …`: prepara uma revisão semântica independente opcional para
+  execução de alto risco ou forense.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
 - `./aegis evidence --path …`: cria um inventário mecânico opcional, limitado
   e transitório para receipt ou investigação forensic. Ele só lê caminhos
@@ -57,8 +62,8 @@ O projeto declara suas provas específicas de domínio no contrato e no registro
 de provas. O core do Aegis não acumula testes de blockchain, pagamentos ou
 qualquer outro domínio.
 
-`npm test` mantém somente as verificações rápidas do harness. Execute
-`npm run aegis:test:preflight-forensic` ao investigar o preflight; seu relatório
-é transiente e removido por `./aegis clean`.
+`npm test` mantém verificações determinísticas do harness. `./aegis review …`
+prepara a revisão opcional por modelo independente somente para execuções de
+alto risco ou forenses.
 
 Veja [ARCHITECTURE.md](ARCHITECTURE.md) para o modelo formal.

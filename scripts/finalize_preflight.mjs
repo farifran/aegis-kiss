@@ -1,69 +1,26 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
+import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
+import { validateContract } from './lib/contract_validator.mjs';
+import { loadArchitecture } from './lib/preflight_core.mjs';
+import { assertSchema } from './lib/schema_validator.mjs';
 
-const rootDirectory = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const rootDirectory = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const clarifiedDemandPath = resolve(rootDirectory, '.harness/active_clarified_demand.json');
+const activeContractPath = resolve(rootDirectory, '.harness/active_contract_ir.json');
 
 function fail(code) {
   process.stderr.write(`[AEGIS][PREFLIGHT][FATAL] ${code}\n`);
   process.exit(1);
 }
 
-function digest(value) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function hasOnlyKeys(value, keys) {
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && Object.keys(value).every((key) => keys.includes(key));
-}
-
-function validRange(value) {
-  return hasOnlyKeys(value, ['startByte', 'endByte'])
-    && Number.isInteger(value.startByte)
-    && Number.isInteger(value.endByte)
-    && value.startByte >= 0
-    && value.endByte >= 0;
-}
-
-function validStringList(value) {
-  return Array.isArray(value)
-    && value.every((item) => typeof item === 'string' && item.length > 0)
-    && new Set(value).size === value.length;
-}
-
-function architectureRulesFromPrompt(prompt, policyDigest) {
-  const startMarker = '<REGRAS_ARQUITETURAIS_CANDIDATAS>';
-  const endMarker = '</REGRAS_ARQUITETURAIS_CANDIDATAS>';
-  const start = prompt.indexOf(startMarker);
-  const end = prompt.indexOf(endMarker, start + startMarker.length);
-  if (start < 0 || end < 0) fail('missing_architecture_rules');
-  let projection;
-  try {
-    projection = JSON.parse(prompt.slice(start + startMarker.length, end).trim());
-  } catch {
-    fail('invalid_architecture_rules');
-  }
-  if (
-    projection?.policyDigest !== policyDigest
-    || !Array.isArray(projection.candidateRules)
-    || !projection.candidateRules.every((rule) => (
-      /^ARCH-[A-Z0-9][A-Z0-9-]+$/u.test(rule?.id ?? '')
-      && ['hard', 'default', 'preference'].includes(rule.level)
-    ))
-  ) fail('malformed_architecture_rules');
-  return projection.candidateRules;
-}
-
-function isSafePath(value) {
+function isSafeRelativePath(value) {
   return typeof value === 'string'
     && value.length > 0
     && !value.startsWith('/')
@@ -72,34 +29,39 @@ function isSafePath(value) {
 
 function isInsideRoot(path) {
   const relation = relative(rootDirectory, path);
-  return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !relation.includes(`${sep}..${sep}`));
+  return relation === '' || (relation !== '..' && !relation.startsWith(`..${sep}`));
+}
+
+function containsSymlink(path) {
+  const relation = relative(rootDirectory, path);
+  let cursor = rootDirectory;
+  for (const part of relation.split(sep).filter(Boolean)) {
+    cursor = resolve(cursor, part);
+    if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) return true;
+  }
+  return false;
 }
 
 function parseArguments(argv) {
-  let decisionPath = '';
-  let resolutionPath = '';
-  for (let index = 0; index < argv.length; index += 1) {
-    const option = argv[index];
+  const options = { decision: '', resolution: '', independentReview: '' };
+  const names = new Map([
+    ['--decision', 'decision'],
+    ['--resolution', 'resolution'],
+    ['--independent-review', 'independentReview'],
+  ]);
+  for (let index = 0; index < argv.length; index += 2) {
+    const key = names.get(argv[index]);
     const value = argv[index + 1];
-    if (option === '--decision' && value !== undefined && isSafePath(value) && decisionPath.length === 0) {
-      decisionPath = value;
-      index += 1;
-      continue;
-    }
-    if (option === '--resolution' && value !== undefined && isSafePath(value) && resolutionPath.length === 0) {
-      resolutionPath = value;
-      index += 1;
-      continue;
-    }
-    fail('invalid_arguments');
+    if (key === undefined || !isSafeRelativePath(value) || options[key].length > 0) fail('invalid_arguments');
+    options[key] = value;
   }
-  if (decisionPath.length === 0) fail('missing_decision');
-  return { decisionPath, resolutionPath };
+  if (options.decision.length === 0) fail('missing_decision');
+  return options;
 }
 
 async function readJson(relativePath, missingCode) {
   const absolutePath = resolve(rootDirectory, relativePath);
-  if (!isInsideRoot(absolutePath)) fail('unsafe_input_path');
+  if (!isInsideRoot(absolutePath) || containsSymlink(absolutePath)) fail('unsafe_input_path');
   let bytes;
   try {
     bytes = await readFile(absolutePath);
@@ -113,179 +75,252 @@ async function readJson(relativePath, missingCode) {
   }
 }
 
-function validateClarifiedDemand(value, normalizedDemandDigest) {
-  if (
-    !hasOnlyKeys(value, ['schema', 'normalizedDemandDigest', 'intent', 'requirements', 'scope', 'acceptanceCriteria', 'failureSemantics'])
-    ||
-    value?.schema !== 'aegis.clarified_demand.v1'
-    || value.normalizedDemandDigest !== normalizedDemandDigest
-    || typeof value.intent !== 'string'
-    || value.intent.length === 0
-    || !Array.isArray(value.requirements)
-    || value.requirements.length === 0
-    || !Array.isArray(value.scope?.included)
-    || !Array.isArray(value.scope?.excluded)
-    || !hasOnlyKeys(value.scope, ['included', 'excluded'])
-    || !validStringList(value.scope.included)
-    || !validStringList(value.scope.excluded)
-    || (value.acceptanceCriteria !== undefined && !validStringList(value.acceptanceCriteria))
-    || (value.failureSemantics !== undefined && !Array.isArray(value.failureSemantics))
-    || !value.requirements.every((requirement) => (
-      hasOnlyKeys(requirement, ['id', 'statement', 'provenance', 'sourceRange'])
-      &&
-      /^REQ-[A-Z0-9][A-Z0-9-]+$/u.test(requirement?.id ?? '')
-      && typeof requirement.statement === 'string'
-      && requirement.statement.length > 0
-      && ['USER', 'SAFE_CORRECTION', 'USER_CLARIFICATION', 'ARCHITECTURE_DEFAULT', 'KISS_DERIVATION'].includes(requirement.provenance)
-      && (requirement.sourceRange === undefined || validRange(requirement.sourceRange))
-    ))
-  ) fail('malformed_clarified_demand');
-  const ids = value.requirements.map((requirement) => requirement.id);
-  if (new Set(ids).size !== ids.length) fail('duplicate_requirement_id');
-  if (value.failureSemantics !== undefined && !value.failureSemantics.every((failure) => (
-    hasOnlyKeys(failure, ['id', 'trigger', 'observableOutcome'])
-    && /^FAIL-[A-Z0-9][A-Z0-9-]+$/u.test(failure?.id ?? '')
-    && typeof failure.trigger === 'string' && failure.trigger.length > 0
-    && typeof failure.observableOutcome === 'string' && failure.observableOutcome.length > 0
-  ))) fail('malformed_failure_semantics');
+function assertValidSchema(schemaId, value, code) {
+  try {
+    assertSchema(schemaId, value);
+  } catch {
+    fail(code);
+  }
 }
 
-function validateDecision(value, preflight, architectureRules) {
-  if (
-    !hasOnlyKeys(value, ['schema', 'normalizedDemandDigest', 'mechanicalFactsDigest', 'architecturePolicyDigest', 'appliedRuleIds', 'hardConflictRuleIds', 'status', 'findings', 'questions', 'clarifiedDemand'])
-    ||
-    value?.schema !== 'aegis.preflight_decision.v1'
-    || value.normalizedDemandDigest !== preflight.normalizedDemandDigest
-    || value.mechanicalFactsDigest !== preflight.mechanicalFactsDigest
-    || value.architecturePolicyDigest !== preflight.architecturePolicyDigest
-    || !Array.isArray(value.appliedRuleIds)
-    || !Array.isArray(value.hardConflictRuleIds)
-    || !['CLARIFIED', 'NEEDS_CONFIRMATION', 'BLOCKED'].includes(value.status)
-    || !Array.isArray(value.findings)
-    || !Array.isArray(value.questions)
-  ) fail('malformed_decision');
-  if (
-    !value.findings.every((finding) => (
-      hasOnlyKeys(finding, ['id', 'kind', 'status', 'evidence', 'sourceRange'])
-      && /^PF-[A-Z0-9][A-Z0-9-]+$/u.test(finding?.id ?? '')
-      && ['input', 'reference', 'scope', 'architecture', 'repository'].includes(finding.kind)
-      && ['PROVEN', 'UNPROVEN', 'DISPROVEN', 'NOT_APPLICABLE'].includes(finding.status)
-      && typeof finding.evidence === 'string' && finding.evidence.length > 0
-      && (finding.sourceRange === undefined || validRange(finding.sourceRange))
-    ))
-  ) fail('malformed_findings');
-  const ruleIds = new Set(architectureRules.map((rule) => rule.id));
-  const hardRuleIds = new Set(architectureRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
-  const appliedRuleIds = value.appliedRuleIds;
-  const hardConflictRuleIds = value.hardConflictRuleIds;
-  if (
-    !appliedRuleIds.every((id) => /^ARCH-[A-Z0-9][A-Z0-9-]+$/u.test(id) && ruleIds.has(id))
-    || new Set(appliedRuleIds).size !== appliedRuleIds.length
-    || !hardConflictRuleIds.every((id) => appliedRuleIds.includes(id) && hardRuleIds.has(id))
-    || new Set(hardConflictRuleIds).size !== hardConflictRuleIds.length
-  ) fail('invalid_architecture_rule_binding');
-  if (hardConflictRuleIds.length > 0 && value.status !== 'BLOCKED') fail('hard_conflict_not_blocked');
-  const ids = value.questions.map((question) => question?.id);
-  if (ids.some((id) => !/^Q-[A-Z0-9][A-Z0-9-]+$/u.test(id ?? '')) || new Set(ids).size !== ids.length) {
-    fail('malformed_question_ids');
-  }
-  if (!value.questions.every((question) => (
-    hasOnlyKeys(question, ['id', 'scope', 'prompt', 'evidence', 'impact', 'recommendation', 'sourceRange'])
-    &&
-    ['INPUT', 'SCOPE', 'ARCHITECTURE'].includes(question?.scope)
-    && typeof question.prompt === 'string' && question.prompt.length > 0
-    && typeof question.evidence === 'string' && question.evidence.length > 0
-    && typeof question.impact === 'string' && question.impact.length > 0
-    && typeof question.recommendation === 'string' && question.recommendation.length > 0
-    && (question.sourceRange === undefined || validRange(question.sourceRange))
-  ))) fail('malformed_questions');
-  if (value.status === 'CLARIFIED' && (value.questions.length !== 0 || value.clarifiedDemand === undefined)) {
-    fail('clarified_decision_incomplete');
-  }
-  if (value.status === 'NEEDS_CONFIRMATION' && (value.questions.length === 0 || value.questions.length > 3)) {
-    fail('confirmation_questions_invalid');
-  }
-  if (value.status === 'BLOCKED' && value.questions.length !== 0) fail('blocked_decision_has_questions');
+function exactIds(actual, expected, code) {
+  if (actual.length !== new Set(actual).size) fail(code);
+  const left = [...actual].sort();
+  const right = [...expected].sort();
+  if (JSON.stringify(left) !== JSON.stringify(right)) fail(code);
 }
 
-function validateResolution(value, decisionBytes, decision, preflight) {
-  if (
-    !hasOnlyKeys(value, ['schema', 'decisionDigest', 'preflightPromptDigest', 'answers', 'clarifiedDemand'])
-    ||
-    value?.schema !== 'aegis.preflight_resolution.v1'
-    || value.decisionDigest !== digest(decisionBytes)
-    || value.preflightPromptDigest !== preflight.promptDigest
-    || !Array.isArray(value.answers)
-    || value.answers.length !== decision.questions.length
-    || value.clarifiedDemand === undefined
-  ) fail('malformed_resolution');
-  const expectedIds = decision.questions.map((question) => question.id).sort();
-  const answerIds = value.answers.map((answer) => answer?.questionId).sort();
-  if (
-    answerIds.some((id) => !/^Q-[A-Z0-9][A-Z0-9-]+$/u.test(id ?? ''))
-    || new Set(answerIds).size !== answerIds.length
-    || JSON.stringify(answerIds) !== JSON.stringify(expectedIds)
-    || !value.answers.every((answer) => (
-      hasOnlyKeys(answer, ['questionId', 'answer'])
-      && typeof answer.answer === 'string' && answer.answer.length > 0
-    ))
-  ) fail('resolution_answers_mismatch');
+function validateEnvelope(envelope) {
+  assertValidSchema('aegis.ide_preflight.v2', envelope, 'malformed_preflight_envelope');
+  if (sha256(envelope.normalizedDemand.text) !== envelope.normalizedDemand.digest) fail('normalized_demand_digest_mismatch');
+  const { digest, ...factBody } = envelope.mechanicalFacts;
+  if (canonicalDigest(factBody) !== digest) fail('mechanical_facts_digest_mismatch');
+  if (sha256(envelope.prompt) !== envelope.promptDigest) fail('preflight_prompt_digest_mismatch');
+  const expectedContextDigest = canonicalDigest({
+    normalizedDemandDigest: envelope.normalizedDemand.digest,
+    mechanicalFactsDigest: envelope.mechanicalFacts.digest,
+    architecturePolicyDigest: envelope.architecture.policyDigest,
+    previousContractDigest: envelope.previousContractDigest,
+  });
+  if (expectedContextDigest !== envelope.contextDigest) fail('preflight_context_digest_mismatch');
+  if (envelope.previousContract === null) {
+    if (envelope.previousContractDigest !== null || existsSync(activeContractPath)) fail('previous_contract_mismatch');
+  } else {
+    if (canonicalDigest(envelope.previousContract) !== envelope.previousContractDigest) fail('previous_contract_digest_mismatch');
+    if (!existsSync(activeContractPath)) fail('previous_contract_mismatch');
+    let activeContract;
+    try {
+      activeContract = JSON.parse(readFileSync(activeContractPath, 'utf8'));
+    } catch {
+      fail('invalid_previous_contract');
+    }
+    if (canonicalJson(activeContract) !== canonicalJson(envelope.previousContract)) fail('stale_previous_contract');
+  }
+  let currentArchitecture;
+  try {
+    currentArchitecture = loadArchitecture(rootDirectory);
+  } catch {
+    fail('architecture_policy_unavailable');
+  }
+  if (currentArchitecture.policyDigest !== envelope.architecture.policyDigest) fail('stale_architecture_policy');
+  const unitIds = envelope.normalizedDemand.units.map((unit) => unit.id);
+  if (unitIds.length !== new Set(unitIds).size) fail('duplicate_input_unit');
+  const byteLength = Buffer.byteLength(envelope.normalizedDemand.text, 'utf8');
+  if (!envelope.normalizedDemand.units.every((unit) => (
+    unit.range.startByte < unit.range.endByte && unit.range.endByte <= byteLength
+  ))) fail('invalid_input_range');
 }
 
-async function persistClarifiedDemand(value) {
+function validateRuleAssessments(envelope, assessments) {
+  const candidates = envelope.architecture.candidateRules;
+  exactIds(assessments.map((item) => item.ruleId), candidates.map((item) => item.id), 'architecture_assessment_incomplete');
+  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
+  if (!assessments.every((assessment) => assessment.sourceUnitIds.every((id) => unitIds.has(id)))) {
+    fail('architecture_assessment_unknown_unit');
+  }
+}
+
+function validateDecision(envelope, decision) {
+  assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
+  if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
+  validateRuleAssessments(envelope, decision.ruleAssessments);
+  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
+  const sourceCollections = [
+    ...decision.findings.map((item) => item.sourceUnitIds),
+    ...decision.questions.map((item) => item.sourceUnitIds),
+  ];
+  if (!sourceCollections.every((ids) => ids.every((id) => unitIds.has(id)))) fail('decision_unknown_unit');
+  const hardRuleIds = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
+  const hardConflict = decision.ruleAssessments.some((item) => item.verdict === 'CONFLICT' && hardRuleIds.has(item.ruleId));
+  if (hardConflict && decision.status !== 'BLOCKED') fail('hard_conflict_not_blocked');
+}
+
+function validateClarifiedDemand(envelope, clarified, ruleAssessments) {
+  assertValidSchema('aegis.clarified_demand.v2', clarified, 'malformed_clarified_demand');
+  if (clarified.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('clarified_demand_digest_mismatch');
+  if (clarified.architecture.policyDigest !== envelope.architecture.policyDigest) fail('clarified_architecture_digest_mismatch');
+  if (canonicalJson(clarified.architecture.ruleAssessments) !== canonicalJson(ruleAssessments)) {
+    fail('clarified_architecture_assessment_mismatch');
+  }
+
+  const inputUnitIds = envelope.normalizedDemand.units.map((unit) => unit.id);
+  exactIds(clarified.inputCoverage.map((entry) => entry.unitId), inputUnitIds, 'input_coverage_incomplete');
+  const requirements = new Map(clarified.requirements.map((requirement) => [requirement.id, requirement]));
+  if (requirements.size !== clarified.requirements.length) fail('duplicate_requirement_id');
+  for (const entry of clarified.inputCoverage) {
+    if (entry.disposition === 'REQUIREMENT' && entry.requirementIds.length === 0) fail('requirement_unit_without_requirement');
+    if (entry.disposition !== 'REQUIREMENT' && entry.requirementIds.length !== 0) fail('non_requirement_unit_with_requirement');
+    if (!entry.requirementIds.every((id) => requirements.has(id))) fail('input_coverage_unknown_requirement');
+  }
+  const covered = new Set(clarified.inputCoverage.flatMap((entry) => entry.requirementIds));
+  const sourceProvenance = new Set(['USER', 'SAFE_CORRECTION', 'USER_CLARIFICATION']);
+  if (clarified.requirements.some((requirement) => sourceProvenance.has(requirement.provenance) && !covered.has(requirement.id))) {
+    fail('source_requirement_without_input_coverage');
+  }
+}
+
+function validateResolution(envelope, decisionFile, resolution) {
+  assertValidSchema('aegis.preflight_resolution.v2', resolution, 'malformed_resolution');
+  if (resolution.decisionDigest !== sha256(decisionFile.bytes)) fail('resolution_decision_digest_mismatch');
+  if (resolution.preflightPromptDigest !== envelope.promptDigest) fail('resolution_prompt_digest_mismatch');
+  exactIds(
+    resolution.answers.map((answer) => answer.questionId),
+    decisionFile.value.questions.map((question) => question.id),
+    'resolution_answers_mismatch',
+  );
+}
+
+function assembleClarifiedDemand(envelope, decision, body) {
+  return {
+    schema: 'aegis.clarified_demand.v2',
+    normalizedDemandDigest: envelope.normalizedDemand.digest,
+    ...body,
+    architecture: {
+      policyDigest: envelope.architecture.policyDigest,
+      ruleAssessments: decision.ruleAssessments,
+    },
+  };
+}
+
+function assembleContract(envelope, decision, clarifiedDemand, body) {
+  return {
+    schema: 'aegis.contract_ir.v2',
+    clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
+    architecture: {
+      policyDigest: envelope.architecture.policyDigest,
+      appliedRuleIds: decision.ruleAssessments
+        .filter((assessment) => assessment.verdict === 'APPLIED')
+        .map((assessment) => assessment.ruleId),
+      amendmentIds: envelope.previousContract?.architecture.amendmentIds ?? [],
+    },
+    ...body,
+  };
+}
+
+function validateIndependentReview(envelope, decisionFile, review) {
+  assertValidSchema('aegis.preflight_review.v2', review, 'malformed_independent_review');
+  if (review.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('review_demand_digest_mismatch');
+  if (review.decisionDigest !== sha256(decisionFile.bytes)) fail('review_decision_digest_mismatch');
+  if (review.producerId === review.reviewerId) fail('review_authority_not_independent');
+  const unitIds = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
+  if (!review.findings.every((finding) => finding.sourceUnitIds.every((id) => unitIds.has(id)))) fail('review_unknown_unit');
+  if (review.verdict !== 'APPROVED') fail('independent_review_rejected');
+}
+
+async function persistSemanticState(clarifiedDemand, contract) {
   await mkdir(resolve(rootDirectory, '.harness'), { recursive: true });
-  const temporaryPath = `${clarifiedDemandPath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(value)}\n`, 'utf8');
-  await rename(temporaryPath, clarifiedDemandPath);
+  const clarifiedTemporaryPath = `${clarifiedDemandPath}.${process.pid}.tmp`;
+  const contractTemporaryPath = `${activeContractPath}.${process.pid}.tmp`;
+  await Promise.all([
+    writeFile(clarifiedTemporaryPath, `${canonicalJson(clarifiedDemand)}\n`, 'utf8'),
+    writeFile(contractTemporaryPath, `${canonicalJson(contract)}\n`, 'utf8'),
+  ]);
+  await rename(clarifiedTemporaryPath, clarifiedDemandPath);
+  await rename(contractTemporaryPath, activeContractPath);
 }
 
-const { decisionPath, resolutionPath } = parseArguments(process.argv.slice(2));
-let input;
+const options = parseArguments(process.argv.slice(2));
+let envelope;
 try {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
-  input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  envelope = JSON.parse(Buffer.concat(chunks).toString('utf8'));
 } catch {
   fail('invalid_preflight_envelope');
 }
-if (
-  input?.schema !== 'aegis.ide_preflight.v1'
-  || input.status !== 'PENDING_SEMANTIC_PREFLIGHT'
-  || !/^[a-f0-9]{64}$/u.test(input.normalizedDemandDigest ?? '')
-  || !/^[a-f0-9]{64}$/u.test(input.mechanicalFactsDigest ?? '')
-  || !/^[a-f0-9]{64}$/u.test(input.architecturePolicyDigest ?? '')
-  || !/^[a-f0-9]{64}$/u.test(input.promptDigest ?? '')
-  || input.architectureSourceStatus !== 'CURRENT'
-  || typeof input.prompt !== 'string'
-  || digest(input.prompt) !== input.promptDigest
-) fail('malformed_preflight_envelope');
+validateEnvelope(envelope);
 
-const architectureRules = architectureRulesFromPrompt(input.prompt, input.architecturePolicyDigest);
+const decisionFile = await readJson(options.decision, 'unreadable_decision');
+validateDecision(envelope, decisionFile.value);
+if (options.independentReview.length > 0) {
+  const review = await readJson(options.independentReview, 'unreadable_independent_review');
+  validateIndependentReview(envelope, decisionFile, review.value);
+}
 
-const decision = await readJson(decisionPath, 'unreadable_decision');
-validateDecision(decision.value, input, architectureRules);
-
-if (decision.value.status === 'BLOCKED') {
-  process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v1', status: 'BLOCKED' })}\n`);
+if (decisionFile.value.status === 'BLOCKED') {
+  process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
   process.exit(0);
 }
 
-let clarifiedDemand;
-if (decision.value.status === 'CLARIFIED') {
-  if (resolutionPath.length !== 0) fail('resolution_not_allowed');
-  clarifiedDemand = decision.value.clarifiedDemand;
+let clarifiedDemandBody;
+let contractBody;
+let interpretationStatus = 'NOT_REQUIRED';
+if (decisionFile.value.status === 'CLARIFIED') {
+  if (options.resolution.length > 0) fail('resolution_not_allowed');
+  clarifiedDemandBody = decisionFile.value.clarifiedDemandBody;
+  contractBody = decisionFile.value.contractBody;
 } else {
-  if (resolutionPath.length === 0) fail('resolution_required');
-  const resolution = await readJson(resolutionPath, 'unreadable_resolution');
-  validateResolution(resolution.value, decision.bytes, decision.value, input);
-  clarifiedDemand = resolution.value.clarifiedDemand;
+  if (options.resolution.length === 0) fail('resolution_required');
+  const resolution = await readJson(options.resolution, 'unreadable_resolution');
+  validateResolution(envelope, decisionFile, resolution.value);
+  const corrections = resolution.value.answers.filter((answer) => answer.action === 'CORRECT_INTERPRETATION');
+  if (corrections.length > 0) {
+    process.stdout.write(`${JSON.stringify({
+      schema: 'aegis.preflight_finalization.v2',
+      status: 'SEMANTIC_REVISION_REQUIRED',
+      corrections: corrections.map((answer) => ({ questionId: answer.questionId, correction: answer.correction })),
+    })}\n`);
+    process.exit(0);
+  }
+  clarifiedDemandBody = decisionFile.value.provisionalClarifiedDemandBody;
+  contractBody = decisionFile.value.provisionalContractBody;
+  interpretationStatus = 'INTERPRETATION_CONFIRMED';
 }
 
-validateClarifiedDemand(clarifiedDemand, input.normalizedDemandDigest);
-await persistClarifiedDemand(clarifiedDemand);
+const clarifiedDemand = assembleClarifiedDemand(envelope, decisionFile.value, clarifiedDemandBody);
+validateClarifiedDemand(envelope, clarifiedDemand, decisionFile.value.ruleAssessments);
+const contract = assembleContract(envelope, decisionFile.value, clarifiedDemand, contractBody);
+let policyText;
+let policy;
+try {
+  policyText = await readFile(resolve(rootDirectory, 'governance/architecture.policy.json'), 'utf8');
+  policy = JSON.parse(policyText);
+} catch {
+  fail('architecture_policy_unavailable');
+}
+try {
+  validateContract({
+    root: rootDirectory,
+    contract,
+    clarified: clarifiedDemand,
+    policy,
+    policyText,
+    previousContract: envelope.previousContract,
+    phase: 'compile',
+  });
+} catch (error) {
+  fail(error instanceof Error ? error.message : 'contract_validation_failed');
+}
+try {
+  await persistSemanticState(clarifiedDemand, contract);
+} catch {
+  fail('semantic_state_persistence_failed');
+}
 process.stdout.write(`${JSON.stringify({
-  schema: 'aegis.preflight_finalization.v1',
-  status: 'CLARIFIED_DEMAND_PERSISTED',
-  clarifiedDemandDigest: digest(JSON.stringify(clarifiedDemand)),
-  path: '.harness/active_clarified_demand.json',
+  schema: 'aegis.preflight_finalization.v2',
+  status: 'SEMANTIC_STATE_PERSISTED',
+  interpretationStatus,
+  clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
+  contractDigest: canonicalDigest(contract),
+  paths: ['.harness/active_clarified_demand.json', '.harness/active_contract_ir.json'],
 })}\n`);

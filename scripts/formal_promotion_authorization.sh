@@ -95,6 +95,35 @@ metadata_digest_from_index() {
   fi
 }
 
+canonical_json_digest_from_worktree() {
+  local path="${1:-}"
+  [[ -f "${repository_root}/${path}" ]] || fatal "receipt_input_missing:${path}"
+  jq -S -c . "${repository_root}/${path}" | shasum -a 256 | awk '{print $1}'
+}
+
+canonical_json_digest_from_index() {
+  local path="${1:-}"
+  git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null \
+    || fatal "receipt_input_missing_from_index:${path}"
+  git -C "${repository_root}" show ":${path}" | jq -S -c . | shasum -a 256 | awk '{print $1}'
+}
+
+clarified_digest_from_worktree() {
+  if [[ -f "${repository_root}/.harness/active_clarified_demand.json" ]]; then
+    canonical_json_digest_from_worktree .harness/active_clarified_demand.json
+  else
+    absent_metadata_digest .harness/active_clarified_demand.json
+  fi
+}
+
+clarified_digest_from_index() {
+  if git -C "${repository_root}" cat-file -e ':.harness/active_clarified_demand.json' 2>/dev/null; then
+    canonical_json_digest_from_index .harness/active_clarified_demand.json
+  else
+    absent_metadata_digest .harness/active_clarified_demand.json
+  fi
+}
+
 validation_authority_json() {
   local validation_llm="$(printf '%s' "${AEGIS_VALIDATION_LLM:-0}" | tr '[:upper:]' '[:lower:]')"
   case "${validation_llm}" in
@@ -161,6 +190,8 @@ create_authorization() {
   # already synchronized the index; running it here binds the receipt to one
   # verification pass instead of repeating type, lint and proof work.
   run_structure_verification
+  bash "${script_root}/contract_evidence_gate.sh" --staged \
+    || fatal "promotion_contract_evidence_verification_failed"
   if [[ ! -e "${repository_root}/.harness/active_contract_ir.json" \
     && ! -e "${repository_root}/.harness/proof_registry.json" ]]; then
     create_baseline_authorization
@@ -183,7 +214,7 @@ create_authorization() {
   artifact_digest="$(shasum -a 256 "${artifact_file}" | awk '{print $1}')"
   contract_digest="$(file_digest_from_worktree .harness/active_contract_ir.json)"
   registry_digest="$(file_digest_from_worktree .harness/proof_registry.json)"
-  clarified_digest="$(metadata_digest_from_worktree .harness/active_clarified_demand.json)"
+  clarified_digest="$(clarified_digest_from_worktree)"
   policy_digest="$(metadata_digest_from_worktree governance/architecture.policy.json)"
   authority="$(validation_authority_json)"
   profile_json="$(profile_for_files "${files}")"
@@ -262,7 +293,7 @@ create_baseline_authorization() {
   write_receipt "${base}" "${files}" "${index_manifest}" "${artifact_digest}" \
     "$(metadata_digest_from_worktree .harness/active_contract_ir.json)" \
     "$(metadata_digest_from_worktree .harness/proof_registry.json)" \
-    "$(metadata_digest_from_worktree .harness/active_clarified_demand.json)" \
+    "$(clarified_digest_from_worktree)" \
     "$(metadata_digest_from_worktree governance/architecture.policy.json)" \
     "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}"
 }
@@ -339,7 +370,7 @@ verify_authorization() {
   expected_policy_digest="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
   contract_digest="$(metadata_digest_from_index .harness/active_contract_ir.json)"
   registry_digest="$(metadata_digest_from_index .harness/proof_registry.json)"
-  clarified_digest="$(metadata_digest_from_index .harness/active_clarified_demand.json)"
+  clarified_digest="$(clarified_digest_from_index)"
   policy_digest="$(metadata_digest_from_index governance/architecture.policy.json)"
   [[ "${expected_contract_digest}" == "${contract_digest}" ]] || fatal "formal_promotion_contract_digest_mismatch"
   [[ "${expected_registry_digest}" == "${registry_digest}" ]] || fatal "formal_promotion_registry_digest_mismatch"

@@ -11,11 +11,10 @@
     "origin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourcePath", "sourceDigest", "normalizerVersion"],
+      "required": ["sourcePath", "sourceDigest"],
       "properties": {
         "sourcePath": { "type": "string", "minLength": 1 },
-        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "normalizerVersion": { "type": "string", "minLength": 1 }
+        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
     "rules": {

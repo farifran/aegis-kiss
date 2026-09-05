@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.clarified_demand_body.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent", "requirements", "scope", "inputCoverage"],
+  "properties": {
+    "intent": { "type": "string", "minLength": 1 },
+    "requirements": { "type": "array", "minItems": 1, "items": { "$ref": "aegis.clarified_demand.v2#/$defs/requirement" } },
+    "scope": { "$ref": "aegis.clarified_demand.v2#/$defs/scope" },
+    "inputCoverage": { "type": "array", "minItems": 1, "items": { "$ref": "aegis.clarified_demand.v2#/$defs/inputCoverage" } },
+    "acceptanceCriteria": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "failureSemantics": { "type": "array", "items": { "$ref": "aegis.clarified_demand.v2#/$defs/failureSemantic" } }
+  }
+}

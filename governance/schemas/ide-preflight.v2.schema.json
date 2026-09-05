@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.ide_preflight.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "contextDigest", "promptDigest", "prompt"],
+  "properties": {
+    "schema": { "const": "aegis.ide_preflight.v2" },
+    "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
+    "normalizedDemand": { "$ref": "aegis.normalized_demand.v2" },
+    "mechanicalFacts": { "$ref": "#/$defs/mechanicalFacts" },
+    "architecture": { "$ref": "#/$defs/architecture" },
+    "previousContract": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "aegis.contract_ir.v2" }
+      ]
+    },
+    "previousContractDigest": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prompt": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "status", "evidence"],
+      "properties": {
+        "kind": { "enum": ["target", "path", "symbol", "url"] },
+        "value": { "type": "string" },
+        "status": { "enum": ["PROVEN", "UNPROVEN", "DISPROVEN", "NOT_APPLICABLE"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "unitId": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" },
+        "range": { "$ref": "aegis.normalized_demand.v2#/$defs/range" }
+      }
+    },
+    "mechanicalFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "digest", "target", "references"],
+      "properties": {
+        "schema": { "const": "aegis.preflight_facts.v2" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "target": { "$ref": "#/$defs/fact" },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/fact" } }
+      }
+    },
+    "architectureRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "level", "statement", "appliesWhen", "appliesMode"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        "level": { "enum": ["hard", "default", "preference"] },
+        "statement": { "type": "string", "minLength": 1 },
+        "appliesWhen": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "appliesMode": { "enum": ["any", "all"] }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "policyDigest", "sourceStatus", "candidateRules"],
+      "properties": {
+        "schema": { "const": "aegis.preflight_architecture.v2" },
+        "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sourceStatus": { "const": "CURRENT" },
+        "candidateRules": { "type": "array", "items": { "$ref": "#/$defs/architectureRule" } }
+      }
+    }
+  }
+}

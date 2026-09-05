@@ -3,8 +3,7 @@
   "policyVersion": 1,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "5ca664b8d173ed4d421923f2ccb8a498af42c708f3cc93cf4abab373fd85cb20",
-    "normalizerVersion": "1"
+    "sourceDigest": "5ca664b8d173ed4d421923f2ccb8a498af42c708f3cc93cf4abab373fd85cb20"
   },
   "rules": [
     {

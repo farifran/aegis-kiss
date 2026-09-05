@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.contract_body.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scope", "behavior", "invariants", "proofObligations", "requirementCoverage"],
+  "properties": {
+    "scope": { "$ref": "aegis.contract_ir.v2#/properties/scope" },
+    "behavior": { "$ref": "aegis.contract_ir.v2#/properties/behavior" },
+    "preconditions": { "$ref": "aegis.contract_ir.v2#/properties/preconditions" },
+    "invariants": { "$ref": "aegis.contract_ir.v2#/properties/invariants" },
+    "postconditions": { "$ref": "aegis.contract_ir.v2#/properties/postconditions" },
+    "failureSemantics": { "$ref": "aegis.contract_ir.v2#/properties/failureSemantics" },
+    "proofObligations": { "$ref": "aegis.contract_ir.v2#/properties/proofObligations" },
+    "requirementCoverage": { "$ref": "aegis.contract_ir.v2#/properties/requirementCoverage" },
+    "continuity": { "$ref": "aegis.contract_ir.v2#/properties/continuity" }
+  }
+}
