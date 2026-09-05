@@ -3,7 +3,7 @@
   "policyVersion": 1,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "541965d95c0f9a7a9b7c9cd3543664166b4897037b620f557fc831848ef31efe",
+    "sourceDigest": "5ca664b8d173ed4d421923f2ccb8a498af42c708f3cc93cf4abab373fd85cb20",
     "normalizerVersion": "1"
   },
   "rules": [
@@ -20,6 +20,21 @@
         {
           "startByte": 1077,
           "endByte": 1315
+        }
+      ]
+    },
+    {
+      "id": "ARCH-DETERMINISTIC-TIME",
+      "level": "hard",
+      "statement": "Comportamento que depende de tempo deve receber uma referência temporal explícita ou usar uma fonte reproduzível. O relógio do sistema não pode alterar o resultado de forma implícita; uma exceção requer emenda arquitetural aprovada.",
+      "appliesWhen": [
+        "time-dependent"
+      ],
+      "appliesMode": "any",
+      "sourceRanges": [
+        {
+          "startByte": 1316,
+          "endByte": 1620
         }
       ]
     }

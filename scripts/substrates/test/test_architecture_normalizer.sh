@@ -23,8 +23,19 @@ printf '%s' "${output}" | jq -e '
 output="$("${NORMALIZER[@]}" --tag documentation)"
 printf '%s' "${output}" | jq -e '.sourceStatus == "CURRENT" and .rules == []' >/dev/null
 
+output="$("${NORMALIZER[@]}" --tag time-dependent)"
+printf '%s' "${output}" | jq -e '
+  .sourceStatus == "CURRENT"
+  and (.rules | length == 1)
+  and .rules[0].id == "ARCH-DETERMINISTIC-TIME"
+  and .rules[0].level == "hard"
+' >/dev/null
+
 output="$("${NORMALIZER[@]}" --all)"
-printf '%s' "${output}" | jq -e '.sourceStatus == "CURRENT" and .rules[0].id == "ARCH-FAILURE-EXPLICIT"' >/dev/null
+printf '%s' "${output}" | jq -e '
+  .sourceStatus == "CURRENT"
+  and ([.rules[].id] | sort == ["ARCH-DETERMINISTIC-TIME", "ARCH-FAILURE-EXPLICIT"])
+' >/dev/null
 
 jq '.origin.sourceDigest = "0000000000000000000000000000000000000000000000000000000000000000"' \
   "${ROOT_DIR}/governance/architecture.policy.json" > "${temporary_policy}"

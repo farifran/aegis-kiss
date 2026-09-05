@@ -4,12 +4,22 @@
   "title": "Aegis Preflight Decision v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizedDemandDigest", "mechanicalFactsDigest", "architecturePolicyDigest", "status", "findings", "questions"],
+  "required": ["schema", "normalizedDemandDigest", "mechanicalFactsDigest", "architecturePolicyDigest", "appliedRuleIds", "hardConflictRuleIds", "status", "findings", "questions"],
   "properties": {
     "schema": { "const": "aegis.preflight_decision.v1" },
     "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "mechanicalFactsDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "architecturePolicyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "appliedRuleIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+      "uniqueItems": true
+    },
+    "hardConflictRuleIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+      "uniqueItems": true
+    },
     "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
     "findings": {
       "type": "array",
@@ -72,6 +82,10 @@
     {
       "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
       "then": { "properties": { "questions": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "hardConflictRuleIds": { "minItems": 1 } }, "required": ["hardConflictRuleIds"] },
+      "then": { "properties": { "status": { "const": "BLOCKED" } } }
     }
   ]
 }

@@ -73,6 +73,8 @@ jq -n \
     normalizedDemandDigest:$normalized,
     mechanicalFactsDigest:$facts,
     architecturePolicyDigest:$policy,
+    appliedRuleIds:[],
+    hardConflictRuleIds:[],
     status:"CLARIFIED",
     findings:[],
     questions:[],
@@ -120,6 +122,8 @@ jq -n \
     normalizedDemandDigest:$normalized,
     mechanicalFactsDigest:$facts,
     architecturePolicyDigest:$policy,
+    appliedRuleIds:[],
+    hardConflictRuleIds:[],
     status:"NEEDS_CONFIRMATION",
     findings:[],
     questions:[{
@@ -188,6 +192,11 @@ if bash "${ROOT_DIR}/aegis" finalize "${demand}" --target src --decision scratch
   echo 'finalization accepted mismatched answer ids' >&2
   exit 1
 fi
+jq '.unexpected = true' "${RESOLUTION_PATH}" > "${FIXTURE_DIR}/unexpected-resolution.json"
+if bash "${ROOT_DIR}/aegis" finalize "${demand}" --target src --decision scratch/preflight-finalization/decision.json --resolution scratch/preflight-finalization/unexpected-resolution.json >/dev/null 2>&1; then
+  echo 'finalization accepted an unknown resolution field' >&2
+  exit 1
+fi
 
 # Cenário 3: uma referência indispensável ausente bloqueia a demanda sem
 # sobrescrever o último esclarecimento válido.
@@ -214,6 +223,8 @@ jq -n \
     normalizedDemandDigest:$normalized,
     mechanicalFactsDigest:$facts,
     architecturePolicyDigest:$policy,
+    appliedRuleIds:[],
+    hardConflictRuleIds:[],
     status:"BLOCKED",
     findings:[{
       id:"PF-REFERENCE-001",
@@ -234,9 +245,8 @@ printf '%s' "${blocked_output}" | jq -e '.status == "BLOCKED"' >/dev/null
   exit 1
 }
 
-# Cenário 4: demanda de implementação com uma fonte de tempo implícita. É uma
-# sonda forense: ela mede o que o preflight atual prova e expõe o que ainda
-# não está presente na política injetada.
+# Cenário 4: demanda de implementação com uma fonte de tempo implícita. A
+# decisão semântica do IDE deve reconhecer a regra hard e bloquear a demanda.
 token_bucket_demand='Crie src/tokenBucket.ts com a classe TokenBucket. Use bigint com BigInt(Date.now()). Construtor aceita (maxBytes: bigint, mbps: number) e converte para rateBitsPerMs (mbps*8000). Em update(), acumule timeDiff*rateBitsPerMs limitando ao maxTokens. Em consume(bits: bigint), atualize e deduza saldo. Exporte a função obterEstadoBitmask(bucket: TokenBucket): number com bit 0 se tokens==0n e bit 1 se refil ativo. Re-exporte no src/index.ts.'
 token_preflight_started="$(now_ns)"
 token_preflight="$(bash "${ROOT_DIR}/aegis" "${token_bucket_demand}" --target src)"
@@ -262,20 +272,58 @@ printf '%s' "${token_facts}" | jq -e '
 if printf '%s' "${token_architecture}" | jq -e '([.candidateRules[].id] | index("ARCH-DETERMINISTIC-TIME")) != null' >/dev/null; then
   token_time_policy_status="PROVEN"
 else
-  token_time_policy_status="UNPROVEN"
+  echo 'deterministic time policy was not injected' >&2
+  exit 1
+fi
+token_persisted_digest_before="$(shasum -a 256 "${CLARIFIED_PATH}" | awk '{print $1}')"
+token_decision_started="$(now_ns)"
+jq -n \
+  --arg normalized "${token_normalized_digest}" \
+  --arg facts "${token_facts_digest}" \
+  --arg policy "${token_policy_digest}" \
+  '{
+    schema:"aegis.preflight_decision.v1",
+    normalizedDemandDigest:$normalized,
+    mechanicalFactsDigest:$facts,
+    architecturePolicyDigest:$policy,
+    appliedRuleIds:["ARCH-DETERMINISTIC-TIME"],
+    hardConflictRuleIds:["ARCH-DETERMINISTIC-TIME"],
+    status:"BLOCKED",
+    findings:[{
+      id:"PF-TIME-001",
+      kind:"architecture",
+      status:"DISPROVEN",
+      evidence:"A demanda exige uma fonte temporal implícita, incompatível com ARCH-DETERMINISTIC-TIME."
+    }],
+    questions:[]
+  }' > "${FIXTURE_DIR}/token-decision.json"
+token_decision_elapsed="$(elapsed_ms "${token_decision_started}" "$(now_ns)")"
+token_decision="$(jq . "${FIXTURE_DIR}/token-decision.json")"
+token_finalize_started="$(now_ns)"
+token_output="$(bash "${ROOT_DIR}/aegis" finalize "${token_bucket_demand}" --target src --decision scratch/preflight-finalization/token-decision.json)"
+token_finalize_elapsed="$(elapsed_ms "${token_finalize_started}" "$(now_ns)")"
+printf '%s' "${token_output}" | jq -e '.status == "BLOCKED"' >/dev/null
+[[ "${token_persisted_digest_before}" == "$(shasum -a 256 "${CLARIFIED_PATH}" | awk '{print $1}')" ]] || {
+  echo 'hard conflict changed clarified demand' >&2
+  exit 1
+}
+jq '.status = "CLARIFIED"' "${FIXTURE_DIR}/token-decision.json" > "${FIXTURE_DIR}/invalid-token-decision.json"
+if bash "${ROOT_DIR}/aegis" finalize "${token_bucket_demand}" --target src --decision scratch/preflight-finalization/invalid-token-decision.json >/dev/null 2>&1; then
+  echo 'hard conflict was accepted as clarified' >&2
+  exit 1
 fi
 
 mkdir -p "${RUNTIME_DIR}"
 {
   printf '# Relatório forense — Preflight v1\n\n'
-  printf 'Escopo: três demandas sintéticas concluídas ponta a ponta e uma sonda forense de política. O relatório é transitório em .harness/runtime/; ./aegis clean o remove.\n\n'
+  printf 'Escopo: quatro demandas sintéticas executadas ponta a ponta. O relatório é transitório em .harness/runtime/; ./aegis clean o remove.\n\n'
   printf 'A revisão semântica usa fixtures controladas para testar o protocolo. Nenhum modelo foi chamado; tempos de raciocínio do IDE: N/A. Os tempos medidos são das etapas mecânicas e da finalização local.\n\n'
   printf '| Cenário | Preflight mecânico (ms) | Decisão fixture (ms) | Finalização local (ms) | Estado final |\n'
   printf '| --- | ---: | ---: | ---: | --- |\n'
   printf '| 1. Inequívoca | %s | %s | %s | CLARIFIED_DEMAND_PERSISTED |\n' "${direct_preflight_elapsed}" "${direct_decision_elapsed}" "${direct_finalize_elapsed}"
   printf '| 2. Confirmação | %s | %s | %s | CLARIFIED_DEMAND_PERSISTED |\n' "${confirmation_preflight_elapsed}" "${confirmation_decision_elapsed}" "${confirmation_finalize_elapsed}"
   printf '| 3. Bloqueada | %s | %s | %s | BLOCKED; estado anterior preservado |\n' "${blocked_preflight_elapsed}" "${blocked_decision_elapsed}" "${blocked_finalize_elapsed}"
-  printf '| 4. TokenBucket | %s | N/A | N/A | PENDING_SEMANTIC_PREFLIGHT; tempo determinístico %s |\n\n' "${token_preflight_elapsed}" "${token_time_policy_status}"
+  printf '| 4. TokenBucket | %s | %s | %s | BLOCKED; tempo determinístico %s |\n\n' "${token_preflight_elapsed}" "${token_decision_elapsed}" "${token_finalize_elapsed}" "${token_time_policy_status}"
 
   printf '## 1. Demanda inequívoca\n\nDemanda bruta:\n\n    %s\n\n' "${direct_demand}"
   printf 'Demanda normalizada:\n\n    %s\n\n' "${direct_normalized_text}"
@@ -315,7 +363,9 @@ mkdir -p "${RUNTIME_DIR}"
   printf '%s\n\n' "${token_facts}" | sed 's/^/    /'
   printf 'Política arquitetural candidata:\n\n'
   printf '%s\n\n' "${token_architecture}" | sed 's/^/    /'
-  printf 'Resultado forense:\n\n- A etapa mecânica passou e não alterou arquivos do produto nem persistiu a demanda bruta.\n- Nenhuma decisão semântica foi simulada: este cenário mede o prompt real do preflight.\n- Cobertura da regra de tempo determinístico no pacote injetado: %s.\n- Com o estado atual, BigInt(Date.now()) não é classificado mecanicamente como conflito; portanto a decisão arquitetural sobre relógio permanece UNPROVEN e não é correto finalizar esta demanda automaticamente.\n' "${token_time_policy_status}"
+  printf 'Decisão semântica controlada:\n\n'
+  printf '%s\n\n' "${token_decision}" | sed 's/^/    /'
+  printf 'Resultado forense:\n\n- A etapa mecânica passou e não alterou arquivos do produto nem persistiu a demanda bruta.\n- A decisão semântica declarou ARCH-DETERMINISTIC-TIME como regra aplicada e conflito hard; a finalização retornou BLOCKED.\n- Cobertura da regra de tempo determinístico no pacote injetado: %s.\n- A tentativa de trocar BLOCKED por CLARIFIED foi rejeitada; a demanda esclarecida anterior permaneceu idêntica.\n' "${token_time_policy_status}"
 } > "${REPORT_PATH}"
 
 [[ -s "${REPORT_PATH}" ]] || {
@@ -323,5 +373,5 @@ mkdir -p "${RUNTIME_DIR}"
   exit 1
 }
 
-printf '[AEGIS][TEST] preflight finalization scenarios: PASS (4 demands)\n'
+printf '[AEGIS][TEST] preflight semantic acceptance: PASS (4 demands)\n'
 printf '[AEGIS][TEST] forensic_report=%s\n' "${REPORT_PATH}"

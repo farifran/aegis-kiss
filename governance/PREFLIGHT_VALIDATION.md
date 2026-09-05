@@ -9,7 +9,7 @@ relatório forense transitório produzido durante a execução.
 | Demanda inequívoca | Normalização CRLF e esclarecimento direto | `CLARIFIED_DEMAND_PERSISTED` sem perguntas e sem demanda bruta em disco. |
 | Escopo ambíguo | Pergunta `SCOPE`, confirmação e vínculo por digest | A resposta deve corresponder à decisão e ao prompt que a originou. |
 | Referência obrigatória ausente | Fato mecânico `DISPROVEN` e bloqueio | `BLOCKED` sem alterar a demanda esclarecida válida anterior. |
-| TokenBucket com relógio implícito | Referências, `BigInt(Date.now())` e cobertura de política | Registra o que é provado mecanicamente e marca lacuna arquitetural como `UNPROVEN`. |
+| TokenBucket com relógio implícito | Referências, `BigInt(Date.now())` e regra hard de tempo | A decisão deve declarar o conflito e terminar em `BLOCKED`; `CLARIFIED` é rejeitado. |
 
 Também é verificada a rejeição de uma resposta cujo identificador não pertence
 à pergunta aprovada. A cobertura está em

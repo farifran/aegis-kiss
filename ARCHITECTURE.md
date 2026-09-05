@@ -33,6 +33,10 @@ canônica de regras aplicáveis. Esta seção é sua projeção humana inicial.
   `external-effect`): nenhuma falha relevante pode desaparecer
   silenciosamente; a operação deve expor resultado, erro explícito, estado
   preservado ou rollback verificável.
+- **ARCH-DETERMINISTIC-TIME** (`hard`; `time-dependent`): comportamento que
+  depende de tempo deve receber uma referência temporal explícita ou usar uma
+  fonte reproduzível. O relógio do sistema não pode alterar o resultado de
+  forma implícita; uma exceção requer emenda arquitetural aprovada.
 
 ## Perfis de evidência
 

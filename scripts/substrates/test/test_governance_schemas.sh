@@ -62,7 +62,7 @@ jq -e '
 
 jq -e '
   .properties.schema.const == "aegis.preflight_decision.v1"
-  and (.required | index("mechanicalFactsDigest"))
+  and (.required | index("mechanicalFactsDigest") and index("appliedRuleIds") and index("hardConflictRuleIds"))
   and (.properties.status.enum == ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"])
   and (."$defs".question.properties.scope.enum == ["INPUT", "SCOPE", "ARCHITECTURE"])
 ' "${SCHEMA_DIR}/preflight-decision.v1.schema.json" >/dev/null

@@ -9,6 +9,10 @@ Responda somente JSON compatível com `aegis.preflight_decision.v1`.
 4. Recomende a menor solução que satisfaça integralmente a demanda.
 5. Marque fatos sem evidência como não verificados.
 6. Não transforme regra técnica em requisito do usuário.
+7. Preencha `appliedRuleIds` com as regras candidatas que governam a decisão.
+8. Se uma regra `hard` conflitar com a demanda, inclua seu ID em
+   `hardConflictRuleIds` e use `BLOCKED`; uma exceção exige emenda aprovada,
+   não uma pergunta de produto.
 
 Use `CLARIFIED` sem perguntas quando intenção e escopo forem inequívocos.
 Use `NEEDS_CONFIRMATION` para uma a três perguntas de `INPUT`, `SCOPE` ou

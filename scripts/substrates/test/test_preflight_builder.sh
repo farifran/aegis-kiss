@@ -18,6 +18,7 @@ printf '%s' "${output}" | jq -e '
   and (.prompt | contains("src/index.ts"))
   and (.prompt | contains("directory_exists"))
   and (.prompt | contains("ARCH-FAILURE-EXPLICIT"))
+  and (.prompt | contains("ARCH-DETERMINISTIC-TIME"))
   and (.prompt | contains("<REGRAS_ARQUITETURAIS_CANDIDATAS>"))
   and (.prompt | contains("# Aegis Preflight Prompt") | not)
   and (has("normalizedDemand") | not)
