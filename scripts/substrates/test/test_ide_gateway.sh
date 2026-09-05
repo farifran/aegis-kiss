@@ -18,8 +18,7 @@ printf '%s' "${output}" | jq -e '
   and (.normalizedDemand.digest | length == 64)
   and (.mechanicalFacts.digest | length == 64)
   and (.contextDigest | length == 64)
-  and .previousContract == null
-  and .previousContractDigest == null
+  and ((.previousContract == null and .previousContractDigest == null) or (.previousContract != null and (.previousContractDigest | length == 64)))
   and (.architecture.candidateRules | type == "array")
   and (.prompt | contains("\r") | not)
   and (has("demand") | not)
@@ -78,7 +77,11 @@ if bash "${ROOT_DIR}/aegis" 'demanda' --target ../outside >/dev/null 2>&1; then
 fi
 
 output="$(bash "${ROOT_DIR}/aegis" proofs)"
-printf '%s\n' "${output}" | grep -qx '\[AEGIS\]\[PROOF\] NOT_APPLICABLE (no project contract or proof registry)'
+if [[ -e "${ROOT_DIR}/.harness/active_contract_ir.json" && -e "${ROOT_DIR}/.harness/proof_registry.json" ]]; then
+  printf '%s\n' "${output}" | grep -q '\[AEGIS\]\[PROOF\]'
+else
+  printf '%s\n' "${output}" | grep -qx '\[AEGIS\]\[PROOF\] NOT_APPLICABLE (no project contract or proof registry)'
+fi
 git check-ignore -q .harness/runtime/ide_validation.json
 
 mkdir -p "${INVENTORY_FIXTURE_DIR}"

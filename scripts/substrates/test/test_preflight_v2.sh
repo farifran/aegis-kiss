@@ -8,11 +8,10 @@ cleanup() { rm -rf "${WORK_DIR}"; }
 trap cleanup EXIT
 
 envelope_file="${WORK_DIR}/envelope.json"
-mkdir -p "${WORK_DIR}/governance"
+cp -r "${ROOT_DIR}/governance" "${WORK_DIR}/"
 cp "${ROOT_DIR}/ARCHITECTURE.md" "${WORK_DIR}/ARCHITECTURE.md"
-cp "${ROOT_DIR}/governance/architecture.policy.json" "${WORK_DIR}/governance/architecture.policy.json"
 printf '\357\273\277# Criar\r\nUse BigInt(Date.now()) em `src/clock.ts`.\rConsulte https://example.test/spec\n' \
-  | node "${ROOT_DIR}/scripts/preflight.mjs" --target src > "${envelope_file}"
+  | AEGIS_ROOT="${WORK_DIR}" node "${ROOT_DIR}/scripts/preflight.mjs" --target src > "${envelope_file}"
 
 node --input-type=module - "${envelope_file}" "${WORK_DIR}" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
