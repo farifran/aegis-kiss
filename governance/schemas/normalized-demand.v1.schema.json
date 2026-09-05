@@ -4,12 +4,14 @@
   "title": "Aegis Normalized Demand v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizerVersion", "rawDigest", "normalizedDigest", "text", "sourceMap", "blocks", "correctionCandidates"],
+  "required": ["schema", "normalizerVersion", "rawDigest", "normalizedDigest", "rawByteLength", "normalizedByteLength", "text", "sourceMap", "transformations", "blocks", "correctionCandidates"],
   "properties": {
     "schema": { "const": "aegis.normalized_demand.v1" },
     "normalizerVersion": { "type": "string", "minLength": 1 },
     "rawDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "normalizedDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "rawByteLength": { "type": "integer", "minimum": 1 },
+    "normalizedByteLength": { "type": "integer", "minimum": 1 },
     "text": { "type": "string" },
     "sourceMap": {
       "type": "array",
@@ -19,6 +21,10 @@
     "blocks": {
       "type": "array",
       "items": { "$ref": "#/$defs/block" }
+    },
+    "transformations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/transformation" }
     },
     "correctionCandidates": {
       "type": "array",
@@ -55,6 +61,15 @@
       "properties": {
         "kind": { "enum": ["paragraph", "heading", "list", "code", "quote", "link"] },
         "range": { "$ref": "#/$defs/range" }
+      }
+    },
+    "transformation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "count"],
+      "properties": {
+        "kind": { "const": "CRLF_TO_LF" },
+        "count": { "type": "integer", "minimum": 1 }
       }
     },
     "correctionCandidate": {

@@ -11,14 +11,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-output="$(bash "${ROOT_DIR}/aegis" 'Criar uma biblioteca determinística.' --target src)"
-printf '%s\n' "${output}" | grep -qx '\[AEGIS\]\[IDE\] intake=PENDING_IDE_CONTRACT file=.harness/runtime/ide_intake.json'
-jq -e '
-  .schema == "aegis.ide_intake.v1"
-  and .status == "PENDING_IDE_CONTRACT"
-  and .requestedTarget == "src"
-  and (.demandDigest | length == 64)
-' "${RUNTIME_DIR}/ide_intake.json" >/dev/null
+output="$(bash "${ROOT_DIR}/aegis" $'Criar uma biblioteca\r\ndeterminística.' --target src)"
+printf '%s' "${output}" | jq -e '
+  .schema == "aegis.ide_preflight.v1"
+  and .status == "PENDING_SEMANTIC_PREFLIGHT"
+  and (.normalizedDemandDigest | length == 64)
+  and (.prompt | contains("\r") | not)
+  and (has("demand") | not)
+' >/dev/null
+[[ ! -e "${RUNTIME_DIR}/ide_intake.json" ]] || {
+  echo 'intake persisted raw demand' >&2
+  exit 1
+}
 
 if bash "${ROOT_DIR}/aegis" 'demanda' --target ../outside >/dev/null 2>&1; then
   echo 'unsafe target was accepted' >&2

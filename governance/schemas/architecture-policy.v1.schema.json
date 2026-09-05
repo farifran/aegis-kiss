@@ -31,7 +31,7 @@
     "rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "level", "statement", "appliesWhen", "sourceRanges"],
+      "required": ["id", "level", "statement", "appliesWhen", "appliesMode", "sourceRanges"],
       "properties": {
         "id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
         "level": { "enum": ["hard", "default", "preference"] },
@@ -42,6 +42,7 @@
           "items": { "type": "string", "minLength": 1 },
           "uniqueItems": true
         },
+        "appliesMode": { "enum": ["any", "all"] },
         "sourceRanges": {
           "type": "array",
           "minItems": 1,

@@ -15,6 +15,8 @@ usage() {
   cat <<'EOF'
 Uso no IDE:
   ./aegis "<demanda>" [--target <caminho>]
+  ./aegis finalize "<demanda>" --decision <arquivo> [--resolution <arquivo>]
+                    [--target <caminho>]
   ./aegis status
   ./aegis evidence --path <caminho> [--path <caminho> ...]
                     [--max-files <n>] [--max-total-bytes <n>] [--max-file-bytes <n>]
@@ -23,8 +25,8 @@ Uso no IDE:
   ./aegis authorize
   ./aegis clean [--src|--all]
 
-O IDE descobre, pergunta e altera o código. Aegis registra a demanda,
-valida contrato/provas e cria a autorização de promoção.
+O IDE descobre, pergunta e altera o código. Aegis normaliza a demanda em
+memória, valida contrato/provas e cria a autorização de promoção.
 
 `evidence` é um inventário mecânico opcional para receipt, reexecução ou
 forensics. Ele nunca escolhe escopo nem injeta arquivos em prompts.
@@ -65,20 +67,55 @@ record_intake() {
   done
 
   mkdir -p "${RUNTIME_DIR}"
-  rm -f "${RUNTIME_DIR}/mechanical_inventory.json"
-  local demand_digest base_commit state
-  demand_digest="$(printf '%s' "${demand}" | shasum -a 256 | awk '{print $1}')"
+  rm -f "${RUNTIME_DIR}/ide_intake.json" "${RUNTIME_DIR}/mechanical_inventory.json"
+  local normalized base_commit state worktree_status_digest
+  normalized="$(printf '%s' "${demand}" | node "${ROOT_DIR}/scripts/normalize_demand.mjs")"
   base_commit="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+  worktree_status_digest="$(git -C "${ROOT_DIR}" status --porcelain=v1 -z | shasum -a 256 | awk '{print $1}')"
   state="$(metadata_state)"
   jq -n \
-    --arg demand "${demand}" \
-    --arg demand_digest "${demand_digest}" \
+    --argjson normalized "${normalized}" \
     --arg target "${target}" \
     --arg base_commit "${base_commit}" \
+    --arg worktree_status_digest "${worktree_status_digest}" \
     --arg evidence_state "${state}" \
-    '{schema:"aegis.ide_intake.v1",status:"PENDING_IDE_CONTRACT",demand:$demand,demandDigest:$demand_digest,requestedTarget:$target,baseCommit:$base_commit,evidenceState:$evidence_state}' \
-    > "${RUNTIME_DIR}/ide_intake.json"
-  printf '[AEGIS][IDE] intake=PENDING_IDE_CONTRACT file=.harness/runtime/ide_intake.json\n'
+    '{schema:"aegis.ide_intake.v2",status:"PENDING_PREFLIGHT",normalizedDemand:$normalized,requestedTarget:$target,baseCommit:$base_commit,worktreeStatusDigest:$worktree_status_digest,evidenceState:$evidence_state}' \
+    | node "${ROOT_DIR}/scripts/build_preflight.mjs"
+}
+
+finalize_preflight() {
+  local demand="${1:-}" target="" decision="" resolution=""
+  shift || true
+  [[ -n "${demand}" ]] || fatal 'missing_demand'
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        target="${2:-}"
+        [[ -n "${target}" ]] || fatal 'missing_target'
+        safe_path "${target}" || fatal 'unsafe_target'
+        shift 2
+        ;;
+      --decision)
+        decision="${2:-}"
+        [[ -n "${decision}" ]] || fatal 'missing_decision'
+        safe_path "${decision}" || fatal 'unsafe_decision'
+        shift 2
+        ;;
+      --resolution)
+        resolution="${2:-}"
+        [[ -n "${resolution}" ]] || fatal 'missing_resolution'
+        safe_path "${resolution}" || fatal 'unsafe_resolution'
+        shift 2
+        ;;
+      *) fatal "unknown_finalize_flag:$1" ;;
+    esac
+  done
+  [[ -n "${decision}" ]] || fatal 'missing_decision'
+  local -a intake_args=() finalize_args=(--decision "${decision}")
+  [[ -n "${target}" ]] && intake_args+=(--target "${target}")
+  [[ -n "${resolution}" ]] && finalize_args+=(--resolution "${resolution}")
+  record_intake "${demand}" "${intake_args[@]}" \
+    | node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}"
 }
 
 run_proofs() {
@@ -155,7 +192,8 @@ clean() {
   if [[ "${clear_source}" -eq 1 ]]; then
     [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
     find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    rm -f "${ROOT_DIR}/.harness/active_contract_ir.json" "${ROOT_DIR}/.harness/proof_registry.json"
+    rm -f "${ROOT_DIR}/.harness/active_contract_ir.json" "${ROOT_DIR}/.harness/proof_registry.json" \
+      "${ROOT_DIR}/.harness/active_clarified_demand.json"
     printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
   fi
   printf '[AEGIS][IDE] clean=PASS source_reset=%s\n' "${clear_source}"
@@ -176,6 +214,7 @@ case "${command_name}" in
   -h|--help|help|'') usage ;;
   status) shift; [[ $# -eq 0 ]] || fatal 'status_does_not_accept_arguments'; status ;;
   evidence) shift; exec bash "${ROOT_DIR}/scripts/evidence_inventory.sh" "$@" ;;
+  finalize) shift; finalize_preflight "$@" ;;
   verify) shift; run_verify "$@" ;;
   proofs) shift; run_proofs "$@" ;;
   authorize) shift; [[ $# -eq 0 ]] || fatal 'authorize_does_not_accept_arguments'; authorize ;;

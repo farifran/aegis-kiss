@@ -1,0 +1,28 @@
+{
+  "schema": "aegis.architecture_policy.v1",
+  "policyVersion": 1,
+  "origin": {
+    "sourcePath": "ARCHITECTURE.md",
+    "sourceDigest": "541965d95c0f9a7a9b7c9cd3543664166b4897037b620f557fc831848ef31efe",
+    "normalizerVersion": "1"
+  },
+  "rules": [
+    {
+      "id": "ARCH-FAILURE-EXPLICIT",
+      "level": "hard",
+      "statement": "Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve expor resultado, erro explícito, estado preservado ou rollback verificável.",
+      "appliesWhen": [
+        "stateful-operation",
+        "external-effect"
+      ],
+      "appliesMode": "any",
+      "sourceRanges": [
+        {
+          "startByte": 1077,
+          "endByte": 1315
+        }
+      ]
+    }
+  ],
+  "amendments": []
+}

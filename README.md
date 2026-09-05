@@ -25,7 +25,8 @@ git commit -m "..."
 
 Available commands:
 
-- `./aegis "<demand>"`: records demand provenance for the IDE.
+- `./aegis "<demand>"`: returns an in-memory normalized preflight envelope for
+  the IDE; it does not persist the raw demand.
 - `./aegis status`: shows evidence state and working-tree state.
 - `./aegis evidence --path …`: creates an optional, bounded and transient
   mechanical inventory for a receipt or forensic investigation. It only reads

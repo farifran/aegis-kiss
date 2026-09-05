@@ -8,9 +8,9 @@ de execução por si só.
 
 | Interface | Estado | Limite atual | Destino da migração |
 | --- | --- | --- | --- |
-| `./aegis "<demanda>"` | Ativa | Grava a demanda bruta em `.harness/runtime/ide_intake.json`. | A demanda bruta passa a existir somente em memória; a saída durável será a demanda esclarecida. |
+| `./aegis "<demanda>"` | Ativa | Emite prompt de preflight com demanda normalizada, fatos mecânicos e política compacta no `stdout`; não persiste a demanda bruta. | A demanda esclarecida será a primeira saída durável após confirmação. |
 | `.skills/briefing.md` | Ativa | Mistura intenção, Contract IR e detalhes de implementação TypeScript. | Refatoração pendente, fora desta modificação; quando iniciada, receberá demanda esclarecida e emitirá somente compromisso semântico. |
-| `ARCHITECTURE.md` | Ativa | Documento humano, sem IDs, níveis ou critérios mecânicos de aplicabilidade. | Será projetado a partir de uma política estruturada e versionada. |
+| `ARCHITECTURE.md` | Ativa | Projeção humana inicial, com range rastreável da regra estruturada. | `governance/architecture.policy.json` é a política canônica; o normalizador seleciona regras por tags e detecta fonte desatualizada. |
 | `.harness/active_contract_ir.json` | Ativa quando há produto governado | A validação atual assegura targets e vínculos com provas, mas não valida pré/pós-condições nem invariantes. | Migrará gradualmente de `v1` para o schema semântico `v2`. |
 | `.harness/proof_registry.json` | Ativa quando há produto governado | Já valida identidade, risco, autoridade, custo, cadência, target e comando. | Permanece a autoridade da execução de provas; será ligado a invariantes do contrato `v2`. |
 | `.git/aegis/precommit_receipt.json` | Ativa na autorização | Liga índice, manifesto, contrato, registro, artefato de validação e perfil. | Continuará sendo o recibo; passará a referenciar os digests de demanda esclarecida e política arquitetural. |
@@ -52,9 +52,10 @@ provas. Antes de ativar os gates de `v2`, o operador reinicia o estado
 governado com ação explícita. O Git preserva contratos e receipts históricos;
 o runtime novo começa sem metadados ativos herdados.
 
-Nesta etapa, nenhum gate escolhe automaticamente os novos schemas. A ativação
-ocorrerá depois de o normalizador, o preflight e a migração de Contract IR
-estarem implementados e testados.
+O normalizador e o intake `v2` já estão ativos. O preflight semântico e a
+migração de Contract IR continuam pendentes; nenhum gate de promoção escolhe
+automaticamente os novos schemas até essas etapas serem implementadas e
+testadas.
 
 ## Critério de encerramento desta fase
 

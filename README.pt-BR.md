@@ -26,7 +26,8 @@ git commit -m "..."
 
 Comandos disponíveis:
 
-- `./aegis "<demanda>"`: registra a proveniência da demanda para o IDE.
+- `./aegis "<demanda>"`: devolve ao IDE um envelope de preflight normalizado
+  em memória; não persiste a demanda bruta.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
 - `./aegis evidence --path …`: cria um inventário mecânico opcional, limitado
   e transitório para receipt ou investigação forensic. Ele só lê caminhos

@@ -4,10 +4,11 @@
   "title": "Aegis Preflight Decision v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizedDemandDigest", "architecturePolicyDigest", "status", "findings", "questions"],
+  "required": ["schema", "normalizedDemandDigest", "mechanicalFactsDigest", "architecturePolicyDigest", "status", "findings", "questions"],
   "properties": {
     "schema": { "const": "aegis.preflight_decision.v1" },
     "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "mechanicalFactsDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "architecturePolicyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
     "findings": {
@@ -17,6 +18,9 @@
     "questions": {
       "type": "array",
       "items": { "$ref": "#/$defs/question" }
+    },
+    "clarifiedDemand": {
+      "$ref": "clarified-demand.v1.schema.json"
     }
   },
   "$defs": {
@@ -47,7 +51,7 @@
       "required": ["id", "scope", "prompt", "evidence", "impact", "recommendation"],
       "properties": {
         "id": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
-        "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE", "DEMAND"] },
+        "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE"] },
         "prompt": { "type": "string", "minLength": 1 },
         "evidence": { "type": "string", "minLength": 1 },
         "impact": { "type": "string", "minLength": 1 },
@@ -59,7 +63,7 @@
   "allOf": [
     {
       "if": { "properties": { "status": { "const": "CLARIFIED" } }, "required": ["status"] },
-      "then": { "properties": { "questions": { "maxItems": 0 } } }
+      "then": { "required": ["clarifiedDemand"], "properties": { "questions": { "maxItems": 0 } } }
     },
     {
       "if": { "properties": { "status": { "const": "NEEDS_CONFIRMATION" } }, "required": ["status"] },

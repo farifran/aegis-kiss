@@ -24,6 +24,16 @@ Adaptadores do projeto
 5. Todo commit não vazio possui receipt verificável.
 6. O estado real pós-commit é confrontado novamente com contrato e resultado.
 
+## Política arquitetural aplicável ao preflight
+
+A política estruturada em `governance/architecture.policy.json` é a fonte
+canônica de regras aplicáveis. Esta seção é sua projeção humana inicial.
+
+- **ARCH-FAILURE-EXPLICIT** (`hard`; `stateful-operation` ou
+  `external-effect`): nenhuma falha relevante pode desaparecer
+  silenciosamente; a operação deve expor resultado, erro explícito, estado
+  preservado ou rollback verificável.
+
 ## Perfis de evidência
 
 | Perfil | Objetivo |
