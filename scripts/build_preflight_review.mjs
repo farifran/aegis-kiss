@@ -68,7 +68,7 @@ const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 let preflight;
 try {
-  preflight = buildPreflight(Buffer.concat(chunks), options.target, root);
+  preflight = await buildPreflight(Buffer.concat(chunks), options.target, root);
 } catch (error) {
   fail(error instanceof Error ? error.message : 'preflight_failed');
 }

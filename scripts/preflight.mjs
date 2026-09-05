@@ -19,7 +19,7 @@ if (process.argv.length > 2) {
 try {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
-  process.stdout.write(JSON.stringify(buildPreflight(Buffer.concat(chunks), target, root)) + '\n');
+  process.stdout.write(JSON.stringify(await buildPreflight(Buffer.concat(chunks), target, root)) + '\n');
 } catch (error) {
   const code = error instanceof Error ? error.message : 'preflight_failed';
   process.stderr.write('[AEGIS][PREFLIGHT][FATAL] ' + code + '\n');

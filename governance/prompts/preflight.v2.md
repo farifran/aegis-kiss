@@ -1,4 +1,4 @@
-Produza somente um objeto JSON válido conforme `aegis.preflight_decision.v2`.
+Produza somente um objeto JSON válido com `schema: "aegis.preflight_decision.v2"` e a estrutura definida abaixo. Use exclusivamente o contexto fornecido; não consulte arquivos, código ou documentação do repositório nesta fase.
 
 Regras obrigatórias:
 - Copie exatamente `contextDigest` no campo homônimo. Não reproduza outros digests.
@@ -20,6 +20,10 @@ Regras obrigatórias:
 - Use `NEEDS_CONFIRMATION` quando houver perguntas e `BLOCKED` somente quando não existir continuação segura.
 
 Forma semântica dos corpos:
+- Objeto principal: `{schema, contextDigest, status, ruleAssessments, findings, questions, clarifiedDemandBody?, contractBody?, provisionalClarifiedDemandBody?, provisionalContractBody?}`.
+- `ruleAssessments`: `[{ruleId, verdict, evidence, sourceUnitIds}]`, com `verdict` igual a `APPLIED`, `NOT_APPLICABLE` ou `CONFLICT`.
+- `findings`: `[{id, kind, status, evidence, sourceUnitIds}]`, onde `kind` é `input`, `reference`, `scope`, `architecture` ou `repository`, e `status` é `PROVEN`, `UNPROVEN`, `DISPROVEN` ou `NOT_APPLICABLE`.
+- `questions`: `[{id, scope, prompt, evidence, impact, recommendation, interpretedAnswer, sourceUnitIds}]`, com `scope` igual a `INPUT`, `SCOPE` ou `ARCHITECTURE`.
 - `clarifiedDemandBody`: `{intent, requirements:[{id,statement,provenance}], scope:{included,excluded}, inputCoverage:[{unitId,disposition,requirementIds,rationale}], acceptanceCriteria?, failureSemantics?}`.
 - `contractBody`: `{scope:{authorizedPaths}, behavior:[{id,statement}], preconditions?, invariants:[{id,statement,proofIds}], postconditions?, failureSemantics?, proofObligations:[{id,risk,statement}], requirementCoverage:[{requirementId,contractIds}], continuity?}`.
 - Em `CLARIFIED`, use `clarifiedDemandBody` e `contractBody`; em `NEEDS_CONFIRMATION`, use somente as versões prefixadas por `provisional`; em `BLOCKED`, não emita corpos.

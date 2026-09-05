@@ -190,7 +190,7 @@ create_authorization() {
   # already synchronized the index; running it here binds the receipt to one
   # verification pass instead of repeating type, lint and proof work.
   run_structure_verification
-  bash "${script_root}/contract_evidence_gate.sh" --staged \
+  AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
     || fatal "promotion_contract_evidence_verification_failed"
   if [[ ! -e "${repository_root}/.harness/active_contract_ir.json" \
     && ! -e "${repository_root}/.harness/proof_registry.json" ]]; then

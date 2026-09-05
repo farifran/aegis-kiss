@@ -152,8 +152,8 @@ if [[ "${omitted_count}" -gt 0 ]]; then
   complete=false
 fi
 
-records_file="$(mktemp "${TMPDIR:-/tmp}/aegis-inventory-records.XXXXXX.jsonl")"
-output_file="$(mktemp "${TMPDIR:-/tmp}/aegis-inventory-output.XXXXXX.json")"
+records_file="$(mktemp "${TMPDIR:-/tmp}/aegis-inventory-records.XXXXXX")"
+output_file="$(mktemp "${TMPDIR:-/tmp}/aegis-inventory-output.XXXXXX")"
 cleanup() { rm -f "${records_file}" "${output_file}"; }
 trap cleanup EXIT
 

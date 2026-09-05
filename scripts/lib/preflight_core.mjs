@@ -3,7 +3,6 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
-import { assertSchema } from './schema_validator.mjs';
 
 const defaultMaxBytes = 65_536;
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
@@ -130,7 +129,6 @@ export function normalizeDemand(rawBytes, maxBytes = defaultMaxBytes) {
     units,
     references: extractReferences(text, units),
   };
-  assertSchema(normalized.schema, normalized);
   return normalized;
 }
 
@@ -171,7 +169,26 @@ export function loadArchitecture(root) {
   const policyPath = resolve(root, 'governance/architecture.policy.json');
   const policyText = readFileSync(policyPath, 'utf8');
   const policy = JSON.parse(policyText);
-  assertSchema('aegis.architecture_policy.v1', policy);
+  if (
+    policy === null
+    || typeof policy !== 'object'
+    || policy.schema !== 'aegis.architecture_policy.v1'
+    || policy.origin === null
+    || typeof policy.origin !== 'object'
+    || typeof policy.origin.sourcePath !== 'string'
+    || !/^[a-f0-9]{64}$/u.test(policy.origin.sourceDigest)
+    || !Array.isArray(policy.rules)
+    || !policy.rules.every((rule) => (
+      rule !== null
+      && typeof rule === 'object'
+      && typeof rule.id === 'string'
+      && ['hard', 'default', 'preference'].includes(rule.level)
+      && typeof rule.statement === 'string'
+      && Array.isArray(rule.appliesWhen)
+      && rule.appliesWhen.every((item) => typeof item === 'string')
+      && ['any', 'all'].includes(rule.appliesMode)
+    ))
+  ) throw new Error('invalid_architecture_policy');
   const sourcePath = safePath(root, policy.origin.sourcePath);
   if (sourcePath === undefined || !existsSync(sourcePath)) throw new Error('architecture_source_unavailable');
   if (digest(readFileSync(sourcePath)) !== policy.origin.sourceDigest) throw new Error('stale_architecture_policy');
@@ -189,7 +206,7 @@ function inject(template, placeholder, value) {
   return template.replace(token, JSON.stringify(value));
 }
 
-export function buildPreflight(rawBytes, requestedTarget, root) {
+export async function buildPreflight(rawBytes, requestedTarget, root) {
   const normalizedDemand = normalizeDemand(rawBytes);
   const target = requestedTarget.length === 0
     ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
@@ -206,6 +223,7 @@ export function buildPreflight(rawBytes, requestedTarget, root) {
   if (existsSync(previousContractPath)) {
     try {
       previousContract = JSON.parse(readFileSync(previousContractPath, 'utf8'));
+      const { assertSchema } = await import('./schema_validator.mjs');
       assertSchema('aegis.contract_ir.v2', previousContract);
     } catch {
       throw new Error('invalid_previous_contract');
@@ -236,6 +254,5 @@ export function buildPreflight(rawBytes, requestedTarget, root) {
     promptDigest: digest(prompt),
     prompt,
   };
-  assertSchema(envelope.schema, envelope);
   return envelope;
 }

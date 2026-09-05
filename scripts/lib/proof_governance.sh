@@ -352,8 +352,8 @@ aegis_proof_profile_plan() {
   local profile="${1:-fast}"
   local registry_file="${2:-$(aegis_proof_registry_path)}"
   local changed_files="${3:-}"
-  [[ -s "${registry_file}" ]] || return 1
-  jq -c --arg profile "${profile}" --arg changed "${changed_files}" '
+  local plan
+  plan="$(jq -c --arg profile "${profile}" --arg changed "${changed_files}" '
     . as $r |
     ($r.profiles[] | select(.id == $profile)) as $p |
     [ $p.proofIds[] as $id |
@@ -365,7 +365,9 @@ aegis_proof_profile_plan() {
          then any($proof.targets[]; ($changed | split("\n")) | index(.) != null)
          else true end)}
     ] | {profile:$profile, proofs:map(select(.selected)), count:(map(select(.selected)) | length)}
-  ' "${registry_file}"
+  ' "${registry_file}")" || return 1
+  [[ -n "${plan}" && "${plan}" != "null" ]] || return 1
+  printf '%s\n' "${plan}"
 }
 
 # Selects the smallest sufficient profile from the files that actually changed.
