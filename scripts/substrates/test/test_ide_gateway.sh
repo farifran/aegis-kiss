@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-ide-gateway.XXXXXX")"
-cleanup() { rm -rf "${WORK_DIR}"; }
+cleanup() { local status=$?; rm -rf "${WORK_DIR}"; exit "${status}"; }
 trap cleanup EXIT
 
 mkdir -p "${WORK_DIR}/src" "${WORK_DIR}/.harness/runtime"

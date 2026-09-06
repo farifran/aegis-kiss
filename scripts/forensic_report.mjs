@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
+import { readSemanticEvidence } from './lib/semantic_state.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 
@@ -43,6 +44,23 @@ const precommit = readReceipt('precommit_receipt.json');
 const postcommit = readReceipt('postcommit_receipt.json');
 if (postcommit.commit !== head || postcommit.executionId !== precommit.executionId) fail('receipt_not_bound_to_head');
 if (JSON.stringify([...precommit.files].sort()) !== JSON.stringify(files)) fail('receipt_files_mismatch');
+let contractVerification = null;
+let semanticEvidence = null;
+try {
+  semanticEvidence = readSemanticEvidence(root);
+} catch (error) {
+  fail(error instanceof Error ? error.message : 'invalid_semantic_state');
+}
+const contractPath = resolve(root, 'src/.aegis/contract-ir.json');
+if (semanticEvidence !== null) {
+  contractVerification = semanticEvidence.contract.verification ?? null;
+} else if (existsSync(contractPath)) {
+  try {
+    contractVerification = JSON.parse(readFileSync(contractPath, 'utf8')).verification ?? null;
+  } catch {
+    fail('invalid_contract_ir');
+  }
+}
 const runtimeTiming = {};
 const semantic = {};
 for (const [name, path] of [
@@ -86,6 +104,7 @@ const report = {
     proofProfile: precommit.proofProfile,
     proofPlanDigest: precommit.proofPlanDigest,
     validationAuthority: precommit.validationAuthority,
+    contractVerification,
     verificationDurationMs: precommit.verificationDurationMs,
     authorizedAtEpoch: precommit.issuedAtEpoch,
     postcommitVerifiedAtEpoch: postcommit.verifiedAtEpoch,

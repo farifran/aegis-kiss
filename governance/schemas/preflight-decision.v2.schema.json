@@ -3,13 +3,16 @@
   "$id": "aegis.preflight_decision.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "contextDigest", "status", "rules", "questions"],
+  "required": ["schema", "contextDigest", "promptDigest", "status", "rules", "questions"],
   "properties": {
     "schema": { "const": "aegis.preflight_decision.v2" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION", "BLOCKED"] },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "riskProfile": { "enum": ["standard", "forensic"] },
+    "stateModel": { "$ref": "#/$defs/stateModel" },
     "intent": { "type": "string", "minLength": 1 },
     "scope": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/path" }, "uniqueItems": true },
     "excluded": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
@@ -131,13 +134,30 @@
           }
         }
       }
+    },
+    "stateBinding": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "prefixItems": [
+        { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/sourceIndexes" },
+        { "$ref": "#/$defs/sourceIndexes" }
+      ]
+    },
+    "stateModel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "bindings"],
+      "properties": {
+        "kind": { "enum": ["NONE", "STATE_TRANSITION"] },
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/stateBinding" } }
+      }
     }
   },
   "allOf": [
     {
       "if": { "properties": { "status": { "enum": ["CLARIFIED", "NEEDS_CONFIRMATION"] } }, "required": ["status"] },
       "then": {
-        "required": ["intent", "scope", "excluded", "requirements", "contextUnits", "acceptance", "failures", "behaviors", "preconditions", "invariants", "postconditions", "proofs", "continuity"]
+        "required": ["riskProfile", "stateModel", "intent", "scope", "excluded", "requirements", "contextUnits", "acceptance", "failures", "behaviors", "preconditions", "invariants", "postconditions", "proofs", "continuity"]
       }
     },
     {

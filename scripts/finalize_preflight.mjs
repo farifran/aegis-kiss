@@ -2,37 +2,45 @@
 
 import { Buffer } from 'node:buffer';
 import { performance } from 'node:perf_hooks';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { existsSync, lstatSync } from 'node:fs';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { validateContract } from './lib/contract_validator.mjs';
-import { loadArchitecture, repositorySnapshot } from './lib/preflight_core.mjs';
+import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
+import { semanticStatePath, semanticStateRelativePath } from './lib/semantic_state.mjs';
 
 const rootDirectory = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const evidenceDirectory = resolve(rootDirectory, 'src/.aegis');
-const clarifiedDemandPath = resolve(evidenceDirectory, 'clarified-demand.json');
-const activeContractPath = resolve(evidenceDirectory, 'contract-ir.json');
-const proofRegistryPath = resolve(evidenceDirectory, 'proof-registry.json');
+const semanticStateFile = semanticStatePath(rootDirectory);
 const runtimeDirectory = resolve(rootDirectory, '.harness/runtime');
-const evidenceScope = [
-  'src/.aegis/clarified-demand.json',
-  'src/.aegis/contract-ir.json',
-  'src/.aegis/proof-registry.json',
-];
+const writeLockDirectory = resolve(runtimeDirectory, 'preflight-write.lock');
+const evidenceScope = [semanticStateRelativePath];
 const startedAtEpochMs = Date.now();
 const started = performance.now();
+const MAX_ENVELOPE_BYTES = 128 * 1024;
+const MAX_ARTIFACT_BYTES = 256 * 1024;
+const WRITE_LOCK_STALE_MS = 120_000;
 
 function fail(code) {
   process.stderr.write(`[AEGIS][PREFLIGHT][FATAL] ${code}\n`);
   process.exit(1);
 }
 
-function isSafeRelativePath(value) {
-  return typeof value === 'string' && value.length > 0 && !value.startsWith('/') && !value.split(/[\\/]/u).includes('..');
+function canonicalRepositoryPath(value) {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.startsWith('/')
+    || value.includes('\\')
+    || value.split('/').some((part) => part.length === 0 || part === '.' || part === '..')
+  ) {
+    fail('non_canonical_repository_path');
+  }
+  return value;
 }
 
 function isInsideRoot(path) {
@@ -60,8 +68,8 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 2) {
     const key = names.get(argv[index]);
     const value = argv[index + 1];
-    if (key === undefined || !isSafeRelativePath(value) || options[key].length > 0) fail('invalid_arguments');
-    options[key] = value;
+    if (key === undefined || value === undefined || options[key].length > 0) fail('invalid_arguments');
+    options[key] = canonicalRepositoryPath(value);
   }
   if (options.decision.length === 0) fail('missing_decision');
   return options;
@@ -76,6 +84,7 @@ async function readJson(relativePath, missingCode) {
   } catch {
     fail(missingCode);
   }
+  if (bytes.length > MAX_ARTIFACT_BYTES) fail('preflight_artifact_budget_exceeded');
   try {
     return { bytes, value: JSON.parse(bytes.toString('utf8')) };
   } catch {
@@ -108,12 +117,12 @@ function proofId(coverageKey) {
 
 function unitIds(envelope, indexes, code) {
   const units = envelope.normalizedDemand.units;
-  if (!indexes.every((index) => index < units.length)) fail(code);
+  if (!indexes.every((index) => Number.isInteger(index) && index >= 0 && index < units.length)) fail(code);
   return indexes.map((index) => units[index].id);
 }
 
 function requireIndexes(indexes, length, code) {
-  if (!indexes.every((index) => index < length)) fail(code);
+  if (!indexes.every((index) => Number.isInteger(index) && index >= 0 && index < length)) fail(code);
 }
 
 function validateEnvelope(envelope) {
@@ -130,21 +139,34 @@ function validateEnvelope(envelope) {
     mechanicalFactsDigest: envelope.mechanicalFacts.digest,
     architecturePolicyDigest: envelope.architecture.policyDigest,
     previousContractDigest: envelope.previousContractDigest,
+    promptTemplateDigest: envelope.promptTemplateDigest,
+    semanticProtocolDigest: envelope.semanticProtocolDigest,
   });
   if (expectedContextDigest !== envelope.contextDigest) fail('preflight_context_digest_mismatch');
+  assertWorldMatches(envelope);
+  const unitIdsInEnvelope = envelope.normalizedDemand.units.map((unit) => unit.id);
+  if (unitIdsInEnvelope.length !== new Set(unitIdsInEnvelope).size) fail('duplicate_input_unit');
+  const length = Buffer.byteLength(envelope.normalizedDemand.text, 'utf8');
+  if (!envelope.normalizedDemand.units.every((unit) => unit.range.startByte < unit.range.endByte && unit.range.endByte <= length)) {
+    fail('invalid_input_range');
+  }
+}
+
+function assertWorldMatches(envelope) {
   const currentBaseline = repositorySnapshot(rootDirectory);
   if (!currentBaseline.clean || canonicalJson(currentBaseline) !== canonicalJson(envelope.baseline)) fail('preflight_baseline_changed');
+  let evidence;
+  try {
+    evidence = loadPreviousEvidence(rootDirectory, currentBaseline.commit);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'invalid_previous_contract');
+  }
   if (envelope.previousContract === null) {
-    if (envelope.previousContractDigest !== null || existsSync(activeContractPath)) fail('previous_contract_mismatch');
+    if (envelope.previousContractDigest !== null || evidence !== null) fail('previous_contract_mismatch');
   } else {
     if (canonicalDigest(envelope.previousContract) !== envelope.previousContractDigest) fail('previous_contract_digest_mismatch');
-    if (!existsSync(activeContractPath)) fail('previous_contract_mismatch');
-    let activeContract;
-    try {
-      activeContract = JSON.parse(readFileSync(activeContractPath, 'utf8'));
-    } catch {
-      fail('invalid_previous_contract');
-    }
+    const activeContract = evidence?.contract;
+    if (activeContract === undefined) fail('previous_contract_mismatch');
     if (canonicalJson(activeContract) !== canonicalJson(envelope.previousContract)) fail('stale_previous_contract');
   }
   let currentArchitecture;
@@ -154,12 +176,6 @@ function validateEnvelope(envelope) {
     fail('architecture_policy_unavailable');
   }
   if (currentArchitecture.policyDigest !== envelope.architecture.policyDigest) fail('stale_architecture_policy');
-  const unitIdsInEnvelope = envelope.normalizedDemand.units.map((unit) => unit.id);
-  if (unitIdsInEnvelope.length !== new Set(unitIdsInEnvelope).size) fail('duplicate_input_unit');
-  const length = Buffer.byteLength(envelope.normalizedDemand.text, 'utf8');
-  if (!envelope.normalizedDemand.units.every((unit) => unit.range.startByte < unit.range.endByte && unit.range.endByte <= length)) {
-    fail('invalid_input_range');
-  }
 }
 
 function ruleAssessments(envelope, decision) {
@@ -175,22 +191,6 @@ function ruleAssessments(envelope, decision) {
     'architecture_assessment_incomplete',
   );
   return assessments;
-}
-
-function codeTerms(text) {
-  const terms = new Set();
-  const standardTypes = new Set(['bigint', 'boolean', 'number', 'string', 'void', 'null', 'undefined', 'true', 'false']);
-  for (const match of text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/gu)) {
-    const value = match[0];
-    const camelOrPascal = /[A-Z]/u.test(value.slice(1)) && value !== value.toUpperCase();
-    if (standardTypes.has(value) || camelOrPascal || value.includes('_') || value.includes('$')) terms.add(value);
-  }
-  for (const match of text.matchAll(/(?:\(|,)\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:/gu)) terms.add(match[1]);
-  return terms;
-}
-
-function termsForUnits(envelope, indexes) {
-  return new Set(indexes.flatMap((index) => [...codeTerms(envelope.normalizedDemand.units[index].text)]));
 }
 
 function questionCoversUnits(decision, unitIndexes, scope) {
@@ -225,57 +225,66 @@ function reconciliationFindings(envelope, decision, assessments) {
     }
   }
 
-  for (const [index, requirement] of decision.requirements.entries()) {
-    const [statement, provenance, sourceIndexes] = requirement;
-    if (provenance !== 'USER') continue;
-    const sourceTerms = termsForUnits(envelope, sourceIndexes);
-    const introduced = [...codeTerms(statement)].filter((term) => !sourceTerms.has(term));
-    if (introduced.length > 0) {
-      findings.push({ code: 'user_requirement_introduces_identifier', requirementIndex: index, identifiers: introduced, unitIndexes: sourceIndexes });
-    }
-  }
-
-  const clauses = [
-    ...decision.behaviors.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
-    ...decision.preconditions.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
-    ...decision.postconditions.map(([statement, requirementIndexes]) => [statement, requirementIndexes]),
-  ];
-  for (const [statement, requirementIndexes] of clauses) {
-    const sourceIndexes = [...new Set(requirementIndexes.flatMap((index) => decision.requirements[index][2]))];
-    const sourceTerms = termsForUnits(envelope, sourceIndexes);
-    const introduced = [...codeTerms(statement)].filter((term) => !sourceTerms.has(term));
-    if (introduced.length > 0 && !questionCoversUnits(decision, sourceIndexes)) {
-      findings.push({ code: 'derived_contract_requires_confirmation', identifiers: introduced, unitIndexes: sourceIndexes });
-    }
-  }
   return findings;
 }
 
 function validateScopeAndProofPaths(envelope, decision) {
-  const scope = new Set(decision.scope);
+  const scope = new Set(decision.scope.map(canonicalRepositoryPath));
   const withinScope = (path) => [...scope].some((declared) => path === declared || path.startsWith(`${declared}/`));
   if (envelope.changeKind === 'PRODUCT' && decision.scope.some((path) => path !== 'src' && !path.startsWith('src/'))) {
     fail('product_scope_outside_src');
   }
   for (const proof of decision.proofs) {
-    if (!withinScope(proof[4]) || !proof[5].every((target) => withinScope(target))) fail('proof_path_outside_scope');
+    const entrypoint = canonicalRepositoryPath(proof[4]);
+    const targets = proof[5].map(canonicalRepositoryPath);
+    if (!withinScope(entrypoint) || !targets.every(withinScope)) fail('proof_path_outside_scope');
   }
+}
+
+function validateStateModel(envelope, decision) {
+  if (decision.status === 'BLOCKED') return { requiresIndependentReview: false };
+  const { stateModel } = decision;
+  if (stateModel.kind === 'NONE') {
+    if (stateModel.bindings.length !== 0) fail('invalid_stateless_state_model');
+    return;
+  }
+
+  const roles = stateModel.bindings.map(([role]) => role);
+  if (roles.length !== new Set(roles).size) fail('duplicate_state_model_role');
+  for (const [, , requirementIndexes, sourceIndexes] of stateModel.bindings) {
+    requireIndexes(requirementIndexes, decision.requirements.length, 'state_model_unknown_requirement');
+    unitIds(envelope, sourceIndexes, 'state_model_unknown_unit');
+  }
+  for (const role of ['STATE', 'COMMAND', 'RESULT', 'ATOMICITY']) {
+    if (!roles.includes(role)) fail(`state_model_role_missing:${role.toLowerCase()}`);
+  }
+  const highRisk = roles.includes('ATOMICITY')
+    && ['RESOURCE', 'TEMPORAL', 'IDENTITY', 'CANONICALIZATION'].some((role) => roles.includes(role));
+  if (highRisk && decision.riskProfile !== 'forensic') fail('state_transition_requires_forensic');
 }
 
 function validateDecision(envelope, decision) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
+  if (decision.promptDigest !== envelope.promptDigest) fail('decision_prompt_digest_mismatch');
   const assessments = ruleAssessments(envelope, decision);
   for (const question of decision.questions) unitIds(envelope, question[6], 'decision_unknown_unit');
+  if (decision.status === 'BLOCKED') return { assessments, stateProfile: { requiresIndependentReview: false } };
   validateScopeAndProofPaths(envelope, decision);
   const hardRules = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
   if (assessments.some((item) => item.verdict === 'CONFLICT' && hardRules.has(item.ruleId)) && decision.status !== 'BLOCKED') {
     fail('hard_conflict_not_blocked');
   }
-  return assessments;
+  validateStateModel(envelope, decision);
+  const hardRisk = assessments.filter((item) => item.verdict === 'APPLIED' && hardRules.has(item.ruleId)).length >= 2;
+  if (decision.riskProfile === 'forensic' && !decision.proofs.some((proof) => proof[7] === 'forensic')) {
+    fail('forensic_profile_requires_forensic_proof');
+  }
+  if (hardRisk && decision.riskProfile !== 'forensic') fail('hard_risk_requires_forensic');
+  return { assessments, stateProfile: { requiresIndependentReview: decision.riskProfile === 'forensic' } };
 }
 
-function assembleSemanticState(envelope, decision, assessments) {
+function assembleSemanticState(envelope, decision, assessments, independentReviewDigest) {
   if (decision.proofs.length > 10) fail('proof_profile_budget_exceeded');
   const requirementIds = ids('REQ', decision.requirements.length);
   const behaviorIds = ids('BEH', decision.behaviors.length);
@@ -354,6 +363,14 @@ function assembleSemanticState(envelope, decision, assessments) {
     })),
     proofChanges: decision.continuity.proofChanges.map(([id, reason, demandEvidence]) => ({ id, reason, demandEvidence })),
   };
+  const stateModel = {
+    kind: decision.stateModel.kind,
+    bindings: decision.stateModel.bindings.map(([role, statement, requirementIndexes]) => ({
+      role,
+      statement,
+      requirementIds: requirementIndexes.map((index) => requirementIds[index]),
+    })),
+  };
   const statements = (clauses, clauseIds) => clauses.map(([statement], index) => ({ id: clauseIds[index], statement }));
   const contract = {
     schema: 'aegis.contract_ir.v2',
@@ -364,6 +381,11 @@ function assembleSemanticState(envelope, decision, assessments) {
       appliedRuleIds: assessments.filter((assessment) => assessment.verdict === 'APPLIED').map((assessment) => assessment.ruleId),
       amendmentIds: envelope.previousContract?.architecture.amendmentIds ?? [],
     },
+    verification: {
+      riskProfile: decision.riskProfile,
+      ...(independentReviewDigest === null ? {} : { independentReviewDigest }),
+    },
+    stateModel,
     scope: { authorizedPaths: [...new Set([...decision.scope, ...evidenceScope])] },
     behavior: statements(decision.behaviors, behaviorIds),
     preconditions: statements(decision.preconditions, preconditionIds),
@@ -395,7 +417,8 @@ function assembleSemanticState(envelope, decision, assessments) {
     status: 'active',
     targets: [...new Set([...targets, entrypoint])],
     executionKey: `proof-${sha256(entrypoint).slice(0, 12)}`,
-    command: entrypoint.endsWith('.ts') ? `node --import tsx ${entrypoint}` : `bash ${entrypoint}`,
+    executor: entrypoint.endsWith('.ts') ? 'node' : 'bash',
+    argv: entrypoint.endsWith('.ts') ? ['--import', 'tsx', entrypoint] : [entrypoint],
   }));
   const proofRegistry = {
     schema: 'aegis.proof_registry.v1',
@@ -427,31 +450,91 @@ function validateIndependentReview(envelope, decisionFile, review) {
   if (review.verdict !== 'APPROVED') fail('independent_review_rejected');
 }
 
+async function readBoundedEnvelope() {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of process.stdin) {
+    total += chunk.length;
+    if (total > MAX_ENVELOPE_BYTES) fail('preflight_envelope_budget_exceeded');
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    fail('invalid_preflight_envelope');
+  }
+}
+
+async function writeAtomicJson(path, value) {
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  let handle;
+  try {
+    handle = await open(temporaryPath, 'w', 0o600);
+    await handle.writeFile(`${canonicalJson(value)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, path);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function withWriteGate(action) {
+  await mkdir(runtimeDirectory, { recursive: true });
+  try {
+    await mkdir(writeLockDirectory);
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    let age = 0;
+    try {
+      age = Date.now() - (await stat(writeLockDirectory)).mtimeMs;
+    } catch {
+      age = 0;
+    }
+    if (age < WRITE_LOCK_STALE_MS) fail('preflight_write_gate_busy');
+    await rm(writeLockDirectory, { recursive: true, force: true });
+    try { await mkdir(writeLockDirectory); } catch { fail('preflight_write_gate_busy'); }
+  }
+  try {
+    await writeFile(resolve(writeLockDirectory, 'owner.json'), `${JSON.stringify({ pid: process.pid, startedAtEpochMs: Date.now() })}\n`, 'utf8');
+    return await action();
+  } finally {
+    await rm(writeLockDirectory, { recursive: true, force: true });
+  }
+}
+
 async function persistSemanticState(clarifiedDemand, contract, proofRegistry) {
   await mkdir(evidenceDirectory, { recursive: true });
-  const records = [
-    [clarifiedDemandPath, clarifiedDemand],
-    [activeContractPath, contract],
-    [proofRegistryPath, proofRegistry],
-  ];
-  await Promise.all(records.map(([path, value]) => writeFile(`${path}.${process.pid}.tmp`, `${canonicalJson(value)}\n`, 'utf8')));
-  for (const [path] of records) await rename(`${path}.${process.pid}.tmp`, path);
+  const semanticState = {
+    schema: 'aegis.semantic_state.v1',
+    clarifiedDemand,
+    contract,
+    proofRegistry,
+    digests: {
+      clarifiedDemandSemanticDigest: canonicalDigest(clarifiedDemand),
+      contractSemanticDigest: canonicalDigest(contract),
+      proofRegistrySemanticDigest: canonicalDigest(proofRegistry),
+    },
+  };
+  await writeAtomicJson(semanticStateFile, semanticState);
+  return semanticState;
 }
 
 const options = parseArguments(process.argv.slice(2));
-let envelope;
-try {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  envelope = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-} catch {
-  fail('invalid_preflight_envelope');
-}
+const envelope = await readBoundedEnvelope();
 validateEnvelope(envelope);
 
 const decisionFile = await readJson(options.decision, 'unreadable_decision');
 const decisionDigest = sha256(decisionFile.bytes);
-const assessments = validateDecision(envelope, decisionFile.value);
+const validation = validateDecision(envelope, decisionFile.value);
+const { assessments } = validation;
+if (decisionFile.value.status === 'BLOCKED') {
+  process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
+  process.exit(0);
+}
 const reconciliation = reconciliationFindings(envelope, decisionFile.value, assessments);
 if (reconciliation.length > 0) {
   process.stdout.write(`${JSON.stringify({
@@ -462,16 +545,14 @@ if (reconciliation.length > 0) {
   process.exit(0);
 }
 let independentReviewDigest = null;
+if (validation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
+  fail('independent_review_required_for_forensic');
+}
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
   validateIndependentReview(envelope, decisionFile, review.value);
   independentReviewDigest = sha256(review.bytes);
 }
-if (decisionFile.value.status === 'BLOCKED') {
-  process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
-  process.exit(0);
-}
-
 let interpretationStatus = 'NOT_REQUIRED';
 if (decisionFile.value.status === 'CLARIFIED') {
   if (options.resolution.length > 0) fail('resolution_not_allowed');
@@ -491,19 +572,28 @@ if (decisionFile.value.status === 'CLARIFIED') {
   interpretationStatus = 'INTERPRETATION_CONFIRMED';
 }
 
-const { clarifiedDemand, contract, proofRegistry } = assembleSemanticState(envelope, decisionFile.value, assessments);
-let policyText;
-let policy;
+const { clarifiedDemand, contract, proofRegistry } = assembleSemanticState(
+  envelope,
+  decisionFile.value,
+  assessments,
+  independentReviewDigest,
+);
+let semanticState;
 try {
-  policyText = await readFile(resolve(rootDirectory, 'governance/architecture.policy.json'), 'utf8');
-  policy = JSON.parse(policyText);
-  validateContract({ root: rootDirectory, contract, clarified: clarifiedDemand, policy, policyText, previousContract: envelope.previousContract, phase: 'compile' });
+  semanticState = await withWriteGate(async () => {
+    assertWorldMatches(envelope);
+    let architecturePolicy;
+    try {
+      architecturePolicy = loadArchitecturePolicy(rootDirectory, envelope.baseline.commit);
+    } catch {
+      fail('architecture_policy_unavailable');
+    }
+    const { policy, policyText } = architecturePolicy;
+    validateContract({ root: rootDirectory, contract, clarified: clarifiedDemand, policy, policyText, previousContract: envelope.previousContract, phase: 'compile' });
+    return persistSemanticState(clarifiedDemand, contract, proofRegistry);
+  });
 } catch (error) {
-  fail(error instanceof Error ? error.message : 'contract_validation_failed');
-}
-try {
-  await persistSemanticState(clarifiedDemand, contract, proofRegistry);
-} catch {
+  if (error instanceof Error && error.message.startsWith('preflight_')) fail(error.message);
   fail('semantic_state_persistence_failed');
 }
 const result = {
@@ -516,18 +606,19 @@ const result = {
   clarifiedDemandDigest: canonicalDigest(clarifiedDemand),
   contractDigest: canonicalDigest(contract),
   proofRegistryDigest: canonicalDigest(proofRegistry),
+  semanticStateDigest: canonicalDigest(semanticState),
   semantic: {
-    reconciler: 'mechanical_reconciliation.v1',
-    decisionDigest,
+    reconciler: 'structural_reconciliation.v2',
+    decisionArtifactBytesDigest: decisionDigest,
     independentReviewDigest,
   },
   timing: { phase: 'finalization', startedAtEpochMs, durationMs: Math.round((performance.now() - started) * 1000) / 1000 },
-  paths: ['src/.aegis/clarified-demand.json', 'src/.aegis/contract-ir.json', 'src/.aegis/proof-registry.json'],
+  paths: [semanticStateRelativePath],
 };
 try {
   await mkdir(runtimeDirectory, { recursive: true });
   await writeFile(resolve(runtimeDirectory, 'finalization.json'), `${JSON.stringify(result)}\n`, 'utf8');
 } catch {
-  fail('finalization_telemetry_persistence_failed');
+  process.stderr.write('[AEGIS][OBSERVATION][WARN] finalization_telemetry_persistence_failed\n');
 }
 process.stdout.write(`${JSON.stringify(result)}\n`);

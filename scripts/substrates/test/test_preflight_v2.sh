@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-preflight-v2.XXXXXX")"
-cleanup() { rm -rf "${WORK_DIR}"; }
+cleanup() { local status=$?; rm -rf "${WORK_DIR}"; exit "${status}"; }
 trap cleanup EXIT
 
 prepare_repository() {
@@ -30,11 +30,14 @@ const allUnits = envelope.normalizedDemand.units.map((_, index) => index);
 const decision = {
   schema: 'aegis.preflight_decision.v2',
   contextDigest: envelope.contextDigest,
+  promptDigest: envelope.promptDigest,
   status,
   rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'NOT_APPLICABLE', 'Sem incidência no comportamento solicitado.', []]),
   questions: status === 'NEEDS_CONFIRMATION'
     ? [['SCOPE', 'Manter somente src/clock.ts?', 'A demanda nomeia esse caminho.', 'Define o escopo.', 'Sim.', 'Somente src/clock.ts e sua prova.', [allUnits[0]]]]
     : [],
+  riskProfile: 'standard',
+  stateModel: { kind: 'NONE', bindings: [] },
   intent: 'Criar o relógio solicitado.',
   scope: ['src/clock.ts', 'src/clock.proof.ts'],
   excluded: [],
@@ -64,13 +67,32 @@ jq -e '
   and .changeKind == "PRODUCT"
   and (.prompt | contains("changeKind=\"PRODUCT\""))
 ' "${WORK_DIR}/direct-request.json" >/dev/null
-[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 7000 ]]
+[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 8500 ]]
 jq -e '
   .baseline.clean == true
   and (.normalizedDemand.text | contains("\r") | not)
+  and (.prompt | contains("Use bigint de Clock.now() em `src/clock.ts`."))
+  and (.prompt | contains("\"text\":"))
   and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Clock.now"))
   and (.mechanicalFacts.references | any(.kind == "url" and .status == "UNPROVEN"))
 ' "${envelope}" >/dev/null
+
+node --input-type=module - "${envelope}" "${WORK_DIR}/direct/.harness/runtime/blocked.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [envelopePath, destination] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(destination, JSON.stringify({
+  schema: 'aegis.preflight_decision.v2',
+  contextDigest: envelope.contextDigest,
+  promptDigest: envelope.promptDigest,
+  status: 'BLOCKED',
+  rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'NOT_APPLICABLE', 'Sem decisão executável.', []]),
+  questions: [],
+}));
+NODE
+AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/blocked.json < "${envelope}" > "${WORK_DIR}/direct/.harness/runtime/blocked-result.json"
+jq -e '.status == "BLOCKED"' "${WORK_DIR}/direct/.harness/runtime/blocked-result.json" >/dev/null
 
 write_decision "${envelope}" "${WORK_DIR}/direct/.harness/runtime/decision.json"
 AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
@@ -127,12 +149,108 @@ rm "${WORK_DIR}/direct/src/drift.ts"
 AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
   < "${envelope}" > "${WORK_DIR}/direct/.harness/runtime/result.json"
-jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .changeKind == "PRODUCT" and (.proofRegistryDigest | test("^[a-f0-9]{64}$")) and (.semantic.reconciler == "mechanical_reconciliation.v1") and (.semantic.decisionDigest | test("^[a-f0-9]{64}$"))' \
+jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .changeKind == "PRODUCT" and (.proofRegistryDigest | test("^[a-f0-9]{64}$")) and (.semanticStateDigest | test("^[a-f0-9]{64}$")) and (.semantic.reconciler == "structural_reconciliation.v2") and (.semantic.decisionArtifactBytesDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/direct/.harness/runtime/result.json" >/dev/null
-jq -e '.changeKind == "PRODUCT" and .scope.authorizedPaths == ["src/clock.ts", "src/clock.proof.ts", "src/.aegis/clarified-demand.json", "src/.aegis/contract-ir.json", "src/.aegis/proof-registry.json"]' \
-  "${WORK_DIR}/direct/src/.aegis/contract-ir.json" >/dev/null
-jq -e '.proofs[0].command == "node --import tsx src/clock.proof.ts" and .proofs[0].targets == ["src/clock.ts", "src/clock.proof.ts"]' \
-  "${WORK_DIR}/direct/src/.aegis/proof-registry.json" >/dev/null
+jq -e '.schema == "aegis.semantic_state.v1" and .contract.changeKind == "PRODUCT" and .contract.scope.authorizedPaths == ["src/clock.ts", "src/clock.proof.ts", "src/.aegis/semantic-state.json"] and .proofRegistry.proofs[0].executor == "node" and .proofRegistry.proofs[0].argv == ["--import", "tsx", "src/clock.proof.ts"] and .proofRegistry.proofs[0].targets == ["src/clock.ts", "src/clock.proof.ts"] and .contract.verification.riskProfile == "standard" and .contract.stateModel == {kind:"NONE",bindings:[]}' \
+  "${WORK_DIR}/direct/src/.aegis/semantic-state.json" >/dev/null
+git -C "${WORK_DIR}/direct" add src/.aegis/semantic-state.json
+git -C "${WORK_DIR}/direct" commit -qm 'persist semantic state'
+printf 'Evoluir o relógio existente.\n' | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+  --kind PRODUCT --save-envelope > /dev/null
+jq -e '.previousContract != null and (.previousContractDigest | test("^[a-f0-9]{64}$"))' \
+  "${WORK_DIR}/direct/.harness/runtime/preflight_envelope.json" >/dev/null
+printf 'export const clock = 0n;\n' > "${WORK_DIR}/direct/src/clock.ts"
+printf 'export {};\n' > "${WORK_DIR}/direct/src/clock.proof.ts"
+git -C "${WORK_DIR}/direct" add src
+AEGIS_ROOT_DIR="${WORK_DIR}/direct" bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
+
+prepare_repository "${WORK_DIR}/forensic"
+printf 'Processar transição de estado atômica com recurso temporal, identificadores externos, resultado observável e representação canônica.\n' \
+  | AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/preflight.mjs" --kind PRODUCT --save-envelope > /dev/null
+forensic_envelope="${WORK_DIR}/forensic/.harness/runtime/preflight_envelope.json"
+node --input-type=module - "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [envelopePath, destination] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const units = envelope.normalizedDemand.units.map((_, index) => index);
+const bindings = [
+  ['STATE', 'O estado é explícito e observável.', [0], units],
+  ['COMMAND', 'Cada comando produz uma transição definida.', [0], units],
+  ['IDENTITY', 'Identificadores externos são dados opacos.', [0], units],
+  ['RESOURCE', 'Recursos são contabilizados no estado projetado.', [0], units],
+  ['TEMPORAL', 'O tempo é entrada explícita da transição.', [0], units],
+  ['RESULT', 'O resultado representa cada decisão e seus agregados.', [0], units],
+  ['ATOMICITY', 'O estado só é publicado depois de todos os passos falíveis.', [0], units],
+  ['CANONICALIZATION', 'A representação canônica vincula os observáveis declarados.', [0], units],
+];
+writeFileSync(destination, JSON.stringify({
+  schema: 'aegis.preflight_decision.v2',
+  contextDigest: envelope.contextDigest,
+  promptDigest: envelope.promptDigest,
+  status: 'CLARIFIED',
+  rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'APPLIED', 'A regra se aplica à transição.', units]),
+  questions: [],
+  riskProfile: 'forensic',
+  stateModel: { kind: 'STATE_TRANSITION', bindings },
+  intent: 'Processar transição de estado forense.',
+  scope: ['src/state.ts', 'src/state.proof.ts'],
+  excluded: [],
+  requirements: [['Processar transição atômica, temporal e observável.', 'USER', units]],
+  contextUnits: [],
+  acceptance: ['A transição é verificável.'],
+  failures: [['Falha de transição', 'Estado anterior preservado.', [0]]],
+  behaviors: [['A transição é observável.', [0]]],
+  preconditions: [['A entrada é válida.', [0]]],
+  invariants: [['Estado e resultado permanecem consistentes.', [0], [0, 1]]],
+  postconditions: [['A publicação é atômica.', [0]]],
+  proofs: [
+    ['state.behavior', 'Transição básica incorreta', 'Provar comportamento básico.', [0], 'src/state.proof.ts', ['src/state.ts'], 'low', 'always'],
+    ['state.adversarial', 'Interação adversarial entre estado e resultado', 'Provar composição, identidade e rollback.', [0], 'src/state.proof.ts', ['src/state.ts'], 'high', 'forensic'],
+  ],
+  continuity: { retirements: [], proofChanges: [] },
+}));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json < "${forensic_envelope}" > /dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/missing-review.err"; then
+  echo 'forensic decision was persisted without independent review' >&2
+  exit 1
+fi
+grep -q 'independent_review_required_for_forensic' "${WORK_DIR}/forensic/.harness/runtime/missing-review.err" || {
+  cat "${WORK_DIR}/forensic/.harness/runtime/missing-review.err" >&2
+  exit 1
+}
+jq '.riskProfile = "standard"' "${WORK_DIR}/forensic/.harness/runtime/decision.json" > "${WORK_DIR}/forensic/.harness/runtime/non-forensic.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/non-forensic.json < "${forensic_envelope}" > /dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"; then
+  echo 'high-risk state transition was accepted outside forensic profile' >&2
+  exit 1
+fi
+grep -q 'state_transition_requires_forensic' "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/review.json" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const [decisionPath, envelopePath, reviewPath] = process.argv.slice(2);
+const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(reviewPath, JSON.stringify({
+  schema: 'aegis.preflight_review.v2',
+  normalizedDemandDigest: envelope.normalizedDemand.digest,
+  decisionDigest: digest(readFileSync(decisionPath)),
+  producerId: 'producer',
+  reviewerId: 'reviewer',
+  verdict: 'APPROVED',
+  findings: [],
+}));
+NODE
+AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
+  < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
+jq -e '.status == "SEMANTIC_STATE_PERSISTED" and (.semantic.independentReviewDigest | test("^[a-f0-9]{64}$"))' \
+  "${WORK_DIR}/forensic/.harness/runtime/result.json" >/dev/null
+jq -e '.contract.verification.riskProfile == "forensic" and (.contract.verification.independentReviewDigest | test("^[a-f0-9]{64}$")) and (.contract.stateModel.bindings | length == 8)' \
+  "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" >/dev/null
+forensic_profile="$(jq '.proofRegistry' "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" > "${WORK_DIR}/forensic/.harness/runtime/proof-registry.json"; AEGIS_ROOT_DIR="${WORK_DIR}/forensic" bash -c "source '${ROOT_DIR}/scripts/lib/proof_governance.sh'; aegis_proof_profile_for_change '${WORK_DIR}/forensic/.harness/runtime/proof-registry.json' 'src/state.ts'")"
+printf '%s' "${forensic_profile}" | jq -e '.profile == "forensic"' >/dev/null
 
 prepare_repository "${WORK_DIR}/confirm"
 printf 'Criar src/clock.ts.\n' | AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/preflight.mjs" \
@@ -175,9 +293,17 @@ const allUnits = envelope.normalizedDemand.units.map((_, index) => index);
 writeFileSync(destination, JSON.stringify({
   schema: 'aegis.preflight_decision.v2',
   contextDigest: envelope.contextDigest,
+  promptDigest: envelope.promptDigest,
   status: 'CLARIFIED',
-  rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'APPLIED', 'A regra foi considerada.', allUnits]),
+  rules: envelope.architecture.candidateRules.map((rule) => [
+    rule.id,
+    rule.id === 'ARCH-DETERMINISTIC-TIME' ? 'APPLIED' : 'NOT_APPLICABLE',
+    'A regra foi considerada.',
+    rule.id === 'ARCH-DETERMINISTIC-TIME' ? allUnits : [],
+  ]),
   questions: [],
+  riskProfile: 'standard',
+  stateModel: { kind: 'NONE', bindings: [] },
   intent: 'Implementar TokenBucket determinístico.',
   scope: ['src/tokenBucket.ts', 'src/tokenBucket.proof.ts', 'src/index.ts'],
   excluded: [],
@@ -195,7 +321,7 @@ writeFileSync(destination, JSON.stringify({
 NODE
 AEGIS_ROOT="${WORK_DIR}/hard-signal" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json < "${hard_envelope}" > "${WORK_DIR}/hard-signal/.harness/runtime/revision.json"
-jq -e '.status == "SEMANTIC_REVISION_REQUIRED" and ([.corrections[].code] | index("hard_reference_requires_confirmation")) and ([.corrections[].code] | index("user_requirement_introduces_identifier"))' \
+jq -e '.status == "SEMANTIC_REVISION_REQUIRED" and ([.corrections[].code] | index("hard_reference_requires_confirmation")) and ([.corrections[].code] | index("user_requirement_introduces_identifier") | not)' \
   "${WORK_DIR}/hard-signal/.harness/runtime/revision.json" >/dev/null
 node --input-type=module - "${WORK_DIR}/hard-signal/.harness/runtime/decision.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';

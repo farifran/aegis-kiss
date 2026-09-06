@@ -8,6 +8,7 @@ script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 contract_record="src/.aegis/contract-ir.json"
 clarified_record="src/.aegis/clarified-demand.json"
 registry_record="src/.aegis/proof-registry.json"
+semantic_record="src/.aegis/semantic-state.json"
 
 # shellcheck disable=SC1091
 source "${script_root}/lib/proof_governance.sh"
@@ -124,22 +125,6 @@ canonical_json_digest_from_index() {
   git -C "${repository_root}" show ":${path}" | jq -S -c . | shasum -a 256 | awk '{print $1}'
 }
 
-clarified_digest_from_worktree() {
-  if [[ -f "${repository_root}/${clarified_record}" ]]; then
-    canonical_json_digest_from_worktree "${clarified_record}"
-  else
-    absent_metadata_digest "${clarified_record}"
-  fi
-}
-
-clarified_digest_from_index() {
-  if git -C "${repository_root}" cat-file -e ":${clarified_record}" 2>/dev/null; then
-    canonical_json_digest_from_index "${clarified_record}"
-  else
-    absent_metadata_digest "${clarified_record}"
-  fi
-}
-
 metadata_digest_from_commit() {
   local commit="${1:-}" path="${2:-}"
   if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
@@ -158,9 +143,72 @@ canonical_json_digest_from_commit() {
   fi
 }
 
+semantic_field_digest_from_worktree() {
+  local field="${1:-}"
+  if [[ -f "${repository_root}/${semantic_record}" ]]; then
+    jq -S -c --arg field "${field}" '.[$field]' "${repository_root}/${semantic_record}" | shasum -a 256 | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+semantic_field_digest_from_index() {
+  local field="${1:-}"
+  if git -C "${repository_root}" cat-file -e ":${semantic_record}" 2>/dev/null; then
+    git -C "${repository_root}" show ":${semantic_record}" | jq -S -c --arg field "${field}" '.[$field]' | shasum -a 256 | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+semantic_field_digest_from_commit() {
+  local commit="${1:-}" field="${2:-}"
+  if git -C "${repository_root}" cat-file -e "${commit}:${semantic_record}" 2>/dev/null; then
+    git -C "${repository_root}" show "${commit}:${semantic_record}" | jq -S -c --arg field "${field}" '.[$field]' | shasum -a 256 | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+contract_digest_from_worktree() { semantic_field_digest_from_worktree contract || metadata_digest_from_worktree "${contract_record}"; }
+registry_digest_from_worktree() { semantic_field_digest_from_worktree proofRegistry || metadata_digest_from_worktree "${registry_record}"; }
+clarified_digest_from_worktree() {
+  semantic_field_digest_from_worktree clarifiedDemand || {
+    [[ -f "${repository_root}/${clarified_record}" ]] && canonical_json_digest_from_worktree "${clarified_record}" || absent_metadata_digest "${clarified_record}";
+  }
+}
+contract_digest_from_index() { semantic_field_digest_from_index contract || metadata_digest_from_index "${contract_record}"; }
+registry_digest_from_index() { semantic_field_digest_from_index proofRegistry || metadata_digest_from_index "${registry_record}"; }
+clarified_digest_from_index() {
+  semantic_field_digest_from_index clarifiedDemand || {
+    git -C "${repository_root}" cat-file -e ":${clarified_record}" 2>/dev/null && canonical_json_digest_from_index "${clarified_record}" || absent_metadata_digest "${clarified_record}";
+  }
+}
+contract_digest_from_commit() { semantic_field_digest_from_commit "$1" contract || metadata_digest_from_commit "$1" "${contract_record}"; }
+registry_digest_from_commit() { semantic_field_digest_from_commit "$1" proofRegistry || metadata_digest_from_commit "$1" "${registry_record}"; }
+clarified_digest_from_commit() {
+  semantic_field_digest_from_commit "$1" clarifiedDemand || {
+    git -C "${repository_root}" cat-file -e "$1:${clarified_record}" 2>/dev/null && canonical_json_digest_from_commit "$1" "${clarified_record}" || absent_metadata_digest "${clarified_record}";
+  }
+}
+
+contract_worktree_file() {
+  if [[ -f "${repository_root}/${semantic_record}" ]]; then
+    local file="${repository_root}/.harness/runtime/semantic-state/contract-ir.json"
+    mkdir -p "$(dirname "${file}")"
+    jq '.contract' "${repository_root}/${semantic_record}" > "${file}"
+    printf '%s\n' "${file}"
+  else
+    printf '%s\n' "${repository_root}/${contract_record}"
+  fi
+}
+
 execution_id_for_base() {
   local base="${1:-}" demand_digest="ABSENT" change_kind="BASELINE"
-  if [[ -f "${repository_root}/${clarified_record}" ]]; then
+  if [[ -f "${repository_root}/${semantic_record}" ]]; then
+    demand_digest="$(jq -r '.clarifiedDemand.normalizedDemandDigest' "${repository_root}/${semantic_record}")"
+    change_kind="$(jq -r '.clarifiedDemand.changeKind' "${repository_root}/${semantic_record}")"
+  elif [[ -f "${repository_root}/${clarified_record}" ]]; then
     demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/${clarified_record}")"
     change_kind="$(jq -r '.changeKind' "${repository_root}/${clarified_record}")"
   fi
@@ -217,9 +265,11 @@ write_receipt() {
 }
 
 profile_for_files() {
-  local files="${1:-}" profile_json
+  local files="${1:-}" profile_json registry_file
+  registry_file="$(AEGIS_ROOT_DIR="${repository_root}" AEGIS_RUNTIME_DIR="${repository_root}/.harness/runtime" aegis_proof_registry_path)" \
+    || fatal "semantic_registry_unavailable"
   profile_json="$(AEGIS_ROOT_DIR="${repository_root}" aegis_proof_profile_for_change \
-    "${repository_root}/${registry_record}" "${files}")" \
+    "${registry_file}" "${files}")" \
     || fatal "automatic_profile_resolution_failed"
   printf '%s' "${profile_json}"
 }
@@ -242,7 +292,8 @@ create_authorization() {
   run_structure_verification
   AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
     || fatal "promotion_contract_evidence_verification_failed"
-  if [[ ! -e "${repository_root}/${contract_record}" \
+  if [[ ! -e "${repository_root}/${semantic_record}" \
+    && ! -e "${repository_root}/${contract_record}" \
     && ! -e "${repository_root}/${registry_record}" ]]; then
     create_baseline_authorization
     return
@@ -262,16 +313,25 @@ create_authorization() {
   base="$(git -C "${repository_root}" rev-parse HEAD)"
   manifest="$(manifest_from_worktree "${files}")"
   artifact_digest="$(shasum -a 256 "${artifact_file}" | awk '{print $1}')"
-  contract_digest="$(file_digest_from_worktree "${contract_record}")"
-  registry_digest="$(file_digest_from_worktree "${registry_record}")"
+  contract_digest="$(contract_digest_from_worktree)"
+  registry_digest="$(registry_digest_from_worktree)"
   clarified_digest="$(clarified_digest_from_worktree)"
   policy_digest="$(metadata_digest_from_worktree governance/architecture.policy.json)"
   authority="$(validation_authority_json)"
   profile_json="$(profile_for_files "${files}")"
   profile="$(printf '%s' "${profile_json}" | jq -r '.profile')"
   case "${profile}" in fast|targeted|release|forensic) ;; *) fatal "invalid_automatic_profile" ;; esac
+  local contract_file registry_file
+  contract_file="$(contract_worktree_file)"
+  registry_file="$(AEGIS_ROOT_DIR="${repository_root}" AEGIS_RUNTIME_DIR="${repository_root}/.harness/runtime" aegis_proof_registry_path)"
+  if jq -e '.verification?.riskProfile == "forensic" and (.verification.independentReviewDigest | type == "string" and test("^[a-f0-9]{64}$"))' \
+    "${contract_file}" >/dev/null; then
+    [[ "${profile}" == "forensic" ]] || fatal "forensic_profile_required"
+  elif jq -e '.verification?.riskProfile == "forensic"' "${contract_file}" >/dev/null; then
+    fatal "forensic_review_missing"
+  fi
   proof_plan="$(AEGIS_ROOT_DIR="${repository_root}" aegis_proof_profile_plan "${profile}" \
-    "${repository_root}/${registry_record}" "${files}")" \
+    "${registry_file}" "${files}")" \
     || fatal "proof_plan_generation_failed"
 
   # A receipt is issued only after the profile selected from this exact diff
@@ -343,8 +403,8 @@ create_baseline_authorization() {
   proof_plan="$(jq -n '{profile:"fast",count:0,proofs:[]}')"
   proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
   write_receipt "${base}" "${files}" "${index_manifest}" "${artifact_digest}" \
-    "$(metadata_digest_from_worktree "${contract_record}")" \
-    "$(metadata_digest_from_worktree "${registry_record}")" \
+    "$(contract_digest_from_worktree)" \
+    "$(registry_digest_from_worktree)" \
     "$(clarified_digest_from_worktree)" \
     "$(metadata_digest_from_worktree governance/architecture.policy.json)" \
     "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}"
@@ -365,6 +425,18 @@ is_complete_baseline_reset_staged() {
   local contract_path="${contract_record}"
   local registry_path="${registry_record}"
   local target reset_index
+
+  if git -C "${repository_root}" cat-file -e "HEAD:${semantic_record}" 2>/dev/null; then
+    ! git -C "${repository_root}" cat-file -e ":${semantic_record}" 2>/dev/null || return 1
+    while IFS= read -r target; do
+      [[ -n "${target}" && "${target}" != "src/index.ts" ]] || continue
+      ! git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || return 1
+    done < <(git -C "${repository_root}" show "HEAD:${semantic_record}" | jq -r '.contract.scope.authorizedPaths[]?')
+    git -C "${repository_root}" cat-file -e ':src/index.ts' 2>/dev/null || return 1
+    reset_index="$(git -C "${repository_root}" show :src/index.ts)"
+    [[ "${reset_index}" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
+    return
+  fi
 
   # A reset is valid only when the *previous* governed unit existed and the
   # index removes both its metadata files. This cannot turn an arbitrary
@@ -423,8 +495,8 @@ verify_authorization() {
   expected_registry_digest="$(jq -r '.proofRegistryDigest' "${auth_file}")"
   expected_clarified_digest="$(jq -r '.clarifiedDemandDigest' "${auth_file}")"
   expected_policy_digest="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
-  contract_digest="$(metadata_digest_from_index "${contract_record}")"
-  registry_digest="$(metadata_digest_from_index "${registry_record}")"
+  contract_digest="$(contract_digest_from_index)"
+  registry_digest="$(registry_digest_from_index)"
   clarified_digest="$(clarified_digest_from_index)"
   policy_digest="$(metadata_digest_from_index governance/architecture.policy.json)"
   [[ "${expected_contract_digest}" == "${contract_digest}" ]] || fatal "formal_promotion_contract_digest_mismatch"
@@ -461,11 +533,11 @@ verify_committed_transition() {
   expected_registry="$(jq -r '.proofRegistryDigest' "${auth_file}")"
   expected_clarified="$(jq -r '.clarifiedDemandDigest' "${auth_file}")"
   expected_policy="$(jq -r '.architecturePolicyDigest' "${auth_file}")"
-  [[ "${expected_contract}" == "$(metadata_digest_from_commit "${head}" "${contract_record}")" ]] \
+  [[ "${expected_contract}" == "$(contract_digest_from_commit "${head}")" ]] \
     || fatal "postcommit_contract_digest_mismatch"
-  [[ "${expected_registry}" == "$(metadata_digest_from_commit "${head}" "${registry_record}")" ]] \
+  [[ "${expected_registry}" == "$(registry_digest_from_commit "${head}")" ]] \
     || fatal "postcommit_registry_digest_mismatch"
-  [[ "${expected_clarified}" == "$(canonical_json_digest_from_commit "${head}" "${clarified_record}")" ]] \
+  [[ "${expected_clarified}" == "$(clarified_digest_from_commit "${head}")" ]] \
     || fatal "postcommit_clarified_demand_digest_mismatch"
   [[ "${expected_policy}" == "$(metadata_digest_from_commit "${head}" governance/architecture.policy.json)" ]] \
     || fatal "postcommit_architecture_policy_digest_mismatch"

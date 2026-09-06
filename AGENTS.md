@@ -58,6 +58,12 @@ Para novas demandas, o único formato ativo é `aegis.contract_ir.v2`. Contratos
 não recebem compatibilidade de execução. O corte para `v2` começa de estado
 governado limpo, preservando a trilha histórica no Git.
 
+Demandas com transição observável de estado declaram um modelo semântico com
+estado, comando, resultado e fronteira atômica. Quando a transição combina
+atomicidade com recursos, tempo, identidade externa ou canonicalização, ela é
+`forensic`: exige prova de cadência `forensic`, revisão independente antes da
+persistência do contrato e promoção no perfil `forensic`.
+
 #### 3. ESTADO PROJETADO ANTES DA MUTAÇÃO (Composição Segura)
 Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição opera obrigatoriamente como:
 $$\text{Estado Atual } (S_0) \longrightarrow \text{Estado Projetado } (S_1 \dots S_n) \longrightarrow \text{Validar Invariantes} \longrightarrow \text{Promover Atomicamente } (S_{\text{commit}})$$

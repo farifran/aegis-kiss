@@ -44,10 +44,15 @@ safe_path() {
 }
 
 metadata_state() {
+  local semantic_state="${ROOT_DIR}/src/.aegis/semantic-state.json"
   local contract="${ROOT_DIR}/src/.aegis/contract-ir.json"
   local clarified="${ROOT_DIR}/src/.aegis/clarified-demand.json"
   local registry="${ROOT_DIR}/src/.aegis/proof-registry.json"
-  if [[ -e "${contract}" && -e "${clarified}" && -e "${registry}" ]]; then
+  if [[ -e "${semantic_state}" ]]; then
+    jq -e '.schema == "aegis.semantic_state.v1" and (.clarifiedDemand | type == "object") and (.contract | type == "object") and (.proofRegistry | type == "object")' "${semantic_state}" >/dev/null 2>&1 \
+      || fatal 'invalid_semantic_state'
+    printf 'GOVERNED\n'
+  elif [[ -e "${contract}" && -e "${clarified}" && -e "${registry}" ]]; then
     printf 'GOVERNED\n'
   elif [[ -e "${contract}" && -e "${clarified}" && ! -e "${registry}" ]]; then
     printf 'CONTRACT_READY\n'

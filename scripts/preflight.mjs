@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
-import { buildPreflight, normalizeDemand, semanticRequest } from './lib/preflight_core.mjs';
+import { buildPreflight, maxDemandBytes, normalizeDemand, semanticRequest } from './lib/preflight_core.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 let target = '';
@@ -14,6 +14,8 @@ let internalEnvelope = false;
 let saveEnvelope = false;
 let digestOnly = false;
 let changeKind = 'PRODUCT';
+const runtimeLockName = 'preflight.lock';
+const staleLockMs = 120_000;
 for (let index = 2; index < process.argv.length;) {
   if (process.argv[index] === '--internal-envelope') {
     internalEnvelope = true;
@@ -40,7 +42,12 @@ try {
   const startedAtEpochMs = Date.now();
   const started = performance.now();
   const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of process.stdin) {
+    total += chunk.length;
+    if (total > maxDemandBytes) throw new Error('input_too_large');
+    chunks.push(chunk);
+  }
   const rawDemand = Buffer.concat(chunks);
   if (digestOnly) {
     if (internalEnvelope || saveEnvelope || target.length > 0) throw new Error('invalid_digest_only_combination');
@@ -59,10 +66,30 @@ try {
     const envelopePath = resolve(runtimeDirectory, 'preflight_envelope.json');
     const temporaryPath = `${envelopePath}.${process.pid}.tmp`;
     await mkdir(runtimeDirectory, { recursive: true });
-    const previousArtifacts = await readdir(runtimeDirectory);
-    await Promise.all(previousArtifacts.map((name) => rm(resolve(runtimeDirectory, name), { force: true, recursive: true })));
-    await writeFile(temporaryPath, `${JSON.stringify(frozenEnvelope)}\n`, 'utf8');
-    await rename(temporaryPath, envelopePath);
+    const lockDirectory = resolve(runtimeDirectory, runtimeLockName);
+    try {
+      await mkdir(lockDirectory);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      const age = Date.now() - (await stat(lockDirectory)).mtimeMs;
+      if (age < staleLockMs) throw new Error('preflight_execution_busy');
+      await rm(lockDirectory, { recursive: true, force: true });
+      await mkdir(lockDirectory);
+    }
+    try {
+      await writeFile(resolve(lockDirectory, 'owner.json'), `${JSON.stringify({ pid: process.pid, startedAtEpochMs })}\n`, 'utf8');
+      await Promise.all([
+        'preflight_envelope.json',
+        'preflight_decision.json',
+        'preflight_review.json',
+        'preflight_resolution.json',
+        'finalization.json',
+      ].map((name) => rm(resolve(runtimeDirectory, name), { force: true })));
+      await writeFile(temporaryPath, `${JSON.stringify(frozenEnvelope)}\n`, 'utf8');
+      await rename(temporaryPath, envelopePath);
+    } finally {
+      await rm(lockDirectory, { recursive: true, force: true });
+    }
   }
   const output = internalEnvelope
     ? frozenEnvelope

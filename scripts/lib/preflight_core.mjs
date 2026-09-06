@@ -1,25 +1,96 @@
 import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
+import process from 'node:process';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
+import { assertSchema } from './schema_validator.mjs';
+import { parseSemanticState } from './semantic_state.mjs';
 
-const defaultMaxBytes = 65_536;
+export const maxDemandBytes = 65_536;
+const governedMaxBytes = 256 * 1024;
+const gitMaxBytes = 512 * 1024;
+const gitTimeoutMs = 3_000;
+const semanticProtocolVersion = 'aegis.semantic_protocol.v2';
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
 
 export function digest(value) {
   return sha256(value);
 }
 
-function currentCommit(root) {
+function gitEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM'].includes(key) || key.startsWith('GIT_CONFIG_')) {
+      delete environment[key];
+    }
+  }
+  return environment;
+}
+
+function git(root, args, code, encoding = 'buffer') {
   try {
-    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
-      encoding: 'utf8',
+    return execFileSync('git', ['-C', root, ...args], {
+      encoding,
       stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+      env: gitEnvironment(),
+      timeout: gitTimeoutMs,
+      maxBuffer: gitMaxBytes,
+    });
   } catch {
-    return null;
+    throw new Error(code);
+  }
+}
+
+function canonicalRoot(root) {
+  let canonical;
+  try {
+    canonical = realpathSync(root);
+  } catch {
+    throw new Error('preflight_root_unavailable');
+  }
+  const reported = git(canonical, ['rev-parse', '--show-toplevel'], 'preflight_requires_git_repository', 'utf8').trim();
+  let gitRoot;
+  try {
+    gitRoot = realpathSync(reported);
+  } catch {
+    throw new Error('preflight_requires_git_repository');
+  }
+  if (gitRoot !== canonical) throw new Error('preflight_root_mismatch');
+  return canonical;
+}
+
+function currentCommit(root) {
+  return git(root, ['rev-parse', 'HEAD'], 'preflight_requires_git_repository', 'utf8').trim();
+}
+
+function canonicalRepositoryPath(value) {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.startsWith('/')
+    || value.includes('\\')
+    || value.split('/').some((part) => part.length === 0 || part === '.' || part === '..')
+  ) {
+    throw new Error('non_canonical_repository_path');
+  }
+  return value;
+}
+
+function readCommitBlob(root, commit, path, code) {
+  const repositoryPath = canonicalRepositoryPath(path);
+  const bytes = git(root, ['show', `${commit}:${repositoryPath}`], code);
+  if (bytes.length > governedMaxBytes) throw new Error('governed_artifact_budget_exceeded');
+  return bytes;
+}
+
+function readOptionalCommitBlob(root, commit, path) {
+  try {
+    return readCommitBlob(root, commit, path, 'governed_artifact_missing');
+  } catch (error) {
+    if (error instanceof Error && error.message === 'governed_artifact_missing') return null;
+    throw error;
   }
 }
 
@@ -28,26 +99,16 @@ function executionId(baseCommit, normalizedDemandDigest, changeKind) {
 }
 
 export function repositorySnapshot(root) {
-  const commit = currentCommit(root);
-  if (commit === null) throw new Error('preflight_requires_git_repository');
-  let status;
-  try {
-    status = execFileSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch {
-    throw new Error('worktree_status_unavailable');
-  }
-  const entries = status
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .filter((line) => !line.slice(3).startsWith('.harness/runtime/'))
-    .sort();
+  const canonical = canonicalRoot(root);
+  const commit = currentCommit(canonical);
+  const trackedRuntime = git(canonical, ['ls-files', '-z', '--', '.harness/runtime'], 'worktree_status_unavailable');
+  if (trackedRuntime.length > 0) throw new Error('tracked_runtime_path_forbidden');
+  const status = git(canonical, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], 'worktree_status_unavailable');
+  if (currentCommit(canonical) !== commit) throw new Error('repository_snapshot_changed');
   return {
     commit,
-    worktreeDigest: sha256(entries.join('\n')),
-    clean: entries.length === 0,
+    worktreeDigest: sha256(status),
+    clean: status.length === 0,
   };
 }
 
@@ -96,16 +157,13 @@ function extractUnits(text) {
     const startsFence = line.startsWith('\x60\x60\x60');
     for (const [start, end] of sentenceRanges(line, inCode)) {
       const fragment = line.slice(start, end);
-      const leading = fragment.length - fragment.trimStart().length;
-      const trailing = fragment.length - fragment.trimEnd().length;
-      const unitText = fragment.trim();
-      if (unitText.length === 0) continue;
-      const unitStart = utf16Start + start + leading;
-      const unitEnd = utf16Start + end - trailing;
+      if (fragment.trim().length === 0) continue;
+      const unitStart = utf16Start + start;
+      const unitEnd = utf16Start + end;
       units.push({
         id: 'UNIT-' + String(units.length + 1).padStart(4, '0'),
-        kind: classifyLine(unitText, inCode),
-        text: unitText,
+        kind: classifyLine(fragment.trimStart(), inCode),
+        text: fragment,
         range: {
           startByte: byteOffset(text, unitStart),
           endByte: byteOffset(text, unitEnd),
@@ -175,7 +233,7 @@ function extractReferences(text, units) {
   return references.sort((left, right) => left.range.startByte - right.range.startByte || left.kind.localeCompare(right.kind));
 }
 
-export function normalizeDemand(rawBytes, maxBytes = defaultMaxBytes) {
+export function normalizeDemand(rawBytes, maxBytes = maxDemandBytes) {
   if (!Buffer.isBuffer(rawBytes) || rawBytes.length > maxBytes) throw new Error('input_too_large');
   let decoded;
   try {
@@ -198,8 +256,13 @@ export function normalizeDemand(rawBytes, maxBytes = defaultMaxBytes) {
 }
 
 function safePath(root, value) {
-  if (typeof value !== 'string' || value.length === 0 || value.startsWith('/') || value.split(/[\\/]/u).includes('..')) return undefined;
-  const absolute = resolve(root, value);
+  let canonical;
+  try {
+    canonical = canonicalRepositoryPath(value);
+  } catch {
+    return undefined;
+  }
+  const absolute = resolve(root, canonical);
   const relation = relative(root, absolute);
   if (relation === '..' || relation.startsWith('..' + sep)) return undefined;
   return absolute;
@@ -220,7 +283,10 @@ function pathFact(root, kind, value, source = {}) {
   if (absolute === undefined) return { kind, value, status: 'DISPROVEN', evidence: 'unsafe_relative_path', ...source };
   if (!existsSync(absolute)) return { kind, value, status: 'DISPROVEN', evidence: 'path_not_found', ...source };
   if (containsSymlink(root, absolute)) return { kind, value, status: 'DISPROVEN', evidence: 'symlink_not_allowed', ...source };
-  return { kind, value, status: 'PROVEN', evidence: lstatSync(absolute).isDirectory() ? 'directory_exists' : 'file_exists', ...source };
+  const stat = lstatSync(absolute);
+  if (stat.isDirectory()) return { kind, value, status: 'PROVEN', evidence: 'directory_exists', ...source };
+  if (stat.isFile()) return { kind, value, status: 'PROVEN', evidence: 'file_exists', ...source };
+  return { kind, value, status: 'DISPROVEN', evidence: 'special_path_not_allowed', ...source };
 }
 
 function referenceFact(root, reference) {
@@ -230,41 +296,66 @@ function referenceFact(root, reference) {
   return { kind: 'symbol', value: reference.value, status: 'UNPROVEN', evidence: 'semantic_resolution_requires_ide', ...source };
 }
 
-export function loadArchitecture(root) {
-  const policyPath = resolve(root, 'governance/architecture.policy.json');
-  const policyText = readFileSync(policyPath, 'utf8');
-  const policy = JSON.parse(policyText);
-  if (
-    policy === null
-    || typeof policy !== 'object'
-    || policy.schema !== 'aegis.architecture_policy.v1'
-    || policy.origin === null
-    || typeof policy.origin !== 'object'
-    || typeof policy.origin.sourcePath !== 'string'
-    || !/^[a-f0-9]{64}$/u.test(policy.origin.sourceDigest)
-    || !Array.isArray(policy.rules)
-    || !policy.rules.every((rule) => (
-      rule !== null
-      && typeof rule === 'object'
-      && typeof rule.id === 'string'
-      && ['hard', 'default', 'preference'].includes(rule.level)
-      && typeof rule.statement === 'string'
-      && Array.isArray(rule.appliesWhen)
-      && rule.appliesWhen.every((item) => typeof item === 'string')
-      && ['any', 'all'].includes(rule.appliesMode)
-    ))
-  ) throw new Error('invalid_architecture_policy');
-  const sourcePath = safePath(root, policy.origin.sourcePath);
-  if (sourcePath === undefined || !existsSync(sourcePath)) throw new Error('architecture_source_unavailable');
-  if (digest(readFileSync(sourcePath)) !== policy.origin.sourceDigest) throw new Error('stale_architecture_policy');
+export function loadArchitecturePolicy(root, commit = undefined) {
+  const canonical = canonicalRoot(root);
+  const baseCommit = commit ?? currentCommit(canonical);
+  let policy;
+  let policyBytes;
+  try {
+    policyBytes = readCommitBlob(canonical, baseCommit, 'governance/architecture.policy.json', 'architecture_policy_unavailable');
+    policy = JSON.parse(policyBytes.toString('utf8'));
+    assertSchema('aegis.architecture_policy.v1', policy);
+  } catch {
+    throw new Error('invalid_architecture_policy');
+  }
+  if (new Set(policy.rules.map((rule) => rule.id)).size !== policy.rules.length) throw new Error('invalid_architecture_policy');
+  let sourceBytes;
+  try {
+    sourceBytes = readCommitBlob(canonical, baseCommit, policy.origin.sourcePath, 'architecture_source_unavailable');
+  } catch {
+    throw new Error('architecture_source_unavailable');
+  }
+  if (digest(sourceBytes) !== policy.origin.sourceDigest) throw new Error('stale_architecture_policy');
+  return {
+    policy,
+    policyText: policyBytes.toString('utf8'),
+    policyDigest: digest(policyBytes),
+  };
+}
+
+export function loadArchitecture(root, commit = undefined) {
+  const { policy, policyDigest } = loadArchitecturePolicy(root, commit);
   return {
     schema: 'aegis.preflight_architecture.v2',
-    policyDigest: digest(policyText),
+    policyDigest,
     sourceStatus: 'CURRENT',
     candidateRules: policy.rules.map(({ id, level, statement, appliesWhen, appliesMode, forbiddenReferences = [] }) => ({
       id, level, statement, appliesWhen, appliesMode, forbiddenReferences,
     })),
   };
+}
+
+export function loadPreviousEvidence(root, commit = undefined) {
+  const canonical = canonicalRoot(root);
+  const baseCommit = commit ?? currentCommit(canonical);
+  const semanticStateBytes = readOptionalCommitBlob(canonical, baseCommit, 'src/.aegis/semantic-state.json');
+  if (semanticStateBytes !== null) {
+    try {
+      const state = parseSemanticState(JSON.parse(semanticStateBytes.toString('utf8')));
+      return { source: 'semantic-state', contract: state.contract, proofRegistry: state.proofRegistry };
+    } catch {
+      throw new Error('invalid_previous_contract');
+    }
+  }
+  const legacyContractBytes = readOptionalCommitBlob(canonical, baseCommit, 'src/.aegis/contract-ir.json');
+  if (legacyContractBytes === null) return null;
+  try {
+    const contract = JSON.parse(legacyContractBytes.toString('utf8'));
+    assertSchema('aegis.contract_ir.v2', contract);
+    return { source: 'legacy-contract', contract, proofRegistry: null };
+  } catch {
+    throw new Error('invalid_previous_contract');
+  }
 }
 
 function inject(template, placeholder, value) {
@@ -275,31 +366,31 @@ function inject(template, placeholder, value) {
 
 export async function buildPreflight(rawBytes, requestedTarget, root, changeKind = 'PRODUCT') {
   if (!['PRODUCT', 'HARNESS'].includes(changeKind)) throw new Error('invalid_change_kind');
-  const baseline = repositorySnapshot(root);
+  const canonical = canonicalRoot(root);
+  const baseline = repositorySnapshot(canonical);
   if (!baseline.clean) throw new Error('preflight_requires_clean_worktree');
   const normalizedDemand = normalizeDemand(rawBytes);
   const target = requestedTarget.length === 0
     ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
-    : pathFact(root, 'target', requestedTarget);
+    : pathFact(canonical, 'target', requestedTarget);
   const factBody = {
     schema: 'aegis.preflight_facts.v2',
     target,
-    references: normalizedDemand.references.map((reference) => referenceFact(root, reference)),
+    references: normalizedDemand.references.map((reference) => referenceFact(canonical, reference)),
   };
   const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
-  const architecture = loadArchitecture(root);
-  const previousContractPath = resolve(root, 'src/.aegis/contract-ir.json');
-  let previousContract = null;
-  if (existsSync(previousContractPath)) {
-    try {
-      previousContract = JSON.parse(readFileSync(previousContractPath, 'utf8'));
-      const { assertSchema } = await import('./schema_validator.mjs');
-      assertSchema('aegis.contract_ir.v2', previousContract);
-    } catch {
-      throw new Error('invalid_previous_contract');
-    }
-  }
+  const architecture = loadArchitecture(canonical, baseline.commit);
+  const previousEvidence = loadPreviousEvidence(canonical, baseline.commit);
+  const previousContract = previousEvidence?.contract ?? null;
+  const previousProofRegistry = previousEvidence?.proofRegistry ?? null;
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);
+  const promptTemplate = readCommitBlob(canonical, baseline.commit, 'governance/prompts/preflight.v2.md', 'preflight_prompt_unavailable').toString('utf8');
+  const promptTemplateDigest = digest(promptTemplate);
+  const semanticProtocolDigest = canonicalDigest({
+    version: semanticProtocolVersion,
+    decisionSchema: 'aegis.preflight_decision.v2',
+    normalizedDemandSchema: 'aegis.normalized_demand.v2',
+  });
   const contextDigest = canonicalDigest({
     changeKind,
     baseline,
@@ -307,18 +398,29 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     mechanicalFactsDigest: mechanicalFacts.digest,
     architecturePolicyDigest: architecture.policyDigest,
     previousContractDigest,
+    promptTemplateDigest,
+    semanticProtocolDigest,
   });
-  let prompt = readFileSync(resolve(root, 'governance/prompts/preflight.v2.md'), 'utf8');
+  let prompt = promptTemplate;
   prompt = inject(prompt, 'context_digest', contextDigest);
   prompt = inject(prompt, 'change_kind', changeKind);
-  prompt = inject(prompt, 'normalized_demand', { units: normalizedDemand.units });
+  prompt = inject(prompt, 'normalized_demand', {
+    text: normalizedDemand.text,
+    units: normalizedDemand.units.map(({ id, kind, range }) => ({ id, kind, range })),
+  });
   prompt = inject(prompt, 'mechanical_facts', { target: mechanicalFacts.target, references: mechanicalFacts.references });
   prompt = inject(prompt, 'architecture_rules', { candidateRules: architecture.candidateRules });
   const previousContractProjection = previousContract === null ? null : {
     changeKind: previousContract.changeKind,
     architecture: { amendmentIds: previousContract.architecture.amendmentIds },
+    ...(previousContract.verification === undefined ? {} : { verification: previousContract.verification }),
+    ...(previousContract.stateModel === undefined ? {} : { stateModel: previousContract.stateModel }),
     scope: previousContract.scope,
     proofObligations: previousContract.proofObligations,
+    continuity: previousContract.continuity,
+    activeProofs: previousProofRegistry?.proofs
+      .filter((proof) => proof.status === 'active')
+      .map(({ id, coverageKey, targets, cadence }) => ({ id, coverageKey, targets, cadence })) ?? [],
   };
   prompt = inject(prompt, 'previous_contract', previousContractProjection);
   const envelope = {
@@ -333,10 +435,15 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     architecture,
     previousContract,
     previousContractDigest,
+    promptTemplateDigest,
+    semanticProtocolDigest,
     contextDigest,
     promptDigest: digest(prompt),
     prompt,
   };
+  if (canonicalDigest(repositorySnapshot(canonical)) !== canonicalDigest(baseline)) {
+    throw new Error('repository_snapshot_changed');
+  }
   return envelope;
 }
 
@@ -349,10 +456,13 @@ export function semanticRequest(envelope, timing) {
     baseCommit: envelope.baseCommit,
     contextDigest: envelope.contextDigest,
     promptDigest: envelope.promptDigest,
+    promptTemplateDigest: envelope.promptTemplateDigest,
+    semanticProtocolDigest: envelope.semanticProtocolDigest,
     timing,
     protocol: {
       decisionPath: '.harness/runtime/preflight_decision.json',
       finalize: './aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json',
+      forensicReview: 'forensic: ./aegis review <demanda> --decision <arquivo>; finalize com --independent-review <review>',
       revision: 'quando finalize retornar SEMANTIC_REVISION_REQUIRED, corrija somente a decisão usando as correções e repita finalize sem redescobrir o repositório',
       promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],
       forbidden: ['repository reads during semantic compilation', 'manual pre-commit execution', 'verification before authorize'],

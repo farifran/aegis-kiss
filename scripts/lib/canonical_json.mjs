@@ -1,11 +1,17 @@
 import { createHash } from 'node:crypto';
 
+function compareCodeUnits(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareCodeUnits(left, right))
         .map(([key, item]) => [key, sortValue(item)]),
     );
   }

@@ -98,9 +98,9 @@ await buildPreflight(Buffer.from('Criar src/example.ts.'), '', fixture);
 fs.readFileSync = originalReadFileSync;
 syncBuiltinESMExports();
 fs.rmSync(fixture, { recursive: true });
-const expected = ['governance/architecture.policy.json', 'ARCHITECTURE.md', 'governance/prompts/preflight.v2.md'];
+const expected = [];
 if (JSON.stringify(fixtureReads) !== JSON.stringify(expected)) {
-  throw new Error('unexpected mechanical read set: ' + fixtureReads.join(','));
+  throw new Error('governed artifacts must be read from the baseline commit, not the worktree: ' + fixtureReads.join(','));
 }
 NODE
 

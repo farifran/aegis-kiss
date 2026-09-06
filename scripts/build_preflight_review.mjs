@@ -72,6 +72,7 @@ try {
   fail('invalid_preflight_envelope');
 }
 if (decision.contextDigest !== preflight.contextDigest) fail('decision_context_mismatch');
+if (decision.promptDigest !== preflight.promptDigest) fail('decision_prompt_mismatch');
 const context = {
   normalizedDemand: preflight.normalizedDemand,
   mechanicalFacts: preflight.mechanicalFacts,

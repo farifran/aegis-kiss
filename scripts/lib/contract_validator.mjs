@@ -78,6 +78,28 @@ function validateContinuity(previousContract, contract) {
   }), 'invalid_continuity_proof_change');
 }
 
+function validateSemanticModel(contract) {
+  const hasModel = contract.stateModel !== undefined;
+  const hasVerification = contract.verification !== undefined;
+  if (!hasModel && !hasVerification) return;
+  requireCondition(hasModel && hasVerification, 'incomplete_semantic_model');
+  const roles = contract.stateModel.bindings.map((binding) => binding.role);
+  requireCondition(roles.length === new Set(roles).size, 'duplicate_state_model_role');
+  if (contract.stateModel.kind === 'NONE') {
+    requireCondition(roles.length === 0, 'invalid_stateless_state_model');
+    return;
+  }
+  for (const role of ['STATE', 'COMMAND', 'RESULT', 'ATOMICITY']) {
+    requireCondition(roles.includes(role), `state_model_role_missing:${role.toLowerCase()}`);
+  }
+  const highRisk = roles.includes('ATOMICITY')
+    && ['RESOURCE', 'TEMPORAL', 'IDENTITY', 'CANONICALIZATION'].some((role) => roles.includes(role));
+  if (highRisk) requireCondition(contract.verification.riskProfile === 'forensic', 'state_transition_requires_forensic');
+  if (contract.verification.riskProfile === 'forensic') {
+    requireCondition(/^[a-f0-9]{64}$/u.test(contract.verification.independentReviewDigest ?? ''), 'forensic_review_missing');
+  }
+}
+
 export function validateContract({ root, contract, clarified, policy, policyText, registry, previousContract, phase = 'promotion' }) {
   requireCondition(phase === 'compile' || phase === 'promotion', 'invalid_validation_phase');
   assertSchema('aegis.contract_ir.v2', contract);
@@ -100,6 +122,7 @@ export function validateContract({ root, contract, clarified, policy, policyText
   requireCondition(contract.architecture.appliedRuleIds.every((id) => policyRuleIds.has(id)), 'invalid_architecture_binding');
   requireCondition(contract.architecture.amendmentIds.every((id) => policyAmendmentIds.has(id)), 'invalid_architecture_binding');
   exactIds(contract.scope.authorizedPaths, clarified.scope.included, 'scope_binding_mismatch');
+  validateSemanticModel(contract);
   if (contract.changeKind === 'PRODUCT') {
     requireCondition(
       contract.scope.authorizedPaths.every((path) => path === 'src' || path.startsWith('src/')),

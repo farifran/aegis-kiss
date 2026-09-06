@@ -3,7 +3,7 @@
   "$id": "aegis.ide_semantic_request.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "contextDigest", "promptDigest", "timing", "protocol", "prompt"],
+  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "contextDigest", "promptDigest", "promptTemplateDigest", "semanticProtocolDigest", "timing", "protocol", "prompt"],
   "properties": {
     "schema": { "const": "aegis.ide_semantic_request.v2" },
     "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
@@ -12,6 +12,8 @@
     "baseCommit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promptTemplateDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "semanticProtocolDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "timing": {
       "type": "object",
       "additionalProperties": false,
@@ -25,10 +27,12 @@
     "protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decisionPath", "finalize", "promotion", "forbidden"],
+      "required": ["decisionPath", "finalize", "forensicReview", "revision", "promotion", "forbidden"],
       "properties": {
         "decisionPath": { "const": ".harness/runtime/preflight_decision.json" },
         "finalize": { "const": "./aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json" },
+        "forensicReview": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 1 },
         "promotion": {
           "const": ["implement authorized scope", "stage persistent changes", "./aegis authorize", "git commit"]
         },

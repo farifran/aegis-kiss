@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { validateContract } from './lib/contract_validator.mjs';
+import { readSemanticEvidence } from './lib/semantic_state.mjs';
 
 const defaultRoot = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 
@@ -44,11 +45,17 @@ function readJson(root, path, code) {
 
 const options = parseArguments(process.argv.slice(2));
 const root = resolve(options.root);
-const contract = readJson(root, options.contract, 'unreadable_contract').value;
-const clarified = readJson(root, options.clarified, 'unreadable_clarified_demand').value;
+let evidence;
+try {
+  evidence = readSemanticEvidence(root);
+} catch (error) {
+  fail(error instanceof Error ? error.message : 'invalid_semantic_state');
+}
+const contract = evidence?.contract ?? readJson(root, options.contract, 'unreadable_contract').value;
+const clarified = evidence?.clarifiedDemand ?? readJson(root, options.clarified, 'unreadable_clarified_demand').value;
 const policyFile = readJson(root, options.policy, 'unreadable_architecture_policy');
 const registry = options.phase === 'promotion'
-  ? readJson(root, options.registry, 'unreadable_proof_registry').value
+  ? (evidence?.proofRegistry ?? readJson(root, options.registry, 'unreadable_proof_registry').value)
   : undefined;
 try {
   const result = validateContract({

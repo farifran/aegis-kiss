@@ -19,7 +19,7 @@
         "required": ["id", "kind", "evidence", "sourceUnitIds"],
         "properties": {
           "id": { "type": "string", "pattern": "^REVIEW-[A-Z0-9][A-Z0-9-]+$" },
-          "kind": { "enum": ["OMISSION", "INVENTION", "RULE_ASSESSMENT", "QUESTION_QUALITY", "COVERAGE", "CONTRACT"] },
+          "kind": { "enum": ["OMISSION", "INVENTION", "RULE_ASSESSMENT", "QUESTION_QUALITY", "COVERAGE", "CONTRACT", "STATE_MODEL"] },
           "evidence": { "type": "string", "minLength": 1 },
           "sourceUnitIds": { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
         }

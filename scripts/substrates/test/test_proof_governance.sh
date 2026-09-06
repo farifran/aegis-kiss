@@ -9,7 +9,7 @@ source scripts/lib/proof_governance.sh
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis-proof-governance.XXXXXX")"
 runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/aegis-proof-runtime.XXXXXX")"
-cleanup() { rm -rf "${work_dir}" "${runtime_dir}"; }
+cleanup() { local status=$?; rm -rf "${work_dir}" "${runtime_dir}"; exit "${status}"; }
 trap cleanup EXIT
 
 valid_registry="${work_dir}/registry.json"
