@@ -37,6 +37,13 @@ esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
 * A primeira compilação semântica deve produzir os dois corpos. Se houver
   pergunta, ela também registra a resposta interpretada e os corpos provisórios:
   confirmação promove-os sem nova chamada; correção exige revisão semântica.
+* Cada pergunta de confirmação oferece de duas a quatro alternativas, uma
+  recomendada e um patch semântico pré-compilado. A escolha do usuário é
+  aplicada mecanicamente, registrada como `USER_CLARIFICATION` e não pode ser
+  removida como sobre-engenharia. Ambiguidades acopladas devem compor uma única
+  pergunta cujas alternativas resolvam conjuntamente todos os papéis afetados;
+  perguntas independentes não são comprimidas. O limite é quatro por
+  compilação.
 * Digests, vínculo arquitetural e metadados canônicos são montados e validados
   mecanicamente pelo Aegis, não reconstruídos pelo modelo.
 * O modelo emite apenas um delta semântico compacto. IDs, cobertura bijetiva,

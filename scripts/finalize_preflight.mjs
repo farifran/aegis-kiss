@@ -10,6 +10,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { validateContract } from './lib/contract_validator.mjs';
 import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
+import { questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 import { semanticStatePath, semanticStateRelativePath } from './lib/semantic_state.mjs';
 
@@ -286,6 +287,24 @@ function validateStateSemantics(envelope, decision) {
   }
 }
 
+function validateQuestionChoices(envelope, decision) {
+  for (const question of decision.questions) {
+    const answerIds = question[7].map(([id]) => id);
+    if (answerIds.length !== new Set(answerIds).size || !answerIds.includes(question[4])) {
+      fail('question_answer_set_invalid');
+    }
+    const questionUnits = new Set(question[6]);
+    const requiredRoles = decision.stateSemantics
+      .filter(([, disposition, , sourceIndexes]) => disposition === 'QUESTION_REQUIRED' && sourceIndexes.some((index) => questionUnits.has(index)))
+      .map(([role]) => role);
+    for (const [, , , , policies] of question[7]) {
+      const roles = policies.map(([role]) => role);
+      if (roles.length !== new Set(roles).size) fail('question_answer_state_policy_duplicate');
+      exactIds(roles, requiredRoles, 'question_answer_state_policy_coverage_invalid');
+    }
+  }
+}
+
 function validateDecision(envelope, decision) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
@@ -293,6 +312,7 @@ function validateDecision(envelope, decision) {
   const assessments = ruleAssessments(envelope, decision);
   for (const question of decision.questions) unitIds(envelope, question[6], 'decision_unknown_unit');
   if (decision.status === 'BLOCKED') return { assessments, stateProfile: { requiresIndependentReview: false } };
+  validateQuestionChoices(envelope, decision);
   validateScopeAndProofPaths(envelope, decision);
   const hardRules = new Set(envelope.architecture.candidateRules.filter((rule) => rule.level === 'hard').map((rule) => rule.id));
   if (assessments.some((item) => item.verdict === 'CONFLICT' && hardRules.has(item.ruleId)) && decision.status !== 'BLOCKED') {
@@ -308,7 +328,7 @@ function validateDecision(envelope, decision) {
   return { assessments, stateProfile: { requiresIndependentReview: decision.riskProfile === 'forensic' } };
 }
 
-function assembleSemanticState(envelope, decision, assessments, independentReviewDigest) {
+function assembleSemanticState(envelope, decision, assessments, independentReviewDigest, clarifications, clarificationRoles) {
   if (decision.proofs.length > 10) fail('proof_profile_budget_exceeded');
   const requirementIds = ids('REQ', decision.requirements.length);
   const behaviorIds = ids('BEH', decision.behaviors.length);
@@ -320,6 +340,12 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
   if (proofIds.length !== new Set(proofIds).size) fail('duplicate_proof_coverage_key');
 
   const inputCoverage = new Map();
+  const persistedClarifications = clarifications.map(({ questionId, answerId, recommended, statement }) => ({
+    questionId,
+    answerId,
+    recommended,
+    statement,
+  }));
   for (let requirementIndex = 0; requirementIndex < decision.requirements.length; requirementIndex += 1) {
     const unitIndexes = decision.requirements[requirementIndex][2];
     const provenance = decision.requirements[requirementIndex][1];
@@ -377,6 +403,7 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
       return { unitId: unit.id, disposition: coverage.disposition, requirementIds: [], rationale: coverage.rationale };
     }),
     architecture: { policyDigest: envelope.architecture.policyDigest, ruleAssessments: assessments },
+    clarifications: persistedClarifications,
     acceptanceCriteria: decision.acceptance,
     failureSemantics: decision.failures.map(([trigger, observableOutcome], index) => ({ id: failureIds[index], trigger, observableOutcome })),
   };
@@ -396,7 +423,7 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
     })),
     policies: decision.stateSemantics.map(([role, disposition, statement, sourceIndexes]) => ({
       role,
-      provenance: disposition === 'EXPLICIT' ? 'USER' : 'USER_CLARIFICATION',
+      provenance: clarificationRoles.has(role) || disposition === 'QUESTION_REQUIRED' ? 'USER_CLARIFICATION' : 'USER',
       statement,
       sourceUnitIds: unitIds(envelope, sourceIndexes, 'state_semantics_unknown_unit'),
     })),
@@ -416,6 +443,7 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
       ...(independentReviewDigest === null ? {} : { independentReviewDigest }),
     },
     stateModel,
+    clarifications: persistedClarifications,
     scope: { authorizedPaths: [...new Set([...decision.scope, ...evidenceScope])] },
     behavior: statements(decision.behaviors, behaviorIds),
     preconditions: statements(decision.preconditions, preconditionIds),
@@ -465,19 +493,26 @@ function validateResolution(envelope, decisionFile, resolution) {
   if (resolution.preflightPromptDigest !== envelope.promptDigest) fail('resolution_prompt_digest_mismatch');
   exactIds(
     resolution.answers.map((answer) => answer.questionId),
-    decisionFile.value.questions.map((_, index) => `Q-${String(index + 1).padStart(4, '0')}`),
+    questionIds(decisionFile.value),
     'resolution_answers_mismatch',
   );
+  for (const answer of resolution.answers) {
+    if (answer.action !== 'SELECT_ANSWER') continue;
+    const index = questionIds(decisionFile.value).indexOf(answer.questionId);
+    if (index < 0 || selectedAnswer(decisionFile.value.questions[index], answer.answerId) === undefined) {
+      fail(`resolution_unknown_answer:${answer.questionId}`);
+    }
+  }
 }
 
-function validateIndependentReview(envelope, decisionFile, review) {
+function validateIndependentReview(envelope, decision, review, decisionDigest) {
   assertValidSchema('aegis.preflight_review.v2', review, 'malformed_independent_review');
   if (review.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('review_demand_digest_mismatch');
-  if (review.decisionDigest !== sha256(decisionFile.bytes)) fail('review_decision_digest_mismatch');
+  if (review.decisionDigest !== decisionDigest) fail('review_decision_digest_mismatch');
   if (review.producerId === review.reviewerId) fail('review_authority_not_independent');
   const knownUnits = new Set(envelope.normalizedDemand.units.map((unit) => unit.id));
   if (!review.findings.every((finding) => finding.sourceUnitIds.every((id) => knownUnits.has(id)))) fail('review_unknown_unit');
-  const expectedRoles = decisionFile.value.stateModel.bindings.map(([role]) => role);
+  const expectedRoles = decision.stateModel.bindings.map(([role]) => role);
   exactIds(
     review.stateSemantics.map(([role]) => role),
     expectedRoles,
@@ -488,7 +523,7 @@ function validateIndependentReview(envelope, decisionFile, review) {
   }
   if (review.verdict === 'APPROVED') {
     const decisionDispositions = new Map(
-      decisionFile.value.stateSemantics.map(([role, disposition]) => [role, disposition]),
+      decision.stateSemantics.map(([role, disposition]) => [role, disposition]),
     );
     if (review.stateSemantics.some(([role, verdict]) => decisionDispositions.get(role) !== verdict)) {
       fail('review_state_semantics_mismatch');
@@ -500,7 +535,7 @@ function validateIndependentReview(envelope, decisionFile, review) {
       const indexes = sourceUnitIds
         .map((unitId) => envelope.normalizedDemand.units.findIndex((unit) => unit.id === unitId))
         .filter((index) => index >= 0);
-      if (decisionFile.value.status !== 'NEEDS_CONFIRMATION' || !questionCoversUnits(decisionFile.value, indexes)) {
+      if (decision.status !== 'NEEDS_CONFIRMATION' || !questionCoversUnits(decision, indexes)) {
         fail(`review_state_semantics_question_missing:${role.toLowerCase()}`);
       }
     }
@@ -587,8 +622,8 @@ validateEnvelope(envelope);
 
 const decisionFile = await readJson(options.decision, 'unreadable_decision');
 const decisionDigest = sha256(decisionFile.bytes);
-const validation = validateDecision(envelope, decisionFile.value);
-const { assessments } = validation;
+const sourceValidation = validateDecision(envelope, decisionFile.value);
+const { assessments } = sourceValidation;
 if (decisionFile.value.status === 'BLOCKED') {
   process.stdout.write(`${JSON.stringify({ schema: 'aegis.preflight_finalization.v2', status: 'BLOCKED' })}\n`);
   process.exit(0);
@@ -606,28 +641,23 @@ if (decisionFile.value.status === 'NEEDS_CONFIRMATION' && options.resolution.len
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
-    questions: decisionFile.value.questions.map(([scope, question, evidence, impact, recommendation, interpreted], index) => ({
-      id: `Q-${String(index + 1).padStart(4, '0')}`,
+    questions: decisionFile.value.questions.map(([scope, question, evidence, impact, recommendedAnswerId, interpreted, , answers], index) => ({
+      id: questionId(index),
       scope,
       question,
       evidence,
       impact,
-      recommendation,
       interpreted,
+      recommendedAnswerId,
+      answers: answers.map(([id, label, rationale]) => ({ id, label, rationale, recommended: id === recommendedAnswerId })),
     })),
   })}\n`);
   process.exit(0);
 }
-let independentReviewDigest = null;
-if (validation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
-  fail('independent_review_required_for_forensic');
-}
-if (options.independentReview.length > 0) {
-  const review = await readJson(options.independentReview, 'unreadable_independent_review');
-  validateIndependentReview(envelope, decisionFile, review.value);
-  independentReviewDigest = sha256(review.bytes);
-}
 let interpretationStatus = 'NOT_REQUIRED';
+let resolvedDecision = decisionFile.value;
+let clarifications = [];
+let clarificationRoles = new Set();
 if (decisionFile.value.status === 'CLARIFIED') {
   if (options.resolution.length > 0) fail('resolution_not_allowed');
 } else {
@@ -643,14 +673,34 @@ if (decisionFile.value.status === 'CLARIFIED') {
     })}\n`);
     process.exit(0);
   }
+  try {
+    ({ decision: resolvedDecision, clarifications, clarificationRoles } = resolvePreflightDecision(decisionFile.value, resolution.value));
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'resolution_invalid');
+  }
+  validateDecision(envelope, resolvedDecision);
   interpretationStatus = 'INTERPRETATION_CONFIRMED';
+}
+
+const effectiveDecisionDigest = resolvedDecision === decisionFile.value ? decisionDigest : canonicalDigest(resolvedDecision);
+const effectiveValidation = resolvedDecision === decisionFile.value ? sourceValidation : validateDecision(envelope, resolvedDecision);
+let independentReviewDigest = null;
+if (effectiveValidation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
+  fail('independent_review_required_for_forensic');
+}
+if (options.independentReview.length > 0) {
+  const review = await readJson(options.independentReview, 'unreadable_independent_review');
+  validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest);
+  independentReviewDigest = sha256(review.bytes);
 }
 
 const { clarifiedDemand, contract, proofRegistry } = assembleSemanticState(
   envelope,
-  decisionFile.value,
+  resolvedDecision,
   assessments,
   independentReviewDigest,
+  clarifications,
+  clarificationRoles,
 );
 let semanticState;
 try {
@@ -684,6 +734,7 @@ const result = {
   semantic: {
     reconciler: 'structural_reconciliation.v2',
     decisionArtifactBytesDigest: decisionDigest,
+    decisionSemanticDigest: effectiveDecisionDigest,
     independentReviewDigest,
   },
   timing: { phase: 'finalization', startedAtEpochMs, durationMs: Math.round((performance.now() - started) * 1000) / 1000 },

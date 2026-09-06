@@ -18,7 +18,7 @@ Uso no IDE:
   ./aegis harness "<demanda>" [--target <caminho>]
   ./aegis finalize "<mesma-demanda>" --decision <arquivo> [--resolution <arquivo>]
                     [--independent-review <arquivo>]
-  ./aegis review "<demanda>" --decision <arquivo> --producer-id <id> --reviewer-id <id>
+  ./aegis review "<demanda>" --decision <arquivo> [--resolution <arquivo>] --producer-id <id> --reviewer-id <id>
   ./aegis status
   ./aegis evidence --path <caminho> [--path <caminho> ...]
                     [--max-files <n>] [--max-total-bytes <n>] [--max-file-bytes <n>]
@@ -131,7 +131,7 @@ finalize_preflight() {
 }
 
 build_independent_review() {
-  local demand="${1:-}" decision="" producer_id="" reviewer_id="" envelope=""
+  local demand="${1:-}" decision="" resolution="" producer_id="" reviewer_id="" envelope=""
   shift || true
   [[ -n "${demand}" ]] || fatal 'missing_demand'
   while [[ $# -gt 0 ]]; do
@@ -141,6 +141,11 @@ build_independent_review() {
         [[ -n "${decision}" ]] && safe_path "${decision}" || fatal 'invalid_review_decision'
         shift 2
         ;;
+      --resolution)
+        resolution="${2:-}"
+        [[ -n "${resolution}" ]] && safe_path "${resolution}" || fatal 'invalid_review_resolution'
+        shift 2
+        ;;
       --producer-id) producer_id="${2:-}"; [[ -n "${producer_id}" ]] || fatal 'missing_producer_id'; shift 2 ;;
       --reviewer-id) reviewer_id="${2:-}"; [[ -n "${reviewer_id}" ]] || fatal 'missing_reviewer_id'; shift 2 ;;
       *) fatal "unknown_review_flag:$1" ;;
@@ -148,6 +153,7 @@ build_independent_review() {
   done
   [[ -n "${decision}" && -n "${producer_id}" && -n "${reviewer_id}" ]] || fatal 'missing_review_arguments'
   local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}")
+  [[ -n "${resolution}" ]] && args+=(--resolution "${resolution}")
   envelope="$(require_frozen_envelope "${demand}")"
   node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}"
 }

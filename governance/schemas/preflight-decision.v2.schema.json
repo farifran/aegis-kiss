@@ -43,15 +43,33 @@
       ]
     },
     "question": {
-      "type": "array", "minItems": 7, "maxItems": 7,
+      "type": "array", "minItems": 8, "maxItems": 8,
       "prefixItems": [
-        { "enum": ["INPUT", "SCOPE", "ARCHITECTURE"] },
+        { "enum": ["INPUT", "SCOPE", "ARCHITECTURE", "DEMAND"] },
         { "type": "string", "minLength": 1 },
         { "type": "string", "minLength": 1 },
         { "type": "string", "minLength": 1 },
+        { "type": "string", "minLength": 1, "pattern": "^[A-Z][A-Z0-9_-]*$" },
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/sourceIndexes" },
+        { "type": "array", "minItems": 2, "maxItems": 4, "items": { "$ref": "#/$defs/questionAnswer" } }
+      ]
+    },
+    "questionAnswer": {
+      "type": "array", "minItems": 5, "maxItems": 5,
+      "prefixItems": [
+        { "type": "string", "minLength": 1, "pattern": "^[A-Z][A-Z0-9_-]*$" },
         { "type": "string", "minLength": 1 },
         { "type": "string", "minLength": 1 },
-        { "$ref": "#/$defs/sourceIndexes" }
+        { "type": "string", "minLength": 1 },
+        { "type": "array", "items": { "$ref": "#/$defs/statePolicyPatch" }, "uniqueItems": true }
+      ]
+    },
+    "statePolicyPatch": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "prefixItems": [
+        { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+        { "type": "string", "minLength": 1 }
       ]
     },
     "requirement": {
@@ -176,7 +194,7 @@
     },
     {
       "if": { "properties": { "status": { "const": "NEEDS_CONFIRMATION" } }, "required": ["status"] },
-      "then": { "properties": { "questions": { "minItems": 1, "maxItems": 3 } } }
+      "then": { "properties": { "questions": { "minItems": 1, "maxItems": 4 } } }
     },
     {
       "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },

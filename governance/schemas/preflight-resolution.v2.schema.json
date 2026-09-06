@@ -17,14 +17,18 @@
         "required": ["questionId", "action"],
         "properties": {
           "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
-          "action": { "enum": ["CONFIRM_INTERPRETATION", "CORRECT_INTERPRETATION"] },
+          "action": { "enum": ["SELECT_ANSWER", "CORRECT_INTERPRETATION"] },
+          "answerId": { "type": "string", "minLength": 1, "pattern": "^[A-Z][A-Z0-9_-]*$" },
           "correction": { "type": "string", "minLength": 1 }
         },
         "allOf": [
           {
             "if": { "properties": { "action": { "const": "CORRECT_INTERPRETATION" } }, "required": ["action"] },
             "then": { "required": ["correction"] },
-            "else": { "not": { "required": ["correction"] } }
+            "else": {
+              "required": ["answerId"],
+              "not": { "required": ["correction"] }
+            }
           }
         ]
       }

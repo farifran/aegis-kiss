@@ -34,7 +34,10 @@ const decision = {
   status,
   rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'NOT_APPLICABLE', 'Sem incidência no comportamento solicitado.', []]),
   questions: status === 'NEEDS_CONFIRMATION'
-    ? [['SCOPE', 'Manter somente src/clock.ts?', 'A demanda nomeia esse caminho.', 'Define o escopo.', 'Sim.', 'Somente src/clock.ts e sua prova.', [allUnits[0]]]]
+    ? [['SCOPE', 'Manter somente src/clock.ts?', 'A demanda nomeia esse caminho.', 'Define o escopo.', 'KEEP_SCOPE', 'Somente src/clock.ts e sua prova.', [allUnits[0]], [
+      ['KEEP_SCOPE', 'Manter escopo mínimo', 'Preserva a menor entrega compatível.', 'O escopo fica limitado a src/clock.ts e sua prova.', []],
+      ['EXPAND_SCOPE', 'Ampliar escopo', 'Autoriza arquivos adicionais quando necessário.', 'O escopo pode incluir arquivos adicionais explicitamente aprovados.', []],
+    ]]]
     : [],
   riskProfile: 'standard',
   stateModel: { kind: 'NONE', bindings: [] },
@@ -301,9 +304,24 @@ printf 'Criar src/clock.ts.\n' | AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_D
   --kind PRODUCT --save-envelope --internal-envelope > "${WORK_DIR}/confirm-envelope-copy.json"
 confirm_envelope="${WORK_DIR}/confirm/.harness/runtime/preflight_envelope.json"
 write_decision "${confirm_envelope}" "${WORK_DIR}/confirm/.harness/runtime/decision.json" NEEDS_CONFIRMATION
+node --input-type=module - "${WORK_DIR}/confirm/.harness/runtime/decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const { assertSchema } = await import(process.cwd() + '/scripts/lib/schema_validator.mjs');
+const path = process.argv[2];
+const decision = JSON.parse(readFileSync(path, 'utf8'));
+decision.questions[0][0] = 'DEMAND';
+for (let index = 2; index <= 4; index += 1) {
+  const question = JSON.parse(JSON.stringify(decision.questions[0]));
+  question[1] = `Decisão independente ${index}`;
+  decision.questions.push(question);
+}
+assertSchema('aegis.preflight_decision.v2', decision);
+decision.questions = [decision.questions[0]];
+writeFileSync(path, JSON.stringify(decision));
+NODE
 AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json < "${confirm_envelope}" > "${WORK_DIR}/confirm/.harness/runtime/questions.json"
-jq -e '.status == "USER_CONFIRMATION_REQUIRED" and .questions == [{id:"Q-0001",scope:"SCOPE",question:"Manter somente src/clock.ts?",evidence:"A demanda nomeia esse caminho.",impact:"Define o escopo.",recommendation:"Sim.",interpreted:"Somente src/clock.ts e sua prova."}]' \
+jq -e '.status == "USER_CONFIRMATION_REQUIRED" and .questions == [{id:"Q-0001",scope:"DEMAND",question:"Manter somente src/clock.ts?",evidence:"A demanda nomeia esse caminho.",impact:"Define o escopo.",interpreted:"Somente src/clock.ts e sua prova.",recommendedAnswerId:"KEEP_SCOPE",answers:[{id:"KEEP_SCOPE",label:"Manter escopo mínimo",rationale:"Preserva a menor entrega compatível.",recommended:true},{id:"EXPAND_SCOPE",label:"Ampliar escopo",rationale:"Autoriza arquivos adicionais quando necessário.",recommended:false}]}]' \
   "${WORK_DIR}/confirm/.harness/runtime/questions.json" >/dev/null
 node --input-type=module - "${WORK_DIR}/confirm/.harness/runtime/decision.json" "${confirm_envelope}" "${WORK_DIR}/confirm/.harness/runtime/resolution.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -315,13 +333,95 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: digest(readFileSync(decisionPath)),
   preflightPromptDigest: envelope.promptDigest,
-  answers: [{ questionId: 'Q-0001', action: 'CONFIRM_INTERPRETATION' }],
+  answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'KEEP_SCOPE' }],
 }));
 NODE
 AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   < "${confirm_envelope}" > "${WORK_DIR}/confirm/.harness/runtime/result.json"
 jq -e '.interpretationStatus == "INTERPRETATION_CONFIRMED"' "${WORK_DIR}/confirm/.harness/runtime/result.json" >/dev/null
+jq -e '.clarifiedDemand.clarifications == [{questionId:"Q-0001",answerId:"KEEP_SCOPE",recommended:true,statement:"O escopo fica limitado a src/clock.ts e sua prova."}] and .contract.clarifications == .clarifiedDemand.clarifications' \
+  "${WORK_DIR}/confirm/src/.aegis/semantic-state.json" >/dev/null
+
+# A coupled ambiguity is one question, not a Cartesian product of separate
+# selections. Its alternatives resolve every linked policy atomically; the
+# forensic reviewer receives and attests that resolved candidate.
+prepare_repository "${WORK_DIR}/selected-forensic"
+printf 'Processar transição de estado atômica com recurso temporal, identificadores externos, resultado observável e representação canônica.\n' \
+  | AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/preflight.mjs" --kind PRODUCT --save-envelope > /dev/null
+selected_envelope="${WORK_DIR}/selected-forensic/.harness/runtime/preflight_envelope.json"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [sourcePath, envelopePath, destination] = process.argv.slice(2);
+const source = JSON.parse(readFileSync(sourcePath, 'utf8'));
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+source.contextDigest = envelope.contextDigest;
+source.promptDigest = envelope.promptDigest;
+source.status = 'NEEDS_CONFIRMATION';
+source.stateSemantics = source.stateSemantics.map((entry) => (
+  ['RESOURCE', 'TEMPORAL'].includes(entry[0]) ? [entry[0], 'QUESTION_REQUIRED', entry[2], entry[3]] : entry
+));
+const units = envelope.normalizedDemand.units.map((_, index) => index);
+source.questions = [[
+  'DEMAND',
+  'Qual política conjunta governa recurso consumido e tempo?',
+  'A transição precisa definir, em conjunto, o consumo de capacidade e o relógio que o contabiliza.',
+  'Define conservação observável, temporalidade e provas do lote.',
+  'EXPLICIT_CAPACITY_TIME',
+  'Interpretado: cost consome somente capacidade e now é entrada explícita, sem débito financeiro implícito.',
+  units,
+  [
+    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']]],
+    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']]],
+  ],
+]];
+writeFileSync(destination, JSON.stringify(source));
+NODE
+node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/resolution.json" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const [decisionPath, envelopePath, resolutionPath] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(resolutionPath, JSON.stringify({
+  schema: 'aegis.preflight_resolution.v2',
+  decisionDigest: createHash('sha256').update(readFileSync(decisionPath)).digest('hex'),
+  preflightPromptDigest: envelope.promptDigest,
+  answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'EXPLICIT_CAPACITY_TIME' }],
+}));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
+  < "${selected_envelope}" >/dev/null 2> "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.err"; then
+  echo 'selected forensic variant was persisted without independent review' >&2
+  exit 1
+fi
+grep -q 'independent_review_required_for_forensic' "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.err"
+AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
+  --producer-id producer --reviewer-id reviewer < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json"
+node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/review.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [requestPath, envelopePath, reviewPath] = process.argv.slice(2);
+const request = JSON.parse(readFileSync(requestPath, 'utf8'));
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(reviewPath, JSON.stringify({
+  schema: 'aegis.preflight_review.v2',
+  normalizedDemandDigest: envelope.normalizedDemand.digest,
+  decisionDigest: request.decisionDigest,
+  producerId: 'producer',
+  reviewerId: 'reviewer',
+  verdict: 'APPROVED',
+  findings: [],
+  stateSemantics: ['STATE', 'COMMAND', 'IDENTITY', 'RESOURCE', 'TEMPORAL', 'RESULT', 'ATOMICITY', 'CANONICALIZATION']
+    .map((role) => [role, 'EXPLICIT', 'A variante selecionada determina a política.', envelope.normalizedDemand.units.map((unit) => unit.id)]),
+}));
+NODE
+AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
+  --independent-review .harness/runtime/review.json < "${selected_envelope}" \
+  > "${WORK_DIR}/selected-forensic/.harness/runtime/result.json"
+jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2)' \
+  "${WORK_DIR}/selected-forensic/src/.aegis/semantic-state.json" >/dev/null
 
 # A hard architecture signal cannot be silently rewritten into a new public API.
 # The mechanical reconciler must request revision first, then accept the same
@@ -378,7 +478,10 @@ const path = process.argv[2];
 const decision = JSON.parse(readFileSync(path, 'utf8'));
 decision.status = 'NEEDS_CONFIRMATION';
 decision.requirements[0][1] = 'ARCHITECTURE_DEFAULT';
-decision.questions = [['ARCHITECTURE', 'A demanda pede Date.now(), mas a arquitetura exige tempo explícito. Confirmar initialTime e now?', 'Date.now foi detectado.', 'Altera a API pública.', 'Usar initialTime e now explícitos.', 'Interpretado: substituir Date.now por parâmetros explícitos.', decision.requirements[0][2]]];
+decision.questions = [['ARCHITECTURE', 'A demanda pede Date.now(), mas a arquitetura exige tempo explícito. Confirmar initialTime e now?', 'Date.now foi detectado.', 'Altera a API pública.', 'EXPLICIT_TIME', 'Interpretado: substituir Date.now por parâmetros explícitos.', decision.requirements[0][2], [
+  ['EXPLICIT_TIME', 'Usar tempo explícito', 'Preserva determinismo arquitetural.', 'A API recebe initialTime e now explícitos.', []],
+  ['REQUEST_AMENDMENT', 'Solicitar emenda', 'Mantém Date.now somente com exceção formal.', 'A mudança depende de emenda arquitetural aprovada.', []],
+]]];
 writeFileSync(path, JSON.stringify(decision));
 NODE
 node --input-type=module - "${WORK_DIR}/hard-signal/.harness/runtime/decision.json" "${hard_envelope}" "${WORK_DIR}/hard-signal/.harness/runtime/resolution.json" <<'NODE'
@@ -391,7 +494,7 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: digest(readFileSync(decisionPath)),
   preflightPromptDigest: envelope.promptDigest,
-  answers: [{ questionId: 'Q-0001', action: 'CONFIRM_INTERPRETATION' }],
+  answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'EXPLICIT_TIME' }],
 }));
 NODE
 AEGIS_ROOT="${WORK_DIR}/hard-signal" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \

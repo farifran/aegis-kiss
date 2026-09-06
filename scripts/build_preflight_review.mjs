@@ -5,7 +5,8 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
-import { sha256 } from './lib/canonical_json.mjs';
+import { canonicalDigest, sha256 } from './lib/canonical_json.mjs';
+import { questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
@@ -16,9 +17,10 @@ function fail(code) {
 }
 
 function parseArguments(argv) {
-  const options = { decision: '', producerId: '', reviewerId: '' };
+  const options = { decision: '', resolution: '', producerId: '', reviewerId: '' };
   const names = new Map([
     ['--decision', 'decision'],
+    ['--resolution', 'resolution'],
     ['--producer-id', 'producerId'],
     ['--reviewer-id', 'reviewerId'],
   ]);
@@ -30,7 +32,7 @@ function parseArguments(argv) {
   }
   if (options.decision.length === 0 || options.producerId.length === 0 || options.reviewerId.length === 0) fail('missing_arguments');
   if (options.producerId === options.reviewerId) fail('review_authority_not_independent');
-  if (options.decision.startsWith('/') || options.decision.split(/[\\/]/u).includes('..')) fail('unsafe_decision_path');
+  if ([options.decision, options.resolution].some((value) => value.startsWith('/') || value.split(/[\\/]/u).includes('..'))) fail('unsafe_decision_path');
   return options;
 }
 
@@ -54,11 +56,11 @@ function decisionPath(value) {
 
 const options = parseArguments(process.argv.slice(2));
 let decisionBytes;
-let decision;
+let sourceDecision;
 try {
   decisionBytes = readFileSync(decisionPath(options.decision));
-  decision = JSON.parse(decisionBytes.toString('utf8'));
-  assertSchema('aegis.preflight_decision.v2', decision);
+  sourceDecision = JSON.parse(decisionBytes.toString('utf8'));
+  assertSchema('aegis.preflight_decision.v2', sourceDecision);
 } catch {
   fail('invalid_decision');
 }
@@ -71,8 +73,44 @@ try {
 } catch {
   fail('invalid_preflight_envelope');
 }
-if (decision.contextDigest !== preflight.contextDigest) fail('decision_context_mismatch');
-if (decision.promptDigest !== preflight.promptDigest) fail('decision_prompt_mismatch');
+if (sourceDecision.contextDigest !== preflight.contextDigest) fail('decision_context_mismatch');
+if (sourceDecision.promptDigest !== preflight.promptDigest) fail('decision_prompt_mismatch');
+let decision = sourceDecision;
+let clarifications = [];
+if (sourceDecision.status === 'NEEDS_CONFIRMATION') {
+  if (options.resolution.length === 0) fail('resolution_required');
+  let resolution;
+  try {
+    resolution = JSON.parse(readFileSync(decisionPath(options.resolution), 'utf8'));
+    assertSchema('aegis.preflight_resolution.v2', resolution);
+  } catch {
+    fail('invalid_resolution');
+  }
+  if (resolution.decisionDigest !== sha256(decisionBytes) || resolution.preflightPromptDigest !== preflight.promptDigest) {
+    fail('resolution_binding_mismatch');
+  }
+  const expectedIds = questionIds(sourceDecision);
+  const actualIds = resolution.answers.map((answer) => answer.questionId);
+  if (actualIds.length !== new Set(actualIds).size || JSON.stringify([...actualIds].sort()) !== JSON.stringify([...expectedIds].sort())) {
+    fail('resolution_answers_mismatch');
+  }
+  for (const answer of resolution.answers) {
+    if (answer.action !== 'SELECT_ANSWER') continue;
+    const index = expectedIds.indexOf(answer.questionId);
+    if (index < 0 || selectedAnswer(sourceDecision.questions[index], answer.answerId) === undefined) {
+      fail('resolution_unknown_answer');
+    }
+  }
+  if (resolution.answers.some((answer) => answer.action === 'CORRECT_INTERPRETATION')) fail('resolution_requires_semantic_revision');
+  try {
+    ({ decision, clarifications } = resolvePreflightDecision(sourceDecision, resolution));
+  } catch {
+    fail('invalid_resolution');
+  }
+} else if (options.resolution.length > 0) {
+  fail('resolution_not_allowed');
+}
+const resolvedDecisionDigest = decision === sourceDecision ? sha256(decisionBytes) : canonicalDigest(decision);
 const context = {
   normalizedDemand: preflight.normalizedDemand,
   mechanicalFacts: preflight.mechanicalFacts,
@@ -80,6 +118,7 @@ const context = {
   previousContract: preflight.previousContract,
   contextDigest: preflight.contextDigest,
   decision,
+  clarifications,
   producerId: options.producerId,
   reviewerId: options.reviewerId,
 };
@@ -89,7 +128,7 @@ const request = {
   schema: 'aegis.preflight_review_request.v2',
   status: 'PENDING_INDEPENDENT_REVIEW',
   normalizedDemandDigest: preflight.normalizedDemand.digest,
-  decisionDigest: sha256(decisionBytes),
+  decisionDigest: resolvedDecisionDigest,
   producerId: options.producerId,
   reviewerId: options.reviewerId,
   promptDigest: sha256(prompt),
