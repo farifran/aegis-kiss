@@ -132,6 +132,7 @@ import { BatchEngine, executeBatch, type Entity, type Operation } from './index.
   const result = executeBatch(engine, ops, regressiveTime);
   assert.equal(result.rolledBack, true);
   assert.equal(result.acceptedCount, 0);
+  assert.equal(result.blockedCount, 0, 'aborted operations are not reported as blocked');
   const d0 = result.decisions[0];
   assert.ok(d0);
   assert.equal(d0.status, 'aborted');
@@ -238,6 +239,68 @@ import { BatchEngine, executeBatch, type Entity, type Operation } from './index.
 
   assert.equal(resA.executionDigest, resB.executionDigest, 'mesmo estado e entradas geram digests idênticos');
   assert.deepEqual(engA.getAllEntities(), engB.getAllEntities(), 'estados finais são estritamente idênticos');
+}
+
+// ============================================================================
+// 6. Estrutural: identidades externas não podem atravessar Object.prototype
+// ============================================================================
+{
+  const engine = new BatchEngine();
+  engine.registerEntity({
+    id: '__proto__',
+    balance: 1_000n,
+    capacity: 100n,
+    maxCapacity: 100n,
+    refillRatePerMs: 0n,
+    lastTimestamp: 1_000n,
+  });
+  engine.registerEntity({
+    id: 'sink',
+    balance: 0n,
+    capacity: 0n,
+    maxCapacity: 0n,
+    refillRatePerMs: 0n,
+    lastTimestamp: 1_000n,
+  });
+
+  assert.equal(engine.getEntity('__proto__')?.balance, 1_000n);
+  const result = executeBatch(engine, [
+    { id: 'hostile-id', source: '__proto__', target: 'sink', amount: 100n, cost: 0n },
+  ], 1_000n);
+  assert.equal(result.decisions[0]?.status, 'committed');
+}
+
+// ============================================================================
+// 7. Estrutural: slot inválido não rompe a cobertura bijetiva da entrada
+// ============================================================================
+{
+  const engine = new BatchEngine();
+  const malformedOperations = [undefined] as never;
+  const result = executeBatch(engine, malformedOperations, 1_000n);
+  assert.equal(result.decisions.length, 1);
+  assert.equal(result.decisions[0]?.status, 'rejected_invalid');
+}
+
+// ============================================================================
+// 8. Estrutural: digest vincula toda a topologia observável da entidade
+// ============================================================================
+{
+  const build = (maxCapacity: bigint, refillRatePerMs: bigint) => {
+    const engine = new BatchEngine();
+    engine.registerEntity({
+      id: 'entity',
+      balance: 1_000n,
+      capacity: 100n,
+      maxCapacity,
+      refillRatePerMs,
+      lastTimestamp: 1_000n,
+    });
+    return engine;
+  };
+
+  const baseline = executeBatch(build(100n, 0n), [], 1_000n);
+  const changedTopology = executeBatch(build(200n, 1n), [], 1_000n);
+  assert.notEqual(baseline.executionDigest, changedTopology.executionDigest);
 }
 
 process.stdout.write('[AEGIS][PROOF][PASS] BatchEngine obligations verified.\n');

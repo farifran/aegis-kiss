@@ -43,10 +43,39 @@ export interface BatchResult {
 
 interface DigestParams {
   entities: Record<string, Entity>;
+  operations: readonly unknown[];
   decisions: readonly OperationDecision[];
   volume: bigint;
   cost: bigint;
   rolledBack: boolean;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function emptyEntityTable(): Record<string, Entity> {
+  return Object.create(null) as Record<string, Entity>;
+}
+
+function operationIdOf(value: unknown): string {
+  if (value === null || typeof value !== 'object' || !('id' in value)) return '';
+  const { id } = value as { id?: unknown };
+  return typeof id === 'string' ? id : '';
+}
+
+function operationDigestFields(value: unknown): readonly string[] {
+  if (value === null || typeof value !== 'object') return ['invalid', operationIdOf(value), typeof value];
+  const operation = value as Partial<Operation>;
+  return [
+    operationIdOf(operation),
+    typeof operation.source === 'string' ? operation.source : `invalid:${typeof operation.source}`,
+    typeof operation.target === 'string' ? operation.target : `invalid:${typeof operation.target}`,
+    typeof operation.amount === 'bigint' ? operation.amount.toString() : `invalid:${typeof operation.amount}`,
+    typeof operation.cost === 'bigint' ? operation.cost.toString() : `invalid:${typeof operation.cost}`,
+  ];
 }
 
 interface OperationEvaluation {
@@ -70,7 +99,7 @@ function cloneEntity(entity: Entity): Entity {
 }
 
 function cloneEntityTable(entities: Record<string, Entity>): Record<string, Entity> {
-  const cloned: Record<string, Entity> = {};
+  const cloned = emptyEntityTable();
   for (const id in entities) {
     if (Object.prototype.hasOwnProperty.call(entities, id)) {
       const e = entities[id];
@@ -83,7 +112,7 @@ function cloneEntityTable(entities: Record<string, Entity>): Record<string, Enti
 }
 
 export class BatchEngine {
-  private _entities: Record<string, Entity> = {};
+  private _entities: Record<string, Entity> = emptyEntityTable();
 
   public registerEntity(entity: Entity): void {
     if (typeof entity.id !== 'string' || entity.id.trim() === '') {
@@ -122,7 +151,7 @@ export class BatchEngine {
         }
       }
     }
-    return result;
+    return result.sort((left, right) => compareCodeUnits(left.id, right.id));
   }
 
   public processBatch(operations: readonly Operation[], now: bigint): BatchResult {
@@ -160,14 +189,15 @@ export class BatchEngine {
       return this.abortBatch(operations, stateBefore, violation);
     }
 
-    this._entities = projected;
     const executionDigest = this.computeDigest({
       entities: projected,
+      operations,
       decisions,
       volume: totalVolume,
       cost: totalCost,
       rolledBack: false,
     });
+    this._entities = projected;
 
     return {
       acceptedCount,
@@ -201,10 +231,10 @@ export class BatchEngine {
     return true;
   }
 
-  private evaluateAndApply(projected: Record<string, Entity>, op: Operation): OperationEvaluation {
+  private evaluateAndApply(projected: Record<string, Entity>, op: unknown): OperationEvaluation {
     if (!this.isValidOperationInput(op)) {
       return {
-        decision: { operationId: op.id ?? '', status: 'rejected_invalid', reason: 'invalid_inputs' },
+        decision: { operationId: operationIdOf(op), status: 'rejected_invalid', reason: 'invalid_inputs' },
         volume: 0n, cost: 0n, accepted: false, rejected: true, blocked: false,
       };
     }
@@ -243,13 +273,15 @@ export class BatchEngine {
     };
   }
 
-  private isValidOperationInput(op: Operation): boolean {
+  private isValidOperationInput(op: unknown): op is Operation {
+    if (op === null || typeof op !== 'object') return false;
+    const candidate = op as Partial<Operation>;
     return (
-      typeof op.id === 'string' && op.id !== '' &&
-      typeof op.source === 'string' && typeof op.target === 'string' &&
-      op.source !== op.target &&
-      typeof op.amount === 'bigint' && op.amount > 0n &&
-      typeof op.cost === 'bigint' && op.cost >= 0n
+      typeof candidate.id === 'string' && candidate.id !== '' &&
+      typeof candidate.source === 'string' && typeof candidate.target === 'string' &&
+      candidate.source !== candidate.target &&
+      typeof candidate.amount === 'bigint' && candidate.amount > 0n &&
+      typeof candidate.cost === 'bigint' && candidate.cost >= 0n
     );
   }
 
@@ -291,15 +323,15 @@ export class BatchEngine {
     revertedState: Record<string, Entity>,
     reason: string,
   ): BatchResult {
-    this._entities = revertedState;
     const decisions: OperationDecision[] = operations.map((op) => ({
-      operationId: op.id ?? '',
+      operationId: operationIdOf(op),
       status: 'aborted',
       reason,
     }));
 
     const executionDigest = this.computeDigest({
       entities: revertedState,
+      operations,
       decisions,
       volume: 0n,
       cost: 0n,
@@ -309,7 +341,7 @@ export class BatchEngine {
     return {
       acceptedCount: 0,
       rejectedCount: 0,
-      blockedCount: operations.length,
+      blockedCount: 0,
       totalVolume: 0n,
       totalCost: 0n,
       rolledBack: true,
@@ -325,20 +357,28 @@ export class BatchEngine {
         keys.push(id);
       }
     }
-    keys.sort((a, b) => a.localeCompare(b));
+    keys.sort(compareCodeUnits);
 
-    const sortedEntities = keys
-      .map((id) => {
-        const e = params.entities[id];
-        return e ? `${id}:${e.balance}:${e.capacity}:${e.lastTimestamp}` : '';
-      })
-      .join(';');
-
-    const decisionsStr = params.decisions
-      .map((d) => `${d.operationId}:${d.status}`)
-      .join(',');
-
-    const payload = `${sortedEntities}|${decisionsStr}|${params.volume}|${params.cost}|${params.rolledBack}`;
+    const entities = keys.flatMap((id) => {
+      const entity = params.entities[id];
+      return entity === undefined
+        ? []
+        : [[id, entity.id, entity.balance.toString(), entity.capacity.toString(), entity.maxCapacity.toString(), entity.refillRatePerMs.toString(), entity.lastTimestamp.toString()]];
+    });
+    const operations = params.operations.map(operationDigestFields);
+    const decisions = params.decisions.map((decision) => [
+      decision.operationId,
+      decision.status,
+      decision.reason ?? null,
+    ]);
+    const payload = JSON.stringify({
+      entities,
+      operations,
+      decisions,
+      volume: params.volume.toString(),
+      cost: params.cost.toString(),
+      rolledBack: params.rolledBack,
+    });
     return createHash('sha256').update(payload, 'utf8').digest('hex');
   }
 }
