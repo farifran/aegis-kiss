@@ -29,6 +29,7 @@ receipt="$(git -C "${repo}" rev-parse --path-format=absolute --git-path aegis/pr
 jq -e '
   .schema == "aegis.precommit_receipt.v1"
   and .status == "PROVEN"
+  and .changeKind == "BASELINE"
   and .proofProfile == "fast"
   and (.executionId | test("^[a-f0-9]{64}$"))
   and (.issuedAtEpoch | type == "number")
@@ -194,6 +195,35 @@ bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${baseline_
 baseline_receipt="$(git -C "${baseline_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
 jq -e '.proofProfile == "fast" and (.proofs | length) == 0' "${baseline_receipt}" >/dev/null
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${baseline_repo}"
+
+# A governed product may coexist with harness maintenance, but both transitions
+# must receive distinct, explicit receipts. HARNESS cannot authorize src/.
+harness_repo="${temp_dir}/harness-repo"
+mkdir -p "${harness_repo}/src/.aegis" "${harness_repo}/governance" "${harness_repo}/scripts"
+cp "${ROOT_DIR}/governance/architecture.policy.json" "${harness_repo}/governance/architecture.policy.json"
+cp "${ROOT_DIR}/ARCHITECTURE.md" "${harness_repo}/ARCHITECTURE.md"
+git -C "${semantic_repo}" show HEAD:src/.aegis/semantic-state.json > "${harness_repo}/src/.aegis/semantic-state.json"
+printf 'export const semantic = 1;\n' > "${harness_repo}/src/semantic.ts"
+printf '#!/usr/bin/env bash\nexit 0\n' > "${harness_repo}/src/semantic.proof.sh"
+chmod +x "${harness_repo}/src/semantic.proof.sh"
+printf 'echo baseline\n' > "${harness_repo}/scripts/marker.sh"
+git -C "${harness_repo}" init -q
+git -C "${harness_repo}" add .
+git -C "${harness_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
+printf 'echo governed-harness\n' > "${harness_repo}/scripts/marker.sh"
+git -C "${harness_repo}" add scripts/marker.sh
+jq -n '{mode:"validation",changeKind:"HARNESS",verdict:"accepted",validated_candidate:{files_changed:["scripts/marker.sh"]}}' > "${temp_dir}/harness-validation.json"
+bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${harness_repo}" "${temp_dir}/harness-validation.json"
+harness_receipt="$(git -C "${harness_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
+jq -e '.changeKind == "HARNESS" and .validationAuthority.id == "harness_validation.v1"' "${harness_receipt}" >/dev/null
+bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${harness_repo}"
+git -C "${harness_repo}" restore --staged scripts/marker.sh
+printf 'export const semantic = 2;\n' > "${harness_repo}/src/semantic.ts"
+git -C "${harness_repo}" add src/semantic.ts
+jq -n '{mode:"validation",changeKind:"HARNESS",verdict:"accepted",validated_candidate:{files_changed:["src/semantic.ts"]}}' > "${temp_dir}/invalid-harness-validation.json"
+if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${harness_repo}" "${temp_dir}/invalid-harness-validation.json" >/dev/null 2>&1; then
+  fail "harness_authorized_product_path"
+fi
 
 # A direct VS Code commit must renew a stale or missing receipt through the
 # hook. The operator should never have to race a 15-minute expiry window.

@@ -22,7 +22,7 @@ Uso no IDE:
   ./aegis status
   ./aegis evidence --path <caminho> [--path <caminho> ...]
                     [--max-files <n>] [--max-total-bytes <n>] [--max-file-bytes <n>]
-  ./aegis authorize
+  ./aegis authorize [--harness]
   ./aegis report
   ./aegis clean [--src|--all]
 
@@ -159,7 +159,12 @@ build_independent_review() {
 }
 
 authorize() {
-  local staged_files artifact
+  local change_kind="PRODUCT" staged_files artifact
+  if [[ "${1:-}" == "--harness" ]]; then
+    change_kind="HARNESS"
+    shift
+  fi
+  [[ $# -eq 0 ]] || fatal 'authorize_does_not_accept_arguments'
   staged_files="$(git -C "${ROOT_DIR}" diff --cached --name-only | sort -u)"
   [[ -n "${staged_files}" ]] || fatal 'authorization_requires_staged_changes'
   if grep -q '^\.harness/runtime/' <<< "${staged_files}"; then
@@ -177,12 +182,13 @@ authorize() {
   [[ -n "${staged_files}" ]] || fatal 'authorization_requires_staged_changes'
   artifact="$(mktemp "${TMPDIR:-/tmp}/aegis-ide-validation.XXXXXX")"
   jq -n --rawfile files <(printf '%s\n' "${staged_files}") \
-    '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:($files | split("\n") | map(select(length > 0)))}}' \
+    --arg changeKind "${change_kind}" \
+    '{mode:"validation",changeKind:$changeKind,verdict:"accepted",validated_candidate:{files_changed:($files | split("\n") | map(select(length > 0)))}}' \
     > "${artifact}"
   bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${ROOT_DIR}" "${artifact}"
   bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${ROOT_DIR}"
   rm -f "${artifact}"
-  printf '[AEGIS][IDE] promotion=AUTHORIZED receipt=.git/aegis/precommit_receipt.json\n'
+  printf '[AEGIS][IDE] promotion=AUTHORIZED kind=%s receipt=.git/aegis/precommit_receipt.json\n' "${change_kind}"
 }
 
 clean() {
@@ -220,7 +226,7 @@ case "${command_name}" in
   harness) shift; build_preflight HARNESS "$@" ;;
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
-  authorize) shift; [[ $# -eq 0 ]] || fatal 'authorize_does_not_accept_arguments'; authorize ;;
+  authorize) shift; authorize "$@" ;;
   report) shift; [[ $# -eq 0 ]] || fatal 'report_does_not_accept_arguments'; node "${ROOT_DIR}/scripts/forensic_report.mjs" ;;
   clean) shift; clean "$@" ;;
   -*) fatal "unknown_command:${command_name}" ;;

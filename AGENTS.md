@@ -32,7 +32,8 @@ esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
   deve também aparecer no Contract IR.
 * Em uma transição de estado, cada papel semântico declarado (estado, comando,
   identidade, recurso, tempo, resultado, atomicidade ou canonicalização)
-  precisa de política observável com proveniência. Se a entrada não a
+  precisa de política observável com proveniência que refine a descrição do
+  papel; repetir o papel não é política. Se a entrada não a
   determina, o preflight pergunta; o coder não escolhe silenciosamente.
 * A primeira compilação semântica deve produzir os dois corpos. Se houver
   pergunta, ela também registra a resposta interpretada e os corpos provisórios:
@@ -74,6 +75,11 @@ estado, comando, resultado e fronteira atômica. Quando a transição combina
 atomicidade com recursos, tempo, identidade externa ou canonicalização, ela é
 `forensic`: exige prova de cadência `forensic`, revisão independente antes da
 persistência do contrato e promoção no perfil `forensic`.
+
+A revisão forensic é vinculada mecanicamente ao `executionId` do preflight,
+ao digest da decisão resolvida e a uma requisição de revisão distinta. Essa
+vinculação prova separação de execução; a identidade efetiva da autoridade
+continua responsabilidade do runtime/IDE que despacha o revisor.
 
 #### 3. ESTADO PROJETADO ANTES DA MUTAÇÃO (Composição Segura)
 Nunca validar apenas componentes isolados ou deltas agregados ($\sum \Delta$). A transição opera obrigatoriamente como:

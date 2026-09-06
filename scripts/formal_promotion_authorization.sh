@@ -204,7 +204,7 @@ contract_worktree_file() {
 }
 
 execution_id_for_base() {
-  local base="${1:-}" demand_digest="ABSENT" change_kind="BASELINE"
+  local base="${1:-}" requested_kind="${2:-}" demand_digest="ABSENT" change_kind="BASELINE"
   if [[ -f "${repository_root}/${semantic_record}" ]]; then
     demand_digest="$(jq -r '.clarifiedDemand.normalizedDemandDigest' "${repository_root}/${semantic_record}")"
     change_kind="$(jq -r '.clarifiedDemand.changeKind' "${repository_root}/${semantic_record}")"
@@ -212,6 +212,7 @@ execution_id_for_base() {
     demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/${clarified_record}")"
     change_kind="$(jq -r '.changeKind' "${repository_root}/${clarified_record}")"
   fi
+  [[ -z "${requested_kind}" ]] || change_kind="${requested_kind}"
   printf 'base=%s\ndemand=%s\nkind=%s\n' "${base}" "${demand_digest}" "${change_kind}" | shasum -a 256 | awk '{print $1}'
 }
 
@@ -234,13 +235,14 @@ write_receipt() {
   local contract_digest="${5:-}" registry_digest="${6:-}" clarified_digest="${7:-}" policy_digest="${8:-}"
   local profile="${9:-}" proof_plan_digest="${10:-}" authority="${11:-}" proof_plan="${12:-}"
   local duration_ms="${13:-0}"
+  local change_kind="${14:-PRODUCT}"
   local auth_file auth_dir now expires execution_id
 
   auth_file="$(authorization_path)"
   auth_dir="$(dirname "${auth_file}")"
   now="$(date +%s)"
   expires=$((now + 900))
-  execution_id="$(execution_id_for_base "${base}")"
+  execution_id="$(execution_id_for_base "${base}" "${change_kind}")"
   mkdir -p "${auth_dir}"
   jq -n \
     --arg base "${base}" \
@@ -259,9 +261,49 @@ write_receipt() {
     --argjson issued "${now}" \
     --argjson expires "${expires}" \
     --argjson duration_ms "${duration_ms}" \
-    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
+    --arg change_kind "${change_kind}" \
+    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",changeKind:$change_kind,executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
     > "${auth_file}"
   echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
+}
+
+is_harness_path() {
+  local path="${1:-}"
+  safe_path "${path}" || return 1
+  case "${path}" in
+    src|src/*|.harness|.harness/*|.git|.git/*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+create_harness_authorization() {
+  local files staged_files base worktree_manifest index_manifest artifact_digest authority profile proof_plan proof_plan_digest
+  files="$(jq -r '.validated_candidate.files_changed[]' "${artifact_file}" | sort -u)"
+  [[ -n "${files}" ]] || fatal "harness_authorization_requires_staged_changes"
+  staged_files="$(git -C "${repository_root}" diff --cached --name-only | sort -u)"
+  [[ "${files}" == "${staged_files}" ]] || fatal "harness_validation_files_changed_mismatch"
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    is_harness_path "${path}" || fatal "harness_path_not_authorized:${path}"
+  done <<< "${files}"
+
+  base="$(git -C "${repository_root}" rev-parse HEAD)"
+  worktree_manifest="$(manifest_from_worktree "${files}")"
+  index_manifest="$(manifest_from_index "${files}")"
+  [[ "${worktree_manifest}" == "${index_manifest}" ]] || fatal "harness_worktree_index_mismatch"
+  git -C "${repository_root}" diff --cached --check || fatal "harness_staged_diff_invalid"
+
+  artifact_digest="$(shasum -a 256 "${artifact_file}" | awk '{print $1}')"
+  authority="$(jq -n '{kind:"deterministic_tribunal",id:"harness_validation.v1"}')"
+  profile="fast"
+  proof_plan="$(jq -n '{profile:"fast",count:0,proofs:[]}')"
+  proof_plan_digest="$(printf '%s' "${proof_plan}" | jq -S -c . | shasum -a 256 | awk '{print $1}')"
+  write_receipt "${base}" "${files}" "${index_manifest}" "${artifact_digest}" \
+    "$(contract_digest_from_worktree)" \
+    "$(registry_digest_from_worktree)" \
+    "$(clarified_digest_from_worktree)" \
+    "$(metadata_digest_from_worktree governance/architecture.policy.json)" \
+    "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}" "0" "HARNESS"
 }
 
 profile_for_files() {
@@ -290,8 +332,6 @@ create_authorization() {
   local started_seconds duration_ms
   started_seconds="$(date +%s)"
   run_structure_verification
-  AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
-    || fatal "promotion_contract_evidence_verification_failed"
   if [[ ! -e "${repository_root}/${semantic_record}" \
     && ! -e "${repository_root}/${contract_record}" \
     && ! -e "${repository_root}/${registry_record}" ]]; then
@@ -302,9 +342,20 @@ create_authorization() {
   [[ -s "${artifact_file}" ]] || fatal "missing_validation_artifact"
   jq -e '
     .mode == "validation" and .verdict == "accepted"
+    and ((.changeKind // "PRODUCT") | IN("PRODUCT", "HARNESS"))
     and (.validated_candidate.files_changed | type == "array" and length > 0)
     and (.validated_candidate.files_changed | all(type == "string" and length > 0))
   ' "${artifact_file}" >/dev/null 2>&1 || fatal "validation_not_accepted"
+
+  local artifact_kind
+  artifact_kind="$(jq -r '.changeKind // "PRODUCT"' "${artifact_file}")"
+  if [[ "${artifact_kind}" == "HARNESS" ]]; then
+    create_harness_authorization
+    return
+  fi
+
+  AEGIS_ROOT_DIR="${repository_root}" bash "${script_root}/contract_evidence_gate.sh" --staged \
+    || fatal "promotion_contract_evidence_verification_failed"
 
   local files base manifest artifact_digest auth_file auth_dir now expires
   local contract_digest registry_digest clarified_digest policy_digest authority profile_json profile profile_plan proof_plan proof_plan_digest
@@ -347,7 +398,7 @@ create_authorization() {
   duration_ms="$(( ($(date +%s) - started_seconds) * 1000 ))"
   write_receipt "${base}" "${files}" "${manifest}" "${artifact_digest}" \
     "${contract_digest}" "${registry_digest}" "${clarified_digest}" "${policy_digest}" "${profile}" "${proof_plan_digest}" \
-    "${authority}" "${proof_plan}" "${duration_ms}"
+    "${authority}" "${proof_plan}" "${duration_ms}" "PRODUCT"
 }
 
 create_baseline_authorization() {
@@ -407,7 +458,7 @@ create_baseline_authorization() {
     "$(registry_digest_from_worktree)" \
     "$(clarified_digest_from_worktree)" \
     "$(metadata_digest_from_worktree governance/architecture.policy.json)" \
-    "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}"
+    "${profile}" "${proof_plan_digest}" "${authority}" "${proof_plan}" "0" "BASELINE"
 }
 
 requires_authorization() {
@@ -469,6 +520,7 @@ verify_authorization() {
   jq -e --arg base "${base}" --argjson now "${now}" '
     .schema == "aegis.precommit_receipt.v1"
     and .status == "PROVEN"
+    and ((.changeKind // "PRODUCT") | IN("PRODUCT", "HARNESS", "BASELINE"))
     and (.executionId | type == "string" and length == 64)
     and .baseCommit == $base
     and (.expiresAtEpoch | type == "number" and . >= $now)

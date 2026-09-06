@@ -275,8 +275,12 @@ function validateStateSemantics(envelope, decision) {
     roles,
     'state_semantics_incomplete',
   );
-  for (const [, disposition, , sourceIndexes] of decision.stateSemantics) {
+  const bindingByRole = new Map(decision.stateModel.bindings.map(([role, statement]) => [role, statement]));
+  for (const [role, disposition, statement, sourceIndexes] of decision.stateSemantics) {
     unitIds(envelope, sourceIndexes, 'state_semantics_unknown_unit');
+    if (disposition === 'EXPLICIT' && statement.trim() === bindingByRole.get(role)?.trim()) {
+      fail(`state_semantics_policy_not_refined:${role.toLowerCase()}`);
+    }
     if (disposition !== 'QUESTION_REQUIRED') continue;
     if (decision.status !== 'NEEDS_CONFIRMATION' || !questionCoversUnits(decision, sourceIndexes)) {
       fail('state_semantics_question_missing');
@@ -505,8 +509,39 @@ function validateResolution(envelope, decisionFile, resolution) {
   }
 }
 
-function validateIndependentReview(envelope, decision, review, decisionDigest) {
+function reviewBinding(request) {
+  return {
+    schema: request.schema,
+    status: request.status,
+    normalizedDemandDigest: request.normalizedDemandDigest,
+    decisionDigest: request.decisionDigest,
+    producerId: request.producerId,
+    reviewerId: request.reviewerId,
+    producerExecutionId: request.producerExecutionId,
+    reviewExecutionId: request.reviewExecutionId,
+  };
+}
+
+async function validateIndependentReview(envelope, decision, review, decisionDigest) {
   assertValidSchema('aegis.preflight_review.v2', review, 'malformed_independent_review');
+  const requestFile = await readJson('.harness/runtime/preflight_review_request.json', 'missing_independent_review_request');
+  assertValidSchema('aegis.preflight_review_request.v2', requestFile.value, 'malformed_independent_review_request');
+  const request = requestFile.value;
+  if (request.reviewRequestDigest !== canonicalDigest(reviewBinding(request))) fail('review_request_digest_mismatch');
+  if (request.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('review_request_demand_digest_mismatch');
+  if (request.decisionDigest !== decisionDigest) fail('review_request_decision_digest_mismatch');
+  if (request.producerExecutionId !== envelope.executionId || request.producerExecutionId === request.reviewExecutionId) {
+    fail('review_execution_identity_invalid');
+  }
+  if (
+    review.producerId !== request.producerId
+    || review.reviewerId !== request.reviewerId
+    || review.producerExecutionId !== request.producerExecutionId
+    || review.reviewExecutionId !== request.reviewExecutionId
+    || review.reviewRequestDigest !== request.reviewRequestDigest
+  ) {
+    fail('review_request_binding_mismatch');
+  }
   if (review.normalizedDemandDigest !== envelope.normalizedDemand.digest) fail('review_demand_digest_mismatch');
   if (review.decisionDigest !== decisionDigest) fail('review_decision_digest_mismatch');
   if (review.producerId === review.reviewerId) fail('review_authority_not_independent');
@@ -690,7 +725,7 @@ if (effectiveValidation.stateProfile.requiresIndependentReview && options.indepe
 }
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
-  validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest);
+  await validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest);
   independentReviewDigest = sha256(review.bytes);
 }
 

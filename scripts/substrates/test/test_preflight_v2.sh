@@ -71,7 +71,7 @@ jq -e '
   and .changeKind == "PRODUCT"
   and (.prompt | contains("changeKind=\"PRODUCT\""))
 ' "${WORK_DIR}/direct-request.json" >/dev/null
-[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 8500 ]]
+[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 9500 ]]
 jq -e '
   .baseline.clean == true
   and (.normalizedDemand.text | contains("\r") | not)
@@ -102,20 +102,31 @@ write_decision "${envelope}" "${WORK_DIR}/direct/.harness/runtime/decision.json"
 AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
   --decision .harness/runtime/decision.json --producer-id producer --reviewer-id reviewer \
   < "${envelope}" > "${WORK_DIR}/review-request.json"
-jq -e '.schema == "aegis.preflight_review_request.v2" and .producerId == "producer" and .reviewerId == "reviewer"' \
+jq -e --arg execution "$(jq -r '.executionId' "${envelope}")" '
+  .schema == "aegis.preflight_review_request.v2"
+  and .producerId == "producer"
+  and .reviewerId == "reviewer"
+  and .producerExecutionId == $execution
+  and (.reviewExecutionId | test("^[a-f0-9]{64}$"))
+  and (.reviewRequestDigest | test("^[a-f0-9]{64}$"))
+' \
   "${WORK_DIR}/review-request.json" >/dev/null
-node --input-type=module - "${WORK_DIR}/direct/.harness/runtime/decision.json" "${envelope}" "${WORK_DIR}/direct/.harness/runtime/review.json" <<'NODE'
+node --input-type=module - "${WORK_DIR}/direct/.harness/runtime/decision.json" "${envelope}" "${WORK_DIR}/direct/.harness/runtime/preflight_review_request.json" "${WORK_DIR}/direct/.harness/runtime/review.json" <<'NODE'
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-const [decisionPath, envelopePath, reviewPath] = process.argv.slice(2);
+const [decisionPath, envelopePath, requestPath, reviewPath] = process.argv.slice(2);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const request = JSON.parse(readFileSync(requestPath, 'utf8'));
 writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
   decisionDigest: digest(readFileSync(decisionPath)),
-  producerId: 'producer',
-  reviewerId: 'reviewer',
+  producerId: request.producerId,
+  reviewerId: request.reviewerId,
+  producerExecutionId: request.producerExecutionId,
+  reviewExecutionId: request.reviewExecutionId,
+  reviewRequestDigest: request.reviewRequestDigest,
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: [],
@@ -197,7 +208,7 @@ writeFileSync(destination, JSON.stringify({
   questions: [],
   riskProfile: 'forensic',
   stateModel: { kind: 'STATE_TRANSITION', bindings },
-  stateSemantics: bindings.map(([role, statement, , sourceIndexes]) => [role, 'EXPLICIT', statement, sourceIndexes]),
+  stateSemantics: bindings.map(([role, statement, , sourceIndexes]) => [role, 'EXPLICIT', `Política observável de ${role}: ${statement}`, sourceIndexes]),
   intent: 'Processar transição de estado forense.',
   scope: ['src/state.ts', 'src/state.proof.ts'],
   excluded: [],
@@ -232,18 +243,25 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
   exit 1
 fi
 grep -q 'state_transition_requires_forensic' "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"
-node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/review.json" <<'NODE'
+AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
+  --decision .harness/runtime/decision.json --producer-id producer --reviewer-id reviewer \
+  < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/review-request.json"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/preflight_review_request.json" "${WORK_DIR}/forensic/.harness/runtime/review.json" <<'NODE'
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-const [decisionPath, envelopePath, reviewPath] = process.argv.slice(2);
+const [decisionPath, envelopePath, requestPath, reviewPath] = process.argv.slice(2);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const request = JSON.parse(readFileSync(requestPath, 'utf8'));
 writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
   decisionDigest: digest(readFileSync(decisionPath)),
-  producerId: 'producer',
-  reviewerId: 'reviewer',
+  producerId: request.producerId,
+  reviewerId: request.reviewerId,
+  producerExecutionId: request.producerExecutionId,
+  reviewExecutionId: request.reviewExecutionId,
+  reviewRequestDigest: request.reviewRequestDigest,
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: envelope.normalizedDemand.units.length === 0 ? [] : JSON.parse(readFileSync(decisionPath, 'utf8')).stateModel.bindings.map(([role]) => [role, 'EXPLICIT', 'A demanda determina esta política.', envelope.normalizedDemand.units.map((unit) => unit.id)]),
@@ -270,6 +288,24 @@ grep -Eq 'state_semantics_question_missing|clarified_state_semantics_not_explici
   exit 1
 }
 
+# A state-policy label must contain a real policy, not merely repeat its role
+# binding. This is the mechanical floor that prevents a plausible contract
+# from treating an unresolved business choice as explicit.
+cp "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${WORK_DIR}/forensic/.harness/runtime/unrefined-policy.json"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/unrefined-policy.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const decision = JSON.parse(readFileSync(path, 'utf8'));
+decision.stateSemantics[0][2] = decision.stateModel.bindings[0][1];
+writeFileSync(path, JSON.stringify(decision));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/unrefined-policy.json < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/unrefined-policy.err"; then
+  echo 'transition accepted an unrefined state policy' >&2
+  exit 1
+fi
+grep -q 'state_semantics_policy_not_refined:state' "${WORK_DIR}/forensic/.harness/runtime/unrefined-policy.err"
+
 # A reviewer must inspect every declared semantic role; a generic APPROVED is
 # not evidence for a high-risk transition.
 jq '.stateSemantics = []' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.json"
@@ -289,6 +325,16 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
   exit 1
 fi
 grep -q 'review_state_semantics_mismatch' "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.err"
+
+# A review cannot be replayed or relabelled as another review execution.
+jq '.reviewExecutionId = ("0" * 64)' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/unbound-review.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --independent-review .harness/runtime/unbound-review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/unbound-review.err"; then
+  echo 'forensic transition accepted an unbound review execution' >&2
+  exit 1
+fi
+grep -q 'review_request_binding_mismatch' "${WORK_DIR}/forensic/.harness/runtime/unbound-review.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
@@ -408,8 +454,11 @@ writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
   decisionDigest: request.decisionDigest,
-  producerId: 'producer',
-  reviewerId: 'reviewer',
+  producerId: request.producerId,
+  reviewerId: request.reviewerId,
+  producerExecutionId: request.producerExecutionId,
+  reviewExecutionId: request.reviewExecutionId,
+  reviewRequestDigest: request.reviewRequestDigest,
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: ['STATE', 'COMMAND', 'IDENTITY', 'RESOURCE', 'TEMPORAL', 'RESULT', 'ATOMICITY', 'CANONICALIZATION']

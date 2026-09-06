@@ -3,13 +3,16 @@
   "$id": "aegis.preflight_review.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "verdict", "findings", "stateSemantics"],
+  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "producerExecutionId", "reviewExecutionId", "reviewRequestDigest", "verdict", "findings", "stateSemantics"],
   "properties": {
     "schema": { "const": "aegis.preflight_review.v2" },
     "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "producerId": { "type": "string", "minLength": 1 },
     "reviewerId": { "type": "string", "minLength": 1 },
+    "producerExecutionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewExecutionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "verdict": { "enum": ["APPROVED", "REJECTED"] },
     "findings": {
       "type": "array",

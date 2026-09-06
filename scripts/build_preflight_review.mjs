@@ -2,6 +2,7 @@
 
 import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
@@ -52,6 +53,15 @@ function decisionPath(value) {
     if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) fail('unsafe_decision_path');
   }
   return path;
+}
+
+async function persistReviewRequest(request) {
+  const runtimeDirectory = resolve(root, '.harness/runtime');
+  const destination = resolve(runtimeDirectory, 'preflight_review_request.json');
+  const temporary = `${destination}.${process.pid}.tmp`;
+  await mkdir(runtimeDirectory, { recursive: true });
+  await writeFile(temporary, `${JSON.stringify(request)}\n`, 'utf8');
+  await rename(temporary, destination);
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -111,6 +121,25 @@ if (sourceDecision.status === 'NEEDS_CONFIRMATION') {
   fail('resolution_not_allowed');
 }
 const resolvedDecisionDigest = decision === sourceDecision ? sha256(decisionBytes) : canonicalDigest(decision);
+const producerExecutionId = preflight.executionId;
+const reviewExecutionId = sha256([
+  'aegis.preflight_review_execution.v1',
+  producerExecutionId,
+  resolvedDecisionDigest,
+  options.producerId,
+  options.reviewerId,
+].join('\n'));
+const reviewBinding = {
+  schema: 'aegis.preflight_review_request.v2',
+  status: 'PENDING_INDEPENDENT_REVIEW',
+  normalizedDemandDigest: preflight.normalizedDemand.digest,
+  decisionDigest: resolvedDecisionDigest,
+  producerId: options.producerId,
+  reviewerId: options.reviewerId,
+  producerExecutionId,
+  reviewExecutionId,
+};
+const reviewRequestDigest = canonicalDigest(reviewBinding);
 const context = {
   normalizedDemand: preflight.normalizedDemand,
   mechanicalFacts: preflight.mechanicalFacts,
@@ -121,16 +150,15 @@ const context = {
   clarifications,
   producerId: options.producerId,
   reviewerId: options.reviewerId,
+  producerExecutionId,
+  reviewExecutionId,
+  reviewRequestDigest,
 };
 const template = readFileSync(resolve(root, 'governance/prompts/preflight-review.v2.md'), 'utf8');
 const prompt = inject(template, context);
 const request = {
-  schema: 'aegis.preflight_review_request.v2',
-  status: 'PENDING_INDEPENDENT_REVIEW',
-  normalizedDemandDigest: preflight.normalizedDemand.digest,
-  decisionDigest: resolvedDecisionDigest,
-  producerId: options.producerId,
-  reviewerId: options.reviewerId,
+  ...reviewBinding,
+  reviewRequestDigest,
   promptDigest: sha256(prompt),
   prompt,
 };
@@ -138,5 +166,10 @@ try {
   assertSchema(request.schema, request);
 } catch {
   fail('invalid_review_request');
+}
+try {
+  await persistReviewRequest(request);
+} catch {
+  fail('review_request_persistence_failed');
 }
 process.stdout.write(`${JSON.stringify(request)}\n`);

@@ -81,6 +81,7 @@ try {
       await Promise.all([
         'preflight_envelope.json',
         'preflight_decision.json',
+        'preflight_review_request.json',
         'preflight_review.json',
         'preflight_resolution.json',
         'finalization.json',

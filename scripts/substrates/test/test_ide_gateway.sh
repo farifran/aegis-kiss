@@ -29,7 +29,7 @@ printf '%s' "${output}" | jq -e '
   and (has("normalizedDemand") | not)
 ' >/dev/null
 [[ -s "${WORK_DIR}/.harness/runtime/preflight_envelope.json" ]]
-[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 8000 ]]
+[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 9000 ]]
 
 output="$(bash "${WORK_DIR}/aegis" harness 'Atualizar a validação interna do Aegis.')"
 printf '%s' "${output}" | jq -e '.changeKind == "HARNESS"' >/dev/null

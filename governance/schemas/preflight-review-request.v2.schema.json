@@ -3,7 +3,7 @@
   "$id": "aegis.preflight_review_request.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "promptDigest", "prompt"],
+  "required": ["schema", "status", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "producerExecutionId", "reviewExecutionId", "reviewRequestDigest", "promptDigest", "prompt"],
   "properties": {
     "schema": { "const": "aegis.preflight_review_request.v2" },
     "status": { "const": "PENDING_INDEPENDENT_REVIEW" },
@@ -11,6 +11,9 @@
     "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "producerId": { "type": "string", "minLength": 1 },
     "reviewerId": { "type": "string", "minLength": 1 },
+    "producerExecutionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewExecutionId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "prompt": { "type": "string", "minLength": 1 }
   }
