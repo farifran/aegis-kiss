@@ -3,7 +3,7 @@
   "$id": "aegis.preflight_review.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "verdict", "findings"],
+  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "verdict", "findings", "stateSemantics"],
   "properties": {
     "schema": { "const": "aegis.preflight_review.v2" },
     "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -23,6 +23,18 @@
           "evidence": { "type": "string", "minLength": 1 },
           "sourceUnitIds": { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
         }
+      }
+    },
+    "stateSemantics": {
+      "type": "array",
+      "items": {
+        "type": "array", "minItems": 4, "maxItems": 4,
+        "prefixItems": [
+          { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+          { "enum": ["EXPLICIT", "QUESTION_REQUIRED", "CONFLICT"] },
+          { "type": "string", "minLength": 1 },
+          { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+        ]
       }
     }
   },

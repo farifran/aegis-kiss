@@ -38,6 +38,7 @@ const decision = {
     : [],
   riskProfile: 'standard',
   stateModel: { kind: 'NONE', bindings: [] },
+  stateSemantics: [],
   intent: 'Criar o relógio solicitado.',
   scope: ['src/clock.ts', 'src/clock.proof.ts'],
   excluded: [],
@@ -114,6 +115,7 @@ writeFileSync(reviewPath, JSON.stringify({
   reviewerId: 'reviewer',
   verdict: 'APPROVED',
   findings: [],
+  stateSemantics: [],
 }));
 NODE
 cp "${WORK_DIR}/direct/.harness/runtime/decision.json" "${WORK_DIR}/direct/.harness/runtime/invalid.json"
@@ -151,7 +153,7 @@ AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/finalize_preflight.mjs
   < "${envelope}" > "${WORK_DIR}/direct/.harness/runtime/result.json"
 jq -e '.status == "SEMANTIC_STATE_PERSISTED" and .changeKind == "PRODUCT" and (.proofRegistryDigest | test("^[a-f0-9]{64}$")) and (.semanticStateDigest | test("^[a-f0-9]{64}$")) and (.semantic.reconciler == "structural_reconciliation.v2") and (.semantic.decisionArtifactBytesDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/direct/.harness/runtime/result.json" >/dev/null
-jq -e '.schema == "aegis.semantic_state.v1" and .contract.changeKind == "PRODUCT" and .contract.scope.authorizedPaths == ["src/clock.ts", "src/clock.proof.ts", "src/.aegis/semantic-state.json"] and .proofRegistry.proofs[0].executor == "node" and .proofRegistry.proofs[0].argv == ["--import", "tsx", "src/clock.proof.ts"] and .proofRegistry.proofs[0].targets == ["src/clock.ts", "src/clock.proof.ts"] and .contract.verification.riskProfile == "standard" and .contract.stateModel == {kind:"NONE",bindings:[]}' \
+jq -e '.schema == "aegis.semantic_state.v1" and .contract.changeKind == "PRODUCT" and .contract.scope.authorizedPaths == ["src/clock.ts", "src/clock.proof.ts", "src/.aegis/semantic-state.json"] and .proofRegistry.proofs[0].executor == "node" and .proofRegistry.proofs[0].argv == ["--import", "tsx", "src/clock.proof.ts"] and .proofRegistry.proofs[0].targets == ["src/clock.ts", "src/clock.proof.ts"] and .contract.verification.riskProfile == "standard" and .contract.stateModel == {kind:"NONE",bindings:[],policies:[]}' \
   "${WORK_DIR}/direct/src/.aegis/semantic-state.json" >/dev/null
 git -C "${WORK_DIR}/direct" add src/.aegis/semantic-state.json
 git -C "${WORK_DIR}/direct" commit -qm 'persist semantic state'
@@ -192,6 +194,7 @@ writeFileSync(destination, JSON.stringify({
   questions: [],
   riskProfile: 'forensic',
   stateModel: { kind: 'STATE_TRANSITION', bindings },
+  stateSemantics: bindings.map(([role, statement, , sourceIndexes]) => [role, 'EXPLICIT', statement, sourceIndexes]),
   intent: 'Processar transição de estado forense.',
   scope: ['src/state.ts', 'src/state.proof.ts'],
   excluded: [],
@@ -240,14 +243,55 @@ writeFileSync(reviewPath, JSON.stringify({
   reviewerId: 'reviewer',
   verdict: 'APPROVED',
   findings: [],
+  stateSemantics: envelope.normalizedDemand.units.length === 0 ? [] : JSON.parse(readFileSync(decisionPath, 'utf8')).stateModel.bindings.map(([role]) => [role, 'EXPLICIT', 'A demanda determina esta política.', envelope.normalizedDemand.units.map((unit) => unit.id)]),
 }));
 NODE
+# A transition cannot be marked clarified while any state policy still needs a
+# user decision. This prevents a plausible-looking contract from inventing
+# observable behavior (fees, eligibility, clock, rollback or digest semantics).
+cp "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${WORK_DIR}/forensic/.harness/runtime/semantic-gap.json"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/semantic-gap.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const decision = JSON.parse(readFileSync(path, 'utf8'));
+decision.stateSemantics[0][1] = 'QUESTION_REQUIRED';
+writeFileSync(path, JSON.stringify(decision));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/semantic-gap.json < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/semantic-gap.err"; then
+  echo 'clarified transition accepted an unresolved semantic policy' >&2
+  exit 1
+fi
+grep -Eq 'state_semantics_question_missing|clarified_state_semantics_not_explicit' "${WORK_DIR}/forensic/.harness/runtime/semantic-gap.err" || {
+  cat "${WORK_DIR}/forensic/.harness/runtime/semantic-gap.err" >&2
+  exit 1
+}
+
+# A reviewer must inspect every declared semantic role; a generic APPROVED is
+# not evidence for a high-risk transition.
+jq '.stateSemantics = []' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --independent-review .harness/runtime/incomplete-review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.err"; then
+  echo 'forensic transition accepted a review without semantic-role coverage' >&2
+  exit 1
+fi
+grep -q 'review_state_semantics_incomplete' "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.err"
+
+jq '.stateSemantics[0][1] = "QUESTION_REQUIRED"' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --independent-review .harness/runtime/mismatched-review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.err"; then
+  echo 'forensic transition accepted a semantic review that disagrees with its decision' >&2
+  exit 1
+fi
+grep -q 'review_state_semantics_mismatch' "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
 jq -e '.status == "SEMANTIC_STATE_PERSISTED" and (.semantic.independentReviewDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/forensic/.harness/runtime/result.json" >/dev/null
-jq -e '.contract.verification.riskProfile == "forensic" and (.contract.verification.independentReviewDigest | test("^[a-f0-9]{64}$")) and (.contract.stateModel.bindings | length == 8)' \
+jq -e '.contract.verification.riskProfile == "forensic" and (.contract.verification.independentReviewDigest | test("^[a-f0-9]{64}$")) and (.contract.stateModel.bindings | length == 8) and (.contract.stateModel.policies | length == 8) and (.contract.stateModel.policies | all(.provenance == "USER"))' \
   "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" >/dev/null
 forensic_profile="$(jq '.proofRegistry' "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" > "${WORK_DIR}/forensic/.harness/runtime/proof-registry.json"; AEGIS_ROOT_DIR="${WORK_DIR}/forensic" bash -c "source '${ROOT_DIR}/scripts/lib/proof_governance.sh'; aegis_proof_profile_for_change '${WORK_DIR}/forensic/.harness/runtime/proof-registry.json' 'src/state.ts'")"
 printf '%s' "${forensic_profile}" | jq -e '.profile == "forensic"' >/dev/null
@@ -257,6 +301,10 @@ printf 'Criar src/clock.ts.\n' | AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_D
   --kind PRODUCT --save-envelope --internal-envelope > "${WORK_DIR}/confirm-envelope-copy.json"
 confirm_envelope="${WORK_DIR}/confirm/.harness/runtime/preflight_envelope.json"
 write_decision "${confirm_envelope}" "${WORK_DIR}/confirm/.harness/runtime/decision.json" NEEDS_CONFIRMATION
+AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json < "${confirm_envelope}" > "${WORK_DIR}/confirm/.harness/runtime/questions.json"
+jq -e '.status == "USER_CONFIRMATION_REQUIRED" and .questions == [{id:"Q-0001",scope:"SCOPE",question:"Manter somente src/clock.ts?",evidence:"A demanda nomeia esse caminho.",impact:"Define o escopo.",recommendation:"Sim.",interpreted:"Somente src/clock.ts e sua prova."}]' \
+  "${WORK_DIR}/confirm/.harness/runtime/questions.json" >/dev/null
 node --input-type=module - "${WORK_DIR}/confirm/.harness/runtime/decision.json" "${confirm_envelope}" "${WORK_DIR}/confirm/.harness/runtime/resolution.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -304,6 +352,7 @@ writeFileSync(destination, JSON.stringify({
   questions: [],
   riskProfile: 'standard',
   stateModel: { kind: 'NONE', bindings: [] },
+  stateSemantics: [],
   intent: 'Implementar TokenBucket determinístico.',
   scope: ['src/tokenBucket.ts', 'src/tokenBucket.proof.ts', 'src/index.ts'],
   excluded: [],

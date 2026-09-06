@@ -129,7 +129,19 @@
       "required": ["kind", "bindings"],
       "properties": {
         "kind": { "enum": ["NONE", "STATE_TRANSITION"] },
-        "bindings": { "type": "array", "items": { "$ref": "#/$defs/semanticBinding" } }
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/semanticBinding" } },
+        "policies": { "type": "array", "items": { "$ref": "#/$defs/semanticPolicy" } }
+      }
+    },
+    "semanticPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "provenance", "statement", "sourceUnitIds"],
+      "properties": {
+        "role": { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+        "provenance": { "enum": ["USER", "USER_CLARIFICATION"] },
+        "statement": { "type": "string", "minLength": 1 },
+        "sourceUnitIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
       }
     },
     "requirementCoverage": {

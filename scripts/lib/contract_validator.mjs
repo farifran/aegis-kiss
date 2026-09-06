@@ -85,12 +85,24 @@ function validateSemanticModel(contract) {
   requireCondition(hasModel && hasVerification, 'incomplete_semantic_model');
   const roles = contract.stateModel.bindings.map((binding) => binding.role);
   requireCondition(roles.length === new Set(roles).size, 'duplicate_state_model_role');
+  const policies = contract.stateModel.policies;
+  if (policies !== undefined) {
+    const policyRoles = policies.map((policy) => policy.role);
+    exactIds(policyRoles, roles, 'state_model_policy_coverage_invalid');
+  }
   if (contract.stateModel.kind === 'NONE') {
     requireCondition(roles.length === 0, 'invalid_stateless_state_model');
+    requireCondition(policies === undefined || policies.length === 0, 'invalid_stateless_state_policies');
     return;
   }
   for (const role of ['STATE', 'COMMAND', 'RESULT', 'ATOMICITY']) {
     requireCondition(roles.includes(role), `state_model_role_missing:${role.toLowerCase()}`);
+  }
+  if (policies !== undefined) {
+    requireCondition(
+      policies.every((policy) => policy.sourceUnitIds.length > 0),
+      'state_model_policy_without_provenance',
+    );
   }
   const highRisk = roles.includes('ATOMICITY')
     && ['RESOURCE', 'TEMPORAL', 'IDENTITY', 'CANONICALIZATION'].some((role) => roles.includes(role));

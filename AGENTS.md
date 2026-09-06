@@ -30,6 +30,10 @@ esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
 * Toda resposta que alterar comportamento, escopo ou regra arquitetural deve
   ser incorporada à demanda esclarecida; se alterar comportamento observável,
   deve também aparecer no Contract IR.
+* Em uma transição de estado, cada papel semântico declarado (estado, comando,
+  identidade, recurso, tempo, resultado, atomicidade ou canonicalização)
+  precisa de política observável com proveniência. Se a entrada não a
+  determina, o preflight pergunta; o coder não escolhe silenciosamente.
 * A primeira compilação semântica deve produzir os dois corpos. Se houver
   pergunta, ela também registra a resposta interpretada e os corpos provisórios:
   confirmação promove-os sem nova chamada; correção exige revisão semântica.
