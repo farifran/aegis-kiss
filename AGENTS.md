@@ -27,6 +27,9 @@ esse mesmo envelope; reconstruí-lo depois de uma mutação é proibido.
   invariante. Ela declara evidência, impacto contratual e default recomendado.
 * `questions: []` é o resultado preferível quando a demanda, o protocolo
   aplicável ou um default KISS já determinam a decisão.
+  Transições `forensic` são a exceção: exigem confirmação humana inicial e
+  revisão independente antes da persistência, pois não podem promover uma
+  interpretação sem escolha explícita do operador.
 * Toda resposta que alterar comportamento, escopo ou regra arquitetural deve
   ser incorporada à demanda esclarecida; se alterar comportamento observável,
   deve também aparecer no Contract IR.

@@ -71,7 +71,7 @@ jq -e '
   and .changeKind == "PRODUCT"
   and (.prompt | contains("changeKind=\"PRODUCT\""))
 ' "${WORK_DIR}/direct-request.json" >/dev/null
-[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 9500 ]]
+[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 10000 ]]
 jq -e '
   .baseline.clean == true
   and (.normalizedDemand.text | contains("\r") | not)
@@ -204,9 +204,12 @@ writeFileSync(destination, JSON.stringify({
   schema: 'aegis.preflight_decision.v2',
   contextDigest: envelope.contextDigest,
   promptDigest: envelope.promptDigest,
-  status: 'CLARIFIED',
+  status: 'NEEDS_CONFIRMATION',
   rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'APPLIED', 'A regra se aplica à transição.', units]),
-  questions: [],
+  questions: [['DEMAND', 'Confirmar o contrato forense antes da promoção?', 'A transição combina estado, identidade, recursos, tempo, resultado, atomicidade e canonicalização.', 'Exige confirmação humana para a interpretação forense.', 'CONFIRM_FORENSIC', 'A interpretação forense será promovida somente após confirmação explícita.', units, [
+    ['CONFIRM_FORENSIC', 'Confirmar contrato forense', 'Autoriza a promoção após a revisão independente.', 'A interpretação forense foi confirmada pelo operador.', []],
+    ['REJECT_FORENSIC', 'Não promover', 'Interrompe a demanda para nova formulação.', 'A interpretação forense não foi aprovada e deve ser revisada.', []],
+  ]]],
   riskProfile: 'forensic',
   stateModel: { kind: 'STATE_TRANSITION', bindings },
   stateSemantics: bindings.map(([role, , , sourceIndexes]) => [role, 'EXPLICIT', envelope.normalizedDemand.units[sourceIndexes[0]].text.trim(), sourceIndexes]),
@@ -228,15 +231,33 @@ writeFileSync(destination, JSON.stringify({
   continuity: { retirements: [], proofChanges: [] },
 }));
 NODE
+AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/questions.json"
+jq -e '.status == "USER_CONFIRMATION_REQUIRED" and (.questions | length == 1)' \
+  "${WORK_DIR}/forensic/.harness/runtime/questions.json" >/dev/null
+# A forensic contract with no user choice must stop here even when every
+# policy appears literal. This prevents a producer/reviewer pair from merely
+# copying demand text and silently promoting an interpretation.
+jq '.status = "CLARIFIED" | .questions = []' "${WORK_DIR}/forensic/.harness/runtime/decision.json" \
+  > "${WORK_DIR}/forensic/.harness/runtime/unconfirmed-forensic.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json < "${forensic_envelope}" > /dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/missing-review.err"; then
-  echo 'forensic decision was persisted without independent review' >&2
+  --decision .harness/runtime/unconfirmed-forensic.json < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/unconfirmed-forensic.err"; then
+  echo 'forensic contract was accepted without user confirmation' >&2
   exit 1
 fi
-grep -q 'independent_review_required_for_forensic' "${WORK_DIR}/forensic/.harness/runtime/missing-review.err" || {
-  cat "${WORK_DIR}/forensic/.harness/runtime/missing-review.err" >&2
-  exit 1
-}
+grep -q 'forensic_user_confirmation_required' "${WORK_DIR}/forensic/.harness/runtime/unconfirmed-forensic.err"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/resolution.json" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const [decisionPath, envelopePath, resolutionPath] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+writeFileSync(resolutionPath, JSON.stringify({
+  schema: 'aegis.preflight_resolution.v2',
+  decisionDigest: createHash('sha256').update(readFileSync(decisionPath)).digest('hex'),
+  preflightPromptDigest: envelope.promptDigest,
+  answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'CONFIRM_FORENSIC' }],
+}));
+NODE
 jq '.riskProfile = "standard"' "${WORK_DIR}/forensic/.harness/runtime/decision.json" > "${WORK_DIR}/forensic/.harness/runtime/non-forensic.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/non-forensic.json < "${forensic_envelope}" > /dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"; then
@@ -245,20 +266,18 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
 fi
 grep -q 'state_transition_requires_forensic' "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
-  --decision .harness/runtime/decision.json --producer-id producer --reviewer-id reviewer \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --producer-id producer --reviewer-id reviewer \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/review-request.json"
 node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/preflight_review_request.json" "${WORK_DIR}/forensic/.harness/runtime/review.json" <<'NODE'
-import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 const [decisionPath, envelopePath, requestPath, reviewPath] = process.argv.slice(2);
-const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
 const request = JSON.parse(readFileSync(requestPath, 'utf8'));
 const decision = JSON.parse(readFileSync(decisionPath, 'utf8'));
 writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
-  decisionDigest: digest(readFileSync(decisionPath)),
+  decisionDigest: request.decisionDigest,
   producerId: request.producerId,
   reviewerId: request.reviewerId,
   producerExecutionId: request.producerExecutionId,
@@ -278,6 +297,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const path = process.argv[2];
 const decision = JSON.parse(readFileSync(path, 'utf8'));
 decision.stateSemantics[0][1] = 'QUESTION_REQUIRED';
+decision.status = 'CLARIFIED';
+decision.questions = [];
 writeFileSync(path, JSON.stringify(decision));
 NODE
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
@@ -329,7 +350,7 @@ grep -q 'state_semantics_policy_not_verbatim:resource' "${WORK_DIR}/forensic/.ha
 # not evidence for a high-risk transition.
 jq '.stateSemantics = []' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json --independent-review .harness/runtime/incomplete-review.json \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/incomplete-review.json \
   < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.err"; then
   echo 'forensic transition accepted a review without semantic-role coverage' >&2
   exit 1
@@ -338,7 +359,7 @@ grep -q 'review_state_semantics_incomplete' "${WORK_DIR}/forensic/.harness/runti
 
 jq '.stateSemantics[0][1] = "QUESTION_REQUIRED"' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json --independent-review .harness/runtime/mismatched-review.json \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/mismatched-review.json \
   < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.err"; then
   echo 'forensic transition accepted a semantic review that disagrees with its decision' >&2
   exit 1
@@ -347,7 +368,7 @@ grep -q 'review_state_semantics_mismatch' "${WORK_DIR}/forensic/.harness/runtime
 
 jq '.stateSemantics[0][2] = "A demanda determina esta política."' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/paraphrased-review.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json --independent-review .harness/runtime/paraphrased-review.json \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/paraphrased-review.json \
   < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/paraphrased-review.err"; then
   echo 'forensic transition accepted a paraphrased review evidence' >&2
   exit 1
@@ -357,14 +378,14 @@ grep -q 'review_state_semantics_evidence_mismatch:state' "${WORK_DIR}/forensic/.
 # A review cannot be replayed or relabelled as another review execution.
 jq '.reviewExecutionId = ("0" * 64)' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/unbound-review.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json --independent-review .harness/runtime/unbound-review.json \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/unbound-review.json \
   < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/unbound-review.err"; then
   echo 'forensic transition accepted an unbound review execution' >&2
   exit 1
 fi
 grep -q 'review_request_binding_mismatch' "${WORK_DIR}/forensic/.harness/runtime/unbound-review.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
-  --decision .harness/runtime/decision.json --independent-review .harness/runtime/review.json \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/review.json \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
 jq -e '.status == "SEMANTIC_STATE_PERSISTED" and (.semantic.independentReviewDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/forensic/.harness/runtime/result.json" >/dev/null

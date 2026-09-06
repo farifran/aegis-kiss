@@ -247,7 +247,7 @@ function validateStateModel(envelope, decision) {
   const { stateModel } = decision;
   if (stateModel.kind === 'NONE') {
     if (stateModel.bindings.length !== 0) fail('invalid_stateless_state_model');
-    return;
+    return { requiresIndependentReview: false };
   }
 
   const roles = stateModel.bindings.map(([role]) => role);
@@ -262,6 +262,7 @@ function validateStateModel(envelope, decision) {
   const highRisk = roles.includes('ATOMICITY')
     && ['RESOURCE', 'TEMPORAL', 'IDENTITY', 'CANONICALIZATION'].some((role) => roles.includes(role));
   if (highRisk && decision.riskProfile !== 'forensic') fail('state_transition_requires_forensic');
+  return { requiresIndependentReview: decision.riskProfile === 'forensic' };
 }
 
 function normalizedLiteral(value) {
@@ -321,7 +322,7 @@ function validateQuestionChoices(envelope, decision) {
   }
 }
 
-function validateDecision(envelope, decision, clarificationRoles = new Set()) {
+function validateDecision(envelope, decision, clarificationRoles = new Set(), userConfirmed = false) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
   if (decision.promptDigest !== envelope.promptDigest) fail('decision_prompt_digest_mismatch');
@@ -334,14 +335,17 @@ function validateDecision(envelope, decision, clarificationRoles = new Set()) {
   if (assessments.some((item) => item.verdict === 'CONFLICT' && hardRules.has(item.ruleId)) && decision.status !== 'BLOCKED') {
     fail('hard_conflict_not_blocked');
   }
-  validateStateModel(envelope, decision);
+  const stateProfile = validateStateModel(envelope, decision);
   validateStateSemantics(envelope, decision, clarificationRoles);
   const hardRisk = assessments.filter((item) => item.verdict === 'APPLIED' && hardRules.has(item.ruleId)).length >= 2;
   if (decision.riskProfile === 'forensic' && !decision.proofs.some((proof) => proof[7] === 'forensic')) {
     fail('forensic_profile_requires_forensic_proof');
   }
   if (hardRisk && decision.riskProfile !== 'forensic') fail('hard_risk_requires_forensic');
-  return { assessments, stateProfile: { requiresIndependentReview: decision.riskProfile === 'forensic' } };
+  if (stateProfile.requiresIndependentReview && decision.status === 'CLARIFIED' && !userConfirmed) {
+    fail('forensic_user_confirmation_required');
+  }
+  return { assessments, stateProfile };
 }
 
 function assembleSemanticState(envelope, decision, assessments, independentReviewDigest, clarifications, clarificationRoles) {
@@ -737,12 +741,14 @@ if (decisionFile.value.status === 'CLARIFIED') {
   } catch (error) {
     fail(error instanceof Error ? error.message : 'resolution_invalid');
   }
-  validateDecision(envelope, resolvedDecision, clarificationRoles);
+  validateDecision(envelope, resolvedDecision, clarificationRoles, clarifications.length > 0);
   interpretationStatus = 'INTERPRETATION_CONFIRMED';
 }
 
 const effectiveDecisionDigest = resolvedDecision === decisionFile.value ? decisionDigest : canonicalDigest(resolvedDecision);
-const effectiveValidation = resolvedDecision === decisionFile.value ? sourceValidation : validateDecision(envelope, resolvedDecision, clarificationRoles);
+const effectiveValidation = resolvedDecision === decisionFile.value
+  ? sourceValidation
+  : validateDecision(envelope, resolvedDecision, clarificationRoles, clarifications.length > 0);
 let independentReviewDigest = null;
 if (effectiveValidation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
   fail('independent_review_required_for_forensic');
