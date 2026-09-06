@@ -180,8 +180,9 @@ printf 'export {};\n' > "${WORK_DIR}/direct/src/clock.proof.ts"
 git -C "${WORK_DIR}/direct" add src
 AEGIS_ROOT_DIR="${WORK_DIR}/direct" bash "${ROOT_DIR}/scripts/contract_evidence_gate.sh" --staged
 
+forensic_demand=$'O estado é uma tabela explícita de entidades.\nCada comando possui identidade única e campos completos.\nIdentidades externas são chaves opacas e entidades inativas são rejeitadas.\nCada custo consome somente capacidade e cada valor transfere saldo entre origem e destino.\nO instante é entrada explícita; igualdade não refila e regressão aborta.\nO resultado contém uma decisão por comando e agregados são a soma das decisões aceitas.\nTodos os passos falíveis ocorrem antes de publicar o estado projetado.\nA representação canônica ordena chaves por code units e cobre comandos, decisões e estado final.\n'
 prepare_repository "${WORK_DIR}/forensic"
-printf 'Processar transição de estado atômica com recurso temporal, identificadores externos, resultado observável e representação canônica.\n' \
+printf '%s' "${forensic_demand}" \
   | AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/preflight.mjs" --kind PRODUCT --save-envelope > /dev/null
 forensic_envelope="${WORK_DIR}/forensic/.harness/runtime/preflight_envelope.json"
 node --input-type=module - "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/decision.json" <<'NODE'
@@ -190,14 +191,14 @@ const [envelopePath, destination] = process.argv.slice(2);
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
 const units = envelope.normalizedDemand.units.map((_, index) => index);
 const bindings = [
-  ['STATE', 'O estado é explícito e observável.', [0], units],
-  ['COMMAND', 'Cada comando produz uma transição definida.', [0], units],
-  ['IDENTITY', 'Identificadores externos são dados opacos.', [0], units],
-  ['RESOURCE', 'Recursos são contabilizados no estado projetado.', [0], units],
-  ['TEMPORAL', 'O tempo é entrada explícita da transição.', [0], units],
-  ['RESULT', 'O resultado representa cada decisão e seus agregados.', [0], units],
-  ['ATOMICITY', 'O estado só é publicado depois de todos os passos falíveis.', [0], units],
-  ['CANONICALIZATION', 'A representação canônica vincula os observáveis declarados.', [0], units],
+  ['STATE', 'O estado é explícito e observável.', [0], [0]],
+  ['COMMAND', 'Cada comando produz uma transição definida.', [0], [1]],
+  ['IDENTITY', 'Identificadores externos são dados opacos.', [0], [2]],
+  ['RESOURCE', 'Recursos são contabilizados no estado projetado.', [0], [3]],
+  ['TEMPORAL', 'O tempo é entrada explícita da transição.', [0], [4]],
+  ['RESULT', 'O resultado representa cada decisão e seus agregados.', [0], [5]],
+  ['ATOMICITY', 'O estado só é publicado depois de todos os passos falíveis.', [0], [6]],
+  ['CANONICALIZATION', 'A representação canônica vincula os observáveis declarados.', [0], [7]],
 ];
 writeFileSync(destination, JSON.stringify({
   schema: 'aegis.preflight_decision.v2',
@@ -208,7 +209,7 @@ writeFileSync(destination, JSON.stringify({
   questions: [],
   riskProfile: 'forensic',
   stateModel: { kind: 'STATE_TRANSITION', bindings },
-  stateSemantics: bindings.map(([role, statement, , sourceIndexes]) => [role, 'EXPLICIT', `Política observável de ${role}: ${statement}`, sourceIndexes]),
+  stateSemantics: bindings.map(([role, , , sourceIndexes]) => [role, 'EXPLICIT', envelope.normalizedDemand.units[sourceIndexes[0]].text.trim(), sourceIndexes]),
   intent: 'Processar transição de estado forense.',
   scope: ['src/state.ts', 'src/state.proof.ts'],
   excluded: [],
@@ -253,6 +254,7 @@ const [decisionPath, envelopePath, requestPath, reviewPath] = process.argv.slice
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
 const request = JSON.parse(readFileSync(requestPath, 'utf8'));
+const decision = JSON.parse(readFileSync(decisionPath, 'utf8'));
 writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
@@ -264,7 +266,7 @@ writeFileSync(reviewPath, JSON.stringify({
   reviewRequestDigest: request.reviewRequestDigest,
   verdict: 'APPROVED',
   findings: [],
-  stateSemantics: envelope.normalizedDemand.units.length === 0 ? [] : JSON.parse(readFileSync(decisionPath, 'utf8')).stateModel.bindings.map(([role]) => [role, 'EXPLICIT', 'A demanda determina esta política.', envelope.normalizedDemand.units.map((unit) => unit.id)]),
+  stateSemantics: envelope.normalizedDemand.units.length === 0 ? [] : decision.stateSemantics.map(([role, , statement]) => [role, 'EXPLICIT', statement, envelope.normalizedDemand.units.map((unit) => unit.id)]),
 }));
 NODE
 # A transition cannot be marked clarified while any state policy still needs a
@@ -306,6 +308,23 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
 fi
 grep -q 'state_semantics_policy_not_refined:state' "${WORK_DIR}/forensic/.harness/runtime/unrefined-policy.err"
 
+# A policy cannot smuggle an implementation decision behind a generic source
+# reference. The earlier batch-engine demand failed exactly this way.
+cp "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${WORK_DIR}/forensic/.harness/runtime/invented-policy.json"
+node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/invented-policy.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const decision = JSON.parse(readFileSync(path, 'utf8'));
+decision.stateSemantics[3][2] = 'O custo consome capacidade e também é deduzido do saldo.';
+writeFileSync(path, JSON.stringify(decision));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/invented-policy.json < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/invented-policy.err"; then
+  echo 'transition accepted an invented state policy' >&2
+  exit 1
+fi
+grep -q 'state_semantics_policy_not_verbatim:resource' "${WORK_DIR}/forensic/.harness/runtime/invented-policy.err"
+
 # A reviewer must inspect every declared semantic role; a generic APPROVED is
 # not evidence for a high-risk transition.
 jq '.stateSemantics = []' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.json"
@@ -325,6 +344,15 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
   exit 1
 fi
 grep -q 'review_state_semantics_mismatch' "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.err"
+
+jq '.stateSemantics[0][2] = "A demanda determina esta política."' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/paraphrased-review.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --independent-review .harness/runtime/paraphrased-review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/paraphrased-review.err"; then
+  echo 'forensic transition accepted a paraphrased review evidence' >&2
+  exit 1
+fi
+grep -q 'review_state_semantics_evidence_mismatch:state' "${WORK_DIR}/forensic/.harness/runtime/paraphrased-review.err"
 
 # A review cannot be replayed or relabelled as another review execution.
 jq '.reviewExecutionId = ("0" * 64)' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/unbound-review.json"
@@ -393,7 +421,7 @@ jq -e '.clarifiedDemand.clarifications == [{questionId:"Q-0001",answerId:"KEEP_S
 # selections. Its alternatives resolve every linked policy atomically; the
 # forensic reviewer receives and attests that resolved candidate.
 prepare_repository "${WORK_DIR}/selected-forensic"
-printf 'Processar transição de estado atômica com recurso temporal, identificadores externos, resultado observável e representação canônica.\n' \
+printf '%s' "${forensic_demand}" \
   | AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/preflight.mjs" --kind PRODUCT --save-envelope > /dev/null
 selected_envelope="${WORK_DIR}/selected-forensic/.harness/runtime/preflight_envelope.json"
 node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" <<'NODE'
@@ -445,11 +473,14 @@ grep -q 'independent_review_required_for_forensic' "${WORK_DIR}/selected-forensi
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --producer-id producer --reviewer-id reviewer < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json"
-node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/review.json" <<'NODE'
+node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/review.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
-const [requestPath, envelopePath, reviewPath] = process.argv.slice(2);
+const [decisionPath, requestPath, envelopePath, reviewPath] = process.argv.slice(2);
+const decision = JSON.parse(readFileSync(decisionPath, 'utf8'));
 const request = JSON.parse(readFileSync(requestPath, 'utf8'));
 const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const policies = new Map(decision.stateSemantics.map(([role, , statement]) => [role, statement]));
+for (const [role, statement] of decision.questions[0][7][0][4]) policies.set(role, statement);
 writeFileSync(reviewPath, JSON.stringify({
   schema: 'aegis.preflight_review.v2',
   normalizedDemandDigest: envelope.normalizedDemand.digest,
@@ -462,7 +493,7 @@ writeFileSync(reviewPath, JSON.stringify({
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: ['STATE', 'COMMAND', 'IDENTITY', 'RESOURCE', 'TEMPORAL', 'RESULT', 'ATOMICITY', 'CANONICALIZATION']
-    .map((role) => [role, 'EXPLICIT', 'A variante selecionada determina a política.', envelope.normalizedDemand.units.map((unit) => unit.id)]),
+    .map((role) => [role, 'EXPLICIT', policies.get(role), envelope.normalizedDemand.units.map((unit) => unit.id)]),
 }));
 NODE
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \

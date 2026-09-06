@@ -264,7 +264,16 @@ function validateStateModel(envelope, decision) {
   if (highRisk && decision.riskProfile !== 'forensic') fail('state_transition_requires_forensic');
 }
 
-function validateStateSemantics(envelope, decision) {
+function normalizedLiteral(value) {
+  return value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+}
+
+function hasVerbatimUnitEvidence(envelope, sourceIndexes, statement) {
+  const literal = normalizedLiteral(statement);
+  return sourceIndexes.some((index) => normalizedLiteral(envelope.normalizedDemand.units[index].text).includes(literal));
+}
+
+function validateStateSemantics(envelope, decision, clarificationRoles = new Set()) {
   const roles = decision.stateModel.bindings.map(([role]) => role);
   if (decision.stateModel.kind === 'NONE') {
     if (decision.stateSemantics.length !== 0) fail('stateless_state_semantics_not_empty');
@@ -280,6 +289,9 @@ function validateStateSemantics(envelope, decision) {
     unitIds(envelope, sourceIndexes, 'state_semantics_unknown_unit');
     if (disposition === 'EXPLICIT' && statement.trim() === bindingByRole.get(role)?.trim()) {
       fail(`state_semantics_policy_not_refined:${role.toLowerCase()}`);
+    }
+    if (disposition === 'EXPLICIT' && !clarificationRoles.has(role) && !hasVerbatimUnitEvidence(envelope, sourceIndexes, statement)) {
+      fail(`state_semantics_policy_not_verbatim:${role.toLowerCase()}`);
     }
     if (disposition !== 'QUESTION_REQUIRED') continue;
     if (decision.status !== 'NEEDS_CONFIRMATION' || !questionCoversUnits(decision, sourceIndexes)) {
@@ -309,7 +321,7 @@ function validateQuestionChoices(envelope, decision) {
   }
 }
 
-function validateDecision(envelope, decision) {
+function validateDecision(envelope, decision, clarificationRoles = new Set()) {
   assertValidSchema('aegis.preflight_decision.v2', decision, 'malformed_decision');
   if (decision.contextDigest !== envelope.contextDigest) fail('decision_context_digest_mismatch');
   if (decision.promptDigest !== envelope.promptDigest) fail('decision_prompt_digest_mismatch');
@@ -323,7 +335,7 @@ function validateDecision(envelope, decision) {
     fail('hard_conflict_not_blocked');
   }
   validateStateModel(envelope, decision);
-  validateStateSemantics(envelope, decision);
+  validateStateSemantics(envelope, decision, clarificationRoles);
   const hardRisk = assessments.filter((item) => item.verdict === 'APPLIED' && hardRules.has(item.ruleId)).length >= 2;
   if (decision.riskProfile === 'forensic' && !decision.proofs.some((proof) => proof[7] === 'forensic')) {
     fail('forensic_profile_requires_forensic_proof');
@@ -522,7 +534,7 @@ function reviewBinding(request) {
   };
 }
 
-async function validateIndependentReview(envelope, decision, review, decisionDigest) {
+async function validateIndependentReview(envelope, decision, review, decisionDigest, clarificationRoles = new Set()) {
   assertValidSchema('aegis.preflight_review.v2', review, 'malformed_independent_review');
   const requestFile = await readJson('.harness/runtime/preflight_review_request.json', 'missing_independent_review_request');
   assertValidSchema('aegis.preflight_review_request.v2', requestFile.value, 'malformed_independent_review_request');
@@ -564,8 +576,20 @@ async function validateIndependentReview(envelope, decision, review, decisionDig
       fail('review_state_semantics_mismatch');
     }
   }
-  for (const [role, verdict, , sourceUnitIds] of review.stateSemantics) {
+  const decisionPolicyByRole = new Map(decision.stateSemantics.map(([role, , statement]) => [role, statement]));
+  for (const [role, verdict, evidence, sourceUnitIds] of review.stateSemantics) {
     if (verdict === 'CONFLICT') fail(`review_state_semantics_conflict:${role.toLowerCase()}`);
+    if (verdict === 'EXPLICIT') {
+      if (normalizedLiteral(evidence) !== normalizedLiteral(decisionPolicyByRole.get(role) ?? '')) {
+        fail(`review_state_semantics_evidence_mismatch:${role.toLowerCase()}`);
+      }
+      const sourceIndexes = sourceUnitIds
+        .map((unitId) => envelope.normalizedDemand.units.findIndex((unit) => unit.id === unitId))
+        .filter((index) => index >= 0);
+      if (!clarificationRoles.has(role) && !hasVerbatimUnitEvidence(envelope, sourceIndexes, evidence)) {
+        fail(`review_state_semantics_evidence_not_verbatim:${role.toLowerCase()}`);
+      }
+    }
     if (verdict === 'QUESTION_REQUIRED') {
       const indexes = sourceUnitIds
         .map((unitId) => envelope.normalizedDemand.units.findIndex((unit) => unit.id === unitId))
@@ -713,19 +737,19 @@ if (decisionFile.value.status === 'CLARIFIED') {
   } catch (error) {
     fail(error instanceof Error ? error.message : 'resolution_invalid');
   }
-  validateDecision(envelope, resolvedDecision);
+  validateDecision(envelope, resolvedDecision, clarificationRoles);
   interpretationStatus = 'INTERPRETATION_CONFIRMED';
 }
 
 const effectiveDecisionDigest = resolvedDecision === decisionFile.value ? decisionDigest : canonicalDigest(resolvedDecision);
-const effectiveValidation = resolvedDecision === decisionFile.value ? sourceValidation : validateDecision(envelope, resolvedDecision);
+const effectiveValidation = resolvedDecision === decisionFile.value ? sourceValidation : validateDecision(envelope, resolvedDecision, clarificationRoles);
 let independentReviewDigest = null;
 if (effectiveValidation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
   fail('independent_review_required_for_forensic');
 }
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
-  await validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest);
+  await validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest, clarificationRoles);
   independentReviewDigest = sha256(review.bytes);
 }
 
