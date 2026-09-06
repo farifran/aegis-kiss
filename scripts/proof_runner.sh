@@ -76,19 +76,13 @@ printf '%s\n' "${plan}" | jq -r '.proofs[] | [.id, .executionKey] | @tsv' \
       continue
     fi
 
-    proof_spec="$(jq -c --arg id "${proof_id}" '.proofs[] | select(.id == $id) | {executor,argv,command}' "$(aegis_proof_registry_path)")"
+    proof_spec="$(jq -c --arg id "${proof_id}" '.proofs[] | select(.id == $id) | {executor,argv}' "$(aegis_proof_registry_path)")"
     executor="$(printf '%s' "${proof_spec}" | jq -r '.executor // empty')"
     if [[ "${executor}" == "bash" ]] && [[ "$(printf '%s' "${proof_spec}" | jq -r '.argv | length')" == "1" ]]; then
       command=(bash "$(printf '%s' "${proof_spec}" | jq -r '.argv[0]')")
     elif [[ "${executor}" == "node" ]] \
       && [[ "$(printf '%s' "${proof_spec}" | jq -r '.argv | @json')" =~ ^\["--import","tsx","[A-Za-z0-9_./-]+\\.ts"\]$ ]]; then
       command=(node --import tsx "$(printf '%s' "${proof_spec}" | jq -r '.argv[2]')")
-    elif [[ "$(printf '%s' "${proof_spec}" | jq -r '.command // empty')" =~ ^npm[[:space:]]+run[[:space:]]+([a-zA-Z0-9:_-]+)$ ]]; then
-      command=(npm run "${BASH_REMATCH[1]}")
-    elif [[ "$(printf '%s' "${proof_spec}" | jq -r '.command // empty')" =~ ^bash[[:space:]]+([a-zA-Z0-9_./-]+)$ ]]; then
-      command=(bash "${BASH_REMATCH[1]}")
-    elif [[ "$(printf '%s' "${proof_spec}" | jq -r '.command // empty')" =~ ^node[[:space:]]+--import[[:space:]]+tsx[[:space:]]+([a-zA-Z0-9_./-]+\.ts)$ ]]; then
-      command=(node --import tsx "${BASH_REMATCH[1]}")
     else
       echo "[AEGIS][PROOF][FATAL] invalid_proof_executor_spec:${proof_id}" >&2
       exit 1

@@ -5,13 +5,16 @@
 ---
 
 #### 1. PREFLIGHT, ALINHAMENTO E CONTRATO
-O processamento começa por uma normalização mecânica da demanda. Essa etapa
-não carrega o `AGENTS.md`, o `ARCHITECTURE.md` ou o briefing inteiro em um
-prompt: ela só usa uma projeção curta e versionada da política de preflight.
+O processamento começa por uma normalização mecânica da demanda e um discovery
+de camada zero executado localmente em memória. Esse discovery produz somente
+candidatos limitados e suas razões factuais; não chama modelo, não escolhe
+escopo e não cria cache separado. A etapa não carrega o `AGENTS.md`, o
+`ARCHITECTURE.md` ou o briefing inteiro em um prompt: ela só usa uma projeção
+curta e versionada da política de preflight.
 
 A sequência obrigatória é:
 
-`demanda bruta → normalização mecânica → fatos de preflight → compilação semântica única (demanda esclarecida + contrato candidato) → perguntas aprovadas (se houver) → confirmação mecânica ou revisão semântica → revisão independente opcional → demanda e contrato finais → plano de implementação`.
+`demanda bruta → normalização e discovery mecânicos → fatos de preflight → compilação semântica única (demanda esclarecida + contrato candidato) → perguntas aprovadas (se houver) → confirmação mecânica ou revisão semântica → revisão independente opcional → demanda e contrato finais → plano de implementação`.
 
 O primeiro intake exige worktree limpo e congela, em runtime transitório, o
 commit base, o manifesto vazio e o contexto semântico. A finalização consome
@@ -74,6 +77,10 @@ Para novas demandas, o único formato ativo é `aegis.contract_ir.v2`. Contratos
 `v1` pertencem apenas ao histórico Git: não são convertidos automaticamente e
 não recebem compatibilidade de execução. O corte para `v2` começa de estado
 governado limpo, preservando a trilha histórica no Git.
+
+O único artefato persistente de autoridade é `src/.aegis/semantic-state.json`.
+Contrato, demanda esclarecida e registro de provas são campos atômicos desse
+registro; projeções em runtime são transitórias e nunca são fonte alternativa.
 
 Demandas com transição observável de estado declaram um modelo semântico com
 estado, comando, resultado e fronteira atômica. Quando a transição combina

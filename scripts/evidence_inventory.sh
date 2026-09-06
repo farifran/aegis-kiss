@@ -13,6 +13,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 OUTPUT_FILE="${RUNTIME_DIR}/mechanical_inventory.json"
 SCHEMA="aegis.mechanical_inventory.v1"
+BASE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
 
 fatal() { printf '[AEGIS][EVIDENCE][FATAL] %s\n' "$1" >&2; exit 1; }
 
@@ -54,7 +55,7 @@ add_candidate() {
 scope_digest() {
   local relative
   {
-    printf '%s\0' "${SCHEMA}" "$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+    printf '%s\0' "${SCHEMA}" "${BASE_COMMIT}"
     printf '%s\0' "${declared_paths[@]}"
     git -C "${ROOT_DIR}" diff --no-ext-diff --binary HEAD -- "${declared_paths[@]}"
     for relative in "${candidate_paths[@]}"; do
@@ -190,6 +191,7 @@ done
 
 jq -s \
   --arg schema "${SCHEMA}" \
+  --arg base_commit "${BASE_COMMIT}" \
   --arg request_digest "${request_digest}" \
   --arg worktree_scope_digest "${worktree_scope_digest}" \
   --argjson paths "$(printf '%s\n' "${declared_paths[@]}" | jq -R . | jq -s .)" \
@@ -201,7 +203,7 @@ jq -s \
   --argjson omitted_count "${omitted_count}" \
   --argjson complete "${complete}" \
   --argjson preview_bytes "${preview_bytes}" \
-  '{schema:$schema,requestDigest:$request_digest,worktreeScopeDigest:$worktree_scope_digest,request:{paths:$paths,maxFiles:$max_files,maxTotalBytes:$max_total_bytes,maxFileBytes:$max_file_bytes},coverage:{candidateFiles:$candidate_count,selectedFiles:$selected_count,omittedFiles:$omitted_count,complete:$complete,previewBytes:$preview_bytes},files:.}' \
+  '{schema:$schema,baseCommit:$base_commit,requestDigest:$request_digest,worktreeScopeDigest:$worktree_scope_digest,request:{paths:$paths,maxFiles:$max_files,maxTotalBytes:$max_total_bytes,maxFileBytes:$max_file_bytes},coverage:{candidateFiles:$candidate_count,selectedFiles:$selected_count,omittedFiles:$omitted_count,complete:$complete,previewBytes:$preview_bytes},files:.}' \
   "${records_file}" > "${output_file}"
 mv "${output_file}" "${OUTPUT_FILE}"
 

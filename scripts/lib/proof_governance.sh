@@ -31,7 +31,8 @@ aegis_proof_registry_path() {
     printf '%s' "${runtime_file}"
     return
   fi
-  printf '%s' "${root_dir}/src/.aegis/proof-registry.json"
+  echo "[AEGIS][PROOF][FATAL] missing_semantic_state" >&2
+  return 1
 }
 
 aegis_proof_contract_path() {
@@ -50,7 +51,8 @@ aegis_proof_contract_path() {
     printf '%s' "${runtime_file}"
     return
   fi
-  printf '%s' "${root_dir}/src/.aegis/contract-ir.json"
+  echo "[AEGIS][PROOF][FATAL] missing_semantic_state" >&2
+  return 1
 }
 
 aegis_proof_safe_repository_path() {
@@ -80,7 +82,7 @@ aegis_staged_scope_validate() {
   while IFS= read -r path; do
     [[ -n "${path}" ]] || continue
     case "${path}" in
-      src/.aegis/semantic-state.json|src/.aegis/contract-ir.json|src/.aegis/clarified-demand.json|src/.aegis/proof-registry.json|.harness/active_contract_ir.json|.harness/active_clarified_demand.json|.harness/proof_registry.json)
+      src/.aegis/semantic-state.json)
         continue
         ;;
     esac
@@ -109,27 +111,7 @@ aegis_staged_scope_validate() {
 aegis_proof_commands_resolve() {
   local registry_file="${1:-}"
   local root_dir="${2:-.}"
-  local executor command_path command_string command_name
-
-  while IFS= read -r command_string; do
-    [[ -n "${command_string}" ]] || continue
-    if [[ "${command_string}" =~ ^npm[[:space:]]+run[[:space:]]+([A-Za-z0-9:_-]+)$ ]]; then
-      command_name="${BASH_REMATCH[1]}"
-      jq -e --arg name "${command_name}" '(.scripts[$name] | type == "string" and length > 0)' "${root_dir}/package.json" >/dev/null 2>&1 || {
-        echo "[AEGIS][PROOF][FATAL] unresolved_legacy_npm_proof_command:${command_name}" >&2
-        return 1
-      }
-    elif [[ "${command_string}" =~ ^bash[[:space:]]+([A-Za-z0-9_./-]+)$ ]]; then
-      command_path="${BASH_REMATCH[1]}"
-      aegis_proof_safe_repository_path "${command_path}" && [[ -f "${root_dir}/${command_path}" ]] || return 1
-    elif [[ "${command_string}" =~ ^node[[:space:]]+--import[[:space:]]+tsx[[:space:]]+([A-Za-z0-9_./-]+\.ts)$ ]]; then
-      command_path="${BASH_REMATCH[1]}"
-      aegis_proof_safe_repository_path "${command_path}" && [[ -f "${root_dir}/${command_path}" ]] || return 1
-    else
-      echo "[AEGIS][PROOF][FATAL] untrusted_legacy_proof_command" >&2
-      return 1
-    fi
-  done < <(jq -r '.proofs[] | select(.status != "retired" and has("command")) | .command' "${registry_file}")
+  local executor command_path
 
   while IFS=$'\t' read -r executor command_path; do
     [[ -n "${executor}" && -n "${command_path}" ]] || continue
@@ -183,12 +165,10 @@ aegis_proof_governance_validate() {
       and (.status | IN("experimental", "active", "retired"))
       and (.targets | type == "array" and length > 0)
       and (.executionKey | type == "string" and test("^[a-z0-9][a-z0-9_-]+$"))
-      and (
-        ((.executor | IN("bash", "node"))
-          and (.argv | type == "array" and length > 0 and all(.[]; type == "string" and length > 0))
-          and (if .executor == "bash" then ((.argv | length == 1) and (.argv[0] | test("^[A-Za-z0-9_./-]+\\.sh$"))) else ((.argv | length == 3) and .argv[0] == "--import" and .argv[1] == "tsx" and (.argv[2] | test("^[A-Za-z0-9_./-]+\\.ts$"))) end))
-        or (.command | type == "string" and test("^(npm run [A-Za-z0-9:_-]+|bash [A-Za-z0-9_./-]+|node --import tsx [A-Za-z0-9_./-]+\\.ts)$"))
-      )
+      and (has("command") | not)
+      and ((.executor | IN("bash", "node"))
+        and (.argv | type == "array" and length > 0 and all(.[]; type == "string" and length > 0))
+        and (if .executor == "bash" then ((.argv | length == 1) and (.argv[0] | test("^[A-Za-z0-9_./-]+\\.sh$"))) else ((.argv | length == 3) and .argv[0] == "--import" and .argv[1] == "tsx" and (.argv[2] | test("^[A-Za-z0-9_./-]+\\.ts$"))) end))
       and (if .status == "experimental" then (.expiresOn | type == "string" and length > 0) else true end)
     )
     and all(.profiles[];
@@ -300,33 +280,24 @@ aegis_proof_staged_path_exists() {
 aegis_proof_continuity_validate_staged() {
   local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
   local continuity_root old_registry old_contract new_registry new_contract proof_id target old_proof new_proof rc=0
-  local old_registry_path="src/.aegis/proof-registry.json" old_contract_path="src/.aegis/contract-ir.json"
-  local new_registry_path="src/.aegis/proof-registry.json" new_contract_path="src/.aegis/contract-ir.json"
+  local semantic_path="src/.aegis/semantic-state.json"
 
   git -C "${repository_root}" rev-parse --verify HEAD >/dev/null 2>&1 || return 0
-  if ! git -C "${repository_root}" cat-file -e "HEAD:${old_registry_path}" 2>/dev/null; then
-    old_registry_path=".harness/proof_registry.json"
-    old_contract_path=".harness/active_contract_ir.json"
-  fi
-  for target in "${old_registry_path}" "${old_contract_path}"; do
-    git -C "${repository_root}" cat-file -e "HEAD:${target}" 2>/dev/null || return 0
-  done
-  for target in "${new_registry_path}" "${new_contract_path}"; do
-    git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || {
-      echo "[AEGIS][CONTINUITY][FATAL] staged_metadata_missing:${target}" >&2
-      return 1
-    }
-  done
+  git -C "${repository_root}" cat-file -e "HEAD:${semantic_path}" 2>/dev/null || return 0
+  git -C "${repository_root}" cat-file -e ":${semantic_path}" 2>/dev/null || {
+    echo "[AEGIS][CONTINUITY][FATAL] staged_semantic_state_missing" >&2
+    return 1
+  }
 
   continuity_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-proof-continuity.XXXXXX")" || return 1
   old_registry="${continuity_root}/old-registry.json"
   old_contract="${continuity_root}/old-contract.json"
   new_registry="${continuity_root}/new-registry.json"
   new_contract="${continuity_root}/new-contract.json"
-  git -C "${repository_root}" show "HEAD:${old_registry_path}" > "${old_registry}"
-  git -C "${repository_root}" show "HEAD:${old_contract_path}" > "${old_contract}"
-  git -C "${repository_root}" show ":${new_registry_path}" > "${new_registry}"
-  git -C "${repository_root}" show ":${new_contract_path}" > "${new_contract}"
+  git -C "${repository_root}" show "HEAD:${semantic_path}" | jq '.proofRegistry' > "${old_registry}"
+  git -C "${repository_root}" show "HEAD:${semantic_path}" | jq '.contract' > "${old_contract}"
+  git -C "${repository_root}" show ":${semantic_path}" | jq '.proofRegistry' > "${new_registry}"
+  git -C "${repository_root}" show ":${semantic_path}" | jq '.contract' > "${new_contract}"
 
   jq -e '
     if has("continuity") then
@@ -364,8 +335,8 @@ aegis_proof_continuity_validate_staged() {
           rc=1
         fi
       else
-        old_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,executor,argv,command,targets:(.targets | sort)}' "${old_registry}")"
-        new_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,executor,argv,command,targets:(.targets | sort)}' "${new_registry}")"
+        old_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,executor,argv,targets:(.targets | sort)}' "${old_registry}")"
+        new_proof="$(jq -S -c --arg id "${proof_id}" '.proofs[] | select(.status != "retired" and .id == $id) | {risk,coverageKey,authority,executor,argv,targets:(.targets | sort)}' "${new_registry}")"
         if [[ "${old_proof}" != "${new_proof}" ]] \
           && ! jq -e --arg id "${proof_id}" '(.continuity.proofChanges // []) | any(.id == $id)' "${new_contract}" >/dev/null 2>&1; then
           echo "[AEGIS][CONTINUITY][FATAL] active_proof_changed_without_record:${proof_id}" >&2
@@ -398,36 +369,26 @@ aegis_proof_continuity_validate_staged() {
 
 aegis_proof_governance_validate_staged() {
   local repository_root="${1:-${AEGIS_ROOT_DIR:-.}}"
-  local staged_root registry_file contract_file target command_path rc=0 semantic_staged=0
+  local staged_root registry_file contract_file target command_path rc=0
 
   git -C "${repository_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
     echo "[AEGIS][PROOF][FATAL] staged_validation_requires_git_repository" >&2
     return 1
   }
-  if git -C "${repository_root}" cat-file -e ':src/.aegis/semantic-state.json' 2>/dev/null; then
-    semantic_staged=1
-  fi
-  if [[ "${semantic_staged}" -eq 0 ]]; then for target in src/.aegis/proof-registry.json src/.aegis/contract-ir.json; do
-    git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || {
-      echo "[AEGIS][PROOF][FATAL] staged_metadata_missing:${target}" >&2
-      return 1
-    }
-  done; fi
+  git -C "${repository_root}" cat-file -e ':src/.aegis/semantic-state.json' 2>/dev/null || {
+    echo "[AEGIS][PROOF][FATAL] staged_semantic_state_missing" >&2
+    return 1
+  }
 
   staged_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-staged-proof.XXXXXX")" || return 1
   registry_file="${staged_root}/src/.aegis/proof-registry.json"
   contract_file="${staged_root}/src/.aegis/contract-ir.json"
   mkdir -p "${staged_root}/src/.aegis"
-  if [[ "${semantic_staged}" -eq 1 ]]; then
-    git -C "${repository_root}" show :src/.aegis/semantic-state.json > "${staged_root}/src/.aegis/semantic-state.json"
-    jq -e '.schema == "aegis.semantic_state.v1"' "${staged_root}/src/.aegis/semantic-state.json" >/dev/null || rc=1
-    if [[ "${rc}" -eq 0 ]]; then
-      jq '.proofRegistry' "${staged_root}/src/.aegis/semantic-state.json" > "${registry_file}"
-      jq '.contract' "${staged_root}/src/.aegis/semantic-state.json" > "${contract_file}"
-    fi
-  else
-    git -C "${repository_root}" show :src/.aegis/proof-registry.json > "${registry_file}"
-    git -C "${repository_root}" show :src/.aegis/contract-ir.json > "${contract_file}"
+  git -C "${repository_root}" show :src/.aegis/semantic-state.json > "${staged_root}/src/.aegis/semantic-state.json"
+  jq -e '.schema == "aegis.semantic_state.v1"' "${staged_root}/src/.aegis/semantic-state.json" >/dev/null || rc=1
+  if [[ "${rc}" -eq 0 ]]; then
+    jq '.proofRegistry' "${staged_root}/src/.aegis/semantic-state.json" > "${registry_file}"
+    jq '.contract' "${staged_root}/src/.aegis/semantic-state.json" > "${contract_file}"
   fi
 
   while IFS= read -r target; do
@@ -459,8 +420,6 @@ aegis_proof_governance_validate_staged() {
       .proofs[] | select(.status != "retired") |
       if .executor == "bash" then .argv[0]
       elif .executor == "node" then .argv[2]
-      elif (.command? | startswith("bash ")) then .command | ltrimstr("bash ")
-      elif (.command? | startswith("node --import tsx ")) then .command | ltrimstr("node --import tsx ")
       else empty end
     ' "${registry_file}")
   fi
@@ -490,7 +449,7 @@ aegis_proof_profile_plan() {
       $r.proofs[] | select(.id == $id and .status != "retired") |
       . as $proof |
       {id:$proof.id, risk:$proof.risk, authority:$proof.authority, cost:$proof.cost, cadence:$proof.cadence,
-       executionKey:$proof.executionKey, executor:$proof.executor, argv:$proof.argv, command:$proof.command,
+       executionKey:$proof.executionKey, executor:$proof.executor, argv:$proof.argv,
        targets:$proof.targets, selected:(if $profile == "targeted" and ($files | length) > 0
          then overlaps($proof.targets; $files)
          else true end)}

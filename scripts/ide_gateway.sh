@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # AEGIS — IDE EVIDENCE GATEWAY
-# The IDE is the only code executor. This gateway never calls a model, opens
-# TTY questions, or edits product code: it records, verifies and authorizes.
+# The IDE is the only code executor. The gateway performs bounded factual
+# discovery, but never calls a model, opens TTY questions, or edits product
+# code: it records, verifies and authorizes.
 
 set -Eeuo pipefail
 
@@ -26,9 +27,10 @@ Uso no IDE:
   ./aegis report
   ./aegis clean [--src|--all]
 
-O IDE descobre, pergunta e altera o código. Uma única compilação produz um
-delta semântico; o Aegis monta demanda esclarecida, contrato, registry e
-digests antes de autorizar a promoção.
+O Aegis produz um discovery factual inicial; o IDE investiga seu significado,
+pergunta e altera o código. Uma única compilação produz um delta semântico; o
+Aegis monta demanda esclarecida, contrato, registry e digests antes de
+autorizar a promoção.
 
 `evidence` é um inventário mecânico opcional para receipt, reexecução ou
 forensics. Ele nunca escolhe escopo nem injeta arquivos em prompts.
@@ -45,21 +47,16 @@ safe_path() {
 
 metadata_state() {
   local semantic_state="${ROOT_DIR}/src/.aegis/semantic-state.json"
-  local contract="${ROOT_DIR}/src/.aegis/contract-ir.json"
-  local clarified="${ROOT_DIR}/src/.aegis/clarified-demand.json"
-  local registry="${ROOT_DIR}/src/.aegis/proof-registry.json"
+  local legacy
+  for legacy in contract-ir.json clarified-demand.json proof-registry.json; do
+    [[ ! -e "${ROOT_DIR}/src/.aegis/${legacy}" ]] || fatal 'legacy_semantic_metadata_detected'
+  done
   if [[ -e "${semantic_state}" ]]; then
     jq -e '.schema == "aegis.semantic_state.v1" and (.clarifiedDemand | type == "object") and (.contract | type == "object") and (.proofRegistry | type == "object")' "${semantic_state}" >/dev/null 2>&1 \
       || fatal 'invalid_semantic_state'
     printf 'GOVERNED\n'
-  elif [[ -e "${contract}" && -e "${clarified}" && -e "${registry}" ]]; then
-    printf 'GOVERNED\n'
-  elif [[ -e "${contract}" && -e "${clarified}" && ! -e "${registry}" ]]; then
-    printf 'CONTRACT_READY\n'
-  elif [[ ! -e "${contract}" && ! -e "${clarified}" && ! -e "${registry}" ]]; then
+  elif [[ ! -e "${semantic_state}" ]]; then
     printf 'BASELINE\n'
-  else
-    fatal 'incomplete_contract_evidence_metadata'
   fi
 }
 
@@ -202,8 +199,6 @@ clean() {
   find "${RUNTIME_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
   find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  rm -f "${ROOT_DIR}/.harness/active_contract_ir.json" "${ROOT_DIR}/.harness/proof_registry.json" \
-    "${ROOT_DIR}/.harness/active_clarified_demand.json"
   printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
   printf '[AEGIS][IDE] clean=PASS source_reset=1\n'
 }

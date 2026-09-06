@@ -57,8 +57,12 @@ fi
 
 mkdir -p "${WORK_DIR}/src/.aegis"
 printf '{}\n' > "${WORK_DIR}/src/.aegis/contract-ir.json"
-printf '{}\n' > "${WORK_DIR}/src/.aegis/clarified-demand.json"
-printf '{}\n' > "${WORK_DIR}/src/.aegis/proof-registry.json"
+if bash "${WORK_DIR}/aegis" status >/dev/null 2>&1; then
+  echo 'legacy semantic metadata was accepted as baseline' >&2
+  exit 1
+fi
+rm "${WORK_DIR}/src/.aegis/contract-ir.json"
+printf '{"schema":"aegis.semantic_state.v1","clarifiedDemand":{},"contract":{},"proofRegistry":{}}\n' > "${WORK_DIR}/src/.aegis/semantic-state.json"
 bash "${WORK_DIR}/aegis" clean | grep -qx '\[AEGIS\]\[IDE\] clean=PASS source_reset=1'
 [[ "$(cat "${WORK_DIR}/src/index.ts")" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
 [[ -z "$(find "${WORK_DIR}/.harness/runtime" -mindepth 1 -print -quit)" ]]

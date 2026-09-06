@@ -12,10 +12,15 @@ export const maxDemandBytes = 65_536;
 const governedMaxBytes = 256 * 1024;
 const gitMaxBytes = 512 * 1024;
 const gitTimeoutMs = 3_000;
+const discoveryGitMaxBytes = 4 * 1024 * 1024;
+const discoveryMaxCandidates = 12;
+const discoveryMaxTrackedPaths = 10_000;
+const discoveryMaxSymbolAnchors = 8;
+const discoveryMaxLexicalTerms = 64;
 const semanticProtocolVersion = 'aegis.semantic_protocol.v2';
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
 
-export function digest(value) {
+function digest(value) {
   return sha256(value);
 }
 
@@ -296,6 +301,159 @@ function referenceFact(root, reference) {
   return { kind: 'symbol', value: reference.value, status: 'UNPROVEN', evidence: 'semantic_resolution_requires_ide', ...source };
 }
 
+function discoveryGit(root, args) {
+  try {
+    return {
+      status: 'PROVEN',
+      bytes: execFileSync('git', ['-C', root, ...args], {
+        encoding: 'buffer',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: gitEnvironment(),
+        timeout: gitTimeoutMs,
+        maxBuffer: discoveryGitMaxBytes,
+      }),
+    };
+  } catch (error) {
+    if (error?.status === 1 && args[0] === 'grep') {
+      return { status: 'PROVEN', bytes: Buffer.alloc(0) };
+    }
+    return { status: 'INCOMPLETE', bytes: Buffer.alloc(0) };
+  }
+}
+
+function discoveryTerms(text) {
+  const terms = new Set();
+  const comparable = text.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+  for (const match of comparable.matchAll(/[\p{L}\p{N}_$-]{4,}/gu)) {
+    terms.add(match[0]);
+    if (terms.size >= discoveryMaxLexicalTerms) break;
+  }
+  return terms;
+}
+
+function discoverySymbols(normalizedDemand, allowInferred) {
+  const explicit = new Set();
+  for (const reference of normalizedDemand.references.filter((item) => item.kind === 'symbol')) {
+    explicit.add(reference.value);
+    for (const part of reference.value.split(/[.:]/u)) {
+      if (part.length >= 4) explicit.add(part);
+    }
+  }
+  const symbols = new Set([...explicit].sort().slice(0, discoveryMaxSymbolAnchors));
+  if (!allowInferred || symbols.size >= discoveryMaxSymbolAnchors) return [...symbols];
+  const identifierPattern = /\b(?:[A-Z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*|[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*|[A-Za-z_$][A-Za-z0-9_$]*_[A-Za-z0-9_$]+)\b/gu;
+  for (const match of normalizedDemand.text.matchAll(identifierPattern)) {
+    if (!match[0].includes('\n') && Buffer.byteLength(match[0], 'utf8') <= 128) symbols.add(match[0]);
+    if (symbols.size >= discoveryMaxSymbolAnchors) break;
+  }
+  return [...symbols].sort().slice(0, discoveryMaxSymbolAnchors);
+}
+
+function pathTerms(path) {
+  const comparable = path.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+  return new Set(
+    comparable.split(/[^\p{L}\p{N}]+/gu).filter((part) => part.length >= 4),
+  );
+}
+
+function isAutomaticDiscoveryPath(changeKind, path) {
+  return changeKind === 'HARNESS' || path === 'src' || path.startsWith('src/');
+}
+
+function discoverRepository(root, commit, normalizedDemand, target, previousContract, changeKind) {
+  const listing = discoveryGit(root, ['ls-tree', '-r', '--name-only', '-z', commit]);
+  const allTrackedPaths = listing.bytes.toString('utf8').split('\0').filter(Boolean);
+  const eligiblePaths = allTrackedPaths.filter((path) => isAutomaticDiscoveryPath(changeKind, path));
+  const trackedPaths = eligiblePaths.slice(0, discoveryMaxTrackedPaths);
+  const tracked = new Set(trackedPaths);
+  const allTracked = new Set(allTrackedPaths);
+  const candidates = new Map();
+  const addCandidate = (path, reason, score, exists = tracked.has(path)) => {
+    let canonical;
+    try {
+      canonical = canonicalRepositoryPath(path);
+    } catch {
+      return;
+    }
+    const current = candidates.get(canonical) ?? { path: canonical, exists, score: 0, reasons: new Set() };
+    current.exists ||= exists;
+    current.score = Math.max(current.score, score);
+    current.reasons.add(reason);
+    candidates.set(canonical, current);
+  };
+
+  if (target.value.length > 0) addCandidate(target.value, 'explicit_target', 100, target.status === 'PROVEN');
+  for (const reference of normalizedDemand.references) {
+    if (reference.kind === 'path') addCandidate(reference.value, 'explicit_path', 100, allTracked.has(reference.value));
+  }
+  for (const path of previousContract?.scope.authorizedPaths ?? []) {
+    if (path !== 'src/.aegis/semantic-state.json' && isAutomaticDiscoveryPath(changeKind, path)) {
+      addCandidate(path, 'previous_contract_scope', 80, allTracked.has(path));
+    }
+  }
+
+  const strongTrackedCandidateCount = [...candidates.values()]
+    .filter((candidate) => candidate.score >= 80 && tracked.has(candidate.path))
+    .length;
+  if (strongTrackedCandidateCount === 0) {
+    const terms = discoveryTerms(normalizedDemand.text);
+    for (const path of trackedPaths) {
+      const overlap = [...pathTerms(path)].filter((term) => terms.has(term));
+      if (overlap.length > 0) addCandidate(path, 'path_term_match', 20 + Math.min(overlap.length, 5), true);
+    }
+  }
+
+  const explicitSymbolCount = normalizedDemand.references.filter((item) => item.kind === 'symbol').length;
+  const symbols = discoverySymbols(normalizedDemand, strongTrackedCandidateCount === 0);
+  let symbolSearchStatus = 'NOT_APPLICABLE';
+  if (symbols.length > 0 && (explicitSymbolCount > 0 || strongTrackedCandidateCount === 0)) {
+    const grepArguments = ['grep', '-l', '-z', '-I', '-F'];
+    for (const symbol of symbols) grepArguments.push('-e', symbol);
+    grepArguments.push(commit, '--');
+    if (changeKind === 'PRODUCT') grepArguments.push('src');
+    const matches = discoveryGit(root, grepArguments);
+    symbolSearchStatus = matches.status;
+    if (matches.status === 'PROVEN') {
+      const prefix = `${commit}:`;
+      for (const rawPath of matches.bytes.toString('utf8').split('\0').filter(Boolean)) {
+        const path = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
+        addCandidate(path, 'symbol_match', 60, tracked.has(path));
+      }
+    }
+  }
+
+  const incomplete = listing.status === 'INCOMPLETE'
+    || eligiblePaths.length > discoveryMaxTrackedPaths
+    || symbolSearchStatus === 'INCOMPLETE';
+  const selected = [...candidates.values()]
+    .sort((left, right) => right.score - left.score || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+    .slice(0, discoveryMaxCandidates)
+    .map(({ path, exists, reasons }) => ({ path, exists, reasons: [...reasons].sort() }));
+  const body = {
+    schema: 'aegis.discovery.v1',
+    status: incomplete ? 'INCOMPLETE' : selected.length > 0 ? 'CANDIDATES' : trackedPaths.length === 0 ? 'NOT_APPLICABLE' : 'UNKNOWN',
+    demandDigest: normalizedDemand.digest,
+    baseCommit: commit,
+    candidates: selected,
+    coverage: {
+      trackedPaths: allTrackedPaths.length,
+      eligiblePaths: eligiblePaths.length,
+      consideredPaths: trackedPaths.length,
+      symbolAnchors: symbols.length,
+      returnedCandidates: selected.length,
+    },
+    limits: {
+      maxCandidates: discoveryMaxCandidates,
+      maxTrackedPaths: discoveryMaxTrackedPaths,
+      maxSymbolAnchors: discoveryMaxSymbolAnchors,
+      maxLexicalTerms: discoveryMaxLexicalTerms,
+      maxGitBytes: discoveryGitMaxBytes,
+      gitTimeoutMs,
+    },
+  };
+  return { ...body, digest: canonicalDigest(body) };
+}
+
 export function loadArchitecturePolicy(root, commit = undefined) {
   const canonical = canonicalRoot(root);
   const baseCommit = commit ?? currentCommit(canonical);
@@ -347,15 +505,16 @@ export function loadPreviousEvidence(root, commit = undefined) {
       throw new Error('invalid_previous_contract');
     }
   }
-  const legacyContractBytes = readOptionalCommitBlob(canonical, baseCommit, 'src/.aegis/contract-ir.json');
-  if (legacyContractBytes === null) return null;
-  try {
-    const contract = JSON.parse(legacyContractBytes.toString('utf8'));
-    assertSchema('aegis.contract_ir.v2', contract);
-    return { source: 'legacy-contract', contract, proofRegistry: null };
-  } catch {
-    throw new Error('invalid_previous_contract');
+  for (const path of [
+    'src/.aegis/contract-ir.json',
+    'src/.aegis/clarified-demand.json',
+    'src/.aegis/proof-registry.json',
+  ]) {
+    if (readOptionalCommitBlob(canonical, baseCommit, path) !== null) {
+      throw new Error('legacy_previous_semantic_metadata');
+    }
   }
+  return null;
 }
 
 function inject(template, placeholder, value) {
@@ -373,16 +532,18 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
   const target = requestedTarget.length === 0
     ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
     : pathFact(canonical, 'target', requestedTarget);
-  const factBody = {
-    schema: 'aegis.preflight_facts.v2',
-    target,
-    references: normalizedDemand.references.map((reference) => referenceFact(canonical, reference)),
-  };
-  const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
   const architecture = loadArchitecture(canonical, baseline.commit);
   const previousEvidence = loadPreviousEvidence(canonical, baseline.commit);
   const previousContract = previousEvidence?.contract ?? null;
   const previousProofRegistry = previousEvidence?.proofRegistry ?? null;
+  const discovery = discoverRepository(canonical, baseline.commit, normalizedDemand, target, previousContract, changeKind);
+  const factBody = {
+    schema: 'aegis.preflight_facts.v2',
+    target,
+    references: normalizedDemand.references.map((reference) => referenceFact(canonical, reference)),
+    discovery,
+  };
+  const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);
   const promptTemplate = readCommitBlob(canonical, baseline.commit, 'governance/prompts/preflight.v2.md', 'preflight_prompt_unavailable').toString('utf8');
   const promptTemplateDigest = digest(promptTemplate);
@@ -408,7 +569,21 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     text: normalizedDemand.text,
     units: normalizedDemand.units.map(({ id, kind, range }) => ({ id, kind, range })),
   });
-  prompt = inject(prompt, 'mechanical_facts', { target: mechanicalFacts.target, references: mechanicalFacts.references });
+  const representedPaths = new Set([
+    ...(mechanicalFacts.target.value.length > 0 ? [mechanicalFacts.target.value] : []),
+    ...mechanicalFacts.references.filter(({ kind }) => kind === 'path').map(({ value }) => value),
+    ...(previousContract?.scope.authorizedPaths ?? []),
+  ]);
+  prompt = inject(prompt, 'mechanical_facts', {
+    target: mechanicalFacts.target,
+    references: mechanicalFacts.references,
+    discovery: [
+      mechanicalFacts.discovery.status,
+      mechanicalFacts.discovery.candidates
+        .filter(({ path }) => !representedPaths.has(path))
+        .map(({ path, exists, reasons }) => [path, exists, reasons]),
+    ],
+  });
   prompt = inject(prompt, 'architecture_rules', { candidateRules: architecture.candidateRules });
   const previousContractProjection = previousContract === null ? null : {
     changeKind: previousContract.changeKind,

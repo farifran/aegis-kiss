@@ -6,10 +6,10 @@ produto.
 
 ```text
 IDE
-→ descoberta, leitura, perguntas, edição e feedback imediato
+→ investigação semântica, leitura, perguntas, edição e feedback imediato
 
 Aegis core
-→ contrato, escopo, provas, receipt, promoção e verificação pós-commit
+→ discovery factual inicial, contrato, escopo, provas, receipt, promoção e verificação pós-commit
 
 Adaptadores do projeto
 → compilador, linter, testes, benchmarks e verificadores especializados
@@ -59,10 +59,27 @@ do IDE valida o Contract IR mecanicamente e segue para a mutação.
 
 ## Inventário mecânico opcional
 
+Toda nova demanda recebe antes da compilação semântica um discovery de camada
+zero. Ele roda no processo local do preflight, sem modelo ou IDE, e confronta
+anchors da demanda com o snapshot Git congelado. A saída contém somente paths,
+existência e razões mecânicas, com limites fixos de anchors, caminhos
+considerados e candidatos. O relatório completo fica incorporado ao envelope
+transitório para binding e somente sua projeção compacta entra no prompt.
+
+O discovery não lê snippets, não interpreta código, não autoriza escopo e não
+persiste cache próprio. `UNKNOWN` e `INCOMPLETE` são resultados válidos; nunca
+são convertidos em certeza pelo runtime. Mesma demanda, commit e versão do
+scanner produzem o mesmo resultado.
+
+Para uma investigação explícita mais profunda,
+
 `./aegis evidence --path <caminho>` produz uma fotografia limitada do estado
 de caminhos explicitamente declarados. É um instrumento para receipts,
 reexecução e investigação; não é um supervisor, não escolhe arquivos e não
 entra automaticamente no contexto de um modelo.
+
+Quando seu `baseCommit` coincide com a promoção, o receipt registra seu digest
+como evidência suplementar. Ele não substitui contrato, provas ou autoridade.
 
 O inventário limita quantidade de arquivos, bytes totais e bytes por arquivo.
 Os previews são lidos parcialmente e codificados em base64, portanto servem

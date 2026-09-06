@@ -17,16 +17,13 @@ function fail(code) {
 function parseArguments(argv) {
   const options = {
     root: defaultRoot,
-    contract: 'src/.aegis/contract-ir.json',
-    clarified: 'src/.aegis/clarified-demand.json',
-    registry: 'src/.aegis/proof-registry.json',
     policy: 'governance/architecture.policy.json',
     phase: 'promotion',
   };
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
-    if (!['--root', '--contract', '--clarified', '--registry', '--policy', '--phase'].includes(flag) || value === undefined) {
+    if (!['--root', '--policy', '--phase'].includes(flag) || value === undefined) {
       fail('invalid_arguments');
     }
     options[flag.slice(2)] = value;
@@ -51,11 +48,12 @@ try {
 } catch (error) {
   fail(error instanceof Error ? error.message : 'invalid_semantic_state');
 }
-const contract = evidence?.contract ?? readJson(root, options.contract, 'unreadable_contract').value;
-const clarified = evidence?.clarifiedDemand ?? readJson(root, options.clarified, 'unreadable_clarified_demand').value;
+if (evidence === null) fail('missing_semantic_state');
+const contract = evidence.contract;
+const clarified = evidence.clarifiedDemand;
 const policyFile = readJson(root, options.policy, 'unreadable_architecture_policy');
 const registry = options.phase === 'promotion'
-  ? (evidence?.proofRegistry ?? readJson(root, options.registry, 'unreadable_proof_registry').value)
+  ? evidence.proofRegistry
   : undefined;
 try {
   const result = validateContract({

@@ -44,7 +44,7 @@ export function parseSemanticState(value) {
   return state;
 }
 
-export function readSemanticState(root) {
+function readSemanticState(root) {
   const path = semanticStatePath(root);
   if (!existsSync(path)) return null;
   return parseSemanticState(parseJson(path, 'invalid_semantic_state'));

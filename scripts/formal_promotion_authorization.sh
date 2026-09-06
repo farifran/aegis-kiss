@@ -5,9 +5,6 @@ command_name="${1:-}"
 repository_root="${2:-}"
 artifact_file="${3:-}"
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-contract_record="src/.aegis/contract-ir.json"
-clarified_record="src/.aegis/clarified-demand.json"
-registry_record="src/.aegis/proof-registry.json"
 semantic_record="src/.aegis/semantic-state.json"
 
 # shellcheck disable=SC1091
@@ -35,6 +32,14 @@ authorization_path() {
 safe_path() {
   local path="${1:-}"
   [[ -n "${path}" && "${path}" != /* && ! "${path}" =~ (^|/)\.\.(/|$) ]]
+}
+
+legacy_metadata_present() {
+  local path
+  for path in contract-ir.json clarified-demand.json proof-registry.json; do
+    [[ ! -e "${repository_root}/src/.aegis/${path}" ]] || return 0
+  done
+  return 1
 }
 
 manifest_from_worktree() {
@@ -112,32 +117,10 @@ metadata_digest_from_index() {
   fi
 }
 
-canonical_json_digest_from_worktree() {
-  local path="${1:-}"
-  [[ -f "${repository_root}/${path}" ]] || fatal "receipt_input_missing:${path}"
-  jq -S -c . "${repository_root}/${path}" | shasum -a 256 | awk '{print $1}'
-}
-
-canonical_json_digest_from_index() {
-  local path="${1:-}"
-  git -C "${repository_root}" cat-file -e ":${path}" 2>/dev/null \
-    || fatal "receipt_input_missing_from_index:${path}"
-  git -C "${repository_root}" show ":${path}" | jq -S -c . | shasum -a 256 | awk '{print $1}'
-}
-
 metadata_digest_from_commit() {
   local commit="${1:-}" path="${2:-}"
   if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
     git -C "${repository_root}" show "${commit}:${path}" | shasum -a 256 | awk '{print $1}'
-  else
-    absent_metadata_digest "${path}"
-  fi
-}
-
-canonical_json_digest_from_commit() {
-  local commit="${1:-}" path="${2:-}"
-  if git -C "${repository_root}" cat-file -e "${commit}:${path}" 2>/dev/null; then
-    git -C "${repository_root}" show "${commit}:${path}" | jq -S -c . | shasum -a 256 | awk '{print $1}'
   else
     absent_metadata_digest "${path}"
   fi
@@ -148,7 +131,7 @@ semantic_field_digest_from_worktree() {
   if [[ -f "${repository_root}/${semantic_record}" ]]; then
     jq -S -c --arg field "${field}" '.[$field]' "${repository_root}/${semantic_record}" | shasum -a 256 | awk '{print $1}'
   else
-    return 1
+    printf 'aegis.semantic_field.absent.v1:%s\n' "${field}" | shasum -a 256 | awk '{print $1}'
   fi
 }
 
@@ -157,7 +140,7 @@ semantic_field_digest_from_index() {
   if git -C "${repository_root}" cat-file -e ":${semantic_record}" 2>/dev/null; then
     git -C "${repository_root}" show ":${semantic_record}" | jq -S -c --arg field "${field}" '.[$field]' | shasum -a 256 | awk '{print $1}'
   else
-    return 1
+    printf 'aegis.semantic_field.absent.v1:%s\n' "${field}" | shasum -a 256 | awk '{print $1}'
   fi
 }
 
@@ -166,41 +149,26 @@ semantic_field_digest_from_commit() {
   if git -C "${repository_root}" cat-file -e "${commit}:${semantic_record}" 2>/dev/null; then
     git -C "${repository_root}" show "${commit}:${semantic_record}" | jq -S -c --arg field "${field}" '.[$field]' | shasum -a 256 | awk '{print $1}'
   else
-    return 1
+    printf 'aegis.semantic_field.absent.v1:%s\n' "${field}" | shasum -a 256 | awk '{print $1}'
   fi
 }
 
-contract_digest_from_worktree() { semantic_field_digest_from_worktree contract || metadata_digest_from_worktree "${contract_record}"; }
-registry_digest_from_worktree() { semantic_field_digest_from_worktree proofRegistry || metadata_digest_from_worktree "${registry_record}"; }
-clarified_digest_from_worktree() {
-  semantic_field_digest_from_worktree clarifiedDemand || {
-    [[ -f "${repository_root}/${clarified_record}" ]] && canonical_json_digest_from_worktree "${clarified_record}" || absent_metadata_digest "${clarified_record}";
-  }
-}
-contract_digest_from_index() { semantic_field_digest_from_index contract || metadata_digest_from_index "${contract_record}"; }
-registry_digest_from_index() { semantic_field_digest_from_index proofRegistry || metadata_digest_from_index "${registry_record}"; }
-clarified_digest_from_index() {
-  semantic_field_digest_from_index clarifiedDemand || {
-    git -C "${repository_root}" cat-file -e ":${clarified_record}" 2>/dev/null && canonical_json_digest_from_index "${clarified_record}" || absent_metadata_digest "${clarified_record}";
-  }
-}
-contract_digest_from_commit() { semantic_field_digest_from_commit "$1" contract || metadata_digest_from_commit "$1" "${contract_record}"; }
-registry_digest_from_commit() { semantic_field_digest_from_commit "$1" proofRegistry || metadata_digest_from_commit "$1" "${registry_record}"; }
-clarified_digest_from_commit() {
-  semantic_field_digest_from_commit "$1" clarifiedDemand || {
-    git -C "${repository_root}" cat-file -e "$1:${clarified_record}" 2>/dev/null && canonical_json_digest_from_commit "$1" "${clarified_record}" || absent_metadata_digest "${clarified_record}";
-  }
-}
+contract_digest_from_worktree() { semantic_field_digest_from_worktree contract; }
+registry_digest_from_worktree() { semantic_field_digest_from_worktree proofRegistry; }
+clarified_digest_from_worktree() { semantic_field_digest_from_worktree clarifiedDemand; }
+contract_digest_from_index() { semantic_field_digest_from_index contract; }
+registry_digest_from_index() { semantic_field_digest_from_index proofRegistry; }
+clarified_digest_from_index() { semantic_field_digest_from_index clarifiedDemand; }
+contract_digest_from_commit() { semantic_field_digest_from_commit "$1" contract; }
+registry_digest_from_commit() { semantic_field_digest_from_commit "$1" proofRegistry; }
+clarified_digest_from_commit() { semantic_field_digest_from_commit "$1" clarifiedDemand; }
 
 contract_worktree_file() {
-  if [[ -f "${repository_root}/${semantic_record}" ]]; then
-    local file="${repository_root}/.harness/runtime/semantic-state/contract-ir.json"
-    mkdir -p "$(dirname "${file}")"
-    jq '.contract' "${repository_root}/${semantic_record}" > "${file}"
-    printf '%s\n' "${file}"
-  else
-    printf '%s\n' "${repository_root}/${contract_record}"
-  fi
+  [[ -f "${repository_root}/${semantic_record}" ]] || fatal "missing_semantic_state"
+  local file="${repository_root}/.harness/runtime/semantic-state/contract-ir.json"
+  mkdir -p "$(dirname "${file}")"
+  jq '.contract' "${repository_root}/${semantic_record}" > "${file}"
+  printf '%s\n' "${file}"
 }
 
 execution_id_for_base() {
@@ -208,9 +176,6 @@ execution_id_for_base() {
   if [[ -f "${repository_root}/${semantic_record}" ]]; then
     demand_digest="$(jq -r '.clarifiedDemand.normalizedDemandDigest' "${repository_root}/${semantic_record}")"
     change_kind="$(jq -r '.clarifiedDemand.changeKind' "${repository_root}/${semantic_record}")"
-  elif [[ -f "${repository_root}/${clarified_record}" ]]; then
-    demand_digest="$(jq -r '.normalizedDemandDigest' "${repository_root}/${clarified_record}")"
-    change_kind="$(jq -r '.changeKind' "${repository_root}/${clarified_record}")"
   fi
   [[ -z "${requested_kind}" ]] || change_kind="${requested_kind}"
   printf 'base=%s\ndemand=%s\nkind=%s\n' "${base}" "${demand_digest}" "${change_kind}" | shasum -a 256 | awk '{print $1}'
@@ -230,19 +195,30 @@ validation_authority_json() {
   esac
 }
 
+supplemental_inventory_digest() {
+  local base="${1:-}" inventory="${repository_root}/.harness/runtime/mechanical_inventory.json"
+  if [[ -s "${inventory}" ]] && jq -e --arg base "${base}" \
+    '.schema == "aegis.mechanical_inventory.v1" and .baseCommit == $base' "${inventory}" >/dev/null 2>&1; then
+    shasum -a 256 "${inventory}" | awk '{print $1}'
+  else
+    printf 'null'
+  fi
+}
+
 write_receipt() {
   local base="${1:-}" files="${2:-}" manifest="${3:-}" artifact_digest="${4:-}"
   local contract_digest="${5:-}" registry_digest="${6:-}" clarified_digest="${7:-}" policy_digest="${8:-}"
   local profile="${9:-}" proof_plan_digest="${10:-}" authority="${11:-}" proof_plan="${12:-}"
   local duration_ms="${13:-0}"
   local change_kind="${14:-PRODUCT}"
-  local auth_file auth_dir now expires execution_id
+  local auth_file auth_dir now expires execution_id inventory_digest
 
   auth_file="$(authorization_path)"
   auth_dir="$(dirname "${auth_file}")"
   now="$(date +%s)"
   expires=$((now + 900))
   execution_id="$(execution_id_for_base "${base}" "${change_kind}")"
+  inventory_digest="$(supplemental_inventory_digest "${base}")"
   mkdir -p "${auth_dir}"
   jq -n \
     --arg base "${base}" \
@@ -262,7 +238,8 @@ write_receipt() {
     --argjson expires "${expires}" \
     --argjson duration_ms "${duration_ms}" \
     --arg change_kind "${change_kind}" \
-    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",changeKind:$change_kind,executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
+    --arg inventory_digest "${inventory_digest}" \
+    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",changeKind:$change_kind,executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,supplementalEvidence:{inventoryArtifactBytesDigest:(if $inventory_digest == "null" then null else $inventory_digest end)},issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
     > "${auth_file}"
   echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
 }
@@ -332,9 +309,8 @@ create_authorization() {
   local started_seconds duration_ms
   started_seconds="$(date +%s)"
   run_structure_verification
-  if [[ ! -e "${repository_root}/${semantic_record}" \
-    && ! -e "${repository_root}/${contract_record}" \
-    && ! -e "${repository_root}/${registry_record}" ]]; then
+  legacy_metadata_present && fatal "legacy_semantic_metadata_detected"
+  if [[ ! -e "${repository_root}/${semantic_record}" ]]; then
     create_baseline_authorization
     return
   fi
@@ -473,8 +449,6 @@ requires_authorization() {
 }
 
 is_complete_baseline_reset_staged() {
-  local contract_path="${contract_record}"
-  local registry_path="${registry_record}"
   local target reset_index
 
   if git -C "${repository_root}" cat-file -e "HEAD:${semantic_record}" 2>/dev/null; then
@@ -488,25 +462,7 @@ is_complete_baseline_reset_staged() {
     [[ "${reset_index}" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
     return
   fi
-
-  # A reset is valid only when the *previous* governed unit existed and the
-  # index removes both its metadata files. This cannot turn an arbitrary
-  # source deletion into a receipt bypass.
-  git -C "${repository_root}" cat-file -e "HEAD:${contract_path}" 2>/dev/null || return 1
-  git -C "${repository_root}" cat-file -e "HEAD:${registry_path}" 2>/dev/null || return 1
-  ! git -C "${repository_root}" cat-file -e ":${contract_path}" 2>/dev/null || return 1
-  ! git -C "${repository_root}" cat-file -e ":${registry_path}" 2>/dev/null || return 1
-
-  # Every former target other than the deliberately recreated entry point
-  # must be absent from the staged state.
-  while IFS= read -r target; do
-    [[ -n "${target}" && "${target}" != "src/index.ts" ]] || continue
-    ! git -C "${repository_root}" cat-file -e ":${target}" 2>/dev/null || return 1
-  done < <(git -C "${repository_root}" show "HEAD:${contract_path}" | jq -r 'if .schema == "aegis.contract_ir.v2" then .scope.authorizedPaths[]? else .targets[]? end')
-
-  git -C "${repository_root}" cat-file -e ':src/index.ts' 2>/dev/null || return 1
-  reset_index="$(git -C "${repository_root}" show :src/index.ts)"
-  [[ "${reset_index}" == $'// Ponto de entrada canônico para a próxima demanda.\nexport {};' ]]
+  return 1
 }
 
 verify_authorization() {

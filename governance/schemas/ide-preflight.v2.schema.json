@@ -68,12 +68,66 @@
     "mechanicalFacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "digest", "target", "references"],
+      "required": ["schema", "digest", "target", "references", "discovery"],
       "properties": {
         "schema": { "const": "aegis.preflight_facts.v2" },
         "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "target": { "$ref": "#/$defs/fact" },
-        "references": { "type": "array", "items": { "$ref": "#/$defs/fact" } }
+        "references": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
+        "discovery": { "$ref": "#/$defs/discovery" }
+      }
+    },
+    "discoveryCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "exists", "reasons"],
+      "properties": {
+        "path": { "$ref": "aegis.preflight_decision.v2#/$defs/path" },
+        "exists": { "type": "boolean" },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["explicit_target", "explicit_path", "previous_contract_scope", "path_term_match", "symbol_match"] }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "demandDigest", "baseCommit", "candidates", "coverage", "limits", "digest"],
+      "properties": {
+        "schema": { "const": "aegis.discovery.v1" },
+        "status": { "enum": ["CANDIDATES", "UNKNOWN", "INCOMPLETE", "NOT_APPLICABLE"] },
+        "demandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "baseCommit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+        "candidates": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/discoveryCandidate" } },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trackedPaths", "eligiblePaths", "consideredPaths", "symbolAnchors", "returnedCandidates"],
+          "properties": {
+            "trackedPaths": { "type": "integer", "minimum": 0 },
+            "eligiblePaths": { "type": "integer", "minimum": 0 },
+            "consideredPaths": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "symbolAnchors": { "type": "integer", "minimum": 0, "maximum": 8 },
+            "returnedCandidates": { "type": "integer", "minimum": 0, "maximum": 12 }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxCandidates", "maxTrackedPaths", "maxSymbolAnchors", "maxLexicalTerms", "maxGitBytes", "gitTimeoutMs"],
+          "properties": {
+            "maxCandidates": { "const": 12 },
+            "maxTrackedPaths": { "const": 10000 },
+            "maxSymbolAnchors": { "const": 8 },
+            "maxLexicalTerms": { "const": 64 },
+            "maxGitBytes": { "const": 4194304 },
+            "gitTimeoutMs": { "const": 3000 }
+          }
+        },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
     "architectureRule": {

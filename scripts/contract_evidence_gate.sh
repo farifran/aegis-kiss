@@ -14,7 +14,14 @@ fi
 
 semantic_state="${ROOT_DIR}/src/.aegis/semantic-state.json"
 
-if [[ ! -e "${semantic_state}" && ! -e "${ROOT_DIR}/src/.aegis/proof-registry.json" && ! -e "${ROOT_DIR}/src/.aegis/contract-ir.json" ]]; then
+for legacy in contract-ir.json clarified-demand.json proof-registry.json; do
+  if [[ -e "${ROOT_DIR}/src/.aegis/${legacy}" ]]; then
+    echo "[AEGIS][CONTRACT][FATAL] legacy_semantic_metadata_detected" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -e "${semantic_state}" ]]; then
   exit 0
 fi
 
@@ -25,35 +32,21 @@ validate_v2_working() {
 }
 
 validate_v2_staged() {
-  local staged_root target architecture_source rc=0 semantic_staged=0
+  local staged_root target architecture_source rc=0
   staged_root="$(mktemp -d "${TMPDIR:-/tmp}/aegis-staged-contract.XXXXXX")"
-  if git -C "${ROOT_DIR}" cat-file -e ':src/.aegis/semantic-state.json' 2>/dev/null; then
-    semantic_staged=1
-    mkdir -p "${staged_root}/src/.aegis"
-    git -C "${ROOT_DIR}" show ':src/.aegis/semantic-state.json' > "${staged_root}/src/.aegis/semantic-state.json"
-    jq -e '.schema == "aegis.semantic_state.v1" and (.clarifiedDemand | type == "object") and (.contract | type == "object") and (.proofRegistry | type == "object")' \
-      "${staged_root}/src/.aegis/semantic-state.json" >/dev/null || rc=1
-    if [[ "${rc}" -eq 0 ]]; then
-      jq '.clarifiedDemand' "${staged_root}/src/.aegis/semantic-state.json" > "${staged_root}/src/.aegis/clarified-demand.json"
-      jq '.contract' "${staged_root}/src/.aegis/semantic-state.json" > "${staged_root}/src/.aegis/contract-ir.json"
-      jq '.proofRegistry' "${staged_root}/src/.aegis/semantic-state.json" > "${staged_root}/src/.aegis/proof-registry.json"
-      mkdir -p "${staged_root}/governance"
-      git -C "${ROOT_DIR}" show ':governance/architecture.policy.json' > "${staged_root}/governance/architecture.policy.json" || rc=1
-    fi
+  if ! git -C "${ROOT_DIR}" cat-file -e ':src/.aegis/semantic-state.json' 2>/dev/null; then
+    echo "[AEGIS][CONTRACT][FATAL] staged_semantic_state_missing" >&2
+    rm -rf "${staged_root}"
+    return 1
   fi
-  if [[ "${semantic_staged}" -eq 0 ]]; then for target in \
-    src/.aegis/contract-ir.json \
-    src/.aegis/clarified-demand.json \
-    src/.aegis/proof-registry.json \
-    governance/architecture.policy.json; do
-    if ! git -C "${ROOT_DIR}" cat-file -e ":${target}" 2>/dev/null; then
-      echo "[AEGIS][CONTRACT][FATAL] staged_contract_input_missing:${target}" >&2
-      rc=1
-      break
-    fi
-    mkdir -p "${staged_root}/$(dirname "${target}")"
-    git -C "${ROOT_DIR}" show ":${target}" > "${staged_root}/${target}"
-  done; fi
+  mkdir -p "${staged_root}/src/.aegis" "${staged_root}/governance"
+  git -C "${ROOT_DIR}" show ':src/.aegis/semantic-state.json' > "${staged_root}/src/.aegis/semantic-state.json"
+  jq -e '.schema == "aegis.semantic_state.v1" and (.clarifiedDemand | type == "object") and (.contract | type == "object") and (.proofRegistry | type == "object")' \
+    "${staged_root}/src/.aegis/semantic-state.json" >/dev/null || rc=1
+  if [[ "${rc}" -eq 0 ]]; then
+    jq '.contract' "${staged_root}/src/.aegis/semantic-state.json" > "${staged_root}/src/.aegis/contract-ir.json"
+    git -C "${ROOT_DIR}" show ':governance/architecture.policy.json' > "${staged_root}/governance/architecture.policy.json" || rc=1
+  fi
   if [[ "${rc}" -eq 0 ]]; then
     architecture_source="$(jq -r '.origin.sourcePath // empty' "${staged_root}/governance/architecture.policy.json")"
     if ! aegis_proof_materialize_staged_path "${ROOT_DIR}" "${staged_root}" "${architecture_source}"; then
@@ -82,20 +75,10 @@ validate_v2_staged() {
 }
 
 
-if [[ ! -e "${semantic_state}" && ( ! -e "${ROOT_DIR}/src/.aegis/proof-registry.json" || ! -e "${ROOT_DIR}/src/.aegis/contract-ir.json" ) ]]; then
-  echo "[AEGIS][PROOF][FATAL] incomplete_contract_evidence_metadata" >&2
+jq -e '.schema == "aegis.semantic_state.v1" and .contract.schema == "aegis.contract_ir.v2"' "${semantic_state}" >/dev/null 2>&1 || {
+  echo "[AEGIS][CONTRACT][FATAL] invalid_semantic_state" >&2
   exit 1
-fi
-
-if [[ -e "${semantic_state}" ]]; then
-  jq -e '.schema == "aegis.semantic_state.v1" and .contract.schema == "aegis.contract_ir.v2"' "${semantic_state}" >/dev/null 2>&1 || {
-    echo "[AEGIS][CONTRACT][FATAL] invalid_semantic_state" >&2
-    exit 1
-  }
-elif ! jq -e '.schema == "aegis.contract_ir.v2"' "${ROOT_DIR}/src/.aegis/contract-ir.json" >/dev/null 2>&1; then
-  echo "[AEGIS][CONTRACT][FATAL] legacy_contract_ir_not_supported" >&2
-  exit 1
-fi
+}
 
 if [[ "${mode}" == "staged" ]]; then
   validate_v2_staged

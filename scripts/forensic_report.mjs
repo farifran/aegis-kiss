@@ -51,15 +51,8 @@ try {
 } catch (error) {
   fail(error instanceof Error ? error.message : 'invalid_semantic_state');
 }
-const contractPath = resolve(root, 'src/.aegis/contract-ir.json');
 if (semanticEvidence !== null) {
   contractVerification = semanticEvidence.contract.verification ?? null;
-} else if (existsSync(contractPath)) {
-  try {
-    contractVerification = JSON.parse(readFileSync(contractPath, 'utf8')).verification ?? null;
-  } catch {
-    fail('invalid_contract_ir');
-  }
 }
 const runtimeTiming = {};
 const semantic = {};
@@ -79,7 +72,8 @@ for (const [name, path] of [
   if (name === 'preflight') semantic.promptDigest = value.promptDigest;
   if (name === 'finalization') {
     semantic.reconciler = value.semantic?.reconciler;
-    semantic.decisionDigest = value.semantic?.decisionDigest;
+    semantic.decisionArtifactBytesDigest = value.semantic?.decisionArtifactBytesDigest;
+    semantic.decisionSemanticDigest = value.semantic?.decisionSemanticDigest;
     semantic.independentReviewDigest = value.semantic?.independentReviewDigest;
     semantic.interpretationStatus = value.interpretationStatus;
   }
@@ -104,6 +98,7 @@ const report = {
     proofProfile: precommit.proofProfile,
     proofPlanDigest: precommit.proofPlanDigest,
     validationAuthority: precommit.validationAuthority,
+    supplementalEvidence: precommit.supplementalEvidence ?? null,
     contractVerification,
     verificationDurationMs: precommit.verificationDurationMs,
     authorizedAtEpoch: precommit.issuedAtEpoch,

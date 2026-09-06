@@ -22,6 +22,11 @@ git -C "${repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.inv
 
 printf 'export const version = 2;\n' > "${repo}/src/index.ts"
 git -C "${repo}" add src/index.ts
+mkdir -p "${repo}/.harness/runtime"
+base_commit="$(git -C "${repo}" rev-parse HEAD)"
+jq -n --arg base "${base_commit}" '{schema:"aegis.mechanical_inventory.v1",baseCommit:$base}' \
+  > "${repo}/.harness/runtime/mechanical_inventory.json"
+inventory_digest="$(shasum -a 256 "${repo}/.harness/runtime/mechanical_inventory.json" | awk '{print $1}')"
 jq -n '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:["src/index.ts"]}}' > "${artifact}"
 
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${repo}" "${artifact}"
@@ -37,7 +42,8 @@ jq -e '
   and (.clarifiedDemandDigest | test("^[a-f0-9]{64}$"))
   and (.architecturePolicyDigest | test("^[a-f0-9]{64}$"))
   and .validationAuthority.kind == "deterministic_tribunal"
-' "${receipt}" >/dev/null
+  and .supplementalEvidence.inventoryArtifactBytesDigest == $inventory
+' --arg inventory "${inventory_digest}" "${receipt}" >/dev/null
 git -C "${repo}" add src/index.ts
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${repo}"
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" verify "${repo}"
@@ -76,8 +82,20 @@ jq -n --arg clarified "${forensic_clarified_digest}" --arg policy "${forensic_po
   {schema:"aegis.contract_ir.v2",changeKind:"PRODUCT",clarifiedDemandDigest:$clarified,architecture:{policyDigest:$policy,appliedRuleIds:["ARCH-FAILURE-EXPLICIT"],amendmentIds:[]},verification:{riskProfile:"forensic",independentReviewDigest:$review},stateModel:{kind:"STATE_TRANSITION",bindings:[{role:"STATE",statement:"Estado explícito.",requirementIds:["REQ-STATE-001"]},{role:"COMMAND",statement:"Comando explícito.",requirementIds:["REQ-STATE-001"]},{role:"RESOURCE",statement:"Recurso projetado.",requirementIds:["REQ-STATE-001"]},{role:"RESULT",statement:"Resultado observável.",requirementIds:["REQ-STATE-001"]},{role:"ATOMICITY",statement:"Publicação final.",requirementIds:["REQ-STATE-001"]}]},scope:{authorizedPaths:["src/foo.ts","src/other.ts","src/foo.proof.sh"]},behavior:[{id:"BEH-STATE-001",statement:"A transição é observável."}],invariants:[{id:"INV-STATE-001",statement:"O estado preserva atomicidade.",proofIds:["PO-STATE-BEHAVIOR","PO-STATE-FORENSIC"]}],proofObligations:[{id:"PO-STATE-BEHAVIOR",risk:"transição básica",statement:"Provar comportamento."},{id:"PO-STATE-FORENSIC",risk:"interação adversarial",statement:"Provar rollback."}],requirementCoverage:[{requirementId:"REQ-STATE-001",contractIds:["BEH-STATE-001","INV-STATE-001","PO-STATE-BEHAVIOR","PO-STATE-FORENSIC"]}]}' \
   > "${forensic_repo}/src/.aegis/contract-ir.json"
 jq -n '
-  {schema:"aegis.proof_registry.v1",policy:{mode:"enforced",maxActiveProofsPerProfile:{fast:10,targeted:10,release:10,forensic:10}},profiles:[{id:"fast",proofIds:["PO-STATE-BEHAVIOR"]},{id:"targeted",proofIds:["PO-STATE-BEHAVIOR"]},{id:"release",proofIds:["PO-STATE-BEHAVIOR"]},{id:"forensic",proofIds:["PO-STATE-BEHAVIOR","PO-STATE-FORENSIC"]}],proofs:[{id:"PO-STATE-BEHAVIOR",risk:"transição básica",coverageKey:"state.behavior",authority:"fixture",cost:"low",cadence:"always",status:"active",targets:["src/foo.ts","src/foo.proof.sh"],executionKey:"state-behavior",command:"bash src/foo.proof.sh"},{id:"PO-STATE-FORENSIC",risk:"interação adversarial",coverageKey:"state.forensic",authority:"fixture",cost:"high",cadence:"forensic",status:"active",targets:["src/foo.ts","src/foo.proof.sh"],executionKey:"state-forensic",command:"bash src/foo.proof.sh"}]}' \
+  {schema:"aegis.proof_registry.v1",policy:{mode:"enforced",maxActiveProofsPerProfile:{fast:10,targeted:10,release:10,forensic:10}},profiles:[{id:"fast",proofIds:["PO-STATE-BEHAVIOR"]},{id:"targeted",proofIds:["PO-STATE-BEHAVIOR"]},{id:"release",proofIds:["PO-STATE-BEHAVIOR"]},{id:"forensic",proofIds:["PO-STATE-BEHAVIOR","PO-STATE-FORENSIC"]}],proofs:[{id:"PO-STATE-BEHAVIOR",risk:"transição básica",coverageKey:"state.behavior",authority:"fixture",cost:"low",cadence:"always",status:"active",targets:["src/foo.ts","src/foo.proof.sh"],executionKey:"state-behavior",executor:"bash",argv:["src/foo.proof.sh"]},{id:"PO-STATE-FORENSIC",risk:"interação adversarial",coverageKey:"state.forensic",authority:"fixture",cost:"high",cadence:"forensic",status:"active",targets:["src/foo.ts","src/foo.proof.sh"],executionKey:"state-forensic",executor:"bash",argv:["src/foo.proof.sh"]}]}' \
   > "${forensic_repo}/src/.aegis/proof-registry.json"
+node --input-type=module - "${forensic_repo}/src/.aegis" "${ROOT_DIR}" <<'NODE'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+const [directory, root] = process.argv.slice(2);
+const { canonicalDigest } = await import(`${root}/scripts/lib/canonical_json.mjs`);
+const clarifiedDemand = JSON.parse(readFileSync(`${directory}/clarified-demand.json`, 'utf8'));
+const contract = JSON.parse(readFileSync(`${directory}/contract-ir.json`, 'utf8'));
+const proofRegistry = JSON.parse(readFileSync(`${directory}/proof-registry.json`, 'utf8'));
+const state = { schema: 'aegis.semantic_state.v1', clarifiedDemand, contract, proofRegistry };
+state.digests = { clarifiedDemandSemanticDigest: canonicalDigest(clarifiedDemand), contractSemanticDigest: canonicalDigest(contract), proofRegistrySemanticDigest: canonicalDigest(proofRegistry) };
+writeFileSync(`${directory}/semantic-state.json`, `${JSON.stringify(state)}\n`);
+for (const name of ['clarified-demand.json', 'contract-ir.json', 'proof-registry.json']) rmSync(`${directory}/${name}`);
+NODE
 git -C "${forensic_repo}" init -q
 git -C "${forensic_repo}" add .
 git -C "${forensic_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
@@ -150,34 +168,6 @@ printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > 
 git -C "${semantic_repo}" add -A
 if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${semantic_repo}"; then
   fail "semantic_complete_baseline_reset_still_required_a_receipt"
-fi
-
-# A full clean is a valid boundary without a receipt only when it retires the
-# whole governed unit: prior targets, contract and proof registry together.
-reset_repo="${temp_dir}/reset-repo"
-mkdir -p "${reset_repo}/src/.aegis"
-printf 'export const feature = 1;\n' > "${reset_repo}/src/feature.ts"
-printf 'export const index = 1;\n' > "${reset_repo}/src/index.ts"
-printf '%s\n' '{"targets":["src/feature.ts","src/index.ts"]}' \
-  > "${reset_repo}/src/.aegis/contract-ir.json"
-printf '%s\n' '{"proofs":[]}' > "${reset_repo}/src/.aegis/proof-registry.json"
-git -C "${reset_repo}" init -q
-git -C "${reset_repo}" add .
-git -C "${reset_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
-
-rm -f "${reset_repo}/src/feature.ts" \
-  "${reset_repo}/src/.aegis/contract-ir.json" \
-  "${reset_repo}/src/.aegis/proof-registry.json"
-printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${reset_repo}/src/index.ts"
-git -C "${reset_repo}" add -A
-if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${reset_repo}"; then
-  fail "complete_baseline_reset_still_required_a_receipt"
-fi
-
-git -C "${reset_repo}" restore --source=HEAD --staged --worktree src/.aegis/contract-ir.json src/.aegis/proof-registry.json
-git -C "${reset_repo}" add -A
-if ! bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" requires "${reset_repo}"; then
-  fail "partial_reset_bypassed_formal_authorization"
 fi
 
 # A universal harness baseline has no product contract or proof registry yet,
@@ -269,5 +259,15 @@ git -C "${hook_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@exampl
 [[ "$(git -C "${hook_repo}" show HEAD:src/index.ts)" == $'export const version = 4;' ]] || fail "committed_content_not_synced"
 AEGIS_ROOT="${hook_repo}" node "${ROOT_DIR}/scripts/forensic_report.mjs" \
   | jq -e '.schema == "aegis.forensic_report.v1" and .status == "PROVEN" and .transition.worktreeClean == true' >/dev/null
+
+# Report telemetry keeps the two digest domains distinct; a byte digest must
+# never disappear because a legacy field name is still being read.
+mkdir -p "${hook_repo}/.harness/runtime"
+hook_execution="$(jq -r '.executionId' "$(git -C "${hook_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)")"
+jq -n --arg execution "${hook_execution}" \
+  '{executionId:$execution,timing:{durationMs:1},semantic:{decisionArtifactBytesDigest:("a" * 64),decisionSemanticDigest:("b" * 64)}}' \
+  > "${hook_repo}/.harness/runtime/finalization.json"
+AEGIS_ROOT="${hook_repo}" node "${ROOT_DIR}/scripts/forensic_report.mjs" \
+  | jq -e '.evidence.semantic.decisionArtifactBytesDigest == ("a" * 64) and .evidence.semantic.decisionSemanticDigest == ("b" * 64)' >/dev/null
 
 echo "[PASS] formal promotion authorization"

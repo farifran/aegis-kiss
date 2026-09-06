@@ -61,6 +61,25 @@ NODE
 }
 
 prepare_repository "${WORK_DIR}/direct"
+cat > "${WORK_DIR}/direct/src/clockSupport.ts" <<'TS'
+export const Clock = {
+  now(): bigint {
+    return 0n;
+  },
+};
+TS
+printf 'export const unrelated = true;\n' > "${WORK_DIR}/direct/src/unrelated.ts"
+printf 'export const existing = true;\n' > "${WORK_DIR}/direct/src/existing.ts"
+printf 'export const InferredAnchor = true;\n' > "${WORK_DIR}/direct/src/inferredOwner.ts"
+mkdir -p "${WORK_DIR}/direct/src/space folder"
+printf 'export const spaced = true;\n' > "${WORK_DIR}/direct/src/space folder/item.ts"
+for fixture_index in $(seq -w 1 16); do
+  printf 'export const SharedAnchor%s = true;\n' "${fixture_index}" \
+    > "${WORK_DIR}/direct/src/shared-anchor-${fixture_index}.ts"
+done
+printf 'export const SharedAnchor = true;\n' > "${WORK_DIR}/direct/governance/hiddenDiscovery.ts"
+git -C "${WORK_DIR}/direct" add src governance/hiddenDiscovery.ts
+git -C "${WORK_DIR}/direct" commit -qm 'add discovery fixtures'
 demand=$'\357\273\277# Criar\r\nUse bigint de Clock.now() em `src/clock.ts`.\rConsulte https://example.test/spec\n'
 printf '%s' "${demand}" | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
   --kind PRODUCT --save-envelope --target src > "${WORK_DIR}/direct-request.json"
@@ -69,6 +88,7 @@ envelope="${WORK_DIR}/direct/.harness/runtime/preflight_envelope.json"
 jq -e '
   .schema == "aegis.ide_semantic_request.v2"
   and .changeKind == "PRODUCT"
+  and .timing.durationMs < 2000
   and (.prompt | contains("changeKind=\"PRODUCT\""))
 ' "${WORK_DIR}/direct-request.json" >/dev/null
 [[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 10000 ]]
@@ -79,7 +99,88 @@ jq -e '
   and (.prompt | contains("\"text\":"))
   and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Clock.now"))
   and (.mechanicalFacts.references | any(.kind == "url" and .status == "UNPROVEN"))
+  and .mechanicalFacts.discovery.status == "CANDIDATES"
+  and .mechanicalFacts.discovery.demandDigest == .normalizedDemand.digest
+  and .mechanicalFacts.discovery.baseCommit == .baseCommit
+  and (.mechanicalFacts.discovery.candidates | length <= 12)
+  and (.mechanicalFacts.discovery.candidates | any(.path == "src/clock.ts" and .exists == false and (.reasons | index("explicit_path"))))
+  and (.mechanicalFacts.discovery.candidates | any(.path == "src/clockSupport.ts" and .exists == true and (.reasons | index("symbol_match"))))
+  and (.prompt | contains("\"discovery\":[\"CANDIDATES\",[[\"src/clockSupport.ts\""))
 ' "${envelope}" >/dev/null
+
+# Discovery is rebuilt locally in the preflight process. It has no model/IDE
+# dependency, no separate cache and is deterministic for the same demand/base.
+printf '%s' "${demand}" | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+  --kind PRODUCT --internal-envelope --target src > "${WORK_DIR}/direct-discovery-repeat.json"
+jq -S '.mechanicalFacts.discovery' "${envelope}" > "${WORK_DIR}/discovery-a.json"
+jq -S '.mechanicalFacts.discovery' "${WORK_DIR}/direct-discovery-repeat.json" > "${WORK_DIR}/discovery-b.json"
+cmp "${WORK_DIR}/discovery-a.json" "${WORK_DIR}/discovery-b.json"
+[[ ! -e "${WORK_DIR}/direct/.harness/runtime/discovery.json" ]]
+
+# An inferred identifier does not justify a full symbol scan when an explicit,
+# tracked file already gives the IDE a strong starting point.
+printf '%s' 'Atualize InferredAnchor em `src/existing.ts`.' \
+  | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope --target src/existing.ts \
+    > "${WORK_DIR}/inferred-symbol.json"
+jq -e '
+  .mechanicalFacts.discovery.coverage.symbolAnchors == 0
+  and (.mechanicalFacts.discovery.candidates | any(.path == "src/existing.ts"))
+  and (.mechanicalFacts.discovery.candidates | all(.path != "src/inferredOwner.ts"))
+' "${WORK_DIR}/inferred-symbol.json" >/dev/null
+
+# A symbol explicitly marked by the user remains authoritative enough for one
+# bounded Git search, even when an existing target is already known.
+printf '%s' 'Atualize `SharedAnchor` em `src/existing.ts`.' \
+  | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope --target src/existing.ts \
+    > "${WORK_DIR}/explicit-symbol.json"
+jq -e '
+  .mechanicalFacts.discovery.coverage.symbolAnchors >= 1
+  and .mechanicalFacts.discovery.coverage.returnedCandidates == 12
+  and (.mechanicalFacts.discovery.candidates | any(.path == "src/shared-anchor-01.ts" and (.reasons | index("symbol_match"))))
+  and (.mechanicalFacts.discovery.candidates | all(.path | startswith("src/")))
+' "${WORK_DIR}/explicit-symbol.json" >/dev/null
+
+printf '%s' 'Ajuste zqxvbnm.' \
+  | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope > "${WORK_DIR}/unknown-discovery.json"
+jq -e '
+  .mechanicalFacts.discovery.status == "UNKNOWN"
+  and .mechanicalFacts.discovery.candidates == []
+' "${WORK_DIR}/unknown-discovery.json" >/dev/null
+
+printf '%s' 'Atualize `src/space folder/item.ts`.' \
+  | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope > "${WORK_DIR}/space-path.json"
+jq -e '
+  .mechanicalFacts.discovery.candidates
+  | any(.path == "src/space folder/item.ts" and .exists == true and (.reasons | index("explicit_path")))
+' "${WORK_DIR}/space-path.json" >/dev/null
+
+# A large project never turns the layer-zero scan into an unbounded operation.
+# It returns INCOMPLETE with explicit limits, leaving semantic investigation to
+# the IDE instead of claiming exhaustive discovery.
+prepare_repository "${WORK_DIR}/bounded"
+mkdir -p "${WORK_DIR}/bounded-bin"
+real_git="$(command -v git)"
+cat > "${WORK_DIR}/bounded-bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${3:-}" == "ls-tree" ]]; then
+  for index in $(seq 1 10001); do printf 'src/many/file-%s.ts\0' "${index}"; done
+  exit 0
+fi
+exec "${AEGIS_TEST_REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK_DIR}/bounded-bin/git"
+printf '%s' 'Ajuste zqxvbnm.' | PATH="${WORK_DIR}/bounded-bin:${PATH}" AEGIS_TEST_REAL_GIT="${real_git}" AEGIS_ROOT="${WORK_DIR}/bounded" node "${ROOT_DIR}/scripts/preflight.mjs" \
+  --kind PRODUCT --internal-envelope > "${WORK_DIR}/bounded-discovery.json"
+jq -e '
+  .mechanicalFacts.discovery.status == "INCOMPLETE"
+  and .mechanicalFacts.discovery.coverage.eligiblePaths == 10001
+  and .mechanicalFacts.discovery.coverage.consideredPaths == 10000
+  and .mechanicalFacts.discovery.limits == {maxCandidates:12,maxTrackedPaths:10000,maxSymbolAnchors:8,maxLexicalTerms:64,maxGitBytes:4194304,gitTimeoutMs:3000}
+' "${WORK_DIR}/bounded-discovery.json" >/dev/null
 
 node --input-type=module - "${envelope}" "${WORK_DIR}/direct/.harness/runtime/blocked.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
