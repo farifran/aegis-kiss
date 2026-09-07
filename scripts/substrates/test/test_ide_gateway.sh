@@ -30,7 +30,9 @@ printf '%s' "${output}" | jq -e '
   and (has("normalizedDemand") | not)
 ' >/dev/null
 [[ -s "${WORK_DIR}/.harness/runtime/preflight_envelope.json" ]]
-[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 9000 ]]
+# The semantic request contains the compact frozen constitution, but must stay
+# far below a full repository or preflight-envelope transfer.
+[[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 16384 ]]
 
 output="$(bash "${WORK_DIR}/aegis" harness 'Atualizar a validação interna do Aegis.')"
 printf '%s' "${output}" | jq -e '.changeKind == "HARNESS"' >/dev/null
