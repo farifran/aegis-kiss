@@ -1,3 +1,7 @@
+/**
+ * Motor central de processamento de lotes de operações com controle de capacidade,
+ * atomicidade transacional e determinismo temporal (Aegis Forensic State Transition).
+ */
 import { createHash } from 'node:crypto';
 
 export interface Entity {
