@@ -200,7 +200,17 @@ finalize_preflight() {
   [[ -n "${resolution}" ]] && finalize_args+=(--resolution "${resolution}")
   [[ -n "${independent_review}" ]] && finalize_args+=(--independent-review "${independent_review}")
   envelope="$(require_frozen_envelope "${demand}")"
-  node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}"
+  local result
+  result="$(node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}")" || return $?
+  if jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "USER_CONFIRMATION_REQUIRED"' <<< "${result}" >/dev/null; then
+    printf '\n══════════════════════════════════════════════════════════════\n'
+    printf '=== AEGIS USER CONFIRMATION REQUIRED ===\n'
+    printf '══════════════════════════════════════════════════════════════\n'
+    printf 'Abra o wizard nativo do IDE com as opções abaixo. Não selecione a recomendação automaticamente e não implemente antes da resposta do usuário.\n\n'
+    jq -r '.questions[] | "[\(.id)] \(.question)\n\(.impact)\n" + (.answers | to_entries | map("  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)") | join("\n"))' <<< "${result}"
+    printf '\nPROTOCOLO IDE: apresente estas opções em modal/ask_question; depois grave somente a seleção explícita do usuário em .harness/runtime/resolution.json e retome finalize.\n\n'
+  fi
+  printf '%s\n' "${result}"
 }
 
 build_independent_review() {

@@ -8,7 +8,7 @@ Preserve requisitos explícitos. Não invente fatos nem altere API, valor inicia
 
 O Aegis cria IDs, cobertura e registro de provas. Você fornece um delta compacto usando índices zero-based:
 - `rules`: `[ruleId,verdict,evidência,[unitIndexes]]`
-- `questions`: `[INPUT|SCOPE|ARCHITECTURE|DEMAND,pergunta,evidência,impacto,recommendedAnswerId,respostaInterpretada,[unitIndexes],answers]`, onde cada `answer` é `[id,label,rationale,resolutionClause,statePolicies]` e cada `statePolicy` é `[role,política]`
+- `questions`: `[INPUT|SCOPE|ARCHITECTURE|DEMAND,pergunta,evidência,impacto,recommendedAnswerId,respostaInterpretada,[unitIndexes],answers]`, onde cada `answer` é `[id,label,rationale,resolutionClause,statePolicies,contractPatch]`, cada `statePolicy` é `[role,política]` e `contractPatch` traz as cláusulas pré-compiladas da alternativa.
 - `requirements`: `[texto,proveniência,[unitIndexes]]`
 - `contextUnits`: `[unitIndex,CONTEXT|REJECTED_INVALID,razão]`
 - `failures`: `[gatilho,resultadoObservável,[requirementIndexes]]`

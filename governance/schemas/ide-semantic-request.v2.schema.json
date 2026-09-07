@@ -38,10 +38,11 @@
     "protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decisionPath", "finalize", "forensicReview", "revision", "promotion", "forbidden"],
+      "required": ["decisionPath", "finalize", "userInteraction", "forensicReview", "revision", "promotion", "forbidden"],
       "properties": {
         "decisionPath": { "const": ".harness/runtime/preflight_decision.json" },
         "finalize": { "const": "./aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json" },
+        "userInteraction": { "type": "string", "minLength": 1 },
         "forensicReview": { "type": "string", "minLength": 1 },
         "revision": { "type": "string", "minLength": 1 },
         "promotion": {

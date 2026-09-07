@@ -29,7 +29,7 @@ const discoveryScanner = Object.freeze({
     ranking: 'highest_reason_score_then_code_unit_path',
   }),
 });
-const semanticProtocolVersion = 'aegis.semantic_protocol.v3';
+const semanticProtocolVersion = 'aegis.semantic_protocol.v4';
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
 
 function digest(value) {
@@ -765,6 +765,7 @@ export function semanticRequest(envelope, timing) {
     protocol: {
       decisionPath: '.harness/runtime/preflight_decision.json',
       finalize: './aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json',
+      userInteraction: 'Depois de gravar a decisão, execute finalize sem --resolution. Se retornar USER_CONFIRMATION_REQUIRED, abra imediatamente o wizard/modal nativo do IDE com todas as opções recebidas; não escolha a recomendação, não implemente e não gere resolution até o usuário responder. Depois, grave a resolução com as escolhas exatas e retome finalize.',
       forensicReview: 'forensic: ./aegis review <demanda> --decision <arquivo>; finalize com --independent-review <review>',
       revision: 'quando finalize retornar SEMANTIC_REVISION_REQUIRED, corrija somente a decisão usando as correções e repita finalize sem redescobrir o repositório',
       promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],

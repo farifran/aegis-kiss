@@ -25,6 +25,7 @@ output="$(bash "${WORK_DIR}/aegis" 'Criar uma biblioteca determinística em src/
 printf '%s' "${output}" | jq -e '
   .schema == "aegis.ide_semantic_request.v2"
   and .changeKind == "PRODUCT"
+  and (.protocol.userInteraction | contains("USER_CONFIRMATION_REQUIRED"))
   and .protocol.promotion == ["implement authorized scope", "stage persistent changes", "./aegis authorize", "git commit"]
   and (.protocol.forbidden | index("verification before authorize"))
   and (has("normalizedDemand") | not)
@@ -34,6 +35,40 @@ printf '%s' "${output}" | jq -e '.supervisor == {mode:"IDE",id:"ide-active-model
 # The semantic request contains the compact frozen constitution, but must stay
 # far below a full repository or preflight-envelope transfer.
 [[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 16384 ]]
+
+# A semantic question is a hard stop, not a recommendation that the IDE agent
+# may silently select. The gateway emits a stable marker and the structured
+# request that an IDE adapter must render with its native question wizard.
+node --input-type=module - "${WORK_DIR}/.harness/runtime/preflight_envelope.json" "${WORK_DIR}/.harness/runtime/preflight_decision.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [envelopePath, decisionPath] = process.argv.slice(2);
+const envelope = JSON.parse(readFileSync(envelopePath, 'utf8'));
+const units = envelope.normalizedDemand.units.map((_, index) => index);
+writeFileSync(decisionPath, JSON.stringify({
+  schema: 'aegis.preflight_decision.v2',
+  contextDigest: envelope.contextDigest,
+  promptDigest: envelope.promptDigest,
+  status: 'NEEDS_CONFIRMATION',
+  rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'NOT_APPLICABLE', 'Sem incidência.', []]),
+  questions: [['DEMAND', 'A execução deve persistir após reinício?', 'A demanda não define durabilidade.', 'Altera a arquitetura mínima.', 'MEMORY_ONLY', 'Interpretado: o estado dura somente nesta execução.', units, [
+    ['MEMORY_ONLY', 'Somente memória', 'Evita persistência não solicitada.', 'O estado existe somente durante esta execução.', [], {}],
+    ['DURABLE', 'Persistir após reinício', 'Autoriza durabilidade explícita.', 'O estado deve sobreviver ao reinício.', [], {}],
+  ]]],
+  riskProfile: 'standard',
+  stateModel: { kind: 'NONE', bindings: [] },
+  stateSemantics: [],
+  intent: 'Criar biblioteca.', scope: ['src/library.ts', 'src/library.proof.ts'], excluded: [],
+  requirements: [['Criar biblioteca.', 'USER', units]], contextUnits: [], acceptance: ['API observável.'],
+  failures: [['Entrada inválida', 'Erro explícito.', [0]]], behaviors: [['API existe.', [0]]],
+  preconditions: [['Entrada válida.', [0]]], invariants: [['Estado consistente.', [0], [0]]],
+  postconditions: [['Resultado observável.', [0]]],
+  proofs: [['library.behavior', 'Biblioteca incorreta', 'Provar comportamento.', [0], 'src/library.proof.ts', ['src/library.ts'], 'low', 'always']],
+  continuity: { retirements: [], proofChanges: [] },
+}));
+NODE
+output="$(bash "${WORK_DIR}/aegis" finalize 'Criar uma biblioteca determinística em src/library.ts.' --decision .harness/runtime/preflight_decision.json)"
+printf '%s\n' "${output}" | grep -q '^=== AEGIS USER CONFIRMATION REQUIRED ===$'
+printf '%s\n' "${output}" | tail -n 1 | jq -e '.status == "USER_CONFIRMATION_REQUIRED" and (.questions | length == 1)' >/dev/null
 
 output="$(bash "${WORK_DIR}/aegis" setup show)"
 printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
