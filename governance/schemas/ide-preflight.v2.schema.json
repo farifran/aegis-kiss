@@ -3,7 +3,7 @@
   "$id": "aegis.ide_preflight.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "baseline", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "promptTemplateDigest", "semanticProtocolDigest", "contextDigest", "promptDigest", "prompt", "timing"],
+  "required": ["schema", "status", "changeKind", "executionId", "baseCommit", "baseline", "normalizedDemand", "mechanicalFacts", "architecture", "previousContract", "previousContractDigest", "constitutionDigest", "promptTemplateDigest", "semanticProtocolDigest", "contextDigest", "promptDigest", "prompt", "timing"],
   "properties": {
     "schema": { "const": "aegis.ide_preflight.v2" },
     "status": { "const": "PENDING_SEMANTIC_COMPILATION" },
@@ -35,6 +35,7 @@
         { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       ]
     },
+    "constitutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "promptTemplateDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "semanticProtocolDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

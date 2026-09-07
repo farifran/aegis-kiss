@@ -140,6 +140,7 @@ function validateEnvelope(envelope) {
     mechanicalFactsDigest: envelope.mechanicalFacts.digest,
     architecturePolicyDigest: envelope.architecture.policyDigest,
     previousContractDigest: envelope.previousContractDigest,
+    constitutionDigest: envelope.constitutionDigest,
     promptTemplateDigest: envelope.promptTemplateDigest,
     semanticProtocolDigest: envelope.semanticProtocolDigest,
   });

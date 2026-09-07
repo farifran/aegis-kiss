@@ -29,7 +29,7 @@ const discoveryScanner = Object.freeze({
     ranking: 'highest_reason_score_then_code_unit_path',
   }),
 });
-const semanticProtocolVersion = 'aegis.semantic_protocol.v2';
+const semanticProtocolVersion = 'aegis.semantic_protocol.v3';
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
 
 function digest(value) {
@@ -651,6 +651,8 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
   };
   const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);
+  const constitutionText = readCommitBlob(canonical, baseline.commit, 'AGENTS.md', 'constitution_unavailable').toString('utf8');
+  const constitutionDigest = digest(constitutionText);
   const promptTemplate = readCommitBlob(canonical, baseline.commit, 'governance/prompts/preflight.v2.md', 'preflight_prompt_unavailable').toString('utf8');
   const promptTemplateDigest = digest(promptTemplate);
   const semanticProtocolDigest = canonicalDigest({
@@ -665,10 +667,12 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     mechanicalFactsDigest: mechanicalFacts.digest,
     architecturePolicyDigest: architecture.policyDigest,
     previousContractDigest,
+    constitutionDigest,
     promptTemplateDigest,
     semanticProtocolDigest,
   });
   let prompt = promptTemplate;
+  prompt = inject(prompt, 'constitution', { source: 'AGENTS.md', digest: constitutionDigest, rules: constitutionText });
   prompt = inject(prompt, 'context_digest', contextDigest);
   prompt = inject(prompt, 'change_kind', changeKind);
   prompt = inject(prompt, 'normalized_demand', {
@@ -716,6 +720,7 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     architecture,
     previousContract,
     previousContractDigest,
+    constitutionDigest,
     promptTemplateDigest,
     semanticProtocolDigest,
     contextDigest,
@@ -738,6 +743,7 @@ export function semanticRequest(envelope, timing) {
     contextDigest: envelope.contextDigest,
     promptDigest: envelope.promptDigest,
     promptTemplateDigest: envelope.promptTemplateDigest,
+    constitutionDigest: envelope.constitutionDigest,
     semanticProtocolDigest: envelope.semanticProtocolDigest,
     timing,
     protocol: {

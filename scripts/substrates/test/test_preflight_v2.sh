@@ -11,6 +11,7 @@ prepare_repository() {
   local directory="$1"
   mkdir -p "${directory}/src" "${directory}/.harness/runtime"
   cp -r "${ROOT_DIR}/governance" "${directory}/"
+  cp "${ROOT_DIR}/AGENTS.md" "${directory}/AGENTS.md"
   cp "${ROOT_DIR}/ARCHITECTURE.md" "${directory}/ARCHITECTURE.md"
   printf '.harness/runtime/\n' > "${directory}/.gitignore"
   git -C "${directory}" init -q
@@ -90,12 +91,17 @@ jq -e '
   .schema == "aegis.ide_semantic_request.v2"
   and .changeKind == "PRODUCT"
   and .timing.durationMs < 2000
+  and (.constitutionDigest | test("^[a-f0-9]{64}$"))
+  and (.prompt | contains("\"source\":\"AGENTS.md\""))
+  and (.prompt | contains("\"rules\":\"# Aegis Cognitive Constitution"))
   and (.prompt | contains("changeKind=\"PRODUCT\""))
 ' "${WORK_DIR}/direct-request.json" >/dev/null
 [[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 10000 ]]
 jq -e '
   .baseline.clean == true
+  and (.constitutionDigest | test("^[a-f0-9]{64}$"))
   and (.normalizedDemand.text | contains("\r") | not)
+  and (.prompt | contains("\"source\":\"AGENTS.md\""))
   and (.prompt | contains("Use bigint de Clock.now() em `src/clock.ts`."))
   and (.prompt | contains("\"text\":"))
   and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Clock.now"))

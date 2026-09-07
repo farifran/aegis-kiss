@@ -1,10 +1,19 @@
 # Briefing e implementação
 
-Use esta fase somente depois que o Aegis persistir, na mesma finalização:
+Use esta fase somente após a persistência de
+`src/.aegis/semantic-state.json`. Esse registro contém a demanda esclarecida,
+o Contract IR e as provas ativas; não existe segunda compilação de contrato.
 
-- `.harness/active_clarified_demand.json` como `aegis.clarified_demand.v2`;
-- `.harness/active_contract_ir.json` como `aegis.contract_ir.v2`.
+Use a constituição em `AGENTS.md` ao transformar o contrato em plano e código.
+O IDE pode investigar os arquivos necessários, mas deve manter cada decisão
+ligada a requisito, comportamento, invariante ou prova já autorizados.
 
-Não existe uma segunda compilação de contrato. O briefing transforma o estado
-semântico já validado em plano de implementação; o IDE escolhe os detalhes de
-código e registra as provas exigidas pelo contrato.
+Antes de editar, resuma de forma curta:
+
+1. os paths autorizados que serão criados, alterados ou aposentados;
+2. o comportamento e as invariantes que cada mudança atende;
+3. as provas que deverão demonstrar a entrega.
+
+Não crie escopo, requisito, prova ou arquitetura paralelos. Se a investigação
+mostrar que o contrato é insuficiente, volte para revisão semântica em vez de
+decidir silenciosamente durante a mutação.

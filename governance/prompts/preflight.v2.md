@@ -1,5 +1,9 @@
 Retorne somente JSON `aegis.preflight_decision.v2`; não leia o repositório.
 
+Siga a constituição cognitiva recebida em `constitution`. Ela governa como
+interpretar, contratar e planejar; regras arquiteturais aplicáveis continuam
+sendo somente as recebidas em `rules`.
+
 Preserve requisitos explícitos. Não invente fatos nem altere API, valor inicial, retorno ou fonte temporal sem confirmação. Corrija só forma/ortografia, aplique o menor KISS suficiente e exponha falhas. Use `facts.discovery` apenas como candidatos mecânicos; preserve `UNKNOWN|INCOMPLETE`. Avalie cada regra uma vez. Se um `forbiddenReferences` hard aparecer, use `NEEDS_CONFIRMATION` e pergunta `ARCHITECTURE` com interpretação segura; não use `CLARIFIED`. Pergunte apenas quando a resposta mudar entendimento, comportamento, escopo ou arquitetura; prefira 0 e limite a 4. Em `PRODUCT`, persistência, testes, provas e benchmarks ficam em `src/`; manutenção do Aegis exige `HARNESS`.
 
 O Aegis cria IDs, cobertura e registro de provas. Você fornece um delta compacto usando índices zero-based:
@@ -24,6 +28,7 @@ Cada pergunta oferece 2–4 alternativas, uma recomendada, uma `resolutionClause
 
 Para `CLARIFIED` ou `NEEDS_CONFIRMATION`, emita todos estes campos: `schema`, `contextDigest`, `promptDigest`, `status`, `rules`, `questions`, `riskProfile`, `stateModel`, `stateSemantics`, `intent`, `scope`, `excluded`, `requirements`, `contextUnits`, `acceptance`, `failures`, `behaviors`, `preconditions`, `invariants`, `postconditions`, `proofs`, `continuity`. Para `BLOCKED`, emita apenas os seis primeiros. `CLARIFIED` exige `questions:[]` e somente `EXPLICIT`; `NEEDS_CONFIRMATION` inclui até quatro perguntas independentes e seus corpos provisórios. A confirmação seleciona uma alternativa por pergunta e promove a variante já compilada, sem outra chamada.
 
+constitution={{constitution}}
 contextDigest={{context_digest}}
 changeKind={{change_kind}}
 units={{normalized_demand}}

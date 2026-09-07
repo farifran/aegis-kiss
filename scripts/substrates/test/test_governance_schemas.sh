@@ -77,7 +77,7 @@ import { tmpdir } from 'node:os';
 
 const fixture = fs.mkdtempSync(join(tmpdir(), 'aegis-mechanical-read-set.'));
 fs.mkdirSync(join(fixture, 'governance/prompts'), { recursive: true });
-for (const path of ['ARCHITECTURE.md', 'governance/architecture.policy.json', 'governance/prompts/preflight.v2.md']) {
+for (const path of ['AGENTS.md', 'ARCHITECTURE.md', 'governance/architecture.policy.json', 'governance/prompts/preflight.v2.md']) {
   fs.copyFileSync(join(process.cwd(), path), join(fixture, path));
 }
 execFileSync('git', ['-C', fixture, 'init', '-q']);
@@ -104,7 +104,7 @@ if (JSON.stringify(fixtureReads) !== JSON.stringify(expected)) {
 }
 NODE
 
-grep -Fqx '#### 1. PREFLIGHT, ALINHAMENTO E CONTRATO' "${ROOT_DIR}/AGENTS.md"
+grep -Fqx '# Aegis Cognitive Constitution' "${ROOT_DIR}/AGENTS.md"
 grep -Fqx '# Briefing e implementação' "${ROOT_DIR}/.skills/briefing.md"
 grep -Fq 'não leia o repositório.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
 if [[ -e "${ROOT_DIR}/governance/prompts/contract.v2.md" || -e "${ROOT_DIR}/scripts/build_contract_prompt.mjs" || -e "${ROOT_DIR}/scripts/finalize_contract.mjs" ]]; then
