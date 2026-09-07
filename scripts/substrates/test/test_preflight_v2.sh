@@ -36,8 +36,8 @@ const decision = {
   rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'NOT_APPLICABLE', 'Sem incidência no comportamento solicitado.', []]),
   questions: status === 'NEEDS_CONFIRMATION'
     ? [['SCOPE', 'Manter somente src/clock.ts?', 'A demanda nomeia esse caminho.', 'Define o escopo.', 'KEEP_SCOPE', 'Somente src/clock.ts e sua prova.', [allUnits[0]], [
-      ['KEEP_SCOPE', 'Manter escopo mínimo', 'Preserva a menor entrega compatível.', 'O escopo fica limitado a src/clock.ts e sua prova.', []],
-      ['EXPAND_SCOPE', 'Ampliar escopo', 'Autoriza arquivos adicionais quando necessário.', 'O escopo pode incluir arquivos adicionais explicitamente aprovados.', []],
+      ['KEEP_SCOPE', 'Manter escopo mínimo', 'Preserva a menor entrega compatível.', 'O escopo fica limitado a src/clock.ts e sua prova.', [], {}],
+      ['EXPAND_SCOPE', 'Ampliar escopo', 'Autoriza arquivos adicionais quando necessário.', 'O escopo pode incluir arquivos adicionais explicitamente aprovados.', [], {}],
     ]]]
     : [],
   riskProfile: 'standard',
@@ -377,8 +377,8 @@ writeFileSync(destination, JSON.stringify({
   status: 'NEEDS_CONFIRMATION',
   rules: envelope.architecture.candidateRules.map((rule) => [rule.id, 'APPLIED', 'A regra se aplica à transição.', units]),
   questions: [['DEMAND', 'Confirmar o contrato forense antes da promoção?', 'A transição combina estado, identidade, recursos, tempo, resultado, atomicidade e canonicalização.', 'Exige confirmação humana para a interpretação forense.', 'CONFIRM_FORENSIC', 'A interpretação forense será promovida somente após confirmação explícita.', units, [
-    ['CONFIRM_FORENSIC', 'Confirmar contrato forense', 'Autoriza a promoção após a revisão independente.', 'A interpretação forense foi confirmada pelo operador.', []],
-    ['REJECT_FORENSIC', 'Não promover', 'Interrompe a demanda para nova formulação.', 'A interpretação forense não foi aprovada e deve ser revisada.', []],
+    ['CONFIRM_FORENSIC', 'Confirmar contrato forense', 'Autoriza a promoção após a revisão independente.', 'A interpretação forense foi confirmada pelo operador.', [], {}],
+    ['REJECT_FORENSIC', 'Não promover', 'Interrompe a demanda para nova formulação.', 'A interpretação forense não foi aprovada e deve ser revisada.', [], {}],
   ]]],
   riskProfile: 'forensic',
   stateModel: { kind: 'STATE_TRANSITION', bindings },
@@ -586,7 +586,7 @@ writeFileSync(path, JSON.stringify(decision));
 NODE
 AEGIS_ROOT="${WORK_DIR}/confirm" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json < "${confirm_envelope}" > "${WORK_DIR}/confirm/.harness/runtime/questions.json"
-jq -e '.status == "USER_CONFIRMATION_REQUIRED" and .questions == [{id:"Q-0001",scope:"DEMAND",question:"Manter somente src/clock.ts?",evidence:"A demanda nomeia esse caminho.",impact:"Define o escopo.",interpreted:"Somente src/clock.ts e sua prova.",recommendedAnswerId:"KEEP_SCOPE",answers:[{id:"KEEP_SCOPE",label:"Manter escopo mínimo",rationale:"Preserva a menor entrega compatível.",recommended:true},{id:"EXPAND_SCOPE",label:"Ampliar escopo",rationale:"Autoriza arquivos adicionais quando necessário.",recommended:false}]}]' \
+jq -e '.status == "USER_CONFIRMATION_REQUIRED" and .questions == [{id:"Q-0001",scope:"DEMAND",question:"Manter somente src/clock.ts?",evidence:"A demanda nomeia esse caminho.",impact:"Define o escopo.",interpreted:"Somente src/clock.ts e sua prova.",recommendedAnswerId:"KEEP_SCOPE",answers:[{id:"KEEP_SCOPE",label:"Manter escopo mínimo",rationale:"Preserva a menor entrega compatível.",resolutionClause:"O escopo fica limitado a src/clock.ts e sua prova.",contractPatchDigest:(.questions[0].answers[0].contractPatchDigest),recommended:true},{id:"EXPAND_SCOPE",label:"Ampliar escopo",rationale:"Autoriza arquivos adicionais quando necessário.",resolutionClause:"O escopo pode incluir arquivos adicionais explicitamente aprovados.",contractPatchDigest:(.questions[0].answers[1].contractPatchDigest),recommended:false}]}] and (.questions[0].answers | all(.contractPatchDigest | test("^[a-f0-9]{64}$")))' \
   "${WORK_DIR}/confirm/.harness/runtime/questions.json" >/dev/null
 node --input-type=module - "${WORK_DIR}/confirm/.harness/runtime/decision.json" "${confirm_envelope}" "${WORK_DIR}/confirm/.harness/runtime/resolution.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -636,12 +636,27 @@ source.questions = [[
   'Interpretado: cost consome somente capacidade e now é entrada explícita, sem débito financeiro implícito.',
   units,
   [
-    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']]],
-    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']]],
+    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost consome somente capacidade; amount é o único débito financeiro.', [0]], ['now é entrada explícita e não pode regredir.', [0]]]}],
+    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost é taxa financeira com destino rastreável e conservação explícita.', [0]], ['now é entrada explícita e não pode regredir.', [0]]]}],
   ],
 ]];
 writeFileSync(destination, JSON.stringify(source));
 NODE
+# A selectable policy may not be a cosmetic label. Every state-policy answer
+# must carry the precompiled clauses that become authoritative on selection.
+node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" "${WORK_DIR}/selected-forensic/.harness/runtime/missing-patch.json" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [sourcePath, destination] = process.argv.slice(2);
+const decision = JSON.parse(readFileSync(sourcePath, 'utf8'));
+decision.questions[0][7][0][5] = {};
+writeFileSync(destination, JSON.stringify(decision));
+NODE
+if AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/missing-patch.json < "${selected_envelope}" >/dev/null 2> "${WORK_DIR}/selected-forensic/.harness/runtime/missing-patch.err"; then
+  echo 'state-policy answer without a contract patch was accepted' >&2
+  exit 1
+fi
+grep -q 'question_answer_contract_patch_missing' "${WORK_DIR}/selected-forensic/.harness/runtime/missing-patch.err"
 node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/resolution.json" <<'NODE'
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -691,7 +706,7 @@ AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_pr
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --independent-review .harness/runtime/review.json < "${selected_envelope}" \
   > "${WORK_DIR}/selected-forensic/.harness/runtime/result.json"
-jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2)' \
+jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2) and ([.contract.behavior[].statement] | index("cost consome somente capacidade; amount é o único débito financeiro."))' \
   "${WORK_DIR}/selected-forensic/src/.aegis/semantic-state.json" >/dev/null
 
 # A hard architecture signal cannot be silently rewritten into a new public API.
@@ -750,8 +765,8 @@ const decision = JSON.parse(readFileSync(path, 'utf8'));
 decision.status = 'NEEDS_CONFIRMATION';
 decision.requirements[0][1] = 'ARCHITECTURE_DEFAULT';
 decision.questions = [['ARCHITECTURE', 'A demanda pede Date.now(), mas a arquitetura exige tempo explícito. Confirmar initialTime e now?', 'Date.now foi detectado.', 'Altera a API pública.', 'EXPLICIT_TIME', 'Interpretado: substituir Date.now por parâmetros explícitos.', decision.requirements[0][2], [
-  ['EXPLICIT_TIME', 'Usar tempo explícito', 'Preserva determinismo arquitetural.', 'A API recebe initialTime e now explícitos.', []],
-  ['REQUEST_AMENDMENT', 'Solicitar emenda', 'Mantém Date.now somente com exceção formal.', 'A mudança depende de emenda arquitetural aprovada.', []],
+  ['EXPLICIT_TIME', 'Usar tempo explícito', 'Preserva determinismo arquitetural.', 'A API recebe initialTime e now explícitos.', [], {}],
+  ['REQUEST_AMENDMENT', 'Solicitar emenda', 'Mantém Date.now somente com exceção formal.', 'A mudança depende de emenda arquitetural aprovada.', [], {}],
 ]]];
 writeFileSync(path, JSON.stringify(decision));
 NODE

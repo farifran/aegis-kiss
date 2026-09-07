@@ -14,6 +14,43 @@ export function selectedAnswer(question, answerId) {
   return question[7].find(([id]) => id === answerId);
 }
 
+const patchFields = ['behaviors', 'preconditions', 'invariants', 'postconditions', 'failures', 'proofs'];
+
+function normalizedLiteral(value) {
+  return value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+}
+
+function patchStatements(patch) {
+  return [
+    ...(patch.behaviors ?? []).map(([statement]) => statement),
+    ...(patch.preconditions ?? []).map(([statement]) => statement),
+    ...(patch.invariants ?? []).map(([statement]) => statement),
+    ...(patch.postconditions ?? []).map(([statement]) => statement),
+    ...(patch.failures ?? []).flatMap(([trigger, outcome]) => [trigger, outcome]),
+    ...(patch.proofs ?? []).flatMap(([, risk, statement]) => [risk, statement]),
+  ];
+}
+
+export function contractPatchCoverageError(policies, patch) {
+  if (policies.length === 0) return;
+  const statements = patchStatements(patch).map(normalizedLiteral);
+  if (statements.length === 0) return 'question_answer_contract_patch_missing';
+  for (const [, policy] of policies) {
+    const literal = normalizedLiteral(policy);
+    if (!statements.some((statement) => statement.includes(literal))) {
+      return 'question_answer_contract_patch_policy_missing';
+    }
+  }
+  return undefined;
+}
+
+function applyContractPatch(decision, patch) {
+  for (const field of patchFields) {
+    if (patch[field] === undefined) continue;
+    decision[field].push(...patch[field]);
+  }
+}
+
 export function resolvePreflightDecision(decision, resolution) {
   if (decision.status !== 'NEEDS_CONFIRMATION') {
     if (resolution !== null) fail('resolution_not_allowed');
@@ -32,7 +69,9 @@ export function resolvePreflightDecision(decision, resolution) {
     if (answer.action === 'CORRECT_INTERPRETATION') fail('resolution_requires_semantic_revision');
     const selected = selectedAnswer(question, answer.answerId);
     if (selected === undefined) fail(`resolution_unknown_answer:${id}`);
-    const [answerId, label, rationale, resolutionClause, policies] = selected;
+    const [answerId, label, rationale, resolutionClause, policies, contractPatch] = selected;
+    const coverageError = contractPatchCoverageError(policies, contractPatch);
+    if (coverageError !== undefined) fail(coverageError);
     clarifications.push({
       questionId: id,
       answerId,
@@ -62,5 +101,10 @@ export function resolvePreflightDecision(decision, resolution) {
       ? [role, 'EXPLICIT', statePolicies.get(role), sourceIndexes]
       : [role, disposition, statement, sourceIndexes]
   ));
+  decision.questions.forEach((question, index) => {
+    const answer = answersByQuestion.get(questionId(index));
+    const selected = selectedAnswer(question, answer.answerId);
+    applyContractPatch(resolved, selected[5]);
+  });
   return { decision: resolved, clarifications, clarificationRoles: new Set(statePolicies.keys()) };
 }

@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { validateContract } from './lib/contract_validator.mjs';
 import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
-import { questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
+import { contractPatchCoverageError, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 import { semanticStatePath, semanticStateRelativePath } from './lib/semantic_state.mjs';
 
@@ -336,10 +336,12 @@ function validateQuestionChoices(envelope, decision) {
     const requiredRoles = decision.stateSemantics
       .filter(([, disposition, , sourceIndexes]) => disposition === 'QUESTION_REQUIRED' && sourceIndexes.some((index) => questionUnits.has(index)))
       .map(([role]) => role);
-    for (const [, , , , policies] of question[7]) {
+    for (const [, , , , policies, contractPatch] of question[7]) {
       const roles = policies.map(([role]) => role);
       if (roles.length !== new Set(roles).size) fail('question_answer_state_policy_duplicate');
       exactIds(roles, requiredRoles, 'question_answer_state_policy_coverage_invalid');
+      const coverageError = contractPatchCoverageError(policies, contractPatch);
+      if (coverageError !== undefined) fail(coverageError);
     }
   }
 }
@@ -735,7 +737,14 @@ if (decisionFile.value.status === 'NEEDS_CONFIRMATION' && options.resolution.len
       impact,
       interpreted,
       recommendedAnswerId,
-      answers: answers.map(([id, label, rationale]) => ({ id, label, rationale, recommended: id === recommendedAnswerId })),
+      answers: answers.map(([id, label, rationale, resolutionClause, , contractPatch]) => ({
+        id,
+        label,
+        rationale,
+        resolutionClause,
+        contractPatchDigest: canonicalDigest(contractPatch),
+        recommended: id === recommendedAnswerId,
+      })),
     })),
   })}\n`);
   process.exit(0);

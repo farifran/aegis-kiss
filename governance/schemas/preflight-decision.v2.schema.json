@@ -56,14 +56,26 @@
       ]
     },
     "questionAnswer": {
-      "type": "array", "minItems": 5, "maxItems": 5,
+      "type": "array", "minItems": 6, "maxItems": 6,
       "prefixItems": [
         { "type": "string", "minLength": 1, "pattern": "^[A-Z][A-Z0-9_-]*$" },
         { "type": "string", "minLength": 1 },
         { "type": "string", "minLength": 1 },
         { "type": "string", "minLength": 1 },
-        { "type": "array", "items": { "$ref": "#/$defs/statePolicyPatch" }, "uniqueItems": true }
+        { "type": "array", "items": { "$ref": "#/$defs/statePolicyPatch" }, "uniqueItems": true },
+        { "$ref": "#/$defs/contractPatch" }
       ]
+    },
+    "contractPatch": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "behaviors": { "type": "array", "items": { "$ref": "#/$defs/clause" } },
+        "preconditions": { "type": "array", "items": { "$ref": "#/$defs/clause" } },
+        "invariants": { "type": "array", "items": { "$ref": "#/$defs/invariant" } },
+        "postconditions": { "type": "array", "items": { "$ref": "#/$defs/clause" } },
+        "failures": { "type": "array", "items": { "$ref": "#/$defs/failure" } },
+        "proofs": { "type": "array", "items": { "$ref": "#/$defs/proof" } }
+      }
     },
     "statePolicyPatch": {
       "type": "array", "minItems": 2, "maxItems": 2,
