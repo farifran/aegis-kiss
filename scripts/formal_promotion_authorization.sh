@@ -172,13 +172,20 @@ contract_worktree_file() {
 }
 
 execution_id_for_base() {
-  local base="${1:-}" requested_kind="${2:-}" demand_digest="ABSENT" change_kind="BASELINE"
+  local base="${1:-}" requested_kind="${2:-}" supervisor="${3:-null}" demand_digest="ABSENT" change_kind="BASELINE" supervisor_digest=""
   if [[ -f "${repository_root}/${semantic_record}" ]]; then
     demand_digest="$(jq -r '.clarifiedDemand.normalizedDemandDigest' "${repository_root}/${semantic_record}")"
     change_kind="$(jq -r '.clarifiedDemand.changeKind' "${repository_root}/${semantic_record}")"
   fi
   [[ -z "${requested_kind}" ]] || change_kind="${requested_kind}"
-  printf 'base=%s\ndemand=%s\nkind=%s\n' "${base}" "${demand_digest}" "${change_kind}" | shasum -a 256 | awk '{print $1}'
+  if [[ -n "${supervisor}" && "${supervisor}" != "null" ]]; then
+    supervisor_digest="$(jq -r '.configDigest // empty' <<< "${supervisor}")"
+  fi
+  if [[ -n "${supervisor_digest}" ]]; then
+    printf 'base=%s\ndemand=%s\nkind=%s\nsupervisor=%s\n' "${base}" "${demand_digest}" "${change_kind}" "${supervisor_digest}" | shasum -a 256 | awk '{print $1}'
+  else
+    printf 'base=%s\ndemand=%s\nkind=%s\n' "${base}" "${demand_digest}" "${change_kind}" | shasum -a 256 | awk '{print $1}'
+  fi
 }
 
 validation_authority_json() {
@@ -234,7 +241,7 @@ write_receipt() {
   auth_dir="$(dirname "${auth_file}")"
   now="$(date +%s)"
   expires=$((now + 900))
-  execution_id="$(execution_id_for_base "${base}" "${change_kind}")"
+  execution_id="$(execution_id_for_base "${base}" "${change_kind}" "${supervisor}")"
   inventory_digest="$(supplemental_inventory_digest "${base}")"
   mkdir -p "${auth_dir}"
   jq -n \
