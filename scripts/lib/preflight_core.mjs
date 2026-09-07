@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer';
-import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { relative, resolve, sep } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import process from 'node:process';
+import { clearTimeout, setTimeout } from 'node:timers';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
@@ -17,6 +17,18 @@ const discoveryMaxCandidates = 12;
 const discoveryMaxTrackedPaths = 10_000;
 const discoveryMaxSymbolAnchors = 8;
 const discoveryMaxLexicalTerms = 64;
+const discoveryBudgetMs = 3_000;
+const discoveryScanner = Object.freeze({
+  id: 'aegis.layer0',
+  version: 2,
+  algorithmDigest: canonicalDigest({
+    input: 'git_tree_and_fixed_string_grep',
+    contentReads: false,
+    automaticRoots: { PRODUCT: ['src'], HARNESS: ['*'] },
+    candidateReasons: ['explicit_target', 'explicit_path', 'previous_contract_scope', 'path_term_match', 'symbol_match'],
+    ranking: 'highest_reason_score_then_code_unit_path',
+  }),
+});
 const semanticProtocolVersion = 'aegis.semantic_protocol.v2';
 const knownFileExtension = /\.(?:c|cc|cpp|css|go|h|hpp|html|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|txt|xml|yaml|yml)$/iu;
 
@@ -260,65 +272,131 @@ export function normalizeDemand(rawBytes, maxBytes = maxDemandBytes) {
   return normalized;
 }
 
-function safePath(root, value) {
+function pathFact(tree, kind, value, source = {}) {
   let canonical;
   try {
     canonical = canonicalRepositoryPath(value);
   } catch {
-    return undefined;
+    return { kind, value, status: 'DISPROVEN', evidence: 'unsafe_relative_path', ...source };
   }
-  const absolute = resolve(root, canonical);
-  const relation = relative(root, absolute);
-  if (relation === '..' || relation.startsWith('..' + sep)) return undefined;
-  return absolute;
-}
-
-function containsSymlink(root, absolute) {
-  const relation = relative(root, absolute);
-  let cursor = root;
-  for (const part of relation.split(sep).filter(Boolean)) {
-    cursor = resolve(cursor, part);
-    if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) return true;
-  }
-  return false;
-}
-
-function pathFact(root, kind, value, source = {}) {
-  const absolute = safePath(root, value);
-  if (absolute === undefined) return { kind, value, status: 'DISPROVEN', evidence: 'unsafe_relative_path', ...source };
-  if (!existsSync(absolute)) return { kind, value, status: 'DISPROVEN', evidence: 'path_not_found', ...source };
-  if (containsSymlink(root, absolute)) return { kind, value, status: 'DISPROVEN', evidence: 'symlink_not_allowed', ...source };
-  const stat = lstatSync(absolute);
-  if (stat.isDirectory()) return { kind, value, status: 'PROVEN', evidence: 'directory_exists', ...source };
-  if (stat.isFile()) return { kind, value, status: 'PROVEN', evidence: 'file_exists', ...source };
+  const entry = tree.entries.get(canonical);
+  if (entry === undefined && !tree.complete) return { kind, value, status: 'UNPROVEN', evidence: 'baseline_tree_incomplete', ...source };
+  if (entry === undefined) return { kind, value, status: 'DISPROVEN', evidence: 'path_not_found_in_baseline', ...source };
+  if (entry.kind === 'symlink') return { kind, value, status: 'DISPROVEN', evidence: 'symlink_not_allowed', ...source };
+  if (entry.kind === 'directory') return { kind, value, status: 'PROVEN', evidence: 'directory_exists_in_baseline', ...source };
+  if (entry.kind === 'file') return { kind, value, status: 'PROVEN', evidence: 'file_exists_in_baseline', ...source };
   return { kind, value, status: 'DISPROVEN', evidence: 'special_path_not_allowed', ...source };
 }
 
-function referenceFact(root, reference) {
+function referenceFact(tree, reference) {
   const source = { unitId: reference.unitId, range: reference.range };
-  if (reference.kind === 'path') return pathFact(root, 'path', reference.value, source);
+  if (reference.kind === 'path') return pathFact(tree, 'path', reference.value, source);
   if (reference.kind === 'url') return { kind: 'url', value: reference.value, status: 'UNPROVEN', evidence: 'external_reference_not_verified', ...source };
   return { kind: 'symbol', value: reference.value, status: 'UNPROVEN', evidence: 'semantic_resolution_requires_ide', ...source };
 }
 
-function discoveryGit(root, args) {
-  try {
-    return {
-      status: 'PROVEN',
-      bytes: execFileSync('git', ['-C', root, ...args], {
-        encoding: 'buffer',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        env: gitEnvironment(),
-        timeout: gitTimeoutMs,
-        maxBuffer: discoveryGitMaxBytes,
-      }),
+function createDiscoveryDeadline() {
+  return process.hrtime.bigint() + BigInt(discoveryBudgetMs) * 1_000_000n;
+}
+
+function remainingDiscoveryMs(deadline) {
+  const remaining = deadline - process.hrtime.bigint();
+  return Number(remaining > 0n ? remaining / 1_000_000n : 0n);
+}
+
+function discoveryGit(root, args, deadline, stopWhenRecord = undefined) {
+  const timeout = remainingDiscoveryMs(deadline);
+  if (timeout < 1) return Promise.resolve({ status: 'INCOMPLETE', bytes: Buffer.alloc(0), reason: 'budget_exhausted' });
+  return new Promise((resolveResult) => {
+    const chunks = [];
+    let byteCount = 0;
+    let remainder = Buffer.alloc(0);
+    let terminalReason;
+    let completed = false;
+    let timer;
+    const child = spawn('git', ['-C', root, ...args], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: gitEnvironment(),
+    });
+    const finish = (result) => {
+      if (completed) return;
+      completed = true;
+      if (timer !== undefined) clearTimeout(timer);
+      resolveResult(result);
     };
-  } catch (error) {
-    if (error?.status === 1 && args[0] === 'grep') {
-      return { status: 'PROVEN', bytes: Buffer.alloc(0) };
-    }
-    return { status: 'INCOMPLETE', bytes: Buffer.alloc(0) };
+    const stop = (reason) => {
+      if (terminalReason !== undefined) return;
+      terminalReason = reason;
+      child.kill('SIGTERM');
+    };
+    timer = setTimeout(() => stop('budget_exhausted'), timeout);
+    child.stdout.on('data', (chunk) => {
+      if (terminalReason !== undefined) return;
+      const remaining = discoveryGitMaxBytes - byteCount;
+      if (chunk.length > remaining) {
+        if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+        byteCount = discoveryGitMaxBytes;
+        stop('git_output_limit');
+        return;
+      }
+      chunks.push(chunk);
+      byteCount += chunk.length;
+      if (stopWhenRecord === undefined) return;
+      const joined = remainder.length === 0 ? chunk : Buffer.concat([remainder, chunk]);
+      let start = 0;
+      for (let index = 0; index < joined.length; index += 1) {
+        if (joined[index] !== 0) continue;
+        if (stopWhenRecord(joined.subarray(start, index))) {
+          stop('tracked_paths_limit');
+          return;
+        }
+        start = index + 1;
+      }
+      remainder = joined.subarray(start);
+    });
+    child.once('error', () => finish({ status: 'INCOMPLETE', bytes: Buffer.alloc(0), reason: 'git_failure' }));
+    child.once('close', (code) => {
+      if (terminalReason !== undefined) {
+        finish({ status: 'INCOMPLETE', bytes: Buffer.concat(chunks), reason: terminalReason });
+      } else if (code === 0 || (code === 1 && args[0] === 'grep')) {
+        finish({ status: 'PROVEN', bytes: Buffer.concat(chunks), reason: undefined });
+      } else {
+        finish({ status: 'INCOMPLETE', bytes: Buffer.alloc(0), reason: 'git_failure' });
+      }
+    });
+  });
+}
+
+function treeEntry(raw) {
+  const tab = raw.indexOf(0x09);
+  if (tab < 0) return undefined;
+  const [mode, type] = raw.subarray(0, tab).toString('utf8').split(' ');
+  const path = raw.subarray(tab + 1).toString('utf8');
+  try {
+    canonicalRepositoryPath(path);
+  } catch {
+    return undefined;
   }
+  const kind = mode === '120000'
+    ? 'symlink'
+    : type === 'tree'
+      ? 'directory'
+      : type === 'blob'
+        ? 'file'
+        : 'special';
+  return { path, kind };
+}
+
+function treeEntries(bytes) {
+  const entries = new Map();
+  let start = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] !== 0) continue;
+    const entry = treeEntry(bytes.subarray(start, index));
+    if (entry !== undefined) entries.set(entry.path, { kind: entry.kind });
+    start = index + 1;
+  }
+  return entries;
 }
 
 function discoveryTerms(text) {
@@ -360,35 +438,56 @@ function isAutomaticDiscoveryPath(changeKind, path) {
   return changeKind === 'HARNESS' || path === 'src' || path.startsWith('src/');
 }
 
-function discoverRepository(root, commit, normalizedDemand, target, previousContract, changeKind) {
-  const listing = discoveryGit(root, ['ls-tree', '-r', '--name-only', '-z', commit]);
-  const allTrackedPaths = listing.bytes.toString('utf8').split('\0').filter(Boolean);
+async function discoverRepository(root, commit, normalizedDemand, targetHint, previousContract, changeKind) {
+  const deadline = createDiscoveryDeadline();
+  let eligibleEntryCount = 0;
+  const listing = await discoveryGit(
+    root,
+    ['ls-tree', '-r', '-t', '-z', commit],
+    deadline,
+    (raw) => {
+      const entry = treeEntry(raw);
+      if (entry?.kind !== 'file' || !isAutomaticDiscoveryPath(changeKind, entry.path)) return false;
+      eligibleEntryCount += 1;
+      return eligibleEntryCount > discoveryMaxTrackedPaths;
+    },
+  );
+  const entries = treeEntries(listing.bytes);
+  const tree = { entries, complete: listing.status === 'PROVEN' };
+  const allTrackedPaths = [...entries]
+    .filter(([, entry]) => entry.kind === 'file')
+    .map(([path]) => path);
   const eligiblePaths = allTrackedPaths.filter((path) => isAutomaticDiscoveryPath(changeKind, path));
   const trackedPaths = eligiblePaths.slice(0, discoveryMaxTrackedPaths);
   const tracked = new Set(trackedPaths);
-  const allTracked = new Set(allTrackedPaths);
   const candidates = new Map();
-  const addCandidate = (path, reason, score, exists = tracked.has(path)) => {
+  const existenceFor = (path) => entries.has(path) ? true : tree.complete ? false : null;
+  const addCandidate = (path, reason, score, exists = existenceFor(path), anchors = []) => {
     let canonical;
     try {
       canonical = canonicalRepositoryPath(path);
     } catch {
       return;
     }
-    const current = candidates.get(canonical) ?? { path: canonical, exists, score: 0, reasons: new Set() };
-    current.exists ||= exists;
+    const current = candidates.get(canonical) ?? { path: canonical, exists, score: 0, reasons: new Set(), anchors: new Set() };
+    current.exists = current.exists === true || exists === true
+      ? true
+      : current.exists === false || exists === false
+        ? false
+        : null;
     current.score = Math.max(current.score, score);
     current.reasons.add(reason);
+    for (const anchor of anchors) current.anchors.add(anchor);
     candidates.set(canonical, current);
   };
 
-  if (target.value.length > 0) addCandidate(target.value, 'explicit_target', 100, target.status === 'PROVEN');
+  if (targetHint.length > 0) addCandidate(targetHint, 'explicit_target', 100, existenceFor(targetHint));
   for (const reference of normalizedDemand.references) {
-    if (reference.kind === 'path') addCandidate(reference.value, 'explicit_path', 100, allTracked.has(reference.value));
+    if (reference.kind === 'path') addCandidate(reference.value, 'explicit_path', 100, existenceFor(reference.value), [reference.unitId]);
   }
   for (const path of previousContract?.scope.authorizedPaths ?? []) {
     if (path !== 'src/.aegis/semantic-state.json' && isAutomaticDiscoveryPath(changeKind, path)) {
-      addCandidate(path, 'previous_contract_scope', 80, allTracked.has(path));
+      addCandidate(path, 'previous_contract_scope', 80, existenceFor(path));
     }
   }
 
@@ -399,42 +498,48 @@ function discoverRepository(root, commit, normalizedDemand, target, previousCont
     const terms = discoveryTerms(normalizedDemand.text);
     for (const path of trackedPaths) {
       const overlap = [...pathTerms(path)].filter((term) => terms.has(term));
-      if (overlap.length > 0) addCandidate(path, 'path_term_match', 20 + Math.min(overlap.length, 5), true);
+      if (overlap.length > 0) addCandidate(path, 'path_term_match', 20 + Math.min(overlap.length, 5), true, overlap);
     }
   }
 
   const explicitSymbolCount = normalizedDemand.references.filter((item) => item.kind === 'symbol').length;
   const symbols = discoverySymbols(normalizedDemand, strongTrackedCandidateCount === 0);
-  let symbolSearchStatus = 'NOT_APPLICABLE';
+  let symbolSearch = { status: 'NOT_APPLICABLE', reason: undefined };
   if (symbols.length > 0 && (explicitSymbolCount > 0 || strongTrackedCandidateCount === 0)) {
     const grepArguments = ['grep', '-l', '-z', '-I', '-F'];
     for (const symbol of symbols) grepArguments.push('-e', symbol);
     grepArguments.push(commit, '--');
     if (changeKind === 'PRODUCT') grepArguments.push('src');
-    const matches = discoveryGit(root, grepArguments);
-    symbolSearchStatus = matches.status;
+    const matches = await discoveryGit(root, grepArguments, deadline);
+    symbolSearch = matches;
     if (matches.status === 'PROVEN') {
       const prefix = `${commit}:`;
       for (const rawPath of matches.bytes.toString('utf8').split('\0').filter(Boolean)) {
         const path = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
-        addCandidate(path, 'symbol_match', 60, tracked.has(path));
+        addCandidate(path, 'symbol_match', 60, existenceFor(path), symbols);
       }
     }
   }
 
-  const incomplete = listing.status === 'INCOMPLETE'
-    || eligiblePaths.length > discoveryMaxTrackedPaths
-    || symbolSearchStatus === 'INCOMPLETE';
+  const incompleteReasons = [...new Set([
+    ...(listing.status === 'INCOMPLETE' ? [listing.reason] : []),
+    ...(listing.reason === 'tracked_paths_limit' ? ['tracked_paths_limit'] : []),
+    ...(symbolSearch.status === 'INCOMPLETE' ? [symbolSearch.reason] : []),
+    ...(remainingDiscoveryMs(deadline) < 1 ? ['budget_exhausted'] : []),
+  ].filter(Boolean))].sort();
+  const incomplete = incompleteReasons.length > 0;
   const selected = [...candidates.values()]
     .sort((left, right) => right.score - left.score || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
     .slice(0, discoveryMaxCandidates)
-    .map(({ path, exists, reasons }) => ({ path, exists, reasons: [...reasons].sort() }));
+    .map(({ path, exists, reasons, anchors }) => ({ path, exists, reasons: [...reasons].sort(), anchors: [...anchors].sort() }));
   const body = {
-    schema: 'aegis.discovery.v1',
+    schema: 'aegis.discovery.v2',
+    scanner: discoveryScanner,
     status: incomplete ? 'INCOMPLETE' : selected.length > 0 ? 'CANDIDATES' : trackedPaths.length === 0 ? 'NOT_APPLICABLE' : 'UNKNOWN',
     demandDigest: normalizedDemand.digest,
     baseCommit: commit,
     candidates: selected,
+    incompleteReasons,
     coverage: {
       trackedPaths: allTrackedPaths.length,
       eligiblePaths: eligiblePaths.length,
@@ -448,10 +553,10 @@ function discoverRepository(root, commit, normalizedDemand, target, previousCont
       maxSymbolAnchors: discoveryMaxSymbolAnchors,
       maxLexicalTerms: discoveryMaxLexicalTerms,
       maxGitBytes: discoveryGitMaxBytes,
-      gitTimeoutMs,
+      budgetMs: discoveryBudgetMs,
     },
   };
-  return { ...body, digest: canonicalDigest(body) };
+  return { discovery: { ...body, digest: canonicalDigest(body) }, tree };
 }
 
 export function loadArchitecturePolicy(root, commit = undefined) {
@@ -529,19 +634,20 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
   const baseline = repositorySnapshot(canonical);
   if (!baseline.clean) throw new Error('preflight_requires_clean_worktree');
   const normalizedDemand = normalizeDemand(rawBytes);
-  const target = requestedTarget.length === 0
-    ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
-    : pathFact(canonical, 'target', requestedTarget);
+  const targetHint = requestedTarget.length === 0 ? '' : requestedTarget;
   const architecture = loadArchitecture(canonical, baseline.commit);
   const previousEvidence = loadPreviousEvidence(canonical, baseline.commit);
   const previousContract = previousEvidence?.contract ?? null;
   const previousProofRegistry = previousEvidence?.proofRegistry ?? null;
-  const discovery = discoverRepository(canonical, baseline.commit, normalizedDemand, target, previousContract, changeKind);
+  const discoveryResult = await discoverRepository(canonical, baseline.commit, normalizedDemand, targetHint, previousContract, changeKind);
+  const target = targetHint.length === 0
+    ? { kind: 'target', value: '', status: 'NOT_APPLICABLE', evidence: 'no_target_hint' }
+    : pathFact(discoveryResult.tree, 'target', targetHint);
   const factBody = {
     schema: 'aegis.preflight_facts.v2',
     target,
-    references: normalizedDemand.references.map((reference) => referenceFact(canonical, reference)),
-    discovery,
+    references: normalizedDemand.references.map((reference) => referenceFact(discoveryResult.tree, reference)),
+    discovery: discoveryResult.discovery,
   };
   const mechanicalFacts = { ...factBody, digest: canonicalDigest(factBody) };
   const previousContractDigest = previousContract === null ? null : canonicalDigest(previousContract);

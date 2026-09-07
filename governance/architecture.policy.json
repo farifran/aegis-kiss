@@ -1,9 +1,9 @@
 {
   "schema": "aegis.architecture_policy.v1",
-  "policyVersion": 1,
+  "policyVersion": 2,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "86ff77156993cea31dfd1b8b75ead81df8a989f9c2b2849efe4d1f2cf1e131df"
+    "sourceDigest": "473403f33e05cd70d8a574b86279e529221239f45af9d0b9deff2640c89a3e21"
   },
   "rules": [
     {
@@ -17,8 +17,8 @@
       "appliesMode": "any",
       "sourceRanges": [
         {
-          "startByte": 1075,
-          "endByte": 1316
+          "startByte": 1514,
+          "endByte": 1667
         }
       ]
     },
@@ -35,8 +35,8 @@
       ],
       "sourceRanges": [
         {
-          "startByte": 1316,
-          "endByte": 1657
+          "startByte": 1762,
+          "endByte": 2002
         }
       ]
     }

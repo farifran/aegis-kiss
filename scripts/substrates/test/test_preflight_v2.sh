@@ -78,6 +78,7 @@ for fixture_index in $(seq -w 1 16); do
     > "${WORK_DIR}/direct/src/shared-anchor-${fixture_index}.ts"
 done
 printf 'export const SharedAnchor = true;\n' > "${WORK_DIR}/direct/governance/hiddenDiscovery.ts"
+ln -s 'clockSupport.ts' "${WORK_DIR}/direct/src/linked-clock.ts"
 git -C "${WORK_DIR}/direct" add src governance/hiddenDiscovery.ts
 git -C "${WORK_DIR}/direct" commit -qm 'add discovery fixtures'
 demand=$'\357\273\277# Criar\r\nUse bigint de Clock.now() em `src/clock.ts`.\rConsulte https://example.test/spec\n'
@@ -100,6 +101,10 @@ jq -e '
   and (.normalizedDemand.references | any(.kind == "symbol" and .value == "Clock.now"))
   and (.mechanicalFacts.references | any(.kind == "url" and .status == "UNPROVEN"))
   and .mechanicalFacts.discovery.status == "CANDIDATES"
+  and .mechanicalFacts.discovery.schema == "aegis.discovery.v2"
+  and .mechanicalFacts.discovery.scanner == {id:"aegis.layer0",version:2,algorithmDigest:.mechanicalFacts.discovery.scanner.algorithmDigest}
+  and (.mechanicalFacts.discovery.scanner.algorithmDigest | test("^[a-f0-9]{64}$"))
+  and .mechanicalFacts.discovery.incompleteReasons == []
   and .mechanicalFacts.discovery.demandDigest == .normalizedDemand.digest
   and .mechanicalFacts.discovery.baseCommit == .baseCommit
   and (.mechanicalFacts.discovery.candidates | length <= 12)
@@ -158,6 +163,16 @@ jq -e '
   | any(.path == "src/space folder/item.ts" and .exists == true and (.reasons | index("explicit_path")))
 ' "${WORK_DIR}/space-path.json" >/dev/null
 
+# Path facts are resolved from the frozen Git tree. A tracked symlink is never
+# presented as a safe file merely because it exists in the live worktree.
+printf '%s' 'Atualize `src/linked-clock.ts`.' \
+  | AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope > "${WORK_DIR}/symlink-path.json"
+jq -e '
+  .mechanicalFacts.references
+  | any(.kind == "path" and .value == "src/linked-clock.ts" and .status == "DISPROVEN" and .evidence == "symlink_not_allowed")
+' "${WORK_DIR}/symlink-path.json" >/dev/null
+
 # A large project never turns the layer-zero scan into an unbounded operation.
 # It returns INCOMPLETE with explicit limits, leaving semantic investigation to
 # the IDE instead of claiming exhaustive discovery.
@@ -167,7 +182,7 @@ real_git="$(command -v git)"
 cat > "${WORK_DIR}/bounded-bin/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${3:-}" == "ls-tree" ]]; then
-  for index in $(seq 1 10001); do printf 'src/many/file-%s.ts\0' "${index}"; done
+  for index in $(seq 1 10001); do printf '100644 blob 0000000000000000000000000000000000000000\tsrc/many/file-%s.ts\0' "${index}"; done
   exit 0
 fi
 exec "${AEGIS_TEST_REAL_GIT}" "$@"
@@ -177,10 +192,33 @@ printf '%s' 'Ajuste zqxvbnm.' | PATH="${WORK_DIR}/bounded-bin:${PATH}" AEGIS_TES
   --kind PRODUCT --internal-envelope > "${WORK_DIR}/bounded-discovery.json"
 jq -e '
   .mechanicalFacts.discovery.status == "INCOMPLETE"
-  and .mechanicalFacts.discovery.coverage.eligiblePaths == 10001
+  and .mechanicalFacts.discovery.incompleteReasons == ["tracked_paths_limit"]
+  and .mechanicalFacts.discovery.coverage.eligiblePaths >= 10001
   and .mechanicalFacts.discovery.coverage.consideredPaths == 10000
-  and .mechanicalFacts.discovery.limits == {maxCandidates:12,maxTrackedPaths:10000,maxSymbolAnchors:8,maxLexicalTerms:64,maxGitBytes:4194304,gitTimeoutMs:3000}
+  and .mechanicalFacts.discovery.limits == {maxCandidates:12,maxTrackedPaths:10000,maxSymbolAnchors:8,maxLexicalTerms:64,maxGitBytes:4194304,budgetMs:3000}
 ' "${WORK_DIR}/bounded-discovery.json" >/dev/null
+
+# An unavailable baseline tree produces unknown facts, never a false claim that
+# an explicit path is absent. The semantic compiler can then request IDE help.
+prepare_repository "${WORK_DIR}/tree-unavailable"
+mkdir -p "${WORK_DIR}/tree-unavailable-bin"
+cat > "${WORK_DIR}/tree-unavailable-bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${3:-}" == "ls-tree" ]]; then
+  exit 2
+fi
+exec "${AEGIS_TEST_REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK_DIR}/tree-unavailable-bin/git"
+printf '%s' 'Atualize `src/example.ts`.' \
+  | PATH="${WORK_DIR}/tree-unavailable-bin:${PATH}" AEGIS_TEST_REAL_GIT="${real_git}" AEGIS_ROOT="${WORK_DIR}/tree-unavailable" node "${ROOT_DIR}/scripts/preflight.mjs" \
+    --kind PRODUCT --internal-envelope > "${WORK_DIR}/tree-unavailable.json"
+jq -e '
+  .mechanicalFacts.discovery.status == "INCOMPLETE"
+  and .mechanicalFacts.discovery.incompleteReasons == ["git_failure"]
+  and (.mechanicalFacts.references | any(.kind == "path" and .value == "src/example.ts" and .status == "UNPROVEN" and .evidence == "baseline_tree_incomplete"))
+  and (.mechanicalFacts.discovery.candidates | any(.path == "src/example.ts" and .exists == null))
+' "${WORK_DIR}/tree-unavailable.json" >/dev/null
 
 node --input-type=module - "${envelope}" "${WORK_DIR}/direct/.harness/runtime/blocked.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
