@@ -8,7 +8,7 @@ import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
-import { validateContract } from './lib/contract_validator.mjs';
+import { transitionAdversarialClasses, validateContract } from './lib/contract_validator.mjs';
 import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
 import { contractPatchCoverageError, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
@@ -269,6 +269,7 @@ function validateStateModel(envelope, decision) {
   const { stateModel } = decision;
   if (stateModel.kind === 'NONE') {
     if (stateModel.bindings.length !== 0) fail('invalid_stateless_state_model');
+    if (stateModel.governance !== undefined) fail('invalid_stateless_transition_governance');
     return { requiresIndependentReview: false };
   }
 
@@ -283,8 +284,36 @@ function validateStateModel(envelope, decision) {
   }
   const highRisk = roles.includes('ATOMICITY')
     && ['RESOURCE', 'TEMPORAL', 'IDENTITY', 'CANONICALIZATION'].some((role) => roles.includes(role));
+  validateTransitionGovernance(decision, roles);
   if (highRisk && decision.riskProfile !== 'forensic') fail('state_transition_requires_forensic');
   return { requiresIndependentReview: decision.riskProfile === 'forensic' };
+}
+
+function validateTransitionGovernance(decision, roles) {
+  const governance = decision.stateModel.governance;
+  if (governance === undefined) fail('transition_governance_missing');
+  const proofCount = decision.proofs.length;
+  const validateProofIndexes = (indexes, code) => {
+    requireIndexes(indexes, proofCount, code);
+    if (indexes.length === 0) fail(code);
+  };
+  validateProofIndexes(governance.authoritativeState[1], 'authoritative_state_without_proof');
+  if (governance.publicationAuthorities.length === 0) fail('publication_authority_missing');
+  const authorityNames = governance.publicationAuthorities.map(([operation]) => operation);
+  if (authorityNames.length !== new Set(authorityNames).size) fail('duplicate_publication_authority');
+  for (const [, , , proofIndexes] of governance.publicationAuthorities) {
+    validateProofIndexes(proofIndexes, 'publication_authority_without_proof');
+  }
+  validateProofIndexes(governance.publicationBoundary[1], 'publication_boundary_without_proof');
+  const observableNames = governance.derivedObservables.map(([name]) => name);
+  if (observableNames.length !== new Set(observableNames).size) fail('duplicate_derived_observable');
+  for (const [, , , proofIndexes] of governance.derivedObservables) {
+    validateProofIndexes(proofIndexes, 'derived_observable_without_proof');
+  }
+  if (governance.digestIdentity !== null) {
+    if (!roles.includes('CANONICALIZATION')) fail('digest_identity_without_canonicalization');
+    validateProofIndexes(governance.digestIdentity[2], 'digest_identity_without_proof');
+  }
 }
 
 function normalizedLiteral(value) {
@@ -324,6 +353,17 @@ function validateStateSemantics(envelope, decision, clarificationRoles = new Set
   if (decision.status === 'CLARIFIED' && decision.stateSemantics.some(([, disposition]) => disposition !== 'EXPLICIT')) {
     fail('clarified_state_semantics_not_explicit');
   }
+}
+
+function expectedGovernanceAssessments(decision) {
+  if (decision.stateModel.kind === 'NONE') return [];
+  return [
+    'AUTHORITATIVE_STATE',
+    'PUBLICATION_AUTHORITIES',
+    'PUBLICATION_BOUNDARY',
+    'DERIVED_OBSERVABLES',
+    'DIGEST_IDENTITY',
+  ];
 }
 
 function validateQuestionChoices(envelope, decision) {
@@ -472,6 +512,42 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
       sourceUnitIds: unitIds(envelope, sourceIndexes, 'state_semantics_unknown_unit'),
     })),
   };
+  if (decision.stateModel.kind === 'STATE_TRANSITION') {
+    const governance = decision.stateModel.governance;
+    const proofIdsFor = (indexes, code) => {
+      requireIndexes(indexes, proofIds.length, code);
+      return indexes.map((index) => proofIds[index]);
+    };
+    stateModel.governance = {
+      authoritativeState: {
+        statement: governance.authoritativeState[0],
+        proofIds: proofIdsFor(governance.authoritativeState[1], 'authoritative_state_without_proof'),
+      },
+      publicationAuthorities: governance.publicationAuthorities.map(([operation, kind, statement, proofIndexes]) => ({
+        operation,
+        kind,
+        statement,
+        proofIds: proofIdsFor(proofIndexes, 'publication_authority_without_proof'),
+      })),
+      publicationBoundary: {
+        statement: governance.publicationBoundary[0],
+        proofIds: proofIdsFor(governance.publicationBoundary[1], 'publication_boundary_without_proof'),
+      },
+      derivedObservables: governance.derivedObservables.map(([name, sourceOfTruth, derivation, proofIndexes]) => ({
+        name,
+        sourceOfTruth,
+        derivation,
+        proofIds: proofIdsFor(proofIndexes, 'derived_observable_without_proof'),
+      })),
+      digestIdentity: governance.digestIdentity === null
+        ? null
+        : {
+          purpose: governance.digestIdentity[0],
+          coveredInputs: governance.digestIdentity[1],
+          proofIds: proofIdsFor(governance.digestIdentity[2], 'digest_identity_without_proof'),
+        },
+    };
+  }
   const statements = (clauses, clauseIds) => clauses.map(([statement], index) => ({ id: clauseIds[index], statement }));
   const contract = {
     schema: 'aegis.contract_ir.v2',
@@ -484,6 +560,9 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
     },
     verification: {
       riskProfile: decision.riskProfile,
+      ...(decision.stateModel.kind === 'STATE_TRANSITION'
+        ? { adversarialClasses: transitionAdversarialClasses(decision.stateModel.bindings.map(([role]) => role)) }
+        : {}),
       ...(independentReviewDigest === null ? {} : { independentReviewDigest }),
     },
     stateModel,
@@ -595,6 +674,21 @@ async function validateIndependentReview(envelope, decision, review, decisionDig
   );
   if (!review.stateSemantics.every(([, , , sourceUnitIds]) => sourceUnitIds.every((id) => knownUnits.has(id)))) {
     fail('review_state_semantics_unknown_unit');
+  }
+  const expectedGovernance = expectedGovernanceAssessments(decision);
+  exactIds(
+    review.governanceAssessment.map(([category]) => category),
+    expectedGovernance,
+    'review_transition_governance_incomplete',
+  );
+  if (review.governanceAssessment.some(([, verdict]) => verdict === 'CONFLICT')) {
+    fail('review_transition_governance_conflict');
+  }
+  for (const [category, verdict] of review.governanceAssessment) {
+    const digestAbsent = category === 'DIGEST_IDENTITY' && decision.stateModel.governance.digestIdentity === null;
+    if (digestAbsent ? verdict !== 'NOT_APPLICABLE' : verdict !== 'COVERED') {
+      fail('review_transition_governance_mismatch');
+    }
   }
   if (review.verdict === 'APPROVED') {
     const decisionDispositions = new Map(

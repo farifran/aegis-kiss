@@ -300,6 +300,7 @@ writeFileSync(reviewPath, JSON.stringify({
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: [],
+  governanceAssessment: [],
 }));
 NODE
 cp "${WORK_DIR}/direct/.harness/runtime/decision.json" "${WORK_DIR}/direct/.harness/runtime/invalid.json"
@@ -381,7 +382,13 @@ writeFileSync(destination, JSON.stringify({
     ['REJECT_FORENSIC', 'Não promover', 'Interrompe a demanda para nova formulação.', 'A interpretação forense não foi aprovada e deve ser revisada.', [], {}],
   ]]],
   riskProfile: 'forensic',
-  stateModel: { kind: 'STATE_TRANSITION', bindings },
+  stateModel: { kind: 'STATE_TRANSITION', bindings, governance: {
+    authoritativeState: ['A tabela de entidades é o único estado autoritativo.', [0, 1]],
+    publicationAuthorities: [['process', 'TRANSITION', 'Somente process publica a tabela projetada após validação.', [1]]],
+    publicationBoundary: ['A troca da tabela projetada ocorre depois de resultado, digest e invariantes.', [1]],
+    derivedObservables: [['acceptedCount', 'decisions.status', 'count(status == committed)', [1]]],
+    digestIdentity: ['TRANSITION_IDENTITY', ['initialState', 'commands', 'time', 'finalState', 'result'], [1]],
+  } },
   stateSemantics: bindings.map(([role, , , sourceIndexes]) => [role, 'EXPLICIT', envelope.normalizedDemand.units[sourceIndexes[0]].text.trim(), sourceIndexes]),
   intent: 'Processar transição de estado forense.',
   scope: ['src/state.ts', 'src/state.proof.ts'],
@@ -435,6 +442,15 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
   exit 1
 fi
 grep -q 'state_transition_requires_forensic' "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"
+# A transition without an explicit publication model cannot be promoted merely
+# because its broad state roles look complete.
+jq 'del(.stateModel.governance)' "${WORK_DIR}/forensic/.harness/runtime/decision.json" > "${WORK_DIR}/forensic/.harness/runtime/missing-governance.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/missing-governance.json < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/missing-governance.err"; then
+  echo 'state transition without governance was accepted' >&2
+  exit 1
+fi
+grep -q 'malformed_decision' "${WORK_DIR}/forensic/.harness/runtime/missing-governance.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --producer-id producer --reviewer-id reviewer \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/review-request.json"
@@ -456,6 +472,13 @@ writeFileSync(reviewPath, JSON.stringify({
   verdict: 'APPROVED',
   findings: [],
   stateSemantics: envelope.normalizedDemand.units.length === 0 ? [] : decision.stateSemantics.map(([role, , statement]) => [role, 'EXPLICIT', statement, envelope.normalizedDemand.units.map((unit) => unit.id)]),
+  governanceAssessment: [
+    ['AUTHORITATIVE_STATE', 'COVERED', 'O estado autoritativo e sua prova foram declarados.'],
+    ['PUBLICATION_AUTHORITIES', 'COVERED', 'A única autoridade de publicação foi declarada.'],
+    ['PUBLICATION_BOUNDARY', 'COVERED', 'A publicação ocorre depois das etapas falíveis.'],
+    ['DERIVED_OBSERVABLES', 'COVERED', 'O agregado observável possui derivação e prova.'],
+    ['DIGEST_IDENTITY', 'COVERED', 'O digest declara propósito, cobertura e prova.'],
+  ],
 }));
 NODE
 # A transition cannot be marked clarified while any state policy still needs a
@@ -527,6 +550,17 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
 fi
 grep -q 'review_state_semantics_incomplete' "${WORK_DIR}/forensic/.harness/runtime/incomplete-review.err"
 
+# An approval must explicitly cover authority, publication, projections and
+# digest identity; a generic semantic-role approval is insufficient.
+jq '.governanceAssessment = []' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/incomplete-governance-review.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/incomplete-governance-review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/incomplete-governance-review.err"; then
+  echo 'forensic transition accepted a review without transition governance' >&2
+  exit 1
+fi
+grep -q 'review_transition_governance_incomplete' "${WORK_DIR}/forensic/.harness/runtime/incomplete-governance-review.err"
+
 jq '.stateSemantics[0][1] = "QUESTION_REQUIRED"' "${WORK_DIR}/forensic/.harness/runtime/review.json" > "${WORK_DIR}/forensic/.harness/runtime/mismatched-review.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/mismatched-review.json \
@@ -559,7 +593,7 @@ AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.m
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
 jq -e '.status == "SEMANTIC_STATE_PERSISTED" and (.semantic.independentReviewDigest | test("^[a-f0-9]{64}$"))' \
   "${WORK_DIR}/forensic/.harness/runtime/result.json" >/dev/null
-jq -e '.contract.verification.riskProfile == "forensic" and (.contract.verification.independentReviewDigest | test("^[a-f0-9]{64}$")) and (.contract.stateModel.bindings | length == 8) and (.contract.stateModel.policies | length == 8) and (.contract.stateModel.policies | all(.provenance == "USER"))' \
+jq -e '.contract.verification.riskProfile == "forensic" and (.contract.verification.independentReviewDigest | test("^[a-f0-9]{64}$")) and .contract.verification.adversarialClasses == ["CONTINUITY","COMPOSITION","IDENTITY","BOUNDARIES","TIME","OBSERVABILITY","ATOMICITY"] and (.contract.stateModel.bindings | length == 8) and (.contract.stateModel.policies | length == 8) and (.contract.stateModel.governance.publicationAuthorities | length == 1) and .contract.stateModel.governance.digestIdentity.purpose == "TRANSITION_IDENTITY" and (.contract.stateModel.policies | all(.provenance == "USER"))' \
   "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" >/dev/null
 forensic_profile="$(jq '.proofRegistry' "${WORK_DIR}/forensic/src/.aegis/semantic-state.json" > "${WORK_DIR}/forensic/.harness/runtime/proof-registry.json"; AEGIS_ROOT_DIR="${WORK_DIR}/forensic" bash -c "source '${ROOT_DIR}/scripts/lib/proof_governance.sh'; aegis_proof_profile_for_change '${WORK_DIR}/forensic/.harness/runtime/proof-registry.json' 'src/state.ts'")"
 printf '%s' "${forensic_profile}" | jq -e '.profile == "forensic"' >/dev/null
@@ -627,6 +661,14 @@ source.stateSemantics = source.stateSemantics.map((entry) => (
   ['RESOURCE', 'TEMPORAL'].includes(entry[0]) ? [entry[0], 'QUESTION_REQUIRED', entry[2], entry[3]] : entry
 ));
 const units = envelope.normalizedDemand.units.map((_, index) => index);
+const capacityGovernance = {
+  ...source.stateModel.governance,
+  derivedObservables: [['acceptedCount', 'decisions.status', 'count(status == committed)', [1]]],
+};
+const feeGovernance = {
+  ...source.stateModel.governance,
+  derivedObservables: [['feeTotal', 'committed decisions', 'sum(cost for committed decisions)', [1]]],
+};
 source.questions = [[
   'DEMAND',
   'Qual política conjunta governa recurso consumido e tempo?',
@@ -636,8 +678,8 @@ source.questions = [[
   'Interpretado: cost consome somente capacidade e now é entrada explícita, sem débito financeiro implícito.',
   units,
   [
-    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost consome somente capacidade; amount é o único débito financeiro.', [0]], ['now é entrada explícita e não pode regredir.', [0]]]}],
-    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost é taxa financeira com destino rastreável e conservação explícita.', [0]], ['now é entrada explícita e não pode regredir.', [0]]]}],
+    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost consome somente capacidade; amount é o único débito financeiro.', [0]], ['now é entrada explícita e não pode regredir.', [0]]], stateModelGovernance: capacityGovernance}],
+    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost é taxa financeira com destino rastreável e conservação explícita.', [0]], ['now é entrada explícita e não pode regredir.', [0]]], stateModelGovernance: feeGovernance}],
   ],
 ]];
 writeFileSync(destination, JSON.stringify(source));
@@ -700,13 +742,20 @@ writeFileSync(reviewPath, JSON.stringify({
   findings: [],
   stateSemantics: ['STATE', 'COMMAND', 'IDENTITY', 'RESOURCE', 'TEMPORAL', 'RESULT', 'ATOMICITY', 'CANONICALIZATION']
     .map((role) => [role, 'EXPLICIT', policies.get(role), envelope.normalizedDemand.units.map((unit) => unit.id)]),
+  governanceAssessment: [
+    ['AUTHORITATIVE_STATE', 'COVERED', 'O estado autoritativo e sua prova foram declarados.'],
+    ['PUBLICATION_AUTHORITIES', 'COVERED', 'A única autoridade de publicação foi declarada.'],
+    ['PUBLICATION_BOUNDARY', 'COVERED', 'A publicação ocorre depois das etapas falíveis.'],
+    ['DERIVED_OBSERVABLES', 'COVERED', 'O agregado observável possui derivação e prova.'],
+    ['DIGEST_IDENTITY', 'COVERED', 'O digest declara propósito, cobertura e prova.'],
+  ],
 }));
 NODE
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --independent-review .harness/runtime/review.json < "${selected_envelope}" \
   > "${WORK_DIR}/selected-forensic/.harness/runtime/result.json"
-jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2) and ([.contract.behavior[].statement] | index("cost consome somente capacidade; amount é o único débito financeiro."))' \
+jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2) and .contract.stateModel.governance.derivedObservables == [{name:"acceptedCount",sourceOfTruth:"decisions.status",derivation:"count(status == committed)",proofIds:["PO-STATE-ADVERSARIAL"]}] and ([.contract.behavior[].statement] | index("cost consome somente capacidade; amount é o único débito financeiro."))' \
   "${WORK_DIR}/selected-forensic/src/.aegis/semantic-state.json" >/dev/null
 
 # A hard architecture signal cannot be silently rewritten into a new public API.

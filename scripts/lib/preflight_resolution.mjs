@@ -49,6 +49,10 @@ function applyContractPatch(decision, patch) {
     if (patch[field] === undefined) continue;
     decision[field].push(...patch[field]);
   }
+  if (patch.stateModelGovernance !== undefined) {
+    if (decision.stateModel.kind !== 'STATE_TRANSITION') fail('state_governance_patch_not_allowed');
+    decision.stateModel.governance = patch.stateModelGovernance;
+  }
 }
 
 export function resolvePreflightDecision(decision, resolution) {

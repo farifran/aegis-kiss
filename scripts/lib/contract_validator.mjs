@@ -15,6 +15,23 @@ function exactIds(actual, expected, code) {
   );
 }
 
+export function transitionAdversarialClasses(roles) {
+  const classes = [];
+  const add = (...items) => items.forEach((item) => {
+    if (!classes.includes(item)) classes.push(item);
+  });
+  roles.forEach((role) => {
+    if (role === 'STATE') add('CONTINUITY');
+    if (role === 'COMMAND') add('COMPOSITION');
+    if (role === 'IDENTITY') add('IDENTITY');
+    if (role === 'RESOURCE') add('BOUNDARIES', 'COMPOSITION');
+    if (role === 'TEMPORAL') add('TIME');
+    if (role === 'RESULT' || role === 'CANONICALIZATION') add('OBSERVABILITY');
+    if (role === 'ATOMICITY') add('ATOMICITY');
+  });
+  return classes;
+}
+
 function isInside(root, path) {
   const relation = relative(root, path);
   return relation === '' || (relation !== '..' && !relation.startsWith(`..${sep}`));
@@ -93,6 +110,8 @@ function validateSemanticModel(contract) {
   if (contract.stateModel.kind === 'NONE') {
     requireCondition(roles.length === 0, 'invalid_stateless_state_model');
     requireCondition(policies === undefined || policies.length === 0, 'invalid_stateless_state_policies');
+    requireCondition(contract.stateModel.governance === undefined, 'invalid_stateless_transition_governance');
+    requireCondition(contract.verification.adversarialClasses === undefined, 'invalid_stateless_adversarial_classes');
     return;
   }
   for (const role of ['STATE', 'COMMAND', 'RESULT', 'ATOMICITY']) {
@@ -110,6 +129,31 @@ function validateSemanticModel(contract) {
   if (contract.verification.riskProfile === 'forensic') {
     requireCondition(/^[a-f0-9]{64}$/u.test(contract.verification.independentReviewDigest ?? ''), 'forensic_review_missing');
   }
+  const governance = contract.stateModel.governance;
+  requireCondition(governance !== undefined, 'transition_governance_missing');
+  const knownProofIds = new Set(contract.proofObligations.map((proof) => proof.id));
+  const requireProofs = (proofIds, code) => requireCondition(
+    proofIds.length > 0 && proofIds.every((id) => knownProofIds.has(id)),
+    code,
+  );
+  requireProofs(governance.authoritativeState.proofIds, 'authoritative_state_without_proof');
+  requireCondition(governance.publicationAuthorities.length > 0, 'publication_authority_missing');
+  const authorityNames = governance.publicationAuthorities.map((item) => item.operation);
+  requireCondition(authorityNames.length === new Set(authorityNames).size, 'duplicate_publication_authority');
+  governance.publicationAuthorities.forEach((item) => requireProofs(item.proofIds, 'publication_authority_without_proof'));
+  requireProofs(governance.publicationBoundary.proofIds, 'publication_boundary_without_proof');
+  const observableNames = governance.derivedObservables.map((item) => item.name);
+  requireCondition(observableNames.length === new Set(observableNames).size, 'duplicate_derived_observable');
+  governance.derivedObservables.forEach((item) => requireProofs(item.proofIds, 'derived_observable_without_proof'));
+  if (governance.digestIdentity !== null) {
+    requireCondition(roles.includes('CANONICALIZATION'), 'digest_identity_without_canonicalization');
+    requireProofs(governance.digestIdentity.proofIds, 'digest_identity_without_proof');
+  }
+  exactIds(
+    contract.verification.adversarialClasses ?? [],
+    transitionAdversarialClasses(roles),
+    'invalid_adversarial_class_selection',
+  );
 }
 
 export function validateContract({ root, contract, clarified, policy, policyText, registry, previousContract, phase = 'promotion' }) {

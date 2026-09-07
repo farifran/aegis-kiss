@@ -3,7 +3,7 @@
   "$id": "aegis.preflight_review.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "producerExecutionId", "reviewExecutionId", "reviewRequestDigest", "verdict", "findings", "stateSemantics"],
+  "required": ["schema", "normalizedDemandDigest", "decisionDigest", "producerId", "reviewerId", "producerExecutionId", "reviewExecutionId", "reviewRequestDigest", "verdict", "findings", "stateSemantics", "governanceAssessment"],
   "properties": {
     "schema": { "const": "aegis.preflight_review.v2" },
     "normalizedDemandDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -37,6 +37,17 @@
           { "enum": ["EXPLICIT", "QUESTION_REQUIRED", "CONFLICT"] },
           { "type": "string", "minLength": 1 },
           { "type": "array", "items": { "type": "string", "pattern": "^UNIT-[0-9]{4}$" }, "uniqueItems": true }
+        ]
+      }
+    },
+    "governanceAssessment": {
+      "type": "array",
+      "items": {
+        "type": "array", "minItems": 3, "maxItems": 3,
+        "prefixItems": [
+          { "enum": ["AUTHORITATIVE_STATE", "PUBLICATION_AUTHORITIES", "PUBLICATION_BOUNDARY", "DERIVED_OBSERVABLES", "DIGEST_IDENTITY"] },
+          { "enum": ["COVERED", "NOT_APPLICABLE", "CONFLICT"] },
+          { "type": "string", "minLength": 1 }
         ]
       }
     }

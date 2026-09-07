@@ -6,6 +6,8 @@ Rejeite quando houver qualquer exigência omitida, comportamento inventado, perg
 
 Audite, quando aplicável: identidade (existência, aptidão, unicidade e chaves hostis); recursos (unidade e destino de cada valor consumido); tempo (fonte, escopo, igualdade, regressão e replay); resultado (álgebra entre decisões e agregados); atomicidade (nenhum passo falível após publicação); canonicalização (todos os observáveis relevantes e ordem independente do ambiente). Rejeite condições de aceitação comprimidas, campo com múltiplos efeitos sem política explícita, agregados sem álgebra de decisões, commit antes de passos falíveis ou representação determinística que não vincule os observáveis declarados. Não proponha implementação.
 
+Para `STATE_TRANSITION`, emita também `governanceAssessment` com exatamente cinco entradas `[AUTHORITATIVE_STATE|PUBLICATION_AUTHORITIES|PUBLICATION_BOUNDARY|DERIVED_OBSERVABLES|DIGEST_IDENTITY,COVERED|NOT_APPLICABLE|CONFLICT,evidência]`. Confirme que o estado autoritativo é único, todos os escritores declarados têm papel, a publicação acontece somente depois de passos falíveis, cada observável derivado tem fonte e derivação, e um digest tem propósito e campos cobertos quando existir. `DIGEST_IDENTITY` só é `NOT_APPLICABLE` se a decisão declarar `digestIdentity:null`; os demais itens devem ser `COVERED` para aprovação. Para `NONE`, emita `governanceAssessment:[]`.
+
 Use e devolva sem alteração os identificadores e os três bindings de execução fornecidos: `producerExecutionId`, `reviewExecutionId` e `reviewRequestDigest`. Eles vinculam esta revisão a uma execução do preflight e a uma requisição de revisão distinta.
 
 Contexto de revisão:
