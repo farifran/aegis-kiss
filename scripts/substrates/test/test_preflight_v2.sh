@@ -198,6 +198,29 @@ jq -e '
   and .mechanicalFacts.discovery.limits == {maxCandidates:12,maxTrackedPaths:10000,maxSymbolAnchors:8,maxLexicalTerms:64,maxGitBytes:4194304,budgetMs:3000}
 ' "${WORK_DIR}/bounded-discovery.json" >/dev/null
 
+# The scanner stops the Git producer at the first path beyond its own bound; it
+# does not wait for a pathological listing to reach the global deadline.
+prepare_repository "${WORK_DIR}/incremental"
+mkdir -p "${WORK_DIR}/incremental-bin"
+cat > "${WORK_DIR}/incremental-bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${3:-}" == "ls-tree" ]]; then
+  for index in $(seq 1 10001); do printf '100644 blob 0000000000000000000000000000000000000000\tsrc/stream/file-%s.ts\0' "${index}"; done
+  while :; do :; done
+fi
+exec "${AEGIS_TEST_REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK_DIR}/incremental-bin/git"
+started_seconds=${SECONDS}
+printf '%s' 'Ajuste stream.' | PATH="${WORK_DIR}/incremental-bin:${PATH}" AEGIS_TEST_REAL_GIT="${real_git}" AEGIS_ROOT="${WORK_DIR}/incremental" node "${ROOT_DIR}/scripts/preflight.mjs" \
+  --kind PRODUCT --internal-envelope > "${WORK_DIR}/incremental-discovery.json"
+((SECONDS - started_seconds < 3))
+jq -e '
+  .mechanicalFacts.discovery.status == "INCOMPLETE"
+  and .mechanicalFacts.discovery.incompleteReasons == ["tracked_paths_limit"]
+  and .mechanicalFacts.discovery.coverage.consideredPaths == 10000
+' "${WORK_DIR}/incremental-discovery.json" >/dev/null
+
 # An unavailable baseline tree produces unknown facts, never a false claim that
 # an explicit path is absent. The semantic compiler can then request IDE help.
 prepare_repository "${WORK_DIR}/tree-unavailable"
