@@ -171,6 +171,46 @@ contract_worktree_file() {
   printf '%s\n' "${file}"
 }
 
+forensic_candidate_review_path() {
+  printf '%s\n' "${repository_root}/.harness/runtime/forensic_candidate_review.json"
+}
+
+require_forensic_candidate_review() {
+  local contract_digest="${1:-}" candidate_manifest="${2:-}" supervisor="${3:-null}" contract_file="${4:-}"
+  local review_file supervisor_id obligation_ids
+  review_file="$(forensic_candidate_review_path)"
+  [[ -s "${review_file}" ]] || fatal "forensic_candidate_review_missing"
+  supervisor_id="$(jq -r '.id // empty' <<< "${supervisor}")"
+  obligation_ids="$(jq -c '[
+    .behavior[].id,
+    (.preconditions // [])[].id,
+    .invariants[].id,
+    (.postconditions // [])[].id,
+    (.failureSemantics // [])[].id
+  ] | unique' "${contract_file}")"
+  jq -e \
+    --arg contract "${contract_digest}" \
+    --arg manifest "${candidate_manifest}" \
+    --arg supervisor "${supervisor_id}" \
+    --argjson obligations "${obligation_ids}" '
+      .schema == "aegis.forensic_candidate_review.v1"
+      and .contractDigest == $contract
+      and .candidateManifest == $manifest
+      and .verdict == "APPROVED"
+      and (.reviewer.id | type == "string" and length > 0)
+      and (.reviewer.executionId | type == "string" and test("^[a-f0-9]{64}$"))
+      and (if $supervisor == "" then true else .reviewer.id != $supervisor end)
+      and (.assessments | type == "array")
+      and ([.assessments[].contractId] | unique) == $obligations
+      and (.assessments | all(
+        (.contractId | type == "string")
+        and (.verdict == "PROVEN")
+        and (.evidence | type == "string" and length > 0)
+      ))
+    ' "${review_file}" >/dev/null 2>&1 \
+    || fatal "forensic_candidate_review_invalid"
+}
+
 execution_id_for_base() {
   local base="${1:-}" requested_kind="${2:-}" supervisor="${3:-null}" demand_digest="ABSENT" change_kind="BASELINE" supervisor_digest=""
   if [[ -f "${repository_root}/${semantic_record}" ]]; then
@@ -380,6 +420,7 @@ create_authorization() {
   if jq -e '.verification?.riskProfile == "forensic" and (.verification.independentReviewDigest | type == "string" and test("^[a-f0-9]{64}$"))' \
     "${contract_file}" >/dev/null; then
     [[ "${profile}" == "forensic" ]] || fatal "forensic_profile_required"
+    require_forensic_candidate_review "${contract_digest}" "$(manifest_from_index "${files}")" "${supervisor}" "${contract_file}"
   elif jq -e '.verification?.riskProfile == "forensic"' "${contract_file}" >/dev/null; then
     fatal "forensic_review_missing"
   fi

@@ -110,6 +110,27 @@ git -C "${forensic_repo}" restore --staged --worktree src/other.ts
 printf 'export const foo = 2;\n' > "${forensic_repo}/src/foo.ts"
 git -C "${forensic_repo}" add src/foo.ts
 jq -n '{mode:"validation",verdict:"accepted",validated_candidate:{files_changed:["src/foo.ts"]}}' > "${forensic_artifact}"
+if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${forensic_repo}" "${forensic_artifact}" > /dev/null 2> "${temp_dir}/forensic-candidate-review.err"; then
+  fail "forensic contract was promoted without candidate review"
+fi
+grep -q 'forensic_candidate_review_missing' "${temp_dir}/forensic-candidate-review.err"
+forensic_contract_digest="$(jq -S -c '.contract' "${forensic_repo}/src/.aegis/semantic-state.json" | shasum -a 256 | awk '{print $1}')"
+forensic_manifest="$(printf 'path=src/foo.ts\n'; git -C "${forensic_repo}" show :src/foo.ts | shasum -a 256 | awk '{print $1}')"
+forensic_manifest="$(printf '%s\n' "${forensic_manifest}" | shasum -a 256 | awk '{print $1}')"
+mkdir -p "${forensic_repo}/.harness/runtime"
+jq -n --arg contract "${forensic_contract_digest}" --arg manifest "${forensic_manifest}" '
+  {
+    schema:"aegis.forensic_candidate_review.v1",
+    contractDigest:$contract,
+    candidateManifest:$manifest,
+    reviewer:{id:"independent-fixture-reviewer",executionId:("c" * 64)},
+    verdict:"APPROVED",
+    assessments:[
+      {contractId:"BEH-STATE-001",verdict:"PROVEN",evidence:"A implementação candidata mantém a transição observável."},
+      {contractId:"INV-STATE-001",verdict:"PROVEN",evidence:"A prova candidata cobre a preservação da atomicidade."}
+    ]
+  }
+' > "${forensic_repo}/.harness/runtime/forensic_candidate_review.json"
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${forensic_repo}" "${forensic_artifact}"
 forensic_receipt="$(git -C "${forensic_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
 jq -e '.proofProfile == "forensic"' "${forensic_receipt}" >/dev/null

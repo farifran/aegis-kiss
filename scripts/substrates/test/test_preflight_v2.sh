@@ -669,6 +669,12 @@ const feeGovernance = {
   ...source.stateModel.governance,
   derivedObservables: [['feeTotal', 'committed decisions', 'sum(cost for committed decisions)', [1]]],
 };
+// These provisional clauses deliberately conflict. Selection must replace,
+// not append to, their policy roles.
+source.behaviors.push(
+  ['cost é débito financeiro implícito.', [0], ['RESOURCE']],
+  ['o relógio pode usar a hora ambiente.', [0], ['TEMPORAL']],
+);
 source.questions = [[
   'DEMAND',
   'Qual política conjunta governa recurso consumido e tempo?',
@@ -678,8 +684,8 @@ source.questions = [[
   'Interpretado: cost consome somente capacidade e now é entrada explícita, sem débito financeiro implícito.',
   units,
   [
-    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost consome somente capacidade; amount é o único débito financeiro.', [0]], ['now é entrada explícita e não pode regredir.', [0]]], stateModelGovernance: capacityGovernance}],
-    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {behaviors: [['cost é taxa financeira com destino rastreável e conservação explícita.', [0]], ['now é entrada explícita e não pode regredir.', [0]]], stateModelGovernance: feeGovernance}],
+    ['EXPLICIT_CAPACITY_TIME', 'Capacidade com tempo explícito', 'Preserva a menor semântica sem taxa financeira ou relógio implícito.', 'cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost consome somente capacidade; amount é o único débito financeiro.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {replacesPolicyRoles: ['RESOURCE', 'TEMPORAL'], behaviors: [['cost consome somente capacidade; amount é o único débito financeiro.', [0], ['RESOURCE']], ['now é entrada explícita e não pode regredir.', [0], ['TEMPORAL']]], stateModelGovernance: capacityGovernance}],
+    ['FINANCIAL_FEE_TIME', 'Taxa financeira com tempo explícito', 'Exige destino rastreável para a taxa e a mesma política temporal explícita.', 'cost é taxa financeira com destino rastreável e conservação explícita; now é entrada explícita e não pode regredir.', [['RESOURCE', 'cost é taxa financeira com destino rastreável e conservação explícita.'], ['TEMPORAL', 'now é entrada explícita e não pode regredir.']], {replacesPolicyRoles: ['RESOURCE', 'TEMPORAL'], behaviors: [['cost é taxa financeira com destino rastreável e conservação explícita.', [0], ['RESOURCE']], ['now é entrada explícita e não pode regredir.', [0], ['TEMPORAL']]], stateModelGovernance: feeGovernance}],
   ],
 ]];
 writeFileSync(destination, JSON.stringify(source));
@@ -755,7 +761,7 @@ AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_pr
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --independent-review .harness/runtime/review.json < "${selected_envelope}" \
   > "${WORK_DIR}/selected-forensic/.harness/runtime/result.json"
-jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2) and .contract.stateModel.governance.derivedObservables == [{name:"acceptedCount",sourceOfTruth:"decisions.status",derivation:"count(status == committed)",proofIds:["PO-STATE-ADVERSARIAL"]}] and ([.contract.behavior[].statement] | index("cost consome somente capacidade; amount é o único débito financeiro."))' \
+jq -e '.contract.clarifications == [{questionId:"Q-0001",answerId:"EXPLICIT_CAPACITY_TIME",recommended:true,statement:"cost consome somente capacidade; amount é o único débito financeiro; now é entrada explícita e não pode regredir."}] and ([.contract.stateModel.policies[] | select((.role == "RESOURCE" or .role == "TEMPORAL") and .provenance == "USER_CLARIFICATION")] | length == 2) and .contract.stateModel.governance.derivedObservables == [{name:"acceptedCount",sourceOfTruth:"decisions.status",derivation:"count(status == committed)",proofIds:["PO-STATE-ADVERSARIAL"]}] and ([.contract.behavior[].statement] | index("cost consome somente capacidade; amount é o único débito financeiro.")) and ([.contract.behavior[].statement] | index("cost é débito financeiro implícito.") | not) and ([.contract.behavior[].statement] | index("o relógio pode usar a hora ambiente.") | not)' \
   "${WORK_DIR}/selected-forensic/src/.aegis/semantic-state.json" >/dev/null
 
 # A hard architecture signal cannot be silently rewritten into a new public API.

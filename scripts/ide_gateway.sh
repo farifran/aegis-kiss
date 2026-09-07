@@ -28,6 +28,7 @@ Uso no IDE:
   ./aegis finalize "<mesma-demanda>" --decision <arquivo> [--resolution <arquivo>]
                     [--independent-review <arquivo>]
   ./aegis review "<demanda>" --decision <arquivo> [--resolution <arquivo>] --producer-id <id> --reviewer-id <id>
+  ./aegis candidate-review
   ./aegis status
   ./aegis evidence --path <caminho> [--path <caminho> ...]
                     [--max-files <n>] [--max-total-bytes <n>] [--max-file-bytes <n>]
@@ -241,6 +242,61 @@ build_independent_review() {
   node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}"
 }
 
+build_candidate_review() {
+  local semantic_state="${ROOT_DIR}/src/.aegis/semantic-state.json"
+  local files contract_digest manifest supervisor
+  [[ -s "${semantic_state}" ]] || fatal 'candidate_review_requires_semantic_state'
+  jq -e '.contract.verification.riskProfile == "forensic"' "${semantic_state}" >/dev/null \
+    || fatal 'candidate_review_not_required'
+  files="$(git -C "${ROOT_DIR}" diff --cached --name-only | sort -u)"
+  [[ -n "${files}" ]] || fatal 'candidate_review_requires_staged_changes'
+  while IFS= read -r path; do safe_path "${path}" || fatal "unsafe_candidate_path:${path}"; done <<< "${files}"
+  manifest="$(while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    printf 'path=%s\n' "${path}"
+    if git -C "${ROOT_DIR}" cat-file -e ":${path}" 2>/dev/null; then
+      git -C "${ROOT_DIR}" show ":${path}" | shasum -a 256 | awk '{print $1}'
+    else
+      printf 'missing\n'
+    fi
+  done <<< "${files}" | shasum -a 256 | awk '{print $1}')"
+  contract_digest="$(jq -S -c '.contract' "${semantic_state}" | shasum -a 256 | awk '{print $1}')"
+  supervisor="$(jq -c '.supervisor // null' "${RUNTIME_DIR}/finalization.json" 2>/dev/null || printf 'null')"
+  jq -n \
+    --arg contractDigest "${contract_digest}" \
+    --arg candidateManifest "${manifest}" \
+    --rawfile files <(printf '%s\n' "${files}") \
+    --argjson supervisor "${supervisor}" \
+    --argjson obligations "$(jq -c '[
+      .contract.behavior[].id,
+      (.contract.preconditions // [])[].id,
+      .contract.invariants[].id,
+      (.contract.postconditions // [])[].id,
+      (.contract.failureSemantics // [])[].id
+    ] | unique' "${semantic_state}")" '
+      {
+        schema:"aegis.forensic_candidate_review_request.v1",
+        status:"PENDING_INDEPENDENT_CANDIDATE_REVIEW",
+        contractDigest:$contractDigest,
+        candidateManifest:$candidateManifest,
+        candidateFiles:($files | split("\n") | map(select(length > 0))),
+        semanticSupervisor:$supervisor,
+        requiredAssessments:$obligations,
+        artifactPath:".harness/runtime/forensic_candidate_review.json",
+        artifactSchema:{
+          schema:"aegis.forensic_candidate_review.v1",
+          contractDigest:$contractDigest,
+          candidateManifest:$candidateManifest,
+          reviewer:{id:"independent reviewer id",executionId:"64-char execution digest"},
+          verdict:"APPROVED|REJECTED",
+          assessments:"one PROVEN|DISPROVEN|UNPROVEN assessment with concrete evidence for each required contract id"
+        },
+        instruction:"Um revisor diferente do supervisor semântico deve ler o contrato, os arquivos candidatos e as provas. Ele deve registrar uma avaliação para cada obrigação; somente APPROVED com todas PROVEN libera authorize."
+      }
+    ' > "${RUNTIME_DIR}/forensic_candidate_review_request.json"
+  cat "${RUNTIME_DIR}/forensic_candidate_review_request.json"
+}
+
 authorize() {
   local change_kind="PRODUCT" staged_files artifact
   if [[ "${1:-}" == "--harness" ]]; then
@@ -310,6 +366,7 @@ case "${command_name}" in
   harness) shift; build_preflight HARNESS "$@" ;;
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
+  candidate-review) shift; [[ $# -eq 0 ]] || fatal 'candidate_review_does_not_accept_arguments'; build_candidate_review ;;
   authorize) shift; authorize "$@" ;;
   report) shift; [[ $# -eq 0 ]] || fatal 'report_does_not_accept_arguments'; node "${ROOT_DIR}/scripts/forensic_report.mjs" ;;
   clean) shift; clean "$@" ;;

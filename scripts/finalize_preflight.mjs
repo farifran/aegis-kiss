@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { transitionAdversarialClasses, validateContract } from './lib/contract_validator.mjs';
 import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
-import { contractPatchCoverageError, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
+import { contractPatchCoverageError, contractPatchOwnershipError, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 import { semanticStatePath, semanticStateRelativePath } from './lib/semantic_state.mjs';
 
@@ -355,6 +355,22 @@ function validateStateSemantics(envelope, decision, clarificationRoles = new Set
   }
 }
 
+function policyRolesOf(field, clause) {
+  const index = field === 'invariants' || field === 'failures' ? 3 : 2;
+  return clause[index] ?? [];
+}
+
+function validatePolicyOwnedClauses(decision) {
+  const knownRoles = new Set(decision.stateModel.bindings.map(([role]) => role));
+  const fields = ['behaviors', 'preconditions', 'invariants', 'postconditions', 'failures'];
+  for (const field of fields) {
+    for (const clause of decision[field]) {
+      const roles = policyRolesOf(field, clause);
+      if (roles.some((role) => !knownRoles.has(role))) fail('clause_policy_role_unknown');
+    }
+  }
+}
+
 function expectedGovernanceAssessments(decision) {
   if (decision.stateModel.kind === 'NONE') return [];
   return [
@@ -382,6 +398,8 @@ function validateQuestionChoices(envelope, decision) {
       exactIds(roles, requiredRoles, 'question_answer_state_policy_coverage_invalid');
       const coverageError = contractPatchCoverageError(policies, contractPatch);
       if (coverageError !== undefined) fail(coverageError);
+      const ownershipError = contractPatchOwnershipError(policies, contractPatch);
+      if (ownershipError !== undefined) fail(ownershipError);
     }
   }
 }
@@ -401,6 +419,7 @@ function validateDecision(envelope, decision, clarificationRoles = new Set(), us
   }
   const stateProfile = validateStateModel(envelope, decision);
   validateStateSemantics(envelope, decision, clarificationRoles);
+  validatePolicyOwnedClauses(decision);
   const hardRisk = assessments.filter((item) => item.verdict === 'APPLIED' && hardRules.has(item.ruleId)).length >= 2;
   if (decision.riskProfile === 'forensic' && !decision.proofs.some((proof) => proof[7] === 'forensic')) {
     fail('forensic_profile_requires_forensic_proof');
@@ -548,7 +567,11 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
         },
     };
   }
-  const statements = (clauses, clauseIds) => clauses.map(([statement], index) => ({ id: clauseIds[index], statement }));
+  const statements = (clauses, clauseIds, policyIndex = 2) => clauses.map(([statement, , policyRoles], index) => ({
+    id: clauseIds[index],
+    statement,
+    ...(clauses[index][policyIndex] === undefined ? {} : { policyRoles }),
+  }));
   const contract = {
     schema: 'aegis.contract_ir.v2',
     changeKind: envelope.changeKind,
@@ -570,12 +593,14 @@ function assembleSemanticState(envelope, decision, assessments, independentRevie
     scope: { authorizedPaths: [...new Set([...decision.scope, ...evidenceScope])] },
     behavior: statements(decision.behaviors, behaviorIds),
     preconditions: statements(decision.preconditions, preconditionIds),
-    invariants: decision.invariants.map(([statement, , proofIndexes], index) => ({
+    invariants: decision.invariants.map(([statement, , proofIndexes, policyRoles], index) => ({
       id: invariantIds[index], statement, proofIds: proofIndexes.map((proofIndex) => proofIds[proofIndex]),
+      ...(policyRoles === undefined ? {} : { policyRoles }),
     })),
     postconditions: statements(decision.postconditions, postconditionIds),
-    failureSemantics: decision.failures.map(([trigger, observableOutcome], index) => ({
+    failureSemantics: decision.failures.map(([trigger, observableOutcome, , policyRoles], index) => ({
       id: failureIds[index], statement: `${trigger} => ${observableOutcome}`,
+      ...(policyRoles === undefined ? {} : { policyRoles }),
     })),
     proofObligations: decision.proofs.map(([, risk, statement], index) => ({ id: proofIds[index], risk, statement })),
     requirementCoverage,

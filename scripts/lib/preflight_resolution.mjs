@@ -15,6 +15,12 @@ export function selectedAnswer(question, answerId) {
 }
 
 const patchFields = ['behaviors', 'preconditions', 'invariants', 'postconditions', 'failures', 'proofs'];
+const policyClauseFields = ['behaviors', 'preconditions', 'invariants', 'postconditions', 'failures'];
+
+function policyRolesOf(field, clause) {
+  const index = field === 'invariants' || field === 'failures' ? 3 : 2;
+  return clause[index] ?? [];
+}
 
 function normalizedLiteral(value) {
   return value.normalize('NFC').replace(/\s+/gu, ' ').trim();
@@ -44,7 +50,35 @@ export function contractPatchCoverageError(policies, patch) {
   return undefined;
 }
 
+export function contractPatchOwnershipError(policies, patch) {
+  const expectedRoles = policies.map(([role]) => role);
+  const replacementRoles = patch.replacesPolicyRoles ?? [];
+  if (expectedRoles.length === 0) {
+    return replacementRoles.length === 0 ? undefined : 'question_answer_policy_replacement_unexpected';
+  }
+  if (
+    replacementRoles.length !== expectedRoles.length
+    || replacementRoles.some((role) => !expectedRoles.includes(role))
+  ) {
+    return 'question_answer_policy_replacement_incomplete';
+  }
+  const introducedRoles = policyClauseFields.flatMap((field) => (
+    (patch[field] ?? []).flatMap((clause) => policyRolesOf(field, clause))
+  ));
+  return expectedRoles.every((role) => introducedRoles.includes(role))
+    ? undefined
+    : 'question_answer_policy_replacement_without_clause';
+}
+
 function applyContractPatch(decision, patch) {
+  const replacedRoles = new Set(patch.replacesPolicyRoles ?? []);
+  if (replacedRoles.size > 0) {
+    for (const field of policyClauseFields) {
+      decision[field] = decision[field].filter((clause) => (
+        !policyRolesOf(field, clause).some((role) => replacedRoles.has(role))
+      ));
+    }
+  }
   for (const field of patchFields) {
     if (patch[field] === undefined) continue;
     decision[field].push(...patch[field]);

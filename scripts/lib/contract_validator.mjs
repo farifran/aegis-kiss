@@ -114,6 +114,17 @@ function validateSemanticModel(contract) {
     requireCondition(contract.verification.adversarialClasses === undefined, 'invalid_stateless_adversarial_classes');
     return;
   }
+  const policyRoleSets = [
+    ...contract.behavior,
+    ...(contract.preconditions ?? []),
+    ...contract.invariants,
+    ...(contract.postconditions ?? []),
+    ...(contract.failureSemantics ?? []),
+  ].map((clause) => clause.policyRoles ?? []);
+  requireCondition(
+    policyRoleSets.every((policyRoles) => policyRoles.every((role) => roles.includes(role))),
+    'contract_clause_policy_role_unknown',
+  );
   for (const role of ['STATE', 'COMMAND', 'RESULT', 'ATOMICITY']) {
     requireCondition(roles.includes(role), `state_model_role_missing:${role.toLowerCase()}`);
   }
