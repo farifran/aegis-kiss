@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 
 # AEGIS — IDE EVIDENCE GATEWAY
-# The IDE is the only code executor. The gateway performs bounded factual
-# discovery, but never calls a model, opens TTY questions, or edits product
-# code: it records, verifies and authorizes.
+# The IDE is the only code executor. The semantic supervisor is selectable:
+# the active IDE model receives the request by default, or one configured
+# external model compiles the decision without access to repository content.
 
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
+if [[ -f "${ROOT_DIR}/.harness/local.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${ROOT_DIR}/.harness/local.env"
+  set +a
+fi
 
 fatal() { printf '[AEGIS][IDE][FATAL] %s\n' "$1" >&2; exit 1; }
 
@@ -17,6 +23,8 @@ usage() {
 Uso no IDE:
   ./aegis "<demanda>" [--target <caminho>]
   ./aegis harness "<demanda>" [--target <caminho>]
+  ./aegis setup
+  ./aegis setup [show|ide|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]]
   ./aegis finalize "<mesma-demanda>" --decision <arquivo> [--resolution <arquivo>]
                     [--independent-review <arquivo>]
   ./aegis review "<demanda>" --decision <arquivo> [--resolution <arquivo>] --producer-id <id> --reviewer-id <id>
@@ -27,10 +35,11 @@ Uso no IDE:
   ./aegis report
   ./aegis clean [--src|--all]
 
-O Aegis produz um discovery factual inicial; o IDE investiga seu significado,
-pergunta e altera o código. Uma única compilação produz um delta semântico; o
-Aegis monta demanda esclarecida, contrato, registry e digests antes de
-autorizar a promoção.
+O Aegis produz um discovery factual inicial. Em `setup ide`, o modelo ativo
+do IDE interpreta a demanda. Em `setup external`, um modelo OpenAI-compatível
+configurado interpreta somente o pedido semântico; o IDE continua perguntando
+e alterando o código. Uma única compilação produz um delta semântico; o Aegis
+monta demanda esclarecida, contrato, registry e digests antes da promoção.
 
 `evidence` é um inventário mecânico opcional para receipt, reexecução ou
 forensics. Ele nunca escolhe escopo nem injeta arquivos em prompts.
@@ -43,6 +52,62 @@ EOF
 safe_path() {
   local path="${1:-}"
   [[ -n "${path}" && "${path}" != /* && ! "${path}" =~ (^|/)\.\.(/|$) ]]
+}
+
+supervisor_setup() {
+  if [[ $# -eq 0 ]]; then
+    # The IDE, not a terminal prompt, owns interaction.  This intentionally
+    # mirrors the old agentic setup behavior: emit a bounded, declarative
+    # selection request so the IDE can render its own chooser and collect any
+    # external endpoint/model fields before rerunning one mechanical command.
+    jq -n '
+      {
+        schema: "aegis.ide_setup_request.v1",
+        status: "PENDING_USER_SELECTION",
+        executor: "IDE",
+        title: "Configurar o supervisor semântico do Aegis",
+        instruction: "Apresente a pergunta e as opções ao usuário no IDE. Após a escolha, execute somente o comando indicado em apply.command; não interprete a demanda nem altere código.",
+        questions: [
+          {
+            id: "supervisor-mode",
+            question: "Quem deve compilar a demanda em decisão semântica antes da implementação?",
+            recommendedAnswerId: "IDE",
+            answers: [
+              {
+                id: "IDE",
+                label: "Modelo ativo do IDE",
+                rationale: "Mantém uma única interação no IDE e não requer endpoint nem credenciais externas.",
+                apply: { command: "./aegis setup ide" }
+              },
+              {
+                id: "EXTERNAL",
+                label: "Modelo externo especializado",
+                rationale: "Usa um endpoint OpenAI-compatível apenas para compilar a decisão semântica; o IDE continua responsável por perguntas, edição, testes e implementação.",
+                requiredFields: [
+                  { name: "endpoint", prompt: "Endpoint base OpenAI-compatível", example: "http://127.0.0.1:11434/v1" },
+                  { name: "model", prompt: "Identificador do modelo", example: "llama3.2:11b" },
+                  { name: "apiKeyEnv", prompt: "Nome da variável de API key, se necessário", optional: true },
+                  { name: "timeoutMs", prompt: "Timeout em milissegundos", default: 45000, optional: true }
+                ],
+                apply: { command: "./aegis setup external --endpoint <endpoint> --model <model> [--api-key-env <apiKeyEnv>] [--timeout-ms <timeoutMs>]" }
+              }
+            ]
+          }
+        ]
+      }
+    '
+    return 0
+  fi
+  exec node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" "$@"
+}
+
+supervisor_setup_state() {
+  local state
+  state="$(node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" show)" \
+    || fatal 'supervisor_configuration_unavailable'
+  jq -e '.schema == "aegis.supervisor_setup.v1" and .status == "CONFIGURED" and (.supervisor.mode | IN("IDE", "EXTERNAL"))' \
+    <<< "${state}" >/dev/null || fatal 'invalid_supervisor_configuration'
+  printf '%s\n' "${state}"
 }
 
 metadata_state() {
@@ -77,10 +142,21 @@ build_preflight() {
   done
 
   mkdir -p "${RUNTIME_DIR}"
+  local supervisor_state supervisor_mode supervisor_id supervisor_digest request
+  supervisor_state="$(supervisor_setup_state)"
+  supervisor_mode="$(jq -r '.supervisor.mode' <<< "${supervisor_state}")"
+  supervisor_id="$(jq -r '.supervisor.id' <<< "${supervisor_state}")"
+  supervisor_digest="$(jq -r '.supervisor.configDigest' <<< "${supervisor_state}")"
   local -a preflight_args=(--kind "${change_kind}" --save-envelope)
   [[ -n "${target}" ]] && preflight_args+=(--target "${target}")
+  preflight_args+=(--supervisor-mode "${supervisor_mode}" --supervisor-id "${supervisor_id}" --supervisor-config-digest "${supervisor_digest}")
   [[ "${AEGIS_PREFLIGHT_OUTPUT:-public}" == "internal" ]] && preflight_args+=(--internal-envelope)
-  printf '%s' "${demand}" | node "${ROOT_DIR}/scripts/preflight.mjs" "${preflight_args[@]}"
+  request="$(printf '%s' "${demand}" | node "${ROOT_DIR}/scripts/preflight.mjs" "${preflight_args[@]}")"
+  if [[ "${supervisor_mode}" == 'EXTERNAL' ]]; then
+    printf '%s' "${request}" | node "${ROOT_DIR}/scripts/external_supervisor.mjs"
+  else
+    printf '%s\n' "${request}"
+  fi
 }
 
 require_frozen_envelope() {
@@ -204,19 +280,22 @@ clean() {
 }
 
 status() {
-  local state
+  local state supervisor
   state="$(metadata_state)"
+  supervisor="$(supervisor_setup_state | jq '.supervisor')"
   jq -n \
     --arg state "${state}" \
     --arg base "$(git -C "${ROOT_DIR}" rev-parse HEAD)" \
     --arg changes "$(git -C "${ROOT_DIR}" status --short)" \
-    '{schema:"aegis.ide_status.v1",evidenceState:$state,baseCommit:$base,workingTree:$changes}'
+    --argjson supervisor "${supervisor}" \
+    '{schema:"aegis.ide_status.v1",evidenceState:$state,baseCommit:$base,workingTree:$changes,supervisor:$supervisor}'
 }
 
 command_name="${1:-}"
 case "${command_name}" in
   -h|--help|help|'') usage ;;
   status) shift; [[ $# -eq 0 ]] || fatal 'status_does_not_accept_arguments'; status ;;
+  setup) shift; supervisor_setup "$@" ;;
   evidence) shift; exec bash "${ROOT_DIR}/scripts/evidence_inventory.sh" "$@" ;;
   harness) shift; build_preflight HARNESS "$@" ;;
   finalize) shift; finalize_preflight "$@" ;;

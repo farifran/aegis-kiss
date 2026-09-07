@@ -7,6 +7,7 @@ import process from 'node:process';
 import { resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { buildPreflight, maxDemandBytes, normalizeDemand, semanticRequest } from './lib/preflight_core.mjs';
+import { canonicalDigest } from './lib/canonical_json.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 let target = '';
@@ -14,6 +15,9 @@ let internalEnvelope = false;
 let saveEnvelope = false;
 let digestOnly = false;
 let changeKind = 'PRODUCT';
+let supervisorMode = 'IDE';
+let supervisorId = 'ide-active-model';
+let supervisorConfigDigest = '';
 const runtimeLockName = 'preflight.lock';
 const staleLockMs = 120_000;
 for (let index = 2; index < process.argv.length;) {
@@ -31,6 +35,15 @@ for (let index = 2; index < process.argv.length;) {
     index += 2;
   } else if (process.argv[index] === '--target' && typeof process.argv[index + 1] === 'string') {
     target = process.argv[index + 1];
+    index += 2;
+  } else if (process.argv[index] === '--supervisor-mode' && ['IDE', 'EXTERNAL'].includes(process.argv[index + 1])) {
+    supervisorMode = process.argv[index + 1];
+    index += 2;
+  } else if (process.argv[index] === '--supervisor-id' && typeof process.argv[index + 1] === 'string') {
+    supervisorId = process.argv[index + 1];
+    index += 2;
+  } else if (process.argv[index] === '--supervisor-config-digest' && /^[a-f0-9]{64}$/.test(process.argv[index + 1] ?? '')) {
+    supervisorConfigDigest = process.argv[index + 1];
     index += 2;
   } else {
     process.stderr.write('[AEGIS][PREFLIGHT][FATAL] invalid_arguments\n');
@@ -54,7 +67,14 @@ try {
     process.stdout.write(`${normalizeDemand(rawDemand).digest}\n`);
     process.exit(0);
   }
-  const envelope = await buildPreflight(rawDemand, target, root, changeKind);
+  if (!digestOnly && supervisorConfigDigest.length === 0) {
+    supervisorConfigDigest = canonicalDigest({ schema: 'aegis.supervisor_config.v1', mode: 'IDE' });
+  }
+  const envelope = await buildPreflight(rawDemand, target, root, changeKind, {
+    mode: supervisorMode,
+    id: supervisorId,
+    configDigest: supervisorConfigDigest,
+  });
   const timing = {
     phase: 'preflight',
     startedAtEpochMs,
@@ -84,6 +104,7 @@ try {
         'preflight_review_request.json',
         'preflight_review.json',
         'preflight_resolution.json',
+        'supervisor_execution.json',
         'finalization.json',
       ].map((name) => rm(resolve(runtimeDirectory, name), { force: true })));
       await writeFile(temporaryPath, `${JSON.stringify(frozenEnvelope)}\n`, 'utf8');

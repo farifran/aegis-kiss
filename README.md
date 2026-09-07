@@ -12,6 +12,32 @@ IDE    → discovery, reading, interaction, editing and fast feedback
 Aegis  → contract/evidence coherence, proof profiles, receipt and promotion
 ```
 
+The semantic supervisor is separate from the code executor. By default it is
+the model currently selected in the IDE. It can instead be an external,
+OpenAI-compatible model (including a local Ollama/vLLM endpoint); the IDE
+still owns questions, edits, tests and implementation.
+
+```bash
+./aegis setup
+# The IDE renders the selection and collects any required fields.
+./aegis setup ide
+./aegis setup external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
+./aegis setup show
+```
+
+For a provider requiring credentials, provide the name of an environment
+variable rather than a secret value:
+
+```bash
+./aegis setup external --endpoint https://provider.example/v1 --model model-id --api-key-env PROVIDER_API_KEY
+```
+
+The selected supervisor is bound to the frozen preflight envelope. External
+execution receives only the semantic request and records model identity,
+timing, provider token usage when available, and the decision digest. The
+promotion receipt carries that binding; it never contains API keys or raw
+model output.
+
 ## Use from an IDE
 
 ```bash
@@ -37,6 +63,9 @@ Available commands:
 - `./aegis review …`: prepares an optional independent semantic review for a
   high-risk or forensic execution.
 - `./aegis status`: shows evidence state and working-tree state.
+- `./aegis setup`: emits an IDE-interactive selection. `ide` uses the active
+  IDE model; `external` collects endpoint and model, then calls the configured
+  OpenAI-compatible endpoint only for demand-to-decision compilation.
 - `./aegis evidence --path …`: creates an optional, bounded and transient
   mechanical inventory for a receipt or forensic investigation. It only reads
   explicitly declared paths, never sends code to a prompt and has no cache
@@ -51,7 +80,8 @@ Available commands:
   transient runtime state, `src/` and the active contract/proof metadata.
   `--src` and `--all` remain equivalent compatibility aliases.
 
-There is no autonomous CLI coder, provider configuration or TTY workflow.
+There is no autonomous CLI coder. The only optional provider integration is
+the bounded external semantic supervisor configured through `setup`.
 Surgical-edit discipline is retained by requiring a minimal diff, local
 checks, proof execution, a staged manifest and a receipt.
 

@@ -135,6 +135,7 @@ function validateEnvelope(envelope) {
   if (sha256(envelope.prompt) !== envelope.promptDigest) fail('preflight_prompt_digest_mismatch');
   const expectedContextDigest = canonicalDigest({
     changeKind: envelope.changeKind,
+    supervisor: envelope.supervisor,
     baseline: envelope.baseline,
     normalizedDemandDigest: envelope.normalizedDemand.digest,
     mechanicalFactsDigest: envelope.mechanicalFacts.digest,
@@ -152,6 +153,26 @@ function validateEnvelope(envelope) {
   if (!envelope.normalizedDemand.units.every((unit) => unit.range.startByte < unit.range.endByte && unit.range.endByte <= length)) {
     fail('invalid_input_range');
   }
+}
+
+async function validateSupervisorExecution(envelope, decisionDigest) {
+  if (envelope.supervisor.mode === 'IDE') {
+    return { ...envelope.supervisor, executionArtifactBytesDigest: null };
+  }
+  const executionFile = await readJson('.harness/runtime/supervisor_execution.json', 'missing_external_supervisor_execution');
+  const execution = executionFile.value;
+  if (
+    execution === null || typeof execution !== 'object' || Array.isArray(execution)
+    || execution.schema !== 'aegis.supervisor_execution.v1'
+    || execution.executionId !== envelope.executionId
+    || execution.baseCommit !== envelope.baseCommit
+    || canonicalJson(execution.supervisor) !== canonicalJson(envelope.supervisor)
+    || execution.promptDigest !== envelope.promptDigest
+    || execution.decisionArtifactBytesDigest !== decisionDigest
+  ) {
+    fail('external_supervisor_execution_binding_mismatch');
+  }
+  return { ...envelope.supervisor, executionArtifactBytesDigest: sha256(executionFile.bytes) };
 }
 
 function assertWorldMatches(envelope) {
@@ -686,6 +707,7 @@ validateEnvelope(envelope);
 
 const decisionFile = await readJson(options.decision, 'unreadable_decision');
 const decisionDigest = sha256(decisionFile.bytes);
+const supervisor = await validateSupervisorExecution(envelope, decisionDigest);
 const sourceValidation = validateDecision(envelope, decisionFile.value);
 const { assessments } = sourceValidation;
 if (decisionFile.value.status === 'BLOCKED') {
@@ -803,6 +825,7 @@ const result = {
     decisionSemanticDigest: effectiveDecisionDigest,
     independentReviewDigest,
   },
+  supervisor,
   timing: { phase: 'finalization', startedAtEpochMs, durationMs: Math.round((performance.now() - started) * 1000) / 1000 },
   paths: [semanticStateRelativePath],
 };

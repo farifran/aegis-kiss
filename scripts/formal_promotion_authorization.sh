@@ -205,12 +205,29 @@ supplemental_inventory_digest() {
   fi
 }
 
+semantic_supervisor_json() {
+  local base="${1:-}" finalization="${repository_root}/.harness/runtime/finalization.json"
+  if [[ -s "${finalization}" ]] && jq -e --arg base "${base}" '
+    .schema == "aegis.preflight_finalization.v2"
+    and .status == "SEMANTIC_STATE_PERSISTED"
+    and .baseCommit == $base
+    and (.supervisor | type == "object")
+    and (.supervisor.mode | IN("IDE", "EXTERNAL"))
+    and (.supervisor.id | type == "string" and length > 0)
+    and (.supervisor.configDigest | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "${finalization}" >/dev/null 2>&1; then
+    jq -c '.supervisor' "${finalization}"
+  else
+    printf 'null'
+  fi
+}
+
 write_receipt() {
   local base="${1:-}" files="${2:-}" manifest="${3:-}" artifact_digest="${4:-}"
   local contract_digest="${5:-}" registry_digest="${6:-}" clarified_digest="${7:-}" policy_digest="${8:-}"
   local profile="${9:-}" proof_plan_digest="${10:-}" authority="${11:-}" proof_plan="${12:-}"
   local duration_ms="${13:-0}"
-  local change_kind="${14:-PRODUCT}"
+  local change_kind="${14:-PRODUCT}" supervisor="${15:-null}"
   local auth_file auth_dir now expires execution_id inventory_digest
 
   auth_file="$(authorization_path)"
@@ -239,7 +256,8 @@ write_receipt() {
     --argjson duration_ms "${duration_ms}" \
     --arg change_kind "${change_kind}" \
     --arg inventory_digest "${inventory_digest}" \
-    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",changeKind:$change_kind,executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,supplementalEvidence:{inventoryArtifactBytesDigest:(if $inventory_digest == "null" then null else $inventory_digest end)},issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
+    --argjson supervisor "${supervisor}" \
+    '{schema:"aegis.precommit_receipt.v1",status:"PROVEN",changeKind:$change_kind,executionId:$execution_id,baseCommit:$base,files:($files|split("\n")|map(select(length>0))),worktreeManifest:$manifest,contractDigest:$contract_digest,proofRegistryDigest:$registry_digest,clarifiedDemandDigest:$clarified_digest,architecturePolicyDigest:$policy_digest,validationArtifactDigest:$artifact_digest,validationAuthority:$authority,semanticSupervisor:$supervisor,proofProfile:$profile,proofPlanDigest:$proof_plan_digest,proofs:$proof_plan.proofs,supplementalEvidence:{inventoryArtifactBytesDigest:(if $inventory_digest == "null" then null else $inventory_digest end)},issuedAtEpoch:$issued,expiresAtEpoch:$expires,verificationDurationMs:$duration_ms}' \
     > "${auth_file}"
   echo "[AEGIS][FORMAL] precommit_receipt_created profile=${profile}" >&2
 }
@@ -334,7 +352,7 @@ create_authorization() {
     || fatal "promotion_contract_evidence_verification_failed"
 
   local files base manifest artifact_digest auth_file auth_dir now expires
-  local contract_digest registry_digest clarified_digest policy_digest authority profile_json profile profile_plan proof_plan proof_plan_digest
+  local contract_digest registry_digest clarified_digest policy_digest authority profile_json profile profile_plan proof_plan proof_plan_digest supervisor
   files="$(jq -r '.validated_candidate.files_changed[]' "${artifact_file}" | sort -u)"
   while IFS= read -r path; do safe_path "${path}" || fatal "unsafe_candidate_path:${path}"; done <<< "${files}"
   base="$(git -C "${repository_root}" rev-parse HEAD)"
@@ -344,6 +362,7 @@ create_authorization() {
   registry_digest="$(registry_digest_from_worktree)"
   clarified_digest="$(clarified_digest_from_worktree)"
   policy_digest="$(metadata_digest_from_worktree governance/architecture.policy.json)"
+  supervisor="$(semantic_supervisor_json "${base}")"
   authority="$(validation_authority_json)"
   profile_json="$(profile_for_files "${files}")"
   profile="$(printf '%s' "${profile_json}" | jq -r '.profile')"
@@ -374,7 +393,7 @@ create_authorization() {
   duration_ms="$(( ($(date +%s) - started_seconds) * 1000 ))"
   write_receipt "${base}" "${files}" "${manifest}" "${artifact_digest}" \
     "${contract_digest}" "${registry_digest}" "${clarified_digest}" "${policy_digest}" "${profile}" "${proof_plan_digest}" \
-    "${authority}" "${proof_plan}" "${duration_ms}" "PRODUCT"
+    "${authority}" "${proof_plan}" "${duration_ms}" "PRODUCT" "${supervisor}"
 }
 
 create_baseline_authorization() {

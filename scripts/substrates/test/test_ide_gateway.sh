@@ -13,7 +13,7 @@ cp -r "${ROOT_DIR}/governance" "${WORK_DIR}/governance"
 cp "${ROOT_DIR}/AGENTS.md" "${WORK_DIR}/AGENTS.md"
 cp "${ROOT_DIR}/ARCHITECTURE.md" "${WORK_DIR}/ARCHITECTURE.md"
 ln -s "${ROOT_DIR}/node_modules" "${WORK_DIR}/node_modules"
-printf '.harness/runtime/\nnode_modules\n' > "${WORK_DIR}/.gitignore"
+printf '.harness/runtime/\n.harness/supervisor.json\nnode_modules\n' > "${WORK_DIR}/.gitignore"
 printf 'export {};\n' > "${WORK_DIR}/src/index.ts"
 git -C "${WORK_DIR}" init -q
 git -C "${WORK_DIR}" config user.name Aegis
@@ -29,10 +29,29 @@ printf '%s' "${output}" | jq -e '
   and (.protocol.forbidden | index("verification before authorize"))
   and (has("normalizedDemand") | not)
 ' >/dev/null
+printf '%s' "${output}" | jq -e '.supervisor == {mode:"IDE",id:"ide-active-model",configDigest:.supervisor.configDigest}' >/dev/null
 [[ -s "${WORK_DIR}/.harness/runtime/preflight_envelope.json" ]]
 # The semantic request contains the compact frozen constitution, but must stay
 # far below a full repository or preflight-envelope transfer.
 [[ "$(printf '%s' "${output}" | wc -c | tr -d ' ')" -lt 16384 ]]
+
+output="$(bash "${WORK_DIR}/aegis" setup show)"
+printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
+output="$(bash "${WORK_DIR}/aegis" setup)"
+printf '%s' "${output}" | jq -e '
+  .schema == "aegis.ide_setup_request.v1"
+  and .status == "PENDING_USER_SELECTION"
+  and .executor == "IDE"
+  and (.questions | length == 1)
+  and .questions[0].recommendedAnswerId == "IDE"
+  and ([.questions[0].answers[].id] | sort == ["EXTERNAL", "IDE"])
+  and ([.questions[0].answers[] | select(.id == "EXTERNAL") | (.requiredFields | length)] == [4])
+' >/dev/null
+[[ ! -e "${WORK_DIR}/.harness/supervisor.json" ]]
+output="$(bash "${WORK_DIR}/aegis" setup ide)"
+printf '%s' "${output}" | jq -e '.status == "CONFIGURED" and .supervisor.mode == "IDE"' >/dev/null
+output="$(bash "${WORK_DIR}/aegis" status)"
+printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
 
 output="$(bash "${WORK_DIR}/aegis" harness 'Atualizar a validação interna do Aegis.')"
 printf '%s' "${output}" | jq -e '.changeKind == "HARNESS"' >/dev/null

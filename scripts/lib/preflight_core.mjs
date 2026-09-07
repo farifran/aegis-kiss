@@ -111,8 +111,20 @@ function readOptionalCommitBlob(root, commit, path) {
   }
 }
 
-function executionId(baseCommit, normalizedDemandDigest, changeKind) {
-  return sha256(`base=${baseCommit ?? 'UNVERSIONED'}\ndemand=${normalizedDemandDigest}\nkind=${changeKind}\n`);
+function supervisorBinding(supervisor) {
+  if (
+    supervisor === null || typeof supervisor !== 'object'
+    || !['IDE', 'EXTERNAL'].includes(supervisor.mode)
+    || typeof supervisor.id !== 'string' || supervisor.id.length === 0
+    || !/^[a-f0-9]{64}$/u.test(supervisor.configDigest)
+  ) {
+    throw new Error('invalid_supervisor_binding');
+  }
+  return { mode: supervisor.mode, id: supervisor.id, configDigest: supervisor.configDigest };
+}
+
+function executionId(baseCommit, normalizedDemandDigest, changeKind, supervisor) {
+  return sha256(`base=${baseCommit ?? 'UNVERSIONED'}\ndemand=${normalizedDemandDigest}\nkind=${changeKind}\nsupervisor=${supervisor.configDigest}\n`);
 }
 
 export function repositorySnapshot(root) {
@@ -628,8 +640,9 @@ function inject(template, placeholder, value) {
   return template.replace(token, JSON.stringify(value));
 }
 
-export async function buildPreflight(rawBytes, requestedTarget, root, changeKind = 'PRODUCT') {
+export async function buildPreflight(rawBytes, requestedTarget, root, changeKind = 'PRODUCT', configuredSupervisor = { mode: 'IDE', id: 'ide-active-model', configDigest: canonicalDigest({ schema: 'aegis.supervisor_config.v1', mode: 'IDE' }) }) {
   if (!['PRODUCT', 'HARNESS'].includes(changeKind)) throw new Error('invalid_change_kind');
+  const supervisor = supervisorBinding(configuredSupervisor);
   const canonical = canonicalRoot(root);
   const baseline = repositorySnapshot(canonical);
   if (!baseline.clean) throw new Error('preflight_requires_clean_worktree');
@@ -662,6 +675,7 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
   });
   const contextDigest = canonicalDigest({
     changeKind,
+    supervisor,
     baseline,
     normalizedDemandDigest: normalizedDemand.digest,
     mechanicalFactsDigest: mechanicalFacts.digest,
@@ -712,7 +726,7 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     schema: 'aegis.ide_preflight.v2',
     status: 'PENDING_SEMANTIC_COMPILATION',
     changeKind,
-    executionId: executionId(baseline.commit, normalizedDemand.digest, changeKind),
+    executionId: executionId(baseline.commit, normalizedDemand.digest, changeKind, supervisor),
     baseCommit: baseline.commit,
     baseline,
     normalizedDemand,
@@ -723,6 +737,7 @@ export async function buildPreflight(rawBytes, requestedTarget, root, changeKind
     constitutionDigest,
     promptTemplateDigest,
     semanticProtocolDigest,
+    supervisor,
     contextDigest,
     promptDigest: digest(prompt),
     prompt,
@@ -745,6 +760,7 @@ export function semanticRequest(envelope, timing) {
     promptTemplateDigest: envelope.promptTemplateDigest,
     constitutionDigest: envelope.constitutionDigest,
     semanticProtocolDigest: envelope.semanticProtocolDigest,
+    supervisor: envelope.supervisor,
     timing,
     protocol: {
       decisionPath: '.harness/runtime/preflight_decision.json',

@@ -13,6 +13,31 @@ IDE    → descoberta, leitura, interação, edição e feedback rápido
 Aegis  → coerência contrato/evidência, perfis de prova, receipt e promoção
 ```
 
+O supervisor semântico é separado do executor de código. Por padrão ele é o
+modelo ativo do IDE. Também pode ser um modelo externo compatível com OpenAI
+(inclusive Ollama/vLLM local); o IDE continua responsável pelas perguntas,
+edição, testes e implementação.
+
+```bash
+./aegis setup
+# O IDE apresenta a seleção e coleta os campos necessários.
+./aegis setup ide
+./aegis setup external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
+./aegis setup show
+```
+
+Se o provedor exigir credenciais, informe apenas o nome da variável de
+ambiente — nunca a chave no comando:
+
+```bash
+./aegis setup external --endpoint https://provider.example/v1 --model model-id --api-key-env PROVIDER_API_KEY
+```
+
+A escolha do supervisor fica vinculada ao envelope de preflight congelado. O
+modelo externo recebe somente o pedido semântico e registra identidade, tempo,
+tokens quando o provedor os informar e digest da decisão. O receipt de promoção
+carrega esse vínculo, sem chave de API ou saída bruta do modelo.
+
 ## Uso pelo IDE
 
 ```bash
@@ -38,6 +63,10 @@ Comandos disponíveis:
 - `./aegis review …`: prepara uma revisão semântica independente opcional para
   execução de alto risco ou forense.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
+- `./aegis setup`: emite uma seleção interativa para o IDE. A escolha
+  `ide` usa o modelo ativo do IDE; `external` coleta endpoint e modelo e chama
+  o endpoint OpenAI-compatível apenas para compilar a demanda em decisão
+  semântica.
 - `./aegis evidence --path …`: cria um inventário mecânico opcional, limitado
   e transitório para receipt ou investigação forensic. Ele só lê caminhos
   declarados explicitamente, nunca envia código para prompts e não tem cache
@@ -49,7 +78,8 @@ Comandos disponíveis:
 - `./aegis clean [--src|--all]`: reinicia runtime, produto, contrato e registro
   de provas como uma única unidade.
 
-Não há codificador CLI autônomo, configuração de provedores ou fluxo TTY. A
+Não há codificador CLI autônomo. A única integração opcional de provedor é o
+supervisor semântico externo, limitado e configurado por `setup`. A
 disciplina de edição cirúrgica permanece: diff mínimo, checks locais, provas,
 manifesto do stage e receipt.
 
