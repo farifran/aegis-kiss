@@ -370,34 +370,25 @@ resolve_preflight_wizard() {
       read -r -p "Escolha [1-$((answer_count + 1))]: " choice
       if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
         answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
-        jq -n --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '{questionId:$questionId,action:"SELECT_ANSWER",answerId:$answerId}' >> "${selections}"
+        jq -cn --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '{questionId:$questionId,action:"SELECT_ANSWER",answerId:$answerId}' >> "${selections}"
         break
       fi
       if [[ "${choice}" == "$((answer_count + 1))" ]]; then
         read -r -p 'Sua interpretação: ' correction
         [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
-        jq -n --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '{questionId:$questionId,action:"CORRECT_INTERPRETATION",correction:$correction}' >> "${selections}"
+        jq -cn --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '{questionId:$questionId,action:"CORRECT_INTERPRETATION",correction:$correction}' >> "${selections}"
         break
       fi
       printf '[AEGIS] Escolha inválida.\n' >&2
     done
   done
-  node - "${result}" "${selections}" "${resolution}" <<'NODE'
-const fs = require('node:fs');
-const result = JSON.parse(process.argv[2]);
-const answers = fs.readFileSync(process.argv[3], 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-fs.writeFileSync(process.argv[4], `${JSON.stringify({
-  schema: 'aegis.preflight_resolution.v2',
-  decisionDigest: result.decisionDigest,
-  preflightPromptDigest: result.preflightPromptDigest,
-  confirmation: {
-    channel: 'IDE_TERMINAL_WIZARD',
-    confirmationId: result.confirmation.confirmationId,
-    selectedAtEpochMs: Date.now(),
-  },
-  answers,
-})}\n`);
-NODE
+  jq -s \
+    --arg decisionDigest "$(jq -r '.decisionDigest' <<< "${result}")" \
+    --arg promptDigest "$(jq -r '.preflightPromptDigest' <<< "${result}")" \
+    --arg confirmationId "$(jq -r '.confirmation.confirmationId' <<< "${result}")" \
+    --argjson selectedAtEpochMs "$(node -p 'Date.now()')" \
+    '{schema:"aegis.preflight_resolution.v2",decisionDigest:$decisionDigest,preflightPromptDigest:$promptDigest,confirmation:{channel:"IDE_TERMINAL_WIZARD",confirmationId:$confirmationId,selectedAtEpochMs:$selectedAtEpochMs},answers:.}' \
+    "${selections}" > "${resolution}"
   printf '%s\n' "${resolution}"
 }
 
