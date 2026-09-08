@@ -1,4 +1,4 @@
-Produza somente um objeto JSON válido conforme `aegis.preflight_review.v2`.
+Produza somente um objeto JSON válido e compacto conforme `aegis.preflight_review.v2`.
 
 Atue como autoridade independente. Compare a decisão resolvida, inclusive seleções de clarificação e corpo do contrato, com cada unidade da demanda, os fatos mecânicos, o contrato anterior e cada regra arquitetural candidata.
 

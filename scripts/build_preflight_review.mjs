@@ -149,11 +149,20 @@ const reviewBinding = {
 };
 const reviewRequestDigest = canonicalDigest(reviewBinding);
 const context = {
-  normalizedDemand: preflight.normalizedDemand,
-  mechanicalFacts: preflight.mechanicalFacts,
-  architecture: preflight.architecture,
+  normalizedDemand: {
+    digest: preflight.normalizedDemand.digest,
+    units: preflight.normalizedDemand.units.map(({ id, text }) => ({ id, text })),
+  },
+  mechanicalFacts: {
+    target: preflight.mechanicalFacts.target,
+    references: preflight.mechanicalFacts.references,
+    discovery: preflight.mechanicalFacts.discovery,
+  },
+  architecture: {
+    policyDigest: preflight.architecture.policyDigest,
+    candidateRules: preflight.architecture.candidateRules,
+  },
   previousContract: preflight.previousContract,
-  contextDigest: preflight.contextDigest,
   decision,
   clarifications,
   producerId: options.producerId,

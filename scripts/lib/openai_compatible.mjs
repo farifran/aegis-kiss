@@ -21,11 +21,18 @@ export async function requestOpenAiJson({
   system,
   prompt,
   maxResponseBytes,
+  maxCompletionTokens = undefined,
   unavailableCode,
   timeoutCode,
   responseCode,
   requestFn = globalThis.fetch,
 }) {
+  if (
+    maxCompletionTokens !== undefined
+    && (!Number.isInteger(maxCompletionTokens) || maxCompletionTokens < 1)
+  ) {
+    fail('external_model_completion_budget_invalid');
+  }
   const headers = { 'content-type': 'application/json' };
   if (config.apiKeyEnv !== null) {
     const token = process.env[config.apiKeyEnv];
@@ -46,6 +53,7 @@ export async function requestOpenAiJson({
       body: JSON.stringify({
         model: config.model,
         temperature: 0,
+        ...(maxCompletionTokens === undefined ? {} : { max_tokens: maxCompletionTokens }),
         messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
       }),
     });

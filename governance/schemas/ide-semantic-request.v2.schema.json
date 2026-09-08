@@ -41,7 +41,7 @@
       "required": ["decisionPath", "continue", "userInteraction", "forensicReview", "revision", "promotion", "forbidden"],
       "properties": {
         "decisionPath": { "const": ".harness/runtime/preflight_decision.json" },
-        "continue": { "const": "./aegis continue <same-demand>" },
+        "continue": { "const": "./aegis resume" },
         "userInteraction": { "type": "string", "minLength": 1 },
         "forensicReview": { "type": "string", "minLength": 1 },
         "revision": { "type": "string", "minLength": 1 },

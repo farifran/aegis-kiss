@@ -14,6 +14,7 @@ import { assertSchema } from './lib/schema_validator.mjs';
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const maxRequestBytes = 256 * 1024;
 const maxResponseBytes = 256 * 1024;
+const maxCompletionTokens = 1024;
 
 function fail(code) {
   throw new Error(code);
@@ -69,6 +70,7 @@ export async function runExternalReviewer(request, { repositoryRoot = root, requ
     system: 'Você é o revisor independente do Aegis. Responda exclusivamente com o JSON exigido no prompt recebido.',
     prompt: request.prompt,
     maxResponseBytes,
+    maxCompletionTokens,
     unavailableCode: 'external_reviewer_unavailable',
     timeoutCode: 'external_reviewer_timeout',
     responseCode: 'external_reviewer_invalid_response',

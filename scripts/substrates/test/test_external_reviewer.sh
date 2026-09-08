@@ -51,6 +51,7 @@ const result = await runExternalReviewer(request, {
     if (url !== 'https://fixture.invalid/v1/chat/completions') throw new Error('unexpected_endpoint');
     const body = JSON.parse(init.body);
     if (body.model !== 'fixture-reviewer-11b') throw new Error('unexpected_model');
+    if (body.max_tokens !== 1024) throw new Error('missing_reviewer_completion_budget');
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(review) } }], usage: { prompt_tokens: 13, completion_tokens: 5 } }), { status: 200 });
   },
 });
