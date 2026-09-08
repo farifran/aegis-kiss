@@ -169,6 +169,31 @@ require_frozen_envelope() {
   printf '%s\n' "${envelope}"
 }
 
+internal_reviewer_id() {
+  local producer_id="${1:-}" reviewer_id="${AEGIS_INTERNAL_REVIEWER_ID:-ide-independent-reviewer}"
+  [[ -n "${producer_id}" && -n "${reviewer_id}" && "${reviewer_id}" != "${producer_id}" ]] \
+    || fatal 'internal_reviewer_identity_invalid'
+  printf '%s\n' "${reviewer_id}"
+}
+
+prepare_internal_review() {
+  local envelope="${1:-}" decision="${2:-}" resolution="${3:-}" producer_id reviewer_id request
+  producer_id="$(jq -r '.supervisor.id' "${envelope}")"
+  reviewer_id="$(internal_reviewer_id "${producer_id}")"
+  local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}")
+  [[ -n "${resolution}" ]] && args+=(--resolution "${resolution}")
+  request="$(node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}")" \
+    || fatal 'internal_review_request_failed'
+  jq -n --argjson review "${request}" '
+    {
+      schema: "aegis.ide_contract_workflow.v1",
+      status: "PENDING_INTERNAL_REVIEW",
+      reviewer: $review,
+      instruction: "Execute uma segunda chamada isolada do revisor indicado usando reviewer.prompt. Grave apenas aegis.preflight_review.v2 em .harness/runtime/preflight_review.json e retome finalize com --independent-review. Não apresente esta etapa ao usuário e não implemente antes do veredito APPROVED."
+    }
+  '
+}
+
 finalize_preflight() {
   local demand="${1:-}" decision="" resolution="" independent_review="" envelope=""
   shift || true
@@ -210,6 +235,9 @@ finalize_preflight() {
     printf 'Abra o wizard nativo do IDE com as opções abaixo. Não selecione a recomendação automaticamente e não implemente antes da resposta do usuário.\n\n'
     jq -r '.questions[] | "[\(.id)] \(.question)\n\(.impact)\n" + (.answers | to_entries | map("  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)") | join("\n"))' <<< "${result}"
     printf '\nPROTOCOLO IDE: apresente estas opções em modal/ask_question; depois grave somente a seleção explícita do usuário em .harness/runtime/resolution.json e retome finalize.\n\n'
+  elif jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "INDEPENDENT_REVIEW_REQUIRED"' <<< "${result}" >/dev/null; then
+    prepare_internal_review "${envelope}" "${decision}" "${resolution}"
+    return
   fi
   printf '%s\n' "${result}"
 }

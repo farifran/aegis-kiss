@@ -741,13 +741,11 @@ writeFileSync(resolutionPath, JSON.stringify({
   answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'EXPLICIT_CAPACITY_TIME' }],
 }));
 NODE
-if AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
-  < "${selected_envelope}" >/dev/null 2> "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.err"; then
-  echo 'selected forensic variant was persisted without independent review' >&2
-  exit 1
-fi
-grep -q 'independent_review_required_for_forensic' "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.err"
+  < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.json"
+jq -e '.status == "INDEPENDENT_REVIEW_REQUIRED" and .interpretationStatus == "INTERPRETATION_CONFIRMED"' \
+  "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.json" >/dev/null
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --producer-id producer --reviewer-id reviewer < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json"

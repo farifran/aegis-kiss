@@ -60,8 +60,10 @@ Comandos disponíveis:
   demanda esclarecida, o Contract IR v2 e o registro de provas. Ele consome o
   intake congelado, sem redescobrir uma árvore mutável. Confirmar uma
   interpretação é mecânico; somente uma correção exige nova chamada ao modelo.
-- `./aegis review …`: prepara uma revisão semântica independente opcional para
-  execução de alto risco ou forense.
+  Em contrato forense, o IDE dispara automaticamente uma revisão independente
+  isolada antes da persistência; isso nunca é uma etapa do usuário.
+- `./aegis review …`: expõe o construtor interno do pedido de revisão para
+  diagnóstico; execuções normais o disparam automaticamente.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
 - `./aegis setup`: emite uma seleção interativa para o IDE. A escolha
   `ide` usa o modelo ativo do IDE; `external` coleta endpoint e modelo e chama
@@ -100,8 +102,8 @@ O projeto declara suas provas específicas de domínio no contrato e no registro
 de provas. O core do Aegis não acumula testes de blockchain, pagamentos ou
 qualquer outro domínio.
 
-`npm test` mantém verificações determinísticas do harness. `./aegis review …`
-prepara a revisão opcional por modelo independente somente para execuções de
-alto risco ou forenses.
+`npm test` mantém verificações determinísticas do harness. Contratos de alto
+risco ou forenses sempre recebem revisão independente isolada, automaticamente
+após as clarificações e antes da persistência.
 
 Veja [ARCHITECTURE.md](ARCHITECTURE.md) para o modelo formal.

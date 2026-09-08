@@ -766,7 +766,7 @@ export function semanticRequest(envelope, timing) {
       decisionPath: '.harness/runtime/preflight_decision.json',
       finalize: './aegis finalize <same-demand> --decision .harness/runtime/preflight_decision.json',
       userInteraction: 'Depois de gravar a decisão, execute finalize sem --resolution. Se retornar USER_CONFIRMATION_REQUIRED, abra imediatamente o wizard/modal nativo do IDE com todas as opções recebidas; não escolha a recomendação, não implemente e não gere resolution até o usuário responder. Depois, grave a resolução com as escolhas exatas e retome finalize.',
-      forensicReview: 'forensic: ./aegis review <demanda> --decision <arquivo>; finalize com --independent-review <review>',
+      forensicReview: 'forensic: após confirmação, o IDE revisa internamente em execução isolada antes de finalizar; o usuário não participa.',
       revision: 'quando finalize retornar SEMANTIC_REVISION_REQUIRED, corrija somente a decisão usando as correções e repita finalize sem redescobrir o repositório',
       promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],
       forbidden: ['repository reads during semantic compilation', 'manual pre-commit execution', 'verification before authorize'],

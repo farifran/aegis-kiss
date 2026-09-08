@@ -60,8 +60,10 @@ Available commands:
   clarified demand, Contract IR v2 and proof registry together. It consumes
   the frozen intake instead of rediscovering a mutable worktree. Confirming a proposed
   interpretation is mechanical; only a correction requires another model call.
-- `./aegis review …`: prepares an optional independent semantic review for a
-  high-risk or forensic execution.
+  For a forensic contract, the IDE automatically dispatches an isolated
+  independent review before persistence; this is never a user step.
+- `./aegis review …`: exposes the internal review-request builder for
+  diagnostics; normal executions dispatch it automatically.
 - `./aegis status`: shows evidence state and working-tree state.
 - `./aegis setup`: emits an IDE-interactive selection. `ide` uses the active
   IDE model; `external` collects endpoint and model, then calls the configured
@@ -102,7 +104,8 @@ The project declares domain-specific proofs in its contract and proof
 registry. The Aegis core does not accumulate blockchain, payment or other
 domain tests.
 
-`npm test` keeps deterministic harness checks. `./aegis review …` prepares the
-optional independent-model review only for high-risk or forensic executions.
+`npm test` keeps deterministic harness checks. High-risk or forensic contracts
+always receive an isolated independent review automatically after any user
+clarifications and before persistence.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the formal model.

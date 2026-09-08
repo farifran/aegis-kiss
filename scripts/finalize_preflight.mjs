@@ -912,7 +912,15 @@ const effectiveValidation = resolvedDecision === decisionFile.value
   : validateDecision(envelope, resolvedDecision, clarificationRoles, clarifications.length > 0);
 let independentReviewDigest = null;
 if (effectiveValidation.stateProfile.requiresIndependentReview && options.independentReview.length === 0) {
-  fail('independent_review_required_for_forensic');
+  process.stdout.write(`${JSON.stringify({
+    schema: 'aegis.preflight_finalization.v2',
+    status: 'INDEPENDENT_REVIEW_REQUIRED',
+    executionId: envelope.executionId,
+    changeKind: envelope.changeKind,
+    decisionDigest: effectiveDecisionDigest,
+    interpretationStatus,
+  })}\n`);
+  process.exit(0);
 }
 if (options.independentReview.length > 0) {
   const review = await readJson(options.independentReview, 'unreadable_independent_review');
