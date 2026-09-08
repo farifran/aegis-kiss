@@ -23,6 +23,7 @@ edição, testes e implementação.
 # O IDE apresenta a seleção e coleta os campos necessários.
 ./aegis setup ide
 ./aegis setup external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
+./aegis setup reviewer external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
 ./aegis setup show
 ```
 
@@ -60,15 +61,15 @@ Comandos disponíveis:
   demanda esclarecida, o Contract IR v2 e o registro de provas. Ele consome o
   intake congelado, sem redescobrir uma árvore mutável. Confirmar uma
   interpretação é mecânico; somente uma correção exige nova chamada ao modelo.
-  Em contrato forense, o IDE dispara automaticamente uma revisão independente
-  isolada antes da persistência; isso nunca é uma etapa do usuário.
+  Em contrato forense, o gateway executa automaticamente o revisor externo
+  independente configurado antes da persistência; isso nunca é uma etapa do usuário.
 - `./aegis review …`: expõe o construtor interno do pedido de revisão para
   diagnóstico; execuções normais o disparam automaticamente.
 - `./aegis status`: mostra o estado das evidências e da árvore de trabalho.
-- `./aegis setup`: emite uma seleção interativa para o IDE. A escolha
-  `ide` usa o modelo ativo do IDE; `external` coleta endpoint e modelo e chama
-  o endpoint OpenAI-compatível apenas para compilar a demanda em decisão
-  semântica.
+- `./aegis setup`: emite uma seleção interativa para o IDE. Ele configura o
+  supervisor semântico e o revisor forense independente. O revisor é um modelo
+  OpenAI-compatível chamado somente na revisão forense; sua identidade e
+  execução vinculam o resultado ao receipt.
 - `./aegis evidence --path …`: cria um inventário mecânico opcional, limitado
   e transitório para receipt ou investigação forensic. Ele só lê caminhos
   declarados explicitamente, nunca envia código para prompts e não tem cache
@@ -104,6 +105,7 @@ qualquer outro domínio.
 
 `npm test` mantém verificações determinísticas do harness. Contratos de alto
 risco ou forenses sempre recebem revisão independente isolada, automaticamente
-após as clarificações e antes da persistência.
+após as clarificações e antes da persistência. Sem revisor configurado, o
+contrato falha fechado antes de persistir estado semântico.
 
 Veja [ARCHITECTURE.md](ARCHITECTURE.md) para o modelo formal.

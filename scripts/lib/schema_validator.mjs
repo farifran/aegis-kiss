@@ -18,6 +18,7 @@ const schemaFiles = new Map([
   ['aegis.ide_semantic_request.v2', 'ide-semantic-request.v2.schema.json'],
   ['aegis.preflight_review.v2', 'preflight-review.v2.schema.json'],
   ['aegis.preflight_review_request.v2', 'preflight-review-request.v2.schema.json'],
+  ['aegis.reviewer_execution.v1', 'reviewer-execution.v1.schema.json'],
 ]);
 
 const validator = new Ajv2020({ allErrors: true, strict: false });

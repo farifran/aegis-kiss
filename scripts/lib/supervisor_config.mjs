@@ -25,42 +25,47 @@ function validEndpoint(value) {
   }
 }
 
-function normalizeConfig(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value) || value.schema !== 'aegis.supervisor_config.v1') {
-    fail('invalid_supervisor_config');
-  }
-  if (value.mode === 'IDE') {
-    if (Object.keys(value).some((key) => !['schema', 'mode'].includes(key))) fail('invalid_supervisor_config');
-    return { schema: 'aegis.supervisor_config.v1', mode: 'IDE' };
-  }
-  if (value.mode !== 'EXTERNAL' || Object.keys(value).some((key) => !['schema', 'mode', 'external'].includes(key))) {
-    fail('invalid_supervisor_config');
-  }
-  const external = value.external;
+function normalizeExternal(value) {
   if (
-    external === null || typeof external !== 'object' || Array.isArray(external)
-    || Object.keys(external).some((key) => !['endpoint', 'model', 'apiKeyEnv', 'timeoutMs'].includes(key))
-    || !validEndpoint(external.endpoint)
-    || typeof external.model !== 'string' || external.model.length === 0 || external.model.length > 256
-    || !(external.apiKeyEnv === null || validEnvironmentName(external.apiKeyEnv))
-    || !Number.isInteger(external.timeoutMs) || external.timeoutMs < 1_000 || external.timeoutMs > 120_000
+    value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !['endpoint', 'model', 'apiKeyEnv', 'timeoutMs'].includes(key))
+    || !validEndpoint(value.endpoint)
+    || typeof value.model !== 'string' || value.model.length === 0 || value.model.length > 256
+    || !(value.apiKeyEnv === null || validEnvironmentName(value.apiKeyEnv))
+    || !Number.isInteger(value.timeoutMs) || value.timeoutMs < 1_000 || value.timeoutMs > 120_000
   ) {
     fail('invalid_supervisor_config');
   }
   return {
+    endpoint: value.endpoint.replace(/\/+$/u, ''),
+    model: value.model,
+    apiKeyEnv: value.apiKeyEnv,
+    timeoutMs: value.timeoutMs,
+  };
+}
+
+function normalizeConfig(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || value.schema !== 'aegis.supervisor_config.v1') {
+    fail('invalid_supervisor_config');
+  }
+  const allowed = value.mode === 'IDE'
+    ? ['schema', 'mode', 'reviewer']
+    : ['schema', 'mode', 'external', 'reviewer'];
+  if (!['IDE', 'EXTERNAL'].includes(value.mode) || Object.keys(value).some((key) => !allowed.includes(key))) {
+    fail('invalid_supervisor_config');
+  }
+  const reviewer = value.reviewer === undefined || value.reviewer === null ? null : normalizeExternal(value.reviewer);
+  if (value.mode === 'IDE') return { schema: 'aegis.supervisor_config.v1', mode: 'IDE', reviewer };
+  return {
     schema: 'aegis.supervisor_config.v1',
     mode: 'EXTERNAL',
-    external: {
-      endpoint: external.endpoint.replace(/\/+$/u, ''),
-      model: external.model,
-      apiKeyEnv: external.apiKeyEnv,
-      timeoutMs: external.timeoutMs,
-    },
+    external: normalizeExternal(value.external),
+    reviewer,
   };
 }
 
 export function defaultSupervisorConfig() {
-  return { schema: 'aegis.supervisor_config.v1', mode: 'IDE' };
+  return { schema: 'aegis.supervisor_config.v1', mode: 'IDE', reviewer: null };
 }
 
 export function supervisorIdentity(config) {
@@ -68,6 +73,16 @@ export function supervisorIdentity(config) {
   return normalized.mode === 'IDE'
     ? { mode: 'IDE', id: 'ide-active-model', configDigest: canonicalDigest(normalized) }
     : { mode: 'EXTERNAL', id: normalized.external.model, configDigest: canonicalDigest(normalized) };
+}
+
+export function reviewerIdentity(config) {
+  const reviewer = normalizeConfig(config).reviewer;
+  if (reviewer === null) return null;
+  return {
+    mode: 'EXTERNAL',
+    id: reviewer.model,
+    configDigest: canonicalDigest({ schema: 'aegis.reviewer_config.v1', external: reviewer }),
+  };
 }
 
 export async function loadSupervisorConfig(repositoryRoot = root) {
@@ -92,14 +107,10 @@ export async function writeSupervisorConfig(config, repositoryRoot = root) {
 }
 
 function usage() {
-  process.stdout.write('Uso: node scripts/lib/supervisor_config.mjs show | ide | external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]\n');
+  process.stdout.write('Uso: node scripts/lib/supervisor_config.mjs show | ide | external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>] | reviewer off | reviewer external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]\n');
 }
 
-function parseCommand(argv) {
-  const [command, ...rest] = argv;
-  if (command === 'show' && rest.length === 0) return { command };
-  if (command === 'ide' && rest.length === 0) return { command };
-  if (command !== 'external') return null;
+function parseExternalOptions(rest) {
   const options = { endpoint: '', model: '', apiKeyEnv: null, timeoutMs: 45_000 };
   for (let index = 0; index < rest.length; index += 2) {
     const key = rest[index];
@@ -111,7 +122,23 @@ function parseCommand(argv) {
     else if (key === '--timeout-ms' && options.timeoutMs === 45_000 && /^\d+$/u.test(value)) options.timeoutMs = Number(value);
     else return null;
   }
-  return { command, options };
+  return options.endpoint.length > 0 && options.model.length > 0 ? options : null;
+}
+
+function parseCommand(argv) {
+  const [command, ...rest] = argv;
+  if (command === 'show' && rest.length === 0) return { command };
+  if (command === 'ide' && rest.length === 0) return { command };
+  if (command === 'external') {
+    const options = parseExternalOptions(rest);
+    return options === null ? null : { command, options };
+  }
+  if (command === 'reviewer' && rest[0] === 'off' && rest.length === 1) return { command: 'reviewer-off' };
+  if (command === 'reviewer' && rest[0] === 'external') {
+    const options = parseExternalOptions(rest.slice(1));
+    return options === null ? null : { command: 'reviewer-external', options };
+  }
+  return null;
 }
 
 if ((process.argv[1] ?? '').endsWith('/supervisor_config.mjs')) {
@@ -123,13 +150,17 @@ if ((process.argv[1] ?? '').endsWith('/supervisor_config.mjs')) {
   try {
     if (parsed.command === 'show') {
       const config = await loadSupervisorConfig(root);
-      process.stdout.write(`${JSON.stringify({ schema: 'aegis.supervisor_setup.v1', status: 'CONFIGURED', supervisor: supervisorIdentity(config) })}\n`);
+      process.stdout.write(`${JSON.stringify({ schema: 'aegis.supervisor_setup.v1', status: 'CONFIGURED', supervisor: supervisorIdentity(config), reviewer: reviewerIdentity(config) })}\n`);
     } else {
-      const config = parsed.command === 'ide'
-        ? defaultSupervisorConfig()
-        : { schema: 'aegis.supervisor_config.v1', mode: 'EXTERNAL', external: parsed.options };
+      const current = await loadSupervisorConfig(root);
+      let config;
+      if (parsed.command === 'ide') config = { ...defaultSupervisorConfig(), reviewer: current.reviewer };
+      else if (parsed.command === 'external') config = { schema: 'aegis.supervisor_config.v1', mode: 'EXTERNAL', external: parsed.options, reviewer: current.reviewer };
+      else if (parsed.command === 'reviewer-off') config = { ...current, reviewer: null };
+      else config = { ...current, reviewer: parsed.options };
       const supervisor = await writeSupervisorConfig(config, root);
-      process.stdout.write(`${JSON.stringify({ schema: 'aegis.supervisor_setup.v1', status: 'CONFIGURED', supervisor })}\n`);
+      const normalized = await loadSupervisorConfig(root);
+      process.stdout.write(`${JSON.stringify({ schema: 'aegis.supervisor_setup.v1', status: 'CONFIGURED', supervisor, reviewer: reviewerIdentity(normalized) })}\n`);
     }
   } catch (error) {
     process.stderr.write(`[AEGIS][SETUP][FATAL] ${error instanceof Error ? error.message : 'setup_failed'}\n`);

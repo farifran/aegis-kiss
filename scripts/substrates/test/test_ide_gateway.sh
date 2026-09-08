@@ -66,9 +66,13 @@ writeFileSync(decisionPath, JSON.stringify({
   continuity: { retirements: [], proofChanges: [] },
 }));
 NODE
+set +e
 output="$(bash "${WORK_DIR}/aegis" finalize 'Criar uma biblioteca determinística em src/library.ts.' --decision .harness/runtime/preflight_decision.json)"
-printf '%s\n' "${output}" | grep -q '^=== AEGIS USER CONFIRMATION REQUIRED ===$'
-printf '%s\n' "${output}" | tail -n 1 | jq -e '.status == "USER_CONFIRMATION_REQUIRED" and (.questions | length == 1)' >/dev/null
+finalize_status=$?
+set -e
+[[ "${finalize_status}" -eq 2 ]]
+[[ "$(printf '%s\n' "${output}" | jq -r '.status')" == 'USER_CONFIRMATION_REQUIRED' ]]
+jq -e '.status == "USER_CONFIRMATION_REQUIRED" and (.questions | length == 1)' "${WORK_DIR}/.harness/runtime/user_confirmation_request.json" >/dev/null
 
 output="$(bash "${WORK_DIR}/aegis" setup show)"
 printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
@@ -77,10 +81,14 @@ printf '%s' "${output}" | jq -e '
   .schema == "aegis.ide_setup_request.v1"
   and .status == "PENDING_USER_SELECTION"
   and .executor == "IDE"
-  and (.questions | length == 1)
+  and (.questions | length == 2)
   and .questions[0].recommendedAnswerId == "IDE"
   and ([.questions[0].answers[].id] | sort == ["EXTERNAL", "IDE"])
   and ([.questions[0].answers[] | select(.id == "EXTERNAL") | (.requiredFields | length)] == [4])
+  and .questions[1].id == "forensic-reviewer"
+  and .questions[1].recommendedAnswerId == "EXTERNAL"
+  and ([.questions[1].answers[].id] | sort == ["EXTERNAL", "OFF"])
+  and ([.questions[1].answers[] | select(.id == "EXTERNAL") | (.requiredFields | length)] == [4])
 ' >/dev/null
 [[ ! -e "${WORK_DIR}/.harness/supervisor.json" ]]
 output="$(bash "${WORK_DIR}/aegis" setup ide)"

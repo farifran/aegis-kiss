@@ -5,9 +5,9 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { resolve } from 'node:path';
-import { clearTimeout as clearScheduledTimeout, setTimeout as scheduleTimeout } from 'node:timers';
 import { fileURLToPath, URL } from 'node:url';
 import { sha256 } from './lib/canonical_json.mjs';
+import { requestOpenAiJson } from './lib/openai_compatible.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 import { loadSupervisorConfig, supervisorIdentity } from './lib/supervisor_config.mjs';
 
@@ -34,16 +34,6 @@ async function readBoundedStdin() {
   }
 }
 
-function extractJson(content) {
-  if (typeof content !== 'string' || content.length === 0) fail('supervisor_empty_response');
-  const trimmed = content.trim().replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '');
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    fail('supervisor_invalid_json');
-  }
-}
-
 async function writeAtomic(runtime, path, value) {
   await mkdir(runtime, { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
@@ -58,49 +48,17 @@ export async function runExternalSupervisor(request, { repositoryRoot = root, re
   const config = await loadSupervisorConfig(repositoryRoot);
   if (config.mode !== 'EXTERNAL') fail('external_supervisor_not_configured');
   const supervisor = supervisorIdentity(config);
-  const { endpoint, model, apiKeyEnv, timeoutMs } = config.external;
-  const headers = { 'content-type': 'application/json' };
-  if (apiKeyEnv !== null) {
-    const token = process.env[apiKeyEnv];
-    if (typeof token !== 'string' || token.length === 0) fail('external_supervisor_api_key_missing');
-    headers.authorization = `Bearer ${token}`;
-  }
-  if (typeof requestFn !== 'function' || typeof globalThis.AbortController !== 'function') {
-    fail('external_supervisor_runtime_unavailable');
-  }
-  const controller = new globalThis.AbortController();
-  const timer = scheduleTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await requestFn(`${endpoint}/chat/completions`, {
-      method: 'POST',
-      headers,
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: 'Você é o compilador semântico do Aegis. Responda exclusivamente com o JSON exigido no prompt recebido.' },
-          { role: 'user', content: request.prompt },
-        ],
-      }),
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') fail('external_supervisor_timeout');
-    fail('external_supervisor_unavailable');
-  } finally {
-    clearScheduledTimeout(timer);
-  }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > maxResponseBytes) fail('external_supervisor_response_budget_exceeded');
-  if (!response.ok) fail(`external_supervisor_http_${response.status}`);
-  let payload;
-  try {
-    payload = JSON.parse(bytes.toString('utf8'));
-  } catch {
-    fail('external_supervisor_invalid_response');
-  }
-  const decision = extractJson(payload?.choices?.[0]?.message?.content);
+  const response = await requestOpenAiJson({
+    config: config.external,
+    system: 'Você é o compilador semântico do Aegis. Responda exclusivamente com o JSON exigido no prompt recebido.',
+    prompt: request.prompt,
+    maxResponseBytes,
+    unavailableCode: 'external_supervisor_unavailable',
+    timeoutCode: 'external_supervisor_timeout',
+    responseCode: 'external_supervisor_invalid_response',
+    requestFn,
+  });
+  const decision = response.value;
   assertSchema('aegis.preflight_decision.v2', decision);
   if (decision.contextDigest !== request.contextDigest || decision.promptDigest !== request.promptDigest) {
     fail('external_supervisor_binding_mismatch');
@@ -121,8 +79,8 @@ export async function runExternalSupervisor(request, { repositoryRoot = root, re
       durationMs: Math.round((performance.now() - started) * 1000) / 1000,
     },
     usage: {
-      promptTokens: Number.isInteger(payload?.usage?.prompt_tokens) ? payload.usage.prompt_tokens : null,
-      completionTokens: Number.isInteger(payload?.usage?.completion_tokens) ? payload.usage.completion_tokens : null,
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
     },
   };
   await writeAtomic(runtime, decisionPath, decision);

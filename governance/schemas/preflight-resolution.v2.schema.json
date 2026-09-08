@@ -13,7 +13,7 @@
       "additionalProperties": false,
       "required": ["channel", "confirmationId", "selectedAtEpochMs"],
       "properties": {
-        "channel": { "const": "IDE_NATIVE_SELECTOR" },
+        "channel": { "enum": ["IDE_NATIVE_SELECTOR", "IDE_TERMINAL_WIZARD"] },
         "confirmationId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "selectedAtEpochMs": { "type": "integer", "minimum": 0 }
       }

@@ -23,8 +23,10 @@ usage() {
 Uso no IDE:
   ./aegis "<demanda>" [--target <caminho>]
   ./aegis harness "<demanda>" [--target <caminho>]
+  ./aegis continue "<mesma-demanda>"
   ./aegis setup
   ./aegis setup [show|ide|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]]
+  ./aegis setup reviewer [off|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]
   ./aegis finalize "<mesma-demanda>" --decision <arquivo> [--resolution <arquivo>]
                     [--independent-review <arquivo>]
   ./aegis review "<demanda>" --decision <arquivo> [--resolution <arquivo>] --producer-id <id> --reviewer-id <id>
@@ -61,7 +63,8 @@ supervisor_setup() {
     # mirrors the old agentic setup behavior: emit a bounded, declarative
     # selection request so the IDE can render its own chooser and collect any
     # external endpoint/model fields before rerunning one mechanical command.
-    jq -n '
+    local request
+    request="$(jq -n '
       {
         schema: "aegis.ide_setup_request.v1",
         status: "PENDING_USER_SELECTION",
@@ -93,13 +96,95 @@ supervisor_setup() {
                 apply: { command: "./aegis setup external --endpoint <endpoint> --model <model> [--api-key-env <apiKeyEnv>] [--timeout-ms <timeoutMs>]" }
               }
             ]
+          },
+          {
+            id: "forensic-reviewer",
+            question: "Qual autoridade deve revisar contratos forenses de forma independente?",
+            recommendedAnswerId: "EXTERNAL",
+            answers: [
+              {
+                id: "EXTERNAL",
+                label: "Modelo externo independente",
+                rationale: "É executável pelo gateway sem envolver o usuário da demanda e fica vinculado ao receipt.",
+                requiredFields: [
+                  { name: "endpoint", prompt: "Endpoint base OpenAI-compatível", example: "http://127.0.0.1:11434/v1" },
+                  { name: "model", prompt: "Identificador do modelo revisor", example: "llama3.2:11b" },
+                  { name: "apiKeyEnv", prompt: "Nome da variável de API key, se necessário", optional: true },
+                  { name: "timeoutMs", prompt: "Timeout em milissegundos", default: 45000, optional: true }
+                ],
+                apply: { command: "./aegis setup reviewer external --endpoint <endpoint> --model <model> [--api-key-env <apiKeyEnv>] [--timeout-ms <timeoutMs>]" }
+              },
+              {
+                id: "OFF",
+                label: "Não configurar agora",
+                rationale: "Demandas comuns continuam funcionando; demandas forenses param antes da persistência.",
+                apply: { command: "./aegis setup reviewer off" }
+              }
+            ]
           }
         ]
       }
-    '
+    ')"
+    if [[ -t 0 && -t 1 ]]; then
+      resolve_setup_wizard "${request}"
+      return
+    fi
+    printf '%s\n' "${request}"
     return 0
   fi
   exec node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" "$@"
+}
+
+prompt_numbered_choice() {
+  local question_json="${1:-}" title answer_count choice selected_id
+  title="$(jq -r '.question' <<< "${question_json}")"
+  answer_count="$(jq '.answers | length' <<< "${question_json}")"
+  printf '\n[AEGIS] %s\n' "${title}" >&2
+  jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)"' <<< "${question_json}" >&2
+  while true; do
+    read -r -p "Escolha [1-${answer_count}]: " choice
+    if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
+      selected_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question_json}")"
+      printf '%s\n' "${selected_id}"
+      return
+    fi
+    printf '[AEGIS] Escolha inválida.\n' >&2
+  done
+}
+
+resolve_setup_wizard() {
+  local request="${1:-}" supervisor_question reviewer_question supervisor_choice reviewer_choice
+  supervisor_question="$(jq -c '.questions[] | select(.id == "supervisor-mode")' <<< "${request}")"
+  reviewer_question="$(jq -c '.questions[] | select(.id == "forensic-reviewer")' <<< "${request}")"
+  supervisor_choice="$(prompt_numbered_choice "${supervisor_question}")"
+  if [[ "${supervisor_choice}" == 'EXTERNAL' ]]; then
+    local endpoint model api_key_env timeout_ms
+    read -r -p 'Endpoint OpenAI-compatível: ' endpoint
+    read -r -p 'Modelo: ' model
+    read -r -p 'Variável de API key (vazio se não usar): ' api_key_env
+    read -r -p 'Timeout em ms [45000]: ' timeout_ms
+    timeout_ms="${timeout_ms:-45000}"
+    local -a supervisor_args=(external --endpoint "${endpoint}" --model "${model}" --timeout-ms "${timeout_ms}")
+    [[ -n "${api_key_env}" ]] && supervisor_args+=(--api-key-env "${api_key_env}")
+    node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" "${supervisor_args[@]}" >/dev/null
+  else
+    node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" ide >/dev/null
+  fi
+  reviewer_choice="$(prompt_numbered_choice "${reviewer_question}")"
+  if [[ "${reviewer_choice}" == 'EXTERNAL' ]]; then
+    local reviewer_endpoint reviewer_model reviewer_api_key_env reviewer_timeout_ms
+    read -r -p 'Endpoint do revisor OpenAI-compatível: ' reviewer_endpoint
+    read -r -p 'Modelo do revisor: ' reviewer_model
+    read -r -p 'Variável de API key do revisor (vazio se não usar): ' reviewer_api_key_env
+    read -r -p 'Timeout do revisor em ms [45000]: ' reviewer_timeout_ms
+    reviewer_timeout_ms="${reviewer_timeout_ms:-45000}"
+    local -a reviewer_args=(reviewer external --endpoint "${reviewer_endpoint}" --model "${reviewer_model}" --timeout-ms "${reviewer_timeout_ms}")
+    [[ -n "${reviewer_api_key_env}" ]] && reviewer_args+=(--api-key-env "${reviewer_api_key_env}")
+    node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" "${reviewer_args[@]}" >/dev/null
+  else
+    node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" reviewer off >/dev/null
+  fi
+  node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" show
 }
 
 supervisor_setup_state() {
@@ -154,7 +239,13 @@ build_preflight() {
   [[ "${AEGIS_PREFLIGHT_OUTPUT:-public}" == "internal" ]] && preflight_args+=(--internal-envelope)
   request="$(printf '%s' "${demand}" | node "${ROOT_DIR}/scripts/preflight.mjs" "${preflight_args[@]}")"
   if [[ "${supervisor_mode}" == 'EXTERNAL' ]]; then
-    printf '%s' "${request}" | node "${ROOT_DIR}/scripts/external_supervisor.mjs"
+    local semantic_result decision_path
+    semantic_result="$(printf '%s' "${request}" | node "${ROOT_DIR}/scripts/external_supervisor.mjs")" \
+      || fatal 'external_semantic_compilation_failed'
+    decision_path="$(jq -r '.decisionPath // empty' <<< "${semantic_result}")"
+    [[ "${decision_path}" == '.harness/runtime/preflight_decision.json' ]] \
+      || fatal 'external_semantic_decision_missing'
+    finalize_preflight "${demand}" --decision "${decision_path}"
   else
     printf '%s\n' "${request}"
   fi
@@ -169,29 +260,34 @@ require_frozen_envelope() {
   printf '%s\n' "${envelope}"
 }
 
-internal_reviewer_id() {
-  local producer_id="${1:-}" reviewer_id="${AEGIS_INTERNAL_REVIEWER_ID:-ide-independent-reviewer}"
-  [[ -n "${producer_id}" && -n "${reviewer_id}" && "${reviewer_id}" != "${producer_id}" ]] \
-    || fatal 'internal_reviewer_identity_invalid'
-  printf '%s\n' "${reviewer_id}"
+internal_reviewer_state() {
+  local producer_id="${1:-}" state reviewer_id reviewer_digest
+  state="$(supervisor_setup_state)"
+  reviewer_id="$(jq -r '.reviewer.id // empty' <<< "${state}")"
+  reviewer_digest="$(jq -r '.reviewer.configDigest // empty' <<< "${state}")"
+  [[ -n "${producer_id}" && -n "${reviewer_id}" && "${reviewer_id}" != "${producer_id}" && "${reviewer_digest}" =~ ^[a-f0-9]{64}$ ]] \
+    || fatal 'independent_reviewer_not_configured'
+  jq -n --arg id "${reviewer_id}" --arg digest "${reviewer_digest}" '{id:$id,configDigest:$digest}'
 }
 
 prepare_internal_review() {
-  local envelope="${1:-}" decision="${2:-}" resolution="${3:-}" producer_id reviewer_id request
+  local envelope="${1:-}" decision="${2:-}" resolution="${3:-}" producer_id reviewer reviewer_id reviewer_digest request execution review_path
   producer_id="$(jq -r '.supervisor.id' "${envelope}")"
-  reviewer_id="$(internal_reviewer_id "${producer_id}")"
-  local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}")
+  reviewer="$(internal_reviewer_state "${producer_id}")"
+  reviewer_id="$(jq -r '.id' <<< "${reviewer}")"
+  reviewer_digest="$(jq -r '.configDigest' <<< "${reviewer}")"
+  local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}" --reviewer-config-digest "${reviewer_digest}")
   [[ -n "${resolution}" ]] && args+=(--resolution "${resolution}")
   request="$(node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}")" \
     || fatal 'internal_review_request_failed'
-  jq -n --argjson review "${request}" '
-    {
-      schema: "aegis.ide_contract_workflow.v1",
-      status: "PENDING_INTERNAL_REVIEW",
-      reviewer: $review,
-      instruction: "Execute uma segunda chamada isolada do revisor indicado usando reviewer.prompt. Grave apenas aegis.preflight_review.v2 em .harness/runtime/preflight_review.json e retome finalize com --independent-review. Não apresente esta etapa ao usuário e não implemente antes do veredito APPROVED."
-    }
-  '
+  execution="$(printf '%s' "${request}" | node "${ROOT_DIR}/scripts/external_reviewer.mjs")" \
+    || fatal 'internal_review_execution_failed'
+  jq -e '.schema == "aegis.internal_review_result.v1" and .status == "INDEPENDENT_REVIEW_READY" and .verdict == "APPROVED" and .reviewPath == ".harness/runtime/preflight_review.json"' \
+    <<< "${execution}" >/dev/null || fatal 'independent_review_rejected'
+  review_path="$(jq -r '.reviewPath' <<< "${execution}")"
+  local -a finalize_args=(--decision "${decision}" --independent-review "${review_path}")
+  [[ -n "${resolution}" ]] && finalize_args+=(--resolution "${resolution}")
+  node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}"
 }
 
 finalize_preflight() {
@@ -229,12 +325,20 @@ finalize_preflight() {
   local result
   result="$(node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}")" || return $?
   if jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "USER_CONFIRMATION_REQUIRED"' <<< "${result}" >/dev/null; then
-    printf '\n══════════════════════════════════════════════════════════════\n'
-    printf '=== AEGIS USER CONFIRMATION REQUIRED ===\n'
-    printf '══════════════════════════════════════════════════════════════\n'
-    printf 'Abra o wizard nativo do IDE com as opções abaixo. Não selecione a recomendação automaticamente e não implemente antes da resposta do usuário.\n\n'
-    jq -r '.questions[] | "[\(.id)] \(.question)\n\(.impact)\n" + (.answers | to_entries | map("  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)") | join("\n"))' <<< "${result}"
-    printf '\nPROTOCOLO IDE: apresente estas opções em modal/ask_question; depois grave somente a seleção explícita do usuário em .harness/runtime/resolution.json e retome finalize.\n\n'
+    write_user_wizard_request "${result}"
+    if [[ ! -t 0 || ! -t 1 ]]; then
+      # A non-interactive executor cannot obtain authority.  The structured
+      # request is deliberately the only successful output, so IDE adapters
+      # must render it instead of treating a pending decision as completion.
+      printf '%s\n' "${result}"
+      return 2
+    fi
+    resolution="$(resolve_preflight_wizard "${result}")"
+    result="$(node "${ROOT_DIR}/scripts/finalize_preflight.mjs" --decision "${decision}" --resolution "${resolution}" < "${envelope}")" || return $?
+    if jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "INDEPENDENT_REVIEW_REQUIRED"' <<< "${result}" >/dev/null; then
+      prepare_internal_review "${envelope}" "${decision}" "${resolution}"
+      return
+    fi
   elif jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "INDEPENDENT_REVIEW_REQUIRED"' <<< "${result}" >/dev/null; then
     prepare_internal_review "${envelope}" "${decision}" "${resolution}"
     return
@@ -242,8 +346,70 @@ finalize_preflight() {
   printf '%s\n' "${result}"
 }
 
+write_user_wizard_request() {
+  local result="${1:-}" temporary="${RUNTIME_DIR}/user_confirmation_request.json.$$.tmp"
+  printf '%s\n' "${result}" > "${temporary}"
+  mv "${temporary}" "${RUNTIME_DIR}/user_confirmation_request.json"
+}
+
+resolve_preflight_wizard() {
+  local result="${1:-}" selections="${RUNTIME_DIR}/preflight_wizard_selections.json" resolution="${RUNTIME_DIR}/preflight_resolution.json"
+  : > "${selections}"
+  local count index question answer_count choice correction answer_id
+  count="$(jq '.questions | length' <<< "${result}")"
+  printf '\n══════════════════════════════════════════════════════════════\n' >&2
+  printf ' AEGIS — decisões necessárias para continuar\n' >&2
+  printf '══════════════════════════════════════════════════════════════\n' >&2
+  for ((index = 0; index < count; index++)); do
+    question="$(jq -c ".questions[${index}]" <<< "${result}")"
+    answer_count="$(jq '.answers | length' <<< "${question}")"
+    printf '\n[%s] %s\n%s\n' "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" "$(jq -r '.impact' <<< "${question}")" >&2
+    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
+    printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
+    while true; do
+      read -r -p "Escolha [1-$((answer_count + 1))]: " choice
+      if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
+        answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
+        jq -n --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '{questionId:$questionId,action:"SELECT_ANSWER",answerId:$answerId}' >> "${selections}"
+        break
+      fi
+      if [[ "${choice}" == "$((answer_count + 1))" ]]; then
+        read -r -p 'Sua interpretação: ' correction
+        [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
+        jq -n --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '{questionId:$questionId,action:"CORRECT_INTERPRETATION",correction:$correction}' >> "${selections}"
+        break
+      fi
+      printf '[AEGIS] Escolha inválida.\n' >&2
+    done
+  done
+  node - "${result}" "${selections}" "${resolution}" <<'NODE'
+const fs = require('node:fs');
+const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const answers = fs.readFileSync(process.argv[3], 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+fs.writeFileSync(process.argv[4], `${JSON.stringify({
+  schema: 'aegis.preflight_resolution.v2',
+  decisionDigest: result.decisionDigest,
+  preflightPromptDigest: result.preflightPromptDigest,
+  confirmation: {
+    channel: 'IDE_TERMINAL_WIZARD',
+    confirmationId: result.confirmation.confirmationId,
+    selectedAtEpochMs: Date.now(),
+  },
+  answers,
+})}\n`);
+NODE
+  printf '%s\n' "${resolution}"
+}
+
+continue_preflight() {
+  local demand="${1:-}"
+  [[ -n "${demand}" ]] || fatal 'missing_demand'
+  [[ -s "${RUNTIME_DIR}/preflight_decision.json" ]] || fatal 'missing_semantic_decision'
+  finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json
+}
+
 build_independent_review() {
-  local demand="${1:-}" decision="" resolution="" producer_id="" reviewer_id="" envelope=""
+  local demand="${1:-}" decision="" resolution="" producer_id="" reviewer_id="" envelope="" reviewer reviewer_digest
   shift || true
   [[ -n "${demand}" ]] || fatal 'missing_demand'
   while [[ $# -gt 0 ]]; do
@@ -264,7 +430,10 @@ build_independent_review() {
     esac
   done
   [[ -n "${decision}" && -n "${producer_id}" && -n "${reviewer_id}" ]] || fatal 'missing_review_arguments'
-  local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}")
+  reviewer="$(internal_reviewer_state "${producer_id}")"
+  [[ "${reviewer_id}" == "$(jq -r '.id' <<< "${reviewer}")" ]] || fatal 'reviewer_identity_not_configured'
+  reviewer_digest="$(jq -r '.configDigest' <<< "${reviewer}")"
+  local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}" --reviewer-config-digest "${reviewer_digest}")
   [[ -n "${resolution}" ]] && args+=(--resolution "${resolution}")
   envelope="$(require_frozen_envelope "${demand}")"
   node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}"
@@ -379,15 +548,18 @@ clean() {
 }
 
 status() {
-  local state supervisor
+  local state setup supervisor reviewer
   state="$(metadata_state)"
-  supervisor="$(supervisor_setup_state | jq '.supervisor')"
+  setup="$(supervisor_setup_state)"
+  supervisor="$(jq '.supervisor' <<< "${setup}")"
+  reviewer="$(jq '.reviewer' <<< "${setup}")"
   jq -n \
     --arg state "${state}" \
     --arg base "$(git -C "${ROOT_DIR}" rev-parse HEAD)" \
     --arg changes "$(git -C "${ROOT_DIR}" status --short)" \
     --argjson supervisor "${supervisor}" \
-    '{schema:"aegis.ide_status.v1",evidenceState:$state,baseCommit:$base,workingTree:$changes,supervisor:$supervisor}'
+    --argjson reviewer "${reviewer}" \
+    '{schema:"aegis.ide_status.v1",evidenceState:$state,baseCommit:$base,workingTree:$changes,supervisor:$supervisor,reviewer:$reviewer}'
 }
 
 command_name="${1:-}"
@@ -397,6 +569,7 @@ case "${command_name}" in
   setup) shift; supervisor_setup "$@" ;;
   evidence) shift; exec bash "${ROOT_DIR}/scripts/evidence_inventory.sh" "$@" ;;
   harness) shift; build_preflight HARNESS "$@" ;;
+  continue) shift; continue_preflight "$@" ;;
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
   candidate-review) shift; [[ $# -eq 0 ]] || fatal 'candidate_review_does_not_accept_arguments'; build_candidate_review ;;

@@ -68,7 +68,7 @@ try {
     process.exit(0);
   }
   if (!digestOnly && supervisorConfigDigest.length === 0) {
-    supervisorConfigDigest = canonicalDigest({ schema: 'aegis.supervisor_config.v1', mode: 'IDE' });
+    supervisorConfigDigest = canonicalDigest({ schema: 'aegis.supervisor_config.v1', mode: 'IDE', reviewer: null });
   }
   const envelope = await buildPreflight(rawDemand, target, root, changeKind, {
     mode: supervisorMode,
@@ -103,6 +103,8 @@ try {
         'preflight_decision.json',
         'preflight_review_request.json',
         'preflight_review.json',
+        'user_confirmation_request.json',
+        'preflight_wizard_selections.json',
         'preflight_resolution.json',
         'supervisor_execution.json',
         'finalization.json',

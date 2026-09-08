@@ -667,12 +667,14 @@ function reviewBinding(request) {
     decisionDigest: request.decisionDigest,
     producerId: request.producerId,
     reviewerId: request.reviewerId,
+    reviewerConfigDigest: request.reviewerConfigDigest,
     producerExecutionId: request.producerExecutionId,
     reviewExecutionId: request.reviewExecutionId,
   };
 }
 
-async function validateIndependentReview(envelope, decision, review, decisionDigest, clarificationRoles = new Set()) {
+async function validateIndependentReview(envelope, decision, reviewFile, decisionDigest, clarificationRoles = new Set(), requireRuntimeExecution = false) {
+  const review = reviewFile.value;
   assertValidSchema('aegis.preflight_review.v2', review, 'malformed_independent_review');
   const requestFile = await readJson('.harness/runtime/preflight_review_request.json', 'missing_independent_review_request');
   assertValidSchema('aegis.preflight_review_request.v2', requestFile.value, 'malformed_independent_review_request');
@@ -753,6 +755,18 @@ async function validateIndependentReview(envelope, decision, review, decisionDig
     }
   }
   if (review.verdict !== 'APPROVED') fail('independent_review_rejected');
+  if (!requireRuntimeExecution) return;
+  const executionFile = await readJson('.harness/runtime/reviewer_execution.json', 'missing_reviewer_execution');
+  assertValidSchema('aegis.reviewer_execution.v1', executionFile.value, 'malformed_reviewer_execution');
+  const execution = executionFile.value;
+  if (
+    execution.reviewRequestDigest !== request.reviewRequestDigest
+    || execution.reviewer.id !== request.reviewerId
+    || execution.reviewer.configDigest !== request.reviewerConfigDigest
+    || execution.reviewArtifactBytesDigest !== sha256(reviewFile.bytes)
+  ) {
+    fail('reviewer_execution_binding_mismatch');
+  }
 }
 
 async function readBoundedEnvelope() {
@@ -854,6 +868,8 @@ if (decisionFile.value.status === 'NEEDS_CONFIRMATION' && options.resolution.len
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
+    decisionDigest,
+    preflightPromptDigest: envelope.promptDigest,
     confirmation: {
       channel: 'IDE_NATIVE_SELECTOR',
       confirmationId: nativeConfirmationId(envelope, sha256(decisionFile.bytes)),
@@ -923,9 +939,16 @@ if (effectiveValidation.stateProfile.requiresIndependentReview && options.indepe
   process.exit(0);
 }
 if (options.independentReview.length > 0) {
-  const review = await readJson(options.independentReview, 'unreadable_independent_review');
-  await validateIndependentReview(envelope, resolvedDecision, review.value, effectiveDecisionDigest, clarificationRoles);
-  independentReviewDigest = sha256(review.bytes);
+  const reviewFile = await readJson(options.independentReview, 'unreadable_independent_review');
+  await validateIndependentReview(
+    envelope,
+    resolvedDecision,
+    reviewFile,
+    effectiveDecisionDigest,
+    clarificationRoles,
+    effectiveValidation.stateProfile.requiresIndependentReview,
+  );
+  independentReviewDigest = sha256(reviewFile.bytes);
 }
 
 const { clarifiedDemand, contract, proofRegistry } = assembleSemanticState(

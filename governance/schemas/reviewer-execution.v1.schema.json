@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.reviewer_execution.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "reviewRequestDigest", "reviewer", "reviewArtifactBytesDigest", "timing", "usage"],
+  "properties": {
+    "schema": { "const": "aegis.reviewer_execution.v1" },
+    "reviewRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "id", "configDigest"],
+      "properties": {
+        "mode": { "const": "EXTERNAL" },
+        "id": { "type": "string", "minLength": 1 },
+        "configDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "reviewArtifactBytesDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "startedAtEpochMs", "durationMs"],
+      "properties": {
+        "phase": { "const": "external_reviewer" },
+        "startedAtEpochMs": { "type": "number", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promptTokens", "completionTokens"],
+      "properties": {
+        "promptTokens": { "type": ["integer", "null"], "minimum": 0 },
+        "completionTokens": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  }
+}

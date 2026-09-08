@@ -22,6 +22,7 @@ still owns questions, edits, tests and implementation.
 # The IDE renders the selection and collects any required fields.
 ./aegis setup ide
 ./aegis setup external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
+./aegis setup reviewer external --endpoint http://127.0.0.1:11434/v1 --model llama3.2:11b
 ./aegis setup show
 ```
 
@@ -60,14 +61,15 @@ Available commands:
   clarified demand, Contract IR v2 and proof registry together. It consumes
   the frozen intake instead of rediscovering a mutable worktree. Confirming a proposed
   interpretation is mechanical; only a correction requires another model call.
-  For a forensic contract, the IDE automatically dispatches an isolated
-  independent review before persistence; this is never a user step.
+  For a forensic contract, the gateway automatically runs the configured,
+  isolated external reviewer before persistence; this is never a user step.
 - `./aegis review …`: exposes the internal review-request builder for
   diagnostics; normal executions dispatch it automatically.
 - `./aegis status`: shows evidence state and working-tree state.
-- `./aegis setup`: emits an IDE-interactive selection. `ide` uses the active
-  IDE model; `external` collects endpoint and model, then calls the configured
-  OpenAI-compatible endpoint only for demand-to-decision compilation.
+- `./aegis setup`: emits an IDE-interactive selection. It configures both the
+  semantic supervisor and the independent forensic reviewer. The reviewer is
+  an OpenAI-compatible model invoked only for forensic contract review; its
+  identity and execution digest bind the result to the receipt.
 - `./aegis evidence --path …`: creates an optional, bounded and transient
   mechanical inventory for a receipt or forensic investigation. It only reads
   explicitly declared paths, never sends code to a prompt and has no cache
@@ -106,6 +108,7 @@ domain tests.
 
 `npm test` keeps deterministic harness checks. High-risk or forensic contracts
 always receive an isolated independent review automatically after any user
-clarifications and before persistence.
+clarifications and before persistence. Without a configured reviewer, the
+contract fails closed before semantic state is persisted.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the formal model.

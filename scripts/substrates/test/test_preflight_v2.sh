@@ -61,6 +61,25 @@ writeFileSync(destination, JSON.stringify(decision));
 NODE
 }
 
+write_reviewer_execution() {
+  local request_path="$1" review_path="$2" destination="$3"
+  node --input-type=module - "${request_path}" "${review_path}" "${destination}" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const [requestPath, reviewPath, destination] = process.argv.slice(2);
+const request = JSON.parse(readFileSync(requestPath, 'utf8'));
+const digest = createHash('sha256').update(readFileSync(reviewPath)).digest('hex');
+writeFileSync(destination, JSON.stringify({
+  schema: 'aegis.reviewer_execution.v1',
+  reviewRequestDigest: request.reviewRequestDigest,
+  reviewer: { mode: 'EXTERNAL', id: request.reviewerId, configDigest: request.reviewerConfigDigest },
+  reviewArtifactBytesDigest: digest,
+  timing: { phase: 'external_reviewer', startedAtEpochMs: 0, durationMs: 0 },
+  usage: { promptTokens: null, completionTokens: null },
+}));
+NODE
+}
+
 prepare_repository "${WORK_DIR}/direct"
 cat > "${WORK_DIR}/direct/src/clockSupport.ts" <<'TS'
 export const Clock = {
@@ -270,7 +289,7 @@ jq -e '.status == "BLOCKED"' "${WORK_DIR}/direct/.harness/runtime/blocked-result
 
 write_decision "${envelope}" "${WORK_DIR}/direct/.harness/runtime/decision.json"
 AEGIS_ROOT="${WORK_DIR}/direct" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
-  --decision .harness/runtime/decision.json --producer-id producer --reviewer-id reviewer \
+  --decision .harness/runtime/decision.json --producer-id producer --reviewer-id reviewer --reviewer-config-digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   < "${envelope}" > "${WORK_DIR}/review-request.json"
 jq -e --arg execution "$(jq -r '.executionId' "${envelope}")" '
   .schema == "aegis.preflight_review_request.v2"
@@ -466,7 +485,7 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
 fi
 grep -q 'malformed_decision' "${WORK_DIR}/forensic/.harness/runtime/missing-governance.err"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
-  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --producer-id producer --reviewer-id reviewer \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --producer-id producer --reviewer-id reviewer --reviewer-config-digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/review-request.json"
 node --input-type=module - "${WORK_DIR}/forensic/.harness/runtime/decision.json" "${forensic_envelope}" "${WORK_DIR}/forensic/.harness/runtime/preflight_review_request.json" "${WORK_DIR}/forensic/.harness/runtime/review.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -495,6 +514,10 @@ writeFileSync(reviewPath, JSON.stringify({
   ],
 }));
 NODE
+write_reviewer_execution \
+  "${WORK_DIR}/forensic/.harness/runtime/preflight_review_request.json" \
+  "${WORK_DIR}/forensic/.harness/runtime/review.json" \
+  "${WORK_DIR}/forensic/.harness/runtime/reviewer_execution.json"
 # A transition cannot be marked clarified while any state policy still needs a
 # user decision. This prevents a plausible-looking contract from inventing
 # observable behavior (fees, eligibility, clock, rollback or digest semantics).
@@ -602,6 +625,18 @@ if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_prefligh
   exit 1
 fi
 grep -q 'review_request_binding_mismatch' "${WORK_DIR}/forensic/.harness/runtime/unbound-review.err"
+rm "${WORK_DIR}/forensic/.harness/runtime/reviewer_execution.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/review.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/missing-reviewer-execution.err"; then
+  echo 'forensic transition accepted a review without runtime reviewer execution' >&2
+  exit 1
+fi
+grep -q 'missing_reviewer_execution' "${WORK_DIR}/forensic/.harness/runtime/missing-reviewer-execution.err"
+write_reviewer_execution \
+  "${WORK_DIR}/forensic/.harness/runtime/preflight_review_request.json" \
+  "${WORK_DIR}/forensic/.harness/runtime/review.json" \
+  "${WORK_DIR}/forensic/.harness/runtime/reviewer_execution.json"
 AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json --independent-review .harness/runtime/review.json \
   < "${forensic_envelope}" > "${WORK_DIR}/forensic/.harness/runtime/result.json"
@@ -748,7 +783,7 @@ jq -e '.status == "INDEPENDENT_REVIEW_REQUIRED" and .interpretationStatus == "IN
   "${WORK_DIR}/selected-forensic/.harness/runtime/missing-review.json" >/dev/null
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/build_preflight_review.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
-  --producer-id producer --reviewer-id reviewer < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json"
+  --producer-id producer --reviewer-id reviewer --reviewer-config-digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa < "${selected_envelope}" > "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json"
 node --input-type=module - "${WORK_DIR}/selected-forensic/.harness/runtime/decision.json" "${WORK_DIR}/selected-forensic/.harness/runtime/review-request.json" "${selected_envelope}" "${WORK_DIR}/selected-forensic/.harness/runtime/review.json" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 const [decisionPath, requestPath, envelopePath, reviewPath] = process.argv.slice(2);
@@ -779,6 +814,10 @@ writeFileSync(reviewPath, JSON.stringify({
   ],
 }));
 NODE
+write_reviewer_execution \
+  "${WORK_DIR}/selected-forensic/.harness/runtime/preflight_review_request.json" \
+  "${WORK_DIR}/selected-forensic/.harness/runtime/review.json" \
+  "${WORK_DIR}/selected-forensic/.harness/runtime/reviewer_execution.json"
 AEGIS_ROOT="${WORK_DIR}/selected-forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/decision.json --resolution .harness/runtime/resolution.json \
   --independent-review .harness/runtime/review.json < "${selected_envelope}" \

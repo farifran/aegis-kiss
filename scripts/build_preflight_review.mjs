@@ -18,12 +18,13 @@ function fail(code) {
 }
 
 function parseArguments(argv) {
-  const options = { decision: '', resolution: '', producerId: '', reviewerId: '' };
+  const options = { decision: '', resolution: '', producerId: '', reviewerId: '', reviewerConfigDigest: '' };
   const names = new Map([
     ['--decision', 'decision'],
     ['--resolution', 'resolution'],
     ['--producer-id', 'producerId'],
     ['--reviewer-id', 'reviewerId'],
+    ['--reviewer-config-digest', 'reviewerConfigDigest'],
   ]);
   for (let index = 0; index < argv.length; index += 2) {
     const key = names.get(argv[index]);
@@ -31,7 +32,7 @@ function parseArguments(argv) {
     if (key === undefined || value === undefined || value.length === 0 || options[key].length > 0) fail('invalid_arguments');
     options[key] = value;
   }
-  if (options.decision.length === 0 || options.producerId.length === 0 || options.reviewerId.length === 0) fail('missing_arguments');
+  if (options.decision.length === 0 || options.producerId.length === 0 || options.reviewerId.length === 0 || !/^[a-f0-9]{64}$/u.test(options.reviewerConfigDigest)) fail('missing_arguments');
   if (options.producerId === options.reviewerId) fail('review_authority_not_independent');
   if ([options.decision, options.resolution].some((value) => value.startsWith('/') || value.split(/[\\/]/u).includes('..'))) fail('unsafe_decision_path');
   return options;
@@ -140,8 +141,9 @@ const reviewBinding = {
   status: 'PENDING_INDEPENDENT_REVIEW',
   normalizedDemandDigest: preflight.normalizedDemand.digest,
   decisionDigest: resolvedDecisionDigest,
-  producerId: options.producerId,
-  reviewerId: options.reviewerId,
+    producerId: options.producerId,
+    reviewerId: options.reviewerId,
+    reviewerConfigDigest: options.reviewerConfigDigest,
   producerExecutionId,
   reviewExecutionId,
 };
@@ -156,6 +158,7 @@ const context = {
   clarifications,
   producerId: options.producerId,
   reviewerId: options.reviewerId,
+  reviewerConfigDigest: options.reviewerConfigDigest,
   producerExecutionId,
   reviewExecutionId,
   reviewRequestDigest,
