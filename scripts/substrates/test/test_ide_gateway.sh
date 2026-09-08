@@ -110,13 +110,25 @@ printf '%s' "${output}" | jq -e '
   and ([.questions[0].answers[] | select(.id == "EXTERNAL") | (.requiredFields | length)] == [4])
   and .questions[1].id == "forensic-reviewer"
   and .questions[1].recommendedAnswerId == "EXTERNAL"
-  and ([.questions[1].answers[].id] | sort == ["EXTERNAL", "OFF"])
+  and ([.questions[1].answers[].id] | sort == ["EXTERNAL", "IDE", "OFF"])
   and ([.questions[1].answers[] | select(.id == "EXTERNAL") | (.requiredFields | length)] == [4])
 ' >/dev/null
 [[ ! -e "${WORK_DIR}/.harness/supervisor.json" ]]
 output="$(bash "${WORK_DIR}/aegis" setup ide)"
 printf '%s' "${output}" | jq -e '.status == "CONFIGURED" and .supervisor.mode == "IDE"' >/dev/null
 output="$(bash "${WORK_DIR}/aegis" status)"
+printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
+if bash "${WORK_DIR}/aegis" setup reviewer ide >/dev/null 2>&1; then
+  echo 'same-model reviewer was accepted' >&2
+  exit 1
+fi
+output="$(bash "${WORK_DIR}/aegis" setup external --endpoint https://fixture.invalid/v1 --model fixture-supervisor --timeout-ms 5000)"
+printf '%s' "${output}" | jq -e '.supervisor.mode == "EXTERNAL"' >/dev/null
+output="$(bash "${WORK_DIR}/aegis" setup reviewer ide)"
+printf '%s' "${output}" | jq -e '.reviewer == {mode:"IDE",id:"ide-active-model",configDigest:.reviewer.configDigest}' >/dev/null
+output="$(bash "${WORK_DIR}/aegis" setup reviewer off)"
+printf '%s' "${output}" | jq -e '.reviewer == null' >/dev/null
+output="$(bash "${WORK_DIR}/aegis" setup ide)"
 printf '%s' "${output}" | jq -e '.supervisor.mode == "IDE"' >/dev/null
 
 output="$(bash "${WORK_DIR}/aegis" harness 'Atualizar a validação interna do Aegis.')"

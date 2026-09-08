@@ -12,7 +12,7 @@
       "additionalProperties": false,
       "required": ["mode", "id", "configDigest"],
       "properties": {
-        "mode": { "const": "EXTERNAL" },
+        "mode": { "enum": ["EXTERNAL", "IDE"] },
         "id": { "type": "string", "minLength": 1 },
         "configDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
@@ -23,7 +23,7 @@
       "additionalProperties": false,
       "required": ["phase", "startedAtEpochMs", "durationMs"],
       "properties": {
-        "phase": { "const": "external_reviewer" },
+        "phase": { "enum": ["external_reviewer", "ide_reviewer_receipt"] },
         "startedAtEpochMs": { "type": "number", "minimum": 0 },
         "durationMs": { "type": "number", "minimum": 0 }
       }

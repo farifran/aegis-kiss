@@ -27,10 +27,11 @@ Uso no IDE:
   ./aegis resume
   ./aegis setup
   ./aegis setup [show|ide|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]]
-  ./aegis setup reviewer [off|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]
+  ./aegis setup reviewer [off|ide|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]
   ./aegis finalize "<mesma-demanda>" --decision <arquivo> [--resolution <arquivo>]
                     [--independent-review <arquivo>]
   ./aegis review "<demanda>" --decision <arquivo> [--resolution <arquivo>] --producer-id <id> --reviewer-id <id>
+  ./aegis resume-review
   ./aegis candidate-review
   ./aegis status
   ./aegis evidence --path <caminho> [--path <caminho> ...]
@@ -116,6 +117,12 @@ supervisor_setup() {
                 apply: { command: "./aegis setup reviewer external --endpoint <endpoint> --model <model> [--api-key-env <apiKeyEnv>] [--timeout-ms <timeoutMs>]" }
               },
               {
+                id: "IDE",
+                label: "Modelo ativo do IDE",
+                rationale: "Quando o supervisor é externo, preserva independência sem um segundo endpoint; o IDE recebe uma solicitação de revisão vinculada e a confirma mecanicamente.",
+                apply: { command: "./aegis setup reviewer ide" }
+              },
+              {
                 id: "OFF",
                 label: "Não configurar agora",
                 rationale: "Demandas comuns continuam funcionando; demandas forenses param antes da persistência.",
@@ -182,6 +189,8 @@ resolve_setup_wizard() {
     local -a reviewer_args=(reviewer external --endpoint "${reviewer_endpoint}" --model "${reviewer_model}" --timeout-ms "${reviewer_timeout_ms}")
     [[ -n "${reviewer_api_key_env}" ]] && reviewer_args+=(--api-key-env "${reviewer_api_key_env}")
     node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" "${reviewer_args[@]}" >/dev/null
+  elif [[ "${reviewer_choice}" == 'IDE' ]]; then
+    node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" reviewer ide >/dev/null
   else
     node "${ROOT_DIR}/scripts/lib/supervisor_config.mjs" reviewer off >/dev/null
   fi
@@ -262,25 +271,36 @@ require_frozen_envelope() {
 }
 
 internal_reviewer_state() {
-  local producer_id="${1:-}" state reviewer_id reviewer_digest
+  local producer_id="${1:-}" state reviewer_id reviewer_digest reviewer_mode
   state="$(supervisor_setup_state)"
   reviewer_id="$(jq -r '.reviewer.id // empty' <<< "${state}")"
   reviewer_digest="$(jq -r '.reviewer.configDigest // empty' <<< "${state}")"
+  reviewer_mode="$(jq -r '.reviewer.mode // empty' <<< "${state}")"
   [[ -n "${producer_id}" && -n "${reviewer_id}" && "${reviewer_id}" != "${producer_id}" && "${reviewer_digest}" =~ ^[a-f0-9]{64}$ ]] \
     || fatal 'independent_reviewer_not_configured'
-  jq -n --arg id "${reviewer_id}" --arg digest "${reviewer_digest}" '{id:$id,configDigest:$digest}'
+  [[ "${reviewer_mode}" == 'IDE' || "${reviewer_mode}" == 'EXTERNAL' ]] || fatal 'independent_reviewer_not_configured'
+  jq -n --arg id "${reviewer_id}" --arg digest "${reviewer_digest}" --arg mode "${reviewer_mode}" '{id:$id,configDigest:$digest,mode:$mode}'
 }
 
 prepare_internal_review() {
-  local envelope="${1:-}" decision="${2:-}" resolution="${3:-}" producer_id reviewer reviewer_id reviewer_digest request execution review_path
+  local envelope="${1:-}" decision="${2:-}" resolution="${3:-}" producer_id reviewer reviewer_id reviewer_digest reviewer_mode request execution review_path
   producer_id="$(jq -r '.supervisor.id' "${envelope}")"
   reviewer="$(internal_reviewer_state "${producer_id}")"
   reviewer_id="$(jq -r '.id' <<< "${reviewer}")"
   reviewer_digest="$(jq -r '.configDigest' <<< "${reviewer}")"
+  reviewer_mode="$(jq -r '.mode' <<< "${reviewer}")"
   local -a args=(--decision "${decision}" --producer-id "${producer_id}" --reviewer-id "${reviewer_id}" --reviewer-config-digest "${reviewer_digest}")
   [[ -n "${resolution}" ]] && args+=(--resolution "${resolution}")
   request="$(node "${ROOT_DIR}/scripts/build_preflight_review.mjs" "${args[@]}" < "${envelope}")" \
     || fatal 'internal_review_request_failed'
+  if [[ "${reviewer_mode}" == 'IDE' ]]; then
+    jq -n \
+      --argjson request "${request}" \
+      --arg reviewerId "${reviewer_id}" \
+      --arg reviewerConfigDigest "${reviewer_digest}" \
+      '{schema:"aegis.ide_review_request.v1",status:"PENDING_IDE_INDEPENDENT_REVIEW",executor:"IDE",reviewer:{mode:"IDE",id:$reviewerId,configDigest:$reviewerConfigDigest},request:$request,artifactPath:".harness/runtime/preflight_review.json",resume:"./aegis resume-review",instruction:"O modelo ativo do IDE deve revisar a decisão usando somente request.prompt, gravar o JSON exigido em artifactPath e executar resume-review. Nenhuma escolha do usuário é necessária."}'
+    return 2
+  fi
   execution="$(printf '%s' "${request}" | node "${ROOT_DIR}/scripts/external_reviewer.mjs")" \
     || fatal 'internal_review_execution_failed'
   jq -e '.schema == "aegis.internal_review_result.v1" and .status == "INDEPENDENT_REVIEW_READY" and .verdict == "APPROVED" and .reviewPath == ".harness/runtime/preflight_review.json"' \
@@ -289,6 +309,20 @@ prepare_internal_review() {
   local -a finalize_args=(--decision "${decision}" --independent-review "${review_path}")
   [[ -n "${resolution}" ]] && finalize_args+=(--resolution "${resolution}")
   node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}"
+}
+
+resume_review() {
+  local envelope="${RUNTIME_DIR}/preflight_envelope.json" resolution="${RUNTIME_DIR}/preflight_resolution.json" demand
+  [[ -s "${envelope}" ]] || fatal 'missing_frozen_preflight_envelope'
+  [[ -s "${RUNTIME_DIR}/preflight_decision.json" ]] || fatal 'missing_semantic_decision'
+  node "${ROOT_DIR}/scripts/ide_reviewer.mjs" >/dev/null || return $?
+  demand="$(jq -r '.normalizedDemand.text // empty' "${envelope}")"
+  [[ -n "${demand}" ]] || fatal 'invalid_frozen_preflight_envelope'
+  if [[ -s "${resolution}" ]]; then
+    finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json --resolution .harness/runtime/preflight_resolution.json --independent-review .harness/runtime/preflight_review.json
+  else
+    finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json --independent-review .harness/runtime/preflight_review.json
+  fi
 }
 
 finalize_preflight() {
@@ -576,6 +610,7 @@ case "${command_name}" in
   harness) shift; build_preflight HARNESS "$@" ;;
   continue) shift; continue_preflight "$@" ;;
   resume) shift; [[ $# -eq 0 ]] || fatal 'resume_does_not_accept_arguments'; resume_preflight ;;
+  resume-review) shift; [[ $# -eq 0 ]] || fatal 'resume_review_does_not_accept_arguments'; resume_review ;;
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
   candidate-review) shift; [[ $# -eq 0 ]] || fatal 'candidate_review_does_not_accept_arguments'; build_candidate_review ;;

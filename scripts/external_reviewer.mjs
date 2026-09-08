@@ -61,7 +61,7 @@ export async function runExternalReviewer(request, { repositoryRoot = root, requ
   assertSchema('aegis.preflight_review_request.v2', request);
   const config = await loadSupervisorConfig(repositoryRoot);
   const reviewer = reviewerIdentity(config);
-  if (reviewer === null) fail('independent_reviewer_not_configured');
+  if (reviewer === null || reviewer.mode !== 'EXTERNAL') fail('external_reviewer_not_configured');
   if (reviewer.id !== request.reviewerId || reviewer.configDigest !== request.reviewerConfigDigest) {
     fail('independent_reviewer_configuration_mismatch');
   }

@@ -44,6 +44,19 @@ function normalizeExternal(value) {
   };
 }
 
+function normalizeReviewer(value) {
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value === 'object'
+    && !Array.isArray(value)
+    && value.mode === 'IDE'
+    && Object.keys(value).every((key) => key === 'mode')
+  ) {
+    return { mode: 'IDE' };
+  }
+  return normalizeExternal(value);
+}
+
 function normalizeConfig(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value) || value.schema !== 'aegis.supervisor_config.v1') {
     fail('invalid_supervisor_config');
@@ -54,7 +67,7 @@ function normalizeConfig(value) {
   if (!['IDE', 'EXTERNAL'].includes(value.mode) || Object.keys(value).some((key) => !allowed.includes(key))) {
     fail('invalid_supervisor_config');
   }
-  const reviewer = value.reviewer === undefined || value.reviewer === null ? null : normalizeExternal(value.reviewer);
+  const reviewer = normalizeReviewer(value.reviewer);
   if (value.mode === 'IDE') return { schema: 'aegis.supervisor_config.v1', mode: 'IDE', reviewer };
   return {
     schema: 'aegis.supervisor_config.v1',
@@ -78,6 +91,13 @@ export function supervisorIdentity(config) {
 export function reviewerIdentity(config) {
   const reviewer = normalizeConfig(config).reviewer;
   if (reviewer === null) return null;
+  if (reviewer.mode === 'IDE') {
+    return {
+      mode: 'IDE',
+      id: 'ide-active-model',
+      configDigest: canonicalDigest({ schema: 'aegis.reviewer_config.v1', mode: 'IDE' }),
+    };
+  }
   return {
     mode: 'EXTERNAL',
     id: reviewer.model,
@@ -98,6 +118,10 @@ export async function loadSupervisorConfig(repositoryRoot = root) {
 
 export async function writeSupervisorConfig(config, repositoryRoot = root) {
   const normalized = normalizeConfig(config);
+  const reviewer = reviewerIdentity(normalized);
+  if (reviewer !== null && reviewer.id === supervisorIdentity(normalized).id) {
+    fail('reviewer_not_independent');
+  }
   const path = resolve(repositoryRoot, supervisorConfigRelativePath);
   await mkdir(resolve(repositoryRoot, '.harness'), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.tmp`;
@@ -107,7 +131,7 @@ export async function writeSupervisorConfig(config, repositoryRoot = root) {
 }
 
 function usage() {
-  process.stdout.write('Uso: node scripts/lib/supervisor_config.mjs show | ide | external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>] | reviewer off | reviewer external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]\n');
+  process.stdout.write('Uso: node scripts/lib/supervisor_config.mjs show | ide | external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>] | reviewer off | reviewer ide | reviewer external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]\n');
 }
 
 function parseExternalOptions(rest) {
@@ -134,6 +158,7 @@ function parseCommand(argv) {
     return options === null ? null : { command, options };
   }
   if (command === 'reviewer' && rest[0] === 'off' && rest.length === 1) return { command: 'reviewer-off' };
+  if (command === 'reviewer' && rest[0] === 'ide' && rest.length === 1) return { command: 'reviewer-ide' };
   if (command === 'reviewer' && rest[0] === 'external') {
     const options = parseExternalOptions(rest.slice(1));
     return options === null ? null : { command: 'reviewer-external', options };
@@ -157,6 +182,7 @@ if ((process.argv[1] ?? '').endsWith('/supervisor_config.mjs')) {
       if (parsed.command === 'ide') config = { ...defaultSupervisorConfig(), reviewer: current.reviewer };
       else if (parsed.command === 'external') config = { schema: 'aegis.supervisor_config.v1', mode: 'EXTERNAL', external: parsed.options, reviewer: current.reviewer };
       else if (parsed.command === 'reviewer-off') config = { ...current, reviewer: null };
+      else if (parsed.command === 'reviewer-ide') config = { ...current, reviewer: { mode: 'IDE' } };
       else config = { ...current, reviewer: parsed.options };
       const supervisor = await writeSupervisorConfig(config, root);
       const normalized = await loadSupervisorConfig(root);
