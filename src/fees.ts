@@ -44,3 +44,13 @@ export function pruneAndSumRollingVolume(history: VolumeRecord[], now: bigint): 
   history.length = writeIdx;
   return sum;
 }
+
+/** Consulta sem mutação para observabilidade fora da fronteira de publicação. */
+export function sumRollingVolume(history: readonly VolumeRecord[], now: bigint): bigint {
+  const minTimestamp = now > RECENT_WINDOW_MS ? now - RECENT_WINDOW_MS : 0n;
+  let sum = 0n;
+  for (const entry of history) {
+    if (entry.timestamp >= minTimestamp) sum += entry.volume;
+  }
+  return sum;
+}

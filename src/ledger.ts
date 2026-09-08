@@ -1,15 +1,27 @@
-/**
- * Módulo de Contabilidade em Memória e Dupla Entrada (Aegis Product Core).
- * Implementação determinística com BigInt e estruturas de dados planas (Zero-GC).
- */
+/** Contabilidade determinística de dupla entrada. */
 
 export interface Account {
   id: string;
   balance: bigint;
   consecutiveFailures: number;
   burstCount: number;
-  burstWindowStart: bigint;
+  burstWindowStart: bigint | null;
   isolatedUntil: bigint;
+}
+
+export interface AccountSnapshot {
+  readonly id: string;
+  readonly balance: bigint;
+  readonly consecutiveFailures: number;
+  readonly burstCount: number;
+  readonly burstWindowStart: bigint | null;
+  readonly isolatedUntil: bigint;
+}
+
+export type AccountTable = Record<string, Account>;
+
+export function createAccountTable(): AccountTable {
+  return Object.create(null) as AccountTable;
 }
 
 export interface Transaction {
@@ -31,65 +43,48 @@ export interface DoubleEntryParties {
   treasury: Account;
 }
 
-/**
- * Cria uma nova conta em memória com saldo inicial validado.
- */
 export function createAccount(id: string, initialBalance: bigint): Account {
-  if (initialBalance < 0n) {
-    throw new RangeError('Initial balance cannot be negative');
-  }
+  if (id.length === 0) throw new RangeError('Account id cannot be empty');
+  if (initialBalance < 0n) throw new RangeError('Initial balance cannot be negative');
   return {
     id,
     balance: initialBalance,
     consecutiveFailures: 0,
     burstCount: 0,
-    burstWindowStart: 0n,
+    burstWindowStart: null,
     isolatedUntil: 0n,
   };
 }
 
-/**
- * Aplica transferência de dupla entrada com dedução de taxa para a tesouraria.
- * Invariante: Débito Total (A) = Crédito (B) + Taxa (Treasury).
- * Se a conta de origem falhar por saldo insuficiente, nenhuma alteração parcial é realizada.
- */
+export function cloneAccount(account: Account): Account {
+  return { ...account };
+}
+
+export function snapshotAccount(account: Account): AccountSnapshot {
+  return Object.freeze({ ...account });
+}
+
 export function applyDoubleEntryTransfer(
   parties: DoubleEntryParties,
   amount: bigint,
   fee: bigint,
 ): TransferResult {
-  if (amount <= 0n) {
-    return { success: false, fee: 0n, reason: 'amount_must_be_positive' };
-  }
-  if (fee < 0n) {
-    return { success: false, fee: 0n, reason: 'fee_cannot_be_negative' };
-  }
+  if (amount < 0n) return { success: false, fee: 0n, reason: 'amount_cannot_be_negative' };
+  if (fee < 0n) return { success: false, fee: 0n, reason: 'fee_cannot_be_negative' };
   const totalDebit = amount + fee;
-  if (parties.sender.balance < totalDebit) {
-    return { success: false, fee: 0n, reason: 'insufficient_funds' };
-  }
+  if (parties.sender.balance < totalDebit) return { success: false, fee: 0n, reason: 'insufficient_funds' };
 
   parties.sender.balance -= totalDebit;
   parties.recipient.balance += amount;
   parties.treasury.balance += fee;
-
   return { success: true, fee };
 }
 
-/**
- * Calcula o saldo somado de todas as contas para verificação da invariante de conservação de valor.
- */
-export function computeTotalBalance(accounts: Record<string, Account>): bigint {
+export function computeTotalBalance(accounts: AccountTable): bigint {
   let total = 0n;
-  const keys = Object.keys(accounts);
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    if (key !== undefined) {
-      const acc = accounts[key];
-      if (acc !== undefined) {
-        total += acc.balance;
-      }
-    }
+  for (const id of Object.keys(accounts)) {
+    const account = accounts[id];
+    if (account !== undefined) total += account.balance;
   }
   return total;
 }
