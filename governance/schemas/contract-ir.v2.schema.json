@@ -110,7 +110,7 @@
         "independentReviewDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "adversarialClasses": {
           "type": "array",
-          "items": { "enum": ["IDENTITY", "BOUNDARIES", "COMPOSITION", "TIME", "ATOMICITY", "OBSERVABILITY", "CONTINUITY"] },
+          "items": { "enum": ["IDENTITY", "BOUNDARIES", "COMPOSITION", "TIME", "ATOMICITY", "OBSERVABILITY", "CONTINUITY", "AUTHORITY"] },
           "uniqueItems": true
         }
       },

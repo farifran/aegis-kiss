@@ -510,7 +510,7 @@ build_candidate_review() {
       (.contract.postconditions // [])[].id,
       (.contract.failureSemantics // [])[].id
     ] | unique' "${semantic_state}")" \
-    --argjson adversarial "$(jq -c '.contract.verification.adversarialClasses // [] | unique' "${semantic_state}")" \
+    --argjson adversarial "$(jq -c '.contract.verification.adversarialClasses // [] | unique | map({class: ., coverageKey: ("adversarial." + ascii_downcase)})' "${semantic_state}")" \
     --argjson authorizedPaths "$(jq -c '.contract.scope.authorizedPaths' "${semantic_state}")" '
       {
         schema:"aegis.forensic_candidate_review_request.v1",
@@ -530,9 +530,9 @@ build_candidate_review() {
           reviewer:{id:"independent reviewer id",executionId:"64-char execution digest"},
           verdict:"APPROVED|REJECTED",
           assessments:"one assessment per contract id: {contractId,verdict,evidence,sourcePaths,proofIds}",
-          adversarialChecks:"one PROVEN check per required class: {class,verdict,evidence,proofIds}"
+          adversarialChecks:"one PROVEN check per required class; proofIds must include a proof with the requested coverageKey: {class,verdict,evidence,proofIds}"
         },
-        instruction:"Um revisor diferente do supervisor semântico deve ler o contrato, os arquivos candidatos e as provas. Para cada obrigação, registre os paths candidatos e proof IDs que a sustentam. Execute e registre uma tentativa adversarial para cada classe exigida. Um texto sem path, proof ou tentativa adversarial não autoriza promoção."
+        instruction:"Um revisor diferente do supervisor semântico deve ler o contrato, os arquivos candidatos e as provas. Para cada obrigação, registre os paths candidatos e proof IDs que a sustentam. Execute e registre uma tentativa adversarial para cada classe exigida usando a proof com coverageKey solicitada. Um texto sem path, proof ou tentativa adversarial não autoriza promoção."
       }
     ' > "${RUNTIME_DIR}/forensic_candidate_review_request.json"
   cat "${RUNTIME_DIR}/forensic_candidate_review_request.json"

@@ -176,10 +176,11 @@ forensic_candidate_review_path() {
 }
 
 require_forensic_candidate_review() {
-  local contract_digest="${1:-}" candidate_manifest="${2:-}" supervisor="${3:-null}" contract_file="${4:-}"
-  local review_file supervisor_id obligation_ids proof_ids adversarial_classes candidate_paths evidence_paths
+  local contract_digest="${1:-}" candidate_manifest="${2:-}" supervisor="${3:-null}" contract_file="${4:-}" registry_file="${5:-}"
+  local review_file supervisor_id obligation_ids proof_ids adversarial_classes candidate_paths evidence_paths adversarial_class expected_coverage expected_proof_ids
   review_file="$(forensic_candidate_review_path)"
   [[ -s "${review_file}" ]] || fatal "forensic_candidate_review_missing"
+  [[ -s "${registry_file}" ]] || fatal "forensic_candidate_review_registry_missing"
   supervisor_id="$(jq -r '.id // empty' <<< "${supervisor}")"
   obligation_ids="$(jq -c '[
     .behavior[].id,
@@ -226,6 +227,17 @@ require_forensic_candidate_review() {
       ))
     ' "${review_file}" >/dev/null 2>&1 \
     || fatal "forensic_candidate_review_invalid"
+  while IFS= read -r adversarial_class; do
+    [[ -n "${adversarial_class}" ]] || continue
+    expected_coverage="adversarial.$(printf '%s' "${adversarial_class}" | tr '[:upper:]' '[:lower:]')"
+    expected_proof_ids="$(jq -c --arg key "${expected_coverage}" --argjson permitted "${proof_ids}" '[.proofs[] | select(.coverageKey == $key and (.id as $id | $permitted | index($id))) | .id] | unique' "${registry_file}")"
+    [[ "${expected_proof_ids}" != '[]' ]] || fatal "forensic_adversarial_proof_missing:${expected_coverage}"
+    jq -e --arg class "${adversarial_class}" --argjson expected "${expected_proof_ids}" '
+      [.adversarialChecks[] | select(.class == $class) | .proofIds[]] as $actual
+      | any($expected[]; . as $id | $actual | index($id))
+    ' "${review_file}" >/dev/null 2>&1 \
+      || fatal "forensic_adversarial_proof_unbound:${expected_coverage}"
+  done < <(printf '%s' "${adversarial_classes}" | jq -r '.[]')
 }
 
 execution_id_for_base() {
@@ -437,7 +449,7 @@ create_authorization() {
   if jq -e '.verification?.riskProfile == "forensic" and (.verification.independentReviewDigest | type == "string" and test("^[a-f0-9]{64}$"))' \
     "${contract_file}" >/dev/null; then
     [[ "${profile}" == "forensic" ]] || fatal "forensic_profile_required"
-    require_forensic_candidate_review "${contract_digest}" "$(manifest_from_index "${files}")" "${supervisor}" "${contract_file}"
+    require_forensic_candidate_review "${contract_digest}" "$(manifest_from_index "${files}")" "${supervisor}" "${contract_file}" "${registry_file}"
   elif jq -e '.verification?.riskProfile == "forensic"' "${contract_file}" >/dev/null; then
     fatal "forensic_review_missing"
   fi

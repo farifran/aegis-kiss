@@ -21,7 +21,7 @@ export function transitionAdversarialClasses(roles) {
     if (!classes.includes(item)) classes.push(item);
   });
   roles.forEach((role) => {
-    if (role === 'STATE') add('CONTINUITY');
+    if (role === 'STATE') add('CONTINUITY', 'AUTHORITY');
     if (role === 'COMMAND') add('COMPOSITION');
     if (role === 'IDENTITY') add('IDENTITY');
     if (role === 'RESOURCE') add('BOUNDARIES', 'COMPOSITION');

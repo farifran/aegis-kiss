@@ -96,6 +96,43 @@ state.digests = { clarifiedDemandSemanticDigest: canonicalDigest(clarifiedDemand
 writeFileSync(`${directory}/semantic-state.json`, `${JSON.stringify(state)}\n`);
 for (const name of ['clarified-demand.json', 'contract-ir.json', 'proof-registry.json']) rmSync(`${directory}/${name}`);
 NODE
+node --input-type=module - "${forensic_repo}/src/.aegis/semantic-state.json" "${ROOT_DIR}" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [path, root] = process.argv.slice(2);
+const { canonicalDigest } = await import(`${root}/scripts/lib/canonical_json.mjs`);
+const state = JSON.parse(readFileSync(path, 'utf8'));
+const classes = ['CONTINUITY', 'AUTHORITY', 'COMPOSITION', 'BOUNDARIES', 'OBSERVABILITY', 'ATOMICITY'];
+state.contract.verification.adversarialClasses = classes;
+state.contract.proofObligations = classes.map((item) => ({
+  id: `PO-ADVERSARIAL-${item}`,
+  risk: `classe adversarial ${item}`,
+  statement: `Provar ${item.toLowerCase()} de forma reproduzível.`,
+}));
+state.contract.invariants[0].proofIds = state.contract.proofObligations.map((proof) => proof.id);
+state.contract.requirementCoverage[0].contractIds = [
+  state.contract.behavior[0].id,
+  state.contract.invariants[0].id,
+  ...state.contract.proofObligations.map((proof) => proof.id),
+];
+state.proofRegistry.proofs = classes.map((item) => ({
+  id: `PO-ADVERSARIAL-${item}`,
+  risk: `classe adversarial ${item}`,
+  coverageKey: `adversarial.${item.toLowerCase()}`,
+  authority: 'fixture', cost: 'high',
+  cadence: item === 'CONTINUITY' ? 'always' : 'forensic', status: 'active',
+  targets: ['src/foo.ts', 'src/foo.proof.sh'], executionKey: 'state-adversarial',
+  executor: 'bash', argv: ['src/foo.proof.sh'],
+}));
+state.proofRegistry.profiles = [
+  { id: 'fast', proofIds: ['PO-ADVERSARIAL-CONTINUITY'] },
+  { id: 'targeted', proofIds: ['PO-ADVERSARIAL-CONTINUITY'] },
+  { id: 'release', proofIds: ['PO-ADVERSARIAL-CONTINUITY'] },
+  { id: 'forensic', proofIds: state.contract.proofObligations.map((proof) => proof.id) },
+];
+state.digests.contractSemanticDigest = canonicalDigest(state.contract);
+state.digests.proofRegistrySemanticDigest = canonicalDigest(state.proofRegistry);
+writeFileSync(path, `${JSON.stringify(state)}\n`);
+NODE
 git -C "${forensic_repo}" init -q
 git -C "${forensic_repo}" add .
 git -C "${forensic_repo}" -c user.name="Aegis Test" -c user.email="aegis-test@example.invalid" commit -qm baseline
@@ -118,7 +155,8 @@ forensic_contract_digest="$(jq -S -c '.contract' "${forensic_repo}/src/.aegis/se
 forensic_manifest="$(printf 'path=src/foo.ts\n'; git -C "${forensic_repo}" show :src/foo.ts | shasum -a 256 | awk '{print $1}')"
 forensic_manifest="$(printf '%s\n' "${forensic_manifest}" | shasum -a 256 | awk '{print $1}')"
 mkdir -p "${forensic_repo}/.harness/runtime"
-jq -n --arg contract "${forensic_contract_digest}" --arg manifest "${forensic_manifest}" '
+jq -n --arg contract "${forensic_contract_digest}" --arg manifest "${forensic_manifest}" \
+  --argjson adversarial "$(jq -c '.contract.verification.adversarialClasses | map({class:.,verdict:"PROVEN",evidence:("A prova dedicada verifica " + ascii_downcase + "."),proofIds:[("PO-ADVERSARIAL-" + .)]})' "${forensic_repo}/src/.aegis/semantic-state.json")" '
   {
     schema:"aegis.forensic_candidate_review.v1",
     contractDigest:$contract,
@@ -126,18 +164,22 @@ jq -n --arg contract "${forensic_contract_digest}" --arg manifest "${forensic_ma
     reviewer:{id:"independent-fixture-reviewer",executionId:("c" * 64)},
     verdict:"APPROVED",
     assessments:[
-      {contractId:"BEH-STATE-001",verdict:"PROVEN",evidence:"A implementação candidata mantém a transição observável.",sourcePaths:["src/foo.ts"],proofIds:["PO-STATE-BEHAVIOR"]},
-      {contractId:"INV-STATE-001",verdict:"PROVEN",evidence:"A prova candidata cobre a preservação da atomicidade.",sourcePaths:["src/foo.ts"],proofIds:["PO-STATE-FORENSIC"]}
+      {contractId:"BEH-STATE-001",verdict:"PROVEN",evidence:"A implementação candidata mantém a transição observável.",sourcePaths:["src/foo.ts"],proofIds:["PO-ADVERSARIAL-CONTINUITY"]},
+      {contractId:"INV-STATE-001",verdict:"PROVEN",evidence:"A prova candidata cobre a preservação da atomicidade.",sourcePaths:["src/foo.ts"],proofIds:["PO-ADVERSARIAL-ATOMICITY"]}
     ],
-    adversarialChecks:[
-      {class:"ATOMICITY",verdict:"PROVEN",evidence:"A prova verifica que uma falha não publica estado parcial.",proofIds:["PO-STATE-FORENSIC"]},
-      {class:"BOUNDARIES",verdict:"PROVEN",evidence:"A prova verifica entradas no limite.",proofIds:["PO-STATE-BEHAVIOR"]},
-      {class:"COMPOSITION",verdict:"PROVEN",evidence:"A prova verifica composição de comandos.",proofIds:["PO-STATE-FORENSIC"]},
-      {class:"CONTINUITY",verdict:"PROVEN",evidence:"A prova verifica continuidade da transição.",proofIds:["PO-STATE-BEHAVIOR"]},
-      {class:"OBSERVABILITY",verdict:"PROVEN",evidence:"A prova verifica resultado observável.",proofIds:["PO-STATE-BEHAVIOR"]}
-    ]
+    adversarialChecks:$adversarial
   }
 ' > "${forensic_repo}/.harness/runtime/forensic_candidate_review.json"
+cp "${forensic_repo}/.harness/runtime/forensic_candidate_review.json" "${forensic_repo}/.harness/runtime/forensic_candidate_review.valid.json"
+jq '(.adversarialChecks[] | select(.class == "AUTHORITY") | .proofIds) = ["PO-ADVERSARIAL-CONTINUITY"]' \
+  "${forensic_repo}/.harness/runtime/forensic_candidate_review.json" \
+  > "${forensic_repo}/.harness/runtime/forensic_candidate_review.invalid.json"
+mv "${forensic_repo}/.harness/runtime/forensic_candidate_review.invalid.json" "${forensic_repo}/.harness/runtime/forensic_candidate_review.json"
+if bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${forensic_repo}" "${forensic_artifact}" > /dev/null 2> "${temp_dir}/forensic-unbound-adversarial.err"; then
+  fail "forensic review accepted an adversarial check bound to the wrong proof"
+fi
+grep -q 'forensic_adversarial_proof_unbound:adversarial.authority' "${temp_dir}/forensic-unbound-adversarial.err"
+mv "${forensic_repo}/.harness/runtime/forensic_candidate_review.valid.json" "${forensic_repo}/.harness/runtime/forensic_candidate_review.json"
 bash "${ROOT_DIR}/scripts/formal_promotion_authorization.sh" create "${forensic_repo}" "${forensic_artifact}"
 forensic_receipt="$(git -C "${forensic_repo}" rev-parse --path-format=absolute --git-path aegis/precommit_receipt.json)"
 jq -e '.proofProfile == "forensic"' "${forensic_receipt}" >/dev/null
