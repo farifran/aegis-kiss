@@ -640,7 +640,7 @@ function validateResolution(envelope, decisionFile, resolution) {
   if (resolution.decisionDigest !== sha256(decisionFile.bytes)) fail('resolution_decision_digest_mismatch');
   if (resolution.preflightPromptDigest !== envelope.promptDigest) fail('resolution_prompt_digest_mismatch');
   if (
-    resolution.confirmation.channel !== 'IDE_NATIVE_SELECTOR'
+    !['IDE_NATIVE_SELECTOR', 'IDE_TERMINAL_WIZARD'].includes(resolution.confirmation.channel)
     || resolution.confirmation.confirmationId !== nativeConfirmationId(envelope, resolution.decisionDigest)
   ) {
     fail('native_confirmation_receipt_invalid');

@@ -326,7 +326,7 @@ finalize_preflight() {
   result="$(node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}")" || return $?
   if jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "USER_CONFIRMATION_REQUIRED"' <<< "${result}" >/dev/null; then
     write_user_wizard_request "${result}"
-    if [[ ! -t 0 || ! -t 1 ]]; then
+    if [[ ( ! -t 0 || ! -t 1 ) && "${AEGIS_WIZARD_FORCE_INTERACTIVE:-0}" != '1' ]]; then
       # A non-interactive executor cannot obtain authority.  The structured
       # request is deliberately the only successful output, so IDE adapters
       # must render it instead of treating a pending decision as completion.
@@ -389,7 +389,7 @@ resolve_preflight_wizard() {
     --argjson selectedAtEpochMs "$(node -p 'Date.now()')" \
     '{schema:"aegis.preflight_resolution.v2",decisionDigest:$decisionDigest,preflightPromptDigest:$promptDigest,confirmation:{channel:"IDE_TERMINAL_WIZARD",confirmationId:$confirmationId,selectedAtEpochMs:$selectedAtEpochMs},answers:.}' \
     "${selections}" > "${resolution}"
-  printf '%s\n' "${resolution}"
+  printf '%s\n' '.harness/runtime/preflight_resolution.json'
 }
 
 continue_preflight() {
