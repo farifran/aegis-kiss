@@ -55,6 +55,8 @@ Available commands:
 - `./aegis "<demand>"`: starts a `PRODUCT` execution, freezes a clean baseline
   in transient runtime state and returns the compact semantic request. Every
   persistent product artifact must live in `src/`.
+- `./aegis resume`: resumes the frozen decision after the IDE's native Aegis
+  Wizard records an explicit selection. It never accepts an arbitrary demand.
 - `./aegis harness "<demand>"`: explicitly starts maintenance of Aegis itself;
   only this mode may authorize paths outside `src/`.
 - `./aegis finalize …`: validates one semantic decision and persists the
@@ -88,6 +90,14 @@ There is no autonomous CLI coder. The only optional provider integration is
 the bounded external semantic supervisor configured through `setup`.
 Surgical-edit discipline is retained by requiring a minimal diff, local
 checks, proof execution, a staged manifest and a receipt.
+
+## Native VS Code Wizard
+
+The optional adapter in `integrations/vscode-aegis-wizard/` watches only the
+transient confirmation request, renders VS Code Quick Picks (arrow keys and
+Enter), records the exact choice, then calls `./aegis resume`. It is separate
+from the universal harness core. Set `AEGIS_WIZARD_MODE=terminal` only when no
+IDE adapter is installed.
 
 Demand-specific governance records live in `src/.aegis/` beside the product
 state they govern. `.harness/` contains only universal rules and ignored

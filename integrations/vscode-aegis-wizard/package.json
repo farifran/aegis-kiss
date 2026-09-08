@@ -1,0 +1,16 @@
+{
+  "name": "aegis-vscode-wizard",
+  "displayName": "Aegis Wizard",
+  "description": "Native confirmation wizard for the Aegis harness.",
+  "version": "0.1.0",
+  "publisher": "aegis-local",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished", "onCommand:aegisWizard.check"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "aegisWizard.check", "title": "Aegis: Check Pending Confirmation" }
+    ]
+  }
+}

@@ -55,6 +55,8 @@ Comandos disponíveis:
 - `./aegis "<demanda>"`: inicia uma execução `PRODUCT`, congela um baseline
   limpo no runtime transitório e devolve o pedido semântico compacto. Todo
   artefato persistente do produto deve ficar em `src/`.
+- `./aegis resume`: retoma a decisão congelada depois que o Wizard nativo do
+  IDE registra uma seleção explícita; nunca aceita uma demanda arbitrária.
 - `./aegis harness "<demanda>"`: inicia explicitamente a manutenção do Aegis;
   somente esse modo pode autorizar mudanças no core do harness.
 - `./aegis finalize …`: valida uma única decisão semântica e persiste juntos a
@@ -85,6 +87,14 @@ Não há codificador CLI autônomo. A única integração opcional de provedor �
 supervisor semântico externo, limitado e configurado por `setup`. A
 disciplina de edição cirúrgica permanece: diff mínimo, checks locais, provas,
 manifesto do stage e receipt.
+
+## Wizard nativo do VS Code
+
+O adaptador opcional em `integrations/vscode-aegis-wizard/` observa apenas a
+solicitação transitória de confirmação, mostra Quick Picks do VS Code (setas e
+Enter), registra a escolha exata e chama `./aegis resume`. Ele fica separado
+do núcleo universal do harness. Use `AEGIS_WIZARD_MODE=terminal` somente sem
+adaptador instalado.
 
 Registros de governança específicos da demanda ficam em `src/.aegis/`, junto
 do estado do produto que governam. `.harness/` contém apenas regras universais

@@ -764,8 +764,8 @@ export function semanticRequest(envelope, timing) {
     timing,
     protocol: {
       decisionPath: '.harness/runtime/preflight_decision.json',
-      continue: './aegis continue <same-demand>',
-      userInteraction: 'Depois de gravar a decisão, execute ./aegis continue com a mesma demanda. USER_CONFIRMATION_REQUIRED é uma parada obrigatória: em terminal interativo, o Aegis abre o wizard numerado; fora dele, renderize o payload estruturado em seletor nativo do IDE. Não escolha a recomendação, não implemente e não gere resolução antes da resposta explícita do usuário.',
+      continue: './aegis resume',
+      userInteraction: 'Depois de gravar a decisão, execute ./aegis resume. USER_CONFIRMATION_REQUIRED é uma parada obrigatória: o adaptador nativo do IDE renderiza o payload estruturado; não escolha a recomendação, não implemente e não gere resolução antes da resposta explícita do usuário. Use AEGIS_WIZARD_MODE=terminal somente como fallback explícito.',
       forensicReview: 'forensic: após confirmação, o IDE revisa internamente em execução isolada antes de finalizar; o usuário não participa.',
       revision: 'quando finalize retornar SEMANTIC_REVISION_REQUIRED, corrija somente a decisão usando as correções e repita finalize sem redescobrir o repositório',
       promotion: ['implement authorized scope', 'stage persistent changes', './aegis authorize', 'git commit'],

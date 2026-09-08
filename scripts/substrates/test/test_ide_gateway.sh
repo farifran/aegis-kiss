@@ -74,10 +74,24 @@ set -e
 [[ "$(printf '%s\n' "${output}" | jq -r '.status')" == 'USER_CONFIRMATION_REQUIRED' ]]
 jq -e '.status == "USER_CONFIRMATION_REQUIRED" and (.questions | length == 1)' "${WORK_DIR}/.harness/runtime/user_confirmation_request.json" >/dev/null
 
+# The native IDE adapter writes this same receipt and resumes without sending
+# the demand again.  Exercise that boundary without requiring VS Code itself.
+jq -n \
+  --arg decisionDigest "$(printf '%s' "${output}" | jq -r '.decisionDigest')" \
+  --arg promptDigest "$(printf '%s' "${output}" | jq -r '.preflightPromptDigest')" \
+  --arg confirmationId "$(printf '%s' "${output}" | jq -r '.confirmation.confirmationId')" \
+  '{schema:"aegis.preflight_resolution.v2",decisionDigest:$decisionDigest,preflightPromptDigest:$promptDigest,confirmation:{channel:"IDE_NATIVE_SELECTOR",confirmationId:$confirmationId,selectedAtEpochMs:0},answers:[{questionId:"Q-0001",action:"SELECT_ANSWER",answerId:"MEMORY_ONLY"}]}' \
+  > "${WORK_DIR}/.harness/runtime/preflight_resolution.json"
+output="$(bash "${WORK_DIR}/aegis" resume)"
+printf '%s' "${output}" | jq -e '.status == "SEMANTIC_STATE_PERSISTED"' >/dev/null
+jq -e '.confirmation.channel == "IDE_NATIVE_SELECTOR" and (.answers | length == 1)' "${WORK_DIR}/.harness/runtime/preflight_resolution.json" >/dev/null
+rm -rf "${WORK_DIR}/src/.aegis"
+rm -f "${WORK_DIR}/.harness/runtime/preflight_resolution.json"
+
 # Exercise the actual terminal-wizard continuation without a human terminal.
 # The test-only flag changes only TTY detection; choices still pass through the
 # same numbered resolver and the same finalization path used by the IDE.
-output="$(printf '1\n' | AEGIS_WIZARD_FORCE_INTERACTIVE=1 bash "${WORK_DIR}/aegis" finalize 'Criar uma biblioteca determinística em src/library.ts.' --decision .harness/runtime/preflight_decision.json)"
+output="$(printf '1\n' | AEGIS_WIZARD_MODE=terminal AEGIS_WIZARD_FORCE_INTERACTIVE=1 bash "${WORK_DIR}/aegis" finalize 'Criar uma biblioteca determinística em src/library.ts.' --decision .harness/runtime/preflight_decision.json)"
 printf '%s' "${output}" | jq -e '.status == "SEMANTIC_STATE_PERSISTED"' >/dev/null
 jq -e '.confirmation.channel == "IDE_TERMINAL_WIZARD" and (.answers | length == 1)' "${WORK_DIR}/.harness/runtime/preflight_resolution.json" >/dev/null
 rm -rf "${WORK_DIR}/src/.aegis"

@@ -24,6 +24,7 @@ Uso no IDE:
   ./aegis "<demanda>" [--target <caminho>]
   ./aegis harness "<demanda>" [--target <caminho>]
   ./aegis continue "<mesma-demanda>"
+  ./aegis resume
   ./aegis setup
   ./aegis setup [show|ide|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]]
   ./aegis setup reviewer [off|external --endpoint <url> --model <id> [--api-key-env <VAR>] [--timeout-ms <n>]
@@ -326,7 +327,7 @@ finalize_preflight() {
   result="$(node "${ROOT_DIR}/scripts/finalize_preflight.mjs" "${finalize_args[@]}" < "${envelope}")" || return $?
   if jq -e '.schema == "aegis.preflight_finalization.v2" and .status == "USER_CONFIRMATION_REQUIRED"' <<< "${result}" >/dev/null; then
     write_user_wizard_request "${result}"
-    if [[ ( ! -t 0 || ! -t 1 ) && "${AEGIS_WIZARD_FORCE_INTERACTIVE:-0}" != '1' ]]; then
+    if [[ "${AEGIS_WIZARD_MODE:-native}" != 'terminal' && "${AEGIS_WIZARD_FORCE_INTERACTIVE:-0}" != '1' ]]; then
       # A non-interactive executor cannot obtain authority.  The structured
       # request is deliberately the only successful output, so IDE adapters
       # must render it instead of treating a pending decision as completion.
@@ -397,6 +398,19 @@ continue_preflight() {
   [[ -n "${demand}" ]] || fatal 'missing_demand'
   [[ -s "${RUNTIME_DIR}/preflight_decision.json" ]] || fatal 'missing_semantic_decision'
   finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json
+}
+
+resume_preflight() {
+  local envelope="${RUNTIME_DIR}/preflight_envelope.json" resolution="${RUNTIME_DIR}/preflight_resolution.json" demand
+  [[ -s "${envelope}" ]] || fatal 'missing_frozen_preflight_envelope'
+  [[ -s "${RUNTIME_DIR}/preflight_decision.json" ]] || fatal 'missing_semantic_decision'
+  demand="$(jq -r '.normalizedDemand.text // empty' "${envelope}")"
+  [[ -n "${demand}" ]] || fatal 'invalid_frozen_preflight_envelope'
+  if [[ -s "${resolution}" ]]; then
+    finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json --resolution .harness/runtime/preflight_resolution.json
+  else
+    finalize_preflight "${demand}" --decision .harness/runtime/preflight_decision.json
+  fi
 }
 
 build_independent_review() {
@@ -561,6 +575,7 @@ case "${command_name}" in
   evidence) shift; exec bash "${ROOT_DIR}/scripts/evidence_inventory.sh" "$@" ;;
   harness) shift; build_preflight HARNESS "$@" ;;
   continue) shift; continue_preflight "$@" ;;
+  resume) shift; [[ $# -eq 0 ]] || fatal 'resume_does_not_accept_arguments'; resume_preflight ;;
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
   candidate-review) shift; [[ $# -eq 0 ]] || fatal 'candidate_review_does_not_accept_arguments'; build_candidate_review ;;
