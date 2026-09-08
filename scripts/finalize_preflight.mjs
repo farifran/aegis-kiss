@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import { transitionAdversarialClasses, validateContract } from './lib/contract_validator.mjs';
 import { loadArchitecture, loadArchitecturePolicy, loadPreviousEvidence, repositorySnapshot } from './lib/preflight_core.mjs';
-import { contractPatchCoverageError, contractPatchOwnershipError, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
+import { contractPatchCoverageError, contractPatchOwnershipError, nativeConfirmationId, questionId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 import { semanticStatePath, semanticStateRelativePath } from './lib/semantic_state.mjs';
 
@@ -639,6 +639,12 @@ function validateResolution(envelope, decisionFile, resolution) {
   assertValidSchema('aegis.preflight_resolution.v2', resolution, 'malformed_resolution');
   if (resolution.decisionDigest !== sha256(decisionFile.bytes)) fail('resolution_decision_digest_mismatch');
   if (resolution.preflightPromptDigest !== envelope.promptDigest) fail('resolution_prompt_digest_mismatch');
+  if (
+    resolution.confirmation.channel !== 'IDE_NATIVE_SELECTOR'
+    || resolution.confirmation.confirmationId !== nativeConfirmationId(envelope, resolution.decisionDigest)
+  ) {
+    fail('native_confirmation_receipt_invalid');
+  }
   exactIds(
     resolution.answers.map((answer) => answer.questionId),
     questionIds(decisionFile.value),
@@ -848,6 +854,10 @@ if (decisionFile.value.status === 'NEEDS_CONFIRMATION' && options.resolution.len
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
+    confirmation: {
+      channel: 'IDE_NATIVE_SELECTOR',
+      confirmationId: nativeConfirmationId(envelope, sha256(decisionFile.bytes)),
+    },
     questions: decisionFile.value.questions.map(([scope, question, evidence, impact, recommendedAnswerId, interpreted, , answers], index) => ({
       id: questionId(index),
       scope,

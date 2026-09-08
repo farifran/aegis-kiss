@@ -1,5 +1,16 @@
+import { createHash } from 'node:crypto';
+
 function fail(code) {
   throw new Error(code);
+}
+
+export function nativeConfirmationId(envelope, decisionDigest) {
+  return createHash('sha256').update([
+    'aegis.native_confirmation.v1',
+    envelope.executionId,
+    decisionDigest,
+    envelope.promptDigest,
+  ].join('\n')).digest('hex');
 }
 
 export function questionId(index) {

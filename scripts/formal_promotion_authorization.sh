@@ -177,7 +177,7 @@ forensic_candidate_review_path() {
 
 require_forensic_candidate_review() {
   local contract_digest="${1:-}" candidate_manifest="${2:-}" supervisor="${3:-null}" contract_file="${4:-}"
-  local review_file supervisor_id obligation_ids
+  local review_file supervisor_id obligation_ids proof_ids adversarial_classes candidate_paths evidence_paths
   review_file="$(forensic_candidate_review_path)"
   [[ -s "${review_file}" ]] || fatal "forensic_candidate_review_missing"
   supervisor_id="$(jq -r '.id // empty' <<< "${supervisor}")"
@@ -188,11 +188,18 @@ require_forensic_candidate_review() {
     (.postconditions // [])[].id,
     (.failureSemantics // [])[].id
   ] | unique' "${contract_file}")"
+  proof_ids="$(jq -c '[.proofObligations[].id] | unique' "${contract_file}")"
+  adversarial_classes="$(jq -c '.verification.adversarialClasses // [] | unique' "${contract_file}")"
+  candidate_paths="$(git -C "${repository_root}" diff --cached --name-only | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  evidence_paths="$(jq -c --argjson candidates "${candidate_paths}" '$candidates + .scope.authorizedPaths | unique' "${contract_file}")"
   jq -e \
     --arg contract "${contract_digest}" \
     --arg manifest "${candidate_manifest}" \
     --arg supervisor "${supervisor_id}" \
-    --argjson obligations "${obligation_ids}" '
+    --argjson obligations "${obligation_ids}" \
+    --argjson proofs "${proof_ids}" \
+    --argjson adversarial "${adversarial_classes}" \
+    --argjson paths "${evidence_paths}" '
       .schema == "aegis.forensic_candidate_review.v1"
       and .contractDigest == $contract
       and .candidateManifest == $manifest
@@ -206,6 +213,16 @@ require_forensic_candidate_review() {
         (.contractId | type == "string")
         and (.verdict == "PROVEN")
         and (.evidence | type == "string" and length > 0)
+        and (.sourcePaths | type == "array" and length > 0 and all(.[]; type == "string" and . as $path | $paths | index($path)))
+        and (.proofIds | type == "array" and length > 0 and all(.[]; type == "string" and . as $id | $proofs | index($id)))
+      ))
+      and (.adversarialChecks | type == "array")
+      and ([.adversarialChecks[].class] | unique) == $adversarial
+      and (.adversarialChecks | all(
+        (.class | type == "string")
+        and (.verdict == "PROVEN")
+        and (.evidence | type == "string" and length > 0)
+        and (.proofIds | type == "array" and length > 0 and all(.[]; type == "string" and . as $id | $proofs | index($id)))
       ))
     ' "${review_file}" >/dev/null 2>&1 \
     || fatal "forensic_candidate_review_invalid"

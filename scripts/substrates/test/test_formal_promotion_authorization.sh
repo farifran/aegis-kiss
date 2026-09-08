@@ -126,8 +126,15 @@ jq -n --arg contract "${forensic_contract_digest}" --arg manifest "${forensic_ma
     reviewer:{id:"independent-fixture-reviewer",executionId:("c" * 64)},
     verdict:"APPROVED",
     assessments:[
-      {contractId:"BEH-STATE-001",verdict:"PROVEN",evidence:"A implementação candidata mantém a transição observável."},
-      {contractId:"INV-STATE-001",verdict:"PROVEN",evidence:"A prova candidata cobre a preservação da atomicidade."}
+      {contractId:"BEH-STATE-001",verdict:"PROVEN",evidence:"A implementação candidata mantém a transição observável.",sourcePaths:["src/foo.ts"],proofIds:["PO-STATE-BEHAVIOR"]},
+      {contractId:"INV-STATE-001",verdict:"PROVEN",evidence:"A prova candidata cobre a preservação da atomicidade.",sourcePaths:["src/foo.ts"],proofIds:["PO-STATE-FORENSIC"]}
+    ],
+    adversarialChecks:[
+      {class:"ATOMICITY",verdict:"PROVEN",evidence:"A prova verifica que uma falha não publica estado parcial.",proofIds:["PO-STATE-FORENSIC"]},
+      {class:"BOUNDARIES",verdict:"PROVEN",evidence:"A prova verifica entradas no limite.",proofIds:["PO-STATE-BEHAVIOR"]},
+      {class:"COMPOSITION",verdict:"PROVEN",evidence:"A prova verifica composição de comandos.",proofIds:["PO-STATE-FORENSIC"]},
+      {class:"CONTINUITY",verdict:"PROVEN",evidence:"A prova verifica continuidade da transição.",proofIds:["PO-STATE-BEHAVIOR"]},
+      {class:"OBSERVABILITY",verdict:"PROVEN",evidence:"A prova verifica resultado observável.",proofIds:["PO-STATE-BEHAVIOR"]}
     ]
   }
 ' > "${forensic_repo}/.harness/runtime/forensic_candidate_review.json"

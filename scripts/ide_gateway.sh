@@ -273,15 +273,19 @@ build_candidate_review() {
       .contract.invariants[].id,
       (.contract.postconditions // [])[].id,
       (.contract.failureSemantics // [])[].id
-    ] | unique' "${semantic_state}")" '
+    ] | unique' "${semantic_state}")" \
+    --argjson adversarial "$(jq -c '.contract.verification.adversarialClasses // [] | unique' "${semantic_state}")" \
+    --argjson authorizedPaths "$(jq -c '.contract.scope.authorizedPaths' "${semantic_state}")" '
       {
         schema:"aegis.forensic_candidate_review_request.v1",
         status:"PENDING_INDEPENDENT_CANDIDATE_REVIEW",
         contractDigest:$contractDigest,
         candidateManifest:$candidateManifest,
         candidateFiles:($files | split("\n") | map(select(length > 0))),
+        authorizedEvidencePaths:$authorizedPaths,
         semanticSupervisor:$supervisor,
         requiredAssessments:$obligations,
+        requiredAdversarialChecks:$adversarial,
         artifactPath:".harness/runtime/forensic_candidate_review.json",
         artifactSchema:{
           schema:"aegis.forensic_candidate_review.v1",
@@ -289,9 +293,10 @@ build_candidate_review() {
           candidateManifest:$candidateManifest,
           reviewer:{id:"independent reviewer id",executionId:"64-char execution digest"},
           verdict:"APPROVED|REJECTED",
-          assessments:"one PROVEN|DISPROVEN|UNPROVEN assessment with concrete evidence for each required contract id"
+          assessments:"one assessment per contract id: {contractId,verdict,evidence,sourcePaths,proofIds}",
+          adversarialChecks:"one PROVEN check per required class: {class,verdict,evidence,proofIds}"
         },
-        instruction:"Um revisor diferente do supervisor semântico deve ler o contrato, os arquivos candidatos e as provas. Ele deve registrar uma avaliação para cada obrigação; somente APPROVED com todas PROVEN libera authorize."
+        instruction:"Um revisor diferente do supervisor semântico deve ler o contrato, os arquivos candidatos e as provas. Para cada obrigação, registre os paths candidatos e proof IDs que a sustentam. Execute e registre uma tentativa adversarial para cada classe exigida. Um texto sem path, proof ou tentativa adversarial não autoriza promoção."
       }
     ' > "${RUNTIME_DIR}/forensic_candidate_review_request.json"
   cat "${RUNTIME_DIR}/forensic_candidate_review_request.json"

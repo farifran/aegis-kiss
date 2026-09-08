@@ -432,9 +432,23 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: createHash('sha256').update(readFileSync(decisionPath)).digest('hex'),
   preflightPromptDigest: envelope.promptDigest,
+  confirmation: {
+    channel: 'IDE_NATIVE_SELECTOR',
+    confirmationId: createHash('sha256').update(['aegis.native_confirmation.v1', envelope.executionId, createHash('sha256').update(readFileSync(decisionPath)).digest('hex'), envelope.promptDigest].join('\n')).digest('hex'),
+    selectedAtEpochMs: envelope.timing.startedAtEpochMs + 1,
+  },
   answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'CONFIRM_FORENSIC' }],
 }));
 NODE
+jq '.confirmation.confirmationId = ("0" * 64)' "${WORK_DIR}/forensic/.harness/runtime/resolution.json" \
+  > "${WORK_DIR}/forensic/.harness/runtime/forged-resolution.json"
+if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
+  --decision .harness/runtime/decision.json --resolution .harness/runtime/forged-resolution.json \
+  < "${forensic_envelope}" >/dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/forged-resolution.err"; then
+  echo 'forged native confirmation was accepted' >&2
+  exit 1
+fi
+grep -q 'native_confirmation_receipt_invalid' "${WORK_DIR}/forensic/.harness/runtime/forged-resolution.err"
 jq '.riskProfile = "standard"' "${WORK_DIR}/forensic/.harness/runtime/decision.json" > "${WORK_DIR}/forensic/.harness/runtime/non-forensic.json"
 if AEGIS_ROOT="${WORK_DIR}/forensic" node "${ROOT_DIR}/scripts/finalize_preflight.mjs" \
   --decision .harness/runtime/non-forensic.json < "${forensic_envelope}" > /dev/null 2> "${WORK_DIR}/forensic/.harness/runtime/non-forensic.err"; then
@@ -632,6 +646,11 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: digest(readFileSync(decisionPath)),
   preflightPromptDigest: envelope.promptDigest,
+  confirmation: {
+    channel: 'IDE_NATIVE_SELECTOR',
+    confirmationId: createHash('sha256').update(['aegis.native_confirmation.v1', envelope.executionId, digest(readFileSync(decisionPath)), envelope.promptDigest].join('\n')).digest('hex'),
+    selectedAtEpochMs: envelope.timing.startedAtEpochMs + 1,
+  },
   answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'KEEP_SCOPE' }],
 }));
 NODE
@@ -714,6 +733,11 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: createHash('sha256').update(readFileSync(decisionPath)).digest('hex'),
   preflightPromptDigest: envelope.promptDigest,
+  confirmation: {
+    channel: 'IDE_NATIVE_SELECTOR',
+    confirmationId: createHash('sha256').update(['aegis.native_confirmation.v1', envelope.executionId, createHash('sha256').update(readFileSync(decisionPath)).digest('hex'), envelope.promptDigest].join('\n')).digest('hex'),
+    selectedAtEpochMs: envelope.timing.startedAtEpochMs + 1,
+  },
   answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'EXPLICIT_CAPACITY_TIME' }],
 }));
 NODE
@@ -835,6 +859,11 @@ writeFileSync(resolutionPath, JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
   decisionDigest: digest(readFileSync(decisionPath)),
   preflightPromptDigest: envelope.promptDigest,
+  confirmation: {
+    channel: 'IDE_NATIVE_SELECTOR',
+    confirmationId: createHash('sha256').update(['aegis.native_confirmation.v1', envelope.executionId, digest(readFileSync(decisionPath)), envelope.promptDigest].join('\n')).digest('hex'),
+    selectedAtEpochMs: envelope.timing.startedAtEpochMs + 1,
+  },
   answers: [{ questionId: 'Q-0001', action: 'SELECT_ANSWER', answerId: 'EXPLICIT_TIME' }],
 }));
 NODE

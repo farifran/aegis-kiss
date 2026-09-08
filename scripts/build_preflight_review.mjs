@@ -7,7 +7,7 @@ import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, sha256 } from './lib/canonical_json.mjs';
-import { questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
+import { nativeConfirmationId, questionIds, resolvePreflightDecision, selectedAnswer } from './lib/preflight_resolution.mjs';
 import { assertSchema } from './lib/schema_validator.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
@@ -98,6 +98,12 @@ if (sourceDecision.status === 'NEEDS_CONFIRMATION') {
   }
   if (resolution.decisionDigest !== sha256(decisionBytes) || resolution.preflightPromptDigest !== preflight.promptDigest) {
     fail('resolution_binding_mismatch');
+  }
+  if (
+    resolution.confirmation.channel !== 'IDE_NATIVE_SELECTOR'
+    || resolution.confirmation.confirmationId !== nativeConfirmationId(preflight, resolution.decisionDigest)
+  ) {
+    fail('native_confirmation_receipt_invalid');
   }
   const expectedIds = questionIds(sourceDecision);
   const actualIds = resolution.answers.map((answer) => answer.questionId);

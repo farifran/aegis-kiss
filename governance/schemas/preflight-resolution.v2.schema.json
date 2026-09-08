@@ -3,11 +3,21 @@
   "$id": "aegis.preflight_resolution.v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "decisionDigest", "preflightPromptDigest", "answers"],
+  "required": ["schema", "decisionDigest", "preflightPromptDigest", "confirmation", "answers"],
   "properties": {
     "schema": { "const": "aegis.preflight_resolution.v2" },
     "decisionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "preflightPromptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "confirmationId", "selectedAtEpochMs"],
+      "properties": {
+        "channel": { "const": "IDE_NATIVE_SELECTOR" },
+        "confirmationId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "selectedAtEpochMs": { "type": "integer", "minimum": 0 }
+      }
+    },
     "answers": {
       "type": "array",
       "minItems": 1,
