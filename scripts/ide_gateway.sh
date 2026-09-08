@@ -384,7 +384,7 @@ resolve_preflight_wizard() {
   done
   node - "${result}" "${selections}" "${resolution}" <<'NODE'
 const fs = require('node:fs');
-const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const result = JSON.parse(process.argv[2]);
 const answers = fs.readFileSync(process.argv[3], 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 fs.writeFileSync(process.argv[4], `${JSON.stringify({
   schema: 'aegis.preflight_resolution.v2',
