@@ -17,9 +17,7 @@ uma implementação, editar código ou revisar um candidato.
   recursos, tempo, resultado, atomicidade e canonicalização quando aplicáveis.
 - Pergunte somente para decidir uma ambiguidade material. Ofereça alternativas
   completas, uma recomendada e a interpretação que cada escolha autoriza.
-- Ao receber `USER_CONFIRMATION_REQUIRED`, abra o seletor nativo do IDE com
-  todas as alternativas e pare. Nunca escolha a recomendação, escreva uma
-  resolução ou implemente antes da resposta explícita do usuário.
+
 
 ## Plano e implementação
 
