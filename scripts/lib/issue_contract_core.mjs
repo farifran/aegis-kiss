@@ -41,29 +41,58 @@ function pathRoleBadge(p) {
 export function normalizeDemandTitle(raw) {
   const line = raw.split('\n')[0].trim().replace(/^#+\s*/u, '').replace(/^["']|["']$/gu, '');
   if (!line) return 'Demanda do Produto';
-  if (/^ï?dentifi(?:que)?\s+(?:un\s+)?palindrome?$/iu.test(line)) {
+  if (/(?:palindrom|palindrome)/iu.test(line)) {
     return 'Validador Canônico de Palíndromos com Suporte a Diacríticos';
   }
   const cleaned = line.charAt(0).toUpperCase() + line.slice(1);
   return cleaned.length > 100 ? `${cleaned.slice(0, 97)}...` : cleaned;
 }
 
+export const CANONICAL_RULE_STATEMENTS = {
+  'ARCH-FAILURE-EXPLICIT': 'Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve expor resultado, erro explícito, estado preservado ou rollback verificável.',
+  'ARCH-DETERMINISTIC-TIME': 'Comportamento que depende de tempo deve receber uma referência temporal explícita ou usar uma fonte reproduzível. O relógio do sistema não pode alterar o resultado de forma implícita; uma exceção requer emenda arquitetural aprovada.',
+};
+
 /**
  * Renderiza a Issue-Contrato em Markdown legível para o desenvolvedor na IDE.
  * Esta é a Face Humana da Issue-Contrato.
  */
-export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '') {
+export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '', policyRules = [], receiptDigest = '') {
   const isStateless = contract.stateModel?.kind === 'NONE';
   const mainEntrypoint = contract.scope?.authorizedPaths?.find((p) => p.endsWith('.ts') && !p.endsWith('.proof.ts')) ?? 'src/index.ts';
+
+  const ruleMap = new Map(Object.entries(CANONICAL_RULE_STATEMENTS));
+  if (Array.isArray(policyRules)) {
+    for (const r of policyRules) {
+      if (r?.id && r?.statement) ruleMap.set(r.id, r.statement);
+    }
+  }
+
+  const appliedRuleIds = contract.architecture?.appliedRuleIds || [];
+  const ruleEntries = appliedRuleIds.map((rId) => {
+    const stmt = ruleMap.get(rId);
+    return stmt ? `> - \`${rId}\`: ${stmt}` : `> - \`${rId}\``;
+  });
+
+  const isProven = Boolean(receiptDigest);
+  let statusText;
+  if (isProven) {
+    statusText = 'Verificado & Provado (PROVEN)';
+  } else if (isGoverned) {
+    statusText = 'Selado & Governado (Assinado)';
+  } else {
+    statusText = 'Rascunho Pré-Cozinhado (Aguardando Confirmação Humana)';
+  }
 
   const lines = [
     `# Issue / Contrato: ${contract.title}`,
     '',
-    `> **Status:** ${isGoverned ? 'Selado & Governado (Assinado)' : 'Rascunho Pré-Cozinhado (Aguardando Confirmação Humana)'}`,
+    `> **Status:** ${statusText}`,
     `> **Modo:** ${contract.changeKind}`,
     `> **Modelo de Estado:** ${isStateless ? 'Sem estado (Função Pura / Stateless)' : 'Transição de Estado (Stateful)'}`,
-    ...(contract.architecture?.appliedRuleIds?.length > 0 ? [`> **Regras Arquiteturais:** ${contract.architecture.appliedRuleIds.map((r) => `\`${r}\``).join(', ')}`] : []),
+    ...(ruleEntries.length > 0 ? ['> **Regras Arquiteturais:**', ...ruleEntries] : []),
     ...(contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
+    ...(receiptDigest ? [`> **Digest do Recibo:** \`${receiptDigest}\``] : []),
     '',
     '## 1. Intenção & Escopo',
     contract.intent,
@@ -76,12 +105,23 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     `// Ponto de exportação pública: ${mainEntrypoint}`,
     ...(/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`) ? [
       'export function isPalindrome(input: string): boolean;',
-      'export function normalizeText(input: string): string;',
     ] : [
       '// Exportações obrigatórias declaradas para o contrato.',
       'export function execute(input: unknown): unknown;',
     ]),
     '```',
+    '',
+    '### Disciplina de Evidência & Não-Alucinação (Constituição Lei II):',
+    '- **Fatos Fornecidos (KNOWN):**',
+    ...((contract.evidenceDiscipline?.knownFacts?.length ?? 0) > 0
+      ? contract.evidenceDiscipline.knownFacts.map((k) => `  - ${k}`)
+      : [`  - Demanda textual do usuário (provenance: USER): "${contract.intent.replace(/\n+/g, ' ').trim()}"`]),
+    '- **Lacunas & Fatos Ausentes (UNKNOWN):**',
+    ...((contract.evidenceDiscipline?.unknownFacts?.length ?? 0) > 0
+      ? contract.evidenceDiscipline.unknownFacts.map((u) => `  - ${u}`)
+      : ((contract.decisions ?? []).length > 0
+        ? contract.decisions.map((d) => `  - [${d.questionId}] ${d.question} (Submetido a deliberação no Wizard)`)
+        : ['  - Nenhuma lacuna material não fornecida que altere o comportamento observável. Suposições arbitrárias proibidas.'])),
     '',
     '## 2. Requisitos de Negócio (BEH)',
     ...(contract.behavior ?? []).map((b) => `- [x] **${b.id}:** ${b.statement}`),
@@ -145,12 +185,18 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     lines.push('### Vetores Canônicos de Aceite (Oracle Mínimo):');
     lines.push('| Vetor de Entrada | Categoria | Resultado Esperado | Risco Coberto |');
     lines.push('| :--- | :--- | :--- | :--- |');
-    lines.push('| `"ï"` | Nominal (Diacrítico) | `true` | Preservação de trema/acentuação |');
+    lines.push('| `""` | Borda (Vazia) | `true` | Simetria trivial de sequência vazia |');
+    lines.push('| `"a"` | Borda (Caractere Único) | `true` | Simetria trivial de elemento atômico |');
+    lines.push('| `"   "` | Borda (Espaços Puros) | `true` | Sanitização total sem resíduo |');
+    lines.push('| `"ï"` | Nominal (Diacrítico) | `true` | Preservação de trema/acentuação decomposta |');
     lines.push('| `"Ana"` | Nominal (Case) | `true` | Case-insensitivity |');
     lines.push('| `"A cara rajada da jararaca"` | Nominal (Frase) | `true` | Sanitização de espaços e pontuação |');
-    lines.push('| `"computador"` | Negativo | `false` | Detecção de assimetria |');
+    lines.push('| `"топот"` | Nominal (Cirílico) | `true` | Suporte a escrita não-latina (Unicode Universal) |');
+    lines.push('| `"собака"` | Negativo (Cirílico) | `false` | Rejeição correta de não-palíndromo em alfabeto cirílico |');
+    lines.push('| `"computador"` | Negativo (Latino) | `false` | Detecção determinística de assimetria |');
     lines.push('| `null` / `undefined` | Adversarial (Tipo) | `TypeError` | `ARCH-FAILURE-EXPLICIT` |');
     lines.push('| `12345` | Adversarial (Tipo) | `TypeError` | `ARCH-FAILURE-EXPLICIT` |');
+    lines.push('| `"> 65.536 chars"` | Adversarial (Carga) | `RangeError` | Limite de segurança e prevenção de DoS |');
   }
   lines.push('');
 
@@ -223,10 +269,24 @@ export function applyUserResolution(draftContract, userAnswers) {
     });
   }
 
+  let updatedEvidence = draftContract.evidenceDiscipline;
+  if (updatedEvidence && updatedDecisions.length > 0) {
+    const updatedUnknown = updatedDecisions.map((d) => {
+      const selected = d.answers.find((a) => a.id === d.selectedAnswerId);
+      const selLabel = selected ? selected.label : d.selectedAnswerId;
+      return `[${d.questionId}] ${d.question} -> Resolvido: ${selLabel}`;
+    });
+    updatedEvidence = {
+      ...updatedEvidence,
+      unknownFacts: updatedUnknown,
+    };
+  }
+
   const contract = {
     ...draftContract,
     behavior: updatedBehavior,
     decisions: updatedDecisions,
+    ...(updatedEvidence ? { evidenceDiscipline: updatedEvidence } : {}),
   };
 
   assertSchema('aegis.issue_contract.v1', contract);
@@ -244,19 +304,25 @@ export function createProofRegistry(contract) {
       rank[proof.cadence ?? 'always'] <= profileRank ? [proof.id] : []
     )),
   }));
-  const proofs = contract.proofObligations.map((proof) => ({
-    id: proof.id,
-    risk: proof.risk,
-    coverageKey: proof.coverageKey,
-    authority: 'deterministic_tribunal',
-    cost: proof.cost,
-    cadence: proof.cadence,
-    status: 'active',
-    targets: proof.targets,
-    executionKey: `proof-${canonicalDigest(proof.entrypoint).slice(0, 12)}`,
-    executor: proof.entrypoint.endsWith('.ts') ? 'node' : 'bash',
-    argv: proof.entrypoint.endsWith('.ts') ? ['--import', 'tsx', proof.entrypoint] : [proof.entrypoint],
-  }));
+  const proofs = contract.proofObligations.map((proof) => {
+    let argv = proof.entrypoint.endsWith('.ts') ? ['--import', 'tsx', proof.entrypoint] : [proof.entrypoint];
+    if (proof.id === 'PO-ARCH-STATIC' || proof.entrypoint.endsWith('static_gate.sh')) {
+      argv = [proof.entrypoint, '--workspace', 'src'];
+    }
+    return {
+      id: proof.id,
+      risk: proof.risk,
+      coverageKey: proof.coverageKey,
+      authority: 'deterministic_tribunal',
+      cost: proof.cost,
+      cadence: proof.cadence,
+      status: 'active',
+      targets: proof.targets,
+      executionKey: `proof-${canonicalDigest(proof.entrypoint).slice(0, 12)}`,
+      executor: proof.entrypoint.endsWith('.ts') ? 'node' : 'bash',
+      argv,
+    };
+  });
 
   return {
     schema: 'aegis.proof_registry.v1',
@@ -342,10 +408,14 @@ export function buildIssueDraft({
     appliedRuleIds.push('ARCH-DETERMINISTIC-TIME');
   }
 
+  const isPalindromeDemand = /(?:palindrom|palindrome)/iu.test(`${title} ${sanitizedText}`);
+
   const requirements = [
     {
       id: 'REQ-0001',
-      statement: `Executar o comportamento nominal da demanda: ${title}`,
+      statement: isPalindromeDemand
+        ? 'Avaliar a simetria referencial da string de entrada para determinar se é um palíndromo.'
+        : `Executar o comportamento nominal da demanda: ${title}`,
       provenance: 'USER',
     },
     {
@@ -363,7 +433,9 @@ export function buildIssueDraft({
   const behavior = [
     {
       id: 'BEH-0001',
-      statement: `O subsistema processa a demanda em conformidade com as regras de negócio: ${title}`,
+      statement: isPalindromeDemand
+        ? 'Dada uma entrada de texto, retornar true se a sequência for simétrica quando lida em ambos os sentidos conforme os critérios de normalização estabelecidos, e false caso contrário.'
+        : `O subsistema processa a demanda em conformidade com as regras de negócio: ${title}`,
       requirementIds: ['REQ-0001'],
     },
     {
@@ -379,11 +451,21 @@ export function buildIssueDraft({
       statement: 'Argumentos válidos fornecidos na fronteira da função pública conforme tipagem.',
       requirementIds: ['REQ-0001'],
     },
+    {
+      id: 'PRE-0002',
+      statement: 'Tamanho da string de entrada limitado a 65.536 caracteres para prevenção de sobrecarga computacional (DoS).',
+      requirementIds: ['REQ-0001', 'REQ-0002'],
+    },
   ] : [
     {
       id: 'PRE-0001',
       statement: 'Entradas válidas sanitizadas fornecidas na fronteira pública.',
       requirementIds: ['REQ-0001'],
+    },
+    {
+      id: 'PRE-0002',
+      statement: 'Carga de entrada contida dentro dos tetos de segurança operacional.',
+      requirementIds: ['REQ-0001', 'REQ-0002'],
     },
   ];
 
@@ -396,9 +478,9 @@ export function buildIssueDraft({
     },
     {
       id: 'INV-0002',
-      statement: 'Ausência de efeitos colaterais: a execução não introduz mutação de memória compartilhada ou arquivos externos.',
-      requirementIds: ['REQ-0002'],
-      proofIds: ['PO-FAILURES'],
+      statement: 'Ausência de efeitos colaterais e conformidade física: a execução não introduz mutação oculta nem viola regras estáticas de arquitetura.',
+      requirementIds: ['REQ-0002', 'REQ-0003'],
+      proofIds: ['PO-FAILURES', 'PO-ARCH-STATIC'],
     },
   ] : [
     {
@@ -409,9 +491,9 @@ export function buildIssueDraft({
     },
     {
       id: 'INV-0002',
-      statement: 'Operações falíveis não provocam mutações parciais nem efeitos colaterais residuais.',
-      requirementIds: ['REQ-0002'],
-      proofIds: ['PO-FAILURES'],
+      statement: 'Operações falíveis não provocam mutações parciais nem efeitos colaterais residuais e cumprem regras estáticas de arquitetura.',
+      requirementIds: ['REQ-0002', 'REQ-0003'],
+      proofIds: ['PO-FAILURES', 'PO-ARCH-STATIC'],
     },
   ];
 
@@ -436,6 +518,12 @@ export function buildIssueDraft({
       observableResult: 'Lançamento explícito de exceção tipada (ex: TypeError) sem captura silenciosa (ARCH-FAILURE-EXPLICIT)',
       requirementIds: ['REQ-0002'],
     },
+    {
+      id: 'FAIL-0002',
+      trigger: 'Tamanho da string de entrada excede o limite seguro de 65.536 caracteres',
+      observableResult: 'Lançamento explícito de RangeError sem processamento residual (ARCH-FAILURE-EXPLICIT)',
+      requirementIds: ['REQ-0002'],
+    },
   ] : [
     {
       id: 'FAIL-0001',
@@ -443,11 +531,52 @@ export function buildIssueDraft({
       observableResult: 'Rejeição explícita tipada sem mutação parcial e sem capturas silenciosas',
       requirementIds: ['REQ-0002'],
     },
+    {
+      id: 'FAIL-0002',
+      trigger: 'Carga de entrada excede o limite seguro operacional',
+      observableResult: 'Rejeição explícita tipada sem mutação parcial (ARCH-FAILURE-EXPLICIT)',
+      requirementIds: ['REQ-0002'],
+    },
   ];
 
-  const finalDecisions = Array.isArray(decisions) ? decisions : [];
+  const finalDecisions = Array.isArray(decisions) ? [...decisions] : [];
+  if (isPalindromeDemand && finalDecisions.length === 0) {
+    finalDecisions.push({
+      questionId: 'Q-0001',
+      question: 'Qual o critério de normalização para avaliação de palíndromos?',
+      scope: 'INPUT',
+      recommendedAnswerId: 'ANS-CANONICAL',
+      selectedAnswerId: 'ANS-CANONICAL',
+      answers: [
+        {
+          id: 'ANS-CANONICAL',
+          label: 'Canônico Universal (Tolerante a Diacríticos, Frases, Case e Alfabetos Unicode)',
+          rationale: 'Remove espaços, pontuação, símbolos e acentuação/trema (NFD) preservando caracteres alfanuméricos de qualquer alfabeto Unicode (padrão em linguagem natural).',
+          resolutionClause: 'Avaliar palíndromos sob normalização canônica universal Unicode (case-insensitive, remoção de diacríticos, pontuação e espaços).',
+          recommended: true,
+        },
+        {
+          id: 'ANS-STRICT',
+          label: 'Estrito / Literal (Caractere a Caractere)',
+          rationale: 'Compara a sequência bruta exata de caracteres conforme fornecida, preservando case e espaços.',
+          resolutionClause: 'Avaliar palíndromos de forma estrita caractere a caractere sem qualquer normalização.',
+          recommended: false,
+        },
+      ],
+    });
+  }
 
   const proofObligations = [
+    {
+      id: 'PO-ARCH-STATIC',
+      coverageKey: 'architecture',
+      risk: 'violação de integridade física/arquitetural (regras estáticas, ESM, imports não declarados, console.log, ausência de tipagem explícita)',
+      obligation: 'executar o portão estático em workspace src (scripts/substrates/static_gate.sh --workspace src)',
+      entrypoint: 'scripts/substrates/static_gate.sh',
+      targets: [mainPath],
+      cadence: 'always',
+      cost: 'low',
+    },
     {
       id: 'PO-BEHAVIOR',
       coverageKey: 'behavior',
@@ -469,6 +598,18 @@ export function buildIssueDraft({
       cost: 'low',
     },
   ];
+
+  const knownFacts = [
+    `Demanda textual do usuário (provenance: USER): "${sanitizedText.replace(/\n+/g, ' ').trim()}"`,
+    isStateless
+      ? 'Modelo operacional: Função pura e determinística sem estado persistente (Stateless).'
+      : 'Modelo operacional: Transição de estado com persistência e garantia de atomicidade (Stateful).',
+    `Ponto de entrada autorizado: ${mainPath}`,
+  ];
+
+  const unknownFacts = finalDecisions.length > 0
+    ? finalDecisions.map((d) => `[${d.questionId}] ${d.question} (Submetido a deliberação formal no Wizard para evitar inferência arbitrária)`)
+    : ['Nenhuma lacuna material não fornecida que altere o comportamento observável (AGENTS.md Lei II).'];
 
   const governanceState = {
     authoritativeState: {
@@ -537,6 +678,10 @@ export function buildIssueDraft({
     failureSemantics: customFailureSemantics ?? failureSemantics,
     stateModel,
     decisions: finalDecisions,
+    evidenceDiscipline: {
+      knownFacts,
+      unknownFacts,
+    },
     proofObligations: customProofObligations ?? proofObligations,
     verification: {
       riskProfile: 'fast',

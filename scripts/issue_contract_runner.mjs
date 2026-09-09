@@ -133,7 +133,7 @@ async function handleDraft(args) {
 
   await mkdir(runtimeDir, { recursive: true });
   await writeFile(contractJsonPath, `${canonicalJson(draft)}\n`, 'utf8');
-  await writeFile(contractMdPath, `${renderContractMarkdown(draft)}\n`, 'utf8');
+  await writeFile(contractMdPath, `${renderContractMarkdown(draft, false, '', policy.rules)}\n`, 'utf8');
 
   const questions = (draft.decisions ?? []).map((d) => ({
     id: d.questionId,
@@ -245,7 +245,7 @@ async function handleApprove() {
 
   await writeFile(statePath, `${canonicalJson(semanticState)}\n`, 'utf8');
   await writeFile(contractJsonPath, `${canonicalJson(contract)}\n`, 'utf8');
-  await writeFile(contractMdPath, `${renderContractMarkdown(contract, true, contractDigest)}\n`, 'utf8');
+  await writeFile(contractMdPath, `${renderContractMarkdown(contract, true, contractDigest, policy.rules)}\n`, 'utf8');
 
   if (existsSync(userConfirmationPath)) {
     try {
@@ -289,15 +289,43 @@ async function handleVerify() {
     process.exit(1);
   }
 
-  process.stdout.write(`[AEGIS][VERIFY] Executando ${proofs.length} obrigações de prova física para o contrato ${contractDigest.slice(0, 12)}...\n`);
-
   const results = [];
+  const hasStaticProof = proofs.some((p) => p.id === 'PO-ARCH-STATIC');
+  if (!hasStaticProof) {
+    process.stdout.write('[AEGIS][VERIFY] Portão Arquitetural: Validando conformidade física estática (PO-ARCH-STATIC)...\n');
+    const staticStartMs = Date.now();
+    const staticGate = spawnSync('bash', ['scripts/substrates/static_gate.sh', '--workspace', 'src'], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    const staticDurationMs = Date.now() - staticStartMs;
+    if (staticGate.status !== 0) {
+      process.stderr.write(`[AEGIS][VERIFY][FAIL] Violação física/arquitetural em src/:\n${staticGate.stderr || staticGate.stdout}\n`);
+      process.exit(1);
+    }
+    const staticPath = resolve(root, 'scripts/substrates/static_gate.sh');
+    const staticSourceDigest = existsSync(staticPath) ? sha256(await readFile(staticPath)) : '0'.repeat(64);
+    process.stdout.write(`  ✔ PO-ARCH-STATIC (architecture): PASS (${staticDurationMs}ms)\n`);
+    results.push({
+      proofId: 'PO-ARCH-STATIC',
+      coverageKey: 'architecture',
+      status: 'PASS',
+      durationMs: staticDurationMs,
+      sourceDigest: staticSourceDigest,
+    });
+  }
+
+  process.stdout.write(`[AEGIS][VERIFY] Executando ${proofs.length} obrigações de prova física para o contrato ${contractDigest.slice(0, 12)}...\n`);
   for (const proof of proofs) {
     const fullPath = resolve(root, proof.argv?.[0] ?? proof.entrypoint);
     if (!existsSync(fullPath)) {
       process.stderr.write(`[AEGIS][VERIFY][FAIL] Arquivo de prova não encontrado: ${proof.argv?.[0] ?? proof.entrypoint}\n`);
       process.exit(1);
     }
+
+    const proofSourceBytes = await readFile(fullPath);
+    const sourceDigest = sha256(proofSourceBytes);
 
     const startMs = Date.now();
     const child = spawnSync(proof.executor, proof.argv, {
@@ -318,6 +346,7 @@ async function handleVerify() {
       coverageKey: proof.coverageKey,
       status: 'PASS',
       durationMs,
+      sourceDigest,
     });
   }
 
@@ -337,6 +366,15 @@ async function handleVerify() {
   const receiptPath = resolve(runtimeDir, 'verification_receipt.json');
   await mkdir(runtimeDir, { recursive: true });
   await writeFile(receiptPath, `${canonicalJson(receiptData)}\n`, 'utf8');
+
+  let policyRules = [];
+  try {
+    const architecturePolicy = loadArchitecturePolicy(root);
+    policyRules = architecturePolicy.policy?.rules ?? [];
+  } catch {
+    // Mantém vazio se não disponível
+  }
+  await writeFile(contractMdPath, `${renderContractMarkdown(contract, true, contractDigest, policyRules, receiptDigest)}\n`, 'utf8');
 
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.proof_verification_receipt.v1',
