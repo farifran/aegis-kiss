@@ -64,20 +64,30 @@ Este arquivo tem hoje mais de 1.000 linhas. As seguintes rotinas serão limpas:
 
 ---
 
-## 3. O que Será PRESERVADO e MANTIDO INTACTO (A Fortaleza do Aegis)
+### 2.5. O Diretório de Produto (`src/`) Fica 100% Zerado
+* Toda e qualquer implementação de regras de negócio anteriores (como o barramento de ordens, `ledger.ts`, `isolation.ts`, etc.) **não pertence ao Aegis** e deve ser zerada.
+* O diretório `src/` fica como uma **folha em branco**, contendo apenas o ponto de entrada inicial vazio:
+  ```typescript
+  // src/index.ts
+  export {};
+  ```
+* Isso garante que a nova esteira seja testada em um ambiente puro e sem herança de código anterior.
 
-Nenhuma das garantias de segurança, performance ou correção matemática será tocada. Permanecem 100% ativas:
+---
+
+## 3. O que Será PRESERVADO e MANTIDO INTACTO (A Infraestrutura do Aegis)
+
+Preservamos exclusivamente os **mecanismos de governança e infraestrutura do Aegis** que garantem a segurança matemática do sistema:
 
 | Componente Preservado | Arquivo / Localização | Por que é mantido? |
 | :--- | :--- | :--- |
-| **Código do Produto em Memória** | `src/ledger.ts`, `src/isolation.ts`, `src/fees.ts`, `src/health.ts`, `src/orderBus.ts` | É o motor funcional de alta performance (BigInt, Zero-GC, ESM). |
-| **Ponto de Entrada Canônico** | `src/index.ts` | Exportação nominal sob padrão ESM estrito (`.js`). |
-| **Provas Formais Físicas** | `src/orderBus.proof.ts`, `src/orderBus.proof.sh` | Comprovação matemática em memória de conservação, dupla entrada e isolamento. |
 | **Portões Estáticos (Static Gate)** | `scripts/substrates/static_gate.sh`, `npm run aegis:*` | Banimento absoluto de ponto flutuante, `Date.now()` e alocações de GC em hot-paths. |
-| **Auditoria Red Team (7 Classes)** | `scripts/formal_promotion_authorization.sh` | Avaliação adversarial de atomicidade, tempo, limites e continuidade. |
+| **Ponto de Entrada Canônico** | `src/index.ts` | Ponto de exportação nominal inicial vazio sob padrão ESM estrito (`.js`). |
+| **Auditoria Red Team (7 Classes)** | `scripts/formal_promotion_authorization.sh` | Validador adversarial de atomicidade, tempo, limites e continuidade. |
 | **Recibos Criptográficos de Commit** | `.git/aegis/precommit_receipt.json` e hooks do Git | Garantia de que nenhum commit entra no repositório sem prova formal prévia. |
 | **Constituição e Políticas** | `AGENTS.md`, `governance/policies/` | Leis do projeto (`ARCH-FAILURE-EXPLICIT`, `ARCH-DETERMINISTIC-TIME`). |
 | **Motor de Discovery da Camada 0** | `scripts/lib/preflight_core.mjs` (`discoverRepository`) | Varredura em memória da árvore Git (`git ls-tree`), que agora se torna a fonte exclusiva de fatos. |
+
 
 ---
 
