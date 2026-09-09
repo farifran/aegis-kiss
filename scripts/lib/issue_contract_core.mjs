@@ -58,12 +58,13 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
   ];
 
   if ((contract.decisions ?? []).length > 0) {
-    lines.push('## 5. Decisões Pré-Selecionadas (Cards de Escolha)');
+    const isGoverned = Boolean(contractDigest);
+    lines.push(isGoverned ? '## 5. Decisões Seladas' : '## 5. Decisões Pendentes de Confirmação');
     for (const decision of contract.decisions) {
       lines.push('');
       lines.push(`### ${decision.questionId}: ${decision.question}`);
       for (const answer of decision.answers) {
-        const isSelected = answer.id === (decision.selectedAnswerId || decision.recommendedAnswerId);
+        const isSelected = Boolean(decision.selectedAnswerId && answer.id === decision.selectedAnswerId);
         const mark = isSelected ? '(*)' : '( )';
         const badge = answer.recommended ? ' **[RECOMENDADO]**' : '';
         lines.push(`${mark} **${answer.label}**${badge}: ${answer.rationale}`);

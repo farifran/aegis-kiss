@@ -2,7 +2,7 @@
 
 import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
@@ -165,6 +165,8 @@ async function handleDraft(args) {
       answers: answersData,
     };
     await writeFile(resolutionPath, `${JSON.stringify(resolution, null, 2)}\n`, 'utf8');
+  } else if (existsSync(resolutionPath)) {
+    await rm(resolutionPath, { force: true });
   }
 
   process.stdout.write(`${JSON.stringify(confirmationRequest)}\n`);
