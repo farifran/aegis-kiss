@@ -97,28 +97,54 @@ function resume(root) {
 
 let isPrompting = false;
 
+function logWizard(msg) {
+  try {
+    fs.appendFileSync('/tmp/aegis-wizard.log', `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {}
+}
+
 async function presentPending() {
+  logWizard('presentPending: called');
   const root = workspaceRoot();
-  if (root === undefined) return;
+  if (root === undefined) {
+    logWizard('presentPending: root is undefined');
+    return;
+  }
   const request = await readRequest(root);
-  if (request === undefined) return;
+  if (request === undefined) {
+    logWizard('presentPending: readRequest returned undefined');
+    return;
+  }
 
-  if (isPrompting) return;
-  if (await isAlreadyResolved(root, request)) return;
+  if (isPrompting) {
+    logWizard('presentPending: isPrompting is true, skipping');
+    return;
+  }
+  if (await isAlreadyResolved(root, request)) {
+    logWizard('presentPending: already resolved, skipping');
+    return;
+  }
 
+  logWizard(`presentPending: prompting ${request.questions.length} questions`);
   isPrompting = true;
   try {
     const answers = [];
     for (const question of request.questions) {
+      logWizard(`presentPending: choosing question ${question.id}`);
       const answer = await choose(question);
       if (answer === undefined) {
+        logWizard(`presentPending: question ${question.id} cancelled`);
         return;
       }
       answers.push(answer);
     }
+    logWizard('presentPending: writing resolution');
     await writeResolution(root, request, answers);
+    logWizard('presentPending: resuming ./aegis approve');
     await resume(root);
+    logWizard('presentPending: approved successfully');
   } catch (error) {
+    logWizard(`presentPending: error ${error.message}`);
     await vscode.window.showErrorMessage(`Aegis não retomou a confirmação: ${error.message}`);
   } finally {
     isPrompting = false;
@@ -126,7 +152,9 @@ async function presentPending() {
 }
 
 function activate(context) {
+  logWizard('activate: starting');
   const root = workspaceRoot();
+  logWizard(`activate: root=${root?.fsPath}`);
   if (root === undefined) return;
 
   // 1. VSCode File System Watcher
@@ -139,12 +167,15 @@ function activate(context) {
     if (fs.existsSync(fullDir)) {
       const fsWatcher = fs.watch(fullDir, (eventType, filename) => {
         if (filename === path.basename(requestPath)) {
+          logWizard(`fs.watch event=${eventType} filename=${filename}`);
           void presentPending();
         }
       });
       context.subscriptions.push({ dispose: () => fsWatcher.close() });
     }
-  } catch {}
+  } catch (e) {
+    logWizard(`fs.watch error=${e.message}`);
+  }
 
   // 3. Polling check every 1.5 seconds for instant response
   const interval = setInterval(() => {
@@ -153,9 +184,13 @@ function activate(context) {
   context.subscriptions.push({ dispose: () => clearInterval(interval) });
 
   context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', presentPending));
+  logWizard('activate: registered command and watcher');
   void presentPending();
 }
 
-function deactivate() {}
+function deactivate() {
+  logWizard('deactivate called');
+}
 
 module.exports = { activate, deactivate };
+
