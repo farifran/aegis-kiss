@@ -15,14 +15,24 @@ function workspaceRoot() {
 function validRequest(value) {
   return (value?.schema === 'aegis.preflight_finalization.v2' || value?.status === 'USER_CONFIRMATION_REQUIRED')
     && value.status === 'USER_CONFIRMATION_REQUIRED'
-    && Array.isArray(value.questions)
-    && value.questions.length > 0;
+    && Array.isArray(value.questions);
+}
+
+let isPrompting = false;
+let lastCancelledId = null;
+
+function resetWizardState() {
+  lastCancelledId = null;
+  isPrompting = false;
 }
 
 function readRequest(root) {
   try {
     const fullPath = path.join(root.fsPath, requestRelPath);
-    if (!fs.existsSync(fullPath)) return undefined;
+    if (!fs.existsSync(fullPath)) {
+      resetWizardState();
+      return undefined;
+    }
     const raw = fs.readFileSync(fullPath, 'utf8');
     const value = JSON.parse(raw);
     return validRequest(value) ? value : undefined;
@@ -99,32 +109,68 @@ function resume(root) {
   });
 }
 
-let isPrompting = false;
-
 function logWizard(msg) {
   try {
     fs.appendFileSync('/tmp/aegis-wizard.log', `[${new Date().toISOString()}] ${msg}\n`);
   } catch {}
 }
 
-async function presentPending() {
+async function presentPending(force = false) {
   const root = workspaceRoot();
   if (root === undefined) return;
 
   const request = readRequest(root);
   if (request === undefined) return;
 
+  const reqId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest;
+  if (!force && lastCancelledId === reqId) return;
+
   if (isPrompting) return;
   if (isAlreadyResolved(root, request)) return;
 
   isPrompting = true;
-  logWizard(`presentPending: initiating confirmation for ${request.executionId}`);
+  logWizard(`presentPending: initiating confirmation for ${reqId}`);
   try {
+    if (request.questions.length === 0) {
+      const choice = await vscode.window.showQuickPick([
+        {
+          label: 'Aprovar e Selar Contrato',
+          description: 'Recomendado',
+          detail: 'Nenhuma ambiguidade pendente na demanda. Selar contrato e gerar governança.',
+          action: 'APPROVE',
+        },
+        {
+          label: 'Cancelar',
+          detail: 'Manter rascunho sem selar.',
+          action: 'CANCEL',
+        },
+      ], {
+        title: `Aegis — ${request.title || 'Confirmação de Contrato'}`,
+        placeHolder: 'Demanda sem ambiguidades materiais. Deseja selar o contrato?',
+        ignoreFocusOut: true,
+      });
+
+      if (!choice || choice.action === 'CANCEL') {
+        logWizard(`presentPending: user cancelled zero-question confirmation for ${reqId}`);
+        lastCancelledId = reqId;
+        return;
+      }
+
+      logWizard('presentPending: writing zero-question resolution');
+      await writeResolution(root, request, []);
+      logWizard('presentPending: resuming ./aegis approve');
+      await resume(root);
+      logWizard('presentPending: approved successfully');
+      lastCancelledId = null;
+      return;
+    }
+
     const answers = [];
     for (const question of request.questions) {
       const answer = await choose(question);
       if (answer === undefined) {
         logWizard(`presentPending: user cancelled question ${question.id}`);
+        lastCancelledId = reqId;
         return;
       }
       answers.push(answer);
@@ -134,6 +180,7 @@ async function presentPending() {
     logWizard('presentPending: resuming ./aegis approve');
     await resume(root);
     logWizard('presentPending: approved successfully');
+    lastCancelledId = null;
   } catch (error) {
     logWizard(`presentPending: error ${error.message}`);
     await vscode.window.showErrorMessage(`Aegis não retomou a confirmação: ${error.message}`);
@@ -149,7 +196,12 @@ function activate(context) {
 
   // 1. VSCode File System Watcher
   const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/' + path.basename(requestRelPath)));
-  context.subscriptions.push(watcher, watcher.onDidCreate(presentPending), watcher.onDidChange(presentPending));
+  context.subscriptions.push(
+    watcher,
+    watcher.onDidCreate(() => presentPending()),
+    watcher.onDidChange(() => presentPending()),
+    watcher.onDidDelete(() => resetWizardState()),
+  );
 
   // 2. Node.js native fs.watch on .harness (survives rm -rf .harness/runtime)
   try {
@@ -170,7 +222,7 @@ function activate(context) {
   }, 1000);
   context.subscriptions.push({ dispose: () => clearInterval(interval) });
 
-  context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', presentPending));
+  context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', () => presentPending(true)));
   void presentPending();
 }
 
