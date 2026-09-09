@@ -52,12 +52,66 @@ clean_command() {
   echo '[AEGIS][IDE] clean=PASS source_reset=1'
 }
 
+resolve_preflight_wizard() {
+  local request_file="${RUNTIME_DIR}/user_confirmation_request.json"
+  local resolution_file="${RUNTIME_DIR}/preflight_resolution.json"
+  local selections="${RUNTIME_DIR}/preflight_wizard_selections.json"
+
+  [[ -f "${request_file}" ]] || fatal 'no_pending_user_confirmation'
+  local result
+  result="$(cat "${request_file}")"
+
+  : > "${selections}"
+  local count index question answer_count choice correction answer_id
+  count="$(jq '.questions | length' <<< "${result}")"
+  printf '\n══════════════════════════════════════════════════════════════\n' >&2
+  printf ' AEGIS — Decisões Necessárias para Selar o Contrato\n' >&2
+  printf '══════════════════════════════════════════════════════════════\n' >&2
+  for ((index = 0; index < count; index++)); do
+    question="$(jq -c ".questions[${index}]" <<< "${result}")"
+    answer_count="$(jq '.answers | length' <<< "${question}")"
+    printf '\n[%s] %s\n' "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" >&2
+    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
+    printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
+    while true; do
+      read -r -p "Escolha [1-$((answer_count + 1))]: " choice
+      if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
+        answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
+        jq -cn --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '{questionId:$questionId,action:"SELECT_ANSWER",answerId:$answerId}' >> "${selections}"
+        break
+      fi
+      if [[ "${choice}" == "$((answer_count + 1))" ]]; then
+        read -r -p 'Sua interpretação: ' correction
+        [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
+        jq -cn --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '{questionId:$questionId,action:"CORRECT_INTERPRETATION",correction:$correction}' >> "${selections}"
+        break
+      fi
+      printf '[AEGIS] Escolha inválida.\n' >&2
+    done
+  done
+  local decision_digest
+  decision_digest="$(jq -r '.executionId // .decisionDigest // .confirmation.confirmationId' <<< "${result}")"
+  jq -s \
+    --arg decisionDigest "${decision_digest}" \
+    --arg promptDigest "${decision_digest}" \
+    --arg confirmationId "${decision_digest}" \
+    --argjson selectedAtEpochMs "$(node -e 'console.log(Date.now())')" \
+    '{schema:"aegis.preflight_resolution.v2",decisionDigest:$decisionDigest,preflightPromptDigest:$promptDigest,confirmation:{channel:"IDE_TERMINAL_WIZARD",confirmationId:$confirmationId,selectedAtEpochMs:$selectedAtEpochMs},answers:.}' \
+    "${selections}" > "${resolution_file}"
+  rm -f "${selections}"
+  echo '[AEGIS][IDE] Resolução gravada. Aprovando contrato...' >&2
+  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
+}
+
 main() {
   [[ $# -ge 1 ]] || { usage; exit 1; }
 
   case "${1}" in
     approve|resume)
       node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
+      ;;
+    wizard)
+      resolve_preflight_wizard
       ;;
     status)
       status_command

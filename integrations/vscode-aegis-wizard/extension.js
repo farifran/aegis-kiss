@@ -2,6 +2,8 @@
 
 const vscode = require('vscode');
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const requestPath = '.harness/runtime/user_confirmation_request.json';
 const resolutionPath = '.harness/runtime/preflight_resolution.json';
@@ -126,8 +128,30 @@ async function presentPending() {
 function activate(context) {
   const root = workspaceRoot();
   if (root === undefined) return;
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, requestPath));
+
+  // 1. VSCode File System Watcher
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/' + path.basename(requestPath)));
   context.subscriptions.push(watcher, watcher.onDidCreate(presentPending), watcher.onDidChange(presentPending));
+
+  // 2. Node.js native fs.watch on directory
+  try {
+    const fullDir = path.join(root.fsPath, '.harness', 'runtime');
+    if (fs.existsSync(fullDir)) {
+      const fsWatcher = fs.watch(fullDir, (eventType, filename) => {
+        if (filename === path.basename(requestPath)) {
+          void presentPending();
+        }
+      });
+      context.subscriptions.push({ dispose: () => fsWatcher.close() });
+    }
+  } catch {}
+
+  // 3. Polling check every 1.5 seconds for instant response
+  const interval = setInterval(() => {
+    void presentPending();
+  }, 1500);
+  context.subscriptions.push({ dispose: () => clearInterval(interval) });
+
   context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', presentPending));
   void presentPending();
 }
