@@ -46,10 +46,11 @@ status_command() {
 clean_command() {
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
+  rm -rf "${ROOT_DIR}/src/.aegis"
   [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
   find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
-  echo '[AEGIS][IDE] clean=PASS source_reset=1'
+  echo '[AEGIS][IDE] clean=PASS source_reset=1 contracts_reset=1 resolutions_reset=1'
 }
 
 resolve_preflight_wizard() {
@@ -63,7 +64,10 @@ resolve_preflight_wizard() {
     exit 0
   fi
 
-  [[ -f "${request_file}" ]] || fatal 'no_pending_user_confirmation'
+  if [[ ! -f "${request_file}" ]]; then
+    printf '\n[AEGIS] Nenhuma Issue-Contrato pendente de confirmação. Execute: ./aegis "<sua demanda>" primeiro.\n' >&2
+    exit 0
+  fi
   local result
   result="$(cat "${request_file}")"
 
