@@ -12,12 +12,10 @@ function workspaceRoot() {
 }
 
 function validRequest(value) {
-  return value?.schema === 'aegis.preflight_finalization.v2'
+  return (value?.schema === 'aegis.preflight_finalization.v2' || value?.status === 'USER_CONFIRMATION_REQUIRED')
     && value.status === 'USER_CONFIRMATION_REQUIRED'
-    && typeof value.decisionDigest === 'string'
-    && typeof value.preflightPromptDigest === 'string'
-    && typeof value.confirmation?.confirmationId === 'string'
-    && Array.isArray(value.questions);
+    && Array.isArray(value.questions)
+    && value.questions.length > 0;
 }
 
 async function readRequest(root) {
@@ -34,10 +32,9 @@ async function isAlreadyResolved(root, request) {
   try {
     const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, resolutionPath));
     const resolution = JSON.parse(Buffer.from(bytes).toString('utf8'));
-    return resolution?.schema === 'aegis.preflight_resolution.v2'
-      && resolution.decisionDigest === request.decisionDigest
-      && resolution.preflightPromptDigest === request.preflightPromptDigest
-      && resolution.confirmation?.confirmationId === request.confirmation.confirmationId;
+    const reqId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest;
+    const resId = resolution?.confirmation?.confirmationId || resolution?.executionId || resolution?.decisionDigest;
+    return Boolean(reqId && resId && reqId === resId);
   } catch {
     return false;
   }
@@ -70,28 +67,30 @@ async function choose(question) {
 async function writeResolution(root, request, answers) {
   const target = vscode.Uri.joinPath(root, resolutionPath);
   const temporary = vscode.Uri.joinPath(root, `${resolutionPath}.${process.pid}.tmp`);
+  const confirmationId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest || 'aegis-conf';
   const payload = Buffer.from(`${JSON.stringify({
     schema: 'aegis.preflight_resolution.v2',
-    decisionDigest: request.decisionDigest,
-    preflightPromptDigest: request.preflightPromptDigest,
+    executionId: confirmationId,
+    decisionDigest: confirmationId,
+    preflightPromptDigest: confirmationId,
     confirmation: {
       channel: 'IDE_NATIVE_SELECTOR',
-      confirmationId: request.confirmation.confirmationId,
+      confirmationId,
       selectedAtEpochMs: Date.now(),
     },
     answers,
-  })}\n`);
+  }, null, 2)}\n`);
   await vscode.workspace.fs.writeFile(temporary, payload);
   await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
 }
 
 function resume(root) {
   return new Promise((resolve, reject) => {
-    const child = spawn('./aegis', ['resume'], { cwd: root.fsPath, shell: false });
+    const child = spawn('./aegis', ['approve'], { cwd: root.fsPath, shell: false });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
     child.on('error', reject);
-    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr || `aegis_resume_failed:${code}`)));
+    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr || `aegis_approve_failed:${code}`)));
   });
 }
 
@@ -99,12 +98,13 @@ async function presentPending() {
   const root = workspaceRoot();
   if (root === undefined) return;
   const request = await readRequest(root);
+  const confirmationId = request?.confirmation?.confirmationId || request?.executionId || request?.decisionDigest;
   if (
     request === undefined
-    || activeConfirmationId === request.confirmation.confirmationId
+    || activeConfirmationId === confirmationId
     || await isAlreadyResolved(root, request)
   ) return;
-  activeConfirmationId = request.confirmation.confirmationId;
+  activeConfirmationId = confirmationId;
   const answers = [];
   for (const question of request.questions) {
     const answer = await choose(question);

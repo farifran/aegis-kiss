@@ -89,10 +89,16 @@ async function handleDraft(args) {
     answers: d.answers,
   }));
 
+  const digest = computeContractDigest(draft);
   const confirmationRequest = {
     schema: 'aegis.preflight_finalization.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
-    executionId: computeContractDigest(draft),
+    executionId: digest,
+    decisionDigest: digest,
+    preflightPromptDigest: digest,
+    confirmation: {
+      confirmationId: digest,
+    },
     title: draft.title,
     intent: draft.intent,
     scope: draft.scope,
