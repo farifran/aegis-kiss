@@ -32,12 +32,13 @@ export function sanitizeInputText(rawBytes, maxBytes = maxDemandBytes) {
  * Renderiza a Issue-Contrato em Markdown legível para o desenvolvedor na IDE.
  * Esta é a Face Humana da Issue-Contrato.
  */
-export function renderContractMarkdown(contract) {
+export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '') {
   const lines = [
     `# Issue / Contrato: ${contract.title}`,
     '',
-    '> **Status:** Rascunho Pré-Cozinhado (Aguardando Confirmação Humana)',
+    `> **Status:** ${isGoverned ? 'Selado & Governado (Assinado)' : 'Rascunho Pré-Cozinhado (Aguardando Confirmação Humana)'}`,
     `> **Modo:** ${contract.changeKind}`,
+    ...(contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     '',
     '## 1. Intenção & Escopo',
     contract.intent,

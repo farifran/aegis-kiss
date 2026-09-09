@@ -164,6 +164,8 @@ async function handleApprove() {
   };
 
   await writeFile(statePath, `${canonicalJson(semanticState)}\n`, 'utf8');
+  await writeFile(contractJsonPath, `${canonicalJson(contract)}\n`, 'utf8');
+  await writeFile(contractMdPath, `${renderContractMarkdown(contract, true, contractDigest)}\n`, 'utf8');
 
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v2',
