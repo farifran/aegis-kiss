@@ -45,8 +45,9 @@ status_command() {
 
 clean_command() {
   rm -rf "${RUNTIME_DIR}"
-  rm -rf "${ROOT_DIR}/src/.aegis"
   mkdir -p "${RUNTIME_DIR}"
+  [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
+  find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
   echo '[AEGIS][IDE] clean=PASS source_reset=1'
 }
