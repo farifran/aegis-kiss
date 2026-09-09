@@ -55,18 +55,23 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     '## 4. Semântica de Falhas e Tratamento de Erros (FAIL)',
     ...(contract.failureSemantics ?? []).map((f) => `- **${f.id}:** Quando *${f.trigger}* $\\to$ Resultado: *${f.observableResult}*`),
     '',
-    '## 5. Decisões Pré-Selecionadas (Cards de Escolha)',
   ];
 
-  for (const decision of (contract.decisions ?? [])) {
-    lines.push('');
-    lines.push(`### ${decision.questionId}: ${decision.question}`);
-    for (const answer of decision.answers) {
-      const isSelected = answer.id === (decision.selectedAnswerId || decision.recommendedAnswerId);
-      const mark = isSelected ? '(*)' : '( )';
-      const badge = answer.recommended ? ' **[RECOMENDADO]**' : '';
-      lines.push(`${mark} **${answer.label}**${badge}: ${answer.rationale}`);
+  if ((contract.decisions ?? []).length > 0) {
+    lines.push('## 5. Decisões Pré-Selecionadas (Cards de Escolha)');
+    for (const decision of contract.decisions) {
+      lines.push('');
+      lines.push(`### ${decision.questionId}: ${decision.question}`);
+      for (const answer of decision.answers) {
+        const isSelected = answer.id === (decision.selectedAnswerId || decision.recommendedAnswerId);
+        const mark = isSelected ? '(*)' : '( )';
+        const badge = answer.recommended ? ' **[RECOMENDADO]**' : '';
+        lines.push(`${mark} **${answer.label}**${badge}: ${answer.rationale}`);
+      }
     }
+  } else {
+    lines.push('## 5. Decisões de Domínio');
+    lines.push('Nenhuma ambiguidade material detectada na demanda.');
   }
 
   lines.push('');
@@ -155,9 +160,21 @@ export function buildIssueDraft({
   targetHint = '',
   candidates = [],
   previousContract = null,
+  decisions = [],
+  title: customTitle,
+  intent: customIntent,
+  requirements: customRequirements,
+  behavior: customBehavior,
+  invariants: customInvariants,
+  preconditions: customPreconditions,
+  postconditions: customPostconditions,
+  failureSemantics: customFailureSemantics,
+  authorizedPaths: customAuthorizedPaths,
+  proofObligations: customProofObligations,
 }) {
   const firstLine = sanitizedText.split('\n')[0].trim().replace(/^#+\s*/u, '');
-  const title = firstLine.length > 100 ? `${firstLine.slice(0, 97)}...` : firstLine || 'Demanda do Produto';
+  const title = customTitle || (firstLine.length > 100 ? `${firstLine.slice(0, 97)}...` : firstLine || 'Demanda do Produto');
+  const intent = customIntent || title;
 
   const fileMatches = sanitizedText.match(/\b(?:src\/)?[a-zA-Z0-9_.-]+\.(?:ts|proof\.sh)\b/gu) || [];
   const extractedPaths = fileMatches.map((f) => (f.startsWith('src/') ? f : `src/${f}`));
@@ -179,7 +196,9 @@ export function buildIssueDraft({
     ? ['src/index.ts', mainPath, proofPath, 'src/.aegis/semantic-state.json']
     : ['scripts/ide_gateway.sh', 'scripts/lib/issue_contract_core.mjs', 'src/.aegis/semantic-state.json'];
 
-  const authorizedPaths = [...new Set([...defaultPaths, ...extractedPaths])];
+  const authorizedPaths = Array.isArray(customAuthorizedPaths) && customAuthorizedPaths.length > 0
+    ? [...new Set([...customAuthorizedPaths, 'src/.aegis/semantic-state.json'])]
+    : [...new Set([...defaultPaths, ...extractedPaths])];
 
   const appliedRuleIds = (architecture?.candidateRules ?? [])
     .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || r.id === 'ARCH-DETERMINISTIC-TIME')
@@ -262,77 +281,7 @@ export function buildIssueDraft({
     },
   ];
 
-  const decisions = [
-    {
-      questionId: 'Q-0001',
-      question: 'Qual a estratégia arquitetural recomendada para a modelagem dos módulos?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-0001',
-      selectedAnswerId: 'ANS-0001',
-      answers: [
-        {
-          id: 'ANS-0001',
-          label: 'Código Plano, Direto e Modular (Protocolo Karpathy / KISS)',
-          rationale: 'Funções e estruturas puras distribuídas em módulos específicos sem injeção de dependências pesada, factories ou event-emitters especulativos (AGENTS.md).',
-          resolutionClause: 'Implementar a lógica diretamente em arquivos enxutos sob src/.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-0002',
-          label: 'Arquitetura Multi-Camada com Factories, Injeção de Dependências e Event-Emitters',
-          rationale: 'Introduz sobre-engenharia e violação da Dumb Code Rule (rejeitado pela Constituição do Aegis).',
-          resolutionClause: 'Criar abstrações adicionais (não recomendado).',
-          recommended: false,
-        },
-      ],
-    },
-    {
-      questionId: 'Q-0002',
-      question: 'Como tratar entradas desconhecidas ou erros de conversão no processamento?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-0001',
-      selectedAnswerId: 'ANS-0001',
-      answers: [
-        {
-          id: 'ANS-0001',
-          label: 'Tratamento de Erro Explícito com Status Tipado (ARCH-FAILURE-EXPLICIT)',
-          rationale: 'Nenhuma falha pode desaparecer silenciosamente; reportar resultado explícito e rejeição rastreável.',
-          resolutionClause: 'Retornar status explícito de erro e rejeição.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-0002',
-          label: 'Capturas Silenciosas com Fallbacks Padrão',
-          rationale: 'Violação direta da regra inviolável ARCH-FAILURE-EXPLICIT.',
-          resolutionClause: 'Capturar exceções silenciosamente (rejeitado).',
-          recommended: false,
-        },
-      ],
-    },
-    {
-      questionId: 'Q-0003',
-      question: 'Qual representação numérica e modelo temporal devem ser utilizados?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-0001',
-      selectedAnswerId: 'ANS-0001',
-      answers: [
-        {
-          id: 'ANS-0001',
-          label: 'Inteiros Puros BigInt com Timestamps Explícitos e Zero-GC',
-          rationale: 'Garante precisão sem ponto flutuante IEEE-754 e determinismo temporal (ARCH-DETERMINISTIC-TIME).',
-          resolutionClause: 'Utilizar exclusivamente BigInt e timestamps explícitos.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-0002',
-          label: 'Ponto Flutuante Padrão (Number) com Date.now() Implícito',
-          rationale: 'Viola as regras de banimento de floats do Static Gate e relógios ocultos.',
-          resolutionClause: 'Utilizar ponto flutuante (rejeitado).',
-          recommended: false,
-        },
-      ],
-    },
-  ];
+  const finalDecisions = Array.isArray(decisions) ? decisions : [];
 
   const proofObligations = [
     {
@@ -392,12 +341,12 @@ export function buildIssueDraft({
       authorizedPaths,
       excludedPaths: [],
     },
-    requirements,
-    behavior,
-    preconditions,
-    invariants,
-    postconditions,
-    failureSemantics,
+    requirements: customRequirements ?? requirements,
+    behavior: customBehavior ?? behavior,
+    preconditions: customPreconditions ?? preconditions,
+    invariants: customInvariants ?? invariants,
+    postconditions: customPostconditions ?? postconditions,
+    failureSemantics: customFailureSemantics ?? failureSemantics,
     stateModel: {
       kind: 'STATE_TRANSITION',
       bindings: [
@@ -412,8 +361,8 @@ export function buildIssueDraft({
       ],
       governance: governanceState,
     },
-    decisions,
-    proofObligations,
+    decisions: finalDecisions,
+    proofObligations: customProofObligations ?? proofObligations,
     verification: {
       riskProfile: 'fast',
       adversarialClasses: ['CONTINUITY', 'BOUNDARIES', 'OBSERVABILITY', 'ATOMICITY'],

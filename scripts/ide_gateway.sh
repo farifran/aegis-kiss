@@ -64,6 +64,21 @@ resolve_preflight_wizard() {
   : > "${selections}"
   local count index question answer_count choice correction answer_id
   count="$(jq '.questions | length' <<< "${result}")"
+  if (( count == 0 )); then
+    printf '\n[AEGIS] Nenhuma ambiguidade detectada na demanda. Aprovando contrato...\n' >&2
+    local decision_digest
+    decision_digest="$(jq -r '.executionId // .decisionDigest // .confirmation.confirmationId' <<< "${result}")"
+    jq -n \
+      --arg decisionDigest "${decision_digest}" \
+      --arg promptDigest "${decision_digest}" \
+      --arg confirmationId "${decision_digest}" \
+      --argjson selectedAtEpochMs "$(node -e 'console.log(Date.now())')" \
+      '{schema:"aegis.preflight_resolution.v2",decisionDigest:$decisionDigest,preflightPromptDigest:$promptDigest,confirmation:{channel:"IDE_TERMINAL_WIZARD",confirmationId:$confirmationId,selectedAtEpochMs:$selectedAtEpochMs},answers:[]}' \
+      > "${resolution_file}"
+    rm -f "${selections}"
+    node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
+    return
+  fi
   printf '\n══════════════════════════════════════════════════════════════\n' >&2
   printf ' AEGIS — Decisões Necessárias para Selar o Contrato\n' >&2
   printf '══════════════════════════════════════════════════════════════\n' >&2

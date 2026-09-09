@@ -46,9 +46,11 @@ try {
 if (!failed) throw new Error('DoS limit was not enforced');
 NODE
 
-# 3. Test Draft Generation via ./aegis CLI
+# 3. Test Draft Generation via ./aegis CLI (com e sem decisões)
+decisions_payload='[{"questionId":"Q-0001","question":"Qual o modo de validação?","scope":"INPUT","recommendedAnswerId":"ANS-0001","selectedAnswerId":"ANS-0001","answers":[{"id":"ANS-0001","label":"Estrito","rationale":"Validação imediata","resolutionClause":"Rejeitar entrada inválida","recommended":true},{"id":"ANS-0002","label":"Tolerante","rationale":"Permissivo","resolutionClause":"Sanitizar automaticamente","recommended":false}]}]'
+
 set +e
-draft_output="$(bash "${WORK_DIR}/aegis" "Criar um validador determinístico em src/validator.ts")"
+draft_output="$(bash "${WORK_DIR}/aegis" "Criar um validador determinístico em src/validator.ts" --decisions "${decisions_payload}")"
 draft_code=$?
 set -e
 
@@ -71,6 +73,25 @@ printf '%s\n' "${draft_output}" | jq -e '
 # Verify contract.md formatting
 grep -q '# Issue / Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"
 grep -q '\[RECOMENDADO\]' "${WORK_DIR}/.harness/runtime/contract.md"
+
+# 3b. Test Draft Generation without decisions (zero questions, no generic hardcoded cards)
+bash "${WORK_DIR}/aegis" clean >/dev/null
+set +e
+zero_q_output="$(bash "${WORK_DIR}/aegis" "Criar um validador simples em src/validator.ts")"
+zero_q_code=$?
+set -e
+
+if [[ "${zero_q_code}" -ne 2 ]]; then
+  echo "[FATAL] Expected exit code 2 for draft without questions, got ${zero_q_code}" >&2
+  exit 1
+fi
+
+printf '%s\n' "${zero_q_output}" | jq -e '
+  .status == "USER_CONFIRMATION_REQUIRED"
+  and (.questions | length == 0)
+' >/dev/null
+
+grep -q 'Nenhuma ambiguidade material detectada' "${WORK_DIR}/.harness/runtime/contract.md"
 
 # 4. Test Status Command before Approval
 status_pre="$(bash "${WORK_DIR}/aegis" status)"

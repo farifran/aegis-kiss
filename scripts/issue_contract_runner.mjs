@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -26,10 +26,20 @@ const contractMdPath = resolve(runtimeDir, 'contract.md');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 
+function parseJsonOrFile(raw, baseDir) {
+  const filePath = resolve(baseDir, raw);
+  if (existsSync(filePath)) {
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  }
+  return JSON.parse(raw);
+}
+
 async function handleDraft(args) {
   let changeKind = 'PRODUCT';
   let targetHint = '';
   let demandText = '';
+  let specData = null;
+  let decisionsData = null;
 
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--kind' && ['PRODUCT', 'HARNESS'].includes(args[index + 1])) {
@@ -38,9 +48,19 @@ async function handleDraft(args) {
     } else if (args[index] === '--target' && typeof args[index + 1] === 'string') {
       targetHint = args[index + 1];
       index += 1;
-    } else if (!demandText) {
+    } else if (args[index] === '--spec' && typeof args[index + 1] === 'string') {
+      specData = parseJsonOrFile(args[index + 1], root);
+      index += 1;
+    } else if (args[index] === '--decisions' && typeof args[index + 1] === 'string') {
+      decisionsData = parseJsonOrFile(args[index + 1], root);
+      index += 1;
+    } else if (!demandText && !args[index].startsWith('--')) {
       demandText = args[index];
     }
+  }
+
+  if (!demandText && specData?.intent) {
+    demandText = specData.intent;
   }
 
   if (!demandText) {
@@ -67,6 +87,10 @@ async function handleDraft(args) {
     policyText = '';
   }
 
+  if (specData && Array.isArray(specData.decisions) && !decisionsData) {
+    decisionsData = specData.decisions;
+  }
+
   const draft = buildIssueDraft({
     sanitizedText,
     architecture: {
@@ -75,6 +99,17 @@ async function handleDraft(args) {
     },
     changeKind,
     targetHint,
+    decisions: Array.isArray(decisionsData) ? decisionsData : [],
+    title: specData?.title,
+    intent: specData?.intent,
+    requirements: specData?.requirements,
+    behavior: specData?.behavior,
+    invariants: specData?.invariants,
+    preconditions: specData?.preconditions,
+    postconditions: specData?.postconditions,
+    failureSemantics: specData?.failureSemantics,
+    authorizedPaths: specData?.authorizedPaths ?? specData?.scope?.authorizedPaths,
+    proofObligations: specData?.proofObligations,
   });
 
   await mkdir(runtimeDir, { recursive: true });
