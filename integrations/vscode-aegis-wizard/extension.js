@@ -7,7 +7,6 @@ const path = require('node:path');
 
 const requestPath = '.harness/runtime/user_confirmation_request.json';
 const resolutionPath = '.harness/runtime/preflight_resolution.json';
-let activeConfirmationId;
 
 function workspaceRoot() {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -96,32 +95,33 @@ function resume(root) {
   });
 }
 
+let isPrompting = false;
+
 async function presentPending() {
   const root = workspaceRoot();
   if (root === undefined) return;
   const request = await readRequest(root);
-  const confirmationId = request?.confirmation?.confirmationId || request?.executionId || request?.decisionDigest;
-  if (
-    request === undefined
-    || activeConfirmationId === confirmationId
-    || await isAlreadyResolved(root, request)
-  ) return;
-  activeConfirmationId = confirmationId;
-  const answers = [];
-  for (const question of request.questions) {
-    const answer = await choose(question);
-    if (answer === undefined) {
-      activeConfirmationId = undefined;
-      return;
-    }
-    answers.push(answer);
-  }
+  if (request === undefined) return;
+
+  if (isPrompting) return;
+  if (await isAlreadyResolved(root, request)) return;
+
+  isPrompting = true;
   try {
+    const answers = [];
+    for (const question of request.questions) {
+      const answer = await choose(question);
+      if (answer === undefined) {
+        return;
+      }
+      answers.push(answer);
+    }
     await writeResolution(root, request, answers);
     await resume(root);
   } catch (error) {
-    activeConfirmationId = undefined;
     await vscode.window.showErrorMessage(`Aegis não retomou a confirmação: ${error.message}`);
+  } finally {
+    isPrompting = false;
   }
 }
 
