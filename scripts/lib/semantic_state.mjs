@@ -23,8 +23,14 @@ export function parseSemanticState(value) {
     throw new Error('invalid_semantic_state');
   }
   try {
-    assertSchema('aegis.clarified_demand.v2', state.clarifiedDemand);
-    assertSchema('aegis.contract_ir.v2', state.contract);
+    if (state.contract?.schema === 'aegis.issue_contract.v1') {
+      assertSchema('aegis.issue_contract.v1', state.contract);
+    } else {
+      if (state.clarifiedDemand !== undefined && state.clarifiedDemand !== null && typeof state.clarifiedDemand !== 'object') {
+        throw new Error('invalid_semantic_state');
+      }
+      assertSchema('aegis.contract_ir.v2', state.contract);
+    }
   } catch {
     throw new Error('invalid_semantic_state');
   }
@@ -35,9 +41,9 @@ export function parseSemanticState(value) {
   if (
     digests === null
     || typeof digests !== 'object'
-    || digests.clarifiedDemandSemanticDigest !== canonicalDigest(state.clarifiedDemand)
     || digests.contractSemanticDigest !== canonicalDigest(state.contract)
     || digests.proofRegistrySemanticDigest !== canonicalDigest(state.proofRegistry)
+    || (state.clarifiedDemand && digests.clarifiedDemandSemanticDigest !== canonicalDigest(state.clarifiedDemand))
   ) {
     throw new Error('semantic_state_digest_mismatch');
   }
@@ -55,7 +61,7 @@ export function readSemanticEvidence(root) {
   if (state !== null) {
     return {
       source: 'semantic-state',
-      clarifiedDemand: state.clarifiedDemand,
+      clarifiedDemand: state.clarifiedDemand ?? null,
       contract: state.contract,
       proofRegistry: state.proofRegistry,
     };

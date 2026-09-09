@@ -109,6 +109,9 @@ state.contract.proofObligations = classes.map((item) => ({
   statement: `Provar ${item.toLowerCase()} de forma reproduzível.`,
 }));
 state.contract.invariants[0].proofIds = state.contract.proofObligations.map((proof) => proof.id);
+state.contract.stateModel.governance.authoritativeState.proofIds = ['PO-ADVERSARIAL-CONTINUITY'];
+state.contract.stateModel.governance.publicationAuthorities[0].proofIds = ['PO-ADVERSARIAL-CONTINUITY'];
+state.contract.stateModel.governance.publicationBoundary.proofIds = ['PO-ADVERSARIAL-CONTINUITY'];
 state.contract.requirementCoverage[0].contractIds = [
   state.contract.behavior[0].id,
   state.contract.invariants[0].id,

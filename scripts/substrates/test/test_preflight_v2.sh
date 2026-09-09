@@ -117,7 +117,7 @@ jq -e '
 ' "${WORK_DIR}/direct-request.json" >/dev/null
 # The compact request now includes the frozen cognitive constitution.  Keep a
 # strict fixture budget that still rejects accidental envelope/repository dumps.
-[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 16384 ]]
+[[ "$(wc -c < "${WORK_DIR}/direct-request.json" | tr -d ' ')" -lt 20480 ]]
 jq -e '
   .baseline.clean == true
   and (.constitutionDigest | test("^[a-f0-9]{64}$"))

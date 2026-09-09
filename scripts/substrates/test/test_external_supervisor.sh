@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export AEGIS_LEGACY_PREFLIGHT=1
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aegis-external-supervisor.XXXXXX")"

@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.issue_contract.v1",
+  "title": "Aegis Issue-Contract Specification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "title",
+    "changeKind",
+    "intent",
+    "architecture",
+    "scope",
+    "requirements",
+    "behavior",
+    "invariants",
+    "proofObligations"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.issue_contract.v1" },
+    "title": { "type": "string", "minLength": 1 },
+    "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
+    "intent": { "type": "string", "minLength": 1 },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyDigest", "appliedRuleIds", "amendmentIds"],
+      "properties": {
+        "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "appliedRuleIds": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true },
+        "amendmentIds": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedPaths"],
+      "properties": {
+        "authorizedPaths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+" },
+          "uniqueItems": true
+        },
+        "excludedPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "provenance"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^REQ-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "provenance": { "enum": ["USER", "USER_CLARIFICATION", "ARCHITECTURE_DEFAULT", "KISS_DERIVATION"] }
+        }
+      }
+    },
+    "behavior": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^BEH-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "policyRoles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^PRE-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "proofIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^INV-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "proofIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "postconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^POST-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "failureSemantics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "trigger", "observableResult"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^FAIL-[A-Z0-9][A-Z0-9-]+$" },
+          "trigger": { "type": "string", "minLength": 1 },
+          "observableResult": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "stateModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["NONE", "STATE_TRANSITION"] },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "statement"],
+            "properties": {
+              "role": { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+              "statement": { "type": "string", "minLength": 1 },
+              "requirementIds": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "provenance", "statement"],
+            "properties": {
+              "role": { "enum": ["STATE", "COMMAND", "IDENTITY", "RESOURCE", "TEMPORAL", "RESULT", "ATOMICITY", "CANONICALIZATION"] },
+              "provenance": { "enum": ["USER", "USER_CLARIFICATION", "ARCHITECTURE_DEFAULT", "KISS_DERIVATION"] },
+              "statement": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "governance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authoritativeState", "publicationAuthorities", "publicationBoundary", "derivedObservables", "digestIdentity"],
+          "properties": {
+            "authoritativeState": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["statement", "proofIds"],
+              "properties": {
+                "statement": { "type": "string", "minLength": 1 },
+                "proofIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+              }
+            },
+            "publicationAuthorities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["operation", "kind", "statement", "proofIds"],
+                "properties": {
+                  "operation": { "type": "string", "minLength": 1 },
+                  "kind": { "enum": ["CREATE_ONLY", "TRANSITION", "ADMIN_RESET", "RESTORE", "MIGRATION"] },
+                  "statement": { "type": "string", "minLength": 1 },
+                  "proofIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+                }
+              }
+            },
+            "publicationBoundary": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["statement", "proofIds"],
+              "properties": {
+                "statement": { "type": "string", "minLength": 1 },
+                "proofIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+              }
+            },
+            "derivedObservables": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "sourceOfTruth", "derivation", "proofIds"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "sourceOfTruth": { "type": "string", "minLength": 1 },
+                  "derivation": { "type": "string", "minLength": 1 },
+                  "proofIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+                }
+              }
+            },
+            "digestIdentity": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["purpose", "coveredInputs", "proofIds"],
+              "properties": {
+                "purpose": { "enum": ["RESULT_FINGERPRINT", "TRANSITION_IDENTITY", "AUDIT_IDENTITY"] },
+                "coveredInputs": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+                "proofIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+              }
+            }
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questionId", "question", "recommendedAnswerId", "selectedAnswerId", "answers"],
+        "properties": {
+          "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "question": { "type": "string", "minLength": 1 },
+          "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE", "DEMAND"] },
+          "recommendedAnswerId": { "type": "string" },
+          "selectedAnswerId": { "type": "string" },
+          "answers": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "label", "rationale", "resolutionClause"],
+              "properties": {
+                "id": { "type": "string" },
+                "label": { "type": "string", "minLength": 1 },
+                "rationale": { "type": "string", "minLength": 1 },
+                "resolutionClause": { "type": "string", "minLength": 1 },
+                "recommended": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "proofObligations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "coverageKey", "risk", "obligation", "entrypoint", "targets", "cadence", "cost"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^PO-[A-Z0-9][A-Z0-9-]+$" },
+          "coverageKey": { "type": "string", "pattern": "^[a-z0-9_.-]+$" },
+          "risk": { "type": "string", "minLength": 1 },
+          "obligation": { "type": "string", "minLength": 1 },
+          "entrypoint": { "type": "string" },
+          "targets": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+          "cadence": { "enum": ["always", "release", "forensic"] },
+          "cost": { "enum": ["low", "medium", "high"] }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskProfile", "adversarialClasses"],
+      "properties": {
+        "riskProfile": { "enum": ["fast", "targeted", "release", "forensic"] },
+        "adversarialClasses": {
+          "type": "array",
+          "items": { "enum": ["CONTINUITY", "COMPOSITION", "IDENTITY", "BOUNDARIES", "TIME", "OBSERVABILITY", "ATOMICITY"] },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

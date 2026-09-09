@@ -213,7 +213,7 @@ metadata_state() {
     [[ ! -e "${ROOT_DIR}/src/.aegis/${legacy}" ]] || fatal 'legacy_semantic_metadata_detected'
   done
   if [[ -e "${semantic_state}" ]]; then
-    jq -e '.schema == "aegis.semantic_state.v1" and (.clarifiedDemand | type == "object") and (.contract | type == "object") and (.proofRegistry | type == "object")' "${semantic_state}" >/dev/null 2>&1 \
+    jq -e '.schema == "aegis.semantic_state.v1" and (.contract | type == "object") and (.proofRegistry | type == "object")' "${semantic_state}" >/dev/null 2>&1 \
       || fatal 'invalid_semantic_state'
     printf 'GOVERNED\n'
   elif [[ ! -e "${semantic_state}" ]]; then
@@ -601,6 +601,26 @@ status() {
     '{schema:"aegis.ide_status.v1",evidenceState:$state,baseCommit:$base,workingTree:$changes,supervisor:$supervisor,reviewer:$reviewer}'
 }
 
+approve_contract() {
+  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve "$@"
+}
+
+run_demand_intake() {
+  local result exit_code=0
+  set +e
+  result="$(node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft --kind PRODUCT "$@")"
+  exit_code=$?
+  set -e
+  if [[ ${exit_code} -eq 2 ]]; then
+    write_user_wizard_request "${result}"
+    printf '%s\n' "${result}"
+    return 2
+  elif [[ ${exit_code} -ne 0 ]]; then
+    fatal 'demand_intake_failed'
+  fi
+  printf '%s\n' "${result}"
+}
+
 command_name="${1:-}"
 case "${command_name}" in
   -h|--help|help|'') usage ;;
@@ -614,9 +634,17 @@ case "${command_name}" in
   finalize) shift; finalize_preflight "$@" ;;
   review) shift; build_independent_review "$@" ;;
   candidate-review) shift; [[ $# -eq 0 ]] || fatal 'candidate_review_does_not_accept_arguments'; build_candidate_review ;;
+  approve) shift; approve_contract "$@" ;;
+  draft) shift; run_demand_intake "$@" ;;
   authorize) shift; authorize "$@" ;;
   report) shift; [[ $# -eq 0 ]] || fatal 'report_does_not_accept_arguments'; node "${ROOT_DIR}/scripts/forensic_report.mjs" ;;
   clean) shift; clean "$@" ;;
   -*) fatal "unknown_command:${command_name}" ;;
-  *) build_preflight PRODUCT "$@" ;;
+  *)
+    if [[ "${AEGIS_LEGACY_PREFLIGHT:-0}" == "1" ]]; then
+      build_preflight PRODUCT "$@"
+    else
+      run_demand_intake "$@"
+    fi
+    ;;
 esac

@@ -62,7 +62,7 @@ aegis_proof_safe_repository_path() {
 
 aegis_contract_targets() {
   local contract_file="${1:-$(aegis_proof_contract_path)}"
-  jq -r 'if .schema == "aegis.contract_ir.v2" then .scope.authorizedPaths[]? else .targets[]? end' "${contract_file}"
+  jq -r 'if (.schema | IN("aegis.contract_ir.v2", "aegis.issue_contract.v1")) then .scope.authorizedPaths[]? else .targets[]? end' "${contract_file}"
 }
 
 aegis_path_within_scope() {

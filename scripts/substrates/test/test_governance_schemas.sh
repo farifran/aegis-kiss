@@ -10,9 +10,6 @@ import { assertSchema, schemaErrors } from './scripts/lib/schema_validator.mjs';
 
 const files = [
   'architecture-policy.v1.schema.json',
-  'normalized-demand.v2.schema.json',
-  'clarified-demand.v2.schema.json',
-  'clarified-demand-body.v2.schema.json',
   'contract-body.v2.schema.json',
   'preflight-decision.v2.schema.json',
   'preflight-resolution.v2.schema.json',
@@ -21,6 +18,8 @@ const files = [
   'contract-ir.v2.schema.json',
   'preflight-review.v2.schema.json',
   'preflight-review-request.v2.schema.json',
+  'reviewer-execution.v1.schema.json',
+  'issue-contract.v1.schema.json',
 ];
 for (const file of files) {
   const schema = JSON.parse(readFileSync('governance/schemas/' + file, 'utf8'));
@@ -29,15 +28,33 @@ for (const file of files) {
   }
 }
 const valid = {
-  schema: 'aegis.normalized_demand.v2',
-  digest: 'a'.repeat(64),
-  text: 'Criar arquivo.',
-  units: [{ id: 'UNIT-0001', kind: 'paragraph', text: 'Criar arquivo.', range: { startByte: 0, endByte: 14 } }],
-  references: [],
+  schema: 'aegis.issue_contract.v1',
+  title: 'Teste',
+  changeKind: 'PRODUCT',
+  intent: 'Intencao',
+  architecture: {
+    policyDigest: 'a'.repeat(64),
+    appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
+    amendmentIds: [],
+  },
+  scope: { authorizedPaths: ['src/foo.ts'] },
+  requirements: [{ id: 'REQ-0001', statement: 'req', provenance: 'USER' }],
+  behavior: [{ id: 'BEH-0001', statement: 'beh' }],
+  invariants: [{ id: 'INV-0001', statement: 'inv', proofIds: ['PO-TEST'] }],
+  proofObligations: [{
+    id: 'PO-TEST',
+    coverageKey: 'test',
+    risk: 'risk',
+    obligation: 'obl',
+    entrypoint: 'src/foo.proof.sh',
+    targets: ['src/foo.ts'],
+    cadence: 'always',
+    cost: 'low',
+  }],
 };
-assertSchema('aegis.normalized_demand.v2', valid);
-if (schemaErrors('aegis.normalized_demand.v2', { ...valid, rawDigest: 'b'.repeat(64) }).length === 0) {
-  throw new Error('schema accepted removed normalizer field');
+assertSchema('aegis.issue_contract.v1', valid);
+if (schemaErrors('aegis.issue_contract.v1', { ...valid, extraField: 'invalid' }).length === 0) {
+  throw new Error('schema accepted invalid extra field');
 }
 NODE
 
@@ -54,16 +71,34 @@ fs.readFileSync = function trackedRead(path, ...args) {
 };
 syncBuiltinESMExports();
 const { assertSchema } = await import(process.cwd() + '/scripts/lib/schema_validator.mjs?lazy-load-test');
-assertSchema('aegis.normalized_demand.v2', {
-  schema: 'aegis.normalized_demand.v2',
-  digest: 'a'.repeat(64),
-  text: 'Criar arquivo.',
-  units: [{ id: 'UNIT-0001', kind: 'paragraph', text: 'Criar arquivo.', range: { startByte: 0, endByte: 14 } }],
-  references: [],
+assertSchema('aegis.issue_contract.v1', {
+  schema: 'aegis.issue_contract.v1',
+  title: 'Teste',
+  changeKind: 'PRODUCT',
+  intent: 'Intencao',
+  architecture: {
+    policyDigest: 'a'.repeat(64),
+    appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
+    amendmentIds: [],
+  },
+  scope: { authorizedPaths: ['src/foo.ts'] },
+  requirements: [{ id: 'REQ-0001', statement: 'req', provenance: 'USER' }],
+  behavior: [{ id: 'BEH-0001', statement: 'beh' }],
+  invariants: [{ id: 'INV-0001', statement: 'inv', proofIds: ['PO-TEST'] }],
+  proofObligations: [{
+    id: 'PO-TEST',
+    coverageKey: 'test',
+    risk: 'risk',
+    obligation: 'obl',
+    entrypoint: 'src/foo.proof.sh',
+    targets: ['src/foo.ts'],
+    cadence: 'always',
+    cost: 'low',
+  }],
 });
 fs.readFileSync = originalReadFileSync;
 syncBuiltinESMExports();
-if (JSON.stringify(schemaReads) !== JSON.stringify(['normalized-demand.v2.schema.json'])) {
+if (JSON.stringify(schemaReads) !== JSON.stringify(['issue-contract.v1.schema.json'])) {
   throw new Error('schema loader is not lazy: ' + schemaReads.join(','));
 }
 NODE

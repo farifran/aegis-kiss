@@ -169,8 +169,66 @@ function validateSemanticModel(contract) {
 
 export function validateContract({ root, contract, clarified, policy, policyText, registry, previousContract, phase = 'promotion' }) {
   requireCondition(phase === 'compile' || phase === 'promotion', 'invalid_validation_phase');
+  if (contract?.schema === 'aegis.issue_contract.v1') {
+    assertSchema('aegis.issue_contract.v1', contract);
+    assertSchema('aegis.architecture_policy.v1', policy);
+
+    const architectureSource = readFileSync(safePath(root, policy.origin.sourcePath));
+    requireCondition(sha256(architectureSource) === policy.origin.sourceDigest, 'stale_architecture_policy');
+    requireCondition(contract.architecture.policyDigest === sha256(policyText), 'architecture_policy_digest_mismatch');
+
+    const policyRuleIds = new Set(policy.rules.map((rule) => rule.id));
+    const policyAmendmentIds = new Set(policy.amendments.map((amendment) => amendment.id));
+    requireCondition(contract.architecture.appliedRuleIds.every((id) => policyRuleIds.has(id)), 'invalid_architecture_binding');
+    requireCondition(contract.architecture.amendmentIds.every((id) => policyAmendmentIds.has(id)), 'invalid_architecture_binding');
+
+    if (contract.changeKind === 'PRODUCT') {
+      requireCondition(
+        contract.scope.authorizedPaths.every((path) => path === 'src' || path.startsWith('src/')),
+        'product_scope_outside_src',
+      );
+    }
+
+    if (phase === 'promotion') {
+      for (const target of contract.scope.authorizedPaths) {
+        const path = safePath(root, target);
+        requireCondition(existsSync(path) && !containsSymlink(root, path), `authorized_target_unavailable:${target}`);
+      }
+    } else {
+      for (const target of contract.scope.authorizedPaths) safePath(root, target);
+    }
+
+    const statementGroups = [
+      contract.behavior,
+      contract.preconditions ?? [],
+      contract.postconditions ?? [],
+      contract.failureSemantics ?? [],
+    ];
+    const statementIds = statementGroups.flat().map((item) => item.id);
+    const invariantIds = contract.invariants.map((item) => item.id);
+    const proofIds = contract.proofObligations.map((item) => item.id);
+    const allContractIds = [...statementIds, ...invariantIds, ...proofIds];
+    requireCondition(allContractIds.length === new Set(allContractIds).size, 'duplicate_contract_id');
+    const proofIdSet = new Set(proofIds);
+    requireCondition(contract.invariants.every((item) => item.proofIds.every((id) => proofIdSet.has(id))), 'invariant_without_obligation');
+
+    if (phase === 'promotion') {
+      requireCondition(registry !== undefined && Array.isArray(registry.proofs), 'unreadable_proof_registry');
+      const registryIds = new Set(registry.proofs.map((proof) => proof.id));
+      requireCondition(proofIds.every((id) => registryIds.has(id)), 'obligation_without_registry_proof');
+    }
+
+    return {
+      schema: 'aegis.contract_validation.v2',
+      status: 'PROVEN',
+      phase,
+      contractDigest: canonicalDigest(contract),
+      architecturePolicyDigest: contract.architecture.policyDigest,
+    };
+  }
+
   assertSchema('aegis.contract_ir.v2', contract);
-  assertSchema('aegis.clarified_demand.v2', clarified);
+  requireCondition(clarified !== null && typeof clarified === 'object', 'invalid_clarified_demand');
   assertSchema('aegis.architecture_policy.v1', policy);
 
   requireCondition(contract.clarifiedDemandDigest === canonicalDigest(clarified), 'clarified_demand_digest_mismatch');
