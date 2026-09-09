@@ -175,7 +175,7 @@ export function buildIssueDraft({
 }) {
   const firstLine = sanitizedText.split('\n')[0].trim().replace(/^#+\s*/u, '');
   const title = customTitle || (firstLine.length > 100 ? `${firstLine.slice(0, 97)}...` : firstLine || 'Demanda do Produto');
-  const intent = customIntent || title;
+  const intent = customIntent || sanitizedText;
 
   const fileMatches = sanitizedText.match(/\b(?:src\/)?[a-zA-Z0-9_.-]+\.(?:ts|proof\.sh)\b/gu) || [];
   const extractedPaths = fileMatches.map((f) => (f.startsWith('src/') ? f : `src/${f}`));
@@ -332,7 +332,7 @@ export function buildIssueDraft({
     schema: 'aegis.issue_contract.v1',
     title,
     changeKind,
-    intent: sanitizedText,
+    intent,
     architecture: {
       policyDigest: architecture?.policyDigest ?? '0'.repeat(64),
       appliedRuleIds,

@@ -1,4 +1,4 @@
-/* global Buffer, module, process, require */
+/* global module, require, setInterval, clearInterval */
 
 const vscode = require('vscode');
 const { spawn } = require('node:child_process');
@@ -112,7 +112,9 @@ function resume(root) {
 function logWizard(msg) {
   try {
     fs.appendFileSync('/tmp/aegis-wizard.log', `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
+  } catch {
+    // Silently ignore logging errors
+  }
 }
 
 async function presentPending(force = false) {
@@ -214,7 +216,9 @@ function activate(context) {
       });
       context.subscriptions.push({ dispose: () => fsWatcher.close() });
     }
-  } catch {}
+  } catch {
+    // Native watch fallback not supported on all environments
+  }
 
   // 3. Polling check every 1.0 second (guaranteed fallback)
   const interval = setInterval(() => {

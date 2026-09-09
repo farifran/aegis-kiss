@@ -239,7 +239,9 @@ async function handleApprove() {
       const existingReq = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
       existingReq.status = 'FINALIZED';
       await writeFile(userConfirmationPath, `${JSON.stringify(existingReq, null, 2)}\n`, 'utf8');
-    } catch {}
+    } catch {
+      // Ignora erro se o arquivo não puder ser lido/analisado
+    }
   }
 
   process.stdout.write(`${JSON.stringify({
