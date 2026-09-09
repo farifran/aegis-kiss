@@ -5,8 +5,11 @@
   "version": "0.1.0",
   "publisher": "aegis-local",
   "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
-  "activationEvents": ["*"],
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "workspaceContains:**/.harness/runtime/user_confirmation_request.json"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
