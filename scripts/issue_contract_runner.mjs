@@ -42,6 +42,7 @@ async function handleDraft(args) {
   let decisionsData = null;
   let channel = 'IDE_DEFAULT';
   let answersData = null;
+  let stateModelKind = null;
 
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--kind' && ['PRODUCT', 'HARNESS'].includes(args[index + 1])) {
@@ -52,6 +53,9 @@ async function handleDraft(args) {
       index += 1;
     } else if (args[index] === '--channel' && typeof args[index + 1] === 'string') {
       channel = args[index + 1];
+      index += 1;
+    } else if (args[index] === '--state-kind' && ['NONE', 'STATE_TRANSITION'].includes(args[index + 1])) {
+      stateModelKind = args[index + 1];
       index += 1;
     } else if (args[index] === '--spec' && typeof args[index + 1] === 'string') {
       specData = parseJsonOrFile(args[index + 1], root);
@@ -108,6 +112,8 @@ async function handleDraft(args) {
     changeKind,
     targetHint,
     decisions: Array.isArray(decisionsData) ? decisionsData : [],
+    stateModelKind: specData?.stateModel?.kind ?? stateModelKind,
+    stateModel: specData?.stateModel,
     title: specData?.title,
     intent: specData?.intent,
     requirements: specData?.requirements,
@@ -191,6 +197,8 @@ async function handleApprove() {
     } catch {
       // Continue with draft as is
     }
+  } else if ((contract.decisions ?? []).length > 0) {
+    contract = applyUserResolution(contract, []);
   }
 
   const contractDigest = computeContractDigest(contract);

@@ -33,11 +33,14 @@ export function sanitizeInputText(rawBytes, maxBytes = maxDemandBytes) {
  * Esta é a Face Humana da Issue-Contrato.
  */
 export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '') {
+  const isStateless = contract.stateModel?.kind === 'NONE';
   const lines = [
     `# Issue / Contrato: ${contract.title}`,
     '',
     `> **Status:** ${isGoverned ? 'Selado & Governado (Assinado)' : 'Rascunho Pré-Cozinhado (Aguardando Confirmação Humana)'}`,
     `> **Modo:** ${contract.changeKind}`,
+    `> **Modelo de Estado:** ${isStateless ? 'Sem estado (Função Pura / Stateless)' : 'Transição de Estado (Stateful)'}`,
+    ...(contract.architecture?.appliedRuleIds?.length > 0 ? [`> **Regras Arquiteturais:** ${contract.architecture.appliedRuleIds.map((r) => `\`${r}\``).join(', ')}`] : []),
     ...(contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     '',
     '## 1. Intenção & Escopo',
@@ -49,17 +52,39 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     '## 2. Requisitos de Negócio (BEH)',
     ...(contract.behavior ?? []).map((b) => `- [x] **${b.id}:** ${b.statement}`),
     '',
-    '## 3. Invariantes & Regras Não-Negociáveis (INV)',
-    ...(contract.invariants ?? []).map((inv) => `- [x] **${inv.id}:** ${inv.statement} *(Provas: ${inv.proofIds.join(', ')})*`),
-    '',
-    '## 4. Semântica de Falhas e Tratamento de Erros (FAIL)',
-    ...(contract.failureSemantics ?? []).map((f) => `- **${f.id}:** Quando *${f.trigger}* $\\to$ Resultado: *${f.observableResult}*`),
-    '',
   ];
 
+  if ((contract.preconditions ?? []).length > 0) {
+    lines.push('### Pré-condições (PRE):');
+    for (const pre of contract.preconditions) {
+      lines.push(`- **${pre.id}:** ${pre.statement}`);
+    }
+    lines.push('');
+  }
+
+  if ((contract.postconditions ?? []).length > 0) {
+    lines.push('### Pós-condições (POST):');
+    for (const post of contract.postconditions) {
+      lines.push(`- **${post.id}:** ${post.statement}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## 3. Invariantes & Regras Não-Negociáveis (INV)');
+  for (const inv of (contract.invariants ?? [])) {
+    lines.push(`- [x] **${inv.id}:** ${inv.statement} *(Provas: ${inv.proofIds.join(', ')})*`);
+  }
+  lines.push('');
+
+  lines.push('## 4. Semântica de Falhas e Tratamento de Erros (FAIL)');
+  for (const f of (contract.failureSemantics ?? [])) {
+    lines.push(`- **${f.id}:** Quando *${f.trigger}* $\\to$ Resultado: *${f.observableResult}*`);
+  }
+  lines.push('');
+
   if ((contract.decisions ?? []).length > 0) {
-    const isGoverned = Boolean(contractDigest);
-    lines.push(isGoverned ? '## 5. Decisões Seladas' : '## 5. Decisões Pendentes de Confirmação');
+    const isGov = Boolean(contractDigest);
+    lines.push(isGov ? '## 5. Decisões Seladas' : '## 5. Decisões Pendentes de Confirmação');
     for (const decision of contract.decisions) {
       lines.push('');
       lines.push(`### ${decision.questionId}: ${decision.question}`);
@@ -94,20 +119,66 @@ export function computeContractDigest(contract) {
 }
 
 /**
- * Converte as respostas do usuário em decisões formalmente seladas.
+ * Converte as respostas do usuário em decisões formalmente seladas
+ * e reconcilia semanticamente as cláusulas aprovadas com o comportamento observável.
  */
 export function applyUserResolution(draftContract, userAnswers) {
   const answerMap = new Map(userAnswers.map((a) => [a.questionId, a.answerId]));
+  const correctionMap = new Map(userAnswers.filter((a) => a.correction).map((a) => [a.questionId, a.correction]));
+
   const updatedDecisions = (draftContract.decisions ?? []).map((decision) => {
-    const selected = answerMap.get(decision.questionId) ?? decision.recommendedAnswerId;
+    const correction = correctionMap.get(decision.questionId);
+    let selected = answerMap.get(decision.questionId) ?? decision.recommendedAnswerId;
+    let answers = decision.answers;
+
+    if (correction) {
+      const customId = `ANS-USER-${Date.now().toString(36)}`;
+      selected = customId;
+      answers = [
+        ...decision.answers,
+        {
+          id: customId,
+          label: `Interpretação do Usuário: ${correction}`,
+          rationale: 'Fornecida diretamente pelo usuário no Wizard.',
+          recommended: false,
+          resolutionClause: correction,
+        },
+      ];
+    }
+
     return {
       ...decision,
+      answers,
       selectedAnswerId: selected,
     };
   });
 
+  // Reconciliação Semântica: costura a cláusula resolvida no primeiro requisito comportamental
+  const resolutionClauses = [];
+  for (const dec of updatedDecisions) {
+    const selectedAnswer = dec.answers.find((a) => a.id === dec.selectedAnswerId);
+    if (selectedAnswer?.resolutionClause) {
+      resolutionClauses.push(selectedAnswer.resolutionClause);
+    }
+  }
+
+  let updatedBehavior = draftContract.behavior;
+  if (resolutionClauses.length > 0 && Array.isArray(updatedBehavior) && updatedBehavior.length > 0) {
+    const suffix = ` [Critério Resolvido: ${resolutionClauses.join('; ')}]`;
+    updatedBehavior = updatedBehavior.map((b, index) => {
+      if (index === 0 && !b.statement.includes('[Critério Resolvido:')) {
+        return {
+          ...b,
+          statement: `${b.statement}${suffix}`,
+        };
+      }
+      return b;
+    });
+  }
+
   const contract = {
     ...draftContract,
+    behavior: updatedBehavior,
     decisions: updatedDecisions,
   };
 
@@ -151,6 +222,16 @@ export function createProofRegistry(contract) {
   };
 }
 
+function isTimeDependent(text) {
+  return /\b(?:tempo|hora|data|timestamp|clock|relogio|relógio|timeout|ttl|interval|agendamento|expiration|cron)\b/iu.test(text);
+}
+
+function isPureFunctionDemand(text) {
+  const purePatterns = /\b(?:palindromo|palindrome|calcul|calc|parse|format|validat|verifi|is[A-Z]|converter|encode|decode|hash|digest|filter|sort|search|math)\b/iu;
+  const statefulPatterns = /\b(?:banco|database|persist|salvar|gravar|store|session|estado|state|mutat|transac|cache|redis|sql|disk|write)\b/iu;
+  return purePatterns.test(text) && !statefulPatterns.test(text);
+}
+
 /**
  * Constrói o rascunho da Issue-Contrato (Pre-baking otimista da IA).
  */
@@ -162,6 +243,8 @@ export function buildIssueDraft({
   candidates = [],
   previousContract = null,
   decisions = [],
+  stateModelKind = null,
+  stateModel: customStateModel,
   title: customTitle,
   intent: customIntent,
   requirements: customRequirements,
@@ -201,13 +284,15 @@ export function buildIssueDraft({
     ? [...new Set([...customAuthorizedPaths, 'src/.aegis/semantic-state.json'])]
     : [...new Set([...defaultPaths, ...extractedPaths])];
 
+  const isStateless = stateModelKind === 'NONE' || (stateModelKind === null && !customStateModel && isPureFunctionDemand(sanitizedText));
+
   const appliedRuleIds = (architecture?.candidateRules ?? [])
-    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || r.id === 'ARCH-DETERMINISTIC-TIME')
+    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || (r.id === 'ARCH-DETERMINISTIC-TIME' && isTimeDependent(sanitizedText)))
     .map((r) => r.id);
   if (!appliedRuleIds.includes('ARCH-FAILURE-EXPLICIT')) {
     appliedRuleIds.push('ARCH-FAILURE-EXPLICIT');
   }
-  if (!appliedRuleIds.includes('ARCH-DETERMINISTIC-TIME')) {
+  if (!appliedRuleIds.includes('ARCH-DETERMINISTIC-TIME') && isTimeDependent(sanitizedText)) {
     appliedRuleIds.push('ARCH-DETERMINISTIC-TIME');
   }
 
@@ -242,7 +327,13 @@ export function buildIssueDraft({
     },
   ];
 
-  const preconditions = [
+  const preconditions = isStateless ? [
+    {
+      id: 'PRE-0001',
+      statement: 'Argumentos válidos fornecidos na fronteira da função pública conforme tipagem.',
+      requirementIds: ['REQ-0001'],
+    },
+  ] : [
     {
       id: 'PRE-0001',
       statement: 'Entradas válidas sanitizadas fornecidas na fronteira pública.',
@@ -250,7 +341,20 @@ export function buildIssueDraft({
     },
   ];
 
-  const invariants = [
+  const invariants = isStateless ? [
+    {
+      id: 'INV-0001',
+      statement: 'Determinismo referencial puro: entradas idênticas produzem sempre resultados idênticos sem dependência de estado externo.',
+      requirementIds: ['REQ-0001', 'REQ-0003'],
+      proofIds: ['PO-BEHAVIOR'],
+    },
+    {
+      id: 'INV-0002',
+      statement: 'Ausência de efeitos colaterais: a execução não introduz mutação de memória compartilhada ou arquivos externos.',
+      requirementIds: ['REQ-0002'],
+      proofIds: ['PO-FAILURES'],
+    },
+  ] : [
     {
       id: 'INV-0001',
       statement: 'O estado do sistema mantém consistência interna e conservação de invariantes durante todo o ciclo.',
@@ -265,7 +369,13 @@ export function buildIssueDraft({
     },
   ];
 
-  const postconditions = [
+  const postconditions = isStateless ? [
+    {
+      id: 'POST-0001',
+      statement: 'Retorno determinístico emitido de forma pura sem efeitos residuais.',
+      requirementIds: ['REQ-0001'],
+    },
+  ] : [
     {
       id: 'POST-0001',
       statement: 'A transição conclui com estado atualizado e resultado determinístico.',
@@ -273,7 +383,14 @@ export function buildIssueDraft({
     },
   ];
 
-  const failureSemantics = [
+  const failureSemantics = isStateless ? [
+    {
+      id: 'FAIL-0001',
+      trigger: 'Argumento de tipo inválido ou violação de contrato de entrada',
+      observableResult: 'Lançamento explícito de exceção tipada (ex: TypeError) sem captura silenciosa (ARCH-FAILURE-EXPLICIT)',
+      requirementIds: ['REQ-0002'],
+    },
+  ] : [
     {
       id: 'FAIL-0001',
       trigger: 'Entrada inválida, falha operacional ou violação de invariante',
@@ -328,6 +445,30 @@ export function buildIssueDraft({
     digestIdentity: null,
   };
 
+  let stateModel;
+  if (customStateModel) {
+    stateModel = customStateModel;
+  } else if (isStateless) {
+    stateModel = {
+      kind: 'NONE',
+    };
+  } else {
+    stateModel = {
+      kind: 'STATE_TRANSITION',
+      bindings: [
+        { role: 'STATE', statement: 'Estado interno mantido em memória.', requirementIds: ['REQ-0001'] },
+        { role: 'COMMAND', statement: 'Invocação direta de operação pública.', requirementIds: ['REQ-0001'] },
+        { role: 'RESULT', statement: 'Retorno tipado e observável.', requirementIds: ['REQ-0001'] },
+        { role: 'ATOMICITY', statement: 'Transição atômica (tudo ou nada).', requirementIds: ['REQ-0001'] },
+      ],
+      policies: [
+        { role: 'STATE', provenance: 'KISS_DERIVATION', statement: 'Sem armazenamento duplicado ou estado oculto.' },
+        { role: 'ATOMICITY', provenance: 'ARCHITECTURE_DEFAULT', statement: 'Publicação ocorre após validação.' },
+      ],
+      governance: governanceState,
+    };
+  }
+
   const draft = {
     schema: 'aegis.issue_contract.v1',
     title,
@@ -348,20 +489,7 @@ export function buildIssueDraft({
     invariants: customInvariants ?? invariants,
     postconditions: customPostconditions ?? postconditions,
     failureSemantics: customFailureSemantics ?? failureSemantics,
-    stateModel: {
-      kind: 'STATE_TRANSITION',
-      bindings: [
-        { role: 'STATE', statement: 'Estado interno mantido em memória.', requirementIds: ['REQ-0001'] },
-        { role: 'COMMAND', statement: 'Invocação direta de operação pública.', requirementIds: ['REQ-0001'] },
-        { role: 'RESULT', statement: 'Retorno tipado e observável.', requirementIds: ['REQ-0001'] },
-        { role: 'ATOMICITY', statement: 'Transição atômica (tudo ou nada).', requirementIds: ['REQ-0001'] },
-      ],
-      policies: [
-        { role: 'STATE', provenance: 'KISS_DERIVATION', statement: 'Sem armazenamento duplicado ou estado oculto.' },
-        { role: 'ATOMICITY', provenance: 'ARCHITECTURE_DEFAULT', statement: 'Publicação ocorre após validação.' },
-      ],
-      governance: governanceState,
-    },
+    stateModel,
     decisions: finalDecisions,
     proofObligations: customProofObligations ?? proofObligations,
     verification: {
