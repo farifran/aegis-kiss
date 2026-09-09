@@ -7,16 +7,16 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
-import { validateContract } from './lib/contract_validator.mjs';
 import {
   applyUserResolution,
   buildIssueDraft,
   computeContractDigest,
   createProofRegistry,
+  loadArchitecturePolicy,
   renderContractMarkdown,
   sanitizeInputText,
+  validateContract,
 } from './lib/issue_contract_core.mjs';
-import { loadArchitecturePolicy } from './lib/preflight_core.mjs';
 import { semanticStatePath } from './lib/semantic_state.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));

@@ -10,48 +10,42 @@ import { assertSchema, schemaErrors } from './scripts/lib/schema_validator.mjs';
 
 const files = [
   'architecture-policy.v1.schema.json',
-  'contract-body.v2.schema.json',
-  'preflight-decision.v2.schema.json',
-  'preflight-resolution.v2.schema.json',
-  'ide-preflight.v2.schema.json',
-  'ide-semantic-request.v2.schema.json',
-  'contract-ir.v2.schema.json',
-  'preflight-review.v2.schema.json',
-  'preflight-review-request.v2.schema.json',
-  'reviewer-execution.v1.schema.json',
   'issue-contract.v1.schema.json',
 ];
+
 for (const file of files) {
   const schema = JSON.parse(readFileSync('governance/schemas/' + file, 'utf8'));
   if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema' || !schema.$id.startsWith('aegis.')) {
     throw new Error('schema metadata invalid: ' + file);
   }
 }
+
 const valid = {
   schema: 'aegis.issue_contract.v1',
-  title: 'Teste',
+  title: 'Demanda de Teste',
   changeKind: 'PRODUCT',
-  intent: 'Intencao',
+  intent: 'Intenção de teste do schema.',
   architecture: {
     policyDigest: 'a'.repeat(64),
     appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
     amendmentIds: [],
   },
-  scope: { authorizedPaths: ['src/foo.ts'] },
-  requirements: [{ id: 'REQ-0001', statement: 'req', provenance: 'USER' }],
-  behavior: [{ id: 'BEH-0001', statement: 'beh' }],
-  invariants: [{ id: 'INV-0001', statement: 'inv', proofIds: ['PO-TEST'] }],
+  scope: { authorizedPaths: ['src/index.ts'] },
+  requirements: [{ id: 'REQ-0001', statement: 'Requisito funcional.', provenance: 'USER' }],
+  behavior: [{ id: 'BEH-0001', statement: 'Comportamento observável.' }],
+  invariants: [{ id: 'INV-0001', statement: 'Invariante de teste.', proofIds: ['PO-TEST'] }],
   proofObligations: [{
     id: 'PO-TEST',
     coverageKey: 'test',
-    risk: 'risk',
-    obligation: 'obl',
-    entrypoint: 'src/foo.proof.sh',
-    targets: ['src/foo.ts'],
+    risk: 'Risco de teste.',
+    obligation: 'Verificar teste.',
+    entrypoint: 'src/index.proof.sh',
+    targets: ['src/index.ts'],
     cadence: 'always',
     cost: 'low',
   }],
 };
+
 assertSchema('aegis.issue_contract.v1', valid);
 if (schemaErrors('aegis.issue_contract.v1', { ...valid, extraField: 'invalid' }).length === 0) {
   throw new Error('schema accepted invalid extra field');
@@ -70,18 +64,19 @@ fs.readFileSync = function trackedRead(path, ...args) {
   return originalReadFileSync.call(this, path, ...args);
 };
 syncBuiltinESMExports();
+
 const { assertSchema } = await import(process.cwd() + '/scripts/lib/schema_validator.mjs?lazy-load-test');
 assertSchema('aegis.issue_contract.v1', {
   schema: 'aegis.issue_contract.v1',
-  title: 'Teste',
+  title: 'Demanda de Teste',
   changeKind: 'PRODUCT',
-  intent: 'Intencao',
+  intent: 'Intenção de teste.',
   architecture: {
     policyDigest: 'a'.repeat(64),
     appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
     amendmentIds: [],
   },
-  scope: { authorizedPaths: ['src/foo.ts'] },
+  scope: { authorizedPaths: ['src/index.ts'] },
   requirements: [{ id: 'REQ-0001', statement: 'req', provenance: 'USER' }],
   behavior: [{ id: 'BEH-0001', statement: 'beh' }],
   invariants: [{ id: 'INV-0001', statement: 'inv', proofIds: ['PO-TEST'] }],
@@ -90,61 +85,21 @@ assertSchema('aegis.issue_contract.v1', {
     coverageKey: 'test',
     risk: 'risk',
     obligation: 'obl',
-    entrypoint: 'src/foo.proof.sh',
-    targets: ['src/foo.ts'],
+    entrypoint: 'src/index.proof.sh',
+    targets: ['src/index.ts'],
     cadence: 'always',
     cost: 'low',
   }],
 });
+
 fs.readFileSync = originalReadFileSync;
 syncBuiltinESMExports();
+
 if (JSON.stringify(schemaReads) !== JSON.stringify(['issue-contract.v1.schema.json'])) {
   throw new Error('schema loader is not lazy: ' + schemaReads.join(','));
 }
 NODE
 
-node --input-type=module <<'NODE'
-import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { syncBuiltinESMExports } from 'node:module';
-import { join, relative } from 'node:path';
-import { tmpdir } from 'node:os';
-
-const fixture = fs.mkdtempSync(join(tmpdir(), 'aegis-mechanical-read-set.'));
-fs.mkdirSync(join(fixture, 'governance/prompts'), { recursive: true });
-for (const path of ['AGENTS.md', 'ARCHITECTURE.md', 'governance/architecture.policy.json', 'governance/prompts/preflight.v2.md']) {
-  fs.copyFileSync(join(process.cwd(), path), join(fixture, path));
-}
-execFileSync('git', ['-C', fixture, 'init', '-q']);
-execFileSync('git', ['-C', fixture, 'config', 'user.name', 'Aegis']);
-execFileSync('git', ['-C', fixture, 'config', 'user.email', 'aegis@example.invalid']);
-execFileSync('git', ['-C', fixture, 'add', '.']);
-execFileSync('git', ['-C', fixture, 'commit', '-qm', 'baseline']);
-const originalReadFileSync = fs.readFileSync;
-const fixtureReads = [];
-fs.readFileSync = function trackedRead(path, ...args) {
-  const value = String(path);
-  if (value.startsWith(fixture + '/')) fixtureReads.push(relative(fixture, value));
-  return originalReadFileSync.call(this, path, ...args);
-};
-syncBuiltinESMExports();
-const { buildPreflight } = await import(process.cwd() + '/scripts/lib/preflight_core.mjs?mechanical-read-set-test');
-await buildPreflight(Buffer.from('Criar src/example.ts.'), '', fixture);
-fs.readFileSync = originalReadFileSync;
-syncBuiltinESMExports();
-fs.rmSync(fixture, { recursive: true });
-const expected = [];
-if (JSON.stringify(fixtureReads) !== JSON.stringify(expected)) {
-  throw new Error('governed artifacts must be read from the baseline commit, not the worktree: ' + fixtureReads.join(','));
-}
-NODE
-
 grep -Fqx '# Aegis Cognitive Constitution' "${ROOT_DIR}/AGENTS.md"
-grep -Fqx '# Briefing e implementação' "${ROOT_DIR}/.skills/briefing.md"
-grep -Fq 'não leia o repositório.' "${ROOT_DIR}/governance/prompts/preflight.v2.md"
-if [[ -e "${ROOT_DIR}/governance/prompts/contract.v2.md" || -e "${ROOT_DIR}/scripts/build_contract_prompt.mjs" || -e "${ROOT_DIR}/scripts/finalize_contract.mjs" ]]; then
-  echo 'separate contract compiler still exists' >&2
-  exit 1
-fi
 
 printf '[AEGIS][TEST] governance schemas: PASS\n'

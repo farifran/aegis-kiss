@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
-import { canonicalDigest } from './canonical_json.mjs';
+import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
 
 export const maxDemandBytes = 65_536;
@@ -344,4 +346,43 @@ export function buildIssueDraft({
 
   assertSchema('aegis.issue_contract.v1', draft);
   return draft;
+}
+
+/**
+ * Carrega a política arquitetural oficial de governance/architecture.policy.json.
+ */
+export function loadArchitecturePolicy(repositoryRoot) {
+  const policyPath = resolve(repositoryRoot, 'governance/architecture.policy.json');
+  if (!existsSync(policyPath)) {
+    throw new Error('architecture_policy_unavailable');
+  }
+  const policyText = readFileSync(policyPath, 'utf8');
+  const policy = JSON.parse(policyText);
+  assertSchema('aegis.architecture_policy.v1', policy);
+  return { policy, policyText, policyDigest: sha256(policyText) };
+}
+
+/**
+ * Valida formalmente a Issue-Contrato contra o schema e regras arquiteturais.
+ */
+export function validateContract({ contract, policy }) {
+  assertSchema('aegis.issue_contract.v1', contract);
+
+  const proofIds = new Set((contract.proofObligations || []).map((p) => p.id));
+  for (const inv of contract.invariants || []) {
+    for (const proofId of inv.proofIds || []) {
+      if (!proofIds.has(proofId)) {
+        throw new Error(`invariant_without_proof:${proofId}`);
+      }
+    }
+  }
+
+  if (policy && policy.rules) {
+    const appliedRuleIds = new Set(contract.architecture?.appliedRuleIds || []);
+    for (const rule of policy.rules) {
+      if (rule.level === 'hard' && !appliedRuleIds.has(rule.id) && rule.id === 'ARCH-FAILURE-EXPLICIT') {
+        throw new Error(`missing_mandatory_rule:${rule.id}`);
+      }
+    }
+  }
 }

@@ -7,15 +7,6 @@ const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const schemaDirectory = resolve(repositoryRoot, 'governance/schemas');
 const schemaFiles = new Map([
   ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
-  ['aegis.contract_ir.v2', 'contract-ir.v2.schema.json'],
-  ['aegis.contract_body.v2', 'contract-body.v2.schema.json'],
-  ['aegis.preflight_decision.v2', 'preflight-decision.v2.schema.json'],
-  ['aegis.preflight_resolution.v2', 'preflight-resolution.v2.schema.json'],
-  ['aegis.ide_preflight.v2', 'ide-preflight.v2.schema.json'],
-  ['aegis.ide_semantic_request.v2', 'ide-semantic-request.v2.schema.json'],
-  ['aegis.preflight_review.v2', 'preflight-review.v2.schema.json'],
-  ['aegis.preflight_review_request.v2', 'preflight-review-request.v2.schema.json'],
-  ['aegis.reviewer_execution.v1', 'reviewer-execution.v1.schema.json'],
   ['aegis.issue_contract.v1', 'issue-contract.v1.schema.json'],
 ]);
 
