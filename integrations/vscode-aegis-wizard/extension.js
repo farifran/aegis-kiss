@@ -5,8 +5,8 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const requestPath = '.harness/runtime/user_confirmation_request.json';
-const resolutionPath = '.harness/runtime/preflight_resolution.json';
+const requestRelPath = '.harness/runtime/user_confirmation_request.json';
+const resolutionRelPath = '.harness/runtime/preflight_resolution.json';
 
 function workspaceRoot() {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -19,20 +19,25 @@ function validRequest(value) {
     && value.questions.length > 0;
 }
 
-async function readRequest(root) {
+function readRequest(root) {
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, requestPath));
-    const value = JSON.parse(Buffer.from(bytes).toString('utf8'));
+    const fullPath = path.join(root.fsPath, requestRelPath);
+    if (!fs.existsSync(fullPath)) return undefined;
+    const raw = fs.readFileSync(fullPath, 'utf8');
+    const value = JSON.parse(raw);
     return validRequest(value) ? value : undefined;
   } catch {
     return undefined;
   }
 }
 
-async function isAlreadyResolved(root, request) {
+function isAlreadyResolved(root, request) {
   try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, resolutionPath));
-    const resolution = JSON.parse(Buffer.from(bytes).toString('utf8'));
+    const fullPath = path.join(root.fsPath, resolutionRelPath);
+    // Crucial: If resolution file does NOT physically exist on disk, it is NEVER resolved!
+    if (!fs.existsSync(fullPath)) return false;
+    const raw = fs.readFileSync(fullPath, 'utf8');
+    const resolution = JSON.parse(raw);
     const reqId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest;
     const resId = resolution?.confirmation?.confirmationId || resolution?.executionId || resolution?.decisionDigest;
     return Boolean(reqId && resId && reqId === resId);
@@ -66,10 +71,9 @@ async function choose(question) {
 }
 
 async function writeResolution(root, request, answers) {
-  const target = vscode.Uri.joinPath(root, resolutionPath);
-  const temporary = vscode.Uri.joinPath(root, `${resolutionPath}.${process.pid}.tmp`);
+  const target = path.join(root.fsPath, resolutionRelPath);
   const confirmationId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest || 'aegis-conf';
-  const payload = Buffer.from(`${JSON.stringify({
+  const payload = `${JSON.stringify({
     schema: 'aegis.preflight_resolution.v2',
     executionId: confirmationId,
     decisionDigest: confirmationId,
@@ -80,9 +84,9 @@ async function writeResolution(root, request, answers) {
       selectedAtEpochMs: Date.now(),
     },
     answers,
-  }, null, 2)}\n`);
-  await vscode.workspace.fs.writeFile(temporary, payload);
-  await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
+  }, null, 2)}\n`;
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.writeFile(target, payload, 'utf8');
 }
 
 function resume(root) {
@@ -104,36 +108,23 @@ function logWizard(msg) {
 }
 
 async function presentPending() {
-  logWizard('presentPending: called');
   const root = workspaceRoot();
-  if (root === undefined) {
-    logWizard('presentPending: root is undefined');
-    return;
-  }
-  const request = await readRequest(root);
-  if (request === undefined) {
-    logWizard('presentPending: readRequest returned undefined');
-    return;
-  }
+  if (root === undefined) return;
 
-  if (isPrompting) {
-    logWizard('presentPending: isPrompting is true, skipping');
-    return;
-  }
-  if (await isAlreadyResolved(root, request)) {
-    logWizard('presentPending: already resolved, skipping');
-    return;
-  }
+  const request = readRequest(root);
+  if (request === undefined) return;
 
-  logWizard(`presentPending: prompting ${request.questions.length} questions`);
+  if (isPrompting) return;
+  if (isAlreadyResolved(root, request)) return;
+
   isPrompting = true;
+  logWizard(`presentPending: initiating confirmation for ${request.executionId}`);
   try {
     const answers = [];
     for (const question of request.questions) {
-      logWizard(`presentPending: choosing question ${question.id}`);
       const answer = await choose(question);
       if (answer === undefined) {
-        logWizard(`presentPending: question ${question.id} cancelled`);
+        logWizard(`presentPending: user cancelled question ${question.id}`);
         return;
       }
       answers.push(answer);
@@ -152,45 +143,37 @@ async function presentPending() {
 }
 
 function activate(context) {
-  logWizard('activate: starting');
+  logWizard('activate: wizard extension active');
   const root = workspaceRoot();
-  logWizard(`activate: root=${root?.fsPath}`);
   if (root === undefined) return;
 
   // 1. VSCode File System Watcher
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/' + path.basename(requestPath)));
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/' + path.basename(requestRelPath)));
   context.subscriptions.push(watcher, watcher.onDidCreate(presentPending), watcher.onDidChange(presentPending));
 
-  // 2. Node.js native fs.watch on directory
+  // 2. Node.js native fs.watch on .harness (survives rm -rf .harness/runtime)
   try {
-    const fullDir = path.join(root.fsPath, '.harness', 'runtime');
-    if (fs.existsSync(fullDir)) {
-      const fsWatcher = fs.watch(fullDir, (eventType, filename) => {
-        if (filename === path.basename(requestPath)) {
-          logWizard(`fs.watch event=${eventType} filename=${filename}`);
+    const harnessDir = path.join(root.fsPath, '.harness');
+    if (fs.existsSync(harnessDir)) {
+      const fsWatcher = fs.watch(harnessDir, { recursive: true }, (_eventType, filename) => {
+        if (filename && filename.includes('user_confirmation_request.json')) {
           void presentPending();
         }
       });
       context.subscriptions.push({ dispose: () => fsWatcher.close() });
     }
-  } catch (e) {
-    logWizard(`fs.watch error=${e.message}`);
-  }
+  } catch {}
 
-  // 3. Polling check every 1.5 seconds for instant response
+  // 3. Polling check every 1.0 second (guaranteed fallback)
   const interval = setInterval(() => {
     void presentPending();
-  }, 1500);
+  }, 1000);
   context.subscriptions.push({ dispose: () => clearInterval(interval) });
 
   context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', presentPending));
-  logWizard('activate: registered command and watcher');
   void presentPending();
 }
 
-function deactivate() {
-  logWizard('deactivate called');
-}
+function deactivate() {}
 
 module.exports = { activate, deactivate };
-
