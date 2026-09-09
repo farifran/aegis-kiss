@@ -40,6 +40,8 @@ async function handleDraft(args) {
   let demandText = '';
   let specData = null;
   let decisionsData = null;
+  let channel = 'IDE_DEFAULT';
+  let answersData = null;
 
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--kind' && ['PRODUCT', 'HARNESS'].includes(args[index + 1])) {
@@ -48,11 +50,17 @@ async function handleDraft(args) {
     } else if (args[index] === '--target' && typeof args[index + 1] === 'string') {
       targetHint = args[index + 1];
       index += 1;
+    } else if (args[index] === '--channel' && typeof args[index + 1] === 'string') {
+      channel = args[index + 1];
+      index += 1;
     } else if (args[index] === '--spec' && typeof args[index + 1] === 'string') {
       specData = parseJsonOrFile(args[index + 1], root);
       index += 1;
     } else if (args[index] === '--decisions' && typeof args[index + 1] === 'string') {
       decisionsData = parseJsonOrFile(args[index + 1], root);
+      index += 1;
+    } else if (args[index] === '--answers' && typeof args[index + 1] === 'string') {
+      answersData = parseJsonOrFile(args[index + 1], root);
       index += 1;
     } else if (!demandText && !args[index].startsWith('--')) {
       demandText = args[index];
@@ -132,6 +140,7 @@ async function handleDraft(args) {
     decisionDigest: digest,
     preflightPromptDigest: digest,
     confirmation: {
+      channel,
       confirmationId: digest,
     },
     title: draft.title,
@@ -142,6 +151,21 @@ async function handleDraft(args) {
   };
 
   await writeFile(userConfirmationPath, `${JSON.stringify(confirmationRequest, null, 2)}\n`, 'utf8');
+
+  if (Array.isArray(answersData)) {
+    const resolution = {
+      schema: 'aegis.preflight_resolution.v2',
+      decisionDigest: digest,
+      preflightPromptDigest: digest,
+      confirmation: {
+        channel,
+        confirmationId: digest,
+        selectedAtEpochMs: Date.now(),
+      },
+      answers: answersData,
+    };
+    await writeFile(resolutionPath, `${JSON.stringify(resolution, null, 2)}\n`, 'utf8');
+  }
 
   process.stdout.write(`${JSON.stringify(confirmationRequest)}\n`);
   process.exit(2);

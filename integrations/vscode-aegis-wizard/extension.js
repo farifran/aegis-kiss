@@ -13,6 +13,8 @@ function workspaceRoot() {
 }
 
 function validRequest(value) {
+  const channel = value?.confirmation?.channel;
+  if (channel === 'IDE_CHAT') return false;
   return (value?.schema === 'aegis.preflight_finalization.v2' || value?.status === 'USER_CONFIRMATION_REQUIRED')
     && value.status === 'USER_CONFIRMATION_REQUIRED'
     && Array.isArray(value.questions)
@@ -30,6 +32,7 @@ async function readRequest(root) {
 }
 
 async function isAlreadyResolved(root, request) {
+  if (request?.confirmation?.channel === 'IDE_CHAT') return true;
   try {
     const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, resolutionPath));
     const resolution = JSON.parse(Buffer.from(bytes).toString('utf8'));
