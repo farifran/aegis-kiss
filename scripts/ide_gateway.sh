@@ -56,10 +56,23 @@ resolve_preflight_wizard() {
   local request_file="${RUNTIME_DIR}/user_confirmation_request.json"
   local resolution_file="${RUNTIME_DIR}/preflight_resolution.json"
   local selections="${RUNTIME_DIR}/preflight_wizard_selections.json"
+  local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
+
+  if [[ -f "${semantic_file}" ]]; then
+    printf '\n[AEGIS] O contrato já está selado e governado (GOVERNED). Nada a resolver no wizard.\n' >&2
+    exit 0
+  fi
 
   [[ -f "${request_file}" ]] || fatal 'no_pending_user_confirmation'
   local result
   result="$(cat "${request_file}")"
+
+  local req_status
+  req_status="$(jq -r '.status // empty' <<< "${result}")"
+  if [[ "${req_status}" == "FINALIZED" ]]; then
+    printf '\n[AEGIS] O contrato já foi finalizado. Nada a resolver no wizard.\n' >&2
+    exit 0
+  fi
 
   : > "${selections}"
   local count index question answer_count choice correction answer_id

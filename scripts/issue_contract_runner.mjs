@@ -232,6 +232,14 @@ async function handleApprove() {
   await writeFile(contractJsonPath, `${canonicalJson(contract)}\n`, 'utf8');
   await writeFile(contractMdPath, `${renderContractMarkdown(contract, true, contractDigest)}\n`, 'utf8');
 
+  if (existsSync(userConfirmationPath)) {
+    try {
+      const existingReq = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
+      existingReq.status = 'FINALIZED';
+      await writeFile(userConfirmationPath, `${JSON.stringify(existingReq, null, 2)}\n`, 'utf8');
+    } catch {}
+  }
+
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v2',
     status: 'FINALIZED',
