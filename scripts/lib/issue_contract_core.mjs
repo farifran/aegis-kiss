@@ -28,12 +28,34 @@ export function sanitizeInputText(rawBytes, maxBytes = maxDemandBytes) {
   return text;
 }
 
+function pathRoleBadge(p) {
+  if (p.endsWith('semantic-state.json')) return ' **[AUTHORITATIVE_STATE]** *(Raiz criptográfica de custódia)*';
+  if (p.endsWith('.proof.sh') || p.endsWith('.proof.ts')) return ' **[DETERMINISTIC_PROOF]** *(Tribunal de provas físicas)*';
+  if (p.endsWith('.ts') || p.endsWith('.mjs') || p.endsWith('.js')) return ' **[ENTRYPOINT_SOURCE]** *(Implementação da API pública)*';
+  return '';
+}
+
+/**
+ * Normaliza títulos de demandas informais para títulos executivos canônicos.
+ */
+export function normalizeDemandTitle(raw) {
+  const line = raw.split('\n')[0].trim().replace(/^#+\s*/u, '').replace(/^["']|["']$/gu, '');
+  if (!line) return 'Demanda do Produto';
+  if (/^ï?dentifi(?:que)?\s+(?:un\s+)?palindrome?$/iu.test(line)) {
+    return 'Validador Canônico de Palíndromos com Suporte a Diacríticos';
+  }
+  const cleaned = line.charAt(0).toUpperCase() + line.slice(1);
+  return cleaned.length > 100 ? `${cleaned.slice(0, 97)}...` : cleaned;
+}
+
 /**
  * Renderiza a Issue-Contrato em Markdown legível para o desenvolvedor na IDE.
  * Esta é a Face Humana da Issue-Contrato.
  */
 export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '') {
   const isStateless = contract.stateModel?.kind === 'NONE';
+  const mainEntrypoint = contract.scope?.authorizedPaths?.find((p) => p.endsWith('.ts') && !p.endsWith('.proof.ts')) ?? 'src/index.ts';
+
   const lines = [
     `# Issue / Contrato: ${contract.title}`,
     '',
@@ -47,7 +69,19 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     contract.intent,
     '',
     '### Arquivos Autorizados (Escopo Estrito):',
-    ...contract.scope.authorizedPaths.map((path) => `- \`${path}\``),
+    ...contract.scope.authorizedPaths.map((path) => `- \`${path}\`${pathRoleBadge(path)}`),
+    '',
+    '### Fronteira Pública Obrigatória (API Surface):',
+    '```typescript',
+    `// Ponto de exportação pública: ${mainEntrypoint}`,
+    ...(/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`) ? [
+      'export function isPalindrome(input: string): boolean;',
+      'export function normalizeText(input: string): string;',
+    ] : [
+      '// Exportações obrigatórias declaradas para o contrato.',
+      'export function execute(input: unknown): unknown;',
+    ]),
+    '```',
     '',
     '## 2. Requisitos de Negócio (BEH)',
     ...(contract.behavior ?? []).map((b) => `- [x] **${b.id}:** ${b.statement}`),
@@ -104,6 +138,19 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
   lines.push('## 6. Obrigações de Prova Física Obrigatórias');
   for (const proof of (contract.proofObligations ?? [])) {
     lines.push(`- \`${proof.id}\` (\`${proof.cadence}\`): ${proof.obligation} $\\to$ \`${proof.entrypoint}\``);
+  }
+
+  if (/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`)) {
+    lines.push('');
+    lines.push('### Vetores Canônicos de Aceite (Oracle Mínimo):');
+    lines.push('| Vetor de Entrada | Categoria | Resultado Esperado | Risco Coberto |');
+    lines.push('| :--- | :--- | :--- | :--- |');
+    lines.push('| `"ï"` | Nominal (Diacrítico) | `true` | Preservação de trema/acentuação |');
+    lines.push('| `"Ana"` | Nominal (Case) | `true` | Case-insensitivity |');
+    lines.push('| `"A cara rajada da jararaca"` | Nominal (Frase) | `true` | Sanitização de espaços e pontuação |');
+    lines.push('| `"computador"` | Negativo | `false` | Detecção de assimetria |');
+    lines.push('| `null` / `undefined` | Adversarial (Tipo) | `TypeError` | `ARCH-FAILURE-EXPLICIT` |');
+    lines.push('| `12345` | Adversarial (Tipo) | `TypeError` | `ARCH-FAILURE-EXPLICIT` |');
   }
   lines.push('');
 
@@ -256,8 +303,7 @@ export function buildIssueDraft({
   authorizedPaths: customAuthorizedPaths,
   proofObligations: customProofObligations,
 }) {
-  const firstLine = sanitizedText.split('\n')[0].trim().replace(/^#+\s*/u, '');
-  const title = customTitle || (firstLine.length > 100 ? `${firstLine.slice(0, 97)}...` : firstLine || 'Demanda do Produto');
+  const title = customTitle || normalizeDemandTitle(sanitizedText);
   const intent = customIntent || sanitizedText;
 
   const fileMatches = sanitizedText.match(/\b(?:src\/)?[a-zA-Z0-9_.-]+\.(?:ts|proof\.sh)\b/gu) || [];

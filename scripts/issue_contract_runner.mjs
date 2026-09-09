@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -43,6 +44,7 @@ async function handleDraft(args) {
   let channel = 'IDE_DEFAULT';
   let answersData = null;
   let stateModelKind = null;
+  let customTitle = null;
 
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--kind' && ['PRODUCT', 'HARNESS'].includes(args[index + 1])) {
@@ -56,6 +58,9 @@ async function handleDraft(args) {
       index += 1;
     } else if (args[index] === '--state-kind' && ['NONE', 'STATE_TRANSITION'].includes(args[index + 1])) {
       stateModelKind = args[index + 1];
+      index += 1;
+    } else if (args[index] === '--title' && typeof args[index + 1] === 'string') {
+      customTitle = args[index + 1];
       index += 1;
     } else if (args[index] === '--spec' && typeof args[index + 1] === 'string') {
       specData = parseJsonOrFile(args[index + 1], root);
@@ -114,7 +119,7 @@ async function handleDraft(args) {
     decisions: Array.isArray(decisionsData) ? decisionsData : [],
     stateModelKind: specData?.stateModel?.kind ?? stateModelKind,
     stateModel: specData?.stateModel,
-    title: specData?.title,
+    title: specData?.title ?? customTitle,
     intent: specData?.intent,
     requirements: specData?.requirements,
     behavior: specData?.behavior,
@@ -261,6 +266,88 @@ async function handleApprove() {
   process.exit(0);
 }
 
+async function handleVerify() {
+  const statePath = semanticStatePath(root);
+  if (!existsSync(statePath)) {
+    process.stderr.write('[AEGIS][VERIFY][FATAL] no_governed_contract: Execute ./aegis approve primeiro.\n');
+    process.exit(1);
+  }
+
+  const semanticState = JSON.parse(await readFile(statePath, 'utf8'));
+  const contract = semanticState.contract;
+  const proofRegistry = semanticState.proofRegistry;
+  const contractDigest = semanticState.digests?.contractSemanticDigest;
+
+  if (!contract || !proofRegistry || !contractDigest) {
+    process.stderr.write('[AEGIS][VERIFY][FATAL] invalid_semantic_state\n');
+    process.exit(1);
+  }
+
+  const proofs = proofRegistry.proofs ?? [];
+  if (proofs.length === 0) {
+    process.stderr.write('[AEGIS][VERIFY][FATAL] no_active_proofs_in_registry\n');
+    process.exit(1);
+  }
+
+  process.stdout.write(`[AEGIS][VERIFY] Executando ${proofs.length} obrigações de prova física para o contrato ${contractDigest.slice(0, 12)}...\n`);
+
+  const results = [];
+  for (const proof of proofs) {
+    const fullPath = resolve(root, proof.argv?.[0] ?? proof.entrypoint);
+    if (!existsSync(fullPath)) {
+      process.stderr.write(`[AEGIS][VERIFY][FAIL] Arquivo de prova não encontrado: ${proof.argv?.[0] ?? proof.entrypoint}\n`);
+      process.exit(1);
+    }
+
+    const startMs = Date.now();
+    const child = spawnSync(proof.executor, proof.argv, {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    const durationMs = Date.now() - startMs;
+
+    if (child.status !== 0) {
+      process.stderr.write(`[AEGIS][VERIFY][FAIL] Prova ${proof.id} falhou com código ${child.status}:\n${child.stderr || child.stdout}\n`);
+      process.exit(1);
+    }
+
+    process.stdout.write(`  ✔ ${proof.id} (${proof.coverageKey}): PASS (${durationMs}ms)\n`);
+    results.push({
+      proofId: proof.id,
+      coverageKey: proof.coverageKey,
+      status: 'PASS',
+      durationMs,
+    });
+  }
+
+  const receiptData = {
+    schema: 'aegis.proof_verification_receipt.v1',
+    status: 'PROVEN',
+    contractDigest,
+    proofRegistryDigest: semanticState.digests?.proofRegistrySemanticDigest,
+    verifiedAtEpochMs: Date.now(),
+    proofsRun: results.length,
+    results,
+  };
+
+  const receiptDigest = sha256(canonicalJson(receiptData));
+  receiptData.receiptDigest = receiptDigest;
+
+  const receiptPath = resolve(runtimeDir, 'verification_receipt.json');
+  await mkdir(runtimeDir, { recursive: true });
+  await writeFile(receiptPath, `${canonicalJson(receiptData)}\n`, 'utf8');
+
+  process.stdout.write(`${JSON.stringify({
+    schema: 'aegis.proof_verification_receipt.v1',
+    status: 'PROVEN',
+    contractDigest,
+    receiptDigest,
+    proofsRun: results.length,
+  })}\n`);
+  process.exit(0);
+}
+
 const command = process.argv[2];
 const remainingArgs = process.argv.slice(3);
 
@@ -269,6 +356,8 @@ try {
     await handleDraft(remainingArgs);
   } else if (command === 'approve') {
     await handleApprove();
+  } else if (command === 'verify' || command === 'prove') {
+    await handleVerify();
   } else {
     process.stderr.write(`[AEGIS][FATAL] unknown_command:${command}\n`);
     process.exit(1);

@@ -14,6 +14,7 @@ usage() {
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>"      Gera a Issue-Contrato pré-cozinhada (.harness/runtime/contract.md)
   ./aegis approve          Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
+  ./aegis verify           Executa as provas físicas do tribunal e emite recibo PROVEN
   ./aegis status           Exibe o status do contrato e da árvore de trabalho
   ./aegis clean            Remove artefatos transientes e redefine src/index.ts
   ./aegis help             Exibe esta mensagem de ajuda
@@ -23,6 +24,7 @@ EOF
 status_command() {
   local contract_file="${RUNTIME_DIR}/contract.json"
   local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
+  local receipt_file="${RUNTIME_DIR}/verification_receipt.json"
 
   if [[ -f "${semantic_file}" ]]; then
     local digest
@@ -35,6 +37,29 @@ status_command() {
         console.log("invalid");
       }
     ' "${semantic_file}")"
+
+    if [[ -f "${receipt_file}" ]]; then
+      local receipt_digest
+      receipt_digest="$(node -e '
+        const fs = require("fs");
+        try {
+          const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          if (r.status === "PROVEN" && r.contractDigest === process.argv[2]) {
+            console.log(r.receiptDigest || "proven");
+          } else {
+            console.log("");
+          }
+        } catch {
+          console.log("");
+        }
+      ' "${receipt_file}" "${digest}")"
+
+      if [[ -n "${receipt_digest}" ]]; then
+        printf '{"status":"PROVEN","contractDigest":"%s","receiptDigest":"%s","semanticState":"%s"}\n' "${digest}" "${receipt_digest}" "${semantic_file}"
+        return
+      fi
+    fi
+
     printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
   elif [[ -f "${contract_file}" ]]; then
     printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
@@ -141,6 +166,10 @@ main() {
   case "${1}" in
     approve|resume)
       node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
+      ;;
+    verify|prove)
+      shift
+      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify "$@"
       ;;
     wizard)
       resolve_preflight_wizard
