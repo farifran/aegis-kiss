@@ -6,7 +6,7 @@
   "publisher": "aegis-local",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
-  "activationEvents": ["onStartupFinished", "onCommand:aegisWizard.check"],
+  "activationEvents": ["*"],
   "main": "./extension.js",
   "contributes": {
     "commands": [
