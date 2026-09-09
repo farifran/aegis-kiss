@@ -55,7 +55,7 @@ main() {
   [[ $# -ge 1 ]] || { usage; exit 1; }
 
   case "${1}" in
-    approve)
+    approve|resume)
       node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;
     status)
