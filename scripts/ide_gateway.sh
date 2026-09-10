@@ -14,7 +14,6 @@ usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>"      Gera a Issue-Contrato pré-cozinhada (.harness/runtime/contract.md)
-  ./aegis -                Lê a demanda pela entrada padrão e gera o rascunho
   ./aegis approve          Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis verify           Executa as provas físicas do tribunal e emite recibo PROVEN
   ./aegis status           Exibe o status do contrato e da árvore de trabalho
@@ -166,9 +165,6 @@ main() {
   [[ $# -ge 1 ]] || { usage; exit 1; }
 
   case "${1}" in
-    -)
-      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft
-      ;;
     approve|resume)
       node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;

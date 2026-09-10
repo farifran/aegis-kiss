@@ -46,54 +46,9 @@ try {
 if (!failed) throw new Error('DoS limit was not enforced');
 NODE
 
-# Standard input is bounded while being read, not only after full buffering.
-node -e 'require("fs").writeFileSync(process.argv[1], "a".repeat(65537))' "${WORK_DIR}/oversized-demand.txt"
-set +e
-bash "${WORK_DIR}/aegis" - <"${WORK_DIR}/oversized-demand.txt" >/dev/null 2>"${WORK_DIR}/stdin-too-large.err"
-stdin_code=$?
-set -e
-if [[ "${stdin_code}" -eq 0 ]] || ! grep -q 'input_too_large' "${WORK_DIR}/stdin-too-large.err"; then
-  echo "[FATAL] Oversized stdin was not rejected during capture" >&2
-  exit 1
-fi
-
-# Capture must not silently choose between two competing intents.
-set +e
-ambiguous_intent_output="$(bash "${WORK_DIR}/aegis" "Intenção livre" --spec '{"intent":"Intenção estruturada"}' 2>&1)"
-ambiguous_intent_code=$?
-set -e
-if [[ "${ambiguous_intent_code}" -eq 0 ]] || ! grep -q 'ambiguous_intent_sources' <<< "${ambiguous_intent_output}"; then
-  echo "[FATAL] Competing intent sources were not rejected" >&2
-  exit 1
-fi
-
-# Structured input must stay inside the workspace and use its declared type.
-set +e
-outside_spec_output="$(bash "${WORK_DIR}/aegis" --spec /dev/null 2>&1)"
-outside_spec_code=$?
-invalid_intent_output="$(bash "${WORK_DIR}/aegis" --spec '{"intent":{"not":"text"}}' 2>&1)"
-invalid_intent_code=$?
-invalid_target_output="$(bash "${WORK_DIR}/aegis" "Demanda válida" --target src/../escape.ts 2>&1)"
-invalid_target_code=$?
-set -e
-if [[ "${outside_spec_code}" -eq 0 ]] || ! grep -q 'input_file_outside_workspace:--spec' <<< "${outside_spec_output}"; then
-  echo "[FATAL] Structured file escaped the workspace boundary" >&2
-  exit 1
-fi
-if [[ "${invalid_intent_code}" -eq 0 ]] || ! grep -q 'invalid_spec_intent' <<< "${invalid_intent_output}"; then
-  echo "[FATAL] Non-text spec intent was not rejected" >&2
-  exit 1
-fi
-if [[ "${invalid_target_code}" -eq 0 ]] || ! grep -q 'invalid_target_path' <<< "${invalid_target_output}"; then
-  echo "[FATAL] Invalid target path was not rejected" >&2
-  exit 1
-fi
-
 # 3. Test Draft Generation via ./aegis CLI (com e sem decisões)
-decisions_payload='[{"questionId":"Q-0001","question":"Qual o modo de validação?","scope":"INPUT","recommendedAnswerId":"ANS-0001","selectedAnswerId":"ANS-0001","answers":[{"id":"ANS-0001","label":"Estrito","rationale":"Validação imediata","resolutionClause":"Rejeitar entrada inválida","recommended":true},{"id":"ANS-0002","label":"Tolerante","rationale":"Permissivo","resolutionClause":"Sanitizar automaticamente","recommended":false}]}]'
-
 set +e
-draft_output="$(bash "${WORK_DIR}/aegis" Criar um validador determinístico em src/validator.ts --decisions "${decisions_payload}")"
+draft_output="$(bash "${WORK_DIR}/aegis" Criar um validador determinístico em src/validator.ts)"
 draft_code=$?
 set -e
 
@@ -104,20 +59,10 @@ fi
 
 printf '%s\n' "${draft_output}" | jq -e '
   .status == "USER_CONFIRMATION_REQUIRED"
-  and (.questions | length > 0)
-  and (.questions[0].recommendedAnswerId != null)
+  and (.questions | length == 0)
   and (.intent == "Criar um validador determinístico em src/validator.ts")
   and (.artifactPath == ".harness/runtime/contract.md")
 ' >/dev/null
-
-set +e
-unknown_option_output="$(bash "${WORK_DIR}/aegis" "Demanda válida" --legacy 2>&1)"
-unknown_option_code=$?
-set -e
-if [[ "${unknown_option_code}" -eq 0 ]] || ! grep -q 'unknown_draft_option:--legacy' <<< "${unknown_option_output}"; then
-  echo "[FATAL] Unknown draft option was not rejected" >&2
-  exit 1
-fi
 
 [[ -s "${WORK_DIR}/.harness/runtime/contract.json" ]]
 [[ -s "${WORK_DIR}/.harness/runtime/contract.md" ]]
@@ -125,7 +70,12 @@ fi
 
 # Verify contract.md formatting
 grep -q '# Issue / Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"
-grep -q '\[RECOMENDADO\]' "${WORK_DIR}/.harness/runtime/contract.md"
+grep -q 'Nenhuma ambiguidade material detectada' "${WORK_DIR}/.harness/runtime/contract.md"
+
+jq -e '
+  .scope.authorizedPaths == ["src"]
+  and (.evidenceDiscipline.knownFacts | any(startswith("Discovery:")))
+' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
 # Verify no cryptographic custody digests leak in draft (letter is being written, not sealed)
 if grep -q 'Digest do Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"; then
@@ -147,15 +97,15 @@ jq -e '
   (.executionId | startswith("draft-"))
 ' "${WORK_DIR}/.harness/runtime/user_confirmation_request.json" >/dev/null
 
-# 3b. Test Draft Generation without decisions (zero questions, no generic hardcoded cards)
+# 3b. A blank workspace does not create speculative Wizard questions.
 bash "${WORK_DIR}/aegis" clean >/dev/null
 set +e
-zero_q_output="$(bash "${WORK_DIR}/aegis" "Criar uma operação simples em src/validator.ts" --state-kind NONE)"
+zero_q_output="$(bash "${WORK_DIR}/aegis" "Criar uma operação simples em src/validator.ts")"
 zero_q_code=$?
 set -e
 
 if [[ "${zero_q_code}" -ne 2 ]]; then
-  echo "[FATAL] Expected exit code 2 for draft without questions, got ${zero_q_code}" >&2
+  echo "[FATAL] Expected exit code 2 for draft without speculative questions, got ${zero_q_code}" >&2
   exit 1
 fi
 
@@ -166,14 +116,14 @@ printf '%s\n' "${zero_q_output}" | jq -e '
 
 grep -q 'Nenhuma ambiguidade material detectada' "${WORK_DIR}/.harness/runtime/contract.md"
 
-# Intent supplied by --spec follows the same normalization as free text.
+# Plain-text intent normalizes CRLF before it becomes contractual evidence.
 bash "${WORK_DIR}/aegis" clean >/dev/null
 set +e
-spec_draft="$(bash "${WORK_DIR}/aegis" --spec '{"intent":"Linha 1\r\nLinha 2"}' --state-kind NONE)"
+spec_draft="$(bash "${WORK_DIR}/aegis" $'Linha 1\r\nLinha 2')"
 spec_draft_code=$?
 set -e
 if [[ "${spec_draft_code}" -ne 2 ]]; then
-  echo "[FATAL] Expected draft generated from --spec intent" >&2
+  echo "[FATAL] Expected draft generated from normalized text intent" >&2
   exit 1
 fi
 jq -e '.intent == "Linha 1\nLinha 2"' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
@@ -239,6 +189,7 @@ status_idle="$(bash "${WORK_DIR}/aegis" status)"
 printf '%s\n' "${status_idle}" | jq -e '.status == "IDLE"' >/dev/null
 
 # 8. Test deliberação genérica de modelo de estado sem regras de domínio embutidas
+printf 'export let observedState = 0;\n' > "${WORK_DIR}/src/index.ts"
 set +e
 state_draft="$(bash "${WORK_DIR}/aegis" "Criar uma operação genérica em src/worker.ts")"
 state_draft_code=$?
@@ -252,6 +203,7 @@ fi
 # The harness must ask about state rather than infer it from words in the demand.
 jq -e '
   (.stateModel == null)
+  and (.decisions | any(.questionId == "Q-API-COMPATIBILITY"))
   and (.decisions | any(.questionId == "Q-STATE-MODEL"))
 ' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 

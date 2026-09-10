@@ -11,8 +11,8 @@
 // ============================================================================
 
 import { Buffer } from 'node:buffer';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
@@ -58,6 +58,132 @@ export function normalizeDemandTitle(raw) {
   return cleaned.length > 100 ? `${cleaned.slice(0, 97)}...` : cleaned;
 }
 
+const discoveryFileLimit = 256;
+const discoveryByteLimit = 1_048_576;
+const sourceFilePattern = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+const publicExportPattern = /^\s*export\s+(?:default\b|(?:async\s+)?(?:function|class|const|let|var|type|interface|enum)\b|\{\s*[^}\s])/mu;
+const mutableModuleBindingPattern = /^(?:export\s+)?(?:let|var)\s+[A-Za-z_$][\w$]*/mu;
+
+/**
+ * Descobre apenas fatos estruturais já presentes em src/.
+ * Todo o resultado existe em RAM até ser incorporado à evidência do contrato.
+ */
+export function discoverWorkspace(repositoryRoot) {
+  const sourceRoot = resolve(repositoryRoot, 'src');
+  const sourceFiles = [];
+  const publicApiFiles = [];
+  const mutableStateFiles = [];
+  let scannedBytes = 0;
+
+  function inspectDirectory(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === '.aegis' || entry.isSymbolicLink()) continue;
+      const absolutePath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        inspectDirectory(absolutePath);
+        continue;
+      }
+      if (!entry.isFile() || !sourceFilePattern.test(entry.name)) continue;
+      if (sourceFiles.length >= discoveryFileLimit) {
+        throw new Error('discovery_file_limit_exceeded');
+      }
+
+      const metadata = statSync(absolutePath);
+      scannedBytes += metadata.size;
+      if (scannedBytes > discoveryByteLimit) {
+        throw new Error('discovery_byte_limit_exceeded');
+      }
+
+      const relativePath = relative(repositoryRoot, absolutePath).replaceAll('\\', '/');
+      const sourceText = readFileSync(absolutePath, 'utf8');
+      sourceFiles.push(relativePath);
+      if (publicExportPattern.test(sourceText)) publicApiFiles.push(relativePath);
+      if (mutableModuleBindingPattern.test(sourceText)) mutableStateFiles.push(relativePath);
+    }
+  }
+
+  if (existsSync(sourceRoot)) inspectDirectory(sourceRoot);
+  sourceFiles.sort();
+  publicApiFiles.sort();
+  mutableStateFiles.sort();
+
+  const primarySourcePath = sourceFiles.includes('src/index.ts')
+    ? 'src/index.ts'
+    : (sourceFiles[0] ?? 'src/index.ts');
+
+  return {
+    sourceRoot: 'src',
+    sourceFiles,
+    publicApiFiles,
+    mutableStateFiles,
+    primarySourcePath,
+    knownFacts: [
+      'Discovery: ' + sourceFiles.length + ' arquivo(s) de código lido(s) em src/.',
+      ...(publicApiFiles.length > 0
+        ? ['Discovery: exportações públicas observadas em ' + publicApiFiles.join(', ') + '.']
+        : []),
+      ...(mutableStateFiles.length > 0
+        ? ['Discovery: bindings mutáveis de módulo observados em ' + mutableStateFiles.join(', ') + '.']
+        : []),
+    ],
+  };
+}
+
+function buildDiscoveryDecisions(discovery) {
+  const decisions = [];
+  if (discovery.publicApiFiles.length > 0) {
+    decisions.push({
+      questionId: 'Q-API-COMPATIBILITY',
+      question: 'O Discovery encontrou exportações públicas. Esta mudança deve preservar a compatibilidade observada?',
+      scope: 'ARCHITECTURE',
+      recommendedAnswerId: 'ANS-PRESERVE-API',
+      selectedAnswerId: 'ANS-PRESERVE-API',
+      answers: [
+        {
+          id: 'ANS-PRESERVE-API',
+          label: 'Preservar compatibilidade',
+          rationale: 'É a escolha KISS quando há API pública existente e nenhum pedido explícito de quebra.',
+          resolutionClause: 'A mudança preserva a fronteira pública observada pelo Discovery.',
+          recommended: true,
+        },
+        {
+          id: 'ANS-CHANGE-API',
+          label: 'Permitir alteração incompatível',
+          rationale: 'Use somente quando a demanda autorizar mudar a API pública observada.',
+          resolutionClause: 'A mudança pode alterar a fronteira pública observada pelo Discovery.',
+          recommended: false,
+        },
+      ],
+    });
+  }
+  if (discovery.mutableStateFiles.length > 0) {
+    decisions.push({
+      questionId: 'Q-STATE-MODEL',
+      question: 'O Discovery encontrou estado modular mutável. A demanda deve alterar esse estado entre invocações?',
+      scope: 'ARCHITECTURE',
+      recommendedAnswerId: 'ANS-STATELESS',
+      selectedAnswerId: 'ANS-STATELESS',
+      answers: [
+        {
+          id: 'ANS-STATELESS',
+          label: 'Sem estado',
+          rationale: 'É a alternativa KISS quando a demanda não declara uma transição persistente.',
+          resolutionClause: 'A operação não mantém estado entre invocações.',
+          recommended: true,
+        },
+        {
+          id: 'ANS-STATE-TRANSITION',
+          label: 'Transição de estado',
+          rationale: 'Use somente quando a demanda depender do estado modular observado.',
+          resolutionClause: 'A operação declara transição de estado observável.',
+          recommended: false,
+        },
+      ],
+    });
+  }
+  return decisions;
+}
+
 export const CANONICAL_RULE_STATEMENTS = {
   'ARCH-FAILURE-EXPLICIT': 'Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve expor resultado, erro explícito, estado preservado ou rollback verificável.',
   'ARCH-DETERMINISTIC-TIME': 'Comportamento que depende de tempo deve receber uma referência temporal explícita ou usar uma fonte reproduzível. O relógio do sistema não pode alterar o resultado de forma implícita; uma exceção requer emenda arquitetural aprovada.',
@@ -75,7 +201,7 @@ export function renderContractMarkdown(
   receiptDigest = '',
 ) {
   const stateKind = contract.stateModel?.kind;
-  const mainEntrypoint = contract.scope?.authorizedPaths?.find((p) => p.endsWith('.ts') && !p.endsWith('.proof.ts')) ?? 'src/index.ts';
+  const sourceScope = contract.scope?.authorizedPaths?.find((p) => p === 'src' || p === 'src/') ?? 'src';
 
   const ruleMap = new Map(Object.entries(CANONICAL_RULE_STATEMENTS));
   if (Array.isArray(policyRules)) {
@@ -118,8 +244,8 @@ export function renderContractMarkdown(
     '',
     '### Fronteira Pública Obrigatória (API Surface):',
     '```typescript',
-    `// Ponto de exportação pública: ${mainEntrypoint}`,
-    '// Assinaturas concretas pertencem ao contrato fornecido e às provas declaradas.',
+    `// Escopo de implementação autorizado: ${sourceScope}`,
+    '// Assinaturas concretas serão definidas após o Discovery e a deliberação.',
     '```',
     '',
     '### Disciplina de Evidência & Não-Alucinação (Constituição Lei II):',
@@ -351,58 +477,20 @@ export function createProofRegistry(contract) {
 export function buildIssueDraft({
   sanitizedText,
   architecture,
-  changeKind = 'PRODUCT',
-  targetHint = '',
-  decisions = [],
-  stateModelKind = null,
-  stateModel: customStateModel,
-  title: customTitle,
-  requirements: customRequirements,
-  behavior: customBehavior,
-  invariants: customInvariants,
-  preconditions: customPreconditions,
-  postconditions: customPostconditions,
-  failureSemantics: customFailureSemantics,
-  authorizedPaths: customAuthorizedPaths,
-  proofObligations: customProofObligations,
+  discovery,
 }) {
-  const title = customTitle ? normalizeDemandTitle(customTitle) : normalizeDemandTitle(sanitizedText);
+  const title = normalizeDemandTitle(sanitizedText);
   const intent = sanitizedText;
 
-  if (
-    targetHint
-    && (
-      !targetHint.startsWith('src/')
-      || !targetHint.endsWith('.ts')
-      || targetHint.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
-    )
-  ) {
-    throw new Error('invalid_target_path');
-  }
-  const mainPath = targetHint || 'src/index.ts';
+  const mainPath = discovery?.primarySourcePath ?? 'src/index.ts';
   const proofPath = mainPath.replace(/\.ts$/, '.proof.sh');
-  const defaultPaths = changeKind === 'PRODUCT'
-    ? ['src/index.ts', mainPath, proofPath, 'src/.aegis/semantic-state.json']
-    : ['scripts/ide_gateway.sh', 'scripts/lib/issue_contract_core.mjs', 'src/.aegis/semantic-state.json'];
-
-  const authorizedPaths = Array.isArray(customAuthorizedPaths) && customAuthorizedPaths.length > 0
-    ? [...new Set([...customAuthorizedPaths, 'src/.aegis/semantic-state.json'])]
-    : [...new Set(defaultPaths)];
-
-  const declaredStateModel = customStateModel ?? (stateModelKind ? { kind: stateModelKind } : null);
-  const hasTemporalDeclaration = [
-    ...(declaredStateModel?.bindings ?? []),
-    ...(declaredStateModel?.policies ?? []),
-  ].some((entry) => entry.role === 'TEMPORAL');
+  const authorizedPaths = ['src'];
 
   const appliedRuleIds = (architecture?.candidateRules ?? [])
-    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || (r.id === 'ARCH-DETERMINISTIC-TIME' && hasTemporalDeclaration))
+    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT')
     .map((r) => r.id);
   if (!appliedRuleIds.includes('ARCH-FAILURE-EXPLICIT')) {
     appliedRuleIds.push('ARCH-FAILURE-EXPLICIT');
-  }
-  if (!appliedRuleIds.includes('ARCH-DETERMINISTIC-TIME') && hasTemporalDeclaration) {
-    appliedRuleIds.push('ARCH-DETERMINISTIC-TIME');
   }
 
   const requirements = [
@@ -470,32 +558,7 @@ export function buildIssueDraft({
     },
   ];
 
-  const finalDecisions = Array.isArray(decisions) ? [...decisions] : [];
-  if (!declaredStateModel && !finalDecisions.some((decision) => decision.questionId === 'Q-STATE-MODEL')) {
-    finalDecisions.push({
-      questionId: 'Q-STATE-MODEL',
-      question: 'A operação possui estado persistente ou uma transição observável entre invocações?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-STATELESS',
-      selectedAnswerId: 'ANS-STATELESS',
-      answers: [
-        {
-          id: 'ANS-STATELESS',
-          label: 'Sem estado',
-          rationale: 'É a alternativa KISS quando não há evidência de persistência ou transição observável.',
-          resolutionClause: 'A operação não mantém estado entre invocações.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-STATE-TRANSITION',
-          label: 'Transição de estado',
-          rationale: 'Use somente quando o comportamento depender de estado entre invocações.',
-          resolutionClause: 'A operação declara transição de estado observável.',
-          recommended: false,
-        },
-      ],
-    });
-  }
+  const finalDecisions = discovery ? buildDiscoveryDecisions(discovery) : [];
 
   const proofObligations = [
     {
@@ -532,7 +595,7 @@ export function buildIssueDraft({
 
   const knownFacts = [
     `Demanda textual do usuário (provenance: USER): "${sanitizedText.replace(/\n+/g, ' ').trim()}"`,
-    ...(declaredStateModel ? [`Modelo de estado declarado: ${declaredStateModel.kind}.`] : []),
+    ...(discovery?.knownFacts ?? []),
     `Ponto de entrada autorizado: ${mainPath}`,
   ];
 
@@ -543,7 +606,7 @@ export function buildIssueDraft({
   const draft = {
     schema: 'aegis.issue_contract.v1',
     title,
-    changeKind,
+    changeKind: 'PRODUCT',
     intent,
     architecture: {
       policyDigest: architecture?.policyDigest ?? '0'.repeat(64),
@@ -554,19 +617,18 @@ export function buildIssueDraft({
       authorizedPaths,
       excludedPaths: [],
     },
-    requirements: customRequirements ?? requirements,
-    behavior: customBehavior ?? behavior,
-    preconditions: customPreconditions ?? preconditions,
-    invariants: customInvariants ?? invariants,
-    postconditions: customPostconditions ?? postconditions,
-    failureSemantics: customFailureSemantics ?? failureSemantics,
-    ...(declaredStateModel ? { stateModel: declaredStateModel } : {}),
+    requirements,
+    behavior,
+    preconditions,
+    invariants,
+    postconditions,
+    failureSemantics,
     decisions: finalDecisions,
     evidenceDiscipline: {
       knownFacts,
       unknownFacts,
     },
-    proofObligations: customProofObligations ?? proofObligations,
+    proofObligations,
     verification: {
       riskProfile: 'fast',
       adversarialClasses: ['BOUNDARIES', 'OBSERVABILITY', 'COMPOSITION'],

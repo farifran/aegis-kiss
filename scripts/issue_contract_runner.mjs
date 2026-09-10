@@ -2,9 +2,9 @@
 
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
@@ -13,8 +13,8 @@ import {
   buildIssueDraft,
   computeContractDigest,
   createProofRegistry,
+  discoverWorkspace,
   loadArchitecturePolicy,
-  maxDemandBytes,
   renderContractMarkdown,
   sanitizeInputText,
   validateContract,
@@ -28,177 +28,22 @@ const contractMdPath = resolve(runtimeDir, 'contract.md');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 
-function isPathInside(baseDir, candidatePath) {
-  const relativePath = relative(baseDir, candidatePath);
-  return relativePath === '' || (!relativePath.startsWith('..' + sep) && relativePath !== '..');
-}
-
-function parseJsonOrFile(raw, baseDir, option) {
-  const filePath = resolve(baseDir, raw);
-  if (existsSync(filePath)) {
-    if (!isPathInside(baseDir, filePath)) {
-      throw new Error('input_file_outside_workspace:' + option);
-    }
-    const metadata = statSync(filePath);
-    if (!metadata.isFile()) {
-      throw new Error('input_path_not_file:' + option);
-    }
-    if (metadata.size > maxDemandBytes) {
-      throw new Error('structured_input_too_large:' + option);
-    }
-    return JSON.parse(readFileSync(filePath, 'utf8'));
-  }
-  if (Buffer.byteLength(raw, 'utf8') > maxDemandBytes) {
-    throw new Error('structured_input_too_large:' + option);
-  }
-  return JSON.parse(raw);
-}
-
-async function readStdinWithinLimit(maxBytes) {
-  const chunks = [];
-  let totalBytes = 0;
-
-  for await (const chunk of process.stdin) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
-    totalBytes += bytes.length;
-    if (totalBytes > maxBytes) {
-      throw new Error('input_too_large');
-    }
-    chunks.push(bytes);
-  }
-
-  return Buffer.concat(chunks);
-}
-
-function requiredOptionValue(args, index, option) {
-  const value = args[index + 1];
-  if (typeof value !== 'string' || value.startsWith('--')) {
-    throw new Error(`missing_option_value:${option}`);
-  }
-  return value;
-}
-
-function requireObject(value, option) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('invalid_json_object:' + option);
-  }
-  return value;
-}
-
-function requireArray(value, option) {
-  if (!Array.isArray(value)) {
-    throw new Error('invalid_json_array:' + option);
-  }
-  return value;
-}
-
 async function handleDraft(args) {
-  let changeKind = 'PRODUCT';
-  let targetHint = '';
-  const demandParts = [];
-  let specData = null;
-  let decisionsData = null;
-  let channel = 'IDE_DEFAULT';
-  let answersData = null;
-  let stateModelKind = null;
-  let customTitle = null;
+  const rawBuffer = Buffer.from(args.join(' '), 'utf8');
 
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === '--') {
-      demandParts.push(...args.slice(index + 1));
-      break;
-    }
-    if (args[index] === '--kind') {
-      const value = requiredOptionValue(args, index, '--kind');
-      if (!['PRODUCT', 'HARNESS'].includes(value)) {
-        throw new Error('invalid_option_value:--kind');
-      }
-      changeKind = value;
-      index += 1;
-    } else if (args[index] === '--target') {
-      targetHint = requiredOptionValue(args, index, '--target');
-      index += 1;
-    } else if (args[index] === '--channel') {
-      channel = requiredOptionValue(args, index, '--channel');
-      index += 1;
-    } else if (args[index] === '--state-kind') {
-      const value = requiredOptionValue(args, index, '--state-kind');
-      if (!['NONE', 'STATE_TRANSITION'].includes(value)) {
-        throw new Error('invalid_option_value:--state-kind');
-      }
-      stateModelKind = value;
-      index += 1;
-    } else if (args[index] === '--title') {
-      customTitle = requiredOptionValue(args, index, '--title');
-      index += 1;
-    } else if (args[index] === '--spec') {
-      specData = requireObject(
-        parseJsonOrFile(requiredOptionValue(args, index, '--spec'), root, '--spec'),
-        '--spec',
-      );
-      index += 1;
-    } else if (args[index] === '--decisions') {
-      decisionsData = requireArray(
-        parseJsonOrFile(requiredOptionValue(args, index, '--decisions'), root, '--decisions'),
-        '--decisions',
-      );
-      index += 1;
-    } else if (args[index] === '--answers') {
-      answersData = requireArray(
-        parseJsonOrFile(requiredOptionValue(args, index, '--answers'), root, '--answers'),
-        '--answers',
-      );
-      index += 1;
-    } else if (args[index].startsWith('--')) {
-      throw new Error(`unknown_draft_option:${args[index]}`);
-    } else {
-      demandParts.push(args[index]);
-    }
-  }
-
-  const demandText = demandParts.join(' ');
-  if (specData?.intent !== undefined && typeof specData.intent !== 'string') {
-    throw new Error('invalid_spec_intent');
-  }
-  if (demandText && specData?.intent !== undefined) {
-    throw new Error('ambiguous_intent_sources');
-  }
-  if (!demandText && specData?.intent !== undefined) {
-    demandParts.push(specData.intent);
-  }
-
-  const rawBuffer = demandParts.length > 0
-    ? Buffer.from(demandParts.join(' '), 'utf8')
-    : await readStdinWithinLimit(maxDemandBytes);
   const sanitizedText = sanitizeInputText(rawBuffer);
 
   const architecturePolicy = loadArchitecturePolicy(root);
   const policy = architecturePolicy.policy;
-
-  if (specData && Array.isArray(specData.decisions) && !decisionsData) {
-    decisionsData = specData.decisions;
-  }
+  const discovery = discoverWorkspace(root);
 
   const draft = buildIssueDraft({
     sanitizedText,
+    discovery,
     architecture: {
       candidateRules: policy.rules,
       policyDigest: '0'.repeat(64),
     },
-    changeKind,
-    targetHint,
-    decisions: decisionsData ?? [],
-    stateModelKind: specData?.stateModel?.kind ?? stateModelKind,
-    stateModel: specData?.stateModel,
-    title: specData?.title ?? customTitle,
-    requirements: specData?.requirements,
-    behavior: specData?.behavior,
-    invariants: specData?.invariants,
-    preconditions: specData?.preconditions,
-    postconditions: specData?.postconditions,
-    failureSemantics: specData?.failureSemantics,
-    authorizedPaths: specData?.authorizedPaths ?? specData?.scope?.authorizedPaths,
-    proofObligations: specData?.proofObligations,
   });
 
   await mkdir(runtimeDir, { recursive: true });
@@ -221,7 +66,7 @@ async function handleDraft(args) {
     decisionDigest: draftSessionId,
     preflightPromptDigest: draftSessionId,
     confirmation: {
-      channel,
+      channel: 'IDE_DEFAULT',
       confirmationId: draftSessionId,
     },
     title: draft.title,
@@ -233,20 +78,7 @@ async function handleDraft(args) {
 
   await writeFile(userConfirmationPath, `${JSON.stringify(confirmationRequest, null, 2)}\n`, 'utf8');
 
-  if (Array.isArray(answersData)) {
-    const resolution = {
-      schema: 'aegis.preflight_resolution.v2',
-      decisionDigest: draftSessionId,
-      preflightPromptDigest: draftSessionId,
-      confirmation: {
-        channel,
-        confirmationId: draftSessionId,
-        selectedAtEpochMs: Date.now(),
-      },
-      answers: answersData,
-    };
-    await writeFile(resolutionPath, `${JSON.stringify(resolution, null, 2)}\n`, 'utf8');
-  } else if (existsSync(resolutionPath)) {
+  if (existsSync(resolutionPath)) {
     await rm(resolutionPath, { force: true });
   }
 
