@@ -360,9 +360,12 @@ async function handleApprove() {
   const rawContract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
   let contract = rawContract;
 
-  if (existsSync(resolutionPath)) {
+  const userResolutionPath = resolve(runtimeDir, 'user_resolution.json');
+  const targetResolution = existsSync(resolutionPath) ? resolutionPath : (existsSync(userResolutionPath) ? userResolutionPath : null);
+
+  if (targetResolution) {
     try {
-      const resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
+      const resolution = JSON.parse(await readFile(targetResolution, 'utf8'));
       if (Array.isArray(resolution.answers)) {
         contract = applyUserResolution(contract, resolution.answers);
       }

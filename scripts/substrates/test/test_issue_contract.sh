@@ -173,4 +173,70 @@ printf '%s\n' "${clean_output}" | grep -q 'clean=PASS'
 status_idle="$(bash "${WORK_DIR}/aegis" status)"
 printf '%s\n' "${status_idle}" | jq -e '.status == "IDLE"' >/dev/null
 
+# 8. Test Universal Transformations: INV-TIE-BREAK, Cross-Clause Consistency and Constitutional Guardrail
+set +e
+liquidity_draft="$(bash "${WORK_DIR}/aegis" "Implementar motor de LiquidityResolver com anéis circulares e MinFlow")"
+liq_draft_code=$?
+set -e
+
+if [[ "${liq_draft_code}" -ne 2 ]]; then
+  echo "[FATAL] Expected exit code 2 for liquidity demand, got ${liq_draft_code}" >&2
+  exit 1
+fi
+
+# Verify INV-TIE-BREAK is present in draft contract
+jq -e '
+  .invariants | any(.id == "INV-TIE-BREAK")
+' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
+
+# Test Constitutional Guardrail (attempt to approve with ANS-LAX-OVERENGINEERING)
+cat > "${WORK_DIR}/.harness/runtime/user_resolution.json" <<'EOF'
+{
+  "answers": [
+    { "questionId": "Q-0001", "selectedAnswerId": "ANS-LAX-OVERENGINEERING" }
+  ]
+}
+EOF
+
+set +e
+lax_approve_err="$(bash "${WORK_DIR}/aegis" approve 2>&1)"
+lax_approve_code=$?
+set -e
+
+if [[ "${lax_approve_code}" -eq 0 ]]; then
+  echo "[FATAL] Expected constitutional guardrail to block ANS-LAX-OVERENGINEERING" >&2
+  exit 1
+fi
+
+if ! printf '%s\n' "${lax_approve_err}" | grep -q 'constitutional_conflict'; then
+  echo "[FATAL] Error message did not mention constitutional_conflict: ${lax_approve_err}" >&2
+  exit 1
+fi
+
+# Test Cross-Clause Consistency (resolve with ANS-TREASURY-ABSORB)
+cat > "${WORK_DIR}/.harness/runtime/user_resolution.json" <<'EOF'
+{
+  "answers": [
+    { "questionId": "Q-0001", "selectedAnswerId": "ANS-STRICT-KISS" },
+    { "questionId": "Q-0002", "selectedAnswerId": "ANS-RESTORE-ECOSYSTEM" },
+    { "questionId": "Q-0003", "selectedAnswerId": "ANS-TREASURY-ABSORB" }
+  ]
+}
+EOF
+
+liq_approve="$(bash "${WORK_DIR}/aegis" approve)"
+printf '%s\n' "${liq_approve}" | jq -e '.status == "FINALIZED"' >/dev/null
+
+# Verify bidirectional cross-clause update: FAIL-0001 must have updated observableResult
+jq -e '
+  .failureSemantics[] | select(.id == "FAIL-0001") | .observableResult | contains("conta tesouro")
+' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
+
+# Verify dynamic vector table renders treasury absorption
+grep -q 'Absorção no fundo do tesouro' "${WORK_DIR}/.harness/runtime/contract.md"
+
+# Final Clean
+bash "${WORK_DIR}/aegis" clean >/dev/null
+
 printf '[AEGIS][TEST] issue-contract symbiotic flow: PASS\n'
+

@@ -112,7 +112,6 @@ export function renderContractMarkdown(
     ...(/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`) ? [
       'export function isPalindrome(input: string): boolean;',
     ] : /(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${contract.title} ${contract.intent}`) ? [
-      '// Ponto de exportação pública: src/index.ts',
       "export { LiquidityResolver, obterLiquidityResolverBitmask } from './liquidityResolver.js';",
       "export { SettlementBus, obterSaudeBitmask } from './settlementBus.js';",
       "export { ClearinghouseCore, obterClearinghouseBitmask } from './clearinghouseCore.js';",
@@ -195,12 +194,17 @@ export function renderContractMarkdown(
   }
 
   if (/(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${contract.title} ${contract.intent}`)) {
+    const isAbsorb = contract.decisions?.some((d) => d.questionId === 'Q-0003' && d.selectedAnswerId === 'ANS-TREASURY-ABSORB');
     lines.push('');
     lines.push('### Vetores Canônicos de Aceite e Invariantes:');
     lines.push('| Vetor / Cenário | Categoria | Resultado Esperado | Invariante / Regra Coberta |');
     lines.push('| :--- | :--- | :--- | :--- |');
     lines.push('| `Ciclo A→B→C→A (1000n, 1200n, 1500n)` | Nominal (Ciclo 3-Way) | `MinFlow=1000n obliterado; 2 resíduos` | Conservação de Massa e Deadlock Resolution |');
-    lines.push('| `Discrepância de 1 unit (1n)` | Adversarial (Arredondamento) | `Reversão atômica e quarentena de contas` | Zero-Sum Invariant & ARCH-FAILURE-EXPLICIT |');
+    if (isAbsorb) {
+      lines.push('| `Discrepância de 1 unit (1n)` | Adversarial (Arredondamento) | `Absorção no fundo do tesouro (com log de auditoria)` | Zero-Sum Invariant & Resolução de Frações |');
+    } else {
+      lines.push('| `Discrepância de 1 unit (1n)` | Adversarial (Arredondamento) | `Reversão atômica e quarentena de contas` | Zero-Sum Invariant & ARCH-FAILURE-EXPLICIT |');
+    }
     lines.push('| `Rajada simultânea Δt = 0n` | Nominal (Sub-milissegundo) | `Acumula pressão no ThrottleGuard sem regressão` | Proteção contra Overflow de Vazão |');
     lines.push('| `Telemetria Bitmask 32-bit` | Observabilidade Zero-GC | `Inteiro 32-bit determinístico puro` | Telemetria sem alocação em hot-path |');
     lines.push('| `Instanciação maxHeapAccounts <= 0` | Adversarial (Configuração) | `RangeError` | ARCH-FAILURE-EXPLICIT |');
@@ -249,7 +253,7 @@ export function computeContractDigest(contract) {
  * e reconcilia semanticamente as cláusulas aprovadas com o comportamento observável.
  */
 export function applyUserResolution(draftContract, userAnswers) {
-  const answerMap = new Map(userAnswers.map((a) => [a.questionId, a.answerId]));
+  const answerMap = new Map(userAnswers.map((a) => [a.questionId, a.answerId ?? a.selectedAnswerId]));
   const correctionMap = new Map(userAnswers.filter((a) => a.correction).map((a) => [a.questionId, a.correction]));
 
   const updatedDecisions = (draftContract.decisions ?? []).map((decision) => {
@@ -302,6 +306,59 @@ export function applyUserResolution(draftContract, userAnswers) {
     });
   }
 
+  // Sincronização de failureSemantics (ex: Q-0003 - Reversão vs Absorção)
+  let updatedFailureSemantics = draftContract.failureSemantics;
+  const isAbsorb = updatedDecisions.some((d) => d.questionId === 'Q-0003' && d.selectedAnswerId === 'ANS-TREASURY-ABSORB');
+  const isAtomic = updatedDecisions.some((d) => d.questionId === 'Q-0003' && d.selectedAnswerId === 'ANS-ATOMIC-ROLLBACK');
+  if (isAbsorb && Array.isArray(updatedFailureSemantics)) {
+    updatedFailureSemantics = updatedFailureSemantics.map((f) => {
+      if (f.id === 'FAIL-0001') {
+        return {
+          ...f,
+          trigger: 'Discrepância fracionária de 1 unit (1n) na conservação de massa do ciclo',
+          observableResult: 'Compensação debitada/creditada no saldo da conta tesouro com log de auditoria emitido',
+        };
+      }
+      return f;
+    });
+  } else if (isAtomic && Array.isArray(updatedFailureSemantics)) {
+    updatedFailureSemantics = updatedFailureSemantics.map((f) => {
+      if (f.id === 'FAIL-0001') {
+        return {
+          ...f,
+          trigger: 'Discrepância fracionária de 1 unit (1n) na conservação de massa do ciclo',
+          observableResult: 'Reversão atômica da rodada, isolamento das contas divergentes via SettlementBus e recálculo linear (ARCH-FAILURE-EXPLICIT)',
+        };
+      }
+      return f;
+    });
+  }
+
+  // Sincronização de escopo autorizado (ex: Q-0002 - Ecossistema Integral vs Stubs Mínimos)
+  let updatedScope = draftContract.scope;
+  const isStubInline = updatedDecisions.some((d) => d.questionId === 'Q-0002' && d.selectedAnswerId === 'ANS-STUB-INLINE');
+  const isRestoreEco = updatedDecisions.some((d) => d.questionId === 'Q-0002' && d.selectedAnswerId === 'ANS-RESTORE-ECOSYSTEM');
+  if (isStubInline && updatedScope) {
+    updatedScope = {
+      ...updatedScope,
+      authorizedPaths: ['src/index.ts', 'src/liquidityResolver.ts', 'src/.aegis/semantic-state.json'],
+    };
+  } else if (isRestoreEco && updatedScope) {
+    updatedScope = {
+      ...updatedScope,
+      authorizedPaths: [
+        'src/index.ts',
+        'src/liquidityResolver.ts',
+        'src/settlementBus.ts',
+        'src/clearingEngine.ts',
+        'src/clearinghouseCore.ts',
+        'src/throttleGuard.ts',
+        'src/settlementEngine.ts',
+        'src/.aegis/semantic-state.json',
+      ],
+    };
+  }
+
   let updatedEvidence = draftContract.evidenceDiscipline;
   if (updatedEvidence && updatedDecisions.length > 0) {
     const updatedUnknown = updatedDecisions.map((d) => {
@@ -319,6 +376,8 @@ export function applyUserResolution(draftContract, userAnswers) {
     ...draftContract,
     behavior: updatedBehavior,
     decisions: updatedDecisions,
+    ...(updatedScope ? { scope: updatedScope } : {}),
+    ...(updatedFailureSemantics ? { failureSemantics: updatedFailureSemantics } : {}),
     ...(updatedEvidence ? { evidenceDiscipline: updatedEvidence } : {}),
   };
 
@@ -576,6 +635,12 @@ export function buildIssueDraft({
     {
       id: 'INV-0003',
       statement: 'Telemetria Instantânea em Bitmask 32-bit: Conversão determinística em hot-path sem alocação dinâmica de objetos (Zero-GC).',
+      requirementIds: ['REQ-0001', 'REQ-0003'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
+    },
+    {
+      id: 'INV-TIE-BREAK',
+      statement: 'Ordem Determinística de Desempate: Havendo múltiplos ciclos elegíveis simultâneos com mesmo MinFlow, a ordem de resolução é estritamente lexicográfica pelos identificadores de conta envolvidos.',
       requirementIds: ['REQ-0001', 'REQ-0003'],
       proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
     },
@@ -927,6 +992,20 @@ export function validateContract({ contract, policy }) {
     for (const proofId of inv.proofIds || []) {
       if (!proofIds.has(proofId)) {
         throw new Error(`invariant_without_proof:${proofId}`);
+      }
+    }
+  }
+
+  // Validador de Imunidade Constitucional (Constitutional Guardrail)
+  for (const dec of contract.decisions || []) {
+    const selectedAnswer = dec.answers?.find((a) => a.id === dec.selectedAnswerId);
+    if (selectedAnswer) {
+      const isLaxId = /(?:lax|permissive|anti-pattern|overengineering)/i.test(selectedAnswer.id);
+      const prescribesViolation = /(?:utilizar|permitir|adotar|habilitar|aceitar)\b.*\b(?:decorador|di global|any|abstrações permissivas)/iu.test(selectedAnswer.resolutionClause);
+      const violatesConstitution = isLaxId || prescribesViolation;
+      const hasAmendments = Array.isArray(contract.architecture?.amendmentIds) && contract.architecture.amendmentIds.length > 0;
+      if (violatesConstitution && !hasAmendments) {
+        throw new Error(`constitutional_conflict: A decisão ${dec.questionId} selecionou "${selectedAnswer.id}" que viola as regras estáticas de arquitetura sem uma emenda formal em architecture.amendmentIds.`);
       }
     }
   }
