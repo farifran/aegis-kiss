@@ -57,7 +57,13 @@ export const CANONICAL_RULE_STATEMENTS = {
  * Renderiza a Issue-Contrato em Markdown legível para o desenvolvedor na IDE.
  * Esta é a Face Humana da Issue-Contrato.
  */
-export function renderContractMarkdown(contract, isGoverned = false, contractDigest = '', policyRules = [], receiptDigest = '') {
+export function renderContractMarkdown(
+  contract,
+  isGoverned = false,
+  contractDigest = '',
+  policyRules = [],
+  receiptDigest = '',
+) {
   const isStateless = contract.stateModel?.kind === 'NONE';
   const mainEntrypoint = contract.scope?.authorizedPaths?.find((p) => p.endsWith('.ts') && !p.endsWith('.proof.ts')) ?? 'src/index.ts';
 
@@ -91,8 +97,8 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
     `> **Modo:** ${contract.changeKind}`,
     `> **Modelo de Estado:** ${isStateless ? 'Sem estado (Função Pura / Stateless)' : 'Transição de Estado (Stateful)'}`,
     ...(ruleEntries.length > 0 ? ['> **Regras Arquiteturais:**', ...ruleEntries] : []),
-    ...(contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
-    ...(receiptDigest ? [`> **Digest do Recibo:** \`${receiptDigest}\``] : []),
+    ...(isGoverned && contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
+    ...(isProven && receiptDigest ? [`> **Digest do Recibo:** \`${receiptDigest}\``] : []),
     '',
     '## 1. Intenção & Escopo',
     contract.intent,
@@ -181,16 +187,24 @@ export function renderContractMarkdown(contract, isGoverned = false, contractDig
   }
 
   if (/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`)) {
+    const isStrict = contract.decisions?.some((d) => d.questionId === 'Q-0001' && d.selectedAnswerId === 'ANS-STRICT');
     lines.push('');
-    lines.push('### Vetores Canônicos de Aceite (Oracle Mínimo):');
+    lines.push(isStrict ? '### Vetores de Aceite Estrito (Oracle Mínimo):' : '### Vetores Canônicos de Aceite (Oracle Mínimo):');
     lines.push('| Vetor de Entrada | Categoria | Resultado Esperado | Risco Coberto |');
     lines.push('| :--- | :--- | :--- | :--- |');
     lines.push('| `""` | Borda (Vazia) | `true` | Simetria trivial de sequência vazia |');
     lines.push('| `"a"` | Borda (Caractere Único) | `true` | Simetria trivial de elemento atômico |');
-    lines.push('| `"   "` | Borda (Espaços Puros) | `true` | Sanitização total sem resíduo |');
-    lines.push('| `"ï"` | Nominal (Diacrítico) | `true` | Preservação de trema/acentuação decomposta |');
-    lines.push('| `"Ana"` | Nominal (Case) | `true` | Case-insensitivity |');
-    lines.push('| `"A cara rajada da jararaca"` | Nominal (Frase) | `true` | Sanitização de espaços e pontuação |');
+    lines.push('| `"   "` | Borda (Espaços Puros) | `true` | Simetria de caracteres brancos idênticos |');
+    lines.push('| `"ï"` | Nominal (Caractere) | `true` | Preservação de caractere Unicode |');
+    if (isStrict) {
+      lines.push('| `"ana"` | Nominal (Minúsculas) | `true` | Palíndromo estrito em minúsculas |');
+      lines.push('| `"Ana"` | Negativo (Case Estrito) | `false` | Distinção de caixa alta/baixa caractere a caractere |');
+      lines.push('| `"A cara rajada da jararaca"` | Negativo (Espaços Estritos) | `false` | Preservação literal de espaços e pontuação |');
+      lines.push('| `"radar"` | Nominal (Palavra Estrita) | `true` | Simetria caractere a caractere |');
+    } else {
+      lines.push('| `"Ana"` | Nominal (Case) | `true` | Case-insensitivity |');
+      lines.push('| `"A cara rajada da jararaca"` | Nominal (Frase) | `true` | Sanitização de espaços e pontuação |');
+    }
     lines.push('| `"топот"` | Nominal (Cirílico) | `true` | Suporte a escrita não-latina (Unicode Universal) |');
     lines.push('| `"собака"` | Negativo (Cirílico) | `false` | Rejeição correta de não-palíndromo em alfabeto cirílico |');
     lines.push('| `"computador"` | Negativo (Latino) | `false` | Detecção determinística de assimetria |');
@@ -474,7 +488,7 @@ export function buildIssueDraft({
       id: 'INV-0001',
       statement: 'Determinismo referencial puro: entradas idênticas produzem sempre resultados idênticos sem dependência de estado externo.',
       requirementIds: ['REQ-0001', 'REQ-0003'],
-      proofIds: ['PO-BEHAVIOR'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
     },
     {
       id: 'INV-0002',
@@ -487,7 +501,7 @@ export function buildIssueDraft({
       id: 'INV-0001',
       statement: 'O estado do sistema mantém consistência interna e conservação de invariantes durante todo o ciclo.',
       requirementIds: ['REQ-0001', 'REQ-0003'],
-      proofIds: ['PO-BEHAVIOR'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
     },
     {
       id: 'INV-0002',
@@ -685,7 +699,9 @@ export function buildIssueDraft({
     proofObligations: customProofObligations ?? proofObligations,
     verification: {
       riskProfile: 'fast',
-      adversarialClasses: ['CONTINUITY', 'BOUNDARIES', 'OBSERVABILITY', 'ATOMICITY'],
+      adversarialClasses: isStateless
+        ? ['BOUNDARIES', 'OBSERVABILITY', 'COMPOSITION', 'TIME']
+        : ['CONTINUITY', 'BOUNDARIES', 'OBSERVABILITY', 'ATOMICITY'],
     },
   };
 

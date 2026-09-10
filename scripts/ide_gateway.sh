@@ -5,6 +5,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export AEGIS_ROOT="${ROOT_DIR}"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 
 fatal() { printf '[AEGIS][IDE][FATAL] %s\n' "$1" >&2; exit 1; }

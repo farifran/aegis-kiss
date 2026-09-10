@@ -74,6 +74,26 @@ printf '%s\n' "${draft_output}" | jq -e '
 grep -q '# Issue / Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"
 grep -q '\[RECOMENDADO\]' "${WORK_DIR}/.harness/runtime/contract.md"
 
+# Verify no cryptographic custody digests leak in draft (letter is being written, not sealed)
+if grep -q 'Digest do Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"; then
+  echo "[FATAL] Cryptographic contract digest leaked into draft contract.md" >&2
+  exit 1
+fi
+if grep -q 'Constituição (AGENTS.md):' "${WORK_DIR}/.harness/runtime/contract.md"; then
+  echo "[FATAL] Cryptographic constitution digest leaked into draft contract.md" >&2
+  exit 1
+fi
+
+# Verify draft contract policyDigest is unsealed placeholder (all zeros)
+jq -e '
+  .architecture.policyDigest == "0000000000000000000000000000000000000000000000000000000000000000"
+' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
+
+# Verify executionId in draft is a correlation ID, not a sha256
+jq -e '
+  (.executionId | startswith("draft-"))
+' "${WORK_DIR}/.harness/runtime/user_confirmation_request.json" >/dev/null
+
 # 3b. Test Draft Generation without decisions (zero questions, no generic hardcoded cards)
 bash "${WORK_DIR}/aegis" clean >/dev/null
 set +e
@@ -107,6 +127,17 @@ printf '%s\n' "${approve_output}" | jq -e '
 
 contract_digest="$(printf '%s\n' "${approve_output}" | jq -r '.contractDigest')"
 
+# Verify cryptographic custody stamps appear strictly after approval: ONLY the contract digest
+grep -q 'Digest do Contrato:' "${WORK_DIR}/.harness/runtime/contract.md"
+if grep -q 'Constituição (AGENTS.md):' "${WORK_DIR}/.harness/runtime/contract.md"; then
+  echo "[FATAL] Unwanted constitution digest leaked into contract.md" >&2
+  exit 1
+fi
+if grep -q 'Política Arquitetural:' "${WORK_DIR}/.harness/runtime/contract.md"; then
+  echo "[FATAL] Unwanted policy digest leaked into contract.md" >&2
+  exit 1
+fi
+
 # Verify persisted state
 [[ -s "${WORK_DIR}/src/.aegis/semantic-state.json" ]]
 persisted_digest="$(jq -r '.digests.contractSemanticDigest' "${WORK_DIR}/src/.aegis/semantic-state.json")"
@@ -114,6 +145,17 @@ if [[ "${contract_digest}" != "${persisted_digest}" ]]; then
   echo "[FATAL] Digest mismatch between approval output and persisted state" >&2
   exit 1
 fi
+
+jq -e '
+  (.digests.contractSemanticDigest | test("^[a-f0-9]{64}$"))
+  and (.digests.proofRegistrySemanticDigest | test("^[a-f0-9]{64}$"))
+' "${WORK_DIR}/src/.aegis/semantic-state.json" >/dev/null
+
+# Verify contract.json was sealed with non-zero policyDigest upon approval
+jq -e '
+  .architecture.policyDigest != "0000000000000000000000000000000000000000000000000000000000000000"
+  and (.architecture.policyDigest | test("^[a-f0-9]{64}$"))
+' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
 # 6. Test Status Command after Approval
 status_post="$(bash "${WORK_DIR}/aegis" status)"
