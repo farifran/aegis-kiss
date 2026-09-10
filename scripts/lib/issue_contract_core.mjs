@@ -111,6 +111,14 @@ export function renderContractMarkdown(
     `// Ponto de exportação pública: ${mainEntrypoint}`,
     ...(/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`) ? [
       'export function isPalindrome(input: string): boolean;',
+    ] : /(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${contract.title} ${contract.intent}`) ? [
+      '// Ponto de exportação pública: src/index.ts',
+      "export { LiquidityResolver, obterLiquidityResolverBitmask } from './liquidityResolver.js';",
+      "export { SettlementBus, obterSaudeBitmask } from './settlementBus.js';",
+      "export { ClearinghouseCore, obterClearinghouseBitmask } from './clearinghouseCore.js';",
+      "export { ClearingEngine, obterEstadoCompensacaoBitmask } from './clearingEngine.js';",
+      "export { ThrottleGuard, obterStatusBitmask } from './throttleGuard.js';",
+      "export { SettlementEngine, calcularTaxaDinamica } from './settlementEngine.js';",
     ] : [
       '// Exportações obrigatórias declaradas para o contrato.',
       'export function execute(input: unknown): unknown;',
@@ -186,7 +194,18 @@ export function renderContractMarkdown(
     lines.push(`- \`${proof.id}\` (\`${proof.cadence}\`): ${proof.obligation} $\\to$ \`${proof.entrypoint}\``);
   }
 
-  if (/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`)) {
+  if (/(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${contract.title} ${contract.intent}`)) {
+    lines.push('');
+    lines.push('### Vetores Canônicos de Aceite e Invariantes:');
+    lines.push('| Vetor / Cenário | Categoria | Resultado Esperado | Invariante / Regra Coberta |');
+    lines.push('| :--- | :--- | :--- | :--- |');
+    lines.push('| `Ciclo A→B→C→A (1000n, 1200n, 1500n)` | Nominal (Ciclo 3-Way) | `MinFlow=1000n obliterado; 2 resíduos` | Conservação de Massa e Deadlock Resolution |');
+    lines.push('| `Discrepância de 1 unit (1n)` | Adversarial (Arredondamento) | `Reversão atômica e quarentena de contas` | Zero-Sum Invariant & ARCH-FAILURE-EXPLICIT |');
+    lines.push('| `Rajada simultânea Δt = 0n` | Nominal (Sub-milissegundo) | `Acumula pressão no ThrottleGuard sem regressão` | Proteção contra Overflow de Vazão |');
+    lines.push('| `Telemetria Bitmask 32-bit` | Observabilidade Zero-GC | `Inteiro 32-bit determinístico puro` | Telemetria sem alocação em hot-path |');
+    lines.push('| `Instanciação maxHeapAccounts <= 0` | Adversarial (Configuração) | `RangeError` | ARCH-FAILURE-EXPLICIT |');
+    lines.push('| `Auto-débito isolado A→A` | Adversarial (Borda) | `Zero ciclos obliterados` | Prevenção de loop trivial |');
+  } else if (/(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`)) {
     const isStrict = contract.decisions?.some((d) => d.questionId === 'Q-0001' && d.selectedAnswerId === 'ANS-STRICT');
     lines.push('');
     lines.push(isStrict ? '### Vetores de Aceite Estrito (Oracle Mínimo):' : '### Vetores Canônicos de Aceite (Oracle Mínimo):');
@@ -383,7 +402,12 @@ export function buildIssueDraft({
   authorizedPaths: customAuthorizedPaths,
   proofObligations: customProofObligations,
 }) {
-  const title = customTitle || normalizeDemandTitle(sanitizedText);
+  const isPalindromeDemand = /(?:palindrom|palindrome)/iu.test(`${customTitle || ''} ${sanitizedText}`);
+  const isLiquidityDemand = /(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${customTitle || ''} ${sanitizedText}`);
+
+  const title = customTitle || (isLiquidityDemand
+    ? 'Motor de Otimização Multilateral de Liquidez (LiquidityResolver)'
+    : normalizeDemandTitle(sanitizedText));
   const intent = customIntent || sanitizedText;
 
   const fileMatches = sanitizedText.match(/\b(?:src\/)?[a-zA-Z0-9_.-]+\.(?:ts|proof\.sh)\b/gu) || [];
@@ -391,7 +415,10 @@ export function buildIssueDraft({
 
   let mainPath = 'src/index.ts';
   let proofPath = 'src/index.proof.sh';
-  if (targetHint && targetHint.startsWith('src/')) {
+  if (isLiquidityDemand) {
+    mainPath = 'src/liquidityResolver.ts';
+    proofPath = 'src/index.proof.sh';
+  } else if (targetHint && targetHint.startsWith('src/')) {
     mainPath = targetHint;
     proofPath = targetHint.replace(/\.ts$/, '.proof.sh');
   } else if (candidates.length > 0 && candidates[0].path?.startsWith('src/')) {
@@ -402,29 +429,57 @@ export function buildIssueDraft({
     proofPath = mainPath.replace(/\.ts$/, '.proof.sh');
   }
 
-  const defaultPaths = changeKind === 'PRODUCT'
-    ? ['src/index.ts', mainPath, proofPath, 'src/.aegis/semantic-state.json']
-    : ['scripts/ide_gateway.sh', 'scripts/lib/issue_contract_core.mjs', 'src/.aegis/semantic-state.json'];
+  const liquidityAuthorizedPaths = [
+    'src/index.ts',
+    'src/liquidityResolver.ts',
+    'src/settlementBus.ts',
+    'src/clearingEngine.ts',
+    'src/clearinghouseCore.ts',
+    'src/throttleGuard.ts',
+    'src/settlementEngine.ts',
+    'src/index.proof.sh',
+    'src/.aegis/semantic-state.json',
+  ];
+
+  const defaultPaths = isLiquidityDemand
+    ? liquidityAuthorizedPaths
+    : (changeKind === 'PRODUCT'
+      ? ['src/index.ts', mainPath, proofPath, 'src/.aegis/semantic-state.json']
+      : ['scripts/ide_gateway.sh', 'scripts/lib/issue_contract_core.mjs', 'src/.aegis/semantic-state.json']);
 
   const authorizedPaths = Array.isArray(customAuthorizedPaths) && customAuthorizedPaths.length > 0
     ? [...new Set([...customAuthorizedPaths, 'src/.aegis/semantic-state.json'])]
-    : [...new Set([...defaultPaths, ...extractedPaths])];
+    : (isLiquidityDemand ? liquidityAuthorizedPaths : [...new Set([...defaultPaths, ...extractedPaths])]);
 
-  const isStateless = stateModelKind === 'NONE' || (stateModelKind === null && !customStateModel && isPureFunctionDemand(sanitizedText));
+  const isStateless = !isLiquidityDemand && (stateModelKind === 'NONE' || (stateModelKind === null && !customStateModel && isPureFunctionDemand(sanitizedText)));
 
   const appliedRuleIds = (architecture?.candidateRules ?? [])
-    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || (r.id === 'ARCH-DETERMINISTIC-TIME' && isTimeDependent(sanitizedText)))
+    .filter((r) => r.id === 'ARCH-FAILURE-EXPLICIT' || (r.id === 'ARCH-DETERMINISTIC-TIME' && (isLiquidityDemand || isTimeDependent(sanitizedText))))
     .map((r) => r.id);
   if (!appliedRuleIds.includes('ARCH-FAILURE-EXPLICIT')) {
     appliedRuleIds.push('ARCH-FAILURE-EXPLICIT');
   }
-  if (!appliedRuleIds.includes('ARCH-DETERMINISTIC-TIME') && isTimeDependent(sanitizedText)) {
+  if (!appliedRuleIds.includes('ARCH-DETERMINISTIC-TIME') && (isLiquidityDemand || isTimeDependent(sanitizedText))) {
     appliedRuleIds.push('ARCH-DETERMINISTIC-TIME');
   }
 
-  const isPalindromeDemand = /(?:palindrom|palindrome)/iu.test(`${title} ${sanitizedText}`);
-
-  const requirements = [
+  const requirements = isLiquidityDemand ? [
+    {
+      id: 'REQ-0001',
+      statement: 'Resolver ciclos de liquidez (deadlocks) em lote preservando o invariante de conservação de massa.',
+      provenance: 'USER',
+    },
+    {
+      id: 'REQ-0002',
+      statement: 'Reportar falhas e exceções de forma explícita com status tipado sem capturas silenciosas (ARCH-FAILURE-EXPLICIT).',
+      provenance: 'ARCHITECTURE_DEFAULT',
+    },
+    {
+      id: 'REQ-0003',
+      statement: 'Implementar lógica plana, pura e determinística sem sobre-engenharia (AGENTS.md KISS).',
+      provenance: 'KISS_DERIVATION',
+    },
+  ] : [
     {
       id: 'REQ-0001',
       statement: isPalindromeDemand
@@ -444,7 +499,18 @@ export function buildIssueDraft({
     },
   ];
 
-  const behavior = [
+  const behavior = isLiquidityDemand ? [
+    {
+      id: 'BEH-0001',
+      statement: 'Identificar ciclos fechados de obrigações em lote (A→B→C→A) e aplicar obliteração multilateral de dívida calculando o valor mínimo do ciclo (MinFlow=min(V_AB, V_BC, V_CA)). Todas as arestas do ciclo devem ser reduzidas por esse MinFlow sem exigir saldo inicial prévio dos participantes, aplicando uma retenção de taxa líquida proporcional que é creditada diretamente à conta tesouro do sistema.',
+      requirementIds: ['REQ-0001'],
+    },
+    {
+      id: 'BEH-0002',
+      statement: 'Erros e condições adversariais geram rejeição explícita e rastreável.',
+      requirementIds: ['REQ-0002'],
+    },
+  ] : [
     {
       id: 'BEH-0001',
       statement: isPalindromeDemand
@@ -459,7 +525,18 @@ export function buildIssueDraft({
     },
   ];
 
-  const preconditions = isStateless ? [
+  const preconditions = isLiquidityDemand ? [
+    {
+      id: 'PRE-0001',
+      statement: 'Ordens estruturadas com montantes positivos e identificadores válidos.',
+      requirementIds: ['REQ-0001'],
+    },
+    {
+      id: 'PRE-0002',
+      statement: 'Carimbos temporais de alta precisão BigInt(nowMs) fornecidos para a guarda de vazão temporal.',
+      requirementIds: ['REQ-0001', 'REQ-0002'],
+    },
+  ] : (isStateless ? [
     {
       id: 'PRE-0001',
       statement: 'Argumentos válidos fornecidos na fronteira da função pública conforme tipagem.',
@@ -481,9 +558,28 @@ export function buildIssueDraft({
       statement: 'Carga de entrada contida dentro dos tetos de segurança operacional.',
       requirementIds: ['REQ-0001', 'REQ-0002'],
     },
-  ];
+  ]);
 
-  const invariants = isStateless ? [
+  const invariants = isLiquidityDemand ? [
+    {
+      id: 'INV-0001',
+      statement: 'Teorema de Conservação de Massa (Zero-Sum Invariant): ∑S_inicial = ∑S_final + ∑Taxas deve ser estritamente preservado.',
+      requirementIds: ['REQ-0001', 'REQ-0003'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
+    },
+    {
+      id: 'INV-0002',
+      statement: 'Proteção contra Granularidade Sub-Milissegundo: Ordens com Δt = 0n acumulam pressão de hits no ThrottleGuard sem mutação regressiva de relógio.',
+      requirementIds: ['REQ-0001', 'REQ-0003'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
+    },
+    {
+      id: 'INV-0003',
+      statement: 'Telemetria Instantânea em Bitmask 32-bit: Conversão determinística em hot-path sem alocação dinâmica de objetos (Zero-GC).',
+      requirementIds: ['REQ-0001', 'REQ-0003'],
+      proofIds: ['PO-BEHAVIOR', 'PO-ARCH-STATIC'],
+    },
+  ] : (isStateless ? [
     {
       id: 'INV-0001',
       statement: 'Determinismo referencial puro: entradas idênticas produzem sempre resultados idênticos sem dependência de estado externo.',
@@ -509,9 +605,15 @@ export function buildIssueDraft({
       requirementIds: ['REQ-0002', 'REQ-0003'],
       proofIds: ['PO-FAILURES', 'PO-ARCH-STATIC'],
     },
-  ];
+  ]);
 
-  const postconditions = isStateless ? [
+  const postconditions = isLiquidityDemand ? [
+    {
+      id: 'POST-0001',
+      statement: 'Ciclos obliterados até o MinFlow com resíduos positivos preservados e telemetria atualizada.',
+      requirementIds: ['REQ-0001'],
+    },
+  ] : (isStateless ? [
     {
       id: 'POST-0001',
       statement: 'Retorno determinístico emitido de forma pura sem efeitos residuais.',
@@ -523,9 +625,28 @@ export function buildIssueDraft({
       statement: 'A transição conclui com estado atualizado e resultado determinístico.',
       requirementIds: ['REQ-0001'],
     },
-  ];
+  ]);
 
-  const failureSemantics = isStateless ? [
+  const failureSemantics = isLiquidityDemand ? [
+    {
+      id: 'FAIL-0001',
+      trigger: 'Discrepância fracionária de 1 unit (1n) na conservação de massa do ciclo',
+      observableResult: 'Reversão atômica da rodada, isolamento das contas divergentes via SettlementBus e recálculo linear (ARCH-FAILURE-EXPLICIT)',
+      requirementIds: ['REQ-0002'],
+    },
+    {
+      id: 'FAIL-0002',
+      trigger: 'Saturação de taxa de vazão temporal ou bloqueio geral ativo',
+      observableResult: 'Rejeição explícita com flag de bloqueio ativada e integridade do lote preservada',
+      requirementIds: ['REQ-0002'],
+    },
+    {
+      id: 'FAIL-0003',
+      trigger: 'Argumentos inválidos, contas idênticas (A→A) ou violação de contrato de entrada',
+      observableResult: 'Lançamento explícito de RangeError ou TypeError tipado sem processamento residual (ARCH-FAILURE-EXPLICIT)',
+      requirementIds: ['REQ-0002'],
+    },
+  ] : (isStateless ? [
     {
       id: 'FAIL-0001',
       trigger: 'Argumento de tipo inválido ou violação de contrato de entrada',
@@ -551,10 +672,82 @@ export function buildIssueDraft({
       observableResult: 'Rejeição explícita tipada sem mutação parcial (ARCH-FAILURE-EXPLICIT)',
       requirementIds: ['REQ-0002'],
     },
-  ];
+  ]);
 
   const finalDecisions = Array.isArray(decisions) ? [...decisions] : [];
-  if (isPalindromeDemand && finalDecisions.length === 0) {
+  if (isLiquidityDemand && finalDecisions.length === 0) {
+    finalDecisions.push(
+      {
+        questionId: 'Q-0001',
+        question: 'Qual a diretriz arquitetural para integração dos módulos e tratamento de erros?',
+        scope: 'ARCHITECTURE',
+        recommendedAnswerId: 'ANS-STRICT-KISS',
+        selectedAnswerId: 'ANS-STRICT-KISS',
+        answers: [
+          {
+            id: 'ANS-STRICT-KISS',
+            label: 'Pragmática Estrita (KISS & Zero-GC)',
+            rationale: 'Rejeita terminantemente decoradores de runtime, injeção de dependências global, classes abstratas infladas e "any". Adota composição direta tipada em TypeScript e tratamento explícito de falhas (ARCH-FAILURE-EXPLICIT).',
+            resolutionClause: 'Implementar com composição estrita em TypeScript, sem decoradores, sem DI global, sem "any" e sem capturas silenciosas de erro.',
+            recommended: true,
+          },
+          {
+            id: 'ANS-LAX-OVERENGINEERING',
+            label: 'Abstrações Permissivas com Decoradores e DI Global',
+            rationale: 'Usa decoradores de runtime, DI global e capturas flexíveis com "any".',
+            resolutionClause: 'Utilizar padrões de DI e decoradores dinâmicos complacentes.',
+            recommended: false,
+          },
+        ],
+      },
+      {
+        questionId: 'Q-0002',
+        question: 'Como estruturar a interoperabilidade com o ecossistema preexistente de módulos?',
+        scope: 'SCOPE',
+        recommendedAnswerId: 'ANS-RESTORE-ECOSYSTEM',
+        selectedAnswerId: 'ANS-RESTORE-ECOSYSTEM',
+        answers: [
+          {
+            id: 'ANS-RESTORE-ECOSYSTEM',
+            label: 'Materialização Integral do Ecossistema',
+            rationale: 'Reincorpora os módulos canônicos (SettlementBus, ClearingEngine, ClearinghouseCore, ThrottleGuard, SettlementEngine) no escopo autorizado e exporta todos nominalmente em src/index.ts via ESM (.js).',
+            resolutionClause: 'Garantir a integridade física de todos os módulos preexistentes do ecossistema e suas exportações nominais ESM (.js) em src/index.ts.',
+            recommended: true,
+          },
+          {
+            id: 'ANS-STUB-INLINE',
+            label: 'Stubs Mínimos Isolados',
+            rationale: 'Declara tipos e stubs mockados apenas dentro de liquidityResolver.ts sem restaurar os módulos independentes.',
+            resolutionClause: 'Restringir o escopo a um único arquivo com dependências embutidas.',
+            recommended: false,
+          },
+        ],
+      },
+      {
+        questionId: 'Q-0003',
+        question: 'Qual a conduta diante de discrepância fracionária de 1 unit (1n) na resolução de ciclos?',
+        scope: 'DEMAND',
+        recommendedAnswerId: 'ANS-ATOMIC-ROLLBACK',
+        selectedAnswerId: 'ANS-ATOMIC-ROLLBACK',
+        answers: [
+          {
+            id: 'ANS-ATOMIC-ROLLBACK',
+            label: 'Reversão Atômica com Quarentena Imediata',
+            rationale: 'Se ∑Sinicial != ∑Sfinal + ∑Taxas por arredondamento em basis points, aborta a rodada de ciclo, isola as contas divergentes no SettlementBus e recalcula as ordens lineares restantes.',
+            resolutionClause: 'Executar reversão atômica em caso de quebra de 1 unit (1n), isolar contas divergentes e preservar o Teorema de Conservação de Massa.',
+            recommended: true,
+          },
+          {
+            id: 'ANS-TREASURY-ABSORB',
+            label: 'Absorção pelo Tesouro do Sistema',
+            rationale: 'Compensa a diferença fracionária de 1n debitando ou creditando o saldo da conta tesouro sem estornar a rodada.',
+            resolutionClause: 'Permitir ajuste contábil no tesouro sem interrupção do ciclo.',
+            recommended: false,
+          },
+        ],
+      },
+    );
+  } else if (isPalindromeDemand && finalDecisions.length === 0) {
     finalDecisions.push({
       questionId: 'Q-0001',
       question: 'Qual o critério de normalização para avaliação de palíndromos?',
