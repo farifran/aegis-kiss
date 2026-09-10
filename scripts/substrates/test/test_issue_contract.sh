@@ -46,11 +46,54 @@ try {
 if (!failed) throw new Error('DoS limit was not enforced');
 NODE
 
+# Standard input is bounded while being read, not only after full buffering.
+node -e 'require("fs").writeFileSync(process.argv[1], "a".repeat(65537))' "${WORK_DIR}/oversized-demand.txt"
+set +e
+bash "${WORK_DIR}/aegis" - <"${WORK_DIR}/oversized-demand.txt" >/dev/null 2>"${WORK_DIR}/stdin-too-large.err"
+stdin_code=$?
+set -e
+if [[ "${stdin_code}" -eq 0 ]] || ! grep -q 'input_too_large' "${WORK_DIR}/stdin-too-large.err"; then
+  echo "[FATAL] Oversized stdin was not rejected during capture" >&2
+  exit 1
+fi
+
+# Capture must not silently choose between two competing intents.
+set +e
+ambiguous_intent_output="$(bash "${WORK_DIR}/aegis" "Intenção livre" --spec '{"intent":"Intenção estruturada"}' 2>&1)"
+ambiguous_intent_code=$?
+set -e
+if [[ "${ambiguous_intent_code}" -eq 0 ]] || ! grep -q 'ambiguous_intent_sources' <<< "${ambiguous_intent_output}"; then
+  echo "[FATAL] Competing intent sources were not rejected" >&2
+  exit 1
+fi
+
+# Structured input must stay inside the workspace and use its declared type.
+set +e
+outside_spec_output="$(bash "${WORK_DIR}/aegis" --spec /dev/null 2>&1)"
+outside_spec_code=$?
+invalid_intent_output="$(bash "${WORK_DIR}/aegis" --spec '{"intent":{"not":"text"}}' 2>&1)"
+invalid_intent_code=$?
+invalid_target_output="$(bash "${WORK_DIR}/aegis" "Demanda válida" --target src/../escape.ts 2>&1)"
+invalid_target_code=$?
+set -e
+if [[ "${outside_spec_code}" -eq 0 ]] || ! grep -q 'input_file_outside_workspace:--spec' <<< "${outside_spec_output}"; then
+  echo "[FATAL] Structured file escaped the workspace boundary" >&2
+  exit 1
+fi
+if [[ "${invalid_intent_code}" -eq 0 ]] || ! grep -q 'invalid_spec_intent' <<< "${invalid_intent_output}"; then
+  echo "[FATAL] Non-text spec intent was not rejected" >&2
+  exit 1
+fi
+if [[ "${invalid_target_code}" -eq 0 ]] || ! grep -q 'invalid_target_path' <<< "${invalid_target_output}"; then
+  echo "[FATAL] Invalid target path was not rejected" >&2
+  exit 1
+fi
+
 # 3. Test Draft Generation via ./aegis CLI (com e sem decisões)
 decisions_payload='[{"questionId":"Q-0001","question":"Qual o modo de validação?","scope":"INPUT","recommendedAnswerId":"ANS-0001","selectedAnswerId":"ANS-0001","answers":[{"id":"ANS-0001","label":"Estrito","rationale":"Validação imediata","resolutionClause":"Rejeitar entrada inválida","recommended":true},{"id":"ANS-0002","label":"Tolerante","rationale":"Permissivo","resolutionClause":"Sanitizar automaticamente","recommended":false}]}]'
 
 set +e
-draft_output="$(bash "${WORK_DIR}/aegis" "Criar um validador determinístico em src/validator.ts" --decisions "${decisions_payload}")"
+draft_output="$(bash "${WORK_DIR}/aegis" Criar um validador determinístico em src/validator.ts --decisions "${decisions_payload}")"
 draft_code=$?
 set -e
 
@@ -63,8 +106,18 @@ printf '%s\n' "${draft_output}" | jq -e '
   .status == "USER_CONFIRMATION_REQUIRED"
   and (.questions | length > 0)
   and (.questions[0].recommendedAnswerId != null)
+  and (.intent == "Criar um validador determinístico em src/validator.ts")
   and (.artifactPath == ".harness/runtime/contract.md")
 ' >/dev/null
+
+set +e
+unknown_option_output="$(bash "${WORK_DIR}/aegis" "Demanda válida" --legacy 2>&1)"
+unknown_option_code=$?
+set -e
+if [[ "${unknown_option_code}" -eq 0 ]] || ! grep -q 'unknown_draft_option:--legacy' <<< "${unknown_option_output}"; then
+  echo "[FATAL] Unknown draft option was not rejected" >&2
+  exit 1
+fi
 
 [[ -s "${WORK_DIR}/.harness/runtime/contract.json" ]]
 [[ -s "${WORK_DIR}/.harness/runtime/contract.md" ]]
@@ -112,6 +165,18 @@ printf '%s\n' "${zero_q_output}" | jq -e '
 ' >/dev/null
 
 grep -q 'Nenhuma ambiguidade material detectada' "${WORK_DIR}/.harness/runtime/contract.md"
+
+# Intent supplied by --spec follows the same normalization as free text.
+bash "${WORK_DIR}/aegis" clean >/dev/null
+set +e
+spec_draft="$(bash "${WORK_DIR}/aegis" --spec '{"intent":"Linha 1\r\nLinha 2"}' --state-kind NONE)"
+spec_draft_code=$?
+set -e
+if [[ "${spec_draft_code}" -ne 2 ]]; then
+  echo "[FATAL] Expected draft generated from --spec intent" >&2
+  exit 1
+fi
+jq -e '.intent == "Linha 1\nLinha 2"' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
 # 4. Test Status Command before Approval
 status_pre="$(bash "${WORK_DIR}/aegis" status)"

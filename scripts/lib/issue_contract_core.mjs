@@ -353,12 +353,10 @@ export function buildIssueDraft({
   architecture,
   changeKind = 'PRODUCT',
   targetHint = '',
-  previousContract = null,
   decisions = [],
   stateModelKind = null,
   stateModel: customStateModel,
   title: customTitle,
-  intent: customIntent,
   requirements: customRequirements,
   behavior: customBehavior,
   invariants: customInvariants,
@@ -368,12 +366,20 @@ export function buildIssueDraft({
   authorizedPaths: customAuthorizedPaths,
   proofObligations: customProofObligations,
 }) {
-  const title = customTitle || normalizeDemandTitle(sanitizedText);
-  const intent = customIntent || sanitizedText;
+  const title = customTitle ? normalizeDemandTitle(customTitle) : normalizeDemandTitle(sanitizedText);
+  const intent = sanitizedText;
 
-  const mainPath = targetHint.startsWith('src/') && targetHint.endsWith('.ts')
-    ? targetHint
-    : 'src/index.ts';
+  if (
+    targetHint
+    && (
+      !targetHint.startsWith('src/')
+      || !targetHint.endsWith('.ts')
+      || targetHint.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    )
+  ) {
+    throw new Error('invalid_target_path');
+  }
+  const mainPath = targetHint || 'src/index.ts';
   const proofPath = mainPath.replace(/\.ts$/, '.proof.sh');
   const defaultPaths = changeKind === 'PRODUCT'
     ? ['src/index.ts', mainPath, proofPath, 'src/.aegis/semantic-state.json']
@@ -542,7 +548,7 @@ export function buildIssueDraft({
     architecture: {
       policyDigest: architecture?.policyDigest ?? '0'.repeat(64),
       appliedRuleIds,
-      amendmentIds: previousContract?.architecture?.amendmentIds ?? [],
+      amendmentIds: [],
     },
     scope: {
       authorizedPaths,

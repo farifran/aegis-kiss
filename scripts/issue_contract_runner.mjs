@@ -2,9 +2,9 @@
 
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
@@ -14,6 +14,7 @@ import {
   computeContractDigest,
   createProofRegistry,
   loadArchitecturePolicy,
+  maxDemandBytes,
   renderContractMarkdown,
   sanitizeInputText,
   validateContract,
@@ -27,18 +28,74 @@ const contractMdPath = resolve(runtimeDir, 'contract.md');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 
-function parseJsonOrFile(raw, baseDir) {
+function isPathInside(baseDir, candidatePath) {
+  const relativePath = relative(baseDir, candidatePath);
+  return relativePath === '' || (!relativePath.startsWith('..' + sep) && relativePath !== '..');
+}
+
+function parseJsonOrFile(raw, baseDir, option) {
   const filePath = resolve(baseDir, raw);
   if (existsSync(filePath)) {
+    if (!isPathInside(baseDir, filePath)) {
+      throw new Error('input_file_outside_workspace:' + option);
+    }
+    const metadata = statSync(filePath);
+    if (!metadata.isFile()) {
+      throw new Error('input_path_not_file:' + option);
+    }
+    if (metadata.size > maxDemandBytes) {
+      throw new Error('structured_input_too_large:' + option);
+    }
     return JSON.parse(readFileSync(filePath, 'utf8'));
   }
+  if (Buffer.byteLength(raw, 'utf8') > maxDemandBytes) {
+    throw new Error('structured_input_too_large:' + option);
+  }
   return JSON.parse(raw);
+}
+
+async function readStdinWithinLimit(maxBytes) {
+  const chunks = [];
+  let totalBytes = 0;
+
+  for await (const chunk of process.stdin) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+    totalBytes += bytes.length;
+    if (totalBytes > maxBytes) {
+      throw new Error('input_too_large');
+    }
+    chunks.push(bytes);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+function requiredOptionValue(args, index, option) {
+  const value = args[index + 1];
+  if (typeof value !== 'string' || value.startsWith('--')) {
+    throw new Error(`missing_option_value:${option}`);
+  }
+  return value;
+}
+
+function requireObject(value, option) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('invalid_json_object:' + option);
+  }
+  return value;
+}
+
+function requireArray(value, option) {
+  if (!Array.isArray(value)) {
+    throw new Error('invalid_json_array:' + option);
+  }
+  return value;
 }
 
 async function handleDraft(args) {
   let changeKind = 'PRODUCT';
   let targetHint = '';
-  let demandText = '';
+  const demandParts = [];
   let specData = null;
   let decisionsData = null;
   let channel = 'IDE_DEFAULT';
@@ -47,58 +104,76 @@ async function handleDraft(args) {
   let customTitle = null;
 
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === '--kind' && ['PRODUCT', 'HARNESS'].includes(args[index + 1])) {
-      changeKind = args[index + 1];
+    if (args[index] === '--') {
+      demandParts.push(...args.slice(index + 1));
+      break;
+    }
+    if (args[index] === '--kind') {
+      const value = requiredOptionValue(args, index, '--kind');
+      if (!['PRODUCT', 'HARNESS'].includes(value)) {
+        throw new Error('invalid_option_value:--kind');
+      }
+      changeKind = value;
       index += 1;
-    } else if (args[index] === '--target' && typeof args[index + 1] === 'string') {
-      targetHint = args[index + 1];
+    } else if (args[index] === '--target') {
+      targetHint = requiredOptionValue(args, index, '--target');
       index += 1;
-    } else if (args[index] === '--channel' && typeof args[index + 1] === 'string') {
-      channel = args[index + 1];
+    } else if (args[index] === '--channel') {
+      channel = requiredOptionValue(args, index, '--channel');
       index += 1;
-    } else if (args[index] === '--state-kind' && ['NONE', 'STATE_TRANSITION'].includes(args[index + 1])) {
-      stateModelKind = args[index + 1];
+    } else if (args[index] === '--state-kind') {
+      const value = requiredOptionValue(args, index, '--state-kind');
+      if (!['NONE', 'STATE_TRANSITION'].includes(value)) {
+        throw new Error('invalid_option_value:--state-kind');
+      }
+      stateModelKind = value;
       index += 1;
-    } else if (args[index] === '--title' && typeof args[index + 1] === 'string') {
-      customTitle = args[index + 1];
+    } else if (args[index] === '--title') {
+      customTitle = requiredOptionValue(args, index, '--title');
       index += 1;
-    } else if (args[index] === '--spec' && typeof args[index + 1] === 'string') {
-      specData = parseJsonOrFile(args[index + 1], root);
+    } else if (args[index] === '--spec') {
+      specData = requireObject(
+        parseJsonOrFile(requiredOptionValue(args, index, '--spec'), root, '--spec'),
+        '--spec',
+      );
       index += 1;
-    } else if (args[index] === '--decisions' && typeof args[index + 1] === 'string') {
-      decisionsData = parseJsonOrFile(args[index + 1], root);
+    } else if (args[index] === '--decisions') {
+      decisionsData = requireArray(
+        parseJsonOrFile(requiredOptionValue(args, index, '--decisions'), root, '--decisions'),
+        '--decisions',
+      );
       index += 1;
-    } else if (args[index] === '--answers' && typeof args[index + 1] === 'string') {
-      answersData = parseJsonOrFile(args[index + 1], root);
+    } else if (args[index] === '--answers') {
+      answersData = requireArray(
+        parseJsonOrFile(requiredOptionValue(args, index, '--answers'), root, '--answers'),
+        '--answers',
+      );
       index += 1;
-    } else if (!demandText && !args[index].startsWith('--')) {
-      demandText = args[index];
+    } else if (args[index].startsWith('--')) {
+      throw new Error(`unknown_draft_option:${args[index]}`);
+    } else {
+      demandParts.push(args[index]);
     }
   }
 
-  if (!demandText && specData?.intent) {
-    demandText = specData.intent;
+  const demandText = demandParts.join(' ');
+  if (specData?.intent !== undefined && typeof specData.intent !== 'string') {
+    throw new Error('invalid_spec_intent');
+  }
+  if (demandText && specData?.intent !== undefined) {
+    throw new Error('ambiguous_intent_sources');
+  }
+  if (!demandText && specData?.intent !== undefined) {
+    demandParts.push(specData.intent);
   }
 
-  if (!demandText) {
-    const chunks = [];
-    for await (const chunk of process.stdin) chunks.push(chunk);
-    demandText = Buffer.concat(chunks);
-  }
-
-  const rawBuffer = Buffer.isBuffer(demandText) ? demandText : Buffer.from(demandText, 'utf8');
+  const rawBuffer = demandParts.length > 0
+    ? Buffer.from(demandParts.join(' '), 'utf8')
+    : await readStdinWithinLimit(maxDemandBytes);
   const sanitizedText = sanitizeInputText(rawBuffer);
 
-  let policy;
-  try {
-    const architecturePolicy = loadArchitecturePolicy(root);
-    policy = architecturePolicy.policy;
-  } catch {
-    policy = {
-      rules: [{ id: 'ARCH-FAILURE-EXPLICIT' }],
-      amendments: [],
-    };
-  }
+  const architecturePolicy = loadArchitecturePolicy(root);
+  const policy = architecturePolicy.policy;
 
   if (specData && Array.isArray(specData.decisions) && !decisionsData) {
     decisionsData = specData.decisions;
@@ -112,11 +187,10 @@ async function handleDraft(args) {
     },
     changeKind,
     targetHint,
-    decisions: Array.isArray(decisionsData) ? decisionsData : [],
+    decisions: decisionsData ?? [],
     stateModelKind: specData?.stateModel?.kind ?? stateModelKind,
     stateModel: specData?.stateModel,
     title: specData?.title ?? customTitle,
-    intent: specData?.intent,
     requirements: specData?.requirements,
     behavior: specData?.behavior,
     invariants: specData?.invariants,
