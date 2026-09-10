@@ -244,7 +244,7 @@
           "selectedAnswerId": { "type": "string" },
           "answers": {
             "type": "array",
-            "minItems": 2,
+            "minItems": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -254,7 +254,8 @@
                 "label": { "type": "string", "minLength": 1 },
                 "rationale": { "type": "string", "minLength": 1 },
                 "resolutionClause": { "type": "string", "minLength": 1 },
-                "recommended": { "type": "boolean" }
+                "recommended": { "type": "boolean" },
+                "requiresText": { "type": "boolean" }
               }
             }
           }

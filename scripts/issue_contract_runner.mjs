@@ -33,9 +33,9 @@ async function handleDraft(args) {
 
   const sanitizedText = sanitizeInputText(rawBuffer);
 
+  const discovery = discoverWorkspace(root, sanitizedText);
   const architecturePolicy = loadArchitecturePolicy(root);
   const policy = architecturePolicy.policy;
-  const discovery = discoverWorkspace(root, sanitizedText);
 
   const draft = buildIssueDraft({
     sanitizedText,
@@ -63,12 +63,6 @@ async function handleDraft(args) {
     schema: 'aegis.preflight_finalization.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
     executionId: draftSessionId,
-    decisionDigest: draftSessionId,
-    preflightPromptDigest: draftSessionId,
-    confirmation: {
-      channel: 'IDE_DEFAULT',
-      confirmationId: draftSessionId,
-    },
     title: draft.title,
     intent: draft.intent,
     scope: draft.scope,
@@ -100,6 +94,10 @@ async function handleApprove() {
   if (targetResolution) {
     try {
       const resolution = JSON.parse(await readFile(targetResolution, 'utf8'));
+      const request = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
+      if (resolution.executionId !== request.executionId) {
+        throw new Error('stale_preflight_resolution');
+      }
       if (Array.isArray(resolution.answers)) {
         contract = applyUserResolution(contract, resolution.answers);
       }

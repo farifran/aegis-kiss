@@ -1,4 +1,4 @@
-/* global module, require, setInterval, clearInterval */
+/* global module, require */
 
 const vscode = require('vscode');
 const { spawn } = require('node:child_process');
@@ -48,9 +48,7 @@ function isAlreadyResolved(root, request) {
     if (!fs.existsSync(fullPath)) return false;
     const raw = fs.readFileSync(fullPath, 'utf8');
     const resolution = JSON.parse(raw);
-    const reqId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest;
-    const resId = resolution?.confirmation?.confirmationId || resolution?.executionId || resolution?.decisionDigest;
-    return Boolean(reqId && resId && reqId === resId);
+    return Boolean(request.executionId && resolution?.executionId === request.executionId);
   } catch {
     return false;
   }
@@ -70,7 +68,7 @@ async function choose(question) {
     ignoreFocusOut: true,
   });
   if (selected === undefined) return undefined;
-  if (!selected.other) return { questionId: question.id, action: 'SELECT_ANSWER', answerId: selected.answer.id };
+  if (!selected.other && !selected.answer.requiresText) return { questionId: question.id, answerId: selected.answer.id };
   const correction = await vscode.window.showInputBox({
     title: `Aegis — ${question.id}`,
     prompt: 'Descreva a interpretação que o contrato deve adotar.',
@@ -82,17 +80,9 @@ async function choose(question) {
 
 async function writeResolution(root, request, answers) {
   const target = path.join(root.fsPath, resolutionRelPath);
-  const confirmationId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest || 'aegis-conf';
   const payload = `${JSON.stringify({
     schema: 'aegis.preflight_resolution.v2',
-    executionId: confirmationId,
-    decisionDigest: confirmationId,
-    preflightPromptDigest: confirmationId,
-    confirmation: {
-      channel: 'IDE_NATIVE_SELECTOR',
-      confirmationId,
-      selectedAtEpochMs: Date.now(),
-    },
+    executionId: request.executionId,
     answers,
   }, null, 2)}\n`;
   await fs.promises.mkdir(path.dirname(target), { recursive: true });
@@ -109,14 +99,6 @@ function resume(root) {
   });
 }
 
-function logWizard(msg) {
-  try {
-    fs.appendFileSync('/tmp/aegis-wizard.log', `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {
-    // Silently ignore logging errors
-  }
-}
-
 async function presentPending(force = false) {
   const root = workspaceRoot();
   if (root === undefined) return;
@@ -124,14 +106,13 @@ async function presentPending(force = false) {
   const request = readRequest(root);
   if (request === undefined) return;
 
-  const reqId = request.confirmation?.confirmationId || request.executionId || request.decisionDigest;
+  const reqId = request.executionId;
   if (!force && lastCancelledId === reqId) return;
 
   if (isPrompting) return;
   if (isAlreadyResolved(root, request)) return;
 
   isPrompting = true;
-  logWizard(`presentPending: initiating confirmation for ${reqId}`);
   try {
     if (request.questions.length === 0) {
       const choice = await vscode.window.showQuickPick([
@@ -153,16 +134,12 @@ async function presentPending(force = false) {
       });
 
       if (!choice || choice.action === 'CANCEL') {
-        logWizard(`presentPending: user cancelled zero-question confirmation for ${reqId}`);
         lastCancelledId = reqId;
         return;
       }
 
-      logWizard('presentPending: writing zero-question resolution');
       await writeResolution(root, request, []);
-      logWizard('presentPending: resuming ./aegis approve');
       await resume(root);
-      logWizard('presentPending: approved successfully');
       lastCancelledId = null;
       return;
     }
@@ -171,20 +148,15 @@ async function presentPending(force = false) {
     for (const question of request.questions) {
       const answer = await choose(question);
       if (answer === undefined) {
-        logWizard(`presentPending: user cancelled question ${question.id}`);
         lastCancelledId = reqId;
         return;
       }
       answers.push(answer);
     }
-    logWizard('presentPending: writing resolution');
     await writeResolution(root, request, answers);
-    logWizard('presentPending: resuming ./aegis approve');
     await resume(root);
-    logWizard('presentPending: approved successfully');
     lastCancelledId = null;
   } catch (error) {
-    logWizard(`presentPending: error ${error.message}`);
     await vscode.window.showErrorMessage(`Aegis não retomou a confirmação: ${error.message}`);
   } finally {
     isPrompting = false;
@@ -192,7 +164,6 @@ async function presentPending(force = false) {
 }
 
 function activate(context) {
-  logWizard('activate: wizard extension active');
   const root = workspaceRoot();
   if (root === undefined) return;
 
@@ -204,27 +175,6 @@ function activate(context) {
     watcher.onDidChange(() => presentPending()),
     watcher.onDidDelete(() => resetWizardState()),
   );
-
-  // 2. Node.js native fs.watch on .harness (survives rm -rf .harness/runtime)
-  try {
-    const harnessDir = path.join(root.fsPath, '.harness');
-    if (fs.existsSync(harnessDir)) {
-      const fsWatcher = fs.watch(harnessDir, { recursive: true }, (_eventType, filename) => {
-        if (filename && filename.includes('user_confirmation_request.json')) {
-          void presentPending();
-        }
-      });
-      context.subscriptions.push({ dispose: () => fsWatcher.close() });
-    }
-  } catch {
-    // Native watch fallback not supported on all environments
-  }
-
-  // 3. Polling check every 1.0 second (guaranteed fallback)
-  const interval = setInterval(() => {
-    void presentPending();
-  }, 1000);
-  context.subscriptions.push({ dispose: () => clearInterval(interval) });
 
   context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', () => presentPending(true)));
   void presentPending();

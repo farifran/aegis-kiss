@@ -155,6 +155,25 @@ function buildForensicEvidence(repositoryRoot, sourceRecords, intent) {
   return { knownFacts, unknownFacts };
 }
 
+function buildClarificationDecision(unknownFacts) {
+  if (unknownFacts.length === 0) return [];
+  return [{
+    questionId: 'Q-INPUT-CLARIFICATION',
+    question: 'A demanda ainda não contém evidência suficiente para um contrato falsificável. Descreva o comportamento observável, entradas, saídas, limites e falhas relevantes.',
+    scope: 'INPUT',
+    recommendedAnswerId: 'ANS-PROVIDE-DETAIL',
+    selectedAnswerId: '',
+    answers: [{
+      id: 'ANS-PROVIDE-DETAIL',
+      label: 'Fornecer especificação',
+      rationale: 'O Aegis não inventa requisitos ausentes.',
+      resolutionClause: 'O usuário fornecerá a especificação observável que falta para o contrato.',
+      recommended: true,
+      requiresText: true,
+    }],
+  }];
+}
+
 /**
  * Descobre apenas fatos estruturais já presentes em src/.
  * Todo o resultado existe em RAM até ser incorporado à evidência do contrato.
@@ -378,6 +397,11 @@ export function applyUserResolution(draftContract, userAnswers) {
     let selected = answerMap.get(decision.questionId) ?? decision.recommendedAnswerId;
     let answers = decision.answers;
 
+    const selectedAnswer = answers.find((answer) => answer.id === selected);
+    if (selectedAnswer?.requiresText && !correction) {
+      throw new Error(`clarification_required:${decision.questionId}`);
+    }
+
     if (correction) {
       const customId = `ANS-USER-${decision.questionId}`;
       selected = customId;
@@ -425,14 +449,15 @@ export function applyUserResolution(draftContract, userAnswers) {
 
   let updatedEvidence = draftContract.evidenceDiscipline;
   if (updatedEvidence && updatedDecisions.length > 0) {
-    const updatedUnknown = updatedDecisions.map((d) => {
+    const clarifications = updatedDecisions.map((d) => {
       const selected = d.answers.find((a) => a.id === d.selectedAnswerId);
       const selLabel = selected ? selected.label : d.selectedAnswerId;
-      return `[${d.questionId}] ${d.question} -> Resolvido: ${selLabel}`;
+      return `[${d.questionId}] Esclarecimento do usuário: ${selLabel}`;
     });
     updatedEvidence = {
       ...updatedEvidence,
-      unknownFacts: updatedUnknown,
+      knownFacts: [...updatedEvidence.knownFacts, ...clarifications],
+      unknownFacts: [],
     };
   }
 
@@ -519,7 +544,7 @@ export function buildIssueDraft({
     },
     {
       id: 'REQ-0002',
-      statement: 'Reportar falhas e exceções de forma explícita com status tipado sem capturas silenciosas (ARCH-FAILURE-EXPLICIT).',
+      statement: 'Reportar falhas relevantes de forma explícita, sem capturas silenciosas (ARCH-FAILURE-EXPLICIT).',
       provenance: 'ARCHITECTURE_DEFAULT',
     },
     {
@@ -614,9 +639,11 @@ export function buildIssueDraft({
     ...(discovery?.knownFacts ?? []),
   ];
 
-  const unknownFacts = discovery?.unknownFacts?.length > 0
-    ? discovery.unknownFacts
+  const discoveryUnknownFacts = discovery?.unknownFacts ?? [];
+  const unknownFacts = discoveryUnknownFacts.length > 0
+    ? discoveryUnknownFacts
     : ['Nenhuma lacuna material não fornecida que altere o comportamento observável (AGENTS.md Lei II).'];
+  const decisions = buildClarificationDecision(discoveryUnknownFacts);
 
   const draft = {
     schema: 'aegis.issue_contract.v1',
@@ -638,7 +665,7 @@ export function buildIssueDraft({
     invariants,
     postconditions,
     failureSemantics,
-    decisions: [],
+    decisions,
     evidenceDiscipline: {
       knownFacts,
       unknownFacts,
@@ -686,14 +713,15 @@ export function validateContract({ contract, policy }) {
   // Validador de Imunidade Constitucional (Constitutional Guardrail)
   for (const dec of contract.decisions || []) {
     const selectedAnswer = dec.answers?.find((a) => a.id === dec.selectedAnswerId);
-    if (selectedAnswer) {
-      const isLaxId = /(?:lax|permissive|anti-pattern|overengineering)/i.test(selectedAnswer.id);
-      const prescribesViolation = /(?:utilizar|permitir|adotar|habilitar|aceitar)\b.*\b(?:decorador|di global|any|abstrações permissivas)/iu.test(selectedAnswer.resolutionClause);
-      const violatesConstitution = isLaxId || prescribesViolation;
-      const hasAmendments = Array.isArray(contract.architecture?.amendmentIds) && contract.architecture.amendmentIds.length > 0;
-      if (violatesConstitution && !hasAmendments) {
-        throw new Error(`constitutional_conflict: A decisão ${dec.questionId} selecionou "${selectedAnswer.id}" que viola as regras estáticas de arquitetura sem uma emenda formal em architecture.amendmentIds.`);
-      }
+    if (!selectedAnswer) {
+      throw new Error(`unresolved_decision:${dec.questionId}`);
+    }
+    const isLaxId = /(?:lax|permissive|anti-pattern|overengineering)/i.test(selectedAnswer.id);
+    const prescribesViolation = /(?:utilizar|permitir|adotar|habilitar|aceitar)\b.*\b(?:decorador|di global|any|abstrações permissivas)/iu.test(selectedAnswer.resolutionClause);
+    const violatesConstitution = isLaxId || prescribesViolation;
+    const hasAmendments = Array.isArray(contract.architecture?.amendmentIds) && contract.architecture.amendmentIds.length > 0;
+    if (violatesConstitution && !hasAmendments) {
+      throw new Error(`constitutional_conflict: A decisão ${dec.questionId} selecionou "${selectedAnswer.id}" que viola as regras estáticas de arquitetura sem uma emenda formal em architecture.amendmentIds.`);
     }
   }
 
