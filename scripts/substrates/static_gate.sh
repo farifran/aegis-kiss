@@ -162,25 +162,6 @@ run_eval_grep_fallback() {
         printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
       fi
 
-      # 6. Zero-GC Hot-Path Heap Allocation Check
-      if [[ "${file}" != *"test"* ]] && [[ "${file}" != *"spec"* ]]; then
-        hits="$(grep -nE '(\._stateStack|\._stack|\._history|\.stack)\.push\([[:space:]]*\{[^}]*\[\.\.\.' "${file}" 2>/dev/null || true)"
-        if [[ -z "${hits}" ]]; then
-          hits="$(grep -nE '\.push\([[:space:]]*\{[[:space:]]*[A-Za-z0-9_$]+:[[:space:]]*\[\.\.\.this\._' "${file}" 2>/dev/null || true)"
-        fi
-        if [[ -n "${hits}" ]]; then
-          failed=1
-          gate_error "heap allocation detected in state stack operation (violates Zero-GC hot-path contract): ${file}"
-          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-        fi
-
-        # 7. Incremental Hash Hot-Path Check (makeMove must not trigger full O(N) recompute)
-        hits="$(grep -nE 'makeMove\b.*\{([^}]*\n)+[[:space:]]*this\._recomputeZobrist\(\)' "${file}" 2>/dev/null || true)"
-        if [[ -n "${hits}" ]]; then
-          gate_error "makeMove performs full O(N) hash recomputation instead of incremental O(1) XOR delta: ${file}"
-          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-        fi
-      fi
       ;;
   esac
 

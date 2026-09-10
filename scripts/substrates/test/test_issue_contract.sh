@@ -97,7 +97,7 @@ jq -e '
 # 3b. Test Draft Generation without decisions (zero questions, no generic hardcoded cards)
 bash "${WORK_DIR}/aegis" clean >/dev/null
 set +e
-zero_q_output="$(bash "${WORK_DIR}/aegis" "Criar um validador simples em src/validator.ts")"
+zero_q_output="$(bash "${WORK_DIR}/aegis" "Criar uma operação simples em src/validator.ts" --state-kind NONE)"
 zero_q_code=$?
 set -e
 
@@ -173,70 +173,47 @@ printf '%s\n' "${clean_output}" | grep -q 'clean=PASS'
 status_idle="$(bash "${WORK_DIR}/aegis" status)"
 printf '%s\n' "${status_idle}" | jq -e '.status == "IDLE"' >/dev/null
 
-# 8. Test Universal Transformations: INV-TIE-BREAK, Cross-Clause Consistency and Constitutional Guardrail
+# 8. Test deliberação genérica de modelo de estado sem regras de domínio embutidas
 set +e
-liquidity_draft="$(bash "${WORK_DIR}/aegis" "Implementar motor de LiquidityResolver com anéis circulares e MinFlow")"
-liq_draft_code=$?
+state_draft="$(bash "${WORK_DIR}/aegis" "Criar uma operação genérica em src/worker.ts")"
+state_draft_code=$?
 set -e
 
-if [[ "${liq_draft_code}" -ne 2 ]]; then
-  echo "[FATAL] Expected exit code 2 for liquidity demand, got ${liq_draft_code}" >&2
+if [[ "${state_draft_code}" -ne 2 ]]; then
+  echo "[FATAL] Expected exit code 2 for draft with unresolved state model, got ${state_draft_code}" >&2
   exit 1
 fi
 
-# Verify INV-TIE-BREAK is present in draft contract
+# The harness must ask about state rather than infer it from words in the demand.
 jq -e '
-  .invariants | any(.id == "INV-TIE-BREAK")
+  (.stateModel == null)
+  and (.decisions | any(.questionId == "Q-STATE-MODEL"))
 ' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
-# Test Constitutional Guardrail (attempt to approve with ANS-LAX-OVERENGINEERING)
+# Resolve the generic decision with an explicit state transition.
 cat > "${WORK_DIR}/.harness/runtime/user_resolution.json" <<'EOF'
 {
   "answers": [
-    { "questionId": "Q-0001", "selectedAnswerId": "ANS-LAX-OVERENGINEERING" }
+    { "questionId": "Q-STATE-MODEL", "selectedAnswerId": "ANS-STATE-TRANSITION" }
   ]
 }
 EOF
 
-set +e
-lax_approve_err="$(bash "${WORK_DIR}/aegis" approve 2>&1)"
-lax_approve_code=$?
-set -e
+state_approve="$(bash "${WORK_DIR}/aegis" approve)"
+printf '%s\n' "${state_approve}" | jq -e '.status == "FINALIZED"' >/dev/null
 
-if [[ "${lax_approve_code}" -eq 0 ]]; then
-  echo "[FATAL] Expected constitutional guardrail to block ANS-LAX-OVERENGINEERING" >&2
-  exit 1
-fi
-
-if ! printf '%s\n' "${lax_approve_err}" | grep -q 'constitutional_conflict'; then
-  echo "[FATAL] Error message did not mention constitutional_conflict: ${lax_approve_err}" >&2
-  exit 1
-fi
-
-# Test Cross-Clause Consistency (resolve with ANS-TREASURY-ABSORB)
-cat > "${WORK_DIR}/.harness/runtime/user_resolution.json" <<'EOF'
-{
-  "answers": [
-    { "questionId": "Q-0001", "selectedAnswerId": "ANS-STRICT-KISS" },
-    { "questionId": "Q-0002", "selectedAnswerId": "ANS-RESTORE-ECOSYSTEM" },
-    { "questionId": "Q-0003", "selectedAnswerId": "ANS-TREASURY-ABSORB" }
-  ]
-}
-EOF
-
-liq_approve="$(bash "${WORK_DIR}/aegis" approve)"
-printf '%s\n' "${liq_approve}" | jq -e '.status == "FINALIZED"' >/dev/null
-
-# Verify bidirectional cross-clause update: FAIL-0001 must have updated observableResult
 jq -e '
-  .failureSemantics[] | select(.id == "FAIL-0001") | .observableResult | contains("conta tesouro")
+  .stateModel.kind == "STATE_TRANSITION"
+  and (.invariants | all(.statement | contains("Massa") | not))
 ' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
-# Verify dynamic vector table renders treasury absorption
-grep -q 'Absorção no fundo do tesouro' "${WORK_DIR}/.harness/runtime/contract.md"
+# The rendered contract is derived from abstract clauses only.
+grep -q 'Aguardando deliberação' "${WORK_DIR}/.harness/runtime/contract.md" && {
+  echo "[FATAL] Final contract retained unresolved state model" >&2
+  exit 1
+}
 
 # Final Clean
 bash "${WORK_DIR}/aegis" clean >/dev/null
 
 printf '[AEGIS][TEST] issue-contract symbiotic flow: PASS\n'
-

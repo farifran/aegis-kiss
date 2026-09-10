@@ -4,7 +4,7 @@ import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
@@ -33,177 +33,6 @@ function parseJsonOrFile(raw, baseDir) {
     return JSON.parse(readFileSync(filePath, 'utf8'));
   }
   return JSON.parse(raw);
-}
-
-function generateProofScriptScaffold(contract) {
-  const isLiquidityDemand = /(?:liquidityresolver|deadlock|câmara de compensação|camara de compensacao|anéis circulares|aneis circulares|anel circular|minflow)/iu.test(`${contract.title} ${contract.intent}`);
-  if (isLiquidityDemand) {
-    return `#!/usr/bin/env bash
-set -Eeuo pipefail
-
-# Tribunal de Provas Físicas — LiquidityResolver & Zero-Sum Invariant
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-
-node --import tsx <<'EOF'
-import {
-  LiquidityResolver,
-  obterLiquidityResolverBitmask,
-  SettlementBus,
-  obterSaudeBitmask,
-  ClearinghouseCore,
-  obterClearinghouseBitmask,
-  ClearingEngine,
-  obterEstadoCompensacaoBitmask,
-  ThrottleGuard,
-  obterStatusBitmask,
-  SettlementEngine,
-  calcularTaxaDinamica
-} from './src/index.ts';
-import assert from 'node:assert/strict';
-
-// 1. Verificação de Integridade das Exportações do Ecossistema
-assert.ok(typeof LiquidityResolver === 'function', 'LiquidityResolver deve ser exportado nominalmente');
-assert.ok(typeof obterLiquidityResolverBitmask === 'function', 'obterLiquidityResolverBitmask deve ser exportada');
-assert.ok(typeof ThrottleGuard === 'function', 'ThrottleGuard deve ser exportado');
-assert.ok(typeof calcularTaxaDinamica === 'function', 'calcularTaxaDinamica deve ser exportado');
-assert.ok(typeof SettlementBus === 'function', 'SettlementBus deve ser exportado');
-assert.ok(typeof ClearingEngine === 'function', 'ClearingEngine deve ser exportado');
-assert.ok(typeof ClearinghouseCore === 'function', 'ClearinghouseCore deve ser exportado');
-
-// 2. Prova de Resolução de Ciclos 3-Way (PO-BEHAVIOR - A->B->C->A)
-const bus = new SettlementBus({}, 0n);
-const core = new ClearinghouseCore(bus);
-const resolver = new LiquidityResolver(bus, core);
-
-const cycleOrders = [
-  { id: 'O-1', senderId: 'A', recipientId: 'B', amount: 1000n },
-  { id: 'O-2', senderId: 'B', recipientId: 'C', amount: 1200n },
-  { id: 'O-3', senderId: 'C', recipientId: 'A', amount: 1500n },
-];
-
-const res1 = resolver.resolveDeadlocks(cycleOrders);
-assert.equal(res1.resolvedCycles, 1, 'Deve detectar e resolver exatamente 1 ciclo fechado');
-assert.equal(res1.totalObliterated, 1000n, 'MinFlow deve ser min(1000, 1200, 1500) = 1000n');
-assert.equal(res1.residualOrders.length, 2, 'Devem restar 2 ordens com valores residuais');
-
-// 3. Prova da Telemetria em Bitmask de 32 Bits (PO-BEHAVIOR)
-const mask = obterLiquidityResolverBitmask(resolver);
-assert.equal(typeof mask, 'number', 'Bitmask deve retornar number');
-assert.equal(mask & 1, 0, 'Bit 0: trava desativada');
-assert.equal(mask & 2, 2, 'Bit 1: ciclo circular detectado e resolvido');
-assert.equal(mask & 4, 0, 'Bit 2: sem violação de conservação');
-assert.equal((mask >> 8) & 0xFF, 2, 'Bits 8-15: 2 ordens residuais');
-
-// 4. Prova de Proteção contra Sub-milissegundo no ThrottleGuard (PO-BEHAVIOR)
-const guard = new ThrottleGuard(5, 1000n);
-const t0 = 1700000000000n;
-assert.equal(guard.allow('acc-1', t0), true);
-assert.equal(guard.allow('acc-1', t0), true);
-assert.equal(guard.allow('acc-1', t0), true);
-assert.equal(guard.allow('acc-1', t0), true);
-assert.equal(guard.allow('acc-1', t0), true);
-assert.equal(guard.allow('acc-1', t0), false, 'Sub-milissegundo Δt=0n deve atingir teto de vazão sem mutação regressiva');
-
-// 5. Provas Adversariais e Modos de Falha (PO-FAILURES)
-assert.throws(() => new LiquidityResolver(bus, core, 0), RangeError, 'maxHeapAccounts <= 0 deve lançar RangeError');
-assert.throws(() => new LiquidityResolver(bus, core, -5), RangeError, 'maxHeapAccounts negativo deve lançar RangeError');
-assert.throws(() => new LiquidityResolver(bus, core, 1.5), RangeError, 'maxHeapAccounts decimal deve lançar RangeError');
-
-const invalidOrders = [
-  { id: 'INV-1', senderId: 'A', recipientId: 'A', amount: 500n },
-];
-const resInv = resolver.resolveDeadlocks(invalidOrders);
-assert.equal(resInv.resolvedCycles, 0, 'Auto-débito não deve formar ciclo');
-assert.equal(resInv.totalObliterated, 0n);
-
-console.log('[PROOFS] Todas as provas físicas de LiquidityResolver foram aprovadas.');
-EOF
-`;
-  }
-
-  const isPalindromeDemand = /(?:palindrom|palindrome)/iu.test(`${contract.title} ${contract.intent}`);
-  if (isPalindromeDemand) {
-    const isStrict = contract.decisions?.some((d) => d.questionId === 'Q-0001' && d.selectedAnswerId === 'ANS-STRICT');
-    if (isStrict) {
-      return `#!/usr/bin/env bash
-set -Eeuo pipefail
-
-# Tribunal de Provas Físicas — Modo Estrito Caractere a Caractere
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-
-node --import tsx <<'EOF'
-import { isPalindrome } from './src/index.ts';
-import assert from 'node:assert/strict';
-
-// 1. Provas Nominais e de Borda (PO-BEHAVIOR - Modo Estrito)
-assert.equal(isPalindrome(""), true, 'Borda: string vazia deve ser palíndromo');
-assert.equal(isPalindrome("a"), true, 'Borda: caractere único deve ser palíndromo');
-assert.equal(isPalindrome("   "), true, 'Borda: espaços puros simétricos devem ser palíndromo');
-assert.equal(isPalindrome("ï"), true, 'Nominal: caractere isolado deve ser palíndromo');
-assert.equal(isPalindrome("ana"), true, 'Nominal: palíndromo estrito em minúsculas');
-assert.equal(isPalindrome("Ana"), false, 'Estrito: case diferente rejeita simetria');
-assert.equal(isPalindrome("radar"), true, 'Nominal: palavra simétrica');
-assert.equal(isPalindrome("A cara rajada da jararaca"), false, 'Estrito: espaços e pontuação preservados rejeitam');
-assert.equal(isPalindrome("топот"), true, 'Nominal: cirílico palíndromo');
-assert.equal(isPalindrome("собака"), false, 'Nominal: cirílico não-palíndromo');
-assert.equal(isPalindrome("computador"), false, 'Nominal: palavra assimétrica');
-
-// 2. Provas Adversariais e Modos de Falha (PO-FAILURES)
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(null), TypeError, 'Adversarial: null deve lançar TypeError');
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(undefined), TypeError, 'Adversarial: undefined deve lançar TypeError');
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(12345), TypeError, 'Adversarial: número deve lançar TypeError');
-assert.throws(() => isPalindrome("a".repeat(65537)), RangeError, 'Adversarial: carga > 65.536 chars deve lançar RangeError (DoS)');
-
-console.log('[PROOFS] Todas as provas físicas de aceite e falhas (Modo Estrito) foram aprovadas.');
-EOF
-`;
-    }
-
-    return `#!/usr/bin/env bash
-set -Eeuo pipefail
-
-# Tribunal de Provas Físicas — Modo Canônico Universal
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-
-node --import tsx <<'EOF'
-import { isPalindrome } from './src/index.ts';
-import assert from 'node:assert/strict';
-
-// 1. Provas Nominais e de Borda (PO-BEHAVIOR - Modo Canônico)
-assert.equal(isPalindrome(""), true, 'Borda: string vazia deve ser palíndromo');
-assert.equal(isPalindrome("a"), true, 'Borda: caractere único deve ser palíndromo');
-assert.equal(isPalindrome("   "), true, 'Borda: espaços puros devem ser palíndromo');
-assert.equal(isPalindrome("ï"), true, 'Nominal: diacrítico isolado deve ser palíndromo');
-assert.equal(isPalindrome("Ana"), true, 'Nominal: case-insensitive');
-assert.equal(isPalindrome("A cara rajada da jararaca"), true, 'Nominal: frase com espaços e pontuação');
-assert.equal(isPalindrome("топот"), true, 'Nominal: cirílico palíndromo');
-assert.equal(isPalindrome("собака"), false, 'Nominal: cirílico não-palíndromo');
-assert.equal(isPalindrome("computador"), false, 'Nominal: palavra latina assimétrica');
-
-// 2. Provas Adversariais e Modos de Falha (PO-FAILURES)
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(null), TypeError, 'Adversarial: null deve lançar TypeError');
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(undefined), TypeError, 'Adversarial: undefined deve lançar TypeError');
-assert.throws(() => (isPalindrome as unknown as (x: unknown) => boolean)(12345), TypeError, 'Adversarial: número deve lançar TypeError');
-assert.throws(() => isPalindrome("a".repeat(65537)), RangeError, 'Adversarial: carga > 65.536 chars deve lançar RangeError (DoS)');
-
-console.log('[PROOFS] Todas as 13 provas físicas de aceite e falhas (Modo Canônico) foram aprovadas.');
-EOF
-`;
-  }
-
-  return `#!/usr/bin/env bash
-set -Eeuo pipefail
-
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-
-node --import tsx <<'EOF'
-import * as entrypoint from './src/index.ts';
-import assert from 'node:assert/strict';
-
-assert.ok(entrypoint, 'Ponto de entrada autorizado deve ser carregável e exportar símbolos esperados');
-console.log('[PROOFS] Provas básicas executadas com sucesso.');
-EOF
-`;
 }
 
 async function handleDraft(args) {
@@ -398,18 +227,6 @@ async function handleApprove() {
     contract,
     policy,
   });
-
-  // Scaffold automático do tribunal de provas físicas se não existir
-  for (const proof of (contract.proofObligations ?? [])) {
-    if (proof.entrypoint.endsWith('.proof.sh')) {
-      const fullProofPath = resolve(root, proof.entrypoint);
-      if (!existsSync(fullProofPath)) {
-        const scaffold = generateProofScriptScaffold(contract);
-        await mkdir(dirname(fullProofPath), { recursive: true });
-        await writeFile(fullProofPath, scaffold, { encoding: 'utf8', mode: 0o755 });
-      }
-    }
-  }
 
   const statePath = semanticStatePath(root);
   await mkdir(resolve(root, 'src/.aegis'), { recursive: true });
