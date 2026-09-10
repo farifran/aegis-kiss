@@ -35,7 +35,7 @@ async function handleDraft(args) {
 
   const architecturePolicy = loadArchitecturePolicy(root);
   const policy = architecturePolicy.policy;
-  const discovery = discoverWorkspace(root);
+  const discovery = discoverWorkspace(root, sanitizedText);
 
   const draft = buildIssueDraft({
     sanitizedText,
@@ -95,8 +95,7 @@ async function handleApprove() {
   const rawContract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
   let contract = rawContract;
 
-  const userResolutionPath = resolve(runtimeDir, 'user_resolution.json');
-  const targetResolution = existsSync(resolutionPath) ? resolutionPath : (existsSync(userResolutionPath) ? userResolutionPath : null);
+  const targetResolution = existsSync(resolutionPath) ? resolutionPath : null;
 
   if (targetResolution) {
     try {
@@ -107,8 +106,6 @@ async function handleApprove() {
     } catch {
       // Continue with draft as is
     }
-  } else if ((contract.decisions ?? []).length > 0) {
-    contract = applyUserResolution(contract, []);
   }
 
   let policy;

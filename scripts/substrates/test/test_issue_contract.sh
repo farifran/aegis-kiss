@@ -75,6 +75,7 @@ grep -q 'Nenhuma ambiguidade material detectada' "${WORK_DIR}/.harness/runtime/c
 jq -e '
   .scope.authorizedPaths == ["src"]
   and (.evidenceDiscipline.knownFacts | any(startswith("Discovery:")))
+  and (.evidenceDiscipline.unknownFacts | any(startswith("Forense mecânico: nenhum termo textual")))
 ' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
 # Verify no cryptographic custody digests leak in draft (letter is being written, not sealed)
@@ -188,45 +189,36 @@ printf '%s\n' "${clean_output}" | grep -q 'clean=PASS'
 status_idle="$(bash "${WORK_DIR}/aegis" status)"
 printf '%s\n' "${status_idle}" | jq -e '.status == "IDLE"' >/dev/null
 
-# 8. Test deliberação genérica de modelo de estado sem regras de domínio embutidas
-printf 'export let observedState = 0;\n' > "${WORK_DIR}/src/index.ts"
+# 8. O forense integrado relaciona demanda, fonte e teste sem escolher alvo ou criar perguntas especulativas.
+printf 'export function calculateDiscount(value: number) {\n  return value; // desconto\n}\n' > "${WORK_DIR}/src/pricing.ts"
+printf 'export { calculateDiscount } from "./pricing.js";\n' > "${WORK_DIR}/src/index.ts"
+printf 'import { calculateDiscount } from "./pricing.js";\nvoid calculateDiscount(10);\n' > "${WORK_DIR}/src/pricing.test.ts"
 set +e
-state_draft="$(bash "${WORK_DIR}/aegis" "Criar uma operação genérica em src/worker.ts")"
-state_draft_code=$?
+forensic_draft="$(bash "${WORK_DIR}/aegis" "Corrigir calculateDiscount para aplicar desconto")"
+forensic_draft_code=$?
 set -e
 
-if [[ "${state_draft_code}" -ne 2 ]]; then
-  echo "[FATAL] Expected exit code 2 for draft with unresolved state model, got ${state_draft_code}" >&2
+if [[ "${forensic_draft_code}" -ne 2 ]]; then
+  echo "[FATAL] Expected exit code 2 for forensic draft, got ${forensic_draft_code}" >&2
   exit 1
 fi
 
-# The harness must ask about state rather than infer it from words in the demand.
+# Discovery records literal evidence and direct references; it does not infer API/state policy.
 jq -e '
-  (.stateModel == null)
-  and (.decisions | any(.questionId == "Q-API-COMPATIBILITY"))
-  and (.decisions | any(.questionId == "Q-STATE-MODEL"))
+  (.decisions | length == 0)
+  and (.evidenceDiscipline.knownFacts | any(. == "Forense mecânico: \"calculateDiscount\" em src/pricing.ts:1."))
+  and (.evidenceDiscipline.knownFacts | any(. == "Forense mecânico: src/index.ts declara importação/exportação relativa para src/pricing.ts."))
+  and (.evidenceDiscipline.knownFacts | any(. == "Forense mecânico: teste diretamente relacionado observado em src/pricing.test.ts."))
+  and (.evidenceDiscipline.unknownFacts | any(startswith("Forense mecânico: termos da demanda sem evidência textual")))
+  and ([.evidenceDiscipline.knownFacts[] | select(startswith("Ponto de entrada autorizado:"))] | length == 0)
 ' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
 
-# Resolve the generic decision with an explicit state transition.
-cat > "${WORK_DIR}/.harness/runtime/user_resolution.json" <<'EOF'
-{
-  "answers": [
-    { "questionId": "Q-STATE-MODEL", "selectedAnswerId": "ANS-STATE-TRANSITION" }
-  ]
-}
-EOF
+forensic_approve="$(bash "${WORK_DIR}/aegis" approve)"
+printf '%s\n' "${forensic_approve}" | jq -e '.status == "FINALIZED"' >/dev/null
 
-state_approve="$(bash "${WORK_DIR}/aegis" approve)"
-printf '%s\n' "${state_approve}" | jq -e '.status == "FINALIZED"' >/dev/null
-
-jq -e '
-  .stateModel.kind == "STATE_TRANSITION"
-  and (.invariants | all(.statement | contains("Massa") | not))
-' "${WORK_DIR}/.harness/runtime/contract.json" >/dev/null
-
-# The rendered contract is derived from abstract clauses only.
+# The rendered contract must not pretend that evidence created a state decision.
 grep -q 'Aguardando deliberação' "${WORK_DIR}/.harness/runtime/contract.md" && {
-  echo "[FATAL] Final contract retained unresolved state model" >&2
+  echo "[FATAL] Final contract retained a speculative state decision" >&2
   exit 1
 }
 

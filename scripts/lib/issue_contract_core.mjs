@@ -1,18 +1,6 @@
-// ============================================================================
-// AEGIS CONSTITUTIONAL DIRECTIVE: META-SYSTEM PURITY (AGENTS.md Cláusula 5)
-//
-// O Aegis Harness é estritamente um META-SISTEMA AGNÓSTICO DE GOVERNANÇA,
-// CUSTÓDIA CRIPTOGRÁFICA E TRIBUNAL DE PROVAS FÍSICAS.
-//
-// É TERMINANTEMENTE PROIBIDO ACOPLAR REGRAS DE NEGÓCIO ESPECÍFICAS, NOMES DE DOMÍNIO
-// OU HEURÍSTICAS DE DEMANDAS PARTICULARES.
-// NESTE MÓDULO. O HARNESS OPERA EXCLUSIVAMENTE SOBRE ARQUÉTIPOS ABSTRATOS DE SOFTWARE,
-// CONTRATOS FORMAIS E SCHEMAS UNIVERSAIS.
-// ============================================================================
-
 import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
@@ -60,19 +48,120 @@ export function normalizeDemandTitle(raw) {
 
 const discoveryFileLimit = 256;
 const discoveryByteLimit = 1_048_576;
-const sourceFilePattern = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
-const publicExportPattern = /^\s*export\s+(?:default\b|(?:async\s+)?(?:function|class|const|let|var|type|interface|enum)\b|\{\s*[^}\s])/mu;
-const mutableModuleBindingPattern = /^(?:export\s+)?(?:let|var)\s+[A-Za-z_$][\w$]*/mu;
+const sourceExtensions = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'];
+const sourceFilePattern = new RegExp(`\\.(?:${sourceExtensions.join('|')})$`, 'u');
+const demandTermPattern = /[\p{L}\p{N}_$-]{4,}/gu;
+const relativeImportPattern = /(?:\b(?:import|export)\s+(?:[^'"\n]*?\s+from\s+)?|\brequire\(\s*)['"](\.{1,2}\/[^'"]+)['"]/gu;
+const testFilePattern = /(?:^|\/)[^/]+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+const forensicOccurrenceLimit = 24;
+const forensicReferenceLimit = 12;
+
+function demandTerms(text) {
+  const termsByKey = new Map();
+  for (const match of text.matchAll(demandTermPattern)) {
+    const term = match[0];
+    const key = term.toLocaleLowerCase('und');
+    if (!termsByKey.has(key)) termsByKey.set(key, term);
+  }
+  return [...termsByKey.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, term]) => ({ key, term }));
+}
+
+function lineNumberAt(text, offset) {
+  return text.slice(0, offset).split('\n').length;
+}
+
+function resolveRelativeImport(repositoryRoot, importerPath, specifier, sourcePathSet) {
+  const absoluteCandidate = resolve(dirname(resolve(repositoryRoot, importerPath)), specifier);
+  const candidate = relative(repositoryRoot, absoluteCandidate).replaceAll('\\', '/');
+  const candidates = [...new Set([candidate, candidate.replace(/\.(?:[cm]?js|jsx)$/u, '')])];
+  const sourcePaths = [...sourcePathSet];
+
+  for (const path of candidates) {
+    if (sourcePathSet.has(path)) return path;
+  }
+  for (const path of candidates) {
+    const directSource = sourcePaths.find((sourcePath) => sourceExtensions.some((extension) => sourcePath === `${path}.${extension}`));
+    if (directSource) return directSource;
+  }
+  for (const path of candidates) {
+    const directoryIndex = sourcePaths.find((sourcePath) => sourcePath.startsWith(`${path}/index.`));
+    if (directoryIndex) return directoryIndex;
+  }
+  return null;
+}
+
+function buildForensicEvidence(repositoryRoot, sourceRecords, intent) {
+  const terms = demandTerms(intent);
+  const occurrences = [];
+  const sourcePathSet = new Set(sourceRecords.map((record) => record.path));
+
+  for (const record of sourceRecords) {
+    const lowerText = record.text.toLocaleLowerCase('und');
+    for (const { key, term } of terms) {
+      let offset = lowerText.indexOf(key);
+      while (offset !== -1 && occurrences.length < forensicOccurrenceLimit) {
+        occurrences.push({ term, path: record.path, line: lineNumberAt(record.text, offset) });
+        offset = lowerText.indexOf(key, offset + key.length);
+      }
+      if (occurrences.length >= forensicOccurrenceLimit) break;
+    }
+    if (occurrences.length >= forensicOccurrenceLimit) break;
+  }
+
+  const matchedPaths = new Set(occurrences.map((occurrence) => occurrence.path));
+  const matchedTerms = new Set(occurrences.map((occurrence) => occurrence.term.toLocaleLowerCase('und')));
+  const references = [];
+  const relatedTestFiles = new Set();
+
+  for (const record of sourceRecords) {
+    for (const match of record.text.matchAll(relativeImportPattern)) {
+      const targetPath = resolveRelativeImport(repositoryRoot, record.path, match[1], sourcePathSet);
+      if (!targetPath || !matchedPaths.has(targetPath) || record.path === targetPath) continue;
+      if (references.length < forensicReferenceLimit) {
+        references.push({ from: record.path, to: targetPath });
+      }
+      if (testFilePattern.test(record.path)) relatedTestFiles.add(record.path);
+    }
+  }
+
+  const knownFacts = [];
+  if (occurrences.length > 0) {
+    knownFacts.push(`Forense mecânico: ${occurrences.length} ocorrência(s) textual(is) da demanda em src/.`);
+    for (const occurrence of occurrences) {
+      knownFacts.push(`Forense mecânico: "${occurrence.term}" em ${occurrence.path}:${occurrence.line}.`);
+    }
+  }
+  for (const reference of references) {
+    knownFacts.push(`Forense mecânico: ${reference.from} declara importação/exportação relativa para ${reference.to}.`);
+  }
+  for (const testPath of [...relatedTestFiles].sort()) {
+    knownFacts.push(`Forense mecânico: teste diretamente relacionado observado em ${testPath}.`);
+  }
+
+  const unmatchedTerms = terms
+    .filter(({ key }) => !matchedTerms.has(key))
+    .map(({ term }) => term);
+  const unknownFacts = [];
+  if (occurrences.length === 0) {
+    unknownFacts.push('Forense mecânico: nenhum termo textual da demanda foi encontrado em src/; a relação entre demanda e código permanece UNKNOWN.');
+  } else if (unmatchedTerms.length > 0) {
+    const displayedTerms = unmatchedTerms.slice(0, 8).join(', ');
+    const overflow = unmatchedTerms.length > 8 ? ` e mais ${unmatchedTerms.length - 8}` : '';
+    unknownFacts.push(`Forense mecânico: termos da demanda sem evidência textual em src/: ${displayedTerms}${overflow}; a relação permanece parcialmente UNKNOWN.`);
+  }
+
+  return { knownFacts, unknownFacts };
+}
 
 /**
  * Descobre apenas fatos estruturais já presentes em src/.
  * Todo o resultado existe em RAM até ser incorporado à evidência do contrato.
  */
-export function discoverWorkspace(repositoryRoot) {
+export function discoverWorkspace(repositoryRoot, intent = '') {
   const sourceRoot = resolve(repositoryRoot, 'src');
-  const sourceFiles = [];
-  const publicApiFiles = [];
-  const mutableStateFiles = [];
+  const sourceRecords = [];
   let scannedBytes = 0;
 
   function inspectDirectory(directory) {
@@ -84,7 +173,7 @@ export function discoverWorkspace(repositoryRoot) {
         continue;
       }
       if (!entry.isFile() || !sourceFilePattern.test(entry.name)) continue;
-      if (sourceFiles.length >= discoveryFileLimit) {
+      if (sourceRecords.length >= discoveryFileLimit) {
         throw new Error('discovery_file_limit_exceeded');
       }
 
@@ -96,16 +185,14 @@ export function discoverWorkspace(repositoryRoot) {
 
       const relativePath = relative(repositoryRoot, absolutePath).replaceAll('\\', '/');
       const sourceText = readFileSync(absolutePath, 'utf8');
-      sourceFiles.push(relativePath);
-      if (publicExportPattern.test(sourceText)) publicApiFiles.push(relativePath);
-      if (mutableModuleBindingPattern.test(sourceText)) mutableStateFiles.push(relativePath);
+      sourceRecords.push({ path: relativePath, text: sourceText });
     }
   }
 
   if (existsSync(sourceRoot)) inspectDirectory(sourceRoot);
-  sourceFiles.sort();
-  publicApiFiles.sort();
-  mutableStateFiles.sort();
+  sourceRecords.sort((left, right) => left.path.localeCompare(right.path));
+  const sourceFiles = sourceRecords.map((record) => record.path);
+  const forensic = buildForensicEvidence(repositoryRoot, sourceRecords, intent);
 
   const primarySourcePath = sourceFiles.includes('src/index.ts')
     ? 'src/index.ts'
@@ -114,74 +201,13 @@ export function discoverWorkspace(repositoryRoot) {
   return {
     sourceRoot: 'src',
     sourceFiles,
-    publicApiFiles,
-    mutableStateFiles,
     primarySourcePath,
     knownFacts: [
       'Discovery: ' + sourceFiles.length + ' arquivo(s) de código lido(s) em src/.',
-      ...(publicApiFiles.length > 0
-        ? ['Discovery: exportações públicas observadas em ' + publicApiFiles.join(', ') + '.']
-        : []),
-      ...(mutableStateFiles.length > 0
-        ? ['Discovery: bindings mutáveis de módulo observados em ' + mutableStateFiles.join(', ') + '.']
-        : []),
+      ...forensic.knownFacts,
     ],
+    unknownFacts: forensic.unknownFacts,
   };
-}
-
-function buildDiscoveryDecisions(discovery) {
-  const decisions = [];
-  if (discovery.publicApiFiles.length > 0) {
-    decisions.push({
-      questionId: 'Q-API-COMPATIBILITY',
-      question: 'O Discovery encontrou exportações públicas. Esta mudança deve preservar a compatibilidade observada?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-PRESERVE-API',
-      selectedAnswerId: 'ANS-PRESERVE-API',
-      answers: [
-        {
-          id: 'ANS-PRESERVE-API',
-          label: 'Preservar compatibilidade',
-          rationale: 'É a escolha KISS quando há API pública existente e nenhum pedido explícito de quebra.',
-          resolutionClause: 'A mudança preserva a fronteira pública observada pelo Discovery.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-CHANGE-API',
-          label: 'Permitir alteração incompatível',
-          rationale: 'Use somente quando a demanda autorizar mudar a API pública observada.',
-          resolutionClause: 'A mudança pode alterar a fronteira pública observada pelo Discovery.',
-          recommended: false,
-        },
-      ],
-    });
-  }
-  if (discovery.mutableStateFiles.length > 0) {
-    decisions.push({
-      questionId: 'Q-STATE-MODEL',
-      question: 'O Discovery encontrou estado modular mutável. A demanda deve alterar esse estado entre invocações?',
-      scope: 'ARCHITECTURE',
-      recommendedAnswerId: 'ANS-STATELESS',
-      selectedAnswerId: 'ANS-STATELESS',
-      answers: [
-        {
-          id: 'ANS-STATELESS',
-          label: 'Sem estado',
-          rationale: 'É a alternativa KISS quando a demanda não declara uma transição persistente.',
-          resolutionClause: 'A operação não mantém estado entre invocações.',
-          recommended: true,
-        },
-        {
-          id: 'ANS-STATE-TRANSITION',
-          label: 'Transição de estado',
-          rationale: 'Use somente quando a demanda depender do estado modular observado.',
-          resolutionClause: 'A operação declara transição de estado observável.',
-          recommended: false,
-        },
-      ],
-    });
-  }
-  return decisions;
 }
 
 export const CANONICAL_RULE_STATEMENTS = {
@@ -231,7 +257,7 @@ export function renderContractMarkdown(
     '',
     `> **Status:** ${statusText}`,
     `> **Modo:** ${contract.changeKind}`,
-    `> **Modelo de Estado:** ${stateKind === 'NONE' ? 'Sem estado' : stateKind === 'STATE_TRANSITION' ? 'Transição de estado' : 'Aguardando deliberação'}`,
+    `> **Modelo de Estado:** ${stateKind === 'NONE' ? 'Sem estado' : stateKind === 'STATE_TRANSITION' ? 'Transição de estado' : 'Não declarado pela demanda'}`,
     ...(ruleEntries.length > 0 ? ['> **Regras Arquiteturais:**', ...ruleEntries] : []),
     ...(isGoverned && contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     ...(isProven && receiptDigest ? [`> **Digest do Recibo:** \`${receiptDigest}\``] : []),
@@ -397,13 +423,6 @@ export function applyUserResolution(draftContract, userAnswers) {
     });
   }
 
-  const selectedStateKind = updatedDecisions.find((decision) => decision.questionId === 'Q-STATE-MODEL')?.selectedAnswerId;
-  const stateModel = selectedStateKind === 'ANS-STATELESS'
-    ? { kind: 'NONE' }
-    : selectedStateKind === 'ANS-STATE-TRANSITION'
-      ? { kind: 'STATE_TRANSITION' }
-      : draftContract.stateModel;
-
   let updatedEvidence = draftContract.evidenceDiscipline;
   if (updatedEvidence && updatedDecisions.length > 0) {
     const updatedUnknown = updatedDecisions.map((d) => {
@@ -421,7 +440,6 @@ export function applyUserResolution(draftContract, userAnswers) {
     ...draftContract,
     behavior: updatedBehavior,
     decisions: updatedDecisions,
-    ...(stateModel ? { stateModel } : {}),
     ...(updatedEvidence ? { evidenceDiscipline: updatedEvidence } : {}),
   };
 
@@ -558,8 +576,6 @@ export function buildIssueDraft({
     },
   ];
 
-  const finalDecisions = discovery ? buildDiscoveryDecisions(discovery) : [];
-
   const proofObligations = [
     {
       id: 'PO-ARCH-STATIC',
@@ -596,11 +612,10 @@ export function buildIssueDraft({
   const knownFacts = [
     `Demanda textual do usuário (provenance: USER): "${sanitizedText.replace(/\n+/g, ' ').trim()}"`,
     ...(discovery?.knownFacts ?? []),
-    `Ponto de entrada autorizado: ${mainPath}`,
   ];
 
-  const unknownFacts = finalDecisions.length > 0
-    ? finalDecisions.map((d) => `[${d.questionId}] ${d.question} (Submetido a deliberação formal no Wizard para evitar inferência arbitrária)`)
+  const unknownFacts = discovery?.unknownFacts?.length > 0
+    ? discovery.unknownFacts
     : ['Nenhuma lacuna material não fornecida que altere o comportamento observável (AGENTS.md Lei II).'];
 
   const draft = {
@@ -623,7 +638,7 @@ export function buildIssueDraft({
     invariants,
     postconditions,
     failureSemantics,
-    decisions: finalDecisions,
+    decisions: [],
     evidenceDiscipline: {
       knownFacts,
       unknownFacts,
