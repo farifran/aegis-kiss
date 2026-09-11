@@ -28,9 +28,7 @@ status_command() {
   local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
   local receipt_file="${RUNTIME_DIR}/verification_receipt.json"
 
-  if [[ -f "${preflight_file}" ]]; then
-    printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
-  elif [[ -f "${semantic_file}" ]]; then
+  if [[ -f "${semantic_file}" ]]; then
     local digest
     digest="$(node -e '
       const fs = require("fs");
@@ -67,6 +65,8 @@ status_command() {
     printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
   elif [[ -f "${contract_file}" ]]; then
     printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
+  elif [[ -f "${preflight_file}" ]]; then
+    printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
   else
     printf '{"status":"IDLE","workspace":"clean"}\n'
   fi

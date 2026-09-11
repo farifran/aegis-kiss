@@ -74,6 +74,22 @@ async function handleApprove() {
 
   const contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
 
+  if (existsSync(resolutionPath)) {
+    try {
+      const resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
+      if (Array.isArray(resolution.answers)) {
+        for (const ans of resolution.answers) {
+          const dec = (contract.decisions || []).find((d) => d.questionId === ans.questionId);
+          if (dec && ans.answerId) {
+            dec.selectedAnswerId = ans.answerId;
+          }
+        }
+      }
+    } catch {
+      // Ignora erro na leitura da resolução
+    }
+  }
+
   let policy;
   let policyText;
   try {
