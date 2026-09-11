@@ -65,10 +65,12 @@ async function handleApprove() {
   const [
     { canonicalDigest, canonicalJson, sha256 },
     { computeContractDigest, createProofRegistry, loadArchitecturePolicy, renderContractMarkdown, validateContract },
+    { assertSchema },
     { semanticStatePath },
   ] = await Promise.all([
     import('./lib/canonical_json.mjs'),
     import('./lib/issue_contract_core.mjs'),
+    import('./lib/schema_validator.mjs'),
     import('./lib/semantic_state.mjs'),
   ]);
 
@@ -96,6 +98,7 @@ async function handleApprove() {
     const architecturePolicy = loadArchitecturePolicy(root);
     policy = architecturePolicy.policy;
     policyText = architecturePolicy.policyText;
+    assertSchema('aegis.architecture_policy.v1', policy);
   } catch {
     process.stderr.write('[AEGIS][FATAL] architecture_policy_unavailable\n');
     process.exit(1);
@@ -103,6 +106,7 @@ async function handleApprove() {
 
   const architecturePolicyDigest = sha256(policyText);
   contract.architecture.policyDigest = architecturePolicyDigest;
+  assertSchema('aegis.issue_contract.v1', contract);
 
   validateContract({
     contract,

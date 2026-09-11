@@ -75,6 +75,13 @@ printf '%s\n' "${draft_output}" | jq -e '
 [[ ! -e .harness/runtime/preflight_resolution.json ]]
 [[ ! -e .harness/runtime/verification_receipt.json ]]
 
+node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs';
+import { assertSchema } from './scripts/lib/schema_validator.mjs';
+
+assertSchema('aegis.preflight_handoff.v1', JSON.parse(readFileSync('.harness/runtime/preflight.json', 'utf8')));
+NODE
+
 # A saída das Fases 1–2 não pode conter decisões ou campos semânticos do contrato.
 jq -e '
   .capture == {provenance:"USER",encoding:"UTF-8",lineEndings:"LF",byteLength:30}

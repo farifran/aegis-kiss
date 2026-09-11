@@ -3,7 +3,6 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
-import { assertSchema } from './schema_validator.mjs';
 
 export const maxDemandBytes = 65_536;
 
@@ -220,7 +219,6 @@ export function buildPreflightHandoff({ sanitizedText, discovery }) {
       unmatchedTerms: discovery.unmatchedTerms,
     },
   };
-  assertSchema('aegis.preflight_handoff.v1', handoff);
   return handoff;
 }
 
@@ -426,7 +424,6 @@ export function renderContractMarkdown(
  * Calcula o hash raiz único da Issue-Contrato (contractDigest).
  */
 export function computeContractDigest(contract) {
-  assertSchema('aegis.issue_contract.v1', contract);
   return canonicalDigest(contract);
 }
 
@@ -482,7 +479,6 @@ export function loadArchitecturePolicy(repositoryRoot) {
   }
   const policyText = readFileSync(policyPath, 'utf8');
   const policy = JSON.parse(policyText);
-  assertSchema('aegis.architecture_policy.v1', policy);
   return { policy, policyText, policyDigest: sha256(policyText) };
 }
 
@@ -490,8 +486,6 @@ export function loadArchitecturePolicy(repositoryRoot) {
  * Valida formalmente a Issue-Contrato contra o schema e regras arquiteturais.
  */
 export function validateContract({ contract, policy }) {
-  assertSchema('aegis.issue_contract.v1', contract);
-
   const proofIds = new Set((contract.proofObligations || []).map((p) => p.id));
   for (const inv of contract.invariants || []) {
     for (const proofId of inv.proofIds || []) {
