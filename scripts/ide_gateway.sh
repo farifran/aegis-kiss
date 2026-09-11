@@ -164,11 +164,11 @@ main() {
 
   case "${1}" in
     approve|resume)
-      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;
     verify|prove)
       shift
-      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify "$@"
       ;;
     wizard)
       resolve_preflight_wizard
@@ -184,7 +184,7 @@ main() {
       ;;
     *)
       # Any demand prompt string triggers the symbiotic draft runner
-      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft "$@"
       ;;
   esac
 }

@@ -51,8 +51,8 @@ draft_output="$(bash ./aegis "Criar calculadora de precisão")"
 draft_code=$?
 set -e
 
-if [[ "${draft_code}" -ne 2 ]]; then
-  printf '[FATAL] Expected semantic handoff exit code 2, got %s\n' "${draft_code}" >&2
+if [[ "${draft_code}" -ne 0 ]]; then
+  printf '[FATAL] Expected successful semantic handoff, got %s\n' "${draft_code}" >&2
   exit 1
 fi
 
@@ -122,8 +122,8 @@ set +e
 forensic_output="$(bash ./aegis "identifique se é palindromo")"
 forensic_code=$?
 set -e
-if [[ "${forensic_code}" -ne 2 ]]; then
-  printf '[FATAL] Expected lexical Discovery exit code 2, got %s\n' "${forensic_code}" >&2
+if [[ "${forensic_code}" -ne 0 ]]; then
+  printf '[FATAL] Expected successful lexical Discovery, got %s\n' "${forensic_code}" >&2
   exit 1
 fi
 
@@ -143,7 +143,7 @@ set +e
 bash ./aegis $'Linha 1\r\nLinha 2' >/dev/null
 normalized_code=$?
 set -e
-[[ "${normalized_code}" -eq 2 ]]
+[[ "${normalized_code}" -eq 0 ]]
 jq -e '.intent == "Linha 1\nLinha 2" and .capture.lineEndings == "LF"' .harness/runtime/preflight.json >/dev/null
 
 clean_output="$(bash ./aegis clean)"

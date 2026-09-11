@@ -1,25 +1,11 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
-import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
-import {
-  buildPreflightHandoff,
-  computeContractDigest,
-  createProofRegistry,
-  discoverWorkspace,
-  loadArchitecturePolicy,
-  renderContractMarkdown,
-  renderPreflightMarkdown,
-  sanitizeInputText,
-  validateContract,
-} from './lib/issue_contract_core.mjs';
-import { semanticStatePath, parseSemanticState } from './lib/semantic_state.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const runtimeDir = resolve(root, '.harness/runtime');
@@ -32,6 +18,13 @@ const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 const receiptPath = resolve(runtimeDir, 'verification_receipt.json');
 
 async function handleDraft(args) {
+  const [
+    { canonicalJson },
+    { buildPreflightHandoff, discoverWorkspace, renderPreflightMarkdown, sanitizeInputText },
+  ] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/issue_contract_core.mjs'),
+  ]);
   const rawBuffer = Buffer.from(args.join(' '), 'utf8');
 
   const sanitizedText = sanitizeInputText(rawBuffer);
@@ -57,7 +50,6 @@ async function handleDraft(args) {
     dataPath: '.harness/runtime/preflight.json',
     artifactPath: '.harness/runtime/preflight.md',
   })}\n`);
-  process.exit(2);
 }
 
 async function handleApprove() {
@@ -69,6 +61,16 @@ async function handleApprove() {
     process.stderr.write('[AEGIS][FATAL] missing_contract_draft\n');
     process.exit(1);
   }
+
+  const [
+    { canonicalDigest, canonicalJson, sha256 },
+    { computeContractDigest, createProofRegistry, loadArchitecturePolicy, renderContractMarkdown, validateContract },
+    { semanticStatePath },
+  ] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/issue_contract_core.mjs'),
+    import('./lib/semantic_state.mjs'),
+  ]);
 
   const contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
 
@@ -132,6 +134,17 @@ async function handleApprove() {
 }
 
 async function handleVerify() {
+  const [
+    { spawnSync },
+    { canonicalJson, sha256 },
+    { loadArchitecturePolicy, renderContractMarkdown },
+    { semanticStatePath, parseSemanticState },
+  ] = await Promise.all([
+    import('node:child_process'),
+    import('./lib/canonical_json.mjs'),
+    import('./lib/issue_contract_core.mjs'),
+    import('./lib/semantic_state.mjs'),
+  ]);
   const statePath = semanticStatePath(root);
   if (!existsSync(statePath)) {
     process.stderr.write('[AEGIS][VERIFY][FATAL] no_governed_contract: Execute ./aegis approve primeiro.\n');
