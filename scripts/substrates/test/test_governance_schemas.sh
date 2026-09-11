@@ -11,6 +11,7 @@ import { assertSchema, schemaErrors } from './scripts/lib/schema_validator.mjs';
 const files = [
   'architecture-policy.v1.schema.json',
   'issue-contract.v1.schema.json',
+  'preflight-handoff.v1.schema.json',
 ];
 
 for (const file of files) {
@@ -49,6 +50,50 @@ const valid = {
 assertSchema('aegis.issue_contract.v1', valid);
 if (schemaErrors('aegis.issue_contract.v1', { ...valid, extraField: 'invalid' }).length === 0) {
   throw new Error('schema accepted invalid extra field');
+}
+
+const preflight = {
+  schema: 'aegis.preflight_handoff.v1',
+  phase: 'DISCOVERED',
+  status: 'SEMANTIC_DELIBERATION_REQUIRED',
+  title: 'Demanda de Teste',
+  intent: 'Demanda de teste.',
+  capture: { provenance: 'USER', encoding: 'UTF-8', lineEndings: 'LF', byteLength: 17 },
+  discovery: {
+    sourceRoot: 'src',
+    sourceFiles: ['src/index.ts'],
+    visitedEntries: 1,
+    inspectedFiles: 1,
+    scannedBytes: 11,
+    skippedFiles: [],
+    relationStatus: 'NO_LEXICAL_MATCH',
+    matchKind: 'CASE_FOLDED_SUBSTRING',
+    queryTerms: ['Demanda', 'teste'],
+    termsTruncated: false,
+    occurrences: [],
+    unmatchedTerms: ['Demanda', 'teste'],
+  },
+};
+assertSchema('aegis.preflight_handoff.v1', preflight);
+if (schemaErrors('aegis.preflight_handoff.v1', { ...preflight, requirements: [] }).length === 0) {
+  throw new Error('preflight schema accepted semantic contract fields');
+}
+
+const decisions = [{
+  questionId: 'Q-OUTPUT',
+  question: 'Qual saída pública deve ser adotada?',
+  recommendedAnswerId: 'ANS-SIMPLE',
+  selectedAnswerId: 'ANS-SIMPLE',
+  answers: [
+    { id: 'ANS-SIMPLE', label: 'Resultado simples', rationale: 'Menor superfície.', resolutionClause: 'Retornar resultado simples.', recommended: true },
+    { id: 'ANS-DETAIL', label: 'Resultado detalhado', rationale: 'Expõe metadados.', resolutionClause: 'Retornar resultado detalhado.', recommended: false },
+  ],
+}];
+assertSchema('aegis.issue_contract.v1', { ...valid, decisions });
+const ambiguousRecommendation = structuredClone(decisions);
+ambiguousRecommendation[0].answers[1].recommended = true;
+if (schemaErrors('aegis.issue_contract.v1', { ...valid, decisions: ambiguousRecommendation }).length === 0) {
+  throw new Error('contract schema accepted multiple recommended answers');
 }
 NODE
 

@@ -13,7 +13,7 @@ fatal() { printf '[AEGIS][IDE][FATAL] %s\n' "$1" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
-  ./aegis "<demanda>"      Gera a Issue-Contrato pré-cozinhada (.harness/runtime/contract.md)
+  ./aegis "<demanda>"      Captura a intenção e executa o Discovery (.harness/runtime/preflight.md)
   ./aegis approve          Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis verify           Executa as provas físicas do tribunal e emite recibo PROVEN
   ./aegis status           Exibe o status do contrato e da árvore de trabalho
@@ -24,10 +24,13 @@ EOF
 
 status_command() {
   local contract_file="${RUNTIME_DIR}/contract.json"
+  local preflight_file="${RUNTIME_DIR}/preflight.json"
   local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
   local receipt_file="${RUNTIME_DIR}/verification_receipt.json"
 
-  if [[ -f "${semantic_file}" ]]; then
+  if [[ -f "${preflight_file}" ]]; then
+    printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
+  elif [[ -f "${semantic_file}" ]]; then
     local digest
     digest="$(node -e '
       const fs = require("fs");
@@ -90,7 +93,11 @@ resolve_preflight_wizard() {
   fi
 
   if [[ ! -f "${request_file}" ]]; then
-    printf '\n[AEGIS] Nenhuma Issue-Contrato pendente de confirmação. Execute: ./aegis "<sua demanda>" primeiro.\n' >&2
+    if [[ -f "${RUNTIME_DIR}/preflight.json" ]]; then
+      printf '\n[AEGIS] Captura e Discovery concluídos. A deliberação semântica ainda precisa compilar as opções do contrato.\n' >&2
+    else
+      printf '\n[AEGIS] Nenhuma Issue-Contrato pendente de confirmação. Execute: ./aegis "<sua demanda>" primeiro.\n' >&2
+    fi
     exit 0
   fi
   local result
@@ -103,7 +110,7 @@ resolve_preflight_wizard() {
     exit 0
   fi
 
-  local count index question answer_count choice correction answer_id requires_text answers='[]'
+  local count index question answer_count choice correction answer_id answers='[]'
   count="$(jq '.questions | length' <<< "${result}")"
   if (( count == 0 )); then
     printf '\n[AEGIS] Nenhuma ambiguidade detectada na demanda. Aprovando contrato...\n' >&2
@@ -122,14 +129,7 @@ resolve_preflight_wizard() {
   for ((index = 0; index < count; index++)); do
     question="$(jq -c ".questions[${index}]" <<< "${result}")"
     answer_count="$(jq '.answers | length' <<< "${question}")"
-    requires_text="$(jq -r '.answers[0].requiresText // false' <<< "${question}")"
     printf '\n[%s] %s\n' "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" >&2
-    if [[ "${requires_text}" == "true" ]]; then
-      read -r -p 'Especificação: ' correction
-      [[ -n "${correction}" ]] || { printf '[AEGIS] A especificação não pode ficar vazia.\n' >&2; exit 1; }
-      answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '. + [{questionId:$questionId, correction:$correction}]' <<< "${answers}")"
-      continue
-    fi
     jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
     printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
     while true; do

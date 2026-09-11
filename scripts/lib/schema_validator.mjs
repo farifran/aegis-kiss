@@ -8,6 +8,7 @@ const schemaDirectory = resolve(repositoryRoot, 'governance/schemas');
 const schemaFiles = new Map([
   ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
   ['aegis.issue_contract.v1', 'issue-contract.v1.schema.json'],
+  ['aegis.preflight_handoff.v1', 'preflight-handoff.v1.schema.json'],
 ]);
 
 const validator = new Ajv2020({ allErrors: true, strict: false });

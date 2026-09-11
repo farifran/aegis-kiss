@@ -68,7 +68,7 @@ async function choose(question) {
     ignoreFocusOut: true,
   });
   if (selected === undefined) return undefined;
-  if (!selected.other && !selected.answer.requiresText) return { questionId: question.id, answerId: selected.answer.id };
+  if (!selected.other) return { questionId: question.id, answerId: selected.answer.id };
   const correction = await vscode.window.showInputBox({
     title: `Aegis — ${question.id}`,
     prompt: 'Descreva a interpretação que o contrato deve adotar.',

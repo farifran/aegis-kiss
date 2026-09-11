@@ -9,13 +9,13 @@ import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { canonicalDigest, canonicalJson, sha256 } from './lib/canonical_json.mjs';
 import {
-  applyUserResolution,
-  buildIssueDraft,
+  buildPreflightHandoff,
   computeContractDigest,
   createProofRegistry,
   discoverWorkspace,
   loadArchitecturePolicy,
   renderContractMarkdown,
+  renderPreflightMarkdown,
   sanitizeInputText,
   validateContract,
 } from './lib/issue_contract_core.mjs';
@@ -25,86 +25,52 @@ const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', impor
 const runtimeDir = resolve(root, '.harness/runtime');
 const contractJsonPath = resolve(runtimeDir, 'contract.json');
 const contractMdPath = resolve(runtimeDir, 'contract.md');
+const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
+const preflightMdPath = resolve(runtimeDir, 'preflight.md');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
+const receiptPath = resolve(runtimeDir, 'verification_receipt.json');
 
 async function handleDraft(args) {
   const rawBuffer = Buffer.from(args.join(' '), 'utf8');
 
   const sanitizedText = sanitizeInputText(rawBuffer);
-
   const discovery = discoverWorkspace(root, sanitizedText);
-  const architecturePolicy = loadArchitecturePolicy(root);
-  const policy = architecturePolicy.policy;
-
-  const draft = buildIssueDraft({
-    sanitizedText,
-    discovery,
-    architecture: {
-      candidateRules: policy.rules,
-      policyDigest: '0'.repeat(64),
-    },
-  });
+  const preflight = buildPreflightHandoff({ sanitizedText, discovery });
 
   await mkdir(runtimeDir, { recursive: true });
-  await writeFile(contractJsonPath, `${canonicalJson(draft)}\n`, 'utf8');
-  await writeFile(contractMdPath, `${renderContractMarkdown(draft, false, '', policy.rules)}\n`, 'utf8');
+  await Promise.all([
+    contractJsonPath,
+    contractMdPath,
+    userConfirmationPath,
+    resolutionPath,
+    receiptPath,
+  ].map((path) => rm(path, { force: true })));
+  await writeFile(preflightJsonPath, `${canonicalJson(preflight)}\n`, 'utf8');
+  await writeFile(preflightMdPath, `${renderPreflightMarkdown(preflight)}\n`, 'utf8');
 
-  const questions = (draft.decisions ?? []).map((d) => ({
-    id: d.questionId,
-    question: d.question,
-    recommendedAnswerId: d.recommendedAnswerId,
-    selectedAnswerId: d.selectedAnswerId,
-    answers: d.answers,
-  }));
-
-  const draftSessionId = `draft-${Date.now().toString(36)}`;
-  const confirmationRequest = {
-    schema: 'aegis.preflight_finalization.v2',
-    status: 'USER_CONFIRMATION_REQUIRED',
-    executionId: draftSessionId,
-    title: draft.title,
-    intent: draft.intent,
-    scope: draft.scope,
-    questions,
-    artifactPath: '.harness/runtime/contract.md',
-  };
-
-  await writeFile(userConfirmationPath, `${JSON.stringify(confirmationRequest, null, 2)}\n`, 'utf8');
-
-  if (existsSync(resolutionPath)) {
-    await rm(resolutionPath, { force: true });
-  }
-
-  process.stdout.write(`${JSON.stringify(confirmationRequest)}\n`);
+  process.stdout.write(`${JSON.stringify({
+    schema: preflight.schema,
+    status: preflight.status,
+    phase: preflight.phase,
+    title: preflight.title,
+    dataPath: '.harness/runtime/preflight.json',
+    artifactPath: '.harness/runtime/preflight.md',
+  })}\n`);
   process.exit(2);
 }
 
 async function handleApprove() {
   if (!existsSync(contractJsonPath)) {
+    if (existsSync(preflightJsonPath)) {
+      process.stderr.write('[AEGIS][FATAL] semantic_deliberation_required\n');
+      process.exit(1);
+    }
     process.stderr.write('[AEGIS][FATAL] missing_contract_draft\n');
     process.exit(1);
   }
 
-  const rawContract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
-  let contract = rawContract;
-
-  const targetResolution = existsSync(resolutionPath) ? resolutionPath : null;
-
-  if (targetResolution) {
-    try {
-      const resolution = JSON.parse(await readFile(targetResolution, 'utf8'));
-      const request = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
-      if (resolution.executionId !== request.executionId) {
-        throw new Error('stale_preflight_resolution');
-      }
-      if (Array.isArray(resolution.answers)) {
-        contract = applyUserResolution(contract, resolution.answers);
-      }
-    } catch {
-      // Continue with draft as is
-    }
-  }
+  const contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
 
   let policy;
   let policyText;
@@ -120,14 +86,14 @@ async function handleApprove() {
   const architecturePolicyDigest = sha256(policyText);
   contract.architecture.policyDigest = architecturePolicyDigest;
 
-  const contractDigest = computeContractDigest(contract);
-  const proofRegistry = createProofRegistry(contract);
-  const proofRegistryDigest = canonicalDigest(proofRegistry);
-
   validateContract({
     contract,
     policy,
   });
+
+  const contractDigest = computeContractDigest(contract);
+  const proofRegistry = createProofRegistry(contract);
+  const proofRegistryDigest = canonicalDigest(proofRegistry);
 
   const statePath = semanticStatePath(root);
   await mkdir(resolve(root, 'src/.aegis'), { recursive: true });
@@ -264,7 +230,6 @@ async function handleVerify() {
   const receiptDigest = sha256(canonicalJson(receiptData));
   receiptData.receiptDigest = receiptDigest;
 
-  const receiptPath = resolve(runtimeDir, 'verification_receipt.json');
   await mkdir(runtimeDir, { recursive: true });
   await writeFile(receiptPath, `${canonicalJson(receiptData)}\n`, 'utf8');
 

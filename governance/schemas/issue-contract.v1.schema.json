@@ -240,11 +240,19 @@
           "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
           "question": { "type": "string", "minLength": 1 },
           "scope": { "enum": ["INPUT", "SCOPE", "ARCHITECTURE", "DEMAND"] },
-          "recommendedAnswerId": { "type": "string" },
-          "selectedAnswerId": { "type": "string" },
+          "recommendedAnswerId": { "type": "string", "minLength": 1 },
+          "selectedAnswerId": { "type": "string", "minLength": 1 },
           "answers": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 2,
+            "maxItems": 4,
+            "contains": {
+              "type": "object",
+              "required": ["recommended"],
+              "properties": { "recommended": { "const": true } }
+            },
+            "minContains": 1,
+            "maxContains": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -254,8 +262,7 @@
                 "label": { "type": "string", "minLength": 1 },
                 "rationale": { "type": "string", "minLength": 1 },
                 "resolutionClause": { "type": "string", "minLength": 1 },
-                "recommended": { "type": "boolean" },
-                "requiresText": { "type": "boolean" }
+                "recommended": { "type": "boolean" }
               }
             }
           }

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_handoff.v1",
+  "title": "Aegis Phase 1-2 Preflight Handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "phase", "status", "title", "intent", "capture", "discovery"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_handoff.v1" },
+    "phase": { "const": "DISCOVERED" },
+    "status": { "const": "SEMANTIC_DELIBERATION_REQUIRED" },
+    "title": { "type": "string", "minLength": 1 },
+    "intent": { "type": "string", "minLength": 1 },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance", "encoding", "lineEndings", "byteLength"],
+      "properties": {
+        "provenance": { "const": "USER" },
+        "encoding": { "const": "UTF-8" },
+        "lineEndings": { "const": "LF" },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 65536 }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRoot",
+        "sourceFiles",
+        "visitedEntries",
+        "inspectedFiles",
+        "scannedBytes",
+        "skippedFiles",
+        "relationStatus",
+        "matchKind",
+        "queryTerms",
+        "termsTruncated",
+        "occurrences",
+        "unmatchedTerms"
+      ],
+      "properties": {
+        "sourceRoot": { "const": "src" },
+        "sourceFiles": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "type": "string", "pattern": "^src/" },
+          "uniqueItems": true
+        },
+        "visitedEntries": { "type": "integer", "minimum": 0, "maximum": 512 },
+        "inspectedFiles": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "scannedBytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "skippedFiles": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "reason"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^src/" },
+              "reason": { "enum": ["AEGIS_STATE", "SYMLINK", "BINARY", "INVALID_UTF8"] }
+            }
+          }
+        },
+        "relationStatus": { "enum": ["EMPTY_SOURCE", "NO_TEXT_SOURCE", "LEXICAL_MATCH", "NO_LEXICAL_MATCH"] },
+        "matchKind": { "const": "CASE_FOLDED_SUBSTRING" },
+        "queryTerms": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 4 },
+          "uniqueItems": true
+        },
+        "termsTruncated": { "type": "boolean" },
+        "occurrences": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["term", "path", "line"],
+            "properties": {
+              "term": { "type": "string", "minLength": 4 },
+              "path": { "type": "string", "pattern": "^src/" },
+              "line": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "unmatchedTerms": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 4 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
