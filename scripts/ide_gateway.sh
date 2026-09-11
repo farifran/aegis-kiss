@@ -25,7 +25,7 @@ EOF
 status_command() {
   local contract_file="${RUNTIME_DIR}/contract.json"
   local preflight_file="${RUNTIME_DIR}/preflight.json"
-  local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
+  local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
   local receipt_file="${RUNTIME_DIR}/verification_receipt.json"
 
   if [[ -f "${semantic_file}" ]]; then
@@ -75,7 +75,7 @@ status_command() {
 clean_command() {
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
-  rm -rf "${ROOT_DIR}/src/.aegis"
+  rm -rf "${ROOT_DIR}/.harness/state"
   [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
   find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
@@ -85,7 +85,7 @@ clean_command() {
 resolve_preflight_wizard() {
   local request_file="${RUNTIME_DIR}/user_confirmation_request.json"
   local resolution_file="${RUNTIME_DIR}/preflight_resolution.json"
-  local semantic_file="${ROOT_DIR}/src/.aegis/semantic-state.json"
+  local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
 
   if [[ -f "${semantic_file}" ]]; then
     printf '\n[AEGIS] O contrato já está selado e governado (GOVERNED). Nada a resolver no wizard.\n' >&2

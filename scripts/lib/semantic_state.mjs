@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { assertSchema } from './schema_validator.mjs';
 import { canonicalDigest } from './canonical_json.mjs';
 
-export const semanticStateRelativePath = 'src/.aegis/semantic-state.json';
+export const semanticStateRelativePath = '.harness/state/semantic-state.json';
 
 export function semanticStatePath(root) {
   return resolve(root, semanticStateRelativePath);

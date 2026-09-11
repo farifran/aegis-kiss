@@ -28,9 +28,8 @@ export function sanitizeInputText(rawBytes, maxBytes = maxDemandBytes) {
 }
 
 function pathRoleBadge(p) {
-  if (p.endsWith('semantic-state.json')) return ' **[AUTHORITATIVE_STATE]** *(Raiz criptográfica de custódia)*';
   if (p.endsWith('.proof.sh') || p.endsWith('.proof.ts')) return ' **[DETERMINISTIC_PROOF]** *(Tribunal de provas físicas)*';
-  if (p.endsWith('.ts') || p.endsWith('.mjs') || p.endsWith('.js')) return ' **[ENTRYPOINT_SOURCE]** *(Implementação da API pública)*';
+  if (p.endsWith('.ts') || p.endsWith('.mjs') || p.endsWith('.js')) return ' **[OBSERVED_SOURCE]** *(Fronteira pública observada)*';
   return '';
 }
 
@@ -123,10 +122,6 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
       }
       const absolutePath = resolve(directory, entry.name);
       const relativePath = relative(repositoryRoot, absolutePath).replaceAll('\\', '/');
-      if (entry.name === '.aegis') {
-        skippedFiles.push({ path: relativePath, reason: 'AEGIS_STATE' });
-        continue;
-      }
       if (entry.isSymbolicLink()) {
         skippedFiles.push({ path: relativePath, reason: 'SYMLINK' });
         continue;
@@ -177,7 +172,7 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
     scannedBytes,
     skippedFiles,
     relationStatus: sourceFiles.length === 0
-      ? (skippedFiles.some(({ reason }) => reason !== 'AEGIS_STATE') ? 'NO_TEXT_SOURCE' : 'EMPTY_SOURCE')
+      ? (skippedFiles.length > 0 ? 'NO_TEXT_SOURCE' : 'EMPTY_SOURCE')
       : forensic.relationStatus,
     matchKind: forensic.matchKind,
     queryTerms: forensic.queryTerms,
@@ -290,7 +285,6 @@ export function renderContractMarkdown(
   receiptDigest = '',
 ) {
   const stateKind = contract.stateModel?.kind;
-  const sourceScope = contract.scope?.authorizedPaths?.find((p) => p === 'src' || p === 'src/') ?? 'src';
 
   const ruleMap = new Map(Object.entries(CANONICAL_RULE_STATEMENTS));
   if (Array.isArray(policyRules)) {
@@ -328,14 +322,12 @@ export function renderContractMarkdown(
     '## 1. Intenção & Escopo',
     contract.intent,
     '',
-    '### Arquivos Autorizados (Escopo Estrito):',
-    ...contract.scope.authorizedPaths.map((path) => `- \`${path}\`${pathRoleBadge(path)}`),
+    '### Fronteira Observável Declarada:',
+    ...contract.scope.observedPaths.map((path) => `- \`${path}\`${pathRoleBadge(path)}`),
     '',
     '### Fronteira Pública Obrigatória (API Surface):',
-    '```typescript',
-    `// Escopo de implementação autorizado: ${sourceScope}`,
-    '// Assinaturas concretas serão definidas após o Discovery e a deliberação.',
-    '```',
+    '> O contrato descreve comportamento observável. Não autoriza criar ou alterar arquivos de produto.',
+    '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     '',
     '### Disciplina de Evidência & Não-Alucinação (Constituição Lei II):',
     '- **Fatos Fornecidos (KNOWN):**',
@@ -439,6 +431,7 @@ export function createProofRegistry(contract) {
     )),
   }));
   const proofs = contract.proofObligations.map((proof) => {
+    const executor = proof.entrypoint.endsWith('.ts') ? 'node' : 'bash';
     let argv = proof.entrypoint.endsWith('.ts') ? ['--import', 'tsx', proof.entrypoint] : [proof.entrypoint];
     if (proof.id === 'PO-ARCH-STATIC' || proof.entrypoint.endsWith('static_gate.sh')) {
       argv = [proof.entrypoint, '--workspace', 'src'];
@@ -452,8 +445,9 @@ export function createProofRegistry(contract) {
       cadence: proof.cadence,
       status: 'active',
       targets: proof.targets,
-      executionKey: `proof-${canonicalDigest(proof.entrypoint).slice(0, 12)}`,
-      executor: proof.entrypoint.endsWith('.ts') ? 'node' : 'bash',
+      executionKey: `proof-${canonicalDigest({ executor, argv }).slice(0, 12)}`,
+      entrypoint: proof.entrypoint,
+      executor,
       argv,
     };
   });

@@ -11,6 +11,9 @@
 
 .harness/runtime/
 
+# Governed state for the current local demand
+.harness/state/
+
 # Local machine secrets/config
 .harness/local.env
 .harness/supervisor.json

@@ -118,6 +118,80 @@ if [[ "${approve_code}" -eq 0 ]] || ! grep -q 'semantic_deliberation_required' <
   exit 1
 fi
 
+# Assinar governa o contrato sem criar, editar ou apagar arquivos de produto.
+source_before="$(shasum src/index.ts)"
+node --input-type=module <<'NODE'
+import { writeFileSync } from 'node:fs';
+
+const contract = {
+  schema: 'aegis.issue_contract.v1',
+  title: 'Contrato sem implementação',
+  changeKind: 'PRODUCT',
+  implementationAuthorized: false,
+  intent: 'Descrever uma fronteira pública sem implementá-la.',
+  architecture: {
+    policyDigest: '0'.repeat(64),
+    appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
+    amendmentIds: [],
+  },
+  scope: { observedPaths: ['src/index.ts'] },
+  requirements: [{ id: 'REQ-CONTRACT', statement: 'Produzir somente o contrato.', provenance: 'USER' }],
+  behavior: [{ id: 'BEH-CONTRACT', statement: 'A assinatura termina sem alterar o produto.' }],
+  invariants: [{ id: 'INV-CONTRACT', statement: 'src permanece inalterado.', proofIds: ['PO-CONTRACT', 'PO-CONTRACT-FAILURES'] }],
+  proofObligations: ['PO-CONTRACT', 'PO-CONTRACT-FAILURES'].map((id, index) => ({
+    id,
+    coverageKey: index === 0 ? 'contract-only' : 'contract-only.failures',
+    risk: 'Alteração indevida do produto.',
+    obligation: 'Confirmar que a assinatura não altera src.',
+    entrypoint: '.harness/dedup-proof.sh',
+    targets: ['src/index.ts'],
+    cadence: 'always',
+    cost: 'low',
+  })),
+};
+writeFileSync('.harness/runtime/contract.json', `${JSON.stringify(contract)}\n`);
+NODE
+
+approve_output="$(bash ./aegis approve)"
+printf '%s\n' "${approve_output}" | jq -e '
+  .status == "FINALIZED"
+  and .evidenceState == "GOVERNED"
+  and .implementationAuthorized == false
+' >/dev/null
+[[ -s .harness/state/semantic-state.json ]]
+[[ ! -e src/.aegis ]]
+[[ "${source_before}" == "$(shasum src/index.ts)" ]]
+[[ "$(find src -type f | wc -l | tr -d ' ')" == "1" ]]
+grep -q 'IMPLEMENTATION_AUTHORIZED.*false' .harness/runtime/contract.md
+if grep -qi 'implementação autorizado\|arquivos autorizados' .harness/runtime/contract.md; then
+  printf '[FATAL] Contract still suggests implementation authorization\n' >&2
+  exit 1
+fi
+
+# Obrigações diferentes que usam o mesmo executor físico rodam apenas uma vez.
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -Eeuo pipefail' \
+  'count_file=".harness/runtime/proof-executions"' \
+  'count=0' \
+  '[[ ! -f "${count_file}" ]] || read -r count < "${count_file}"' \
+  'printf "%s\\n" "$((count + 1))" > "${count_file}"' \
+  > .harness/dedup-proof.sh
+chmod +x .harness/dedup-proof.sh
+verify_output="$(bash ./aegis verify)"
+printf '%s\n' "${verify_output}" | tail -n 1 | jq -e '
+  .status == "PROVEN"
+  and .proofsCovered == 3
+  and .executionsRun == 2
+' >/dev/null
+[[ "$(cat .harness/runtime/proof-executions)" == "1" ]]
+jq -e '
+  .proofsCovered == 3
+  and .executionsRun == 2
+  and (.results | map(select(.executionKey != "aegis-static-gate")) | length == 2)
+  and (.results | map(select(.reusedExecution == true)) | length == 1)
+' .harness/runtime/verification_receipt.json >/dev/null
+
 # O Discovery é agnóstico de linguagem e registra limites da evidência lexical.
 bash ./aegis clean >/dev/null
 printf 'def palindromo(texto):\n    return texto == texto[::-1]\n' > src/palindromo.py
@@ -141,7 +215,7 @@ jq -e '
   and .discovery.matchKind == "CASE_FOLDED_SUBSTRING"
   and (.discovery.occurrences | any(.term == "palindromo" and .path == "src/palindromo.py" and .line == 1))
   and (.discovery.skippedFiles | any(.path == "src/blob.bin" and .reason == "BINARY"))
-  and (.discovery.skippedFiles | any(.path == "src/.aegis" and .reason == "AEGIS_STATE"))
+  and (.discovery.sourceFiles | index("src/.aegis/semantic-state.json") != null)
   and (has("requirements") | not)
 ' .harness/runtime/preflight.json >/dev/null
 

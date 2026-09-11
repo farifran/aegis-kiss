@@ -3,7 +3,7 @@
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -106,6 +106,7 @@ async function handleApprove() {
 
   const architecturePolicyDigest = sha256(policyText);
   contract.architecture.policyDigest = architecturePolicyDigest;
+  contract.implementationAuthorized = false;
   assertSchema('aegis.issue_contract.v1', contract);
 
   validateContract({
@@ -118,7 +119,7 @@ async function handleApprove() {
   const proofRegistryDigest = canonicalDigest(proofRegistry);
 
   const statePath = semanticStatePath(root);
-  await mkdir(resolve(root, 'src/.aegis'), { recursive: true });
+  await mkdir(dirname(statePath), { recursive: true });
 
   const semanticState = {
     schema: 'aegis.semantic_state.v1',
@@ -149,6 +150,7 @@ async function handleApprove() {
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
+    implementationAuthorized: false,
   })}\n`);
   process.exit(0);
 }
@@ -190,6 +192,8 @@ async function handleVerify() {
   }
 
   const results = [];
+  const executionCache = new Map();
+  let executionsRun = 0;
   const hasStaticProof = proofs.some((p) => p.id === 'PO-ARCH-STATIC');
   if (!hasStaticProof) {
     process.stdout.write('[AEGIS][VERIFY] Portão Arquitetural: Validando conformidade física estática (PO-ARCH-STATIC)...\n');
@@ -213,40 +217,59 @@ async function handleVerify() {
       status: 'PASS',
       durationMs: staticDurationMs,
       sourceDigest: staticSourceDigest,
+      executionKey: 'aegis-static-gate',
+      reusedExecution: false,
     });
+    executionsRun += 1;
   }
 
-  process.stdout.write(`[AEGIS][VERIFY] Executando ${proofs.length} obrigações de prova física para o contrato ${contractDigest.slice(0, 12)}...\n`);
+  process.stdout.write(`[AEGIS][VERIFY] Verificando ${proofs.length} obrigações de prova física para o contrato ${contractDigest.slice(0, 12)}...\n`);
   for (const proof of proofs) {
-    const fullPath = resolve(root, proof.argv?.[0] ?? proof.entrypoint);
-    if (!existsSync(fullPath)) {
-      process.stderr.write(`[AEGIS][VERIFY][FAIL] Arquivo de prova não encontrado: ${proof.argv?.[0] ?? proof.entrypoint}\n`);
-      process.exit(1);
+    const executionIdentity = JSON.stringify([proof.executor, proof.argv]);
+    let execution = executionCache.get(executionIdentity);
+    const reusedExecution = Boolean(execution);
+
+    if (!execution) {
+      const sourcePath = proof.entrypoint ?? proof.argv?.at(-1);
+      const fullPath = resolve(root, sourcePath);
+      if (!existsSync(fullPath)) {
+        process.stderr.write(`[AEGIS][VERIFY][FAIL] Arquivo de prova não encontrado: ${sourcePath}\n`);
+        process.exit(1);
+      }
+
+      const sourceDigest = sha256(await readFile(fullPath));
+      const startMs = Date.now();
+      const child = spawnSync(proof.executor, proof.argv, {
+        cwd: root,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        encoding: 'utf8',
+      });
+      const durationMs = Date.now() - startMs;
+
+      if (child.status !== 0) {
+        process.stderr.write(`[AEGIS][VERIFY][FAIL] Prova ${proof.id} falhou com código ${child.status}:\n${child.stderr || child.stdout}\n`);
+        process.exit(1);
+      }
+
+      execution = {
+        durationMs,
+        sourceDigest,
+        executionKey: proof.executionKey,
+      };
+      executionCache.set(executionIdentity, execution);
+      executionsRun += 1;
     }
 
-    const proofSourceBytes = await readFile(fullPath);
-    const sourceDigest = sha256(proofSourceBytes);
-
-    const startMs = Date.now();
-    const child = spawnSync(proof.executor, proof.argv, {
-      cwd: root,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-    });
-    const durationMs = Date.now() - startMs;
-
-    if (child.status !== 0) {
-      process.stderr.write(`[AEGIS][VERIFY][FAIL] Prova ${proof.id} falhou com código ${child.status}:\n${child.stderr || child.stdout}\n`);
-      process.exit(1);
-    }
-
-    process.stdout.write(`  ✔ ${proof.id} (${proof.coverageKey}): PASS (${durationMs}ms)\n`);
+    const reuseLabel = reusedExecution ? ', resultado reutilizado' : '';
+    process.stdout.write(`  ✔ ${proof.id} (${proof.coverageKey}): PASS (${execution.durationMs}ms${reuseLabel})\n`);
     results.push({
       proofId: proof.id,
       coverageKey: proof.coverageKey,
       status: 'PASS',
-      durationMs,
-      sourceDigest,
+      durationMs: execution.durationMs,
+      sourceDigest: execution.sourceDigest,
+      executionKey: execution.executionKey,
+      reusedExecution,
     });
   }
 
@@ -256,7 +279,8 @@ async function handleVerify() {
     contractDigest,
     proofRegistryDigest: semanticState.digests?.proofRegistrySemanticDigest,
     verifiedAtEpochMs: Date.now(),
-    proofsRun: results.length,
+    proofsCovered: results.length,
+    executionsRun,
     results,
   };
 
@@ -280,7 +304,8 @@ async function handleVerify() {
     status: 'PROVEN',
     contractDigest,
     receiptDigest,
-    proofsRun: results.length,
+    proofsCovered: results.length,
+    executionsRun,
   })}\n`);
   process.exit(0);
 }

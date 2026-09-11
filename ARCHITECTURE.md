@@ -9,9 +9,12 @@ projeção estruturada em `governance/architecture.policy.json`.
 
 - O produto reside em `src/`; uma demanda `PRODUCT` não altera o harness.
 - O estado semântico persistente, quando necessário, reside unicamente em
-  `src/.aegis/semantic-state.json`.
+  `.harness/state/semantic-state.json`.
 - O runtime do harness é transitório em `.harness/runtime/`; não é fonte de
   verdade nem artefato de produto.
+- Ao processar e assinar uma demanda, o harness pode observar e citar caminhos
+  de produto no contrato, mas não pode criar, editar ou apagar esses caminhos.
+  Assinar um contrato não autoriza sua implementação.
 - O core usa execução local, determinística e sem dependência de rede ou de
   provedores de modelo. Compiladores, linters e provas são adaptadores locais.
 

@@ -59,7 +59,7 @@
             "required": ["path", "reason"],
             "properties": {
               "path": { "type": "string", "pattern": "^src/" },
-              "reason": { "enum": ["AEGIS_STATE", "SYMLINK", "BINARY", "INVALID_UTF8"] }
+              "reason": { "enum": ["SYMLINK", "BINARY", "INVALID_UTF8"] }
             }
           }
         },

@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 import { assertSchema, schemaErrors } from './scripts/lib/schema_validator.mjs';
+import { createProofRegistry } from './scripts/lib/issue_contract_core.mjs';
+import { semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
 
 const files = [
   'architecture-policy.v1.schema.json',
@@ -25,13 +27,14 @@ const valid = {
   schema: 'aegis.issue_contract.v1',
   title: 'Demanda de Teste',
   changeKind: 'PRODUCT',
+  implementationAuthorized: false,
   intent: 'Intenção de teste do schema.',
   architecture: {
     policyDigest: 'a'.repeat(64),
     appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
     amendmentIds: [],
   },
-  scope: { authorizedPaths: ['src/index.ts'] },
+  scope: { observedPaths: ['src/index.ts'] },
   requirements: [{ id: 'REQ-0001', statement: 'Requisito funcional.', provenance: 'USER' }],
   behavior: [{ id: 'BEH-0001', statement: 'Comportamento observável.' }],
   invariants: [{ id: 'INV-0001', statement: 'Invariante de teste.', proofIds: ['PO-TEST'] }],
@@ -48,8 +51,31 @@ const valid = {
 };
 
 assertSchema('aegis.issue_contract.v1', valid);
+if (schemaErrors('aegis.issue_contract.v1', { ...valid, implementationAuthorized: true }).length === 0) {
+  throw new Error('contract authorized product implementation');
+}
+if (semanticStateRelativePath !== '.harness/state/semantic-state.json') {
+  throw new Error('semantic state escaped the harness boundary');
+}
+if (schemaErrors('aegis.issue_contract.v1', {
+  ...valid,
+  scope: { authorizedPaths: ['src/index.ts'] },
+}).length === 0) {
+  throw new Error('legacy implementation authorization field was accepted');
+}
 if (schemaErrors('aegis.issue_contract.v1', { ...valid, extraField: 'invalid' }).length === 0) {
   throw new Error('schema accepted invalid extra field');
+}
+
+const duplicateExecutionContract = structuredClone(valid);
+duplicateExecutionContract.proofObligations.push({
+  ...duplicateExecutionContract.proofObligations[0],
+  id: 'PO-TEST-FAILURES',
+  coverageKey: 'test.failures',
+});
+const duplicateRegistry = createProofRegistry(duplicateExecutionContract);
+if (duplicateRegistry.proofs[0].executionKey !== duplicateRegistry.proofs[1].executionKey) {
+  throw new Error('equivalent proof commands were not deduplicated');
 }
 
 const preflight = {
@@ -115,13 +141,14 @@ assertSchema('aegis.issue_contract.v1', {
   schema: 'aegis.issue_contract.v1',
   title: 'Demanda de Teste',
   changeKind: 'PRODUCT',
+  implementationAuthorized: false,
   intent: 'Intenção de teste.',
   architecture: {
     policyDigest: 'a'.repeat(64),
     appliedRuleIds: ['ARCH-FAILURE-EXPLICIT'],
     amendmentIds: [],
   },
-  scope: { authorizedPaths: ['src/index.ts'] },
+  scope: { observedPaths: ['src/index.ts'] },
   requirements: [{ id: 'REQ-0001', statement: 'req', provenance: 'USER' }],
   behavior: [{ id: 'BEH-0001', statement: 'beh' }],
   invariants: [{ id: 'INV-0001', statement: 'inv', proofIds: ['PO-TEST'] }],
