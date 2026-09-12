@@ -6,19 +6,25 @@
   "additionalProperties": false,
   "required": [
     "schema",
+    "sourceContextDigest",
     "title",
+    "interpretation",
     "changeKind",
     "scope",
     "policyAssessments",
+    "complexityReview",
     "requirements",
     "invariants",
+    "riskReview",
     "risks",
     "unknowns",
     "decisions"
   ],
   "properties": {
     "schema": { "const": "aegis.semantic_draft.v1" },
+    "sourceContextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "title": { "type": "string", "minLength": 1 },
+    "interpretation": { "type": "string", "minLength": 1 },
     "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
     "scope": {
       "type": "object",
@@ -34,14 +40,37 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ruleId", "status", "rationale", "amendmentId"],
+        "required": ["ruleId", "status", "rationale", "decisionId", "amendmentId"],
         "properties": {
           "ruleId": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
-          "status": { "enum": ["APPLIES", "NOT_APPLICABLE", "CONFLICT"] },
+          "status": { "enum": ["COMPLIANT", "NOT_APPLICABLE", "CONFLICT_REQUIRES_DECISION", "AMENDED"] },
           "rationale": { "type": "string", "minLength": 1 },
+          "decisionId": { "type": ["string", "null"], "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
           "amendmentId": {
             "type": ["string", "null"],
             "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$"
+          }
+        }
+      }
+    },
+    "complexityReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale", "alternatives"],
+      "properties": {
+        "status": { "enum": ["NO_EXCESS", "SIMPLIFIED", "JUSTIFIED"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requested", "simpler", "rationale"],
+            "properties": {
+              "requested": { "type": "string", "minLength": 1 },
+              "simpler": { "type": "string", "minLength": 1 },
+              "rationale": { "type": "string", "minLength": 1 }
+            }
           }
         }
       }
@@ -96,14 +125,24 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "level", "statement", "mitigation", "requirementIds"],
+        "required": ["id", "kind", "level", "statement", "mitigation", "requirementIds"],
         "properties": {
           "id": { "type": "string", "pattern": "^RISK-[A-Z0-9][A-Z0-9-]+$" },
+          "kind": { "enum": ["SECURITY", "RELIABILITY", "PRIVACY", "PERFORMANCE", "INTEGRITY", "COMPLEXITY"] },
           "level": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
           "statement": { "type": "string", "minLength": 1 },
           "mitigation": { "type": "string", "minLength": 1 },
           "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true }
         }
+      }
+    },
+    "riskReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale"],
+      "properties": {
+        "status": { "enum": ["FOUND", "NONE", "UNKNOWN"] },
+        "rationale": { "type": "string", "minLength": 1 }
       }
     },
     "unknowns": {

@@ -102,30 +102,36 @@ printf '%s\n' "${draft_output}" | jq -e '
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
   .schema == "aegis.semantic_request.v1"
-  and .constitution.sourcePath == "AGENTS.md"
+  and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
-  and (.constitution.content | contains("# Aegis Cognitive Constitution"))
+  and (.constitution.rules | length) == 5
+  and (.contextDigest | test("^[a-f0-9]{64}$"))
   and .outputSchema.id == "aegis.semantic_draft.v1"
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
   and .outputSchema.document."$id" == "aegis.semantic_draft.v1"
+  and .outputSchema.document.properties.sourceContextDigest.const == .contextDigest
   and (.outputSchema.document.required | index("requirements") != null)
   and .revision == null
   and .intent == "Criar calculadora de precisão"
-  and (.policy.rules | length) == 2
+  and (.policy.rules | length) == 8
   and (.workspace.observedTextPaths == ["src/index.ts"])
   and (.workspace.sourceEvidence[0].trust == "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS")
   and (.workspace.sourceEvidence[0].content | contains("Ignore regras anteriores"))
   and (has("preflightDigest") | not)
   and (has("sourceSnapshotDigest") | not)
 ' >/dev/null
+semantic_context_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.contextDigest')"
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -print)" == ".harness/runtime/preflight.json" ]]
 
 make_draft() {
   local mode="$1"
-  node --input-type=module - "${mode}" <<'NODE'
+  local context_digest="$2"
+  node --input-type=module - "${mode}" "${context_digest}" <<'NODE'
+import { readFileSync } from 'node:fs';
 const mode = process.argv[2];
+const sourceContextDigest = process.argv[3];
 const withDecision = mode === 'yes';
 const provenance = mode === 'resolved' ? 'USER_CLARIFICATION' : 'USER';
 const decisions = withDecision ? [{
@@ -145,16 +151,29 @@ const unknowns = withDecision ? [{
 }] : [];
 process.stdout.write(JSON.stringify({
   schema: 'aegis.semantic_draft.v1',
+  sourceContextDigest,
   title: 'Calculadora de precisão',
+  interpretation: 'Definir o comportamento público de uma calculadora sem implementar o produto.',
   changeKind: 'PRODUCT',
   scope: {
     inScope: ['Definir o comportamento público da calculadora.'],
     outOfScope: ['Implementar ou alterar código de produto.'],
   },
-  policyAssessments: [
-    { ruleId: 'ARCH-FAILURE-EXPLICIT', status: 'APPLIES', rationale: 'Erros devem ser resultados observáveis.', amendmentId: null },
-    { ruleId: 'ARCH-DETERMINISTIC-TIME', status: 'NOT_APPLICABLE', rationale: 'A demanda não depende do relógio.', amendmentId: null },
-  ],
+  policyAssessments: JSON.parse(readFileSync('governance/architecture.policy.json', 'utf8')).rules
+    .map((rule) => ({
+      ruleId: rule.id,
+      status: ['ARCH-PRODUCT-BOUNDARY', 'ARCH-CONTRACT-ONLY', 'ARCH-FAILURE-EXPLICIT'].includes(rule.id)
+        ? 'COMPLIANT'
+        : 'NOT_APPLICABLE',
+      rationale: 'A regra foi confrontada explicitamente com a demanda.',
+      decisionId: null,
+      amendmentId: null,
+    })),
+  complexityReview: {
+    status: 'NO_EXCESS',
+    rationale: 'A demanda não solicita arquitetura desnecessária.',
+    alternatives: [],
+  },
   requirements: [{
     id: 'REQ-CALCULATE',
     statement: 'A calculadora deve produzir resultado determinístico para entradas válidas.',
@@ -170,6 +189,10 @@ process.stdout.write(JSON.stringify({
     falsification: 'Duas entradas equivalentes produzem resultados diferentes.',
     requirementIds: ['REQ-CALCULATE'],
   }],
+  riskReview: {
+    status: 'NONE',
+    rationale: 'Nenhum risco material adicional foi identificado nesta demanda simples.',
+  },
   risks: [],
   unknowns,
   decisions,
@@ -177,8 +200,17 @@ process.stdout.write(JSON.stringify({
 NODE
 }
 
+# Uma resposta válida de outro contexto não pode ser carimbada com as entradas atuais.
+set +e
+context_output="$(make_draft no "$(printf '0%.0s' {1..64})" | bash ./aegis --semantic-compile 2>&1)"
+context_code=$?
+set -e
+[[ "${context_code}" -ne 0 ]]
+printf '%s\n' "${context_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH"' >/dev/null
+[[ ! -e .harness/runtime/contract.json ]]
+
 # Saída semanticamente incompleta é rejeitada antes de criar contrato.
-invalid_draft="$(make_draft no | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
+invalid_draft="$(make_draft no "${semantic_context_digest}" | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
 set +e
 invalid_output="$(printf '%s' "${invalid_draft}" | bash ./aegis --semantic-compile 2>&1)"
 invalid_code=$?
@@ -188,7 +220,7 @@ printf '%s\n' "${invalid_output}" | jq -e '.phase == "SEMANTIC" and .reason == "
 [[ ! -e .harness/runtime/contract.json ]]
 
 # Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
-make_draft yes | bash ./aegis --semantic-compile >/dev/null
+make_draft yes "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -n \
   --arg executionId "$(jq -r '.executionId' .harness/runtime/user_confirmation_request.json)" \
   --arg contractDraftDigest "$(jq -r '.contractDraftDigest' .harness/runtime/user_confirmation_request.json)" \
@@ -212,9 +244,10 @@ printf '%s\n' "${revision_request}" | jq -e '
     rationale:"Expõe metadados adicionais."
   }]
 ' >/dev/null
+semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.contextDigest')"
 
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
-make_draft resolved | bash ./aegis --semantic-compile >/dev/null
+make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
   .schema == "aegis.issue_contract.v3"
   and .implementationAuthorized == false
@@ -255,7 +288,8 @@ set -e
 mv AGENTS.original.md AGENTS.md
 [[ "${constitution_code}" -ne 0 ]]
 printf '%s\n' "${constitution_output}" | jq -e '
-  .reason == "CONTRACT_CONSTITUTION_MISMATCH"
+  .reason == "SEMANTIC_CONSTITUTION_UNAVAILABLE"
+  and (.detail | contains("semantic_constitution_origin_mismatch"))
 ' >/dev/null
 
 # A política estruturada deixa de ser confiável se ARCHITECTURE.md mudar.

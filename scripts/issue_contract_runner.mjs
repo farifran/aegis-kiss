@@ -180,6 +180,7 @@ async function handleSemanticCompile(args) {
     {
       assertRevisionApplied,
       buildConfirmationRequest,
+      buildSemanticRequest,
       compileSemanticContract,
       renderSemanticContractMarkdown,
     },
@@ -207,6 +208,16 @@ async function handleSemanticCompile(args) {
   ]);
   await assertDiscoveryUnchanged(preflight);
   const revision = await readPendingRevision(preflight, loadedPolicy, constitution);
+  const request = buildSemanticRequest({
+    repositoryRoot: root,
+    preflight,
+    policy: loadedPolicy.policy,
+    constitution,
+    revision: revision?.request ?? null,
+  });
+  if (draft.sourceContextDigest !== request.contextDigest) {
+    throw rejection('SEMANTIC_CONTEXT_MISMATCH');
+  }
   if (revision !== null) assertRevisionApplied(draft, revision.resolution);
   const contract = compileSemanticContract({
     draft,

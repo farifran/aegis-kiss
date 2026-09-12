@@ -29,9 +29,55 @@ projeção estruturada em `governance/architecture.policy.json`.
 
 ## Regras arquiteturais ativas
 
-As duas cláusulas abaixo são a fonte humana das regras estruturadas. Alterar
-uma delas exige atualizar a política estruturada no mesmo commit; divergência
+As cláusulas abaixo são a fonte humana das regras estruturadas. Alterar uma
+delas exige atualizar a política estruturada no mesmo commit; divergência
 entre ambos bloqueia o preflight.
+
+### ARCH-PRODUCT-BOUNDARY — hard
+
+Uma demanda de produto pode observar e citar exclusivamente `src/` como fonte
+do produto. O fluxo de contrato não altera `src/`, e requisitos de produto não
+podem alterar o harness.
+
+Aplica-se a demandas de produto e a referências a caminhos do produto.
+
+### ARCH-HARNESS-STATE — hard
+
+O estado semântico persistente do harness reside em
+`.harness/state/semantic-state.json`; dados transitórios residem em
+`.harness/runtime/` e nunca são fonte de verdade do produto.
+
+Aplica-se a mudanças ou decisões sobre estado e runtime do harness.
+
+### ARCH-CONTRACT-ONLY — hard
+
+Captura, discovery, deliberação e assinatura terminam no contrato. Observar ou
+citar um caminho e assinar o contrato não autorizam implementação nem criação
+de scripts de produto.
+
+Aplica-se a todo o fluxo de contrato.
+
+### ARCH-LOCAL-DETERMINISTIC-CORE — hard
+
+O core mecânico opera localmente, de forma determinística e sem dependência de
+rede ou de um provedor de modelo. Integrações externas pertencem a adaptadores.
+
+Aplica-se a mudanças no core do harness e a integrações com provedores.
+
+### ARCH-STRICT-EXPLICIT-MODULES — default
+
+Código TypeScript usa tipagem estrita, módulos pequenos e APIs explícitas, sem
+supressões permissivas que escondam falhas ou contratos públicos.
+
+Aplica-se a demandas que imponham forma técnica TypeScript.
+
+### ARCH-PARSIMONY — default
+
+Dependências, persistência, concorrência, camadas e pontos de extensão só são
+admitidos quando um requisito observável justificar seu custo. A alternativa
+recomendada deve ser a menor arquitetura suficiente.
+
+Aplica-se quando a demanda solicita dependências ou complexidade estrutural.
 
 ### ARCH-FAILURE-EXPLICIT — hard
 

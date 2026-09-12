@@ -80,11 +80,13 @@ O Preflight completo permanece como evidência do Harness. `./aegis --semantic-r
 - estado e truncamento da evidência lexical;
 - termo e caminho de cada correspondência lexical.
 - trechos limitados dos arquivos correspondentes, marcados explicitamente como evidência não confiável e nunca como instruções;
-- conteúdo integral de `AGENTS.md`, identificado como constituição confiável e acompanhado de seu digest;
-- política arquitetural estruturada, autenticada contra `ARCHITECTURE.md`;
+- constituição estruturada em `governance/constitution.json`, autenticada contra `AGENTS.md` e acompanhada de seu digest canônico;
+- política arquitetural estruturada em `governance/architecture.policy.json`, autenticada contra `ARCHITECTURE.md` e acompanhada de todas as regras aplicáveis;
 - schema JSON completo e estrito que define a resposta esperada da IA, acompanhado de identificador e digest.
 
-Não são enviados à IA metadados da captura, contadores, tamanhos, hashes de arquivos, termos sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. `AGENTS.md` é a única fonte da constituição: não existe uma segunda cópia de suas regras no código. A saída da IA é obrigada a seguir o documento completo de `aegis.semantic_draft.v1`; intenção, digests, caminhos observados, seleção recomendada e `implementationAuthorized: false` são acrescentados mecanicamente pelo Harness no contrato v3. Uma alteração constitucional posterior invalida a aprovação do contrato compilado sob o digest anterior.
+Não são enviados à IA metadados da captura, contadores, tamanhos, hashes de arquivos, termos sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. As projeções JSON são as únicas representações consumidas semanticamente; qualquer divergência em relação aos documentos humanos bloqueia o fluxo. A saída da IA é obrigada a repetir o `contextDigest` calculado sobre constituição, intenção, Discovery, política e eventual revisão humana, além de seguir o documento completo de `aegis.semantic_draft.v1`. Respostas de outro contexto são rejeitadas. Intenção, digests, caminhos observados, seleção recomendada e `implementationAuthorized: false` são acrescentados mecanicamente pelo Harness no contrato v3.
+
+O rascunho declara explicitamente sua interpretação, revisão de complexidade e revisão de riscos. Sobre-engenharia detectada deve produzir alternativas mais simples; vulnerabilidades e riscos recebem categoria, nível, mitigação e requisitos afetados. Conflitos arquiteturais podem chegar ao Wizard quando vinculados a uma decisão, mas somente uma alternativa compatível ou uma emenda já aprovada pode sustentar o contrato final.
 
 Cada requisito contém um caso `HAPPY_PATH` e pelo menos um caso `FAILURE` ou `BOUNDARY`. Esses casos especificam provas falsificáveis, mas não apontam para executores nem autorizam a criação de scripts. Uma escolha diferente da recomendada retorna `SEMANTIC_RECOMPILATION_REQUIRED`; a resolução humana é incorporada à próxima requisição e requisitos, riscos e casos de aceitação devem ser recompilados antes da assinatura.
 

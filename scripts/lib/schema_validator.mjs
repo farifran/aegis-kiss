@@ -8,6 +8,7 @@ const schemaDirectory = resolve(repositoryRoot, 'governance/schemas');
 const schemaFiles = new Map([
   ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
   ['aegis.confirmation_request.v1', 'confirmation-request.v1.schema.json'],
+  ['aegis.constitution.v1', 'constitution.v1.schema.json'],
   ['aegis.issue_contract.v3', 'issue-contract.v3.schema.json'],
   ['aegis.preflight_handoff.v2', 'preflight-handoff.v2.schema.json'],
   ['aegis.rejection.v1', 'rejection.v1.schema.json'],

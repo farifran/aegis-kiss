@@ -7,30 +7,34 @@ import { assertSchema, schemaDocument } from './schema_validator.mjs';
 
 const sourceEvidenceByteLimit = 32_768;
 const sourceEvidenceFileByteLimit = 8_192;
-const constitutionByteLimit = 65_536;
 
 export function loadSemanticConstitution(repositoryRoot) {
-  const sourcePath = 'AGENTS.md';
-  const absolutePath = resolve(repositoryRoot, sourcePath);
-  const metadata = lstatSync(absolutePath);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+  const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
+  const policyMetadata = lstatSync(policyPath);
+  if (!policyMetadata.isFile() || policyMetadata.isSymbolicLink()) {
     throw new Error('semantic_constitution_unavailable');
   }
-  const bytes = readFileSync(absolutePath);
-  if (bytes.byteLength === 0 || bytes.byteLength > constitutionByteLimit) {
-    throw new Error('semantic_constitution_invalid_size');
-  }
-  let content;
+  let policy;
   try {
-    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    policy = JSON.parse(readFileSync(policyPath, 'utf8'));
   } catch {
-    throw new Error('semantic_constitution_invalid_utf8');
+    throw new Error('semantic_constitution_invalid_json');
+  }
+  assertSchema('aegis.constitution.v1', policy);
+  const sourcePath = resolve(repositoryRoot, policy.origin.sourcePath);
+  const sourceMetadata = lstatSync(sourcePath);
+  if (!sourceMetadata.isFile() || sourceMetadata.isSymbolicLink()) {
+    throw new Error('semantic_constitution_origin_unavailable');
+  }
+  if (sha256(readFileSync(sourcePath)) !== policy.origin.sourceDigest) {
+    throw new Error('semantic_constitution_origin_mismatch');
   }
   return {
-    sourcePath,
-    digest: sha256(bytes),
+    schema: policy.schema,
+    version: policy.constitutionVersion,
+    digest: canonicalDigest(policy),
     authority: 'TRUSTED_CONSTITUTION',
-    content,
+    rules: policy.rules,
   };
 }
 
@@ -89,7 +93,6 @@ export function buildSemanticRequest({
   constitution,
   revision = null,
 }) {
-  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v1');
   const observedTextPaths = preflight.discovery.files
     .filter(({ kind }) => kind === 'UTF8_TEXT')
     .map(({ path }) => path);
@@ -99,8 +102,7 @@ export function buildSemanticRequest({
       .map(({ path, kind }) => ({ path, reason: kind })),
     ...preflight.discovery.ignoredEntries,
   ];
-  const request = {
-    schema: 'aegis.semantic_request.v1',
+  const context = {
     constitution,
     intent: preflight.intent,
     workspace: {
@@ -131,6 +133,14 @@ export function buildSemanticRequest({
       })),
     },
     revision,
+  };
+  const contextDigest = canonicalDigest(context);
+  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v1');
+  outputSchemaDocument.properties.sourceContextDigest = { const: contextDigest };
+  const request = {
+    schema: 'aegis.semantic_request.v1',
+    contextDigest,
+    ...context,
     outputSchema: {
       id: 'aegis.semantic_draft.v1',
       digest: canonicalDigest(outputSchemaDocument),
@@ -195,6 +205,25 @@ export function assertSemanticDraft(draft, policy) {
     }
   }
 
+  if (draft.complexityReview.status === 'SIMPLIFIED'
+    && draft.complexityReview.alternatives.length === 0) {
+    throw new Error('simplification_without_alternative');
+  }
+  if (draft.complexityReview.status === 'NO_EXCESS'
+    && draft.complexityReview.alternatives.length !== 0) {
+    throw new Error('unexpected_complexity_alternative');
+  }
+  if (draft.riskReview.status === 'FOUND' && draft.risks.length === 0) {
+    throw new Error('risk_review_without_findings');
+  }
+  if (draft.riskReview.status === 'NONE' && draft.risks.length !== 0) {
+    throw new Error('risk_findings_without_review_status');
+  }
+  if (draft.riskReview.status === 'UNKNOWN'
+    && !draft.unknowns.some(({ material }) => material)) {
+    throw new Error('unknown_risk_without_material_unknown');
+  }
+
   const rulesById = new Map(policy.rules.map((rule) => [rule.id, rule]));
   const amendmentsById = new Map((policy.amendments ?? []).map((item) => [item.id, item]));
   if (rulesById.size !== policy.rules.length) throw new Error('duplicate_policy_rule_id');
@@ -208,14 +237,23 @@ export function assertSemanticDraft(draft, policy) {
   }
   for (const assessment of draft.policyAssessments) {
     if (!rulesById.has(assessment.ruleId)) throw new Error(`unknown_policy_rule:${assessment.ruleId}`);
-    if (assessment.status !== 'CONFLICT' && assessment.amendmentId !== null) {
-      throw new Error(`unexpected_policy_amendment:${assessment.ruleId}`);
-    }
-    if (assessment.status === 'CONFLICT') {
+    if (assessment.status === 'CONFLICT_REQUIRES_DECISION') {
+      if (assessment.decisionId === null || !decisionIds.has(assessment.decisionId)) {
+        throw new Error(`policy_conflict_without_decision:${assessment.ruleId}`);
+      }
+      if (assessment.amendmentId !== null) {
+        throw new Error(`unexpected_policy_amendment:${assessment.ruleId}`);
+      }
+    } else if (assessment.status === 'AMENDED') {
+      if (assessment.decisionId !== null) {
+        throw new Error(`unexpected_policy_decision:${assessment.ruleId}`);
+      }
       const amendment = amendmentsById.get(assessment.amendmentId);
       if (amendment?.ruleId !== assessment.ruleId || amendment.status !== 'approved') {
         throw new Error(`unapproved_policy_conflict:${assessment.ruleId}`);
       }
+    } else if (assessment.decisionId !== null || assessment.amendmentId !== null) {
+      throw new Error(`unexpected_policy_resolution:${assessment.ruleId}`);
     }
   }
 }
@@ -367,6 +405,9 @@ export function renderSemanticContractMarkdown(contract, {
     '## 1. Intenção',
     contract.intent,
     '',
+    '**Interpretação proposta:**',
+    specification.interpretation,
+    '',
     '## 2. Escopo',
     '**Incluído:**',
     ...specification.scope.inScope.map((item) => `- ${item}`),
@@ -391,7 +432,13 @@ export function renderSemanticContractMarkdown(contract, {
     if (assessment.amendmentId) lines.push(`  - Emenda: \`${assessment.amendmentId}\``);
   }
 
-  lines.push('', '## 4. Requisitos e casos falsificáveis');
+  lines.push('', '## 4. Revisão de complexidade');
+  lines.push(`- **${specification.complexityReview.status}:** ${specification.complexityReview.rationale}`);
+  for (const alternative of specification.complexityReview.alternatives) {
+    lines.push(`- **${alternative.requested} → ${alternative.simpler}:** ${alternative.rationale}`);
+  }
+
+  lines.push('', '## 5. Requisitos e casos falsificáveis');
   for (const requirement of specification.requirements) {
     lines.push('', `### ${requirement.id}`, requirement.statement, `*Proveniência: ${requirement.provenance}*`, '');
     for (const acceptanceCase of requirement.acceptanceCases) {
@@ -404,26 +451,27 @@ export function renderSemanticContractMarkdown(contract, {
     }
   }
 
-  lines.push('', '## 5. Invariantes');
+  lines.push('', '## 6. Invariantes');
   for (const invariant of specification.invariants) {
     lines.push(`- **${invariant.id}:** ${invariant.statement}`);
     lines.push(`  - Falsificado se: ${invariant.falsification}`);
   }
 
-  lines.push('', '## 6. Riscos');
+  lines.push('', '## 7. Riscos e vulnerabilidades');
+  lines.push(`- **Revisão ${specification.riskReview.status}:** ${specification.riskReview.rationale}`);
   if (specification.risks.length === 0) lines.push('- Nenhum risco material identificado.');
   for (const risk of specification.risks) {
-    lines.push(`- **${risk.id} — ${risk.level}:** ${risk.statement}`);
+    lines.push(`- **${risk.id} — ${risk.kind}/${risk.level}:** ${risk.statement}`);
     lines.push(`  - Mitigação: ${risk.mitigation}`);
   }
 
-  lines.push('', '## 7. Lacunas declaradas');
+  lines.push('', '## 8. Lacunas declaradas');
   if (specification.unknowns.length === 0) lines.push('- Nenhuma lacuna material não resolvida.');
   for (const unknown of specification.unknowns) {
     lines.push(`- **${unknown.id}${unknown.material ? ' — MATERIAL' : ''}:** ${unknown.statement}`);
   }
 
-  lines.push('', governed ? '## 8. Decisões seladas' : '## 8. Decisões pendentes');
+  lines.push('', governed ? '## 9. Decisões seladas' : '## 9. Decisões pendentes');
   if (specification.decisions.length === 0) {
     lines.push('Nenhuma ambiguidade material detectada.');
   } else {

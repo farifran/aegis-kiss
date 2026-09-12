@@ -24,6 +24,7 @@ import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/sem
 const schemaFiles = [
   'architecture-policy.v1.schema.json',
   'confirmation-request.v1.schema.json',
+  'constitution.v1.schema.json',
   'issue-contract.v3.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
@@ -54,35 +55,40 @@ const semanticRequest = buildSemanticRequest({
 });
 assertSchema('aegis.semantic_request.v1', semanticRequest);
 const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v1');
-if (semanticRequest.constitution.content !== readFileSync('AGENTS.md', 'utf8')
-  || semanticRequest.constitution.digest !== constitution.digest
+expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
+if (semanticRequest.constitution.digest !== constitution.digest
+  || semanticRequest.constitution.rules.length !== 5
   || semanticRequest.outputSchema.digest !== canonicalDigest(expectedOutputSchema)
-  || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)) {
+  || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)
+  || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
+    !== semanticRequest.contextDigest) {
   throw new Error('semantic_request_omitted_authoritative_inputs');
 }
 
 const draft = {
   schema: 'aegis.semantic_draft.v1',
+  sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
+  interpretation: 'Definir uma operação pública sem implementar o produto.',
   changeKind: 'PRODUCT',
   scope: {
     inScope: ['Definir o resultado público da operação.'],
     outOfScope: ['Implementar o produto.'],
   },
-  policyAssessments: [
-    {
-      ruleId: 'ARCH-FAILURE-EXPLICIT',
-      status: 'APPLIES',
-      rationale: 'A operação possui resultado observável.',
-      amendmentId: null,
-    },
-    {
-      ruleId: 'ARCH-DETERMINISTIC-TIME',
-      status: 'NOT_APPLICABLE',
-      rationale: 'A demanda não depende do relógio.',
-      amendmentId: null,
-    },
-  ],
+  policyAssessments: loadedPolicy.policy.rules.map((rule) => ({
+    ruleId: rule.id,
+    status: ['ARCH-PRODUCT-BOUNDARY', 'ARCH-CONTRACT-ONLY', 'ARCH-FAILURE-EXPLICIT'].includes(rule.id)
+      ? 'COMPLIANT'
+      : 'NOT_APPLICABLE',
+    rationale: 'A regra foi confrontada explicitamente com a demanda.',
+    decisionId: null,
+    amendmentId: null,
+  })),
+  complexityReview: {
+    status: 'NO_EXCESS',
+    rationale: 'A demanda não exige estrutura técnica.',
+    alternatives: [],
+  },
   requirements: [{
     id: 'REQ-RESULT',
     statement: 'A operação deve retornar resultado explícito.',
@@ -112,11 +118,16 @@ const draft = {
   }],
   risks: [{
     id: 'RISK-SILENCE',
+    kind: 'RELIABILITY',
     level: 'HIGH',
     statement: 'Uma falha pode desaparecer silenciosamente.',
     mitigation: 'Exigir resultado explícito em todos os casos.',
     requirementIds: ['REQ-RESULT'],
   }],
+  riskReview: {
+    status: 'FOUND',
+    rationale: 'Foi identificado risco de falha silenciosa.',
+  },
   unknowns: [{
     id: 'UNKNOWN-FORMAT',
     statement: 'O formato final do resultado não foi definido.',
@@ -184,6 +195,8 @@ for (const mutate of [
   (value) => { value.invariants[0].requirementIds = ['REQ-MISSING']; },
   (value) => value.policyAssessments.pop(),
   (value) => { value.unknowns[0].decisionId = null; },
+  (value) => { value.complexityReview.status = 'SIMPLIFIED'; },
+  (value) => { value.riskReview.status = 'NONE'; },
 ]) {
   const invalid = structuredClone(draft);
   mutate(invalid);
@@ -195,6 +208,11 @@ for (const mutate of [
   }
   if (!rejected) throw new Error('invalid_semantic_draft_was_accepted');
 }
+
+const deliberableConflict = structuredClone(draft);
+deliberableConflict.policyAssessments[0].status = 'CONFLICT_REQUIRES_DECISION';
+deliberableConflict.policyAssessments[0].decisionId = 'Q-FORMAT';
+assertSemanticDraft(deliberableConflict, loadedPolicy.policy);
 
 const semanticState = {
   schema: 'aegis.semantic_state.v3',

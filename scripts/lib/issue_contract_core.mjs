@@ -317,5 +317,5 @@ export function loadArchitecturePolicy(repositoryRoot) {
   if (sha256(readFileSync(sourcePath)) !== policy.origin.sourceDigest) {
     throw new Error('architecture_policy_origin_mismatch');
   }
-  return { policy, policyText, policyDigest: sha256(policyText) };
+  return { policy, policyDigest: canonicalDigest(policy) };
 }

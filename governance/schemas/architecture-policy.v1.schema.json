@@ -13,7 +13,7 @@
       "additionalProperties": false,
       "required": ["sourcePath", "sourceDigest"],
       "properties": {
-        "sourcePath": { "type": "string", "minLength": 1 },
+        "sourcePath": { "const": "ARCHITECTURE.md" },
         "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
