@@ -14,14 +14,14 @@ export function semanticStatePath(root) {
  */
 export function parseSemanticState(value) {
   const state = value;
-  if (state === null || typeof state !== 'object' || state.schema !== 'aegis.semantic_state.v1') {
+  if (state === null || typeof state !== 'object' || state.schema !== 'aegis.semantic_state.v2') {
     throw new Error('invalid_semantic_state');
   }
 
-  if (state.contract?.schema !== 'aegis.issue_contract.v1') {
+  if (state.contract?.schema !== 'aegis.issue_contract.v2') {
     throw new Error('invalid_semantic_state');
   }
-  assertSchema('aegis.issue_contract.v1', state.contract);
+  assertSchema('aegis.issue_contract.v2', state.contract);
 
   if (state.proofRegistry === null || typeof state.proofRegistry !== 'object') {
     throw new Error('invalid_semantic_state');

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "aegis.issue_contract.v1",
-  "title": "Aegis Issue-Contract Specification v1",
+  "$id": "aegis.issue_contract.v2",
+  "title": "Aegis Issue-Contract Specification v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,6 +9,8 @@
     "title",
     "changeKind",
     "implementationAuthorized",
+    "sourcePreflightDigest",
+    "sourceSnapshotDigest",
     "intent",
     "architecture",
     "scope",
@@ -18,10 +20,12 @@
     "proofObligations"
   ],
   "properties": {
-    "schema": { "const": "aegis.issue_contract.v1" },
+    "schema": { "const": "aegis.issue_contract.v2" },
     "title": { "type": "string", "minLength": 1 },
     "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
     "implementationAuthorized": { "const": false },
+    "sourcePreflightDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSnapshotDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "intent": { "type": "string", "minLength": 1 },
     "architecture": {
       "type": "object",

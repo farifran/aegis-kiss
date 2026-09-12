@@ -1,4 +1,4 @@
-# Evolução de `./aegis clean` para `./aegis new`
+# Evolução de `./aegis --clean` para `./aegis --new`
 
 ## Estado deste documento
 
@@ -12,12 +12,12 @@ O Aegis Harness atua como tribunal constitucional e compilador de requisitos. Su
 
 Portanto, reiniciar o Aegis significa remover ou substituir somente artefatos pertencentes ao próprio Aegis. Reiniciar o Aegis não significa apagar o sistema de software existente.
 
-## Comportamento atual de `clean`
+## Comportamento atual de `--clean`
 
 Atualmente, o comando executa esta sequência:
 
 ```text
-./aegis clean
+./aegis --clean
       │
       ├─ apaga .harness/runtime/
       ├─ recria .harness/runtime/
@@ -85,12 +85,12 @@ Esse fluxo preserva o estado e o contrato anteriores. A nova demanda deve ser an
 ### Começar um sistema independente
 
 ```bash
-./aegis new "Criar sistema de controle de estoque"
+./aegis --new "Criar sistema de controle de estoque"
 ```
 
 Esse fluxo declara que a demanda não possui relação com o sistema governado anteriormente. O Aegis reinicia seu próprio contexto e produz imediatamente o preflight da nova demanda.
 
-## Por que usar `new` em vez de `clean`
+## Por que usar `--new` em vez de `--clean`
 
 `new` descreve a intenção do usuário: começar um novo contexto governado. Ele evita que o usuário precise executar duas operações separadas e reduz o período em que o Aegis ficaria sem estado.
 
@@ -104,7 +104,7 @@ new "demanda"
 
 ## Comparação lado a lado
 
-| Aspecto | `./aegis clean` atual | `./aegis new "demanda"` proposto |
+| Aspecto | `./aegis --clean` atual | `./aegis --new "demanda"` proposto |
 |---|---|---|
 | Intenção | Limpar o laboratório | Iniciar um sistema independente |
 | Exige nova demanda | Não | Sim |
@@ -135,7 +135,7 @@ Se qualquer verificação falhar, nenhum estado anterior deve ser removido.
 ## Fluxo futuro de `new`
 
 ```text
-./aegis new "nova demanda"
+./aegis --new "nova demanda"
             │
             ▼
    Validar intenção e UTF-8
@@ -220,7 +220,7 @@ Saída sugerida:
   "status": "DISCOVERED",
   "previousAegisStateRemoved": true,
   "productPreserved": true,
-  "artifactPath": ".harness/runtime/preflight.md"
+  "dataPath": ".harness/runtime/preflight.json"
 }
 ```
 
@@ -228,7 +228,7 @@ Saída sugerida:
 
 A mudança estará correta quando:
 
-- `./aegis new "demanda válida"` produzir um novo preflight;
+- `./aegis --new "demanda válida"` produzir um novo preflight;
 - a demanda inválida preservar integralmente o estado anterior;
 - o código em `src/` permanecer byte a byte idêntico;
 - arquivos não versionados em `src/` sobreviverem;
@@ -283,7 +283,7 @@ Uma implementação segura pode seguir esta ordem:
 
 1. Adicionar testes que preservem `src/` e reproduzam a vulnerabilidade de link simbólico.
 2. ~~Mover o estado interno de `src/.aegis/` para `.harness/state/`.~~ Concluído.
-3. Implementar `./aegis new "demanda"` com validação antes da remoção.
+3. Implementar `./aegis --new "demanda"` com validação antes da remoção.
 4. Remover do fluxo qualquer exclusão ou criação dentro de `src/`.
 5. ~~Atualizar `status`, Wizard, documentação e testes para a nova localização do estado.~~ Concluído para o fluxo atual.
 6. Remover ou descontinuar `clean` somente depois que `new` cobrir sua finalidade útil.
@@ -294,7 +294,7 @@ Adotar esta interface:
 
 ```text
 ./aegis "demanda"      → evolui o sistema atual e preserva seu contexto
-./aegis new "demanda"  → inicia contexto independente e substitui somente o estado do Aegis
+./aegis --new "demanda" → inicia contexto independente e substitui somente o estado do Aegis
 ```
 
 O antigo comportamento que apaga `src/` não deve ser mantido sob nenhum nome. Preparar ou apagar um produto pertence ao usuário, ao Git ou ao gerenciador de workspaces, não ao compilador de contratos.

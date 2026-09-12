@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.rejection.v1",
+  "title": "Aegis Structured Rejection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "phase", "reason"],
+  "properties": {
+    "schema": { "const": "aegis.rejection.v1" },
+    "status": { "const": "REJECTED" },
+    "phase": { "enum": ["COMMAND", "PREFLIGHT", "APPROVAL", "VERIFICATION"] },
+    "reason": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "detail": { "type": "string", "minLength": 1 }
+  }
+}

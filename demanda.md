@@ -15,7 +15,7 @@ Este documento serve como a **especificação formal da mudança** e como **guia
 
 Na branch `main`, o Aegis original sofre de rigidez artificial na entrada:
 1. **Superstição do Prompt Cru:** O sistema congela o texto inicial do usuário no primeiro segundo (`normalizedDemandDigest`), tratando um rascunho de chat cheio de ruído como documento sagrado.
-2. **Fatiamento em `UNITs`:** Quebra o texto em `UNIT-0001`..`UNIT-NNNN`, calcula byte-offsets e amarra cada cláusula a coordenadas de caracteres. Se uma quebra de linha `\r\n` mudar para `\n`, o digest quebra e força `./aegis clean`.
+2. **Fatiamento em `UNITs`:** Quebra o texto em `UNIT-0001`..`UNIT-NNNN`, calcula byte-offsets e amarra cada cláusula a coordenadas de caracteres. Se uma quebra de linha `\r\n` mudar para `\n`, o digest quebra e força `./aegis --clean`.
 3. **Duplicação Estrutural:** Existem quatro representações para a mesma coisa: `normalizedDemand`, `preflightDecision`, `clarifiedDemand` e `contractIR`.
 4. **Consulta Mecânica Redundante:** Executa regexes pontuais para tentar achar caminhos de arquivos e depois executa o Discovery completo.
 
@@ -48,19 +48,39 @@ A Issue e o Contrato deixam de ser dois conceitos separados e tornam-se **duas p
 | Projeção | Formato / Destino | Para que serve? |
 | :--- | :--- | :--- |
 | **Face Humana (`issue.md`)** | Markdown elegante na IDE | Leitura limpa, checkboxes de requisitos, escopo visual de arquivos e facilidade de edição. |
-| **Face Máquina (`contract.json`)** | JSON Canônico (RFC 8785) | Tipagem formal, invariantes, IDs de falha e geração do hash imutável (`contractDigest`). |
+| **Face Máquina (`contract.json`)** | JSON canônico determinístico do Aegis | Tipagem formal, invariantes, IDs de falha e geração do hash imutável (`contractDigest`). |
 
 O **Hash Raiz Único** do projeto é gerado no momento do aceite da Issue-Contrato. Nada antes disso precisa ser assinado.
 
 ---
 
-## 5. O Discovery na Memória RAM (Camada 0)
+## 5. Fase 3 — Discovery na memória RAM
 
-A consulta mecânica pontual por regex é abolida. O **Discovery da Camada 0 (`aegis.layer0`)** torna-se o único oráculo de fatos mecânicos:
-1. Executa `git ls-tree -r -t -z` uma única vez (~20 ms).
-2. Carrega a árvore inteira do repositório em um `Map` na memória RAM.
-3. Identifica arquivos existentes, arquivos anteriores, classes e símbolos sem ler o conteúdo do disco.
-4. Entrega o mapa factual para a IA redigir a Issue-Contrato com os caminhos de arquivo 100% corretos, impedindo qualquer alucinação de dependências.
+O **Discovery mecânico** observa exclusivamente `src/`, com limites explícitos de arquivos, entradas e bytes. Ele lê cada arquivo regular uma vez, mantém o texto somente em RAM e persiste apenas:
+
+1. manifesto canônico com caminho, tamanho real, classificação e SHA-256;
+2. digest único do snapshot observado;
+3. entradas ignoradas, como links simbólicos;
+4. evidência lexical limitada à primeira ocorrência de cada termo.
+
+A evidência lexical é apenas uma pista textual. Ela não afirma compreender regras de negócio, detectar vulnerabilidades, provar código morto nem estabelecer relações semânticas. Antes da assinatura, o snapshot de `src/` é recalculado; qualquer mudança invalida o preflight e exige um novo Discovery.
+
+Os caminhos mantêm a identidade nativa dos arquivos: barras invertidas só são convertidas no Windows. Controles direcionais Unicode invisíveis são rejeitados para impedir nomes visualmente enganosos no contrato.
+
+O resultado mecânico possui uma única fonte persistida: `.harness/runtime/preflight.json`. Não existe uma cópia em Markdown; a face humana será produzida somente para o contrato que precisará de revisão.
+
+### Entrada futura da deliberação semântica
+
+O Preflight completo permanece como evidência do Harness, mas a IA deve receber somente a projeção útil ao raciocínio, construída em RAM:
+
+- `intent`;
+- estado estrutural do Discovery;
+- caminhos dos arquivos textuais observados;
+- caminhos indisponíveis e seus motivos (`BINARY`, `INVALID_UTF8` ou `SYMLINK`);
+- estado, método e truncamento da evidência lexical;
+- termo e caminho de cada correspondência lexical.
+
+Não serão enviados à IA: metadados da captura, fase, status do fluxo, contadores, tamanhos, hashes individuais, termos lexicais sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. Esses campos protegem e auditam o processo, mas não ajudam na interpretação da demanda. Os digests de vínculo serão acrescentados mecanicamente pelo Harness à futura saída, sem pedir que a IA os copie ou produza.
 
 ---
 
@@ -71,7 +91,7 @@ Esta branch só será integrada de volta na `main` quando cumprir 100% dos segui
 - [ ] **Fluxo Simbiótico Ponta a Ponta:** Um prompt informal gera a Issue-Contrato com opções recomendadas pré-marcadas.
 - [ ] **Aprovação Atômica em 1 Clique:** Confirmar a Issue gera o `contractDigest` canônico diretamente.
 - [ ] **Eliminação de UNITs:** Zero fatiamento de parágrafos e zero erro de `normalized_demand_digest_mismatch`.
-- [ ] **Discovery 100% em RAM:** Mapeamento de arquivos executado sem regexes de busca no texto.
+- [ ] **Discovery delimitado e verificável:** Conteúdo analisado em RAM, manifesto canônico persistido e snapshot de `src/` reconferido antes da assinatura.
 - [ ] **Preservação da Segurança:**
   - `npm run aegis:enforce` (Static Gate limpo: BigInt, Zero-GC, ESM).
   - Provas formais físicas (`*.proof.sh`) executando e passando 100%.

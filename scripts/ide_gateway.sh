@@ -8,18 +8,30 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export AEGIS_ROOT="${ROOT_DIR}"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 
-fatal() { printf '[AEGIS][IDE][FATAL] %s\n' "$1" >&2; exit 1; }
+fatal() {
+  printf '{"schema":"aegis.rejection.v1","status":"REJECTED","phase":"COMMAND","reason":"%s"}\n' "$1" >&2
+  exit 1
+}
+
+require_command_arity() {
+  [[ "$#" -eq 1 ]] || fatal 'INVALID_COMMAND_ARITY'
+}
 
 usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
-  ./aegis "<demanda>"      Captura a intenção e executa o Discovery (.harness/runtime/preflight.md)
-  ./aegis approve          Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
-  ./aegis verify           Executa as provas físicas do tribunal e emite recibo PROVEN
-  ./aegis status           Exibe o status do contrato e da árvore de trabalho
-  ./aegis clean            Remove artefatos transientes e redefine src/index.ts
-  ./aegis help             Exibe esta mensagem de ajuda
+  ./aegis "<demanda>" Captura a intenção e executa o Discovery (.harness/runtime/preflight.json)
+  ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
+  ./aegis --verify    Executa as provas físicas do tribunal e emite recibo PROVEN
+  ./aegis --wizard    Abre as decisões pendentes no terminal
+  ./aegis --status    Exibe o status do contrato e da árvore de trabalho
+  ./aegis --clean     Remove artefatos transientes e redefine src/index.ts
+  ./aegis --help      Exibe esta mensagem de ajuda
 EOF
+}
+
+preflight_is_valid() {
+  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" validate-preflight >/dev/null 2>&1
 }
 
 status_command() {
@@ -64,9 +76,17 @@ status_command() {
 
     printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
   elif [[ -f "${contract_file}" ]]; then
-    printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
+    if [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
+      printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
+    else
+      printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
+    fi
   elif [[ -f "${preflight_file}" ]]; then
-    printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
+    if preflight_is_valid; then
+      printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
+    else
+      printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
+    fi
   else
     printf '{"status":"IDLE","workspace":"clean"}\n'
   fi
@@ -76,7 +96,7 @@ clean_command() {
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
   rm -rf "${ROOT_DIR}/.harness/state"
-  [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'invalid_source_directory'
+  [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'INVALID_SOURCE_DIRECTORY'
   find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
   echo '[AEGIS][IDE] clean=PASS source_reset=1 contracts_reset=1 resolutions_reset=1'
@@ -160,27 +180,35 @@ resolve_preflight_wizard() {
 }
 
 main() {
-  [[ $# -ge 1 ]] || { usage; exit 1; }
+  [[ $# -ge 1 ]] || fatal 'MISSING_ARGUMENT'
 
   case "${1}" in
-    approve|resume)
+    --approve)
+      require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;
-    verify|prove)
-      shift
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify "$@"
+    --verify)
+      require_command_arity "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify
       ;;
-    wizard)
+    --wizard)
+      require_command_arity "$@"
       resolve_preflight_wizard
       ;;
-    status)
+    --status)
+      require_command_arity "$@"
       status_command
       ;;
-    clean)
+    --clean)
+      require_command_arity "$@"
       clean_command
       ;;
-    help|--help|-h)
+    --help|-h)
+      require_command_arity "$@"
       usage
+      ;;
+    --*)
+      fatal 'UNKNOWN_COMMAND'
       ;;
     *)
       # Any demand prompt string triggers the symbiotic draft runner

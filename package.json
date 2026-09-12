@@ -6,7 +6,7 @@
   "description": "Evidence governance for IDE-driven software engineering.",
   "scripts": {
     "test": "npm run aegis:test",
-    "aegis:cleanup": "bash aegis clean",
+    "aegis:cleanup": "bash aegis --clean",
     "aegis:typecheck": "tsc --noEmit",
     "aegis:lint": "eslint .",
     "aegis:enforce": "bash scripts/substrates/static_gate.sh --workspace src",

@@ -91,7 +91,7 @@ async function writeResolution(root, request, answers) {
 
 function resume(root) {
   return new Promise((resolve, reject) => {
-    const child = spawn('./aegis', ['approve'], { cwd: root.fsPath, shell: false });
+    const child = spawn('./aegis', ['--approve'], { cwd: root.fsPath, shell: false });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
     child.on('error', reject);

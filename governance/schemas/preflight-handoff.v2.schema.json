@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.preflight_handoff.v2",
+  "title": "Aegis Phase 1-3 Preflight Handoff v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "phase", "status", "intent", "capture", "discovery", "preflightDigest"],
+  "properties": {
+    "schema": { "const": "aegis.preflight_handoff.v2" },
+    "phase": { "const": "DISCOVERED" },
+    "status": { "const": "SEMANTIC_DELIBERATION_REQUIRED" },
+    "intent": { "type": "string", "minLength": 1 },
+    "preflightDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance", "transport", "unicodeNormalization", "lineEndings", "byteLength"],
+      "properties": {
+        "provenance": { "const": "USER" },
+        "transport": { "const": "ARGV_STRING" },
+        "unicodeNormalization": { "const": "NFC" },
+        "lineEndings": { "const": "LF" },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 65536 }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRoot",
+        "status",
+        "files",
+        "ignoredEntries",
+        "visitedEntries",
+        "scannedBytes",
+        "sourceSnapshotDigest",
+        "lexicalEvidence"
+      ],
+      "properties": {
+        "sourceRoot": { "const": "src" },
+        "status": { "enum": ["EMPTY_SOURCE", "NO_TEXT_SOURCE", "SOURCE_OBSERVED"] },
+        "files": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "bytes", "digest", "kind"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
+              "bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+              "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "kind": { "enum": ["UTF8_TEXT", "BINARY", "INVALID_UTF8"] }
+            }
+          },
+          "uniqueItems": true
+        },
+        "ignoredEntries": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "reason"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
+              "reason": { "const": "SYMLINK" }
+            }
+          },
+          "uniqueItems": true
+        },
+        "visitedEntries": { "type": "integer", "minimum": 0, "maximum": 512 },
+        "scannedBytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "sourceSnapshotDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "lexicalEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "method", "queryTerms", "termsTruncated", "matches"],
+          "properties": {
+            "status": { "enum": ["MATCH", "NO_MATCH", "NOT_APPLICABLE"] },
+            "method": { "const": "NFC_UNICODE_LOWERCASE_SUBSTRING" },
+            "queryTerms": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "type": "string", "minLength": 4 },
+              "uniqueItems": true
+            },
+            "termsTruncated": { "type": "boolean" },
+            "matches": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["term", "path", "line"],
+                "properties": {
+                  "term": { "type": "string", "minLength": 4 },
+                  "path": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
+                  "line": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

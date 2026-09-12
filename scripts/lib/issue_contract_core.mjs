@@ -1,28 +1,38 @@
 import { Buffer } from 'node:buffer';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 
-export const maxDemandBytes = 65_536;
+const maxDemandBytes = 65_536;
+
+function hasUnsafeControlCharacter(text) {
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if ((codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0A) || codePoint === 0x7F) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
- * Sanitiza o texto de entrada sem fatiamento arbitrário em UNITs.
- * Valida UTF-8 estrito, normaliza quebras de linha Unix e impõe teto de segurança.
+ * Captura exatamente um argumento textual, sem reconstruir tokens do shell.
+ * Normaliza quebras de linha e equivalência Unicode, preservando a semântica.
  */
-export function sanitizeInputText(rawBytes, maxBytes = maxDemandBytes) {
-  if (!Buffer.isBuffer(rawBytes) || rawBytes.length > maxBytes) {
-    throw new Error('input_too_large');
+export function captureDemand(args) {
+  if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== 'string') {
+    throw new Error('invalid_demand_arity');
   }
-  let decoded;
-  try {
-    decoded = new TextDecoder('utf-8', { fatal: true }).decode(rawBytes);
-  } catch {
-    throw new Error('invalid_utf8');
-  }
-  const text = decoded.replace(/\r\n?/gu, '\n');
+  const text = args[0].replace(/\r\n?/gu, '\n').normalize('NFC');
   if (text.trim().length === 0) {
     throw new Error('empty_demand');
+  }
+  if (hasUnsafeControlCharacter(text)) {
+    throw new Error('unsafe_control_character');
+  }
+  if (Buffer.byteLength(text, 'utf8') > maxDemandBytes) {
+    throw new Error('input_too_large');
   }
   return text;
 }
@@ -33,29 +43,30 @@ function pathRoleBadge(p) {
   return '';
 }
 
-/**
- * Normaliza títulos de demandas informais para títulos executivos canônicos.
- * Totalmente agnóstico a regras de negócio particulares.
- */
-export function normalizeDemandTitle(raw) {
-  const line = raw.split('\n')[0].trim().replace(/^#+\s*/u, '').replace(/^["']|["']$/gu, '');
-  if (!line) return 'Demanda do Produto';
-  const cleaned = line.charAt(0).toUpperCase() + line.slice(1);
-  return cleaned.length > 100 ? `${cleaned.slice(0, 97)}...` : cleaned;
-}
-
 const discoveryFileLimit = 256;
 const discoveryEntryLimit = 512;
 const discoveryByteLimit = 1_048_576;
 const discoveryTermLimit = 64;
 const demandTermPattern = /[\p{L}\p{N}_$-]{4,}/gu;
-const forensicOccurrenceLimit = 24;
+const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
+function compareText(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function portableRelativePath(repositoryRoot, absolutePath) {
+  const nativePath = relative(repositoryRoot, absolutePath);
+  return sep === '\\' ? nativePath.replaceAll('\\', '/') : nativePath;
+}
 
 function demandTerms(text) {
   const termsByKey = new Map();
   for (const match of text.matchAll(demandTermPattern)) {
     const term = match[0];
-    const key = term.toLocaleLowerCase('und');
+    const key = term.normalize('NFC').toLowerCase();
     if (!termsByKey.has(key)) termsByKey.set(key, term);
   }
   const terms = [...termsByKey.entries()].map(([key, term]) => ({ key, term }));
@@ -65,39 +76,55 @@ function demandTerms(text) {
   };
 }
 
-function lineNumberAt(text, offset) {
-  return text.slice(0, offset).split('\n').length;
+function assignLineNumbers(text, pendingMatches) {
+  const orderedMatches = [...pendingMatches].sort((left, right) => left.offset - right.offset);
+  let line = 1;
+  let cursor = 0;
+  for (const match of orderedMatches) {
+    while (cursor < match.offset) {
+      if (text.charCodeAt(cursor) === 0x0A) line += 1;
+      cursor += 1;
+    }
+    match.line = line;
+  }
 }
 
-function buildForensicEvidence(sourceRecords, intent) {
+function buildLexicalEvidence(sourceRecords, intent) {
   const { terms, termsTruncated } = demandTerms(intent);
-  const occurrences = [];
-  const matchedTerms = new Set();
+  const pendingTerms = new Map(terms.map(({ key, term }) => [key, term]));
+  const matches = [];
 
   for (const record of sourceRecords) {
-    const lowerText = record.text.toLocaleLowerCase('und');
-    for (const { key, term } of terms) {
+    if (pendingTerms.size === 0) break;
+    const lowerText = record.text.normalize('NFC').toLowerCase();
+    const recordMatches = [];
+    for (const [key, term] of pendingTerms) {
       const offset = lowerText.indexOf(key);
       if (offset === -1) continue;
-      matchedTerms.add(key);
-      if (occurrences.length < forensicOccurrenceLimit) {
-        occurrences.push({ term, path: record.path, line: lineNumberAt(record.text, offset) });
-      }
+      recordMatches.push({ term, path: record.path, offset });
+      pendingTerms.delete(key);
     }
+    assignLineNumbers(lowerText, recordMatches);
+    matches.push(...recordMatches.map(({ term, path, line }) => ({ term, path, line })));
   }
 
-  const unmatchedTerms = terms
-    .filter(({ key }) => !matchedTerms.has(key))
-    .map(({ term }) => term);
+  const applicable = sourceRecords.length > 0 && terms.length > 0;
 
   return {
-    relationStatus: occurrences.length > 0 ? 'LEXICAL_MATCH' : 'NO_LEXICAL_MATCH',
-    matchKind: 'CASE_FOLDED_SUBSTRING',
+    status: applicable ? (matches.length > 0 ? 'MATCH' : 'NO_MATCH') : 'NOT_APPLICABLE',
+    method: 'NFC_UNICODE_LOWERCASE_SUBSTRING',
     queryTerms: terms.map(({ term }) => term),
     termsTruncated,
-    occurrences,
-    unmatchedTerms,
+    matches,
   };
+}
+
+export function computeSourceSnapshotDigest(files, ignoredEntries) {
+  return canonicalDigest({
+    sourceRoot: 'src',
+    files,
+    ignoredEntries,
+  });
 }
 
 /**
@@ -107,23 +134,26 @@ function buildForensicEvidence(sourceRecords, intent) {
 export function discoverWorkspace(repositoryRoot, intent = '') {
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
-  const skippedFiles = [];
+  const files = [];
+  const ignoredEntries = [];
   let visitedEntries = 0;
-  let inspectedFiles = 0;
   let scannedBytes = 0;
 
   function inspectDirectory(directory) {
     const entries = readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort((left, right) => compareText(left.name, right.name));
     for (const entry of entries) {
       visitedEntries += 1;
       if (visitedEntries > discoveryEntryLimit) {
         throw new Error('discovery_entry_limit_exceeded');
       }
       const absolutePath = resolve(directory, entry.name);
-      const relativePath = relative(repositoryRoot, absolutePath).replaceAll('\\', '/');
+      const relativePath = portableRelativePath(repositoryRoot, absolutePath);
+      if (bidirectionalControlPattern.test(relativePath)) {
+        throw new Error('unsafe_source_path');
+      }
       if (entry.isSymbolicLink()) {
-        skippedFiles.push({ path: relativePath, reason: 'SYMLINK' });
+        ignoredEntries.push({ path: relativePath, reason: 'SYMLINK' });
         continue;
       }
       if (entry.isDirectory()) {
@@ -131,141 +161,103 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
         continue;
       }
       if (!entry.isFile()) continue;
-      if (inspectedFiles >= discoveryFileLimit) {
+      if (files.length >= discoveryFileLimit) {
         throw new Error('discovery_file_limit_exceeded');
       }
 
       const metadata = statSync(absolutePath);
-      inspectedFiles += 1;
-      scannedBytes += metadata.size;
-      if (scannedBytes > discoveryByteLimit) {
+      if (scannedBytes + metadata.size > discoveryByteLimit) {
         throw new Error('discovery_byte_limit_exceeded');
       }
 
       const sourceBytes = readFileSync(absolutePath);
+      if (scannedBytes + sourceBytes.byteLength > discoveryByteLimit) {
+        throw new Error('discovery_byte_limit_exceeded');
+      }
+      scannedBytes += sourceBytes.byteLength;
+      const file = {
+        path: relativePath,
+        bytes: sourceBytes.byteLength,
+        digest: sha256(sourceBytes),
+        kind: 'UTF8_TEXT',
+      };
       if (sourceBytes.includes(0)) {
-        skippedFiles.push({ path: relativePath, reason: 'BINARY' });
+        file.kind = 'BINARY';
+        files.push(file);
         continue;
       }
       let sourceText;
       try {
-        sourceText = new TextDecoder('utf-8', { fatal: true }).decode(sourceBytes);
+        sourceText = utf8Decoder.decode(sourceBytes);
       } catch {
-        skippedFiles.push({ path: relativePath, reason: 'INVALID_UTF8' });
+        file.kind = 'INVALID_UTF8';
+        files.push(file);
         continue;
       }
+      files.push(file);
       sourceRecords.push({ path: relativePath, text: sourceText });
     }
   }
 
-  if (existsSync(sourceRoot)) inspectDirectory(sourceRoot);
-  sourceRecords.sort((left, right) => left.path.localeCompare(right.path));
-  const sourceFiles = sourceRecords.map((record) => record.path);
-  skippedFiles.sort((left, right) => left.path.localeCompare(right.path));
-  const forensic = buildForensicEvidence(sourceRecords, intent);
+  if (existsSync(sourceRoot)) {
+    const sourceRootMetadata = lstatSync(sourceRoot);
+    if (sourceRootMetadata.isSymbolicLink()) {
+      throw new Error('discovery_source_root_symlink');
+    }
+    if (!sourceRootMetadata.isDirectory()) {
+      throw new Error('invalid_source_root');
+    }
+    inspectDirectory(sourceRoot);
+  }
+  files.sort((left, right) => compareText(left.path, right.path));
+  ignoredEntries.sort((left, right) => compareText(left.path, right.path));
+  sourceRecords.sort((left, right) => compareText(left.path, right.path));
+  const lexicalEvidence = buildLexicalEvidence(sourceRecords, intent);
+  const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
   return {
     sourceRoot: 'src',
-    sourceFiles,
+    status: hasTextSource
+      ? 'SOURCE_OBSERVED'
+      : (files.length > 0 || ignoredEntries.length > 0 ? 'NO_TEXT_SOURCE' : 'EMPTY_SOURCE'),
+    files,
+    ignoredEntries,
     visitedEntries,
-    inspectedFiles,
     scannedBytes,
-    skippedFiles,
-    relationStatus: sourceFiles.length === 0
-      ? (skippedFiles.length > 0 ? 'NO_TEXT_SOURCE' : 'EMPTY_SOURCE')
-      : forensic.relationStatus,
-    matchKind: forensic.matchKind,
-    queryTerms: forensic.queryTerms,
-    termsTruncated: forensic.termsTruncated,
-    occurrences: forensic.occurrences,
-    unmatchedTerms: forensic.unmatchedTerms,
+    sourceSnapshotDigest: computeSourceSnapshotDigest(files, ignoredEntries),
+    lexicalEvidence,
   };
 }
 
 /**
- * Compila somente os fatos mecânicos das Fases 1 e 2.
+ * Compila somente os fatos mecânicos das Fases 1 a 3.
  * Deliberação, requisitos, riscos e provas pertencem às fases seguintes.
  */
-export function buildPreflightHandoff({ sanitizedText, discovery }) {
+export function buildPreflightHandoff({ demand, discovery }) {
   const handoff = {
-    schema: 'aegis.preflight_handoff.v1',
+    schema: 'aegis.preflight_handoff.v2',
     phase: 'DISCOVERED',
     status: 'SEMANTIC_DELIBERATION_REQUIRED',
-    title: normalizeDemandTitle(sanitizedText),
-    intent: sanitizedText,
+    intent: demand,
     capture: {
       provenance: 'USER',
-      encoding: 'UTF-8',
+      transport: 'ARGV_STRING',
+      unicodeNormalization: 'NFC',
       lineEndings: 'LF',
-      byteLength: Buffer.byteLength(sanitizedText, 'utf8'),
+      byteLength: Buffer.byteLength(demand, 'utf8'),
     },
-    discovery: {
-      sourceRoot: discovery.sourceRoot,
-      sourceFiles: discovery.sourceFiles,
-      visitedEntries: discovery.visitedEntries,
-      inspectedFiles: discovery.inspectedFiles,
-      scannedBytes: discovery.scannedBytes,
-      skippedFiles: discovery.skippedFiles,
-      relationStatus: discovery.relationStatus,
-      matchKind: discovery.matchKind,
-      queryTerms: discovery.queryTerms,
-      termsTruncated: discovery.termsTruncated,
-      occurrences: discovery.occurrences,
-      unmatchedTerms: discovery.unmatchedTerms,
-    },
+    discovery,
   };
-  return handoff;
+  return {
+    ...handoff,
+    preflightDigest: computePreflightDigest(handoff),
+  };
 }
 
-function markdownCode(value) {
-  const display = JSON.stringify(String(value));
-  const longestRun = Math.max(0, ...(display.match(/`+/gu) ?? []).map((run) => run.length));
-  const fence = '`'.repeat(longestRun + 1);
-  return `${fence}${display}${fence}`;
-}
-
-export function renderPreflightMarkdown(handoff) {
-  const discovery = handoff.discovery;
-  const lines = [
-    `# Pré-voo: ${markdownCode(handoff.title)}`,
-    '',
-    '> **Status:** Discovery concluído — aguardando deliberação semântica',
-    '> **Fases concluídas:** 1. Captura de intenção; 2. Discovery mecânico',
-    '',
-    '## Intenção capturada',
-    ...handoff.intent.split('\n').map((line) => `    ${line}`),
-    '',
-    '## Discovery mecânico',
-    `- Raiz examinada: ${markdownCode(`${discovery.sourceRoot}/`)}`,
-    `- Arquivos textuais lidos: ${discovery.sourceFiles.length}`,
-    `- Entradas visitadas: ${discovery.visitedEntries}`,
-    `- Entradas inspecionadas: ${discovery.inspectedFiles}`,
-    `- Bytes inspecionados: ${discovery.scannedBytes}`,
-    `- Relação lexical: \`${discovery.relationStatus}\``,
-    `- Método: \`${discovery.matchKind}\``,
-  ];
-
-  if (discovery.occurrences.length > 0) {
-    lines.push('', '### Ocorrências lexicais');
-    for (const occurrence of discovery.occurrences) {
-      lines.push(`- ${markdownCode(occurrence.term)} em ${markdownCode(`${occurrence.path}:${occurrence.line}`)}`);
-    }
-  }
-  if (discovery.skippedFiles.length > 0) {
-    lines.push('', '### Entradas não lidas');
-    for (const skipped of discovery.skippedFiles) {
-      lines.push(`- ${markdownCode(skipped.path)}: ${skipped.reason}`);
-    }
-  }
-
-  lines.push(
-    '',
-    '## Próxima fase',
-    'A deliberação semântica deve propor o caminho feliz recomendado e as alternativas materiais. Só depois da escolha serão compilados requisitos, comportamento, invariantes, riscos e provas.',
-    '',
-    '> Ausência de correspondência lexical não significa ausência de requisito nem demanda incompleta.',
-  );
-  return lines.join('\n');
+export function computePreflightDigest(preflight) {
+  const { preflightDigest, ...digestInput } = preflight;
+  void preflightDigest;
+  return canonicalDigest(digestInput);
 }
 
 export const CANONICAL_RULE_STATEMENTS = {
@@ -317,6 +309,8 @@ export function renderContractMarkdown(
     `> **Modelo de Estado:** ${stateKind === 'NONE' ? 'Sem estado' : stateKind === 'STATE_TRANSITION' ? 'Transição de estado' : 'Não declarado pela demanda'}`,
     ...(ruleEntries.length > 0 ? ['> **Regras Arquiteturais:**', ...ruleEntries] : []),
     ...(isGoverned && contractDigest ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
+    `> **Pré-voo de origem:** \`${contract.sourcePreflightDigest}\``,
+    `> **Snapshot de \`src/\`:** \`${contract.sourceSnapshotDigest}\``,
     ...(isProven && receiptDigest ? [`> **Digest do Recibo:** \`${receiptDigest}\``] : []),
     '',
     '## 1. Intenção & Escopo',
