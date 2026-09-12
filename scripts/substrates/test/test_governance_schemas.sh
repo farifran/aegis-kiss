@@ -12,12 +12,13 @@ import {
   assertContractDocument,
   assertSemanticDraft,
   buildConfirmationRequest,
+  buildSemanticRequest,
   compileSemanticContract,
+  loadSemanticConstitution,
   resolutionRequiresRecompilation,
-  semanticConstitutionDigest,
 } from './scripts/lib/semantic_contract.mjs';
 import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
-import { assertSchema, schemaErrors } from './scripts/lib/schema_validator.mjs';
+import { assertSchema, schemaDocument, schemaErrors } from './scripts/lib/schema_validator.mjs';
 import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
 
 const schemaFiles = [
@@ -39,11 +40,26 @@ for (const file of schemaFiles) {
 }
 
 const loadedPolicy = loadArchitecturePolicy(process.cwd());
+const constitution = loadSemanticConstitution(process.cwd());
 assertSchema('aegis.architecture_policy.v1', loadedPolicy.policy);
 const preflight = buildPreflightHandoff({
   demand: 'Criar comportamento observável de teste.',
   discovery: discoverWorkspace(process.cwd(), 'Criar comportamento observável de teste.'),
 });
+const semanticRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+assertSchema('aegis.semantic_request.v1', semanticRequest);
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v1');
+if (semanticRequest.constitution.content !== readFileSync('AGENTS.md', 'utf8')
+  || semanticRequest.constitution.digest !== constitution.digest
+  || semanticRequest.outputSchema.digest !== canonicalDigest(expectedOutputSchema)
+  || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)) {
+  throw new Error('semantic_request_omitted_authoritative_inputs');
+}
 
 const draft = {
   schema: 'aegis.semantic_draft.v1',
@@ -124,16 +140,18 @@ const contract = compileSemanticContract({
   preflight,
   policy: loadedPolicy.policy,
   policyDigest: loadedPolicy.policyDigest,
+  constitutionDigest: constitution.digest,
 });
 assertContractDocument({
   contract,
   preflight,
   policy: loadedPolicy.policy,
   policyDigest: loadedPolicy.policyDigest,
+  constitutionDigest: constitution.digest,
 });
 if (contract.intent !== preflight.intent
   || contract.implementationAuthorized !== false
-  || contract.constitutionDigest !== semanticConstitutionDigest) {
+  || contract.constitutionDigest !== constitution.digest) {
   throw new Error('mechanical_contract_fields_were_not_injected');
 }
 if (schemaErrors('aegis.issue_contract.v3', { ...contract, implementationAuthorized: true }).length === 0) {

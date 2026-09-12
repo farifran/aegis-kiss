@@ -47,6 +47,15 @@ async function readPolicy() {
   }
 }
 
+async function readConstitution() {
+  try {
+    const { loadSemanticConstitution } = await import('./lib/semantic_contract.mjs');
+    return loadSemanticConstitution(root);
+  } catch (error) {
+    throw rejection('SEMANTIC_CONSTITUTION_UNAVAILABLE', error.message);
+  }
+}
+
 async function assertDiscoveryUnchanged(preflight) {
   const [{ canonicalDigest }, { discoverWorkspace }] = await Promise.all([
     import('./lib/canonical_json.mjs'),
@@ -61,7 +70,7 @@ async function assertDiscoveryUnchanged(preflight) {
   }
 }
 
-async function readPendingRevision(preflight, loadedPolicy) {
+async function readPendingRevision(preflight, loadedPolicy, constitution) {
   const pathsExist = [contractJsonPath, userConfirmationPath, resolutionPath]
     .map((path) => existsSync(path));
   if (!pathsExist[2]) return null;
@@ -82,11 +91,16 @@ async function readPendingRevision(preflight, loadedPolicy) {
     readFile(userConfirmationPath, 'utf8').then(JSON.parse),
     readFile(resolutionPath, 'utf8').then(JSON.parse),
   ]);
+  if (contract.constitutionDigest !== constitution.digest
+    || contract.policyDigest !== loadedPolicy.policyDigest) {
+    return null;
+  }
   assertContractDocument({
     contract,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitutionDigest: constitution.digest,
   });
   if (!resolutionRequiresRecompilation({ contract, request, resolution })) return null;
   return {
@@ -142,13 +156,18 @@ async function handleSemanticRequest() {
     import('./lib/canonical_json.mjs'),
     import('./lib/semantic_contract.mjs'),
   ]);
-  const [preflight, loadedPolicy] = await Promise.all([readPreflight(), readPolicy()]);
+  const [preflight, loadedPolicy, constitution] = await Promise.all([
+    readPreflight(),
+    readPolicy(),
+    readConstitution(),
+  ]);
   await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(preflight, loadedPolicy);
+  const revision = await readPendingRevision(preflight, loadedPolicy, constitution);
   const request = buildSemanticRequest({
     repositoryRoot: root,
     preflight,
     policy: loadedPolicy.policy,
+    constitution,
     revision: revision?.request ?? null,
   });
   process.stdout.write(`${canonicalJson(request)}\n`);
@@ -181,15 +200,20 @@ async function handleSemanticCompile(args) {
   } catch (error) {
     throw rejection('INVALID_SEMANTIC_DRAFT', error.message);
   }
-  const [preflight, loadedPolicy] = await Promise.all([readPreflight(), readPolicy()]);
+  const [preflight, loadedPolicy, constitution] = await Promise.all([
+    readPreflight(),
+    readPolicy(),
+    readConstitution(),
+  ]);
   await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(preflight, loadedPolicy);
+  const revision = await readPendingRevision(preflight, loadedPolicy, constitution);
   if (revision !== null) assertRevisionApplied(draft, revision.resolution);
   const contract = compileSemanticContract({
     draft,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitutionDigest: constitution.digest,
     humanResolutions: revision?.resolution.answers ?? [],
   });
   const confirmation = buildConfirmationRequest(contract);
@@ -226,16 +250,18 @@ async function handleApprove() {
     import('./lib/semantic_contract.mjs'),
     import('./lib/semantic_state.mjs'),
   ]);
-  const [contract, preflight, loadedPolicy] = await Promise.all([
+  const [contract, preflight, loadedPolicy, constitution] = await Promise.all([
     readFile(contractJsonPath, 'utf8').then(JSON.parse),
     readPreflight(),
     readPolicy(),
+    readConstitution(),
   ]);
   assertContractDocument({
     contract,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitutionDigest: constitution.digest,
   });
 
   if (existsSync(userConfirmationPath)) {

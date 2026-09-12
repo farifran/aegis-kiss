@@ -80,9 +80,11 @@ O Preflight completo permanece como evidência do Harness. `./aegis --semantic-r
 - estado e truncamento da evidência lexical;
 - termo e caminho de cada correspondência lexical.
 - trechos limitados dos arquivos correspondentes, marcados explicitamente como evidência não confiável e nunca como instruções;
-- constituição semântica do Aegis e política arquitetural estruturada.
+- conteúdo integral de `AGENTS.md`, identificado como constituição confiável e acompanhado de seu digest;
+- política arquitetural estruturada, autenticada contra `ARCHITECTURE.md`;
+- schema JSON completo e estrito que define a resposta esperada da IA, acompanhado de identificador e digest.
 
-Não são enviados à IA metadados da captura, contadores, tamanhos, hashes de arquivos, termos sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. A saída da IA é obrigada a seguir `aegis.semantic_draft.v1`; intenção, digests, caminhos observados, seleção recomendada e `implementationAuthorized: false` são acrescentados mecanicamente pelo Harness no contrato v3.
+Não são enviados à IA metadados da captura, contadores, tamanhos, hashes de arquivos, termos sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. `AGENTS.md` é a única fonte da constituição: não existe uma segunda cópia de suas regras no código. A saída da IA é obrigada a seguir o documento completo de `aegis.semantic_draft.v1`; intenção, digests, caminhos observados, seleção recomendada e `implementationAuthorized: false` são acrescentados mecanicamente pelo Harness no contrato v3. Uma alteração constitucional posterior invalida a aprovação do contrato compilado sob o digest anterior.
 
 Cada requisito contém um caso `HAPPY_PATH` e pelo menos um caso `FAILURE` ou `BOUNDARY`. Esses casos especificam provas falsificáveis, mas não apontam para executores nem autorizam a criação de scripts. Uma escolha diferente da recomendada retorna `SEMANTIC_RECOMPILATION_REQUIRED`; a resolução humana é incorporada à próxima requisição e requisitos, riscos e casos de aceitação devem ser recompilados antes da assinatura.
 

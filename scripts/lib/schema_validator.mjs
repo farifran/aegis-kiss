@@ -35,14 +35,18 @@ function referencedSchemaIds(value, result = new Set()) {
 
 function loadSchema(schemaId, loading = new Set()) {
   if (validator.getSchema(schemaId) !== undefined) return;
-  const file = schemaFiles.get(schemaId);
-  if (file === undefined) throw new Error('unknown_schema:' + schemaId);
   if (loading.has(schemaId)) throw new Error('circular_schema_reference:' + schemaId);
   loading.add(schemaId);
-  const schema = JSON.parse(readFileSync(resolve(schemaDirectory, file), 'utf8'));
+  const schema = schemaDocument(schemaId);
   for (const referenceId of referencedSchemaIds(schema)) loadSchema(referenceId, loading);
   validator.addSchema(schema);
   loading.delete(schemaId);
+}
+
+export function schemaDocument(schemaId) {
+  const file = schemaFiles.get(schemaId);
+  if (file === undefined) throw new Error('unknown_schema:' + schemaId);
+  return JSON.parse(readFileSync(resolve(schemaDirectory, file), 'utf8'));
 }
 
 export function schemaErrors(schemaId, value) {

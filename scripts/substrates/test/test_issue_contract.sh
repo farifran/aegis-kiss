@@ -12,6 +12,7 @@ trap cleanup EXIT
 
 mkdir -p "${WORK_DIR}/src" "${WORK_DIR}/.harness/runtime"
 cp "${ROOT_DIR}/aegis" "${WORK_DIR}/aegis"
+cp "${ROOT_DIR}/AGENTS.md" "${WORK_DIR}/AGENTS.md"
 cp "${ROOT_DIR}/ARCHITECTURE.md" "${WORK_DIR}/ARCHITECTURE.md"
 cp -r "${ROOT_DIR}/scripts" "${WORK_DIR}/scripts"
 cp -r "${ROOT_DIR}/governance" "${WORK_DIR}/governance"
@@ -97,11 +98,19 @@ printf '%s\n' "${draft_output}" | jq -e '
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -print)" == ".harness/runtime/preflight.json" ]]
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
-# A projeção semântica é produzida em RAM e não lê documentos alheios à interface.
+# A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
   .schema == "aegis.semantic_request.v1"
-  and .outputSchema == "aegis.semantic_draft.v1"
+  and .constitution.sourcePath == "AGENTS.md"
+  and .constitution.authority == "TRUSTED_CONSTITUTION"
+  and (.constitution.digest | test("^[a-f0-9]{64}$"))
+  and (.constitution.content | contains("# Aegis Cognitive Constitution"))
+  and .outputSchema.id == "aegis.semantic_draft.v1"
+  and .outputSchema.strict == true
+  and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
+  and .outputSchema.document."$id" == "aegis.semantic_draft.v1"
+  and (.outputSchema.document.required | index("requirements") != null)
   and .revision == null
   and .intent == "Criar calculadora de precisão"
   and (.policy.rules | length) == 2
@@ -235,6 +244,19 @@ printf '%s\n' "$(bash ./aegis --verify)" | jq -e '
   and .implementationExecuted == false
 ' >/dev/null
 [[ ! -e .harness/runtime/verification_receipt.json ]]
+
+# Um contrato não pode ser aprovado sob uma constituição diferente da usada na compilação.
+cp AGENTS.md AGENTS.original.md
+printf '\nregra constitucional não pactuada\n' >> AGENTS.md
+set +e
+constitution_output="$(bash ./aegis --approve 2>&1)"
+constitution_code=$?
+set -e
+mv AGENTS.original.md AGENTS.md
+[[ "${constitution_code}" -ne 0 ]]
+printf '%s\n' "${constitution_output}" | jq -e '
+  .reason == "CONTRACT_CONSTITUTION_MISMATCH"
+' >/dev/null
 
 # A política estruturada deixa de ser confiável se ARCHITECTURE.md mudar.
 cp ARCHITECTURE.md ARCHITECTURE.original.md
