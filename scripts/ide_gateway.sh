@@ -183,7 +183,7 @@ main() {
   [[ $# -ge 1 ]] || fatal 'MISSING_ARGUMENT'
 
   case "${1}" in
-    --approve)
+    --approve|approve)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;
