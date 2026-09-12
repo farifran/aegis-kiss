@@ -17,6 +17,7 @@ import {
   buildSemanticRequest,
   compileSemanticContract,
   loadSemanticConstitution,
+  renderSemanticContractMarkdown,
   resolutionRequiresRecompilation,
 } from './scripts/lib/semantic_contract.mjs';
 import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
@@ -28,10 +29,13 @@ const schemaFiles = [
   'confirmation-request.v1.schema.json',
   'constitution.v1.schema.json',
   'issue-contract.v3.schema.json',
+  'issue-contract.v4.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'semantic-draft.v1.schema.json',
+  'semantic-draft.v2.schema.json',
   'semantic-request.v1.schema.json',
+  'semantic-request.v2.schema.json',
   'semantic-resolution.v1.schema.json',
 ];
 for (const file of schemaFiles) {
@@ -55,8 +59,8 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v1', semanticRequest);
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v1');
+assertSchema('aegis.semantic_request.v2', semanticRequest);
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v2');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
@@ -65,6 +69,16 @@ if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
     !== semanticRequest.contextDigest) {
   throw new Error('semantic_request_omitted_authoritative_inputs');
+}
+
+const userBasis = [{ source: 'USER_INTENT', reference: 'comportamento observável' }];
+const modelBasis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
+const semanticSchema = semanticRequest.outputSchema.document;
+if (semanticSchema.properties.riskReview.required.includes('consideredKinds')
+  || semanticSchema.properties.riskReview.properties.consideredKinds !== undefined
+  || semanticSchema.properties.policyAssessments.items.properties.demandStatus.enum
+    .includes('NOT_APPLICABLE')) {
+  throw new Error('semantic_schema_retained_declarative_noise');
 }
 
 const largeRoot = mkdtempSync(join(tmpdir(), 'aegis-semantic-evidence.'));
@@ -97,7 +111,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v1',
+  schema: 'aegis.semantic_draft.v2',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -109,11 +123,14 @@ const draft = {
   architectureContexts: [{
     tag: 'product-demand',
     rationale: 'A demanda define comportamento público do produto.',
+    basis: userBasis,
   }],
-  policyAssessments: loadedPolicy.policy.rules.map((rule) => ({
+  policyAssessments: loadedPolicy.policy.rules
+    .filter((rule) => rule.appliesWhen.includes('product-demand'))
+    .map((rule) => ({
     ruleId: rule.id,
-    demandStatus: rule.appliesWhen.includes('product-demand') ? 'COMPLIANT' : 'NOT_APPLICABLE',
-    recommendedStatus: rule.appliesWhen.includes('product-demand') ? 'COMPLIANT' : 'NOT_APPLICABLE',
+    demandStatus: 'COMPLIANT',
+    recommendedStatus: 'COMPLIANT',
     rationale: 'A regra foi confrontada explicitamente com a demanda.',
     decisionId: null,
     amendmentId: null,
@@ -126,7 +143,7 @@ const draft = {
   requirements: [{
     id: 'REQ-RESULT',
     statement: 'A operação deve retornar resultado explícito.',
-    provenance: 'USER',
+    basis: userBasis,
     acceptanceCases: [
       {
         id: 'AC-RESULT-HAPPY',
@@ -157,17 +174,29 @@ const draft = {
     statement: 'Uma falha pode desaparecer silenciosamente.',
     mitigation: 'Exigir resultado explícito em todos os casos.',
     requirementIds: ['REQ-RESULT'],
+    basis: modelBasis,
   }],
   riskReview: {
     status: 'FOUND',
     rationale: 'Foi identificado risco de falha silenciosa.',
-    consideredKinds: ['SECURITY', 'RELIABILITY', 'PRIVACY', 'PERFORMANCE', 'INTEGRITY', 'COMPLEXITY'],
+  },
+  adversarialReview: {
+    status: 'CHALLENGES_INTEGRATED',
+    rationale: 'A recomendação foi confrontada com seu principal modo de falha.',
+    findings: [{
+      id: 'ADV-SILENT-RESULT',
+      challenge: 'Um resultado simples pode ocultar a causa da falha.',
+      response: 'O risco e o requisito exigem falha explícita.',
+      targetIds: ['REQ-RESULT', 'RISK-SILENCE'],
+      basis: modelBasis,
+    }],
   },
   unknowns: [{
     id: 'UNKNOWN-FORMAT',
     statement: 'O formato final do resultado não foi definido.',
     material: true,
     decisionId: 'Q-FORMAT',
+    basis: userBasis,
   }],
   decisions: [{
     questionId: 'Q-FORMAT',
@@ -183,19 +212,29 @@ const draft = {
   }],
 };
 
-assertSemanticDraft(draft, loadedPolicy.policy);
+const semanticValidationContext = {
+  constitutionRules: constitution.rules,
+  intent: preflight.intent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: semanticRequest.workspace.sourceEvidence,
+};
+assertSemanticDraft(draft, loadedPolicy.policy, semanticValidationContext);
 const contract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
   draft,
   preflight,
   policy: loadedPolicy.policy,
   policyDigest: loadedPolicy.policyDigest,
+  constitution,
   constitutionDigest: constitution.digest,
 });
 assertContractDocument({
+  repositoryRoot: process.cwd(),
   contract,
   preflight,
   policy: loadedPolicy.policy,
   policyDigest: loadedPolicy.policyDigest,
+  constitution,
   constitutionDigest: constitution.digest,
 });
 if (contract.intent !== preflight.intent
@@ -203,7 +242,16 @@ if (contract.intent !== preflight.intent
   || contract.constitutionDigest !== constitution.digest) {
   throw new Error('mechanical_contract_fields_were_not_injected');
 }
-if (schemaErrors('aegis.issue_contract.v3', { ...contract, implementationAuthorized: true }).length === 0) {
+const humanContract = renderSemanticContractMarkdown(contract, {
+  policyRules: loadedPolicy.policy.rules,
+});
+if (humanContract.includes(preflight.intent)
+  || humanContract.includes('## 8. Lacunas declaradas')
+  || !humanContract.includes('**Lacuna:** O formato final do resultado não foi definido.')
+  || !humanContract.includes('## 8. Parecer adversarial')) {
+  throw new Error('human_contract_retained_redundant_sections');
+}
+if (schemaErrors('aegis.issue_contract.v4', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -235,11 +283,34 @@ for (const mutate of [
   (value) => { value.unknowns[0].decisionId = null; },
   (value) => { value.complexityReview.status = 'SIMPLIFIED'; },
   (value) => { value.riskReview.status = 'NONE'; },
-  (value) => value.riskReview.consideredKinds.pop(),
   (value) => { value.architectureContexts[0].tag = 'unknown-context'; },
   (value) => {
-    value.policyAssessments[0].demandStatus = 'NOT_APPLICABLE';
-    value.policyAssessments[0].recommendedStatus = 'NOT_APPLICABLE';
+    value.policyAssessments.push({
+      ruleId: 'ARCH-HARNESS-STATE',
+      demandStatus: 'COMPLIANT',
+      recommendedStatus: 'COMPLIANT',
+      rationale: 'Regra não aplicável injetada indevidamente.',
+      decisionId: null,
+      amendmentId: null,
+    });
+  },
+  (value) => { value.unknowns = []; },
+  (value) => { value.unknowns[0].material = false; },
+  (value) => { value.requirements[0].basis = modelBasis; },
+  (value) => { value.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'invented' }]; },
+  (value) => { value.risks[0].basis = [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-MISSING' }]; },
+  (value) => { value.risks[0].basis = [{ source: 'CONSTITUTION', reference: 'CONST-MISSING' }]; },
+  (value) => { value.risks[0].basis = [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/missing.ts:L1' }]; },
+  (value) => { value.risks[0].basis = [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/index.ts:L999999' }]; },
+  (value) => { value.requirements[0].basis = [{ source: 'USER_DECISION', reference: 'Q-GHOST' }]; },
+  (value) => { value.adversarialReview.findings[0].targetIds = ['REQ-MISSING']; },
+  (value) => { value.adversarialReview.status = 'NO_ADDITIONAL_FINDINGS'; },
+  (value) => {
+    value.adversarialReview = {
+      status: 'NO_ADDITIONAL_FINDINGS',
+      rationale: 'Nenhuma objeção adicional.',
+      findings: [],
+    };
   },
   (value) => {
     value.decisions[0].requirementIds = [];
@@ -251,20 +322,108 @@ for (const mutate of [
   mutate(invalid);
   let rejected = false;
   try {
-    assertSemanticDraft(invalid, loadedPolicy.policy);
+    assertSemanticDraft(invalid, loadedPolicy.policy, semanticValidationContext);
   } catch {
     rejected = true;
   }
   if (!rejected) throw new Error('invalid_semantic_draft_was_accepted');
 }
 
-const deliberableConflict = structuredClone(draft);
-deliberableConflict.policyAssessments[0].demandStatus = 'CONFLICT';
-deliberableConflict.policyAssessments[0].decisionId = 'Q-FORMAT';
-assertSemanticDraft(deliberableConflict, loadedPolicy.policy);
+const enforcedHardConflict = structuredClone(draft);
+enforcedHardConflict.policyAssessments[0].demandStatus = 'CONFLICT';
+enforcedHardConflict.policyAssessments[0].rationale = 'O conflito hard foi corrigido sem virar pergunta.';
+assertSemanticDraft(enforcedHardConflict, loadedPolicy.policy, semanticValidationContext);
+const correctedContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: enforcedHardConflict,
+  preflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (!renderSemanticContractMarkdown(correctedContract, {
+  policyRules: loadedPolicy.policy.rules,
+}).includes('ARCH-PRODUCT-BOUNDARY — CORREÇÃO OBRIGATÓRIA')) {
+  throw new Error('hard_policy_correction_was_not_visible');
+}
+
+const invalidHardDecision = structuredClone(enforcedHardConflict);
+invalidHardDecision.policyAssessments[0].decisionId = 'Q-FORMAT';
+let hardDecisionRejected = false;
+try {
+  assertSemanticDraft(invalidHardDecision, loadedPolicy.policy, semanticValidationContext);
+} catch {
+  hardDecisionRejected = true;
+}
+if (!hardDecisionRejected) throw new Error('hard_policy_conflict_became_user_choice');
+
+const deliberableDefaultConflict = structuredClone(draft);
+deliberableDefaultConflict.architectureContexts.push({
+  tag: 'typescript-form',
+  rationale: 'A demanda exige uma forma TypeScript ainda ambígua.',
+  basis: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/index.ts:L1' }],
+});
+deliberableDefaultConflict.policyAssessments.push({
+  ruleId: 'ARCH-STRICT-EXPLICIT-MODULES',
+  demandStatus: 'CONFLICT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'Uma exigência explícita deixa escolha material sob regra default.',
+  decisionId: 'Q-FORMAT',
+  amendmentId: null,
+});
+assertSemanticDraft(deliberableDefaultConflict, loadedPolicy.policy, semanticValidationContext);
+
+const redFlagIntent = 'Usar any, AbstractCycleResolver e try/catch vazios na operação.';
+const redFlagPreflight = buildPreflightHandoff({
+  demand: redFlagIntent,
+  discovery: discoverWorkspace(process.cwd(), redFlagIntent),
+});
+const redFlagRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: redFlagPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const redFlagDraft = structuredClone(draft);
+redFlagDraft.sourceContextDigest = redFlagRequest.contextDigest;
+for (const claim of [
+  ...redFlagDraft.architectureContexts,
+  ...redFlagDraft.requirements,
+  ...redFlagDraft.unknowns,
+]) claim.basis = [{ source: 'USER_INTENT', reference: 'any' }];
+redFlagDraft.policyAssessments = loadedPolicy.policy.rules
+  .filter((rule) => rule.appliesWhen.includes('product-demand')
+    || (rule.forbiddenReferences ?? []).some((reference) => (
+      redFlagIntent.toLocaleLowerCase('pt-BR').includes(reference.toLocaleLowerCase('pt-BR'))
+    )))
+  .map((rule) => ({
+    ruleId: rule.id,
+    demandStatus: 'COMPLIANT',
+    recommendedStatus: 'COMPLIANT',
+    rationale: 'A regra ativada explicitamente foi confrontada com a demanda.',
+    decisionId: null,
+    amendmentId: null,
+  }));
+const redFlagContext = {
+  constitutionRules: constitution.rules,
+  intent: redFlagIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: redFlagRequest.workspace.sourceEvidence,
+};
+assertSemanticDraft(redFlagDraft, loadedPolicy.policy, redFlagContext);
+redFlagDraft.policyAssessments = redFlagDraft.policyAssessments
+  .filter(({ ruleId }) => ruleId !== 'ARCH-PARSIMONY');
+let omittedTriggeredRuleRejected = false;
+try {
+  assertSemanticDraft(redFlagDraft, loadedPolicy.policy, redFlagContext);
+} catch {
+  omittedTriggeredRuleRejected = true;
+}
+if (!omittedTriggeredRuleRejected) throw new Error('explicit_policy_trigger_was_omitted');
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v3',
+  schema: 'aegis.semantic_state.v4',
   contract,
   contractDigest: canonicalDigest(contract),
 };

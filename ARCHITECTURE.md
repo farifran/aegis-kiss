@@ -89,7 +89,19 @@ proibida enquanto não houver emenda aprovada.
 
 ## Evolução da política
 
-O Contract IR avalia todas as regras ativas para cada demanda. Regras `hard`
-bloqueiam conflito; regras `default` podem pedir confirmação; preferências não
-devem criar perguntas. Regras de negócio, invariantes e provas de uma demanda
-pertencem ao contrato dela, não a este documento.
+O Contract IR calcula localmente quais regras são aplicáveis e exige avaliação
+semântica somente dessas regras. Conflitos com regras `hard` são correções
+obrigatórias e nunca viram opções do Wizard. Regras `default` só podem pedir
+confirmação quando uma exigência observável e explícita do usuário deixar uma
+escolha material; complexidade apenas sugerida é podada automaticamente.
+Preferências não criam perguntas. Regras de negócio, invariantes e provas de
+uma demanda pertencem ao contrato dela, não a este documento.
+
+## Sinais mecânicos conservadores
+
+Referências explícitas na própria demanda também ativam a regra correspondente,
+mesmo se o modelo omitir um contexto. `any` e `@ts-ignore` ativam tipagem
+estrita; `AbstractCycleResolver`, injeção dinâmica de dependências, `factories`
+e decoradores ativam parcimônia; `try/catch` vazios e `catch` vazio ativam falha
+explícita. A lista é deliberadamente curta: ela protege proibições declaradas
+sem tentar substituir a interpretação semântica por um dicionário de domínio.

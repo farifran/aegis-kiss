@@ -1,9 +1,9 @@
 {
   "schema": "aegis.constitution.v1",
-  "constitutionVersion": 1,
+  "constitutionVersion": 3,
   "origin": {
     "sourcePath": "AGENTS.md",
-    "sourceDigest": "c5ca6f0b97cae9840c201a069a7e0db82cf50e2f9e9c47c85d3f5b8c197f88e1"
+    "sourceDigest": "c067c2a700fe5ecb3225d703210e71f9db741748aa9bc31930ac1e2982f863ad"
   },
   "rules": [
     {
@@ -16,11 +16,11 @@
     },
     {
       "id": "CONST-DECISIONS",
-      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Não crie perguntas sobre obviedades ou detalhes internos livres."
+      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Não crie perguntas sobre obviedades, detalhes internos livres, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
     },
     {
       "id": "CONST-OBSERVABLE",
-      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Cada requisito deve prever o caminho feliz recomendado e pelo menos uma falha ou limite."
+      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Cada requisito deve prever o caminho feliz recomendado e pelo menos uma falha ou limite. Antes de entregar, confronte a própria recomendação com as objeções materiais mais fortes e incorpore cada achado em requisito, risco ou decisão."
     },
     {
       "id": "CONST-CONTRACT-ONLY",

@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_draft.v2",
+  "title": "Aegis Semantic Contract Draft v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "sourceContextDigest",
+    "title",
+    "interpretation",
+    "changeKind",
+    "scope",
+    "architectureContexts",
+    "policyAssessments",
+    "complexityReview",
+    "requirements",
+    "invariants",
+    "riskReview",
+    "risks",
+    "adversarialReview",
+    "unknowns",
+    "decisions"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.semantic_draft.v2" },
+    "sourceContextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "interpretation": { "type": "string", "minLength": 1 },
+    "changeKind": { "enum": ["PRODUCT", "HARNESS"] },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declare apenas o escopo específico da demanda; não repita limites constitucionais já impostos mecanicamente.",
+      "required": ["inScope", "outOfScope"],
+      "properties": {
+        "inScope": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "outOfScope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "architectureContexts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tag", "rationale", "basis"],
+        "properties": {
+          "tag": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "rationale": { "type": "string", "minLength": 1 },
+          "basis": { "$ref": "#/$defs/basis" }
+        }
+      }
+    },
+    "policyAssessments": {
+      "type": "array",
+      "description": "Avalie exatamente as regras ativadas pelos contextos declarados ou por referências explícitas da demanda. Regras não aplicáveis são calculadas e omitidas localmente.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "demandStatus", "recommendedStatus", "rationale", "decisionId", "amendmentId"],
+        "properties": {
+          "ruleId": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+          "demandStatus": { "enum": ["COMPLIANT", "CONFLICT"] },
+          "recommendedStatus": { "enum": ["COMPLIANT", "AMENDED"] },
+          "rationale": { "type": "string", "minLength": 1 },
+          "decisionId": { "type": ["string", "null"], "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "amendmentId": {
+            "type": ["string", "null"],
+            "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$"
+          }
+        }
+      }
+    },
+    "complexityReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pode simplificar automaticamente complexidade apenas sugerida. Não crie uma decisão quando KISS já determinar a resposta.",
+      "required": ["status", "rationale", "alternatives"],
+      "properties": {
+        "status": { "enum": ["NO_EXCESS", "SIMPLIFIED", "JUSTIFIED"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requested", "simpler", "rationale", "basis"],
+            "properties": {
+              "requested": { "type": "string", "minLength": 1 },
+              "simpler": { "type": "string", "minLength": 1 },
+              "rationale": { "type": "string", "minLength": 1 },
+              "basis": { "$ref": "#/$defs/basis" }
+            }
+          }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "basis", "acceptanceCases"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^REQ-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "basis": { "$ref": "#/$defs/basis" },
+          "acceptanceCases": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind", "given", "when", "then"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$" },
+                "kind": { "enum": ["HAPPY_PATH", "FAILURE", "BOUNDARY"] },
+                "given": { "type": "string", "minLength": 1 },
+                "when": { "type": "string", "minLength": 1 },
+                "then": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "falsification", "requirementIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^INV-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "falsification": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "level", "statement", "mitigation", "requirementIds", "basis"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^RISK-[A-Z0-9][A-Z0-9-]+$" },
+          "kind": { "enum": ["SECURITY", "RELIABILITY", "PRIVACY", "PERFORMANCE", "INTEGRITY", "COMPLEXITY"] },
+          "level": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+          "statement": { "type": "string", "minLength": 1 },
+          "mitigation": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+          "basis": { "$ref": "#/$defs/basis" }
+        }
+      }
+    },
+    "riskReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Revise segurança, confiabilidade, privacidade, desempenho, integridade e complexidade; reporte somente achados materiais.",
+      "required": ["status", "rationale"],
+      "properties": {
+        "status": { "enum": ["FOUND", "NONE", "UNKNOWN"] },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "adversarialReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Ataque a própria recomendação e registre somente objeções materiais já absorvidas pelo contrato. Decisão, conflito, simplificação ou risco alto exige ao menos um achado. Não repita riscos sem mostrar a resposta incorporada.",
+      "required": ["status", "rationale", "findings"],
+      "properties": {
+        "status": { "enum": ["NO_ADDITIONAL_FINDINGS", "CHALLENGES_INTEGRATED"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "findings": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "challenge", "response", "targetIds", "basis"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^ADV-[A-Z0-9][A-Z0-9-]+$" },
+              "challenge": { "type": "string", "minLength": 1 },
+              "response": { "type": "string", "minLength": 1 },
+              "targetIds": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "pattern": "^(REQ|INV|RISK|Q)-[A-Z0-9][A-Z0-9-]+$" }
+              },
+              "basis": { "$ref": "#/$defs/basis" }
+            }
+          }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "material", "decisionId", "basis"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^UNKNOWN-[A-Z0-9][A-Z0-9-]+$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "material": { "type": "boolean" },
+          "decisionId": { "type": ["string", "null"] },
+          "basis": { "$ref": "#/$defs/basis" }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "description": "Inclua somente escolhas humanas materiais associadas a uma lacuna. Não ofereça violações constitucionais ou de regras hard como alternativas.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questionId", "question", "recommendedAnswerId", "requirementIds", "invariantIds", "riskIds", "answers"],
+        "properties": {
+          "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "question": { "type": "string", "minLength": 1 },
+          "recommendedAnswerId": { "type": "string", "minLength": 1 },
+          "requirementIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "invariantIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "riskIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "answers": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "label", "rationale", "recommended"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+                "label": { "type": "string", "minLength": 1 },
+                "rationale": { "type": "string", "minLength": 1 },
+                "recommended": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "basis": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/basisRef" }
+    },
+    "basisRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "reference"],
+      "properties": {
+        "source": {
+          "enum": [
+            "USER_INTENT",
+            "USER_DECISION",
+            "CONSTITUTION",
+            "ARCHITECTURE_POLICY",
+            "WORKSPACE_EVIDENCE",
+            "MODEL_ANALYSIS"
+          ]
+        },
+        "reference": { "type": "string", "minLength": 1, "maxLength": 240 }
+      }
+    }
+  }
+}

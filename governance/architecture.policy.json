@@ -1,9 +1,9 @@
 {
   "schema": "aegis.architecture_policy.v1",
-  "policyVersion": 3,
+  "policyVersion": 5,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "837336a19145fc1ec6b5c1532e879d5d2ca298941c454ef6c88ce949dd397d89"
+    "sourceDigest": "7aab17321105fdf70769034baa2b796aec485be57abbc259bc4d975730da8ca7"
   },
   "contexts": [
     { "tag": "product-demand", "description": "A demanda define comportamento ou fronteira pública do produto." },
@@ -61,6 +61,7 @@
       "statement": "Dependências, persistência, concorrência, camadas e pontos de extensão só são admitidos quando um requisito observável justificar seu custo. A alternativa recomendada deve ser a menor arquitetura suficiente.",
       "appliesWhen": ["dependency", "persistence", "concurrency", "structural-complexity"],
       "appliesMode": "any",
+      "forbiddenReferences": ["AbstractCycleResolver", "injeção dinâmica de dependências", "factories", "decoradores"],
       "sourceRanges": [{ "startByte": 2805, "endByte": 3098 }]
     },
     {
@@ -69,6 +70,7 @@
       "statement": "Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve expor resultado, erro explícito, estado preservado ou rollback verificável.",
       "appliesWhen": ["stateful-operation", "external-effect"],
       "appliesMode": "any",
+      "forbiddenReferences": ["try/catch vazios", "catch vazio"],
       "sourceRanges": [{ "startByte": 3136, "endByte": 3344 }]
     },
     {

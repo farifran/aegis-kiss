@@ -95,11 +95,14 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
+  if (contract.schema !== 'aegis.issue_contract.v4') return null;
   assertContractDocument({
+    repositoryRoot: root,
     contract,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitution,
     constitutionDigest: constitution.digest,
   });
   if (!resolutionRequiresRecompilation({ contract, request, resolution })) return null;
@@ -220,10 +223,12 @@ async function handleSemanticCompile(args) {
   }
   if (revision !== null) assertRevisionApplied(draft, revision.resolution);
   const contract = compileSemanticContract({
+    repositoryRoot: root,
     draft,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitution,
     constitutionDigest: constitution.digest,
     humanResolutions: revision?.resolution.answers ?? [],
   });
@@ -268,21 +273,22 @@ async function handleApprove() {
     readConstitution(),
   ]);
   assertContractDocument({
+    repositoryRoot: root,
     contract,
     preflight,
     policy: loadedPolicy.policy,
     policyDigest: loadedPolicy.policyDigest,
+    constitution,
     constitutionDigest: constitution.digest,
   });
 
-  if (existsSync(userConfirmationPath)) {
-    const request = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
-    assertConfirmationRequest(contract, request);
-    if (existsSync(resolutionPath)) {
-      const resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
-      if (resolutionRequiresRecompilation({ contract, request, resolution })) {
-        throw rejection('SEMANTIC_RECOMPILATION_REQUIRED');
-      }
+  if (!existsSync(userConfirmationPath)) throw rejection('MISSING_USER_CONFIRMATION');
+  const request = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
+  assertConfirmationRequest(contract, request);
+  if (existsSync(resolutionPath)) {
+    const resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
+    if (resolutionRequiresRecompilation({ contract, request, resolution })) {
+      throw rejection('SEMANTIC_RECOMPILATION_REQUIRED');
     }
   }
 
@@ -290,7 +296,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v3',
+    schema: 'aegis.semantic_state.v4',
     contract,
     contractDigest,
   };
@@ -309,7 +315,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v3',
+    schema: 'aegis.preflight_finalization.v4',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

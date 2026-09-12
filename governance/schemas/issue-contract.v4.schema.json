@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.issue_contract.v4",
+  "title": "Aegis Signed Issue-Contract v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "implementationAuthorized",
+    "sourcePreflightDigest",
+    "sourceSnapshotDigest",
+    "policyDigest",
+    "constitutionDigest",
+    "intent",
+    "observedPaths",
+    "specification",
+    "decisionSelections",
+    "humanResolutions"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.issue_contract.v4" },
+    "implementationAuthorized": { "const": false },
+    "sourcePreflightDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSnapshotDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "constitutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "intent": { "type": "string", "minLength": 1 },
+    "observedPaths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "specification": { "$ref": "aegis.semantic_draft.v2" },
+    "decisionSelections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questionId", "answerId"],
+        "properties": {
+          "questionId": { "type": "string", "minLength": 1 },
+          "answerId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "humanResolutions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "answerId"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "answerId": { "type": "string", "minLength": 1 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "correction"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "correction": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
