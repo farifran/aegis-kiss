@@ -7,9 +7,13 @@ const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const schemaDirectory = resolve(repositoryRoot, 'governance/schemas');
 const schemaFiles = new Map([
   ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
-  ['aegis.issue_contract.v2', 'issue-contract.v2.schema.json'],
+  ['aegis.confirmation_request.v1', 'confirmation-request.v1.schema.json'],
+  ['aegis.issue_contract.v3', 'issue-contract.v3.schema.json'],
   ['aegis.preflight_handoff.v2', 'preflight-handoff.v2.schema.json'],
   ['aegis.rejection.v1', 'rejection.v1.schema.json'],
+  ['aegis.semantic_draft.v1', 'semantic-draft.v1.schema.json'],
+  ['aegis.semantic_request.v1', 'semantic-request.v1.schema.json'],
+  ['aegis.semantic_resolution.v1', 'semantic-resolution.v1.schema.json'],
 ]);
 
 const validator = new Ajv2020({ allErrors: true, strict: true });

@@ -22,7 +22,7 @@ usage() {
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>" Captura a intenção e executa o Discovery (.harness/runtime/preflight.json)
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
-  ./aegis --verify    Executa as provas físicas do tribunal e emite recibo PROVEN
+  ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --wizard    Abre as decisões pendentes no terminal
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
   ./aegis --clean     Remove artefatos transientes e redefine src/index.ts
@@ -37,49 +37,25 @@ preflight_is_valid() {
 status_command() {
   local contract_file="${RUNTIME_DIR}/contract.json"
   local preflight_file="${RUNTIME_DIR}/preflight.json"
+  local confirmation_file="${RUNTIME_DIR}/user_confirmation_request.json"
   local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
-  local receipt_file="${RUNTIME_DIR}/verification_receipt.json"
-
-  if [[ -f "${semantic_file}" ]]; then
-    local digest
-    digest="$(node -e '
-      const fs = require("fs");
-      try {
-        const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-        console.log(state.digests?.contractSemanticDigest || "unknown");
-      } catch {
-        console.log("invalid");
-      }
-    ' "${semantic_file}")"
-
-    if [[ -f "${receipt_file}" ]]; then
-      local receipt_digest
-      receipt_digest="$(node -e '
-        const fs = require("fs");
-        try {
-          const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-          if (r.status === "PROVEN" && r.contractDigest === process.argv[2]) {
-            console.log(r.receiptDigest || "proven");
-          } else {
-            console.log("");
-          }
-        } catch {
-          console.log("");
-        }
-      ' "${receipt_file}" "${digest}")"
-
-      if [[ -n "${receipt_digest}" ]]; then
-        printf '{"status":"PROVEN","contractDigest":"%s","receiptDigest":"%s","semanticState":"%s"}\n' "${digest}" "${receipt_digest}" "${semantic_file}"
-        return
-      fi
-    fi
-
-    printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
-  elif [[ -f "${contract_file}" ]]; then
+  if [[ -f "${contract_file}" ]]; then
     if [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
       printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
-    else
+    elif [[ -f "${confirmation_file}" ]] || [[ ! -f "${semantic_file}" ]]; then
       printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
+    else
+      local digest
+      digest="$(node -e '
+        const fs = require("fs");
+        try {
+          const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          console.log(state.contractDigest || "unknown");
+        } catch {
+          console.log("invalid");
+        }
+      ' "${semantic_file}")"
+      printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
     fi
   elif [[ -f "${preflight_file}" ]]; then
     if preflight_is_valid; then
@@ -87,6 +63,18 @@ status_command() {
     else
       printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
     fi
+  elif [[ -f "${semantic_file}" ]]; then
+    local digest
+    digest="$(node -e '
+      const fs = require("fs");
+      try {
+        const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        console.log(state.contractDigest || "unknown");
+      } catch {
+        console.log("invalid");
+      }
+    ' "${semantic_file}")"
+    printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
   else
     printf '{"status":"IDLE","workspace":"clean"}\n'
   fi
@@ -107,13 +95,10 @@ resolve_preflight_wizard() {
   local resolution_file="${RUNTIME_DIR}/preflight_resolution.json"
   local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
 
-  if [[ -f "${semantic_file}" ]]; then
-    printf '\n[AEGIS] O contrato já está selado e governado (GOVERNED). Nada a resolver no wizard.\n' >&2
-    exit 0
-  fi
-
   if [[ ! -f "${request_file}" ]]; then
-    if [[ -f "${RUNTIME_DIR}/preflight.json" ]]; then
+    if [[ -f "${semantic_file}" ]]; then
+      printf '\n[AEGIS] O contrato já está selado e governado (GOVERNED). Nada a resolver no wizard.\n' >&2
+    elif [[ -f "${RUNTIME_DIR}/preflight.json" ]]; then
       printf '\n[AEGIS] Captura e Discovery concluídos. A deliberação semântica ainda precisa compilar as opções do contrato.\n' >&2
     else
       printf '\n[AEGIS] Nenhuma Issue-Contrato pendente de confirmação. Execute: ./aegis "<sua demanda>" primeiro.\n' >&2
@@ -134,11 +119,13 @@ resolve_preflight_wizard() {
   count="$(jq '.questions | length' <<< "${result}")"
   if (( count == 0 )); then
     printf '\n[AEGIS] Nenhuma ambiguidade detectada na demanda. Aprovando contrato...\n' >&2
-    local execution_id
+    local execution_id contract_draft_digest
     execution_id="$(jq -r '.executionId' <<< "${result}")"
+    contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
     jq -n \
       --arg executionId "${execution_id}" \
-      '{schema:"aegis.preflight_resolution.v2",executionId:$executionId,answers:[]}' \
+      --arg contractDraftDigest "${contract_draft_digest}" \
+      '{schema:"aegis.semantic_resolution.v1",executionId:$executionId,contractDraftDigest:$contractDraftDigest,answers:[]}' \
       > "${resolution_file}"
     node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
     return
@@ -168,12 +155,14 @@ resolve_preflight_wizard() {
       printf '[AEGIS] Escolha inválida.\n' >&2
     done
   done
-  local execution_id
+  local execution_id contract_draft_digest
   execution_id="$(jq -r '.executionId' <<< "${result}")"
+  contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
   jq -n \
     --arg executionId "${execution_id}" \
+    --arg contractDraftDigest "${contract_draft_digest}" \
     --argjson answers "${answers}" \
-    '{schema:"aegis.preflight_resolution.v2",executionId:$executionId,answers:$answers}' \
+    '{schema:"aegis.semantic_resolution.v1",executionId:$executionId,contractDraftDigest:$contractDraftDigest,answers:$answers}' \
     > "${resolution_file}"
   echo '[AEGIS][IDE] Resolução gravada. Aprovando contrato...' >&2
   node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
@@ -190,6 +179,14 @@ main() {
     --verify)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify
+      ;;
+    --semantic-request)
+      require_command_arity "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-request
+      ;;
+    --semantic-compile)
+      require_command_arity "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-compile
       ;;
     --wizard)
       require_command_arity "$@"

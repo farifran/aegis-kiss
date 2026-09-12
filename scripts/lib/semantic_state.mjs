@@ -14,26 +14,15 @@ export function semanticStatePath(root) {
  */
 export function parseSemanticState(value) {
   const state = value;
-  if (state === null || typeof state !== 'object' || state.schema !== 'aegis.semantic_state.v2') {
+  if (state === null || typeof state !== 'object' || state.schema !== 'aegis.semantic_state.v3') {
     throw new Error('invalid_semantic_state');
   }
 
-  if (state.contract?.schema !== 'aegis.issue_contract.v2') {
+  if (state.contract?.schema !== 'aegis.issue_contract.v3') {
     throw new Error('invalid_semantic_state');
   }
-  assertSchema('aegis.issue_contract.v2', state.contract);
-
-  if (state.proofRegistry === null || typeof state.proofRegistry !== 'object') {
-    throw new Error('invalid_semantic_state');
-  }
-
-  const digests = state.digests;
-  if (
-    digests === null
-    || typeof digests !== 'object'
-    || digests.contractSemanticDigest !== canonicalDigest(state.contract)
-    || digests.proofRegistrySemanticDigest !== canonicalDigest(state.proofRegistry)
-  ) {
+  assertSchema('aegis.issue_contract.v3', state.contract);
+  if (state.contractDigest !== canonicalDigest(state.contract)) {
     throw new Error('semantic_state_digest_mismatch');
   }
 

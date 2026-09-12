@@ -13,8 +13,9 @@ function workspaceRoot() {
 }
 
 function validRequest(value) {
-  return (value?.schema === 'aegis.preflight_finalization.v2' || value?.status === 'USER_CONFIRMATION_REQUIRED')
+  return value?.schema === 'aegis.confirmation_request.v1'
     && value.status === 'USER_CONFIRMATION_REQUIRED'
+    && typeof value.contractDraftDigest === 'string'
     && Array.isArray(value.questions);
 }
 
@@ -48,7 +49,11 @@ function isAlreadyResolved(root, request) {
     if (!fs.existsSync(fullPath)) return false;
     const raw = fs.readFileSync(fullPath, 'utf8');
     const resolution = JSON.parse(raw);
-    return Boolean(request.executionId && resolution?.executionId === request.executionId);
+    return Boolean(
+      request.executionId
+      && resolution?.executionId === request.executionId
+      && resolution?.contractDraftDigest === request.contractDraftDigest,
+    );
   } catch {
     return false;
   }
@@ -81,8 +86,9 @@ async function choose(question) {
 async function writeResolution(root, request, answers) {
   const target = path.join(root.fsPath, resolutionRelPath);
   const payload = `${JSON.stringify({
-    schema: 'aegis.preflight_resolution.v2',
+    schema: 'aegis.semantic_resolution.v1',
     executionId: request.executionId,
+    contractDraftDigest: request.contractDraftDigest,
     answers,
   }, null, 2)}\n`;
   await fs.promises.mkdir(path.dirname(target), { recursive: true });

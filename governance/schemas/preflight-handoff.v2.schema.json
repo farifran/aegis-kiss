@@ -78,11 +78,11 @@
           "required": ["status", "method", "queryTerms", "termsTruncated", "matches"],
           "properties": {
             "status": { "enum": ["MATCH", "NO_MATCH", "NOT_APPLICABLE"] },
-            "method": { "const": "NFC_UNICODE_LOWERCASE_SUBSTRING" },
+            "method": { "const": "NFC_UNICODE_LOWERCASE_EXACT_TOKEN" },
             "queryTerms": {
               "type": "array",
               "maxItems": 64,
-              "items": { "type": "string", "minLength": 4 },
+              "items": { "type": "string", "minLength": 3 },
               "uniqueItems": true
             },
             "termsTruncated": { "type": "boolean" },
@@ -94,7 +94,7 @@
                 "additionalProperties": false,
                 "required": ["term", "path", "line"],
                 "properties": {
-                  "term": { "type": "string", "minLength": 4 },
+                  "term": { "type": "string", "minLength": 3 },
                   "path": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
                   "line": { "type": "integer", "minimum": 1 }
                 }

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_resolution.v1",
+  "title": "Aegis Human Semantic Resolution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "executionId", "contractDraftDigest", "answers"],
+  "properties": {
+    "schema": { "const": "aegis.semantic_resolution.v1" },
+    "executionId": { "type": "string", "pattern": "^draft-[a-f0-9]{16}$" },
+    "contractDraftDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "answers": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "answerId"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "answerId": { "type": "string", "minLength": 1 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "correction"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "correction": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

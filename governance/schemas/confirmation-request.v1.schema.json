@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.confirmation_request.v1",
+  "title": "Aegis Human Confirmation Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "executionId", "contractDraftDigest", "title", "questions", "artifactPath"],
+  "properties": {
+    "schema": { "const": "aegis.confirmation_request.v1" },
+    "status": { "const": "USER_CONFIRMATION_REQUIRED" },
+    "executionId": { "type": "string", "pattern": "^draft-[a-f0-9]{16}$" },
+    "contractDraftDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "recommendedAnswerId", "answers"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "question": { "type": "string", "minLength": 1 },
+          "recommendedAnswerId": { "type": "string", "minLength": 1 },
+          "answers": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "type": "object" } }
+        }
+      }
+    },
+    "artifactPath": { "const": ".harness/runtime/contract.md" }
+  }
+}

@@ -69,18 +69,22 @@ Os caminhos mantêm a identidade nativa dos arquivos: barras invertidas só são
 
 O resultado mecânico possui uma única fonte persistida: `.harness/runtime/preflight.json`. Não existe uma cópia em Markdown; a face humana será produzida somente para o contrato que precisará de revisão.
 
-### Entrada futura da deliberação semântica
+### Interface da deliberação semântica
 
-O Preflight completo permanece como evidência do Harness, mas a IA deve receber somente a projeção útil ao raciocínio, construída em RAM:
+O Preflight completo permanece como evidência do Harness. `./aegis --semantic-request` produz em RAM somente a projeção útil ao raciocínio:
 
 - `intent`;
 - estado estrutural do Discovery;
 - caminhos dos arquivos textuais observados;
 - caminhos indisponíveis e seus motivos (`BINARY`, `INVALID_UTF8` ou `SYMLINK`);
-- estado, método e truncamento da evidência lexical;
+- estado e truncamento da evidência lexical;
 - termo e caminho de cada correspondência lexical.
+- trechos limitados dos arquivos correspondentes, marcados explicitamente como evidência não confiável e nunca como instruções;
+- constituição semântica do Aegis e política arquitetural estruturada.
 
-Não serão enviados à IA: metadados da captura, fase, status do fluxo, contadores, tamanhos, hashes individuais, termos lexicais sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. Esses campos protegem e auditam o processo, mas não ajudam na interpretação da demanda. Os digests de vínculo serão acrescentados mecanicamente pelo Harness à futura saída, sem pedir que a IA os copie ou produza.
+Não são enviados à IA metadados da captura, contadores, tamanhos, hashes de arquivos, termos sem correspondência, números de linha, `sourceSnapshotDigest` ou `preflightDigest`. A saída da IA é obrigada a seguir `aegis.semantic_draft.v1`; intenção, digests, caminhos observados, seleção recomendada e `implementationAuthorized: false` são acrescentados mecanicamente pelo Harness no contrato v3.
+
+Cada requisito contém um caso `HAPPY_PATH` e pelo menos um caso `FAILURE` ou `BOUNDARY`. Esses casos especificam provas falsificáveis, mas não apontam para executores nem autorizam a criação de scripts. Uma escolha diferente da recomendada retorna `SEMANTIC_RECOMPILATION_REQUIRED`; a resolução humana é incorporada à próxima requisição e requisitos, riscos e casos de aceitação devem ser recompilados antes da assinatura.
 
 ---
 
@@ -88,11 +92,8 @@ Não serão enviados à IA: metadados da captura, fase, status do fluxo, contado
 
 Esta branch só será integrada de volta na `main` quando cumprir 100% dos seguintes requisitos:
 
-- [ ] **Fluxo Simbiótico Ponta a Ponta:** Um prompt informal gera a Issue-Contrato com opções recomendadas pré-marcadas.
+- [ ] **Adaptador de IA Ponta a Ponta:** Um provedor externo consome a interface semântica e devolve `aegis.semantic_draft.v1`.
 - [ ] **Aprovação Atômica em 1 Clique:** Confirmar a Issue gera o `contractDigest` canônico diretamente.
 - [ ] **Eliminação de UNITs:** Zero fatiamento de parágrafos e zero erro de `normalized_demand_digest_mismatch`.
 - [ ] **Discovery delimitado e verificável:** Conteúdo analisado em RAM, manifesto canônico persistido e snapshot de `src/` reconferido antes da assinatura.
-- [ ] **Preservação da Segurança:**
-  - `npm run aegis:enforce` (Static Gate limpo: BigInt, Zero-GC, ESM).
-  - Provas formais físicas (`*.proof.sh`) executando e passando 100%.
-  - Verificação de recibo pré-commit (`precommit_receipt.json`) e pós-commit (`postcommit=PROVEN`).
+- [ ] **Preservação da Segurança:** schema estrito, validação referencial, política arquitetural autenticada e zero alteração em `src/` durante todo o fluxo.
