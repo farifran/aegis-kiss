@@ -35,9 +35,8 @@ entre ambos bloqueia o preflight.
 
 ### ARCH-PRODUCT-BOUNDARY — hard
 
-Uma demanda de produto pode observar e citar exclusivamente `src/` como fonte
-do produto. O fluxo de contrato não altera `src/`, e requisitos de produto não
-podem alterar o harness.
+Uma demanda de produto observa e cita exclusivamente `src/` como fonte do
+produto, e requisitos de produto não podem alterar o harness.
 
 Aplica-se a demandas de produto e a referências a caminhos do produto.
 
@@ -48,14 +47,6 @@ O estado semântico persistente do harness reside em
 `.harness/runtime/` e nunca são fonte de verdade do produto.
 
 Aplica-se a mudanças ou decisões sobre estado e runtime do harness.
-
-### ARCH-CONTRACT-ONLY — hard
-
-Captura, discovery, deliberação e assinatura terminam no contrato. Observar ou
-citar um caminho e assinar o contrato não autorizam implementação nem criação
-de scripts de produto.
-
-Aplica-se a todo o fluxo de contrato.
 
 ### ARCH-LOCAL-DETERMINISTIC-CORE — hard
 

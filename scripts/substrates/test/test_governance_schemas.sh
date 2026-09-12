@@ -6,7 +6,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${ROOT_DIR}"
 
 node --input-type=module <<'NODE'
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { canonicalDigest } from './scripts/lib/canonical_json.mjs';
 import {
   assertContractDocument,
@@ -65,6 +67,35 @@ if (semanticRequest.constitution.digest !== constitution.digest
   throw new Error('semantic_request_omitted_authoritative_inputs');
 }
 
+const largeRoot = mkdtempSync(join(tmpdir(), 'aegis-semantic-evidence.'));
+try {
+  mkdirSync(join(largeRoot, 'src'));
+  writeFileSync(
+    join(largeRoot, 'src/index.ts'),
+    `${'const filler = 1;\n'.repeat(3_000)}export const needleterm = true;\n`,
+  );
+  const largePreflight = buildPreflightHandoff({
+    demand: 'Encontrar needleterm.',
+    discovery: discoverWorkspace(largeRoot, 'Encontrar needleterm.'),
+  });
+  const largeRequest = buildSemanticRequest({
+    repositoryRoot: largeRoot,
+    preflight: largePreflight,
+    policy: loadedPolicy.policy,
+    constitution,
+  });
+  const lexicalMatch = largeRequest.workspace.lexicalEvidence.matches[0];
+  const sourceWindow = largeRequest.workspace.sourceEvidence[0];
+  if (lexicalMatch.line < 3_000
+    || sourceWindow.selection !== 'LEXICAL_WINDOW'
+    || sourceWindow.startLine <= 1
+    || !sourceWindow.content.includes('needleterm')) {
+    throw new Error('lexical_window_omitted_match');
+  }
+} finally {
+  rmSync(largeRoot, { recursive: true, force: true });
+}
+
 const draft = {
   schema: 'aegis.semantic_draft.v1',
   sourceContextDigest: semanticRequest.contextDigest,
@@ -75,11 +106,14 @@ const draft = {
     inScope: ['Definir o resultado público da operação.'],
     outOfScope: ['Implementar o produto.'],
   },
+  architectureContexts: [{
+    tag: 'product-demand',
+    rationale: 'A demanda define comportamento público do produto.',
+  }],
   policyAssessments: loadedPolicy.policy.rules.map((rule) => ({
     ruleId: rule.id,
-    status: ['ARCH-PRODUCT-BOUNDARY', 'ARCH-CONTRACT-ONLY', 'ARCH-FAILURE-EXPLICIT'].includes(rule.id)
-      ? 'COMPLIANT'
-      : 'NOT_APPLICABLE',
+    demandStatus: rule.appliesWhen.includes('product-demand') ? 'COMPLIANT' : 'NOT_APPLICABLE',
+    recommendedStatus: rule.appliesWhen.includes('product-demand') ? 'COMPLIANT' : 'NOT_APPLICABLE',
     rationale: 'A regra foi confrontada explicitamente com a demanda.',
     decisionId: null,
     amendmentId: null,
@@ -127,6 +161,7 @@ const draft = {
   riskReview: {
     status: 'FOUND',
     rationale: 'Foi identificado risco de falha silenciosa.',
+    consideredKinds: ['SECURITY', 'RELIABILITY', 'PRIVACY', 'PERFORMANCE', 'INTEGRITY', 'COMPLEXITY'],
   },
   unknowns: [{
     id: 'UNKNOWN-FORMAT',
@@ -138,6 +173,9 @@ const draft = {
     questionId: 'Q-FORMAT',
     question: 'Qual formato público deve ser usado?',
     recommendedAnswerId: 'ANS-SIMPLE',
+    requirementIds: ['REQ-RESULT'],
+    invariantIds: ['INV-EXPLICIT'],
+    riskIds: ['RISK-SILENCE'],
     answers: [
       { id: 'ANS-SIMPLE', label: 'Simples', rationale: 'Menor superfície pública.', recommended: true },
       { id: 'ANS-DETAIL', label: 'Detalhado', rationale: 'Expõe mais dados.', recommended: false },
@@ -197,6 +235,17 @@ for (const mutate of [
   (value) => { value.unknowns[0].decisionId = null; },
   (value) => { value.complexityReview.status = 'SIMPLIFIED'; },
   (value) => { value.riskReview.status = 'NONE'; },
+  (value) => value.riskReview.consideredKinds.pop(),
+  (value) => { value.architectureContexts[0].tag = 'unknown-context'; },
+  (value) => {
+    value.policyAssessments[0].demandStatus = 'NOT_APPLICABLE';
+    value.policyAssessments[0].recommendedStatus = 'NOT_APPLICABLE';
+  },
+  (value) => {
+    value.decisions[0].requirementIds = [];
+    value.decisions[0].invariantIds = [];
+    value.decisions[0].riskIds = [];
+  },
 ]) {
   const invalid = structuredClone(draft);
   mutate(invalid);
@@ -210,7 +259,7 @@ for (const mutate of [
 }
 
 const deliberableConflict = structuredClone(draft);
-deliberableConflict.policyAssessments[0].status = 'CONFLICT_REQUIRES_DECISION';
+deliberableConflict.policyAssessments[0].demandStatus = 'CONFLICT';
 deliberableConflict.policyAssessments[0].decisionId = 'Q-FORMAT';
 assertSemanticDraft(deliberableConflict, loadedPolicy.policy);
 

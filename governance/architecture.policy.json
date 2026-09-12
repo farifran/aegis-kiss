@@ -3,16 +3,32 @@
   "policyVersion": 3,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "7d9cfcdce71831dc6989760a04822aab52a7acb8c9561fa6b3194f9dd5fa24b3"
+    "sourceDigest": "837336a19145fc1ec6b5c1532e879d5d2ca298941c454ef6c88ce949dd397d89"
   },
+  "contexts": [
+    { "tag": "product-demand", "description": "A demanda define comportamento ou fronteira pública do produto." },
+    { "tag": "product-path", "description": "A demanda cita ou depende de caminhos do produto." },
+    { "tag": "harness-state", "description": "A demanda altera ou define estado persistente do harness." },
+    { "tag": "harness-runtime", "description": "A demanda altera ou define dados transitórios do harness." },
+    { "tag": "harness-core", "description": "A demanda altera o núcleo mecânico do harness." },
+    { "tag": "provider-integration", "description": "A demanda conecta um provedor externo ou modelo ao harness." },
+    { "tag": "typescript-form", "description": "A demanda exige uma forma técnica específica em TypeScript." },
+    { "tag": "dependency", "description": "A demanda solicita dependência externa." },
+    { "tag": "persistence", "description": "A demanda solicita persistência de dados." },
+    { "tag": "concurrency", "description": "A demanda solicita concorrência ou paralelismo observável." },
+    { "tag": "structural-complexity", "description": "A demanda solicita camadas, abstrações ou extensibilidade estrutural." },
+    { "tag": "stateful-operation", "description": "O comportamento público altera estado." },
+    { "tag": "external-effect", "description": "O comportamento público produz efeito fora do processo." },
+    { "tag": "time-dependent", "description": "O resultado público depende de tempo ou relógio." }
+  ],
   "rules": [
     {
       "id": "ARCH-PRODUCT-BOUNDARY",
       "level": "hard",
-      "statement": "Uma demanda de produto pode observar e citar exclusivamente src/ como fonte do produto. O fluxo de contrato não altera src/, e requisitos de produto não podem alterar o harness.",
+      "statement": "Uma demanda de produto observa e cita exclusivamente src/ como fonte do produto, e requisitos de produto não podem alterar o harness.",
       "appliesWhen": ["product-demand", "product-path"],
       "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 1729, "endByte": 1985 }]
+      "sourceRanges": [{ "startByte": 1729, "endByte": 1938 }]
     },
     {
       "id": "ARCH-HARNESS-STATE",
@@ -20,15 +36,7 @@
       "statement": "O estado semântico persistente do harness reside em .harness/state/semantic-state.json; dados transitórios residem em .harness/runtime/ e nunca são fonte de verdade do produto.",
       "appliesWhen": ["harness-state", "harness-runtime"],
       "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 2020, "endByte": 2274 }]
-    },
-    {
-      "id": "ARCH-CONTRACT-ONLY",
-      "level": "hard",
-      "statement": "Captura, discovery, deliberação e assinatura terminam no contrato. Observar ou citar um caminho e assinar o contrato não autorizam implementação nem criação de scripts de produto.",
-      "appliesWhen": ["contract-flow"],
-      "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 2309, "endByte": 2534 }]
+      "sourceRanges": [{ "startByte": 1973, "endByte": 2227 }]
     },
     {
       "id": "ARCH-LOCAL-DETERMINISTIC-CORE",
@@ -36,7 +44,7 @@
       "statement": "O core mecânico opera localmente, de forma determinística e sem dependência de rede ou de um provedor de modelo. Integrações externas pertencem a adaptadores.",
       "appliesWhen": ["harness-core", "provider-integration"],
       "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 2580, "endByte": 2819 }]
+      "sourceRanges": [{ "startByte": 2273, "endByte": 2512 }]
     },
     {
       "id": "ARCH-STRICT-EXPLICIT-MODULES",
@@ -45,7 +53,7 @@
       "appliesWhen": ["typescript-form"],
       "appliesMode": "any",
       "forbiddenReferences": ["any", "@ts-ignore"],
-      "sourceRanges": [{ "startByte": 2867, "endByte": 3078 }]
+      "sourceRanges": [{ "startByte": 2560, "endByte": 2771 }]
     },
     {
       "id": "ARCH-PARSIMONY",
@@ -53,7 +61,7 @@
       "statement": "Dependências, persistência, concorrência, camadas e pontos de extensão só são admitidos quando um requisito observável justificar seu custo. A alternativa recomendada deve ser a menor arquitetura suficiente.",
       "appliesWhen": ["dependency", "persistence", "concurrency", "structural-complexity"],
       "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 3112, "endByte": 3405 }]
+      "sourceRanges": [{ "startByte": 2805, "endByte": 3098 }]
     },
     {
       "id": "ARCH-FAILURE-EXPLICIT",
@@ -61,7 +69,7 @@
       "statement": "Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve expor resultado, erro explícito, estado preservado ou rollback verificável.",
       "appliesWhen": ["stateful-operation", "external-effect"],
       "appliesMode": "any",
-      "sourceRanges": [{ "startByte": 3443, "endByte": 3651 }]
+      "sourceRanges": [{ "startByte": 3136, "endByte": 3344 }]
     },
     {
       "id": "ARCH-DETERMINISTIC-TIME",
@@ -70,7 +78,7 @@
       "appliesWhen": ["time-dependent"],
       "appliesMode": "any",
       "forbiddenReferences": ["Date.now"],
-      "sourceRanges": [{ "startByte": 3691, "endByte": 4058 }]
+      "sourceRanges": [{ "startByte": 3384, "endByte": 3751 }]
     }
   ],
   "amendments": []

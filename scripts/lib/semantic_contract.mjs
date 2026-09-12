@@ -50,35 +50,94 @@ function decodeUtf8Prefix(bytes, byteLimit) {
   return '';
 }
 
+function verifiedTextSource(repositoryRoot, manifestEntry) {
+  const absolutePath = resolve(repositoryRoot, manifestEntry.path);
+  const metadata = lstatSync(absolutePath);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`semantic_source_changed:${manifestEntry.path}`);
+  }
+  const bytes = readFileSync(absolutePath);
+  if (bytes.byteLength !== manifestEntry.bytes || sha256(bytes) !== manifestEntry.digest) {
+    throw new Error(`semantic_source_changed:${manifestEntry.path}`);
+  }
+  return bytes;
+}
+
+function lineWindow(bytes, targetLine, byteLimit) {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const lines = text.split('\n');
+  const target = Math.min(Math.max(targetLine - 1, 0), lines.length - 1);
+  let start = target;
+  let end = target + 1;
+  let content = lines[target];
+  while (start > 0 || end < lines.length) {
+    const nextStart = start > 0 ? start - 1 : start;
+    const nextEnd = end < lines.length ? end + 1 : end;
+    const candidate = lines.slice(nextStart, nextEnd).join('\n');
+    if (Buffer.byteLength(candidate, 'utf8') > byteLimit) break;
+    start = nextStart;
+    end = nextEnd;
+    content = candidate;
+  }
+  if (Buffer.byteLength(content, 'utf8') > byteLimit) {
+    content = decodeUtf8Prefix(Buffer.from(content), byteLimit);
+  }
+  return { content, startLine: start + 1, endLine: end };
+}
+
 function buildSourceEvidence(repositoryRoot, preflight) {
-  const filesByPath = new Map(preflight.discovery.files.map((file) => [file.path, file]));
-  const matchedPaths = [...new Set(
-    preflight.discovery.lexicalEvidence.matches.map(({ path }) => path),
-  )];
+  const textFiles = preflight.discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
+  const filesByPath = new Map(textFiles.map((file) => [file.path, file]));
+  const smallWorkspace = textFiles.reduce((total, { bytes }) => total + bytes, 0)
+    <= sourceEvidenceByteLimit;
+  const entrypoints = textFiles
+    .map(({ path }) => path)
+    .filter((path) => /(?:^|\/)(?:index|main|mod)\.[^/]+$/iu.test(path));
+  const selections = smallWorkspace
+    ? textFiles.map(({ path }) => ({ path, line: null }))
+    : [
+      ...new Map(preflight.discovery.lexicalEvidence.matches
+        .map(({ path, line }) => [`${path}:${line}`, { path, line }])).values(),
+      ...entrypoints
+        .filter((path) => !preflight.discovery.lexicalEvidence.matches
+          .some((match) => match.path === path))
+        .map((path) => ({ path, line: null })),
+    ];
+  if (!smallWorkspace && selections.length === 0 && textFiles[0] !== undefined) {
+    selections.push({ path: textFiles[0].path, line: null });
+  }
   const evidence = [];
   let remainingBytes = sourceEvidenceByteLimit;
 
-  for (const path of matchedPaths) {
+  for (const { path, line: matchLine } of selections) {
     if (remainingBytes === 0) break;
     const manifestEntry = filesByPath.get(path);
-    if (manifestEntry?.kind !== 'UTF8_TEXT') continue;
-    const absolutePath = resolve(repositoryRoot, path);
-    const metadata = lstatSync(absolutePath);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error(`semantic_source_changed:${path}`);
+    if (manifestEntry === undefined) continue;
+    const bytes = verifiedTextSource(repositoryRoot, manifestEntry);
+    const limit = Math.min(smallWorkspace ? bytes.byteLength : sourceEvidenceFileByteLimit, remainingBytes);
+    let excerpt;
+    if (!smallWorkspace && matchLine !== null) {
+      excerpt = lineWindow(bytes, matchLine, limit);
+    } else {
+      const content = decodeUtf8Prefix(bytes, limit);
+      excerpt = {
+        content,
+        startLine: 1,
+        endLine: content.split('\n').length,
+      };
     }
-    const bytes = readFileSync(absolutePath);
-    if (bytes.byteLength !== manifestEntry.bytes || sha256(bytes) !== manifestEntry.digest) {
-      throw new Error(`semantic_source_changed:${path}`);
-    }
-    const limit = Math.min(sourceEvidenceFileByteLimit, remainingBytes);
-    const content = decodeUtf8Prefix(bytes, limit);
+    const { content, startLine, endLine } = excerpt;
     const consumedBytes = Buffer.byteLength(content, 'utf8');
     remainingBytes -= consumedBytes;
     evidence.push({
       path,
       content,
+      startLine,
+      endLine,
       truncated: consumedBytes < bytes.byteLength,
+      selection: smallWorkspace
+        ? 'FULL_SOURCE'
+        : matchLine === null ? 'ENTRYPOINT_PREFIX' : 'LEXICAL_WINDOW',
       trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
     });
   }
@@ -103,6 +162,14 @@ export function buildSemanticRequest({
     ...preflight.discovery.ignoredEntries,
   ];
   const context = {
+    delivery: {
+      constitution: 'SYSTEM_INSTRUCTION',
+      architecture: 'TRUSTED_POLICY',
+      intent: 'USER_DATA',
+      workspace: 'UNTRUSTED_EVIDENCE',
+      revision: 'USER_DECISION',
+      outputSchema: 'STRICT_STRUCTURED_OUTPUT',
+    },
     constitution,
     intent: preflight.intent,
     workspace: {
@@ -113,11 +180,12 @@ export function buildSemanticRequest({
         status: preflight.discovery.lexicalEvidence.status,
         termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
         matches: preflight.discovery.lexicalEvidence.matches
-          .map(({ term, path }) => ({ term, path })),
+          .map(({ term, path, line }) => ({ term, path, line })),
       },
       sourceEvidence: buildSourceEvidence(repositoryRoot, preflight),
     },
     policy: {
+      contexts: policy.contexts,
       rules: policy.rules.map((rule) => ({
         id: rule.id,
         level: rule.level,
@@ -173,10 +241,25 @@ export function assertSemanticDraft(draft, policy) {
   const requirementIds = assertUniqueIds(draft.requirements, 'id', 'requirement');
   const acceptanceCases = draft.requirements.flatMap(({ acceptanceCases: cases }) => cases);
   assertUniqueIds(acceptanceCases, 'id', 'acceptance_case');
-  assertUniqueIds(draft.invariants, 'id', 'invariant');
-  assertUniqueIds(draft.risks, 'id', 'risk');
+  const invariantIds = assertUniqueIds(draft.invariants, 'id', 'invariant');
+  const riskIds = assertUniqueIds(draft.risks, 'id', 'risk');
   assertUniqueIds(draft.unknowns, 'id', 'unknown');
   const decisionIds = assertUniqueIds(draft.decisions, 'questionId', 'decision');
+  const architectureTags = assertUniqueIds(draft.architectureContexts, 'tag', 'architecture_context');
+  const knownArchitectureTags = new Set(policy.contexts.map(({ tag }) => tag));
+  if (knownArchitectureTags.size !== policy.contexts.length) {
+    throw new Error('duplicate_policy_context');
+  }
+  for (const tag of architectureTags) {
+    if (!knownArchitectureTags.has(tag)) throw new Error(`unknown_architecture_context:${tag}`);
+  }
+  for (const rule of policy.rules) {
+    for (const tag of rule.appliesWhen) {
+      if (!knownArchitectureTags.has(tag)) {
+        throw new Error(`policy_rule_references_unknown_context:${rule.id}:${tag}`);
+      }
+    }
+  }
 
   for (const requirement of draft.requirements) {
     const kinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
@@ -203,6 +286,18 @@ export function assertSemanticDraft(draft, policy) {
     if (recommended.length !== 1 || recommended[0].id !== decision.recommendedAnswerId) {
       throw new Error(`invalid_recommendation:${decision.questionId}`);
     }
+    assertRequirementReferences([decision], requirementIds, 'decision');
+    for (const invariantId of decision.invariantIds) {
+      if (!invariantIds.has(invariantId)) {
+        throw new Error(`decision_references_unknown_invariant:${invariantId}`);
+      }
+    }
+    for (const riskId of decision.riskIds) {
+      if (!riskIds.has(riskId)) throw new Error(`decision_references_unknown_risk:${riskId}`);
+    }
+    if (decision.requirementIds.length + decision.invariantIds.length + decision.riskIds.length === 0) {
+      throw new Error(`decision_without_observable_impact:${decision.questionId}`);
+    }
   }
 
   if (draft.complexityReview.status === 'SIMPLIFIED'
@@ -223,6 +318,13 @@ export function assertSemanticDraft(draft, policy) {
     && !draft.unknowns.some(({ material }) => material)) {
     throw new Error('unknown_risk_without_material_unknown');
   }
+  const expectedRiskKinds = new Set([
+    'SECURITY', 'RELIABILITY', 'PRIVACY', 'PERFORMANCE', 'INTEGRITY', 'COMPLEXITY',
+  ]);
+  if (draft.riskReview.consideredKinds.length !== expectedRiskKinds.size
+    || draft.riskReview.consideredKinds.some((kind) => !expectedRiskKinds.has(kind))) {
+    throw new Error('incomplete_risk_review');
+  }
 
   const rulesById = new Map(policy.rules.map((rule) => [rule.id, rule]));
   const amendmentsById = new Map((policy.amendments ?? []).map((item) => [item.id, item]));
@@ -236,24 +338,40 @@ export function assertSemanticDraft(draft, policy) {
     throw new Error('incomplete_policy_assessment');
   }
   for (const assessment of draft.policyAssessments) {
-    if (!rulesById.has(assessment.ruleId)) throw new Error(`unknown_policy_rule:${assessment.ruleId}`);
-    if (assessment.status === 'CONFLICT_REQUIRES_DECISION') {
+    const rule = rulesById.get(assessment.ruleId);
+    if (rule === undefined) throw new Error(`unknown_policy_rule:${assessment.ruleId}`);
+    const applicable = rule.appliesMode === 'all'
+      ? rule.appliesWhen.every((tag) => architectureTags.has(tag))
+      : rule.appliesWhen.some((tag) => architectureTags.has(tag));
+    if (!applicable) {
+      if (assessment.demandStatus !== 'NOT_APPLICABLE'
+        || assessment.recommendedStatus !== 'NOT_APPLICABLE'
+        || assessment.decisionId !== null
+        || assessment.amendmentId !== null) {
+        throw new Error(`invalid_non_applicable_assessment:${assessment.ruleId}`);
+      }
+    } else if (assessment.demandStatus === 'NOT_APPLICABLE'
+      || assessment.recommendedStatus === 'NOT_APPLICABLE') {
+      throw new Error(`applicable_rule_marked_not_applicable:${assessment.ruleId}`);
+    } else if (assessment.demandStatus === 'CONFLICT') {
       if (assessment.decisionId === null || !decisionIds.has(assessment.decisionId)) {
         throw new Error(`policy_conflict_without_decision:${assessment.ruleId}`);
       }
-      if (assessment.amendmentId !== null) {
+      if (assessment.recommendedStatus === 'COMPLIANT' && assessment.amendmentId !== null) {
         throw new Error(`unexpected_policy_amendment:${assessment.ruleId}`);
       }
-    } else if (assessment.status === 'AMENDED') {
-      if (assessment.decisionId !== null) {
-        throw new Error(`unexpected_policy_decision:${assessment.ruleId}`);
+      if (assessment.recommendedStatus === 'AMENDED') {
+        const amendment = amendmentsById.get(assessment.amendmentId);
+        if (amendment?.ruleId !== assessment.ruleId || amendment.status !== 'approved') {
+          throw new Error(`unapproved_policy_conflict:${assessment.ruleId}`);
+        }
       }
-      const amendment = amendmentsById.get(assessment.amendmentId);
-      if (amendment?.ruleId !== assessment.ruleId || amendment.status !== 'approved') {
-        throw new Error(`unapproved_policy_conflict:${assessment.ruleId}`);
+    } else if (assessment.demandStatus === 'COMPLIANT') {
+      if (assessment.recommendedStatus !== 'COMPLIANT'
+        || assessment.decisionId !== null
+        || assessment.amendmentId !== null) {
+        throw new Error(`unexpected_policy_resolution:${assessment.ruleId}`);
       }
-    } else if (assessment.decisionId !== null || assessment.amendmentId !== null) {
-      throw new Error(`unexpected_policy_resolution:${assessment.ruleId}`);
     }
   }
 }
@@ -425,12 +543,18 @@ export function renderSemanticContractMarkdown(contract, {
     '## 3. Política arquitetural',
   ];
 
-  for (const assessment of specification.policyAssessments) {
-    lines.push(`- **${assessment.ruleId} — ${assessment.status}:** ${assessment.rationale}`);
+  const applicableAssessments = specification.policyAssessments
+    .filter(({ demandStatus }) => demandStatus !== 'NOT_APPLICABLE');
+  const omittedAssessments = specification.policyAssessments.length - applicableAssessments.length;
+  lines.push(`- **Contextos detectados:** ${specification.architectureContexts.map(({ tag }) => tag).join(', ')}`);
+  for (const assessment of applicableAssessments) {
+    lines.push(`- **${assessment.ruleId} — demanda ${assessment.demandStatus} → recomendação ${assessment.recommendedStatus}:** ${assessment.rationale}`);
     const statement = rules.get(assessment.ruleId);
     if (statement) lines.push(`  - Regra: ${statement}`);
+    if (assessment.decisionId) lines.push(`  - Decisão: \`${assessment.decisionId}\``);
     if (assessment.amendmentId) lines.push(`  - Emenda: \`${assessment.amendmentId}\``);
   }
+  if (omittedAssessments > 0) lines.push(`- ${omittedAssessments} regra(s) não aplicável(is) omitida(s) desta visão.`);
 
   lines.push('', '## 4. Revisão de complexidade');
   lines.push(`- **${specification.complexityReview.status}:** ${specification.complexityReview.rationale}`);
@@ -482,6 +606,7 @@ export function renderSemanticContractMarkdown(contract, {
         const recommended = answer.recommended ? ' **[RECOMENDADO]**' : '';
         lines.push(`${mark} **${answer.label}**${recommended}: ${answer.rationale}`);
       }
+      lines.push(`Impacta requisitos: ${decision.requirementIds.join(', ') || 'nenhum'}; invariantes: ${decision.invariantIds.join(', ') || 'nenhum'}; riscos: ${decision.riskIds.join(', ') || 'nenhum'}.`);
     }
   }
   lines.push('');

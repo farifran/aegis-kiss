@@ -4,10 +4,23 @@
   "title": "Aegis Semantic Deliberation Request v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "contextDigest", "constitution", "intent", "workspace", "policy", "revision", "outputSchema"],
+  "required": ["schema", "contextDigest", "delivery", "constitution", "intent", "workspace", "policy", "revision", "outputSchema"],
   "properties": {
     "schema": { "const": "aegis.semantic_request.v1" },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constitution", "architecture", "intent", "workspace", "revision", "outputSchema"],
+      "properties": {
+        "constitution": { "const": "SYSTEM_INSTRUCTION" },
+        "architecture": { "const": "TRUSTED_POLICY" },
+        "intent": { "const": "USER_DATA" },
+        "workspace": { "const": "UNTRUSTED_EVIDENCE" },
+        "revision": { "const": "USER_DECISION" },
+        "outputSchema": { "const": "STRICT_STRUCTURED_OUTPUT" }
+      }
+    },
     "constitution": {
       "type": "object",
       "additionalProperties": false,
@@ -68,10 +81,11 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["term", "path"],
+                "required": ["term", "path", "line"],
                 "properties": {
                   "term": { "type": "string", "minLength": 1 },
-                  "path": { "type": "string", "minLength": 1 }
+                  "path": { "type": "string", "minLength": 1 },
+                  "line": { "type": "integer", "minimum": 1 }
                 }
               }
             }
@@ -82,11 +96,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "content", "truncated", "trust"],
+            "required": ["path", "content", "startLine", "endLine", "truncated", "selection", "trust"],
             "properties": {
               "path": { "type": "string", "minLength": 1 },
               "content": { "type": "string" },
+              "startLine": { "type": "integer", "minimum": 1 },
+              "endLine": { "type": "integer", "minimum": 1 },
               "truncated": { "type": "boolean" },
+              "selection": { "enum": ["FULL_SOURCE", "LEXICAL_WINDOW", "ENTRYPOINT_PREFIX"] },
               "trust": { "const": "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS" }
             }
           }
@@ -96,8 +113,21 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rules", "amendments"],
+      "required": ["contexts", "rules", "amendments"],
       "properties": {
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tag", "description"],
+            "properties": {
+              "tag": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+              "description": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "rules": {
           "type": "array",
           "items": {
