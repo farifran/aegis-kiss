@@ -42,7 +42,11 @@ status_command() {
   local confirmation_file="${RUNTIME_DIR}/user_confirmation_request.json"
   local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
   if [[ -f "${contract_file}" ]]; then
-    if [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
+    local contract_schema
+    contract_schema="$(jq -r '.schema // "INVALID"' "${contract_file}" 2>/dev/null || printf 'INVALID')"
+    if [[ "${contract_schema}" != "aegis.issue_contract.v8" ]]; then
+      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v8"}\n' "${contract_schema}"
+    elif [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
       printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
     elif [[ -f "${confirmation_file}" ]] || [[ ! -f "${semantic_file}" ]]; then
       printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
@@ -119,7 +123,10 @@ resolve_preflight_wizard() {
 
   local request_schema
   request_schema="$(jq -r '.schema // empty' <<< "${result}")"
-  [[ "${request_schema}" == "aegis.confirmation_request.v2" ]] || fatal 'OBSOLETE_CONFIRMATION_REQUEST'
+  if [[ "${request_schema}" != "aegis.confirmation_request.v3" ]]; then
+    printf '\n[AEGIS] Este rascunho usa um contrato anterior. A intenção permanece no preflight, mas precisa de nova deliberação semântica antes do Wizard.\n' >&2
+    return
+  fi
 
   local count index question answer_count choice correction answer_id answers='[]'
   local recommended_index selected_label final_confirmation attestation
@@ -141,8 +148,9 @@ resolve_preflight_wizard() {
     recommended_index="$(jq -r '(.recommendedAnswerId) as $recommended | .answers | to_entries[] | select(.value.id == $recommended) | .key + 1' <<< "${question}")"
     printf '\n[%s] %s\n' "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" >&2
     jq -r '.gaps[] | "  Lacuna: \(.)"' <<< "${question}" >&2
-    printf '  Impacta: requisitos [%s]; invariantes [%s]; riscos [%s].\n' \
+    printf '  Impacta: requisitos [%s]; provas [%s]; invariantes [%s]; riscos [%s].\n' \
       "$(jq -r '.requirementIds | join(", ")' <<< "${question}")" \
+      "$(jq -r '.acceptanceCaseIds | join(", ")' <<< "${question}")" \
       "$(jq -r '.invariantIds | join(", ")' <<< "${question}")" \
       "$(jq -r '.riskIds | join(", ")' <<< "${question}")" >&2
     jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2

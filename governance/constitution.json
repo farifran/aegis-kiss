@@ -1,9 +1,9 @@
 {
   "schema": "aegis.constitution.v1",
-  "constitutionVersion": 5,
+  "constitutionVersion": 6,
   "origin": {
     "sourcePath": "AGENTS.md",
-    "sourceDigest": "3be78623a7e2cdea215842c408e9686894223f06ab2f4d02d618f22544a3f51f"
+    "sourceDigest": "378ab985c2248d13ac89f2eda5ca3747f8a593d0916e234ae6ff94ac29f55c76"
   },
   "rules": [
     {
@@ -16,11 +16,11 @@
     },
     {
       "id": "CONST-DECISIONS",
-      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Recomendação nunca equivale a consentimento: o Wizard exige escolha e confirmação humanas explícitas, e o contrato selado preserva a pergunta, a resposta e o digest do rascunho aprovado. Não crie perguntas sobre obviedades, detalhes internos livres, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
+      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Recomendação nunca equivale a consentimento: o Wizard exige escolha e confirmação humanas explícitas, e o contrato selado preserva a pergunta, a resposta e o digest do rascunho aprovado. Toda recomendação precisa estar materializada no rascunho em requisito e caso falsificável ligados à resposta recomendada; decisão sem efeito contratual verificável bloqueia a assinatura. Não crie perguntas sobre obviedades, detalhes internos livres, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
     },
     {
       "id": "CONST-OBSERVABLE",
-      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Nomes de arquivos, classes, buffers e estruturas de dados permanecem internos, salvo exigência textual de empacotamento público. Restrições de desempenho, latência ou alocação exigem método, métrica, alvo quantificado e condições de medição; adjetivos vagos viram decisão. Cada requisito deve prever o caminho feliz recomendado e pelo menos uma falha ou limite. Antes de entregar, confronte a própria recomendação com as objeções materiais mais fortes e incorpore cada achado em requisito, risco ou decisão."
+      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Caminhos são classificados como superfície pública, restrição de implementação explicitamente humana, sugestão não normativa ou evidência; superfície pública não confina topologia interna, e sugestões ou evidências não criam obrigações. Classes, buffers e estruturas de dados permanecem internos salvo exigência humana textual. Restrições de desempenho, latência ou alocação exigem método, métrica, alvo quantificado, procedência, estado de evidência e condições de medição; adjetivos vagos podem gerar apenas propostas não verificadas ligadas a decisão. Todo valor público de representação finita exige intervalo, comportamento fora dele e caso de limite; wrap ou truncamento silencioso são proibidos salvo exigência humana textual. Cada requisito deve prever o caminho feliz recomendado e pelo menos uma falha ou limite. Antes de entregar, confronte a própria recomendação com as objeções materiais mais fortes e incorpore cada achado em requisito, risco ou decisão."
     },
     {
       "id": "CONST-CONTRACT-ONLY",

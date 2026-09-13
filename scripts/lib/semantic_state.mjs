@@ -24,13 +24,15 @@ export function parseSemanticState(value) {
     ['aegis.semantic_state.v5', 'aegis.issue_contract.v5'],
     ['aegis.semantic_state.v6', 'aegis.issue_contract.v6'],
     ['aegis.semantic_state.v7', 'aegis.issue_contract.v7'],
+    ['aegis.semantic_state.v8', 'aegis.issue_contract.v8'],
   ]);
   const contractSchema = contractSchemaByState.get(state.schema);
   if (contractSchema === undefined || state.contract?.schema !== contractSchema) {
     throw new Error('invalid_semantic_state');
   }
   assertSchema(contractSchema, state.contract);
-  if (state.schema === 'aegis.semantic_state.v7') {
+  if (state.schema === 'aegis.semantic_state.v7'
+    || state.schema === 'aegis.semantic_state.v8') {
     assertContractApprovalEvidence(state.contract, { required: true });
   }
   if (state.contractDigest !== canonicalDigest(state.contract)) {

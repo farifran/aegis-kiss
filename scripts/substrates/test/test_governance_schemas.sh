@@ -112,7 +112,7 @@ const semanticRequest = buildSemanticRequest({
   constitution,
 });
 assertSchema('aegis.semantic_request.v4', semanticRequest);
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v3');
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v4');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
@@ -168,7 +168,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v3',
+  schema: 'aegis.semantic_draft.v4',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -177,6 +177,7 @@ const draft = {
     inScope: ['Definir o resultado público da operação.'],
     outOfScope: ['Implementar o produto.'],
   },
+  pathReferences: [],
   architectureContexts: [{
     tag: 'product-demand',
     rationale: 'A demanda define comportamento público do produto.',
@@ -211,6 +212,7 @@ const draft = {
         given: 'Uma entrada válida.',
         when: 'A operação for solicitada.',
         then: 'Um resultado explícito deve ser observado.',
+        decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
       },
       {
         id: 'AC-RESULT-FAILURE',
@@ -218,6 +220,7 @@ const draft = {
         given: 'Uma entrada inválida.',
         when: 'A operação for solicitada.',
         then: 'Uma falha explícita deve ser observada.',
+        decisionBinding: null,
       },
     ],
   }],
@@ -251,6 +254,7 @@ const draft = {
       basis: modelBasis,
     }],
   },
+  boundaryRules: [],
   unknowns: [{
     id: 'UNKNOWN-FORMAT',
     statement: 'O formato final do resultado não foi definido.',
@@ -301,7 +305,7 @@ assertContractDocument({
 if (contract.intent !== preflight.intent
   || contract.implementationAuthorized !== false
   || contract.constitutionDigest !== constitution.digest
-  || contract.schema !== 'aegis.issue_contract.v7'
+  || contract.schema !== 'aegis.issue_contract.v8'
   || contract.approval !== null
   || contract.humanResolutions.length !== 0
   || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
@@ -316,7 +320,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v7', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v8', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -357,7 +361,13 @@ gapDraft.requirements[0] = {
   measurement: {
     method: 'Medição repetível de lotes após aquecimento.',
     metric: 'Operações concluídas por segundo.',
-    target: '1000 operações/s',
+    target: {
+      value: '1000 operações/s',
+      source: 'MODEL_PROPOSAL',
+      reference: 'analysis',
+      evidenceStatus: 'UNVERIFIED',
+      decisionId: 'Q-FORMAT',
+    },
     conditions: 'Mesmo lote e ambiente fixo durante todas as medições.',
   },
 };
@@ -399,6 +409,10 @@ gapDraft.decisions.push({
     { id: 'ANS-REMOVE', label: 'Remover ambos', rationale: 'Retira comportamentos não especificados.', recommended: false },
   ],
 });
+gapDraft.requirements[0].acceptanceCases[1].decisionBinding = {
+  questionId: 'Q-EXPRESSION',
+  answerId: 'ANS-EXPLICIT',
+};
 const gapContext = {
   constitutionRules: constitution.rules,
   intent: gapIntent,
@@ -412,16 +426,38 @@ resolvedGapDraft.requirements[0].basis = [
   { source: 'USER_DECISION', reference: 'Q-FORMAT' },
   { source: 'USER_DECISION', reference: 'Q-EXPRESSION' },
 ];
+resolvedGapDraft.requirements[0].measurement.target = {
+  value: '1000 operações/s',
+  source: 'USER_DECISION',
+  reference: 'Q-FORMAT',
+  evidenceStatus: 'UNVERIFIED',
+  decisionId: null,
+};
+for (const acceptanceCase of resolvedGapDraft.requirements[0].acceptanceCases) {
+  acceptanceCase.decisionBinding = null;
+}
 resolvedGapDraft.unknowns = [];
 resolvedGapDraft.decisions = [];
 assertSemanticDraft(resolvedGapDraft, loadedPolicy.policy, {
   ...gapContext,
   resolvedDecisionIds: ['Q-FORMAT', 'Q-EXPRESSION'],
+  humanResolutions: [{
+    questionId: 'Q-FORMAT',
+    kind: 'ANSWER',
+    label: '1000 operações/s',
+  }],
 });
 for (const mutate of [
   (value) => { value.unknowns[1].intentSignalIds = []; },
   (value) => { value.unknowns[0].intentSignalIds = []; },
-  (value) => { value.requirements[0].measurement.target = 'rápido'; },
+  (value) => { value.requirements[0].measurement.target.value = 'rápido'; },
+  (value) => {
+    value.requirements[0].measurement.target.source = 'USER_INTENT';
+    value.requirements[0].measurement.target.reference = 'alta frequência';
+    value.requirements[0].measurement.target.decisionId = null;
+  },
+  (value) => { value.requirements[0].measurement.conditions += ' com buffers estáticos.'; },
+  (value) => { value.requirements[0].acceptanceCases[0].decisionBinding = null; },
   (value) => { value.scope.inScope = ['src/index.ts']; },
   (value) => { value.requirements[0].statement += ' usando BigUint64Array.'; },
 ]) {
@@ -448,6 +484,143 @@ if (canonicalDigest(gapContract.intentSignals) !== canonicalDigest(gapSignals)
   || !renderSemanticContractMarkdown(gapContract).includes('Operações concluídas por segundo.')) {
   throw new Error('contract_omitted_intent_signals_or_measurement');
 }
+
+const pathIntent = 'Expor o resultado por src/index.ts; src/engine.ts é somente uma sugestão.';
+const pathPreflight = buildPreflightHandoff({
+  demand: pathIntent,
+  discovery: discoverWorkspace(process.cwd(), pathIntent),
+});
+const pathRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: pathPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const pathDraft = structuredClone(draft);
+pathDraft.sourceContextDigest = pathRequest.contextDigest;
+pathDraft.pathReferences = [
+  {
+    path: 'src/index.ts',
+    role: 'PUBLIC_SURFACE',
+    rationale: 'Ponto público exigido pela demanda; não limita a topologia interna.',
+    requirementIds: ['REQ-RESULT'],
+    basis: [{ source: 'USER_INTENT', reference: 'src/index.ts' }],
+  },
+  {
+    path: 'src/engine.ts',
+    role: 'IMPLEMENTATION_SUGGESTION',
+    rationale: 'Exemplo não normativo fornecido pelo usuário.',
+    requirementIds: [],
+    basis: [{ source: 'USER_INTENT', reference: 'src/engine.ts' }],
+  },
+];
+pathDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'src/index.ts' }];
+pathDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'src/index.ts' }];
+pathDraft.requirements[0].statement = 'O resultado deve ser exposto publicamente por src/index.ts.';
+pathDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'src/index.ts' }];
+const pathContext = {
+  constitutionRules: constitution.rules,
+  intent: pathIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: pathRequest.workspace.sourceEvidence,
+};
+assertSemanticDraft(pathDraft, loadedPolicy.policy, pathContext);
+for (const mutate of [
+  (value) => value.pathReferences.pop(),
+  (value) => { value.requirements[0].statement += ' A implementação deve residir em src/engine.ts.'; },
+]) {
+  const invalid = structuredClone(pathDraft);
+  mutate(invalid);
+  let rejected = false;
+  try {
+    assertSemanticDraft(invalid, loadedPolicy.policy, pathContext);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error('path_role_gate_accepted_ambiguous_topology');
+}
+
+const boundedIntent = 'Expor a quantidade nos Bits 4–9 da bitmask.';
+const boundedPreflight = buildPreflightHandoff({
+  demand: boundedIntent,
+  discovery: discoverWorkspace(process.cwd(), boundedIntent),
+});
+const boundedRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: boundedPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const boundedSignals = boundedRequest.intentSignals.signals;
+if (boundedSignals.length !== 1
+  || boundedSignals[0].kind !== 'BOUNDED_VALUE'
+  || boundedSignals[0].handling !== 'BOUNDARY_RULE') {
+  throw new Error('bounded_value_signal_was_not_detected');
+}
+const boundedDraft = structuredClone(draft);
+boundedDraft.sourceContextDigest = boundedRequest.contextDigest;
+boundedDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'Bits 4–9' }];
+boundedDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'Bits 4–9' }];
+boundedDraft.requirements[0].statement = 'A quantidade pública deve ocupar o campo de seis bits indicado.';
+boundedDraft.requirements[0].acceptanceCases[0].decisionBinding = null;
+boundedDraft.requirements[0].acceptanceCases[1] = {
+  id: 'AC-RESULT-FAILURE',
+  kind: 'BOUNDARY',
+  given: 'Uma quantidade igual a 64.',
+  when: 'O campo público for compilado.',
+  then: 'O valor observável deve ser saturado em 63.',
+  decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
+};
+boundedDraft.boundaryRules = [{
+  id: 'BOUND-PARTICIPANTS',
+  subject: 'Quantidade de participantes no campo de seis bits',
+  lowerBound: '0',
+  upperBound: '63',
+  underflowBehavior: 'REJECT',
+  overflowBehavior: 'SATURATE',
+  decisionId: 'Q-FORMAT',
+  requirementIds: ['REQ-RESULT'],
+  acceptanceCaseIds: ['AC-RESULT-FAILURE'],
+  intentSignalIds: [boundedSignals[0].id],
+  basis: [
+    { source: 'USER_INTENT', reference: 'Bits 4–9' },
+    { source: 'CONSTITUTION', reference: 'CONST-OBSERVABLE' },
+  ],
+}];
+boundedDraft.unknowns[0].statement = 'O comportamento acima da capacidade de seis bits precisa de decisão.';
+boundedDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'Bits 4–9' }];
+boundedDraft.decisions[0] = {
+  ...boundedDraft.decisions[0],
+  question: 'Como representar quantidades acima de 63?',
+  answers: [
+    { id: 'ANS-SIMPLE', label: 'Saturar em 63', rationale: 'Preserva indicação de capacidade excedida.', recommended: true },
+    { id: 'ANS-DETAIL', label: 'Rejeitar o valor', rationale: 'Expõe erro em vez de aproximar.', recommended: false },
+  ],
+};
+const boundedContext = {
+  constitutionRules: constitution.rules,
+  intent: boundedIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: boundedRequest.workspace.sourceEvidence,
+};
+assertSemanticDraft(boundedDraft, loadedPolicy.policy, boundedContext);
+for (const mutate of [
+  (value) => { value.boundaryRules = []; },
+  (value) => { value.requirements[0].acceptanceCases[1].decisionBinding = null; },
+  (value) => { value.boundaryRules[0].decisionId = null; },
+  (value) => { value.boundaryRules[0].overflowBehavior = 'WRAP'; },
+]) {
+  const invalid = structuredClone(boundedDraft);
+  mutate(invalid);
+  let rejected = false;
+  try {
+    assertSemanticDraft(invalid, loadedPolicy.policy, boundedContext);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error('boundary_gate_accepted_undefined_or_silent_overflow');
+}
+
 const tamperedIntentSignals = structuredClone(gapContract);
 tamperedIntentSignals.intentSignals.pop();
 let tamperedIntentSignalsRejected = false;
@@ -475,10 +648,11 @@ const recommendedResolution = {
   attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
   answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
 };
-if (confirmation.schema !== 'aegis.confirmation_request.v2'
+if (confirmation.schema !== 'aegis.confirmation_request.v3'
   || confirmation.recommendationPolicy !== 'RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS'
   || confirmation.questions[0].gaps[0] !== 'O formato final do resultado não foi definido.'
-  || confirmation.questions[0].requirementIds[0] !== 'REQ-RESULT') {
+  || confirmation.questions[0].requirementIds[0] !== 'REQ-RESULT'
+  || confirmation.questions[0].acceptanceCaseIds[0] !== 'AC-RESULT-HAPPY') {
   throw new Error('confirmation_request_blurred_recommendation_and_consent');
 }
 if (resolutionRequiresRecompilation({
@@ -663,6 +837,13 @@ const redFlagRequest = buildSemanticRequest({
 });
 const redFlagDraft = structuredClone(draft);
 redFlagDraft.sourceContextDigest = redFlagRequest.contextDigest;
+redFlagDraft.pathReferences = [{
+  path: 'src/index.ts',
+  role: 'IMPLEMENTATION_CONSTRAINT',
+  rationale: 'A demanda cita explicitamente este local.',
+  requirementIds: ['REQ-RESULT'],
+  basis: [{ source: 'USER_INTENT', reference: 'src/index.ts' }],
+}];
 for (const claim of [
   ...redFlagDraft.architectureContexts,
   ...redFlagDraft.requirements,
@@ -832,6 +1013,7 @@ parsimonyDraft.risks = [];
 parsimonyDraft.riskReview = { status: 'NONE', rationale: 'Nenhum risco material adicional.' };
 parsimonyDraft.unknowns = [];
 parsimonyDraft.decisions = [];
+parsimonyDraft.requirements[0].acceptanceCases[0].decisionBinding = null;
 parsimonyDraft.adversarialReview = {
   status: 'NO_ADDITIONAL_FINDINGS',
   rationale: 'Nenhuma objeção adicional.',
@@ -864,7 +1046,7 @@ parsimonyDraft.adversarialReview = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v7',
+  schema: 'aegis.semantic_state.v8',
   contract: approvedContract,
   contractDigest: canonicalDigest(approvedContract),
 };

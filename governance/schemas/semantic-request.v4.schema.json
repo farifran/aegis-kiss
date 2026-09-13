@@ -50,7 +50,7 @@
     "intentSignals": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Sinais mecânicos não são veredictos. Cada INCOMPLETE_EXPRESSION exige UNKNOWN material e decisão até ser resolvida; QUALITY_CONSTRAINT exige requisito QUALITY mensurável e, quando handling=MATERIAL_DECISION, também uma decisão sobre o alvo.",
+      "description": "Sinais mecânicos não são veredictos. INCOMPLETE_EXPRESSION exige UNKNOWN material; QUALITY_CONSTRAINT exige medição; BOUNDED_VALUE exige regra explícita de limite.",
       "required": ["method", "status", "signals"],
       "properties": {
         "method": { "const": "DETERMINISTIC_INTENT_REVIEW_V1" },
@@ -65,10 +65,10 @@
             "required": ["id", "kind", "handling", "offset", "reference", "excerpt"],
             "properties": {
               "id": { "type": "string", "pattern": "^INPUT-[0-9]{4}$" },
-              "kind": { "enum": ["INCOMPLETE_EXPRESSION", "QUALITY_CONSTRAINT"] },
+              "kind": { "enum": ["INCOMPLETE_EXPRESSION", "QUALITY_CONSTRAINT", "BOUNDED_VALUE"] },
               "handling": {
-                "enum": ["MATERIAL_DECISION", "MEASURABLE_REQUIREMENT"],
-                "description": "MATERIAL_DECISION proíbe completar a lacuna silenciosamente; MEASURABLE_REQUIREMENT exige método, métrica, alvo e condições falsificáveis."
+                "enum": ["MATERIAL_DECISION", "MEASURABLE_REQUIREMENT", "BOUNDARY_RULE"],
+                "description": "MATERIAL_DECISION proíbe completar a lacuna silenciosamente; MEASURABLE_REQUIREMENT exige medição falsificável; BOUNDARY_RULE exige intervalo, extrapolação e prova de limite."
               },
               "offset": { "type": "integer", "minimum": 0 },
               "reference": { "type": "string", "minLength": 1, "maxLength": 120 },
@@ -254,7 +254,7 @@
       "additionalProperties": false,
       "required": ["id", "digest", "strict", "document"],
       "properties": {
-        "id": { "const": "aegis.semantic_draft.v3" },
+        "id": { "enum": ["aegis.semantic_draft.v3", "aegis.semantic_draft.v4"] },
         "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "strict": { "const": true },
         "document": {
@@ -262,7 +262,7 @@
           "required": ["$schema", "$id", "type", "properties"],
           "properties": {
             "$schema": { "const": "https://json-schema.org/draft/2020-12/schema" },
-            "$id": { "const": "aegis.semantic_draft.v3" },
+            "$id": { "enum": ["aegis.semantic_draft.v3", "aegis.semantic_draft.v4"] },
             "type": { "const": "object" },
             "properties": { "type": "object" }
           }

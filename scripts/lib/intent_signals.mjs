@@ -10,6 +10,11 @@ const qualityPatterns = [
   { pattern: /\b(?:r[aá]pid[oa]s?|fast)\b/giu, implicitTarget: false },
 ];
 
+const boundedValuePatterns = [
+  /\bbits?\s+\d+\s*[–—-]\s*\d+\b/giu,
+  /\b\d+\s*bits?\b/giu,
+];
+
 function excerptAt(intent, start, length) {
   const from = Math.max(0, start - contextRadius);
   const to = Math.min(intent.length, start + length + contextRadius);
@@ -76,6 +81,22 @@ function collectQualityClaims(intent) {
   return signals;
 }
 
+function collectBoundedValues(intent) {
+  const signals = [];
+  for (const pattern of boundedValuePatterns) {
+    for (const match of intent.matchAll(pattern)) {
+      signals.push({
+        kind: 'BOUNDED_VALUE',
+        handling: 'BOUNDARY_RULE',
+        offset: match.index,
+        reference: match[0],
+        excerpt: excerptAt(intent, match.index, match[0].length),
+      });
+    }
+  }
+  return signals;
+}
+
 function overlaps(left, right) {
   const leftEnd = left.offset + left.reference.length;
   const rightEnd = right.offset + right.reference.length;
@@ -86,6 +107,7 @@ export function detectIntentSignals(intent) {
   const candidates = [
     ...collectIncompleteExpressions(intent),
     ...collectQualityClaims(intent),
+    ...collectBoundedValues(intent),
   ].sort((left, right) => left.offset - right.offset
     || right.reference.length - left.reference.length
     || (left.kind < right.kind ? -1 : 1));
