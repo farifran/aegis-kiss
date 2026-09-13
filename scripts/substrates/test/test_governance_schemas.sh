@@ -26,16 +26,19 @@ import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/sem
 
 const schemaFiles = [
   'architecture-policy.v1.schema.json',
+  'architecture-policy.v2.schema.json',
   'confirmation-request.v1.schema.json',
   'constitution.v1.schema.json',
   'issue-contract.v3.schema.json',
   'issue-contract.v4.schema.json',
+  'issue-contract.v5.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'semantic-draft.v1.schema.json',
   'semantic-draft.v2.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
+  'semantic-request.v3.schema.json',
   'semantic-resolution.v1.schema.json',
 ];
 for (const file of schemaFiles) {
@@ -48,7 +51,7 @@ for (const file of schemaFiles) {
 
 const loadedPolicy = loadArchitecturePolicy(process.cwd());
 const constitution = loadSemanticConstitution(process.cwd());
-assertSchema('aegis.architecture_policy.v1', loadedPolicy.policy);
+assertSchema('aegis.architecture_policy.v2', loadedPolicy.policy);
 const preflight = buildPreflightHandoff({
   demand: 'Criar comportamento observável de teste.',
   discovery: discoverWorkspace(process.cwd(), 'Criar comportamento observável de teste.'),
@@ -59,7 +62,7 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v2', semanticRequest);
+assertSchema('aegis.semantic_request.v3', semanticRequest);
 const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v2');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
@@ -67,7 +70,10 @@ if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.outputSchema.digest !== canonicalDigest(expectedOutputSchema)
   || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)
   || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
-    !== semanticRequest.contextDigest) {
+    !== semanticRequest.contextDigest
+  || semanticRequest.policy.signalSemantics.verdict !== 'SEMANTIC_NOT_LEXICAL'
+  || semanticRequest.policy.signalSemantics.adversarialReview
+    !== 'REQUIRED_WHEN_FLAGGED_AND_MUST_CITE_RULE') {
   throw new Error('semantic_request_omitted_authoritative_inputs');
 }
 
@@ -251,7 +257,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v4', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v5', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -374,7 +380,7 @@ deliberableDefaultConflict.policyAssessments.push({
 });
 assertSemanticDraft(deliberableDefaultConflict, loadedPolicy.policy, semanticValidationContext);
 
-const redFlagIntent = 'Usar any, AbstractCycleResolver e try/catch vazios na operação.';
+const redFlagIntent = 'Usar any, AbstractCycleResolver e try/catch vazios em src/index.ts.';
 const redFlagPreflight = buildPreflightHandoff({
   demand: redFlagIntent,
   discovery: discoverWorkspace(process.cwd(), redFlagIntent),
@@ -392,9 +398,24 @@ for (const claim of [
   ...redFlagDraft.requirements,
   ...redFlagDraft.unknowns,
 ]) claim.basis = [{ source: 'USER_INTENT', reference: 'any' }];
+redFlagDraft.adversarialReview = {
+  status: 'CHALLENGES_INTEGRATED',
+  rationale: 'Os sinais arquiteturais explícitos foram confrontados.',
+  findings: [{
+    id: 'ADV-POLICY-SIGNALS',
+    challenge: 'As formas técnicas sugeridas podem ocultar falhas e inflar a solução.',
+    response: 'O contrato mantém tipagem e falhas explícitas e exige a menor arquitetura suficiente.',
+    targetIds: ['REQ-RESULT', 'RISK-SILENCE'],
+    basis: [
+      { source: 'ARCHITECTURE_POLICY', reference: 'ARCH-STRICT-EXPLICIT-MODULES' },
+      { source: 'ARCHITECTURE_POLICY', reference: 'ARCH-PARSIMONY' },
+      { source: 'ARCHITECTURE_POLICY', reference: 'ARCH-FAILURE-EXPLICIT' },
+    ],
+  }],
+};
 redFlagDraft.policyAssessments = loadedPolicy.policy.rules
   .filter((rule) => rule.appliesWhen.includes('product-demand')
-    || (rule.forbiddenReferences ?? []).some((reference) => (
+    || [...rule.reviewReferences, ...rule.forbiddenReferences].some((reference) => (
       redFlagIntent.toLocaleLowerCase('pt-BR').includes(reference.toLocaleLowerCase('pt-BR'))
     )))
   .map((rule) => ({
@@ -411,19 +432,161 @@ const redFlagContext = {
   resolvedDecisionIds: [],
   workspaceEvidence: redFlagRequest.workspace.sourceEvidence,
 };
+const observedSignals = new Set(redFlagRequest.policy.signals
+  .map(({ ruleId, kind, reference }) => `${ruleId}:${kind}:${reference}`));
+for (const expectedSignal of [
+  'ARCH-PRODUCT-BOUNDARY:REVIEW:src/',
+  'ARCH-STRICT-EXPLICIT-MODULES:POSSIBLE_CONFLICT:any',
+  'ARCH-PARSIMONY:REVIEW:AbstractCycleResolver',
+  'ARCH-FAILURE-EXPLICIT:POSSIBLE_CONFLICT:try/catch',
+]) {
+  if (!observedSignals.has(expectedSignal)) throw new Error(`missing_policy_signal:${expectedSignal}`);
+}
+if (redFlagRequest.policy.signals
+  .filter(({ ruleId }) => ['ARCH-STRICT-EXPLICIT-MODULES', 'ARCH-PARSIMONY', 'ARCH-FAILURE-EXPLICIT']
+    .includes(ruleId))
+  .some(({ requiresAdversarialReview }) => !requiresAdversarialReview)) {
+  throw new Error('material_policy_signal_did_not_require_adversarial_review');
+}
 assertSemanticDraft(redFlagDraft, loadedPolicy.policy, redFlagContext);
-redFlagDraft.policyAssessments = redFlagDraft.policyAssessments
+const redFlagContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: redFlagDraft,
+  preflight: redFlagPreflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (canonicalDigest(redFlagContract.policySignals)
+  !== canonicalDigest(redFlagRequest.policy.signals)
+  || !renderSemanticContractMarkdown(redFlagContract, {
+    policyRules: loadedPolicy.policy.rules,
+  }).includes('ARCH-FAILURE-EXPLICIT/POSSIBLE_CONFLICT: try/catch')) {
+  throw new Error('contract_omitted_mechanical_policy_signals');
+}
+assertContractDocument({
+  repositoryRoot: process.cwd(),
+  contract: redFlagContract,
+  preflight: redFlagPreflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+const tamperedSignalsContract = structuredClone(redFlagContract);
+tamperedSignalsContract.policySignals.pop();
+let tamperedSignalsRejected = false;
+try {
+  assertContractDocument({
+    repositoryRoot: process.cwd(),
+    contract: tamperedSignalsContract,
+    preflight: redFlagPreflight,
+    policy: loadedPolicy.policy,
+    policyDigest: loadedPolicy.policyDigest,
+    constitution,
+    constitutionDigest: constitution.digest,
+  });
+} catch {
+  tamperedSignalsRejected = true;
+}
+if (!tamperedSignalsRejected) throw new Error('tampered_policy_signals_were_accepted');
+const omittedAssessment = structuredClone(redFlagDraft);
+omittedAssessment.policyAssessments = omittedAssessment.policyAssessments
   .filter(({ ruleId }) => ruleId !== 'ARCH-PARSIMONY');
 let omittedTriggeredRuleRejected = false;
 try {
-  assertSemanticDraft(redFlagDraft, loadedPolicy.policy, redFlagContext);
+  assertSemanticDraft(omittedAssessment, loadedPolicy.policy, redFlagContext);
 } catch {
   omittedTriggeredRuleRejected = true;
 }
 if (!omittedTriggeredRuleRejected) throw new Error('explicit_policy_trigger_was_omitted');
 
+const omittedAdversarialBasis = structuredClone(redFlagDraft);
+omittedAdversarialBasis.adversarialReview.findings[0].basis = omittedAdversarialBasis
+  .adversarialReview.findings[0].basis
+  .filter(({ reference }) => reference !== 'ARCH-FAILURE-EXPLICIT');
+let omittedAdversarialSignalRejected = false;
+try {
+  assertSemanticDraft(omittedAdversarialBasis, loadedPolicy.policy, redFlagContext);
+} catch {
+  omittedAdversarialSignalRejected = true;
+}
+if (!omittedAdversarialSignalRejected) {
+  throw new Error('adversarial_review_omitted_policy_signal');
+}
+
+const parsimonyIntent = 'Projetar com AbstractCycleResolver.';
+const parsimonyPreflight = buildPreflightHandoff({
+  demand: parsimonyIntent,
+  discovery: discoverWorkspace(process.cwd(), parsimonyIntent),
+});
+const parsimonyRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: parsimonyPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const parsimonyDraft = structuredClone(draft);
+parsimonyDraft.sourceContextDigest = parsimonyRequest.contextDigest;
+parsimonyDraft.architectureContexts[0].basis = [{
+  source: 'USER_INTENT',
+  reference: 'AbstractCycleResolver',
+}];
+parsimonyDraft.requirements[0].basis = [{
+  source: 'USER_INTENT',
+  reference: 'AbstractCycleResolver',
+}];
+parsimonyDraft.policyAssessments = parsimonyDraft.policyAssessments.concat({
+  ruleId: 'ARCH-PARSIMONY',
+  demandStatus: 'COMPLIANT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'A abstração foi justificada pela demanda.',
+  decisionId: null,
+  amendmentId: null,
+});
+parsimonyDraft.complexityReview = {
+  status: 'JUSTIFIED',
+  rationale: 'A forma técnica foi explicitamente solicitada.',
+  alternatives: [],
+};
+parsimonyDraft.risks = [];
+parsimonyDraft.riskReview = { status: 'NONE', rationale: 'Nenhum risco material adicional.' };
+parsimonyDraft.unknowns = [];
+parsimonyDraft.decisions = [];
+parsimonyDraft.adversarialReview = {
+  status: 'NO_ADDITIONAL_FINDINGS',
+  rationale: 'Nenhuma objeção adicional.',
+  findings: [],
+};
+const parsimonyContext = {
+  constitutionRules: constitution.rules,
+  intent: parsimonyIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: parsimonyRequest.workspace.sourceEvidence,
+};
+let missingParsimonyReviewRejected = false;
+try {
+  assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
+} catch {
+  missingParsimonyReviewRejected = true;
+}
+if (!missingParsimonyReviewRejected) throw new Error('parsimony_review_was_optional');
+parsimonyDraft.adversarialReview = {
+  status: 'CHALLENGES_INTEGRATED',
+  rationale: 'A abstração foi contestada antes da recomendação.',
+  findings: [{
+    id: 'ADV-PARSIMONY',
+    challenge: 'Uma classe abstrata pode ser desnecessária.',
+    response: 'O contrato exige justificativa observável para mantê-la.',
+    targetIds: ['REQ-RESULT'],
+    basis: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-PARSIMONY' }],
+  }],
+};
+assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
+
 const semanticState = {
-  schema: 'aegis.semantic_state.v4',
+  schema: 'aegis.semantic_state.v5',
   contract,
   contractDigest: canonicalDigest(contract),
 };

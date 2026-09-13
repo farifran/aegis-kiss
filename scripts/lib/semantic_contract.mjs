@@ -7,6 +7,11 @@ import { assertSchema, schemaDocument } from './schema_validator.mjs';
 
 const sourceEvidenceByteLimit = 32_768;
 const sourceEvidenceFileByteLimit = 8_192;
+const policySignalSemantics = {
+  verdict: 'SEMANTIC_NOT_LEXICAL',
+  assessment: 'REQUIRED_FOR_EACH_SIGNAL_RULE',
+  adversarialReview: 'REQUIRED_WHEN_FLAGGED_AND_MUST_CITE_RULE',
+};
 
 export function loadSemanticConstitution(repositoryRoot) {
   const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
@@ -186,14 +191,18 @@ export function buildSemanticRequest({
     },
     policy: {
       contexts: policy.contexts,
+      signalSemantics: policySignalSemantics,
       rules: policy.rules.map((rule) => ({
         id: rule.id,
         level: rule.level,
         statement: rule.statement,
         appliesWhen: rule.appliesWhen,
         appliesMode: rule.appliesMode,
-        forbiddenReferences: rule.forbiddenReferences ?? [],
+        reviewReferences: rule.reviewReferences,
+        forbiddenReferences: rule.forbiddenReferences,
+        requiresAdversarialReview: rule.requiresAdversarialReview,
       })),
+      signals: mechanicalPolicySignals(policy, preflight.intent),
       amendments: (policy.amendments ?? []).map(({ id, ruleId, reason }) => ({
         id,
         ruleId,
@@ -206,7 +215,7 @@ export function buildSemanticRequest({
   const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v2');
   outputSchemaDocument.properties.sourceContextDigest = { const: contextDigest };
   const request = {
-    schema: 'aegis.semantic_request.v2',
+    schema: 'aegis.semantic_request.v3',
     contextDigest,
     ...context,
     outputSchema: {
@@ -216,7 +225,7 @@ export function buildSemanticRequest({
       document: outputSchemaDocument,
     },
   };
-  assertSchema('aegis.semantic_request.v2', request);
+  assertSchema('aegis.semantic_request.v3', request);
   return request;
 }
 
@@ -254,6 +263,40 @@ function literalReferenceAppears(text, reference) {
     return normalizedText.split(/[^\p{L}\p{N}_-]+/u).includes(normalizedReference);
   }
   return normalizedText.includes(normalizedReference);
+}
+
+function matchingReferences(intent, references) {
+  return references.filter((reference) => literalReferenceAppears(intent, reference));
+}
+
+function mechanicalPolicySignals(policy, intent) {
+  return policy.rules.flatMap((rule) => [
+    ...matchingReferences(intent, rule.reviewReferences)
+      .map((reference) => ({
+        ruleId: rule.id,
+        kind: 'REVIEW',
+        reference,
+        requiresAdversarialReview: rule.requiresAdversarialReview,
+      })),
+    ...matchingReferences(intent, rule.forbiddenReferences)
+      .map((reference) => ({
+        ruleId: rule.id,
+        kind: 'POSSIBLE_CONFLICT',
+        reference,
+        requiresAdversarialReview: true,
+      })),
+  ]);
+}
+
+function ruleApplication(rule, architectureTags, intent) {
+  const contextApplies = rule.appliesMode === 'all'
+    ? rule.appliesWhen.every((tag) => architectureTags.has(tag))
+    : rule.appliesWhen.some((tag) => architectureTags.has(tag));
+  const reviewReferences = matchingReferences(intent, rule.reviewReferences);
+  const forbiddenReferences = matchingReferences(intent, rule.forbiddenReferences);
+  return {
+    applies: contextApplies || reviewReferences.length > 0 || forbiddenReferences.length > 0,
+  };
 }
 
 function workspaceBasisRange(reference) {
@@ -295,6 +338,11 @@ export function assertSemanticDraft(draft, policy, {
       }
     }
   }
+  const ruleApplications = new Map(policy.rules.map((rule) => [
+    rule.id,
+    ruleApplication(rule, architectureTags, intent),
+  ]));
+  const policySignals = mechanicalPolicySignals(policy, intent);
 
   for (const requirement of draft.requirements) {
     const kinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
@@ -415,9 +463,30 @@ export function assertSemanticDraft(draft, policy, {
   const materiallyContestable = draft.decisions.length > 0
     || draft.policyAssessments.some(({ demandStatus }) => demandStatus === 'CONFLICT')
     || draft.complexityReview.status === 'SIMPLIFIED'
-    || draft.risks.some(({ level }) => level === 'HIGH' || level === 'CRITICAL');
+    || draft.risks.some(({ level }) => level === 'HIGH' || level === 'CRITICAL')
+    || policySignals.some(({ requiresAdversarialReview }) => requiresAdversarialReview)
+    || policy.rules.some((rule) => rule.requiresAdversarialReview
+      && ruleApplications.get(rule.id)?.applies);
   if (materiallyContestable && draft.adversarialReview.findings.length === 0) {
     throw new Error('material_draft_without_adversarial_finding');
+  }
+  const adversarialRuleIds = new Set(draft.adversarialReview.findings
+    .flatMap(({ basis }) => basis
+      .filter(({ source }) => source === 'ARCHITECTURE_POLICY')
+      .map(({ reference }) => reference)));
+  const requiredAdversarialRuleIds = new Set([
+    ...policySignals
+      .filter(({ requiresAdversarialReview }) => requiresAdversarialReview)
+      .map(({ ruleId }) => ruleId),
+    ...policy.rules
+      .filter((rule) => rule.requiresAdversarialReview
+        && ruleApplications.get(rule.id)?.applies)
+      .map(({ id }) => id),
+  ]);
+  for (const ruleId of requiredAdversarialRuleIds) {
+    if (!adversarialRuleIds.has(ruleId)) {
+      throw new Error(`adversarial_review_omits_policy_signal:${ruleId}`);
+    }
   }
   for (const finding of draft.adversarialReview.findings) {
     for (const targetId of finding.targetIds) {
@@ -453,14 +522,7 @@ export function assertSemanticDraft(draft, policy, {
   }
   const assessedRuleIds = assertUniqueIds(draft.policyAssessments, 'ruleId', 'policy_assessment');
   const applicableRuleIds = new Set(policy.rules
-    .filter((rule) => {
-      const contextApplies = rule.appliesMode === 'all'
-        ? rule.appliesWhen.every((tag) => architectureTags.has(tag))
-        : rule.appliesWhen.some((tag) => architectureTags.has(tag));
-      const explicitTriggerAppears = (rule.forbiddenReferences ?? [])
-        .some((reference) => literalReferenceAppears(intent, reference));
-      return contextApplies || explicitTriggerAppears;
-    })
+    .filter((rule) => ruleApplications.get(rule.id)?.applies)
     .map(({ id }) => id));
   if (assessedRuleIds.size !== applicableRuleIds.size
     || [...applicableRuleIds].some((ruleId) => !assessedRuleIds.has(ruleId))) {
@@ -524,7 +586,7 @@ export function compileSemanticContract({
     workspaceEvidence: buildSourceEvidence(repositoryRoot, preflight),
   });
   const contract = {
-    schema: 'aegis.issue_contract.v4',
+    schema: 'aegis.issue_contract.v5',
     implementationAuthorized: false,
     sourcePreflightDigest: preflight.preflightDigest,
     sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
@@ -532,6 +594,7 @@ export function compileSemanticContract({
     constitutionDigest,
     intent: preflight.intent,
     observedPaths: observedPaths(preflight),
+    policySignals: mechanicalPolicySignals(policy, preflight.intent),
     specification: draft,
     decisionSelections: draft.decisions.map((decision) => ({
       questionId: decision.questionId,
@@ -539,7 +602,7 @@ export function compileSemanticContract({
     })),
     humanResolutions,
   };
-  assertSchema('aegis.issue_contract.v4', contract);
+  assertSchema('aegis.issue_contract.v5', contract);
   return contract;
 }
 
@@ -552,7 +615,7 @@ export function assertContractDocument({
   constitution,
   constitutionDigest,
 }) {
-  assertSchema('aegis.issue_contract.v4', contract);
+  assertSchema('aegis.issue_contract.v5', contract);
   assertSemanticDraft(contract.specification, policy, {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
@@ -567,6 +630,10 @@ export function assertContractDocument({
   if (contract.intent !== preflight.intent) throw new Error('contract_intent_mismatch');
   if (canonicalDigest(contract.observedPaths) !== canonicalDigest(observedPaths(preflight))) {
     throw new Error('contract_observed_paths_mismatch');
+  }
+  if (canonicalDigest(contract.policySignals)
+    !== canonicalDigest(mechanicalPolicySignals(policy, preflight.intent))) {
+    throw new Error('contract_policy_signals_mismatch');
   }
   const expectedSelections = contract.specification.decisions.map((decision) => ({
     questionId: decision.questionId,
@@ -691,6 +758,11 @@ export function renderSemanticContractMarkdown(contract, {
   const conflictAssessments = specification.policyAssessments
     .filter(({ demandStatus }) => demandStatus === 'CONFLICT');
   lines.push(`- **Contextos detectados:** ${specification.architectureContexts.map(({ tag }) => tag).join(', ')}`);
+  if (contract.policySignals.length > 0) {
+    lines.push(`- **Sinais mecânicos:** ${contract.policySignals
+      .map(({ ruleId, kind, reference }) => `${ruleId}/${kind}: ${reference}`)
+      .join('; ')}.`);
+  }
   if (compliantAssessments.length > 0) {
     lines.push(`- **Regras aplicáveis já conformes:** ${compliantAssessments.map(({ ruleId }) => ruleId).join(', ')}.`);
   }

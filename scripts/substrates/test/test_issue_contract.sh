@@ -101,7 +101,7 @@ printf '%s\n' "${draft_output}" | jq -e '
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
-  .schema == "aegis.semantic_request.v2"
+  .schema == "aegis.semantic_request.v3"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
@@ -288,7 +288,7 @@ semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.context
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v4"
+  .schema == "aegis.issue_contract.v5"
   and .implementationAuthorized == false
   and .intent == "Criar calculadora de precisão"
   and .specification.schema == "aegis.semantic_draft.v2"
@@ -301,7 +301,7 @@ jq -e '
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v4"
+  .schema == "aegis.preflight_finalization.v5"
   and .status == "FINALIZED"
   and .implementationAuthorized == false
 ' >/dev/null

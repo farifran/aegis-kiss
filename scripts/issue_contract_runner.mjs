@@ -40,7 +40,7 @@ async function readPolicy() {
   ]);
   try {
     const loaded = loadArchitecturePolicy(root);
-    assertSchema('aegis.architecture_policy.v1', loaded.policy);
+    assertSchema('aegis.architecture_policy.v2', loaded.policy);
     return loaded;
   } catch (error) {
     throw rejection('ARCHITECTURE_POLICY_UNAVAILABLE', error.message);
@@ -95,7 +95,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v4') return null;
+  if (contract.schema !== 'aegis.issue_contract.v5') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -296,7 +296,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v4',
+    schema: 'aegis.semantic_state.v5',
     contract,
     contractDigest,
   };
@@ -315,7 +315,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v4',
+    schema: 'aegis.preflight_finalization.v5',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.architecture_policy.v2",
+  "title": "Aegis Architecture Policy v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "policyVersion", "origin", "contexts", "rules", "amendments"],
+  "properties": {
+    "schema": { "const": "aegis.architecture_policy.v2" },
+    "policyVersion": { "type": "integer", "minimum": 1 },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath", "sourceDigest"],
+      "properties": {
+        "sourcePath": { "const": "ARCHITECTURE.md" },
+        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "contexts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tag", "description"],
+        "properties": {
+          "tag": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "description": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    },
+    "amendments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/amendment" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "level", "statement", "appliesWhen", "appliesMode", "reviewReferences", "forbiddenReferences", "requiresAdversarialReview", "sourceRanges"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        "level": { "enum": ["hard", "default", "preference"] },
+        "statement": { "type": "string", "minLength": 1 },
+        "appliesWhen": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "appliesMode": { "enum": ["any", "all"] },
+        "reviewReferences": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "forbiddenReferences": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "requiresAdversarialReview": { "type": "boolean" },
+        "sourceRanges": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceRange" }
+        }
+      }
+    },
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ruleId", "status", "reason", "approvedBy"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$" },
+        "ruleId": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$" },
+        "status": { "const": "approved" },
+        "reason": { "type": "string", "minLength": 1 },
+        "approvedBy": { "const": "user" }
+      }
+    },
+    "sourceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startByte", "endByte"],
+      "properties": {
+        "startByte": { "type": "integer", "minimum": 0 },
+        "endByte": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

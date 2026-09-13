@@ -20,6 +20,7 @@ export function parseSemanticState(value) {
   const contractSchemaByState = new Map([
     ['aegis.semantic_state.v3', 'aegis.issue_contract.v3'],
     ['aegis.semantic_state.v4', 'aegis.issue_contract.v4'],
+    ['aegis.semantic_state.v5', 'aegis.issue_contract.v5'],
   ]);
   const contractSchema = contractSchemaByState.get(state.schema);
   if (contractSchema === undefined || state.contract?.schema !== contractSchema) {
