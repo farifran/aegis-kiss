@@ -117,56 +117,101 @@ resolve_preflight_wizard() {
     exit 0
   fi
 
+  local request_schema
+  request_schema="$(jq -r '.schema // empty' <<< "${result}")"
+  [[ "${request_schema}" == "aegis.confirmation_request.v2" ]] || fatal 'OBSOLETE_CONFIRMATION_REQUEST'
+
   local count index question answer_count choice correction answer_id answers='[]'
+  local recommended_index selected_label final_confirmation attestation
+  local requires_recompilation=0
   count="$(jq '.questions | length' <<< "${result}")"
-  if (( count == 0 )); then
-    printf '\n[AEGIS] Nenhuma ambiguidade detectada na demanda. Aprovando contrato...\n' >&2
-    local execution_id contract_draft_digest
-    execution_id="$(jq -r '.executionId' <<< "${result}")"
-    contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
-    jq -n \
-      --arg executionId "${execution_id}" \
-      --arg contractDraftDigest "${contract_draft_digest}" \
-      '{schema:"aegis.semantic_resolution.v1",executionId:$executionId,contractDraftDigest:$contractDraftDigest,answers:[]}' \
-      > "${resolution_file}"
-    node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
-    return
-  fi
   printf '\n══════════════════════════════════════════════════════════════\n' >&2
-  printf ' AEGIS — Decisões Necessárias para Selar o Contrato\n' >&2
+  printf ' AEGIS — Deliberação e Aprovação Humana\n' >&2
   printf '══════════════════════════════════════════════════════════════\n' >&2
+  printf 'Contrato: %s\n' "$(jq -r '.title' <<< "${result}")" >&2
+  printf 'Digest do rascunho: %s\n' "$(jq -r '.contractDraftDigest' <<< "${result}")" >&2
+  printf 'Revisão completa: %s\n' "$(jq -r '.artifactPath' <<< "${result}")" >&2
+  printf 'Uma recomendação é apenas uma proposta; nada será selado sem sua confirmação final.\n' >&2
+  if (( count == 0 )); then
+    printf '\n[AEGIS] Nenhuma decisão material está pendente, mas o contrato ainda exige aprovação humana explícita.\n' >&2
+  fi
   for ((index = 0; index < count; index++)); do
     question="$(jq -c ".questions[${index}]" <<< "${result}")"
     answer_count="$(jq '.answers | length' <<< "${question}")"
+    recommended_index="$(jq -r '(.recommendedAnswerId) as $recommended | .answers | to_entries[] | select(.value.id == $recommended) | .key + 1' <<< "${question}")"
     printf '\n[%s] %s\n' "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" >&2
-    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
+    jq -r '.gaps[] | "  Lacuna: \(.)"' <<< "${question}" >&2
+    printf '  Impacta: requisitos [%s]; invariantes [%s]; riscos [%s].\n' \
+      "$(jq -r '.requirementIds | join(", ")' <<< "${question}")" \
+      "$(jq -r '.invariantIds | join(", ")' <<< "${question}")" \
+      "$(jq -r '.riskIds | join(", ")' <<< "${question}")" >&2
+    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
     printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
     while true; do
-      read -r -p "Escolha [1-$((answer_count + 1))]: " choice
+      read -r -p "Escolha [${recommended_index} recomendado]: " choice
+      choice="${choice:-${recommended_index}}"
       if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
         answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
         answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '. + [{questionId:$questionId, answerId:$answerId}]' <<< "${answers}")"
+        if [[ "${answer_id}" != "$(jq -r '.recommendedAnswerId' <<< "${question}")" ]]; then
+          requires_recompilation=1
+        fi
         break
       fi
       if [[ "${choice}" == "$((answer_count + 1))" ]]; then
         read -r -p 'Sua interpretação: ' correction
         [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
         answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '. + [{questionId:$questionId, correction:$correction}]' <<< "${answers}")"
+        requires_recompilation=1
         break
       fi
       printf '[AEGIS] Escolha inválida.\n' >&2
     done
   done
+
+  if (( count > 0 )); then
+    printf '\n──────────────────────────────────────────────────────────────\n' >&2
+    printf ' Resumo das suas escolhas\n' >&2
+    printf '──────────────────────────────────────────────────────────────\n' >&2
+    for ((index = 0; index < count; index++)); do
+      question="$(jq -c ".questions[${index}]" <<< "${result}")"
+      answer_id="$(jq -r ".[$index].answerId // empty" <<< "${answers}")"
+      if [[ -n "${answer_id}" ]]; then
+        selected_label="$(jq -r --arg answerId "${answer_id}" '.answers[] | select(.id == $answerId) | .label' <<< "${question}")"
+      else
+        selected_label="Interpretação própria: $(jq -r ".[$index].correction" <<< "${answers}")"
+      fi
+      printf -- '- %s → %s\n' "$(jq -r '.id' <<< "${question}")" "${selected_label}" >&2
+    done
+  fi
+
+  if (( requires_recompilation == 1 )); then
+    read -r -p 'Confirmar escolhas e enviar o contrato para recompilação? [s/N]: ' final_confirmation
+    attestation='DECISIONS_REVIEWED_AND_CONFIRMED'
+  else
+    read -r -p 'Revisei o contrato e confirmo que ele pode ser selado? [s/N]: ' final_confirmation
+    attestation='CONTRACT_REVIEWED_AND_APPROVED'
+  fi
+  if [[ ! "${final_confirmation}" =~ ^([sS]|[sS][iI][mM]|[yY]|[yY][eE][sS])$ ]]; then
+    printf '[AEGIS] Operação cancelada. Nenhuma nova decisão ou aprovação foi gravada.\n' >&2
+    return
+  fi
+
   local execution_id contract_draft_digest
   execution_id="$(jq -r '.executionId' <<< "${result}")"
   contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
   jq -n \
     --arg executionId "${execution_id}" \
     --arg contractDraftDigest "${contract_draft_digest}" \
+    --arg attestation "${attestation}" \
     --argjson answers "${answers}" \
-    '{schema:"aegis.semantic_resolution.v1",executionId:$executionId,contractDraftDigest:$contractDraftDigest,answers:$answers}' \
+    '{schema:"aegis.semantic_resolution.v2",executionId:$executionId,contractDraftDigest:$contractDraftDigest,method:"INTERACTIVE_WIZARD",attestation:$attestation,answers:$answers}' \
     > "${resolution_file}"
-  echo '[AEGIS][IDE] Resolução gravada. Aprovando contrato...' >&2
+  if (( requires_recompilation == 1 )); then
+    printf '[AEGIS] Escolhas gravadas e vinculadas ao rascunho. Recompilação semântica necessária antes da assinatura.\n' >&2
+    return
+  fi
+  echo '[AEGIS][IDE] Escolhas e aprovação explícita gravadas. Selando contrato...' >&2
   node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
 }
 

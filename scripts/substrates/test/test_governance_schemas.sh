@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import { canonicalDigest } from './scripts/lib/canonical_json.mjs';
 import {
   assertContractDocument,
+  assertContractApprovalEvidence,
   assertSemanticDraft,
   buildConfirmationRequest,
   buildSemanticRequest,
   compileSemanticContract,
+  finalizeContractApproval,
   loadSemanticConstitution,
   renderSemanticContractMarkdown,
   resolutionRequiresRecompilation,
@@ -33,11 +35,13 @@ const schemaFiles = [
   'architecture-policy.v1.schema.json',
   'architecture-policy.v2.schema.json',
   'confirmation-request.v1.schema.json',
+  'confirmation-request.v2.schema.json',
   'constitution.v1.schema.json',
   'issue-contract.v3.schema.json',
   'issue-contract.v4.schema.json',
   'issue-contract.v5.schema.json',
   'issue-contract.v6.schema.json',
+  'issue-contract.v7.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -49,6 +53,7 @@ const schemaFiles = [
   'semantic-request.v3.schema.json',
   'semantic-request.v4.schema.json',
   'semantic-resolution.v1.schema.json',
+  'semantic-resolution.v2.schema.json',
 ];
 for (const file of schemaFiles) {
   const schema = JSON.parse(readFileSync(`governance/schemas/${file}`, 'utf8'));
@@ -295,7 +300,11 @@ assertContractDocument({
 });
 if (contract.intent !== preflight.intent
   || contract.implementationAuthorized !== false
-  || contract.constitutionDigest !== constitution.digest) {
+  || contract.constitutionDigest !== constitution.digest
+  || contract.schema !== 'aegis.issue_contract.v7'
+  || contract.approval !== null
+  || contract.humanResolutions.length !== 0
+  || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
   throw new Error('mechanical_contract_fields_were_not_injected');
 }
 const humanContract = renderSemanticContractMarkdown(contract, {
@@ -307,7 +316,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v6', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v7', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -459,16 +468,81 @@ if (!tamperedIntentSignalsRejected) throw new Error('tampered_intent_signals_wer
 
 const confirmation = buildConfirmationRequest(contract);
 const recommendedResolution = {
-  schema: 'aegis.semantic_resolution.v1',
+  schema: 'aegis.semantic_resolution.v2',
   executionId: confirmation.executionId,
   contractDraftDigest: confirmation.contractDraftDigest,
+  method: 'INTERACTIVE_WIZARD',
+  attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
   answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
 };
+if (confirmation.schema !== 'aegis.confirmation_request.v2'
+  || confirmation.recommendationPolicy !== 'RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS'
+  || confirmation.questions[0].gaps[0] !== 'O formato final do resultado não foi definido.'
+  || confirmation.questions[0].requirementIds[0] !== 'REQ-RESULT') {
+  throw new Error('confirmation_request_blurred_recommendation_and_consent');
+}
 if (resolutionRequiresRecompilation({
   contract,
   request: confirmation,
   resolution: recommendedResolution,
 })) throw new Error('recommended_path_required_recompilation');
+
+const directDecisionResolution = { ...recommendedResolution, method: 'DIRECT_COMMAND' };
+let directDecisionRejected = false;
+try {
+  resolutionRequiresRecompilation({
+    contract,
+    request: confirmation,
+    resolution: directDecisionResolution,
+  });
+} catch {
+  directDecisionRejected = true;
+}
+if (!directDecisionRejected) throw new Error('direct_command_bypassed_human_wizard');
+
+const unapprovedAttestation = {
+  ...recommendedResolution,
+  attestation: 'DECISIONS_REVIEWED_AND_CONFIRMED',
+};
+let missingApprovalAttestationRejected = false;
+try {
+  finalizeContractApproval({
+    contract,
+    request: confirmation,
+    resolution: unapprovedAttestation,
+  });
+} catch {
+  missingApprovalAttestationRejected = true;
+}
+if (!missingApprovalAttestationRejected) {
+  throw new Error('decision_confirmation_was_treated_as_contract_approval');
+}
+
+const approvedContract = finalizeContractApproval({
+  contract,
+  request: confirmation,
+  resolution: recommendedResolution,
+});
+assertContractApprovalEvidence(approvedContract, { required: true });
+if (approvedContract.approval.contractDraftDigest !== confirmation.contractDraftDigest
+  || approvedContract.approval.method !== 'INTERACTIVE_WIZARD'
+  || approvedContract.humanResolutions[0].question !== 'Qual formato público deve ser usado?'
+  || approvedContract.humanResolutions[0].label !== 'Simples'
+  || approvedContract.humanResolutions[0].sourceContractDigest !== confirmation.contractDraftDigest
+  || !renderSemanticContractMarkdown(approvedContract, {
+    contractDigest: canonicalDigest(approvedContract),
+  }).includes('[ESCOLHA HUMANA]')) {
+  throw new Error('approved_contract_omitted_human_evidence');
+}
+const tamperedApproval = structuredClone(approvedContract);
+tamperedApproval.approval.contractDraftDigest = '0'.repeat(64);
+let tamperedApprovalRejected = false;
+try {
+  assertContractApprovalEvidence(tamperedApproval, { required: true });
+} catch {
+  tamperedApprovalRejected = true;
+}
+if (!tamperedApprovalRejected) throw new Error('tampered_human_approval_was_accepted');
 
 const alternativeResolution = structuredClone(recommendedResolution);
 alternativeResolution.answers[0].answerId = 'ANS-DETAIL';
@@ -790,9 +864,9 @@ parsimonyDraft.adversarialReview = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v6',
-  contract,
-  contractDigest: canonicalDigest(contract),
+  schema: 'aegis.semantic_state.v7',
+  contract: approvedContract,
+  contractDigest: canonicalDigest(approvedContract),
 };
 parseSemanticState(semanticState);
 if (semanticStateRelativePath !== '.harness/state/semantic-state.json') {

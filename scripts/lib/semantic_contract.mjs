@@ -740,7 +740,7 @@ export function compileSemanticContract({
     workspaceEvidence: buildSourceEvidence(repositoryRoot, preflight),
   });
   const contract = {
-    schema: 'aegis.issue_contract.v6',
+    schema: 'aegis.issue_contract.v7',
     implementationAuthorized: false,
     sourcePreflightDigest: preflight.preflightDigest,
     sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
@@ -751,14 +751,96 @@ export function compileSemanticContract({
     intentSignals: detectIntentSignals(preflight.intent),
     policySignals: mechanicalPolicySignals(policy, preflight.intent),
     specification: draft,
-    decisionSelections: draft.decisions.map((decision) => ({
-      questionId: decision.questionId,
-      answerId: decision.recommendedAnswerId,
-    })),
     humanResolutions,
+    approval: null,
   };
-  assertSchema('aegis.issue_contract.v6', contract);
+  assertSchema('aegis.issue_contract.v7', contract);
+  assertContractApprovalEvidence(contract);
   return contract;
+}
+
+function decisionMap(contract) {
+  return new Map(contract.specification.decisions
+    .map((decision) => [decision.questionId, decision]));
+}
+
+export function buildHumanResolutionRecords(contract, resolution) {
+  const decisions = decisionMap(contract);
+  return resolution.answers.map((answer) => {
+    const decision = decisions.get(answer.questionId);
+    if (decision === undefined) throw new Error(`unknown_resolution_question:${answer.questionId}`);
+    if ('correction' in answer) {
+      return {
+        questionId: answer.questionId,
+        question: decision.question,
+        kind: 'CORRECTION',
+        correction: answer.correction,
+        sourceContractDigest: resolution.contractDraftDigest,
+        method: resolution.method,
+        attestation: resolution.attestation,
+      };
+    }
+    const selected = decision.answers.find(({ id }) => id === answer.answerId);
+    if (selected === undefined) throw new Error(`unknown_resolution_answer:${answer.questionId}`);
+    return {
+      questionId: answer.questionId,
+      question: decision.question,
+      kind: 'ANSWER',
+      answerId: selected.id,
+      label: selected.label,
+      rationale: selected.rationale,
+      sourceContractDigest: resolution.contractDraftDigest,
+      method: resolution.method,
+      attestation: resolution.attestation,
+    };
+  });
+}
+
+export function assertContractApprovalEvidence(contract, { required = false } = {}) {
+  const resolutions = new Map();
+  for (const resolution of contract.humanResolutions) {
+    if (resolutions.has(resolution.questionId)) {
+      throw new Error(`duplicate_human_resolution:${resolution.questionId}`);
+    }
+    resolutions.set(resolution.questionId, resolution);
+  }
+  const decisions = decisionMap(contract);
+  if (contract.approval === null) {
+    if (required) throw new Error('missing_human_approval');
+    for (const questionId of decisions.keys()) {
+      if (resolutions.has(questionId)) throw new Error(`pending_decision_marked_resolved:${questionId}`);
+    }
+    return;
+  }
+
+  for (const decision of decisions.values()) {
+    const resolution = resolutions.get(decision.questionId);
+    if (resolution?.kind !== 'ANSWER' || resolution.answerId !== decision.recommendedAnswerId) {
+      throw new Error(`approved_decision_not_bound_to_recommendation:${decision.questionId}`);
+    }
+    const selected = decision.answers.find(({ id }) => id === resolution.answerId);
+    if (selected === undefined
+      || resolution.question !== decision.question
+      || resolution.label !== selected.label
+      || resolution.rationale !== selected.rationale
+      || resolution.sourceContractDigest !== contract.approval.contractDraftDigest
+      || resolution.method !== contract.approval.method
+      || resolution.attestation !== contract.approval.attestation) {
+      throw new Error(`human_resolution_evidence_mismatch:${decision.questionId}`);
+    }
+  }
+  const pendingIds = new Set(decisions.keys());
+  const draft = {
+    ...contract,
+    humanResolutions: contract.humanResolutions
+      .filter(({ questionId }) => !pendingIds.has(questionId)),
+    approval: null,
+  };
+  const draftDigest = canonicalDigest(draft);
+  if (contract.approval.contractDraftDigest !== draftDigest
+    || contract.approval.executionId !== `draft-${draftDigest.slice(0, 16)}`) {
+    throw new Error('human_approval_draft_mismatch');
+  }
 }
 
 export function assertContractDocument({
@@ -770,7 +852,7 @@ export function assertContractDocument({
   constitution,
   constitutionDigest,
 }) {
-  assertSchema('aegis.issue_contract.v6', contract);
+  assertSchema('aegis.issue_contract.v7', contract);
   assertSemanticDraft(contract.specification, policy, {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
@@ -794,32 +876,35 @@ export function assertContractDocument({
     !== canonicalDigest(mechanicalPolicySignals(policy, preflight.intent))) {
     throw new Error('contract_policy_signals_mismatch');
   }
-  const expectedSelections = contract.specification.decisions.map((decision) => ({
-    questionId: decision.questionId,
-    answerId: decision.recommendedAnswerId,
-  }));
-  if (canonicalDigest(contract.decisionSelections) !== canonicalDigest(expectedSelections)) {
-    throw new Error('contract_decision_selection_mismatch');
-  }
+  assertContractApprovalEvidence(contract);
 }
 
 export function buildConfirmationRequest(contract) {
+  if (contract.approval !== null) throw new Error('contract_already_approved');
   const contractDraftDigest = canonicalDigest(contract);
   const request = {
-    schema: 'aegis.confirmation_request.v1',
+    schema: 'aegis.confirmation_request.v2',
     status: 'USER_CONFIRMATION_REQUIRED',
     executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
     contractDraftDigest,
     title: contract.specification.title,
+    recommendationPolicy: 'RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS',
+    requiredAttestation: 'CONTRACT_REVIEWED_AND_APPROVED',
     questions: contract.specification.decisions.map((decision) => ({
       id: decision.questionId,
       question: decision.question,
       recommendedAnswerId: decision.recommendedAnswerId,
+      gaps: contract.specification.unknowns
+        .filter(({ decisionId }) => decisionId === decision.questionId)
+        .map(({ statement }) => statement),
+      requirementIds: decision.requirementIds,
+      invariantIds: decision.invariantIds,
+      riskIds: decision.riskIds,
       answers: decision.answers,
     })),
     artifactPath: '.harness/runtime/contract.md',
   };
-  assertSchema('aegis.confirmation_request.v1', request);
+  assertSchema('aegis.confirmation_request.v2', request);
   return request;
 }
 
@@ -862,20 +947,21 @@ export function assertRevisionApplied(draft, resolution) {
 }
 
 export function assertConfirmationRequest(contract, request) {
-  assertSchema('aegis.confirmation_request.v1', request);
+  assertSchema('aegis.confirmation_request.v2', request);
   if (canonicalDigest(request) !== canonicalDigest(buildConfirmationRequest(contract))) {
     throw new Error('stale_confirmation_request');
   }
 }
 
 export function renderSemanticContractMarkdown(contract, {
-  governed = false,
   contractDigest = '',
   policyRules = [],
 } = {}) {
   const specification = contract.specification;
+  const governed = contract.approval !== null;
   const rules = new Map(policyRules.map((rule) => [rule.id, rule]));
-  const selections = new Map(contract.decisionSelections
+  const selections = new Map(contract.humanResolutions
+    .filter(({ kind }) => kind === 'ANSWER')
     .map(({ questionId, answerId }) => [questionId, answerId]));
   const renderBasis = (basis) => basis
     .map(({ source, reference }) => `${source}:${reference}`)
@@ -887,6 +973,10 @@ export function renderSemanticContractMarkdown(contract, {
     `> **Modo:** ${specification.changeKind}`,
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
+    ...(governed ? [
+      `> **Rascunho aprovado:** \`${contract.approval.contractDraftDigest}\``,
+      `> **Confirmação humana:** ${contract.approval.attestation} via ${contract.approval.method}`,
+    ] : []),
     `> **Preflight:** \`${contract.sourcePreflightDigest}\``,
     `> **Snapshot de src/:** \`${contract.sourceSnapshotDigest}\``,
     '',
@@ -1001,19 +1091,22 @@ export function renderSemanticContractMarkdown(contract, {
   }
   const informationalUnknowns = specification.unknowns.filter(({ decisionId }) => decisionId === null);
 
-  lines.push('', governed ? '## 9. Decisões seladas' : '## 9. Decisões pendentes');
+  lines.push('', governed ? '## 9. Decisões humanas seladas' : '## 9. Decisões aguardando escolha humana');
   if (specification.decisions.length === 0) {
     lines.push('Nenhuma ambiguidade material detectada.');
   } else {
     for (const decision of specification.decisions) {
       lines.push('', `### ${decision.questionId}: ${decision.question}`);
       for (const unknown of unknownsByDecision.get(decision.questionId) ?? []) {
-        lines.push(`**Lacuna:** ${unknown.statement}`);
+        lines.push(`**${governed ? 'Lacuna resolvida' : 'Lacuna'}:** ${unknown.statement}`);
       }
       for (const answer of decision.answers) {
-        const mark = selections.get(decision.questionId) === answer.id ? '(*)' : '( )';
-        const recommended = answer.recommended ? ' **[RECOMENDADO]**' : '';
-        lines.push(`${mark} **${answer.label}**${recommended}: ${answer.rationale}`);
+        const selected = selections.get(decision.questionId) === answer.id;
+        const mark = selected ? '(*)' : '( )';
+        const evidence = selected
+          ? ' **[ESCOLHA HUMANA]**'
+          : answer.recommended ? ' **[RECOMENDADO — NÃO É CONSENTIMENTO]**' : '';
+        lines.push(`${mark} **${answer.label}**${evidence}: ${answer.rationale}`);
       }
       lines.push(`Impacta requisitos: ${decision.requirementIds.join(', ') || 'nenhum'}; invariantes: ${decision.invariantIds.join(', ') || 'nenhum'}; riscos: ${decision.riskIds.join(', ') || 'nenhum'}.`);
     }
@@ -1022,13 +1115,28 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push('', '### Lacunas informativas — não exigem decisão');
     for (const unknown of informationalUnknowns) lines.push(`- **${unknown.id}:** ${unknown.statement}`);
   }
+  const currentDecisionIds = new Set(specification.decisions
+    .map(({ questionId }) => questionId));
+  const incorporatedResolutions = contract.humanResolutions
+    .filter(({ questionId }) => !currentDecisionIds.has(questionId));
+  if (incorporatedResolutions.length > 0) {
+    lines.push('', '### Decisões humanas incorporadas por recompilação');
+    for (const resolution of incorporatedResolutions) {
+      if (resolution.kind === 'ANSWER') {
+        lines.push(`- **${resolution.questionId}: ${resolution.question}** → ${resolution.label}. ${resolution.rationale}`);
+      } else {
+        lines.push(`- **${resolution.questionId}: ${resolution.question}** → interpretação fornecida: ${resolution.correction}`);
+      }
+      lines.push(`  - Evidência: ${resolution.attestation} via ${resolution.method}; rascunho \`${resolution.sourceContractDigest}\`.`);
+    }
+  }
   lines.push('');
   return lines.join('\n');
 }
 
 export function resolutionRequiresRecompilation({ contract, request, resolution }) {
   assertConfirmationRequest(contract, request);
-  assertSchema('aegis.semantic_resolution.v1', resolution);
+  assertSchema('aegis.semantic_resolution.v2', resolution);
   if (request.executionId !== resolution.executionId
     || request.contractDraftDigest !== resolution.contractDraftDigest
     || request.contractDraftDigest !== canonicalDigest(contract)) {
@@ -1036,6 +1144,9 @@ export function resolutionRequiresRecompilation({ contract, request, resolution 
   }
   const decisions = new Map(contract.specification.decisions
     .map((decision) => [decision.questionId, decision]));
+  if (resolution.method === 'DIRECT_COMMAND' && decisions.size > 0) {
+    throw new Error('interactive_wizard_required');
+  }
   const answered = assertUniqueIds(resolution.answers, 'questionId', 'resolution');
   if (answered.size !== decisions.size || [...decisions.keys()].some((id) => !answered.has(id))) {
     throw new Error('incomplete_semantic_resolution');
@@ -1050,4 +1161,29 @@ export function resolutionRequiresRecompilation({ contract, request, resolution 
     if (answer.answerId !== decision.recommendedAnswerId) return true;
   }
   return false;
+}
+
+export function finalizeContractApproval({ contract, request, resolution }) {
+  if (resolutionRequiresRecompilation({ contract, request, resolution })) {
+    throw new Error('semantic_recompilation_required');
+  }
+  if (resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED') {
+    throw new Error('contract_approval_attestation_required');
+  }
+  const finalContract = {
+    ...contract,
+    humanResolutions: [
+      ...contract.humanResolutions,
+      ...buildHumanResolutionRecords(contract, resolution),
+    ],
+    approval: {
+      method: resolution.method,
+      attestation: resolution.attestation,
+      executionId: resolution.executionId,
+      contractDraftDigest: resolution.contractDraftDigest,
+    },
+  };
+  assertSchema('aegis.issue_contract.v7', finalContract);
+  assertContractApprovalEvidence(finalContract, { required: true });
+  return finalContract;
 }

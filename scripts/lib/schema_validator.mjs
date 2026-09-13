@@ -9,11 +9,13 @@ const schemaFiles = new Map([
   ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
   ['aegis.architecture_policy.v2', 'architecture-policy.v2.schema.json'],
   ['aegis.confirmation_request.v1', 'confirmation-request.v1.schema.json'],
+  ['aegis.confirmation_request.v2', 'confirmation-request.v2.schema.json'],
   ['aegis.constitution.v1', 'constitution.v1.schema.json'],
   ['aegis.issue_contract.v3', 'issue-contract.v3.schema.json'],
   ['aegis.issue_contract.v4', 'issue-contract.v4.schema.json'],
   ['aegis.issue_contract.v5', 'issue-contract.v5.schema.json'],
   ['aegis.issue_contract.v6', 'issue-contract.v6.schema.json'],
+  ['aegis.issue_contract.v7', 'issue-contract.v7.schema.json'],
   ['aegis.preflight_handoff.v2', 'preflight-handoff.v2.schema.json'],
   ['aegis.rejection.v1', 'rejection.v1.schema.json'],
   ['aegis.semantic_draft.v1', 'semantic-draft.v1.schema.json'],
@@ -24,6 +26,7 @@ const schemaFiles = new Map([
   ['aegis.semantic_request.v3', 'semantic-request.v3.schema.json'],
   ['aegis.semantic_request.v4', 'semantic-request.v4.schema.json'],
   ['aegis.semantic_resolution.v1', 'semantic-resolution.v1.schema.json'],
+  ['aegis.semantic_resolution.v2', 'semantic-resolution.v2.schema.json'],
   ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],
 ]);
 

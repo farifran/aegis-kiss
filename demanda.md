@@ -25,19 +25,20 @@ Na branch `main`, o Aegis original sofre de rigidez artificial na entrada:
 
 O novo fluxo estabelece uma divisão de trabalho inteligente entre a IA e o ser humano:
 
-$$\text{Prompt Informal} + \text{Discovery (RAM)} \longrightarrow \text{Inferência Proativa da IA} \longrightarrow \text{Aprovação Humana (1 Clique)} \longrightarrow \mathbf{HASH\ RAIZ\ ÚNICO}$$
+$$\text{Prompt Informal} + \text{Discovery (RAM)} \longrightarrow \text{Recomendação da IA} \longrightarrow \text{Escolha e Confirmação Humanas} \longrightarrow \mathbf{HASH\ RAIZ\ ÚNICO}$$
 
 ### 3.1. O Trabalho Pesado da IA (Proativo & Pré-Cozinhado)
 A IA não espera passivamente nem bombardeia o usuário com perguntas em branco. Ela atua em 5 camadas simultâneas:
 1. **Tolerância a Ruído e Correção Semântica:** Interpreta prompts com gírias, erros gramaticais, ortografia torta ou escrita incompleta, extraindo a real intenção de negócio.
 2. **Filtro Anti-Sobre-engenharia (`AGENTS.md`):** Se o usuário pedir padrões inflados (*factories*, *event-emitters*, injeção de dependência complexa), a IA reescreve a proposta aplicando o princípio KISS / Dumb Code Rule (Protocolo Karpathy).
 3. **Filtro Arquitetural (`ARCHITECTURE.md`):** Se o prompt pedir más práticas (*"coloquem capturas silenciosas para a esteira nunca falhar"*), a IA aplica `ARCH-FAILURE-EXPLICIT` e já formata a Issue exigindo resultados de erro explícitos.
-4. **Seleção Otimista de Decisões Recomendadas (*Pre-baking*):** Para cada bifurcação de negócio aberta (ex: taxas, janelas de tempo, critérios de quarentena), a IA **já escolhe a melhor alternativa técnica recomendada e já constrói a Issue completa assumindo essa escolha**.
-5. **Emissão de Cards de Decisão:** As perguntas não são bloqueios; são cards com a opção ótima já pré-marcada (*pre-checked*).
+4. **Caminho Recomendado Completo:** Para cada bifurcação de negócio aberta, a IA constrói requisitos, riscos e provas segundo uma alternativa recomendada, mas essa recomendação permanece proposta, nunca consentimento.
+5. **Emissão de Decisões Auditáveis:** Cada pergunta mostra de duas a quatro opções, exatamente uma recomendada, seu motivo e os requisitos, invariantes ou riscos afetados.
 
 ### 3.2. A Experiência do Humano (Diretor Executivo)
-* **Caminho Feliz (90% das vezes):** O humano lê o resumo executivo, vê que as escolhas pré-selecionadas fazem sentido e aperta **`Enter`** (aprovação em 1 clique, ~5 segundos).
-* **Caminho de Ajuste (10% das vezes):** Se quiser mudar uma decisão (ex: taxa fixa em vez de escalonada), ele altera a alternativa no seletor. A IA aplica um patch instantâneo na Issue e o humano confirma.
+* **Caminho Feliz:** Em cada pergunta, **`Enter`** seleciona explicitamente a recomendação. O Wizard exibe um resumo e exige uma confirmação final antes de selar.
+* **Caminho de Ajuste:** Se o humano escolher outra alternativa ou escrever interpretação própria, nada é assinado. A escolha é vinculada ao rascunho e toda a especificação volta à IA para recompilação.
+* **Cancelamento seguro:** Recusar a confirmação final não grava nova decisão nem aprovação.
 
 ---
 
@@ -47,10 +48,10 @@ A Issue e o Contrato deixam de ser dois conceitos separados e tornam-se **duas p
 
 | Projeção | Formato / Destino | Para que serve? |
 | :--- | :--- | :--- |
-| **Face Humana (`issue.md`)** | Markdown elegante na IDE | Leitura limpa, checkboxes de requisitos, escopo visual de arquivos e facilidade de edição. |
+| **Face Humana (`contract.md`)** | Markdown conciso na IDE | Leitura dos requisitos, riscos, recomendações e evidências de aprovação. |
 | **Face Máquina (`contract.json`)** | JSON canônico determinístico do Aegis | Tipagem formal, invariantes, IDs de falha e geração do hash imutável (`contractDigest`). |
 
-O **Hash Raiz Único** do projeto é gerado no momento do aceite da Issue-Contrato. Nada antes disso precisa ser assinado.
+O **Hash Raiz Único** é gerado no aceite final e cobre o contrato, as decisões humanas e a evidência de qual digest de rascunho foi aprovado. O registro não inventa identidade nem horário: essas garantias exigiriam uma assinatura externa real.
 
 ---
 
@@ -100,6 +101,8 @@ Uma revisão adversarial curta confronta a própria solução recomendada antes 
 
 Cada requisito contém um caso `HAPPY_PATH` e pelo menos um caso `FAILURE` ou `BOUNDARY`. Esses casos especificam provas falsificáveis, mas não apontam para executores nem autorizam a criação de scripts. Uma escolha diferente da recomendada retorna `SEMANTIC_RECOMPILATION_REQUIRED`; a resolução humana é incorporada à próxima requisição e requisitos, riscos e casos de aceitação devem ser recompilados antes da assinatura.
 
+No `aegis.issue_contract.v7`, a recomendação permanece somente dentro da decisão que a explica, sem uma cópia redundante. `humanResolutions` preserva a pergunta, a resposta ou correção, o rótulo, a justificativa, o método e o digest do rascunho ao qual a pessoa respondeu. `approval` permanece `null` no rascunho e só passa a registrar `INTERACTIVE_WIZARD` ou `DIRECT_COMMAND`, a declaração explícita e o digest exato aprovado no contrato final. Assim, recomendação ausente de resposta nunca é tratada como decisão humana.
+
 ### Atribuição local de papéis
 
 `./aegis --setup` registra localmente quem recebe a deliberação semântica como
@@ -120,7 +123,7 @@ codificação.
 Esta branch só será integrada de volta na `main` quando cumprir 100% dos seguintes requisitos:
 
 - [ ] **Adaptador de IA Ponta a Ponta:** Um provedor externo consome a interface semântica e devolve `aegis.semantic_draft.v3`.
-- [ ] **Aprovação Atômica em 1 Clique:** Confirmar a Issue gera o `contractDigest` canônico diretamente.
+- [ ] **Aprovação Humana Auditável:** Escolha e confirmação explícitas geram um `contractDigest` que cobre as decisões e o digest do rascunho aprovado.
 - [ ] **Eliminação de UNITs:** Zero fatiamento de parágrafos e zero erro de `normalized_demand_digest_mismatch`.
 - [ ] **Discovery delimitado e verificável:** Conteúdo analisado em RAM, manifesto canônico persistido e snapshot de `src/` reconferido antes da assinatura.
 - [ ] **Preservação da Segurança:** schema estrito, validação referencial, política arquitetural autenticada e zero alteração em `src/` durante todo o fluxo.

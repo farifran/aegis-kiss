@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_resolution.v2",
+  "title": "Aegis Explicit Human Resolution v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "executionId",
+    "contractDraftDigest",
+    "method",
+    "attestation",
+    "answers"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.semantic_resolution.v2" },
+    "executionId": { "type": "string", "pattern": "^draft-[a-f0-9]{16}$" },
+    "contractDraftDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "method": { "enum": ["INTERACTIVE_WIZARD", "DIRECT_COMMAND"] },
+    "attestation": {
+      "enum": [
+        "DECISIONS_REVIEWED_AND_CONFIRMED",
+        "CONTRACT_REVIEWED_AND_APPROVED"
+      ]
+    },
+    "answers": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "answerId"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "answerId": { "type": "string", "minLength": 1 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "correction"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "correction": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

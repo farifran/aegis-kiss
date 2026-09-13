@@ -295,18 +295,68 @@ set -e
 [[ "${missing_confirmation_code}" -ne 0 ]]
 printf '%s\n' "${missing_confirmation_output}" | jq -e '.reason == "MISSING_USER_CONFIRMATION"' >/dev/null
 mv .harness/runtime/user_confirmation_request.saved.json .harness/runtime/user_confirmation_request.json
-jq -n \
-  --arg executionId "$(jq -r '.executionId' .harness/runtime/user_confirmation_request.json)" \
-  --arg contractDraftDigest "$(jq -r '.contractDraftDigest' .harness/runtime/user_confirmation_request.json)" \
-  '{schema:"aegis.semantic_resolution.v1",executionId:$executionId,contractDraftDigest:$contractDraftDigest,answers:[{questionId:"Q-FORMAT",answerId:"ANS-DETAIL"}]}' \
-  > .harness/runtime/preflight_resolution.json
+set +e
+missing_decisions_output="$(bash ./aegis --approve 2>&1)"
+missing_decisions_code=$?
+set -e
+[[ "${missing_decisions_code}" -ne 0 ]]
+printf '%s\n' "${missing_decisions_output}" | jq -e '.reason == "HUMAN_DECISIONS_REQUIRED"' >/dev/null
+
+# Enter aceita a recomendação como ação humana explícita; uma confirmação final
+# grava pergunta, resposta e digest no contrato selado.
+cancelled_wizard_output="$(printf '\nn\n' | bash ./aegis --wizard 2>&1)"
+printf '%s\n' "${cancelled_wizard_output}" | grep -F 'Nenhuma nova decisão ou aprovação foi gravada'
+[[ ! -e .harness/runtime/preflight_resolution.json ]]
+jq -e '.approval == null and .humanResolutions == []' .harness/runtime/contract.json >/dev/null
+
+wizard_output="$(printf '\ns\n' | bash ./aegis --wizard 2>&1)"
+printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma proposta'
+jq -e '
+  .schema == "aegis.issue_contract.v7"
+  and .approval.method == "INTERACTIVE_WIZARD"
+  and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
+  and .humanResolutions[0].questionId == "Q-FORMAT"
+  and .humanResolutions[0].question == "Qual formato público deve ser usado?"
+  and .humanResolutions[0].kind == "ANSWER"
+  and .humanResolutions[0].answerId == "ANS-SIMPLE"
+  and .humanResolutions[0].label == "Resultado simples"
+  and .humanResolutions[0].rationale == "Menor superfície pública."
+  and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
+  and .humanResolutions[0].attestation == "CONTRACT_REVIEWED_AND_APPROVED"
+  and .humanResolutions[0].sourceContractDigest == .approval.contractDraftDigest
+' .harness/runtime/contract.json >/dev/null
+grep -F '[ESCOLHA HUMANA]' .harness/runtime/contract.md >/dev/null
+previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-state.json)"
+
+# Uma demanda diferente não herda a validade do contrato anterior.
+bash ./aegis 'Criar contrato diferente' >/dev/null
+set +e
+stale_verification_output="$(bash ./aegis --verify 2>&1)"
+stale_verification_code=$?
+set -e
+[[ "${stale_verification_code}" -ne 0 ]]
+printf '%s\n' "${stale_verification_output}" | jq -e '.reason == "ACTIVE_PREFLIGHT_NOT_GOVERNED"' >/dev/null
+
+# Reabre a demanda original para exercitar uma alternativa que exige recompilação.
+bash ./aegis 'Criar calculadora de precisão' >/dev/null
+revisionless_request="$(bash ./aegis --semantic-request)"
+semantic_context_digest="$(printf '%s\n' "${revisionless_request}" | jq -r '.contextDigest')"
+make_draft yes "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
+alternative_wizard_output="$(printf '2\ns\n' | bash ./aegis --wizard 2>&1)"
+printf '%s\n' "${alternative_wizard_output}" | grep -F 'Recompilação semântica necessária antes da assinatura'
+jq -e '
+  .schema == "aegis.semantic_resolution.v2"
+  and .method == "INTERACTIVE_WIZARD"
+  and .attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
+  and .answers == [{questionId:"Q-FORMAT",answerId:"ANS-DETAIL"}]
+' .harness/runtime/preflight_resolution.json >/dev/null
 set +e
 alternative_output="$(bash ./aegis --approve 2>&1)"
 alternative_code=$?
 set -e
 [[ "${alternative_code}" -ne 0 ]]
 printf '%s\n' "${alternative_output}" | jq -e '.reason == "SEMANTIC_RECOMPILATION_REQUIRED"' >/dev/null
-[[ ! -e .harness/state/semantic-state.json ]]
+[[ "${previous_contract_digest}" == "$(jq -r '.contractDigest' .harness/state/semantic-state.json)" ]]
 
 revision_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${revision_request}" | jq -e '
@@ -323,24 +373,42 @@ semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.context
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v6"
+  .schema == "aegis.issue_contract.v7"
   and .implementationAuthorized == false
   and .intent == "Criar calculadora de precisão"
   and .specification.schema == "aegis.semantic_draft.v3"
   and (.specification.requirements[0].acceptanceCases | length) == 2
   and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-FORMAT"}]
-  and .humanResolutions == [{questionId:"Q-FORMAT",answerId:"ANS-DETAIL"}]
+  and .approval == null
+  and .humanResolutions[0].questionId == "Q-FORMAT"
+  and .humanResolutions[0].question == "Qual formato público deve ser usado?"
+  and .humanResolutions[0].kind == "ANSWER"
+  and .humanResolutions[0].answerId == "ANS-DETAIL"
+  and .humanResolutions[0].label == "Resultado detalhado"
+  and .humanResolutions[0].rationale == "Expõe metadados adicionais."
+  and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
+  and .humanResolutions[0].attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
+  and (.humanResolutions[0].sourceContractDigest | test("^[a-f0-9]{64}$"))
   and (has("proofObligations") | not)
   and (.. | objects | has("entrypoint") | not)
 ' .harness/runtime/contract.json >/dev/null
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v6"
+  .schema == "aegis.preflight_finalization.v7"
   and .status == "FINALIZED"
+  and .approvalMethod == "DIRECT_COMMAND"
+  and .humanDecisionCount == 1
   and .implementationAuthorized == false
 ' >/dev/null
 [[ -s .harness/state/semantic-state.json ]]
+jq -e '
+  .schema == "aegis.semantic_state.v7"
+  and .contract.schema == "aegis.issue_contract.v7"
+  and .contract.approval.method == "DIRECT_COMMAND"
+  and .contract.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
+  and (.contract.approval.contractDraftDigest | test("^[a-f0-9]{64}$"))
+' .harness/state/semantic-state.json >/dev/null
 [[ ! -e .harness/runtime/user_confirmation_request.json ]]
 [[ ! -e .harness/runtime/preflight_resolution.json ]]
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]

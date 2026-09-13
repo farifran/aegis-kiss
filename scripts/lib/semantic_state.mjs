@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { assertSchema } from './schema_validator.mjs';
 import { canonicalDigest } from './canonical_json.mjs';
+import { assertContractApprovalEvidence } from './semantic_contract.mjs';
 
 export const semanticStateRelativePath = '.harness/state/semantic-state.json';
 
@@ -22,12 +23,16 @@ export function parseSemanticState(value) {
     ['aegis.semantic_state.v4', 'aegis.issue_contract.v4'],
     ['aegis.semantic_state.v5', 'aegis.issue_contract.v5'],
     ['aegis.semantic_state.v6', 'aegis.issue_contract.v6'],
+    ['aegis.semantic_state.v7', 'aegis.issue_contract.v7'],
   ]);
   const contractSchema = contractSchemaByState.get(state.schema);
   if (contractSchema === undefined || state.contract?.schema !== contractSchema) {
     throw new Error('invalid_semantic_state');
   }
   assertSchema(contractSchema, state.contract);
+  if (state.schema === 'aegis.semantic_state.v7') {
+    assertContractApprovalEvidence(state.contract, { required: true });
+  }
   if (state.contractDigest !== canonicalDigest(state.contract)) {
     throw new Error('semantic_state_digest_mismatch');
   }

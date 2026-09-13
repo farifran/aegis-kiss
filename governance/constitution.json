@@ -1,9 +1,9 @@
 {
   "schema": "aegis.constitution.v1",
-  "constitutionVersion": 4,
+  "constitutionVersion": 5,
   "origin": {
     "sourcePath": "AGENTS.md",
-    "sourceDigest": "bd21ed9053185c4e2b261d3ce4cd126b0fcdd9bbcb3b7228bddee4da0cd18faf"
+    "sourceDigest": "3be78623a7e2cdea215842c408e9686894223f06ab2f4d02d618f22544a3f51f"
   },
   "rules": [
     {
@@ -16,7 +16,7 @@
     },
     {
       "id": "CONST-DECISIONS",
-      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Não crie perguntas sobre obviedades, detalhes internos livres, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
+      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas e marque exatamente uma solução pragmática como recomendada. Recomendação nunca equivale a consentimento: o Wizard exige escolha e confirmação humanas explícitas, e o contrato selado preserva a pergunta, a resposta e o digest do rascunho aprovado. Não crie perguntas sobre obviedades, detalhes internos livres, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
     },
     {
       "id": "CONST-OBSERVABLE",
