@@ -23,6 +23,10 @@ import {
 import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
 import { assertSchema, schemaDocument, schemaErrors } from './scripts/lib/schema_validator.mjs';
 import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
+import {
+  assertRoleAssignment,
+  publicRoleAssignmentSummary,
+} from './scripts/lib/role_assignment.mjs';
 
 const schemaFiles = [
   'architecture-policy.v1.schema.json',
@@ -34,6 +38,7 @@ const schemaFiles = [
   'issue-contract.v5.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
+  'role-assignment.v1.schema.json',
   'semantic-draft.v1.schema.json',
   'semantic-draft.v2.schema.json',
   'semantic-request.v1.schema.json',
@@ -47,6 +52,41 @@ for (const file of schemaFiles) {
     || !schema.$id.startsWith('aegis.')) {
     throw new Error(`invalid_schema_metadata:${file}`);
   }
+}
+
+const roleAssignment = {
+  schema: 'aegis.role_assignment.v1',
+  roles: {
+    contractSupervisor: {
+      channel: 'API',
+      adapter: 'openai-compatible',
+      model: 'supervisor-model',
+      credentialEnv: 'AEGIS_SUPERVISOR_API_KEY',
+    },
+    codingAgent: {
+      channel: 'IDE',
+      adapter: 'codex',
+      model: null,
+      credentialEnv: null,
+    },
+  },
+};
+assertRoleAssignment(roleAssignment);
+const roleSummary = publicRoleAssignmentSummary(roleAssignment);
+if (roleSummary.roles.contractSupervisor.credentialEnv !== 'AEGIS_SUPERVISOR_API_KEY'
+  || roleSummary.roles.contractSupervisor.credentialAvailable !== false
+  || roleSummary.roles.codingAgent.credentialEnv !== undefined
+  || roleSummary.executionBoundary !== 'EXTERNAL_HUMAN_AUTHORIZATION_REQUIRED') {
+  throw new Error('role_assignment_exposed_or_omitted_public_configuration');
+}
+if (schemaErrors('aegis.role_assignment.v1', {
+  ...roleAssignment,
+  roles: {
+    ...roleAssignment.roles,
+    contractSupervisor: { ...roleAssignment.roles.contractSupervisor, credentialEnv: null },
+  },
+}).length === 0) {
+  throw new Error('role_assignment_accepted_api_without_environment_key');
 }
 
 const loadedPolicy = loadArchitecturePolicy(process.cwd());

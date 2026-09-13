@@ -17,6 +17,10 @@ projeção estruturada em `governance/architecture.policy.json`.
   Assinar um contrato não autoriza sua implementação.
 - O core usa execução local, determinística e sem dependência de rede ou de
   provedores de modelo. Compiladores, linters e provas são adaptadores locais.
+- A atribuição local de adaptadores humanos/IA reside em
+  `.harness/config/roles.json`, é ignorada pelo Git e nunca contém segredos.
+  Chaves de API pertencem exclusivamente a variáveis de ambiente ou ao
+  chaveiro do sistema. Essa atribuição não autoriza implementação.
 
 ## Forma técnica preferida
 
@@ -44,7 +48,9 @@ Aplica-se a demandas de produto e a referências a caminhos do produto.
 
 O estado semântico persistente do harness reside em
 `.harness/state/semantic-state.json`; dados transitórios residem em
-`.harness/runtime/` e nunca são fonte de verdade do produto.
+`.harness/runtime/`. A atribuição local de adaptadores reside em
+`.harness/config/roles.json`, não contém segredos e nunca é fonte de verdade
+do produto.
 
 Aplica-se a mudanças ou decisões sobre estado e runtime do harness.
 

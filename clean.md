@@ -111,6 +111,7 @@ new "demanda"
 | Momento da limpeza | Imediatamente | Depois de validar a nova demanda |
 | `.harness/runtime/` | Apaga tudo | Substitui pelo preflight da nova demanda |
 | Estado anterior do Aegis | Apaga imediatamente | Remove somente quando a nova captura pode prosseguir |
+| Configuração local de papéis | Não se aplica | Preserva `.harness/config/roles.json`; ela pertence à máquina, não à demanda |
 | `src/` | Apaga completamente | Nunca modifica |
 | `src/index.ts` | Recria artificialmente | Não cria |
 | Arquivos não versionados | Apaga | Preserva |

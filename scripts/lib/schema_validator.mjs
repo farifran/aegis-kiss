@@ -21,6 +21,7 @@ const schemaFiles = new Map([
   ['aegis.semantic_request.v2', 'semantic-request.v2.schema.json'],
   ['aegis.semantic_request.v3', 'semantic-request.v3.schema.json'],
   ['aegis.semantic_resolution.v1', 'semantic-resolution.v1.schema.json'],
+  ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],
 ]);
 
 const validator = new Ajv2020({ allErrors: true, strict: true });

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.role_assignment.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "roles"],
+  "properties": {
+    "schema": { "const": "aegis.role_assignment.v1" },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractSupervisor", "codingAgent"],
+      "properties": {
+        "contractSupervisor": { "$ref": "#/$defs/role" },
+        "codingAgent": { "$ref": "#/$defs/role" }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "adapter", "model", "credentialEnv"],
+      "properties": {
+        "channel": { "enum": ["API", "IDE"] },
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "credentialEnv": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "channel": { "const": "API" } } },
+          "then": {
+            "properties": {
+              "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "credentialEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "channel": { "const": "IDE" } } },
+          "then": { "properties": { "credentialEnv": { "const": null } } }
+        }
+      ]
+    }
+  }
+}

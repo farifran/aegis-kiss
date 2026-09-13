@@ -1,9 +1,9 @@
 {
   "schema": "aegis.architecture_policy.v2",
-  "policyVersion": 6,
+  "policyVersion": 7,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "d6140ccfec48452c354e9cc75d5c58c7473c2851de59ee6cbe4962da24e8293f"
+    "sourceDigest": "85c8e08ede9967abfa69f204c43b6863439a32ffaf57e23c2b7156b50be3b691"
   },
   "contexts": [
     { "tag": "product-demand", "description": "A demanda define comportamento ou fronteira pública do produto." },
@@ -31,18 +31,18 @@
       "reviewReferences": ["src/"],
       "forbiddenReferences": [],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 1729, "endByte": 1938 }]
+      "sourceRanges": [{ "startByte": 2011, "endByte": 2220 }]
     },
     {
       "id": "ARCH-HARNESS-STATE",
       "level": "hard",
-      "statement": "O estado semântico persistente do harness reside em .harness/state/semantic-state.json; dados transitórios residem em .harness/runtime/ e nunca são fonte de verdade do produto.",
+      "statement": "O estado semântico persistente do harness reside em .harness/state/semantic-state.json; dados transitórios residem em .harness/runtime/. A atribuição local de adaptadores reside em .harness/config/roles.json, não contém segredos e nunca é fonte de verdade do produto.",
       "appliesWhen": ["harness-state", "harness-runtime"],
       "appliesMode": "any",
-      "reviewReferences": [".harness/state/", ".harness/runtime/"],
+      "reviewReferences": [".harness/state/", ".harness/runtime/", ".harness/config/roles.json"],
       "forbiddenReferences": [],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 1973, "endByte": 2227 }]
+      "sourceRanges": [{ "startByte": 2255, "endByte": 2606 }]
     },
     {
       "id": "ARCH-LOCAL-DETERMINISTIC-CORE",
@@ -53,7 +53,7 @@
       "reviewReferences": ["provedor de modelo"],
       "forbiddenReferences": [],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 2273, "endByte": 2512 }]
+      "sourceRanges": [{ "startByte": 2652, "endByte": 2891 }]
     },
     {
       "id": "ARCH-STRICT-EXPLICIT-MODULES",
@@ -64,7 +64,7 @@
       "reviewReferences": ["TypeScript"],
       "forbiddenReferences": ["any", "@ts-ignore"],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 2560, "endByte": 2771 }]
+      "sourceRanges": [{ "startByte": 2939, "endByte": 3150 }]
     },
     {
       "id": "ARCH-PARSIMONY",
@@ -75,7 +75,7 @@
       "reviewReferences": ["AbstractCycleResolver", "injeção dinâmica de dependências", "factories", "decoradores"],
       "forbiddenReferences": [],
       "requiresAdversarialReview": true,
-      "sourceRanges": [{ "startByte": 2805, "endByte": 3098 }]
+      "sourceRanges": [{ "startByte": 3184, "endByte": 3477 }]
     },
     {
       "id": "ARCH-FAILURE-EXPLICIT",
@@ -86,7 +86,7 @@
       "reviewReferences": ["rollback"],
       "forbiddenReferences": ["try/catch", "catch vazio"],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 3136, "endByte": 3344 }]
+      "sourceRanges": [{ "startByte": 3515, "endByte": 3723 }]
     },
     {
       "id": "ARCH-DETERMINISTIC-TIME",
@@ -97,7 +97,7 @@
       "reviewReferences": ["relógio"],
       "forbiddenReferences": ["Date.now"],
       "requiresAdversarialReview": false,
-      "sourceRanges": [{ "startByte": 3384, "endByte": 3751 }]
+      "sourceRanges": [{ "startByte": 3763, "endByte": 4130 }]
     }
   ],
   "amendments": []

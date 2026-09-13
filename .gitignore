@@ -17,6 +17,7 @@
 # Local machine secrets/config
 .harness/local.env
 .harness/supervisor.json
+.harness/config/
 
 # =========================================================
 # EXECUTION ARTIFACTS

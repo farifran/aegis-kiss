@@ -96,6 +96,19 @@ Uma revisão adversarial curta confronta a própria solução recomendada antes 
 
 Cada requisito contém um caso `HAPPY_PATH` e pelo menos um caso `FAILURE` ou `BOUNDARY`. Esses casos especificam provas falsificáveis, mas não apontam para executores nem autorizam a criação de scripts. Uma escolha diferente da recomendada retorna `SEMANTIC_RECOMPILATION_REQUIRED`; a resolução humana é incorporada à próxima requisição e requisitos, riscos e casos de aceitação devem ser recompilados antes da assinatura.
 
+### Atribuição local de papéis
+
+`./aegis --setup` registra localmente quem recebe a deliberação semântica como
+supervisor de contrato e qual IDE/agente receberia uma futura solicitação de
+implementação. Cada papel pode usar API ou IDE; ambos podem apontar para a
+mesma opção ou para opções diferentes. O arquivo local é
+`.harness/config/roles.json`, ignorado pelo Git, e guarda somente o adaptador,
+o modelo opcional e, para APIs, o **nome** da variável de ambiente da chave.
+O valor da chave não passa pelo Aegis nem entra no repositório. A configuração
+é uma atribuição de responsabilidade para adaptadores externos: o fluxo atual
+continua a produzir apenas contrato e jamais chama ou autoriza o agente de
+codificação.
+
 ---
 
 ## 6. Critérios de Aceite para Fusão (Merge Checklist com a `main`)

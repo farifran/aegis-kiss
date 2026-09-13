@@ -24,6 +24,8 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --wizard    Abre as decisões pendentes no terminal
+  ./aegis --setup     Define supervisor do contrato e agente de código locais
+  ./aegis --setup --show  Exibe a atribuição local sem expor chaves
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
   ./aegis --clean     Remove artefatos transientes e redefine src/index.ts
   ./aegis --help      Exibe esta mensagem de ajuda
@@ -191,6 +193,15 @@ main() {
     --wizard)
       require_command_arity "$@"
       resolve_preflight_wizard
+      ;;
+    --setup)
+      if [[ "$#" -eq 1 ]]; then
+        exec node "${ROOT_DIR}/scripts/setup_roles.mjs"
+      elif [[ "$#" -eq 2 && "$2" == "--show" ]]; then
+        exec node "${ROOT_DIR}/scripts/setup_roles.mjs" --show
+      else
+        fatal 'INVALID_SETUP_ARITY'
+      fi
       ;;
     --status)
       require_command_arity "$@"
