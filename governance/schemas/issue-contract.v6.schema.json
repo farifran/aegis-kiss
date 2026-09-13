@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.issue_contract.v6",
+  "title": "Aegis Signed Issue-Contract v6",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "implementationAuthorized",
+    "sourcePreflightDigest",
+    "sourceSnapshotDigest",
+    "policyDigest",
+    "constitutionDigest",
+    "intent",
+    "observedPaths",
+    "intentSignals",
+    "policySignals",
+    "specification",
+    "decisionSelections",
+    "humanResolutions"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.issue_contract.v6" },
+    "implementationAuthorized": { "const": false },
+    "sourcePreflightDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSnapshotDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "constitutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "intent": { "type": "string", "minLength": 1 },
+    "observedPaths": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
+      "uniqueItems": true
+    },
+    "intentSignals": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "handling", "offset", "reference", "excerpt"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^INPUT-[0-9]{4}$" },
+          "kind": { "enum": ["INCOMPLETE_EXPRESSION", "QUALITY_CONSTRAINT"] },
+          "handling": { "enum": ["MATERIAL_DECISION", "MEASURABLE_REQUIREMENT"] },
+          "offset": { "type": "integer", "minimum": 0 },
+          "reference": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "excerpt": { "type": "string", "minLength": 1, "maxLength": 240 }
+        }
+      }
+    },
+    "policySignals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "kind", "reference", "requiresAdversarialReview"],
+        "properties": {
+          "ruleId": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["REVIEW", "POSSIBLE_CONFLICT"] },
+          "reference": { "type": "string", "minLength": 1 },
+          "requiresAdversarialReview": { "type": "boolean" }
+        }
+      }
+    },
+    "specification": { "$ref": "aegis.semantic_draft.v3" },
+    "decisionSelections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questionId", "answerId"],
+        "properties": {
+          "questionId": { "type": "string", "minLength": 1 },
+          "answerId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "humanResolutions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "answerId"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "answerId": { "type": "string", "minLength": 1 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["questionId", "correction"],
+            "properties": {
+              "questionId": { "type": "string", "minLength": 1 },
+              "correction": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

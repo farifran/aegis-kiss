@@ -23,6 +23,7 @@ import {
 import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
 import { assertSchema, schemaDocument, schemaErrors } from './scripts/lib/schema_validator.mjs';
 import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
+import { detectIntentSignals } from './scripts/lib/intent_signals.mjs';
 import {
   assertRoleAssignment,
   publicRoleAssignmentSummary,
@@ -36,14 +37,17 @@ const schemaFiles = [
   'issue-contract.v3.schema.json',
   'issue-contract.v4.schema.json',
   'issue-contract.v5.schema.json',
+  'issue-contract.v6.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
   'semantic-draft.v1.schema.json',
   'semantic-draft.v2.schema.json',
+  'semantic-draft.v3.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
   'semantic-request.v3.schema.json',
+  'semantic-request.v4.schema.json',
   'semantic-resolution.v1.schema.json',
 ];
 for (const file of schemaFiles) {
@@ -102,8 +106,8 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v3', semanticRequest);
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v2');
+assertSchema('aegis.semantic_request.v4', semanticRequest);
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v3');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
@@ -111,6 +115,8 @@ if (semanticRequest.constitution.digest !== constitution.digest
   || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)
   || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
     !== semanticRequest.contextDigest
+  || semanticRequest.intentSignals.status !== 'CLEAR'
+  || semanticRequest.intentSignals.signals.length !== 0
   || semanticRequest.policy.signalSemantics.verdict !== 'SEMANTIC_NOT_LEXICAL'
   || semanticRequest.policy.signalSemantics.adversarialReview
     !== 'REQUIRED_WHEN_FLAGGED_AND_MUST_CITE_RULE') {
@@ -157,7 +163,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v2',
+  schema: 'aegis.semantic_draft.v3',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -188,8 +194,11 @@ const draft = {
   },
   requirements: [{
     id: 'REQ-RESULT',
+    kind: 'FUNCTIONAL',
     statement: 'A operação deve retornar resultado explícito.',
     basis: userBasis,
+    intentSignalIds: [],
+    measurement: null,
     acceptanceCases: [
       {
         id: 'AC-RESULT-HAPPY',
@@ -242,6 +251,7 @@ const draft = {
     statement: 'O formato final do resultado não foi definido.',
     material: true,
     decisionId: 'Q-FORMAT',
+    intentSignalIds: [],
     basis: userBasis,
   }],
   decisions: [{
@@ -297,9 +307,155 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v5', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v6', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
+
+const gapIntent = 'Processar em alta frequência com fração () e volume acima de .';
+const gapPreflight = buildPreflightHandoff({
+  demand: gapIntent,
+  discovery: discoverWorkspace(process.cwd(), gapIntent),
+});
+const gapRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: gapPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const gapSignals = gapRequest.intentSignals.signals;
+if (gapRequest.intentSignals.status !== 'REVIEW_REQUIRED'
+  || gapSignals.length !== 3
+  || gapSignals[0].kind !== 'QUALITY_CONSTRAINT'
+  || gapSignals[0].handling !== 'MATERIAL_DECISION'
+  || gapSignals.slice(1).some(({ kind }) => kind !== 'INCOMPLETE_EXPRESSION')
+  || detectIntentSignals('Executar calcular() e usar () => valor.').length !== 0) {
+  throw new Error('intent_review_signals_are_not_conservative');
+}
+const quantifiedQualitySignals = detectIntentSignals('Latência máxima de 10 ms e zero-GC friendly.');
+if (quantifiedQualitySignals.length !== 2
+  || quantifiedQualitySignals.some(({ handling }) => handling !== 'MEASURABLE_REQUIREMENT')) {
+  throw new Error('quantified_quality_signal_was_not_measurable');
+}
+const gapDraft = structuredClone(draft);
+gapDraft.sourceContextDigest = gapRequest.contextDigest;
+gapDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'alta frequência' }];
+gapDraft.requirements[0] = {
+  ...gapDraft.requirements[0],
+  kind: 'QUALITY',
+  statement: 'A operação deve sustentar o volume recomendado de processamento.',
+  basis: [{ source: 'USER_INTENT', reference: 'alta frequência' }],
+  intentSignalIds: [gapSignals[0].id],
+  measurement: {
+    method: 'Medição repetível de lotes após aquecimento.',
+    metric: 'Operações concluídas por segundo.',
+    target: '1000 operações/s',
+    conditions: 'Mesmo lote e ambiente fixo durante todas as medições.',
+  },
+};
+gapDraft.requirements[0].acceptanceCases[0].then = 'Sustenta pelo menos 1000 operações/s nas condições declaradas.';
+gapDraft.unknowns[0] = {
+  ...gapDraft.unknowns[0],
+  statement: 'A expressão alta frequência não informa um volume mínimo.',
+  intentSignalIds: [gapSignals[0].id],
+  basis: [{ source: 'USER_INTENT', reference: 'alta frequência' }],
+};
+gapDraft.decisions[0] = {
+  ...gapDraft.decisions[0],
+  question: 'Qual volume mínimo observável define alta frequência?',
+  answers: [
+    { id: 'ANS-SIMPLE', label: '1000 operações/s', rationale: 'Primeiro alvo mensurável.', recommended: true },
+    { id: 'ANS-DETAIL', label: '10000 operações/s', rationale: 'Alvo mais exigente.', recommended: false },
+  ],
+};
+gapDraft.unknowns.push({
+  id: 'UNKNOWN-EXPRESSION',
+  statement: 'A fórmula da fração e o limite comparado estão ausentes.',
+  material: true,
+  decisionId: 'Q-EXPRESSION',
+  intentSignalIds: gapSignals.slice(1).map(({ id }) => id),
+  basis: [
+    { source: 'USER_INTENT', reference: '()' },
+    { source: 'USER_INTENT', reference: 'acima de' },
+  ],
+});
+gapDraft.decisions.push({
+  questionId: 'Q-EXPRESSION',
+  question: 'Quais fórmula e limite devem reger o comportamento?',
+  recommendedAnswerId: 'ANS-EXPLICIT',
+  requirementIds: ['REQ-RESULT'],
+  invariantIds: ['INV-EXPLICIT'],
+  riskIds: [],
+  answers: [
+    { id: 'ANS-EXPLICIT', label: 'Definir ambos', rationale: 'Elimina a lacuna antes da assinatura.', recommended: true },
+    { id: 'ANS-REMOVE', label: 'Remover ambos', rationale: 'Retira comportamentos não especificados.', recommended: false },
+  ],
+});
+const gapContext = {
+  constitutionRules: constitution.rules,
+  intent: gapIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: gapRequest.workspace.sourceEvidence,
+};
+assertSemanticDraft(gapDraft, loadedPolicy.policy, gapContext);
+const resolvedGapDraft = structuredClone(gapDraft);
+resolvedGapDraft.requirements[0].intentSignalIds = gapSignals.map(({ id }) => id);
+resolvedGapDraft.requirements[0].basis = [
+  { source: 'USER_DECISION', reference: 'Q-FORMAT' },
+  { source: 'USER_DECISION', reference: 'Q-EXPRESSION' },
+];
+resolvedGapDraft.unknowns = [];
+resolvedGapDraft.decisions = [];
+assertSemanticDraft(resolvedGapDraft, loadedPolicy.policy, {
+  ...gapContext,
+  resolvedDecisionIds: ['Q-FORMAT', 'Q-EXPRESSION'],
+});
+for (const mutate of [
+  (value) => { value.unknowns[1].intentSignalIds = []; },
+  (value) => { value.unknowns[0].intentSignalIds = []; },
+  (value) => { value.requirements[0].measurement.target = 'rápido'; },
+  (value) => { value.scope.inScope = ['src/index.ts']; },
+  (value) => { value.requirements[0].statement += ' usando BigUint64Array.'; },
+]) {
+  const invalid = structuredClone(gapDraft);
+  mutate(invalid);
+  let rejected = false;
+  try {
+    assertSemanticDraft(invalid, loadedPolicy.policy, gapContext);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error('intent_completeness_gate_accepted_false_precision');
+}
+const gapContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: gapDraft,
+  preflight: gapPreflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (canonicalDigest(gapContract.intentSignals) !== canonicalDigest(gapSignals)
+  || !renderSemanticContractMarkdown(gapContract).includes('Operações concluídas por segundo.')) {
+  throw new Error('contract_omitted_intent_signals_or_measurement');
+}
+const tamperedIntentSignals = structuredClone(gapContract);
+tamperedIntentSignals.intentSignals.pop();
+let tamperedIntentSignalsRejected = false;
+try {
+  assertContractDocument({
+    repositoryRoot: process.cwd(),
+    contract: tamperedIntentSignals,
+    preflight: gapPreflight,
+    policy: loadedPolicy.policy,
+    policyDigest: loadedPolicy.policyDigest,
+    constitution,
+    constitutionDigest: constitution.digest,
+  });
+} catch {
+  tamperedIntentSignalsRejected = true;
+}
+if (!tamperedIntentSignalsRejected) throw new Error('tampered_intent_signals_were_accepted');
 
 const confirmation = buildConfirmationRequest(contract);
 const recommendedResolution = {
@@ -531,6 +687,14 @@ try {
   tamperedSignalsRejected = true;
 }
 if (!tamperedSignalsRejected) throw new Error('tampered_policy_signals_were_accepted');
+
+let excessiveIntentSignalsRejected = false;
+try {
+  detectIntentSignals(Array.from({ length: 33 }, () => 'fórmula ()').join(' '));
+} catch {
+  excessiveIntentSignalsRejected = true;
+}
+if (!excessiveIntentSignalsRejected) throw new Error('intent_signal_limit_was_silently_truncated');
 const omittedAssessment = structuredClone(redFlagDraft);
 omittedAssessment.policyAssessments = omittedAssessment.policyAssessments
   .filter(({ ruleId }) => ruleId !== 'ARCH-PARSIMONY');
@@ -626,7 +790,7 @@ parsimonyDraft.adversarialReview = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v5',
+  schema: 'aegis.semantic_state.v6',
   contract,
   contractDigest: canonicalDigest(contract),
 };

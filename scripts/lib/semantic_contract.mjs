@@ -3,6 +3,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
+import { detectIntentSignals } from './intent_signals.mjs';
 import { assertSchema, schemaDocument } from './schema_validator.mjs';
 
 const sourceEvidenceByteLimit = 32_768;
@@ -157,6 +158,7 @@ export function buildSemanticRequest({
   constitution,
   revision = null,
 }) {
+  const detectedIntentSignals = detectIntentSignals(preflight.intent);
   const observedTextPaths = preflight.discovery.files
     .filter(({ kind }) => kind === 'UTF8_TEXT')
     .map(({ path }) => path);
@@ -171,12 +173,18 @@ export function buildSemanticRequest({
       constitution: 'SYSTEM_INSTRUCTION',
       architecture: 'TRUSTED_POLICY',
       intent: 'USER_DATA',
+      intentSignals: 'MECHANICAL_REVIEW_OBLIGATIONS',
       workspace: 'UNTRUSTED_EVIDENCE',
       revision: 'USER_DECISION',
       outputSchema: 'STRICT_STRUCTURED_OUTPUT',
     },
     constitution,
     intent: preflight.intent,
+    intentSignals: {
+      method: 'DETERMINISTIC_INTENT_REVIEW_V1',
+      status: detectedIntentSignals.length === 0 ? 'CLEAR' : 'REVIEW_REQUIRED',
+      signals: detectedIntentSignals,
+    },
     workspace: {
       status: preflight.discovery.status,
       observedTextPaths,
@@ -212,20 +220,20 @@ export function buildSemanticRequest({
     revision,
   };
   const contextDigest = canonicalDigest(context);
-  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v2');
+  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v3');
   outputSchemaDocument.properties.sourceContextDigest = { const: contextDigest };
   const request = {
-    schema: 'aegis.semantic_request.v3',
+    schema: 'aegis.semantic_request.v4',
     contextDigest,
     ...context,
     outputSchema: {
-      id: 'aegis.semantic_draft.v2',
+      id: 'aegis.semantic_draft.v3',
       digest: canonicalDigest(outputSchemaDocument),
       strict: true,
       document: outputSchemaDocument,
     },
   };
-  assertSchema('aegis.semantic_request.v3', request);
+  assertSchema('aegis.semantic_request.v4', request);
   return request;
 }
 
@@ -308,13 +316,40 @@ function workspaceBasisRange(reference) {
   return { path: match[1], startLine, endLine };
 }
 
+function scopeContainsInternalPath(item) {
+  return /(?:^|\s)(?:\.\/)?(?:src|lib|app|tests?)\/\S+/u.test(item);
+}
+
+function technicalIdentifiers(text) {
+  const pattern = /(?<![\p{L}\p{N}_$])(?:[\p{Lu}][\p{Ll}\p{N}_$-]+[\p{Lu}][\p{L}\p{N}_$-]*|[\p{Ll}_$][\p{L}\p{N}_$-]*[\p{Lu}][\p{L}\p{N}_$-]*|[\p{Lu}]{2,}(?:-[\p{L}\p{N}]+)?)(?![\p{L}\p{N}_$])/gu;
+  return [...new Set([...text.matchAll(pattern)].map(([identifier]) => identifier))];
+}
+
+function targetIsQuantified(target) {
+  return /\d/u.test(target)
+    || /\b(?:zero|none|nenhum|nenhuma|sem\s+aloca(?:ç|c)(?:ão|ões)|no[- ]?allocation)\b/iu.test(target);
+}
+
+function basisCitesIntentSignal(claim, signal) {
+  return claim.basis.some(({ source, reference }) => source === 'USER_INTENT'
+    && (reference.includes(signal.reference) || signal.reference.includes(reference)));
+}
+
+function assertNoUnprovenTechnicalPrescription(kind, id, text, trustedText) {
+  for (const identifier of technicalIdentifiers(text)) {
+    if (!literalReferenceAppears(trustedText, identifier)) {
+      throw new Error(`unproven_technical_prescription:${kind}:${id}:${identifier}`);
+    }
+  }
+}
+
 export function assertSemanticDraft(draft, policy, {
   constitutionRules = [],
   intent = '',
   resolvedDecisionIds = [],
   workspaceEvidence = [],
 } = {}) {
-  assertSchema('aegis.semantic_draft.v2', draft);
+  assertSchema('aegis.semantic_draft.v3', draft);
   const requirementIds = assertUniqueIds(draft.requirements, 'id', 'requirement');
   const acceptanceCases = draft.requirements.flatMap(({ acceptanceCases: cases }) => cases);
   assertUniqueIds(acceptanceCases, 'id', 'acceptance_case');
@@ -343,11 +378,35 @@ export function assertSemanticDraft(draft, policy, {
     ruleApplication(rule, architectureTags, intent),
   ]));
   const policySignals = mechanicalPolicySignals(policy, intent);
+  const intentSignals = detectIntentSignals(intent);
+  const intentSignalsById = new Map(intentSignals.map((signal) => [signal.id, signal]));
+  const knownResolvedDecisions = new Set(resolvedDecisionIds);
+
+  for (const item of [...draft.scope.inScope, ...draft.scope.outOfScope]) {
+    if (scopeContainsInternalPath(item)) throw new Error(`scope_contains_internal_path:${item}`);
+    for (const identifier of technicalIdentifiers(item)) {
+      if (!literalReferenceAppears(intent, identifier)) {
+        throw new Error(`scope_contains_unproven_technical_prescription:${identifier}`);
+      }
+    }
+  }
 
   for (const requirement of draft.requirements) {
     const kinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
     if (!kinds.has('HAPPY_PATH') || (!kinds.has('FAILURE') && !kinds.has('BOUNDARY'))) {
       throw new Error(`requirement_without_dual_acceptance:${requirement.id}`);
+    }
+    if (requirement.kind === 'QUALITY' && !targetIsQuantified(requirement.measurement.target)) {
+      throw new Error(`quality_requirement_without_quantified_target:${requirement.id}`);
+    }
+    if (requirement.kind === 'QUALITY') {
+      const acceptanceText = requirement.acceptanceCases
+        .flatMap(({ given, when, then }) => [given, when, then])
+        .join('\n');
+      if (!acceptanceText.includes(requirement.measurement.target)
+        && !acceptanceText.includes(requirement.measurement.metric)) {
+        throw new Error(`quality_measurement_not_falsifiable:${requirement.id}`);
+      }
     }
   }
 
@@ -368,6 +427,66 @@ export function assertSemanticDraft(draft, policy, {
   const materialDecisionIds = new Set(draft.unknowns
     .filter(({ material }) => material)
     .map(({ decisionId }) => decisionId));
+
+  const requirementSignalOwners = new Map();
+  for (const requirement of draft.requirements) {
+    for (const signalId of requirement.intentSignalIds) {
+      const signal = intentSignalsById.get(signalId);
+      if (signal === undefined) throw new Error(`requirement_references_unknown_intent_signal:${signalId}`);
+      const resolvedByHuman = requirement.basis.some(({ source, reference }) => (
+        source === 'USER_DECISION' && knownResolvedDecisions.has(reference)
+      ));
+      if ((signal.kind === 'QUALITY_CONSTRAINT' && requirement.kind !== 'QUALITY')
+        || (signal.kind === 'INCOMPLETE_EXPRESSION' && !resolvedByHuman)) {
+        throw new Error(`invalid_requirement_intent_signal:${requirement.id}:${signalId}`);
+      }
+      if (!resolvedByHuman && !basisCitesIntentSignal(requirement, signal)) {
+        throw new Error(`requirement_omits_intent_signal_basis:${requirement.id}:${signalId}`);
+      }
+      const owners = requirementSignalOwners.get(signalId) ?? [];
+      owners.push(requirement);
+      requirementSignalOwners.set(signalId, owners);
+    }
+  }
+  const unknownSignalOwners = new Map();
+  for (const unknown of draft.unknowns) {
+    for (const signalId of unknown.intentSignalIds) {
+      if (!intentSignalsById.has(signalId)) {
+        throw new Error(`unknown_references_unknown_intent_signal:${signalId}`);
+      }
+      if (!unknown.material || unknown.decisionId === null) {
+        throw new Error(`intent_signal_without_material_decision:${signalId}`);
+      }
+      if (!basisCitesIntentSignal(unknown, intentSignalsById.get(signalId))) {
+        throw new Error(`unknown_omits_intent_signal_basis:${unknown.id}:${signalId}`);
+      }
+      const owners = unknownSignalOwners.get(signalId) ?? [];
+      owners.push(unknown);
+      unknownSignalOwners.set(signalId, owners);
+    }
+  }
+  for (const signal of intentSignals) {
+    const requirements = requirementSignalOwners.get(signal.id) ?? [];
+    const unknowns = unknownSignalOwners.get(signal.id) ?? [];
+    if (signal.kind === 'INCOMPLETE_EXPRESSION') {
+      const unresolved = requirements.length === 0 && unknowns.length === 1;
+      const resolved = requirements.length === 1 && unknowns.length === 0;
+      if (!unresolved && !resolved) {
+        throw new Error(`incomplete_expression_not_deliberated:${signal.id}`);
+      }
+      continue;
+    }
+    if (requirements.length !== 1) {
+      throw new Error(`quality_constraint_without_measurable_requirement:${signal.id}`);
+    }
+    const resolvedByHuman = requirements[0].basis.some(({ source, reference }) => (
+      source === 'USER_DECISION' && knownResolvedDecisions.has(reference)
+    ));
+    const expectedUnknowns = signal.handling === 'MATERIAL_DECISION' && !resolvedByHuman ? 1 : 0;
+    if (unknowns.length !== expectedUnknowns) {
+      throw new Error(`quality_constraint_decision_mismatch:${signal.id}`);
+    }
+  }
 
   for (const decision of draft.decisions) {
     if (!materialDecisionIds.has(decision.questionId)) {
@@ -397,7 +516,6 @@ export function assertSemanticDraft(draft, policy, {
     ...policy.rules.map(({ id }) => id),
     ...(policy.amendments ?? []).map(({ id }) => id),
   ]);
-  const knownResolvedDecisions = new Set(resolvedDecisionIds);
   for (const claim of basisClaims(draft)) {
     for (const basis of claim.basis) {
       if (basis.source === 'USER_INTENT' && !intent.includes(basis.reference)) {
@@ -434,9 +552,45 @@ export function assertSemanticDraft(draft, policy, {
     'CONSTITUTION',
     'ARCHITECTURE_POLICY',
   ]);
+  const trustedTechnicalText = [
+    intent,
+    ...constitutionRules.map(({ statement }) => statement),
+    ...policy.rules.map(({ statement }) => statement),
+  ].join('\n');
   for (const requirement of draft.requirements) {
     if (!requirement.basis.some(({ source }) => authoritativeRequirementSources.has(source))) {
       throw new Error(`requirement_without_authoritative_basis:${requirement.id}`);
+    }
+    if (!requirement.basis.some(({ source }) => source === 'USER_DECISION')) {
+      const normativeText = [
+        requirement.statement,
+        ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
+        ...(requirement.measurement === null ? [] : Object.values(requirement.measurement)),
+      ].join('\n');
+      assertNoUnprovenTechnicalPrescription(
+        'requirement',
+        requirement.id,
+        normativeText,
+        trustedTechnicalText,
+      );
+    }
+  }
+  for (const invariant of draft.invariants) {
+    assertNoUnprovenTechnicalPrescription(
+      'invariant',
+      invariant.id,
+      `${invariant.statement}\n${invariant.falsification}`,
+      trustedTechnicalText,
+    );
+  }
+  for (const risk of draft.risks) {
+    if (!risk.basis.some(({ source }) => source === 'USER_DECISION')) {
+      assertNoUnprovenTechnicalPrescription(
+        'risk',
+        risk.id,
+        `${risk.statement}\n${risk.mitigation}`,
+        trustedTechnicalText,
+      );
     }
   }
   const contextualEvidenceSources = new Set(['USER_INTENT', 'USER_DECISION', 'WORKSPACE_EVIDENCE']);
@@ -586,7 +740,7 @@ export function compileSemanticContract({
     workspaceEvidence: buildSourceEvidence(repositoryRoot, preflight),
   });
   const contract = {
-    schema: 'aegis.issue_contract.v5',
+    schema: 'aegis.issue_contract.v6',
     implementationAuthorized: false,
     sourcePreflightDigest: preflight.preflightDigest,
     sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
@@ -594,6 +748,7 @@ export function compileSemanticContract({
     constitutionDigest,
     intent: preflight.intent,
     observedPaths: observedPaths(preflight),
+    intentSignals: detectIntentSignals(preflight.intent),
     policySignals: mechanicalPolicySignals(policy, preflight.intent),
     specification: draft,
     decisionSelections: draft.decisions.map((decision) => ({
@@ -602,7 +757,7 @@ export function compileSemanticContract({
     })),
     humanResolutions,
   };
-  assertSchema('aegis.issue_contract.v5', contract);
+  assertSchema('aegis.issue_contract.v6', contract);
   return contract;
 }
 
@@ -615,7 +770,7 @@ export function assertContractDocument({
   constitution,
   constitutionDigest,
 }) {
-  assertSchema('aegis.issue_contract.v5', contract);
+  assertSchema('aegis.issue_contract.v6', contract);
   assertSemanticDraft(contract.specification, policy, {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
@@ -630,6 +785,10 @@ export function assertContractDocument({
   if (contract.intent !== preflight.intent) throw new Error('contract_intent_mismatch');
   if (canonicalDigest(contract.observedPaths) !== canonicalDigest(observedPaths(preflight))) {
     throw new Error('contract_observed_paths_mismatch');
+  }
+  if (canonicalDigest(contract.intentSignals)
+    !== canonicalDigest(detectIntentSignals(preflight.intent))) {
+    throw new Error('contract_intent_signals_mismatch');
   }
   if (canonicalDigest(contract.policySignals)
     !== canonicalDigest(mechanicalPolicySignals(policy, preflight.intent))) {
@@ -763,6 +922,11 @@ export function renderSemanticContractMarkdown(contract, {
       .map(({ ruleId, kind, reference }) => `${ruleId}/${kind}: ${reference}`)
       .join('; ')}.`);
   }
+  if (contract.intentSignals.length > 0) {
+    lines.push(`- **Sinais da intenção:** ${contract.intentSignals
+      .map(({ id, kind, reference }) => `${id}/${kind}: ${reference}`)
+      .join('; ')}.`);
+  }
   if (compliantAssessments.length > 0) {
     lines.push(`- **Regras aplicáveis já conformes:** ${compliantAssessments.map(({ ruleId }) => ruleId).join(', ')}.`);
   }
@@ -787,6 +951,14 @@ export function renderSemanticContractMarkdown(contract, {
   lines.push('', '## 5. Requisitos e casos falsificáveis');
   for (const requirement of specification.requirements) {
     lines.push('', `### ${requirement.id}`, requirement.statement, `*Base: ${renderBasis(requirement.basis)}*`, '');
+    if (requirement.measurement !== null) {
+      lines.push(
+        `- **Medição:** ${requirement.measurement.metric}`,
+        `  - Método: ${requirement.measurement.method}`,
+        `  - Alvo: ${requirement.measurement.target}`,
+        `  - Condições: ${requirement.measurement.conditions}`,
+      );
+    }
     for (const acceptanceCase of requirement.acceptanceCases) {
       lines.push(
         `- **${acceptanceCase.id} — ${acceptanceCase.kind}**`,

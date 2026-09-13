@@ -95,7 +95,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v5') return null;
+  if (contract.schema !== 'aegis.issue_contract.v6') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -296,7 +296,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v5',
+    schema: 'aegis.semantic_state.v6',
     contract,
     contractDigest,
   };
@@ -315,7 +315,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v5',
+    schema: 'aegis.preflight_finalization.v6',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

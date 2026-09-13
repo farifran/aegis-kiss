@@ -129,7 +129,7 @@ printf '%s\n' "${draft_output}" | jq -e '
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
-  .schema == "aegis.semantic_request.v3"
+  .schema == "aegis.semantic_request.v4"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
@@ -137,12 +137,15 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and (.contextDigest | test("^[a-f0-9]{64}$"))
   and .delivery.constitution == "SYSTEM_INSTRUCTION"
   and .delivery.architecture == "TRUSTED_POLICY"
+  and .delivery.intentSignals == "MECHANICAL_REVIEW_OBLIGATIONS"
   and .delivery.workspace == "UNTRUSTED_EVIDENCE"
-  and .outputSchema.id == "aegis.semantic_draft.v2"
+  and .outputSchema.id == "aegis.semantic_draft.v3"
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
-  and .outputSchema.document."$id" == "aegis.semantic_draft.v2"
+  and .outputSchema.document."$id" == "aegis.semantic_draft.v3"
   and .outputSchema.document.properties.sourceContextDigest.const == .contextDigest
+  and .intentSignals.status == "CLEAR"
+  and .intentSignals.signals == []
   and (.outputSchema.document.required | index("requirements") != null)
   and .revision == null
   and .intent == "Criar calculadora de precisão"
@@ -187,10 +190,11 @@ const unknowns = withDecision ? [{
   statement: 'O formato público ainda precisa de confirmação.',
   material: true,
   decisionId: 'Q-FORMAT',
+  intentSignalIds: [],
   basis: [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão' }],
 }] : [];
 process.stdout.write(JSON.stringify({
-  schema: 'aegis.semantic_draft.v2',
+  schema: 'aegis.semantic_draft.v3',
   sourceContextDigest,
   title: 'Calculadora de precisão',
   interpretation: 'Definir o comportamento público de uma calculadora sem implementar o produto.',
@@ -221,8 +225,11 @@ process.stdout.write(JSON.stringify({
   },
   requirements: [{
     id: 'REQ-CALCULATE',
+    kind: 'FUNCTIONAL',
     statement: 'A calculadora deve produzir resultado determinístico para entradas válidas.',
     basis: requirementBasis,
+    intentSignalIds: [],
+    measurement: null,
     acceptanceCases: [
       { id: 'AC-CALCULATE-HAPPY', kind: 'HAPPY_PATH', given: 'Entradas válidas.', when: 'O cálculo for solicitado.', then: 'O resultado esperado deve ser retornado.' },
       { id: 'AC-CALCULATE-FAILURE', kind: 'FAILURE', given: 'Uma entrada inválida.', when: 'O cálculo for solicitado.', then: 'Uma falha explícita deve ser retornada.' },
@@ -316,10 +323,10 @@ semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.context
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v5"
+  .schema == "aegis.issue_contract.v6"
   and .implementationAuthorized == false
   and .intent == "Criar calculadora de precisão"
-  and .specification.schema == "aegis.semantic_draft.v2"
+  and .specification.schema == "aegis.semantic_draft.v3"
   and (.specification.requirements[0].acceptanceCases | length) == 2
   and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-FORMAT"}]
   and .humanResolutions == [{questionId:"Q-FORMAT",answerId:"ANS-DETAIL"}]
@@ -329,7 +336,7 @@ jq -e '
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v5"
+  .schema == "aegis.preflight_finalization.v6"
   and .status == "FINALIZED"
   and .implementationAuthorized == false
 ' >/dev/null
