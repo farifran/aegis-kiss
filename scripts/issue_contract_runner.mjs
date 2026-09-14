@@ -96,7 +96,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v9') return null;
+  if (contract.schema !== 'aegis.issue_contract.v10') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -157,6 +157,26 @@ async function handleDraft(args) {
 
 async function handleValidatePreflight() {
   await readPreflight();
+}
+
+async function handleValidateContract() {
+  const { assertContractDocument } = await import('./lib/semantic_contract.mjs');
+  const [contract, preflight, loadedPolicy, constitution] = await Promise.all([
+    readFile(contractJsonPath, 'utf8').then(JSON.parse),
+    readPreflight(),
+    readPolicy(),
+    readConstitution(),
+  ]);
+  await assertDiscoveryUnchanged(preflight);
+  assertContractDocument({
+    repositoryRoot: root,
+    contract,
+    preflight,
+    policy: loadedPolicy.policy,
+    policyDigest: loadedPolicy.policyDigest,
+    constitution,
+    constitutionDigest: constitution.digest,
+  });
 }
 
 async function handleSemanticRequest() {
@@ -236,6 +256,7 @@ async function handleSemanticCompile(args) {
     constitution,
     constitutionDigest: constitution.digest,
     humanResolutions: revision?.humanResolutions ?? [],
+    semanticRevision: request.revision,
   });
   const confirmation = buildConfirmationRequest(contract);
 
@@ -278,8 +299,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v9') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v9`);
+  if (draftContract.schema !== 'aegis.issue_contract.v10') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v10`);
   }
   assertContractDocument({
     repositoryRoot: root,
@@ -331,7 +352,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v9',
+    schema: 'aegis.semantic_state.v10',
     contract,
     contractDigest,
   };
@@ -349,7 +370,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v9',
+    schema: 'aegis.preflight_finalization.v10',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
@@ -384,6 +405,7 @@ const remainingArgs = process.argv.slice(3);
 try {
   if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'validate-preflight') await handleValidatePreflight();
+  else if (command === 'validate-contract') await handleValidateContract();
   else if (command === 'semantic-request') await handleSemanticRequest();
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();
@@ -396,7 +418,7 @@ try {
   const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
   const phase = command === 'draft' || command === 'validate-preflight'
     ? 'PREFLIGHT'
-    : command === 'semantic-request' || command === 'semantic-compile'
+    : command === 'semantic-request' || command === 'semantic-compile' || command === 'validate-contract'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';
   process.stderr.write(`${JSON.stringify({

@@ -129,20 +129,21 @@ printf '%s\n' "${draft_output}" | jq -e '
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
-  .schema == "aegis.semantic_request.v5"
+  .schema == "aegis.semantic_request.v6"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
   and (.constitution.rules | length) == 5
+  and (.requestDigest | test("^[a-f0-9]{64}$"))
   and (.contextDigest | test("^[a-f0-9]{64}$"))
   and .delivery.constitution == "SYSTEM_INSTRUCTION"
   and .delivery.architecture == "TRUSTED_POLICY"
   and .delivery.intentSignals == "MECHANICAL_REVIEW_OBLIGATIONS"
   and .delivery.workspace == "UNTRUSTED_EVIDENCE"
-  and .outputSchema.id == "aegis.semantic_draft.v5"
+  and .outputSchema.id == "aegis.semantic_draft.v6"
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
-  and .outputSchema.document."$id" == "aegis.semantic_draft.v5"
+  and .outputSchema.document."$id" == "aegis.semantic_draft.v6"
   and .outputSchema.document.properties.sourceContextDigest.const == .contextDigest
   and .intentSignals.status == "CLEAR"
   and .intentSignals.signals == []
@@ -197,7 +198,7 @@ const unknowns = withDecision ? [{
   basis: [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }],
 }] : [];
 process.stdout.write(JSON.stringify({
-  schema: 'aegis.semantic_draft.v5',
+  schema: 'aegis.semantic_draft.v6',
   sourceContextDigest,
   title: 'Calculadora de precisão',
   interpretation: 'Definir o comportamento público de uma calculadora sem implementar o produto.',
@@ -212,6 +213,7 @@ process.stdout.write(JSON.stringify({
       quote: 'Criar calculadora de precisão',
       kind: 'OBLIGATION',
       disposition: 'NORMATIVE',
+      contractEffect: 'Criar calculadora de precisão com resultado explícito para entradas válidas.',
       targetIds: ['REQ-CALCULATE'],
       rationale: 'A demanda solicita comportamento público da calculadora.',
     },
@@ -220,6 +222,7 @@ process.stdout.write(JSON.stringify({
       quote: 'formato ainda a escolher',
       kind: 'AMBIGUITY',
       disposition: 'DECISION',
+      contractEffect: null,
       targetIds: ['Q-FORMAT'],
       rationale: 'O formato foi deixado explicitamente aberto.',
     },
@@ -249,7 +252,7 @@ process.stdout.write(JSON.stringify({
   requirements: [{
     id: 'REQ-CALCULATE',
     kind: 'FUNCTIONAL',
-    statement: 'A calculadora deve produzir resultado explícito para entradas válidas.',
+    statement: 'Criar calculadora de precisão com resultado explícito para entradas válidas.',
     basis: requirementBasis,
     intentSignalIds: [],
     measurement: null,
@@ -344,7 +347,9 @@ jq -e '.approval == null and .humanResolutions == []' .harness/runtime/contract.
 wizard_output="$(printf '\ns\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma proposta'
 jq -e '
-  .schema == "aegis.issue_contract.v9"
+  .schema == "aegis.issue_contract.v10"
+  and (.sourceSemanticRequestDigest | test("^[a-f0-9]{64}$"))
+  and .semanticRevision == null
   and .approval.method == "INTERACTIVE_WIZARD"
   and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and .humanResolutions[0].questionId == "Q-FORMAT"
@@ -407,10 +412,10 @@ semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.context
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v9"
+  .schema == "aegis.issue_contract.v10"
   and .implementationAuthorized == false
   and .intent == "Criar calculadora de precisão com formato ainda a escolher"
-  and .specification.schema == "aegis.semantic_draft.v5"
+  and .specification.schema == "aegis.semantic_draft.v6"
   and (.specification.requirements[0].acceptanceCases | length) == 2
   and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-FORMAT"}]
   and .approval == null
@@ -430,7 +435,7 @@ jq -e '
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v9"
+  .schema == "aegis.preflight_finalization.v10"
   and .status == "FINALIZED"
   and .approvalMethod == "DIRECT_COMMAND"
   and .humanDecisionCount == 1
@@ -438,8 +443,8 @@ printf '%s\n' "${approve_output}" | jq -e '
 ' >/dev/null
 [[ -s .harness/state/semantic-state.json ]]
 jq -e '
-  .schema == "aegis.semantic_state.v9"
-  and .contract.schema == "aegis.issue_contract.v9"
+  .schema == "aegis.semantic_state.v10"
+  and .contract.schema == "aegis.issue_contract.v10"
   and .contract.approval.method == "DIRECT_COMMAND"
   and .contract.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and (.contract.approval.contractDraftDigest | test("^[a-f0-9]{64}$"))

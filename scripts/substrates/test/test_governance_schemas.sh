@@ -47,6 +47,7 @@ const schemaFiles = [
   'issue-contract.v7.schema.json',
   'issue-contract.v8.schema.json',
   'issue-contract.v9.schema.json',
+  'issue-contract.v10.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -55,11 +56,13 @@ const schemaFiles = [
   'semantic-draft.v3.schema.json',
   'semantic-draft.v4.schema.json',
   'semantic-draft.v5.schema.json',
+  'semantic-draft.v6.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
   'semantic-request.v3.schema.json',
   'semantic-request.v4.schema.json',
   'semantic-request.v5.schema.json',
+  'semantic-request.v6.schema.json',
   'semantic-resolution.v1.schema.json',
   'semantic-resolution.v2.schema.json',
 ];
@@ -119,11 +122,13 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v5', semanticRequest);
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v5');
+assertSchema('aegis.semantic_request.v6', semanticRequest);
+const { requestDigest: semanticRequestDigest, ...semanticRequestPayload } = semanticRequest;
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v6');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
+  || semanticRequestDigest !== canonicalDigest(semanticRequestPayload)
   || semanticRequest.outputSchema.digest !== canonicalDigest(expectedOutputSchema)
   || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)
   || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
@@ -176,7 +181,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v5',
+  schema: 'aegis.semantic_draft.v6',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -191,6 +196,7 @@ const draft = {
       quote: 'comportamento observável',
       kind: 'OBLIGATION',
       disposition: 'NORMATIVE',
+      contractEffect: 'A operação deve produzir comportamento observável para toda entrada.',
       targetIds: ['REQ-RESULT'],
       rationale: 'A demanda solicita comportamento público observável.',
     },
@@ -199,6 +205,7 @@ const draft = {
       quote: 'formato ainda a escolher',
       kind: 'AMBIGUITY',
       disposition: 'DECISION',
+      contractEffect: null,
       targetIds: ['Q-FORMAT'],
       rationale: 'A demanda declara que o formato permanece aberto.',
     },
@@ -228,7 +235,7 @@ const draft = {
   requirements: [{
     id: 'REQ-RESULT',
     kind: 'FUNCTIONAL',
-    statement: 'A operação deve retornar resultado explícito.',
+    statement: 'A operação deve produzir comportamento observável para toda entrada.',
     basis: userBasis,
     intentSignalIds: [],
     measurement: null,
@@ -341,13 +348,34 @@ assertContractDocument({
 });
 if (contract.intent !== preflight.intent
   || contract.implementationAuthorized !== false
+  || contract.sourceSemanticRequestDigest !== semanticRequest.requestDigest
+  || contract.semanticRevision !== null
   || contract.constitutionDigest !== constitution.digest
-  || contract.schema !== 'aegis.issue_contract.v9'
+  || contract.schema !== 'aegis.issue_contract.v10'
   || contract.approval !== null
   || contract.humanResolutions.length !== 0
   || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
   throw new Error('mechanical_contract_fields_were_not_injected');
 }
+const tamperedSemanticRequestDigest = {
+  ...contract,
+  sourceSemanticRequestDigest: '0'.repeat(64),
+};
+let semanticRequestTamperRejected = false;
+try {
+  assertContractDocument({
+    repositoryRoot: process.cwd(),
+    contract: tamperedSemanticRequestDigest,
+    preflight,
+    policy: loadedPolicy.policy,
+    policyDigest: loadedPolicy.policyDigest,
+    constitution,
+    constitutionDigest: constitution.digest,
+  });
+} catch {
+  semanticRequestTamperRejected = true;
+}
+if (!semanticRequestTamperRejected) throw new Error('semantic_request_digest_was_not_bound');
 const humanContract = renderSemanticContractMarkdown(contract, {
   policyRules: loadedPolicy.policy.rules,
 });
@@ -357,11 +385,11 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v9', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v10', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
-const gapIntent = 'Processar em alta frequência com fração () e volume acima de .';
+const gapIntent = 'Processar em alta frequência com fração cuja fórmula ainda deve ser escolhida () e volume acima de .';
 const gapPreflight = buildPreflightHandoff({
   demand: gapIntent,
   discovery: discoverWorkspace(process.cwd(), gapIntent),
@@ -387,6 +415,19 @@ if (quantifiedQualitySignals.length !== 2
   || quantifiedQualitySignals[1].handling !== 'NON_NORMATIVE_GOAL') {
   throw new Error('quality_goal_was_promoted_to_fabricated_target');
 }
+const allocationSignals = detectIntentSignals('Executar sem recorrer a ponto flutuante, bibliotecas externas ou alocações intermediárias de buffers no hot path (Zero-GC friendly).');
+if (allocationSignals.length !== 2
+  || allocationSignals[0].kind !== 'QUALITY_CONSTRAINT'
+  || allocationSignals[0].handling !== 'MEASURABLE_REQUIREMENT'
+  || allocationSignals[1].kind !== 'QUALITY_GOAL'
+  || allocationSignals[1].handling !== 'NON_NORMATIVE_GOAL') {
+  throw new Error('explicit_allocation_prohibition_was_weakened_to_goal');
+}
+const arithmeticSignals = detectIntentSignals('Calcular uma saída de 64 bits usando multiplicação e XOR.');
+if (!arithmeticSignals.some(({ kind }) => kind === 'BOUNDED_VALUE')
+  || arithmeticSignals.filter(({ kind }) => kind === 'ARITHMETIC_SEMANTICS').length !== 2) {
+  throw new Error('bounded_arithmetic_was_confused_with_output_width');
+}
 
 const gapDraft = structuredClone(draft);
 gapDraft.sourceContextDigest = gapRequest.contextDigest;
@@ -396,6 +437,7 @@ gapDraft.intentClaims = [
     quote: 'Processar',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'Processar com resultado público explícito.',
     targetIds: ['REQ-RESULT'],
     rationale: 'A demanda solicita processamento observável.',
   },
@@ -404,14 +446,16 @@ gapDraft.intentClaims = [
     quote: 'alta frequência',
     kind: 'GOAL',
     disposition: 'NON_NORMATIVE',
+    contractEffect: null,
     targetIds: ['NOTE-HIGH-FREQUENCY'],
     rationale: 'Não há alvo quantitativo autorizado.',
   },
   {
     id: 'CLAIM-FRACTION-GAP',
-    quote: '()',
+    quote: 'fórmula ainda deve ser escolhida ()',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'A fórmula está ausente.',
   },
@@ -420,6 +464,7 @@ gapDraft.intentClaims = [
     quote: 'acima de',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-EXPRESSION'],
     rationale: 'O comparador não informa o limite.',
   },
@@ -433,7 +478,7 @@ gapDraft.nonNormativeItems = [{
   basis: [{ source: 'USER_INTENT', reference: 'alta frequência' }],
 }];
 gapDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'Processar' }];
-gapDraft.requirements[0].statement = 'O processamento deve ter resultado público explícito.';
+gapDraft.requirements[0].statement = 'Processar com resultado público explícito.';
 gapDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'Processar' }];
 gapDraft.requirements[0].intentSignalIds = [];
 gapDraft.requirements[0].acceptanceCases[0].then = 'A fração deve seguir a fórmula explicitamente escolhida.';
@@ -445,7 +490,7 @@ gapDraft.unknowns = [
     material: true,
     decisionId: 'Q-FORMAT',
     intentSignalIds: [gapSignals[1].id],
-    basis: [{ source: 'USER_INTENT', reference: '()' }],
+    basis: [{ source: 'USER_INTENT', reference: 'fórmula ainda deve ser escolhida ()' }],
   },
   {
     id: 'UNKNOWN-LIMIT',
@@ -582,6 +627,21 @@ for (const mutate of [
   (value) => { value.decisions[0].answers[0].contractEffect = 'Efeito apenas nominal.'; },
   (value) => { value.scope.inScope = ['src/index.ts']; },
   (value) => { value.requirements[0].statement += ' usando BigUint64Array.'; },
+  (value) => { value.intentClaims[0].contractEffect = 'Efeito que omite a citação literal.'; },
+  (value) => { value.requirements[0].statement = 'Resultado público explícito.'; },
+  (value) => {
+    value.intentClaims.find(({ id }) => id === 'CLAIM-FRACTION-GAP').quote = '()';
+    value.unknowns.find(({ id }) => id === 'UNKNOWN-FRACTION').basis = [
+      { source: 'USER_INTENT', reference: '()' },
+    ];
+  },
+  (value) => {
+    const decision = value.decisions.find(({ questionId }) => questionId === 'Q-EXPRESSION');
+    const inventedEffect = 'O limite comparado deve ser 1000000.';
+    decision.answers.find(({ id }) => id === decision.recommendedAnswerId).contractEffect = inventedEffect;
+    value.requirements[0].acceptanceCases
+      .find(({ decisionBinding }) => decisionBinding?.questionId === decision.questionId).then = inventedEffect;
+  },
 ]) {
   const invalid = structuredClone(gapDraft);
   mutate(invalid);
@@ -631,6 +691,7 @@ deterministicDraft.intentClaims = [
     quote: 'saída determinística',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'A saída determinística deve ser explícita.',
     targetIds: ['REQ-RESULT'],
     rationale: 'A demanda promete resultado determinístico.',
   },
@@ -639,24 +700,45 @@ deterministicDraft.intentClaims = [
     quote: 'formato ainda a escolher',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'O formato permanece aberto.',
   },
 ];
 deterministicDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
-deterministicDraft.requirements[0].statement = 'A saída deve ser determinística e explícita.';
+deterministicDraft.requirements[0].statement = 'A saída determinística deve ser explícita.';
 deterministicDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
+deterministicDraft.requirements[0].acceptanceCases.push({
+  id: 'AC-DETERMINISTIC-REPLAY',
+  kind: 'HAPPY_PATH',
+  given: 'A mesma entrada válida em duas execuções.',
+  when: 'A operação for repetida sob o mesmo contexto.',
+  then: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
+  decisionBinding: null,
+  boundaryBinding: null,
+});
 deterministicDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }];
 deterministicDraft.determinismReview = {
   status: 'COMPLETE',
-  rationale: 'A única dimensão aplicável está coberta pela especificação.',
+  rationale: 'Todas as dimensões universais foram classificadas e a dimensão aplicável possui prova exata.',
   intentSignalIds: [deterministicSignal.id],
-  dimensions: [{
-    kind: 'CANONICALIZATION',
-    status: 'SPECIFIED',
-    rationale: 'O requisito e sua prova definem um único resultado observável.',
-    targetIds: ['REQ-RESULT'],
-  }],
+  dimensions: [
+    { kind: 'ORDERING', status: 'NOT_APPLICABLE', rationale: 'Não há coleção ou sequência observável.', targetIds: [] },
+    {
+      kind: 'CANONICALIZATION',
+      status: 'SPECIFIED',
+      rationale: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
+      targetIds: ['REQ-RESULT'],
+    },
+    { kind: 'DUPLICATES', status: 'NOT_APPLICABLE', rationale: 'Não há coleção com duplicatas.', targetIds: [] },
+    { kind: 'EMPTY_INPUT', status: 'NOT_APPLICABLE', rationale: 'A entrada vazia não integra a promessa de determinismo.', targetIds: [] },
+    { kind: 'ODD_CARDINALITY', status: 'NOT_APPLICABLE', rationale: 'Não há estrutura pareada.', targetIds: [] },
+    { kind: 'ROUNDING_REMAINDER', status: 'NOT_APPLICABLE', rationale: 'Não há divisão ou arredondamento.', targetIds: [] },
+    { kind: 'ZERO_DIVISOR', status: 'NOT_APPLICABLE', rationale: 'Não há divisão.', targetIds: [] },
+    { kind: 'TIE_BREAKING', status: 'NOT_APPLICABLE', rationale: 'Não há escolhas empatadas.', targetIds: [] },
+    { kind: 'COUNTING_IDENTITY', status: 'NOT_APPLICABLE', rationale: 'Não há contagem de identidades.', targetIds: [] },
+    { kind: 'BOUNDED_ARITHMETIC', status: 'NOT_APPLICABLE', rationale: 'Não há aritmética de largura fixa.', targetIds: [] },
+  ],
 };
 const deterministicContext = {
   constitutionRules: constitution.rules,
@@ -680,7 +762,20 @@ try {
 }
 if (!omittedDeterminismRejected) throw new Error('determinism_review_was_optional');
 
-const exampleIntent = 'Garantir integridade criptográfica, como FNV-1a, com primitiva ainda a escolher.';
+const falselySpecifiedDeterminism = structuredClone(deterministicDraft);
+falselySpecifiedDeterminism.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').status = 'SPECIFIED';
+falselySpecifiedDeterminism.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').targetIds = ['REQ-RESULT'];
+let falseClosureRejected = false;
+try {
+  assertSemanticDraft(falselySpecifiedDeterminism, loadedPolicy.policy, deterministicContext);
+} catch {
+  falseClosureRejected = true;
+}
+if (!falseClosureRejected) throw new Error('determinism_dimension_closed_by_reference_only');
+
+const exampleIntent = 'Garantir integridade criptográfica (como FNV-1a), com primitiva ainda a escolher.';
 const examplePreflight = buildPreflightHandoff({
   demand: exampleIntent,
   discovery: discoverWorkspace(process.cwd(), exampleIntent),
@@ -691,6 +786,11 @@ const exampleRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
+const exampleSignal = exampleRequest.intentSignals.signals
+  .find(({ kind }) => kind === 'EXAMPLE');
+if (exampleSignal?.handling !== 'NON_NORMATIVE_EXAMPLE') {
+  throw new Error('explicit_example_was_not_detected');
+}
 const exampleDraft = structuredClone(draft);
 exampleDraft.sourceContextDigest = exampleRequest.contextDigest;
 exampleDraft.intentClaims = [
@@ -699,6 +799,7 @@ exampleDraft.intentClaims = [
     quote: 'integridade criptográfica',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'A operação deve garantir integridade criptográfica.',
     targetIds: ['REQ-RESULT'],
     rationale: 'A garantia observável é normativa.',
   },
@@ -707,6 +808,7 @@ exampleDraft.intentClaims = [
     quote: 'como FNV-1a',
     kind: 'EXAMPLE',
     disposition: 'NON_NORMATIVE',
+    contractEffect: null,
     targetIds: ['NOTE-HASH-EXAMPLE'],
     rationale: 'O marcador “como” apresenta exemplo, não obrigação.',
   },
@@ -715,6 +817,7 @@ exampleDraft.intentClaims = [
     quote: 'primitiva ainda a escolher',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'A primitiva material permanece aberta.',
   },
@@ -724,11 +827,11 @@ exampleDraft.nonNormativeItems = [{
   kind: 'EXAMPLE',
   statement: 'FNV-1a foi citado apenas como exemplo e não constitui obrigação contratual.',
   status: 'NON_NORMATIVE',
-  intentSignalIds: [],
+  intentSignalIds: [exampleSignal.id],
   basis: [{ source: 'USER_INTENT', reference: 'como FNV-1a' }],
 }];
 exampleDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'integridade criptográfica' }];
-exampleDraft.requirements[0].statement = 'A integridade pública deve cumprir a garantia criptográfica escolhida.';
+exampleDraft.requirements[0].statement = 'A operação deve garantir integridade criptográfica.';
 exampleDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'integridade criptográfica' }];
 exampleDraft.requirements[0].acceptanceCases[0].then = 'A primitiva escolhida deve satisfazer a garantia criptográfica declarada.';
 exampleDraft.unknowns[0].statement = 'A garantia e o exemplo podem exigir primitivas incompatíveis.';
@@ -790,6 +893,7 @@ pathDraft.intentClaims = [
     quote: 'Expor o resultado por src/index.ts',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'Expor o resultado por src/index.ts como superfície pública.',
     targetIds: ['REQ-RESULT'],
     rationale: 'A superfície pública foi exigida.',
   },
@@ -798,6 +902,7 @@ pathDraft.intentClaims = [
     quote: 'src/engine.ts é somente uma sugestão',
     kind: 'OPTION',
     disposition: 'NON_NORMATIVE',
+    contractEffect: null,
     targetIds: ['PATH-ENGINE-SUGGESTION'],
     rationale: 'A própria demanda declara o caminho como sugestão.',
   },
@@ -806,6 +911,7 @@ pathDraft.intentClaims = [
     quote: 'formato ainda a escolher',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'O formato continua aberto.',
   },
@@ -830,7 +936,7 @@ pathDraft.pathReferences = [
 ];
 pathDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'src/index.ts' }];
 pathDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'Expor o resultado por src/index.ts' }];
-pathDraft.requirements[0].statement = 'O resultado deve ser exposto publicamente por src/index.ts.';
+pathDraft.requirements[0].statement = 'Expor o resultado por src/index.ts como superfície pública.';
 pathDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }];
 const pathContext = {
   constitutionRules: constitution.rules,
@@ -880,6 +986,7 @@ boundedDraft.intentClaims = [
     quote: 'Bits 4–9',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'Bits 4–9 devem representar a quantidade pública.',
     targetIds: ['REQ-RESULT', 'BOUND-PARTICIPANTS'],
     rationale: 'A demanda define uma representação pública finita.',
   },
@@ -888,13 +995,14 @@ boundedDraft.intentClaims = [
     quote: 'política fora do limite ainda deve ser escolhida',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'O comportamento fora da faixa permanece aberto.',
   },
 ];
 boundedDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'Bits 4–9' }];
 boundedDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'Bits 4–9' }];
-boundedDraft.requirements[0].statement = 'A quantidade pública deve ocupar o campo de seis bits indicado.';
+boundedDraft.requirements[0].statement = 'Bits 4–9 devem representar a quantidade pública.';
 boundedDraft.requirements[0].acceptanceCases[0].decisionBinding = null;
 boundedDraft.requirements[0].acceptanceCases[1] = {
   id: 'AC-RESULT-FAILURE',
@@ -994,6 +1102,7 @@ fixedWidthDraft.intentClaims = [{
   quote: '64 bits',
   kind: 'OBLIGATION',
   disposition: 'NORMATIVE',
+  contractEffect: 'O identificador público deve ter exatamente 64 bits.',
   targetIds: ['REQ-RESULT', 'BOUND-FIXED-WIDTH'],
   rationale: 'A demanda exige largura pública exata.',
 }];
@@ -1216,6 +1325,7 @@ enforcedHardConflict.intentClaims.push({
   quote: 'Criar',
   kind: 'OBLIGATION',
   disposition: 'POLICY_CORRECTION',
+  contractEffect: null,
   targetIds: ['ARCH-PRODUCT-BOUNDARY'],
   rationale: 'O teste torna explícita a correção constitucional aplicada.',
 });
@@ -1253,6 +1363,7 @@ deliberableDefaultConflict.intentClaims.push({
   quote: 'teste',
   kind: 'OBLIGATION',
   disposition: 'POLICY_CORRECTION',
+  contractEffect: null,
   targetIds: ['ARCH-STRICT-EXPLICIT-MODULES'],
   rationale: 'A forma técnica conflitante precisa de disposição explícita.',
 });
@@ -1290,6 +1401,7 @@ redFlagDraft.intentClaims = [
     quote: 'src/index.ts',
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
+    contractEffect: 'O resultado público deve ser exposto por src/index.ts com tipagem e falhas explícitas.',
     targetIds: ['REQ-RESULT'],
     rationale: 'A demanda exige esta superfície de produto.',
   },
@@ -1298,6 +1410,7 @@ redFlagDraft.intentClaims = [
     quote: 'any, AbstractCycleResolver e try/catch vazios',
     kind: 'OBLIGATION',
     disposition: 'POLICY_CORRECTION',
+    contractEffect: null,
     targetIds: [
       'ARCH-STRICT-EXPLICIT-MODULES',
       'ARCH-PARSIMONY',
@@ -1310,6 +1423,7 @@ redFlagDraft.intentClaims = [
     quote: 'formato ainda a escolher',
     kind: 'AMBIGUITY',
     disposition: 'DECISION',
+    contractEffect: null,
     targetIds: ['Q-FORMAT'],
     rationale: 'A forma pública final permanece aberta.',
   },
@@ -1487,6 +1601,7 @@ parsimonyDraft.intentClaims = [{
   quote: 'AbstractCycleResolver',
   kind: 'OBLIGATION',
   disposition: 'NORMATIVE',
+  contractEffect: 'A solução deve usar AbstractCycleResolver conforme exigência humana explícita.',
   targetIds: ['REQ-RESULT'],
   rationale: 'A forma técnica foi exigida textualmente neste cenário de teste.',
 }];
@@ -1531,7 +1646,7 @@ const parsimonyContext = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v9',
+  schema: 'aegis.semantic_state.v10',
   contract: approvedContract,
   contractDigest: canonicalDigest(approvedContract),
 };

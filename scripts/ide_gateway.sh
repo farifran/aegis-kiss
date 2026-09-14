@@ -36,6 +36,10 @@ preflight_is_valid() {
   node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" validate-preflight >/dev/null 2>&1
 }
 
+contract_is_valid() {
+  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" validate-contract >/dev/null 2>&1
+}
+
 status_command() {
   local contract_file="${RUNTIME_DIR}/contract.json"
   local preflight_file="${RUNTIME_DIR}/preflight.json"
@@ -44,10 +48,12 @@ status_command() {
   if [[ -f "${contract_file}" ]]; then
     local contract_schema
     contract_schema="$(jq -r '.schema // "INVALID"' "${contract_file}" 2>/dev/null || printf 'INVALID')"
-    if [[ "${contract_schema}" != "aegis.issue_contract.v9" ]]; then
-      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v9"}\n' "${contract_schema}"
+    if [[ "${contract_schema}" != "aegis.issue_contract.v10" ]]; then
+      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v10"}\n' "${contract_schema}"
     elif [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
       printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
+    elif ! contract_is_valid; then
+      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","reason":"INVALID_OR_STALE_CONTRACT"}\n'
     elif [[ -f "${confirmation_file}" ]] || [[ ! -f "${semantic_file}" ]]; then
       printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
     else
