@@ -2,12 +2,17 @@ const signalLimit = 32;
 const contextRadius = 80;
 
 const qualityPatterns = [
-  { pattern: /\bzero[- ]?gc(?:\s+friendly)?\b/giu, implicitTarget: true },
-  { pattern: /\b(?:zero[- ]?allocation|no[- ]?allocation|sem\s+aloca(?:ç|c)(?:ão|ões))\b/giu, implicitTarget: true },
-  { pattern: /\b(?:alta|high)[ -]?frequ[eê]ncia\b/giu, implicitTarget: false },
-  { pattern: /\b(?:(?:baixa|low)[ -]?)?lat[eê]ncia\b/giu, implicitTarget: false },
-  { pattern: /\b(?:performance|desempenho|throughput|vaz(?:ã|a)o|escalabilidade|scalability)\b/giu, implicitTarget: false },
-  { pattern: /\b(?:r[aá]pid[oa]s?|fast)\b/giu, implicitTarget: false },
+  { pattern: /\bzero[- ]?gc(?:\s+friendly)?\b/giu, mode: 'GOAL' },
+  { pattern: /\b(?:zero[- ]?allocation|no[- ]?allocation|sem\s+aloca(?:ç|c)(?:ão|ões))\b/giu, mode: 'EXPLICIT_TARGET' },
+  { pattern: /\b(?:alta|high)[ -]?frequ[eê]ncia\b/giu, mode: 'QUANTIFIED_WHEN_EXPLICIT' },
+  { pattern: /\b(?:(?:baixa|low)[ -]?)?lat[eê]ncia\b/giu, mode: 'QUANTIFIED_WHEN_EXPLICIT' },
+  { pattern: /\b(?:performance|desempenho|throughput|vaz(?:ã|a)o|escalabilidade|scalability)\b/giu, mode: 'QUANTIFIED_WHEN_EXPLICIT' },
+  { pattern: /\b(?:r[aá]pid[oa]s?|fast)\b/giu, mode: 'QUANTIFIED_WHEN_EXPLICIT' },
+];
+
+const determinismPatterns = [
+  /\b(?:determin(?:ismo|ista|[ií]stic[oa]s?)|reprodut[ií]vel|reproducible)\b/giu,
+  /\bmesm[ao]\s+entrada[^.!?\n]{0,80}\bmesm[ao]\s+resultado\b/giu,
 ];
 
 const boundedValuePatterns = [
@@ -65,13 +70,30 @@ function collectIncompleteExpressions(intent) {
 
 function collectQualityClaims(intent) {
   const signals = [];
-  for (const { pattern, implicitTarget } of qualityPatterns) {
+  for (const { pattern, mode } of qualityPatterns) {
+    for (const match of intent.matchAll(pattern)) {
+      const measurable = mode === 'EXPLICIT_TARGET'
+        || (mode === 'QUANTIFIED_WHEN_EXPLICIT'
+          && /\d/u.test(nearbyText(intent, match.index, match[0].length)));
+      signals.push({
+        kind: measurable ? 'QUALITY_CONSTRAINT' : 'QUALITY_GOAL',
+        handling: measurable ? 'MEASURABLE_REQUIREMENT' : 'NON_NORMATIVE_GOAL',
+        offset: match.index,
+        reference: match[0],
+        excerpt: excerptAt(intent, match.index, match[0].length),
+      });
+    }
+  }
+  return signals;
+}
+
+function collectDeterminismClaims(intent) {
+  const signals = [];
+  for (const pattern of determinismPatterns) {
     for (const match of intent.matchAll(pattern)) {
       signals.push({
-        kind: 'QUALITY_CONSTRAINT',
-        handling: implicitTarget || /\d/u.test(nearbyText(intent, match.index, match[0].length))
-          ? 'MEASURABLE_REQUIREMENT'
-          : 'MATERIAL_DECISION',
+        kind: 'DETERMINISM_CLAIM',
+        handling: 'DETERMINISM_REVIEW',
         offset: match.index,
         reference: match[0],
         excerpt: excerptAt(intent, match.index, match[0].length),
@@ -108,6 +130,7 @@ export function detectIntentSignals(intent) {
     ...collectIncompleteExpressions(intent),
     ...collectQualityClaims(intent),
     ...collectBoundedValues(intent),
+    ...collectDeterminismClaims(intent),
   ].sort((left, right) => left.offset - right.offset
     || right.reference.length - left.reference.length
     || (left.kind < right.kind ? -1 : 1));

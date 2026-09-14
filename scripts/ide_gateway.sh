@@ -44,8 +44,8 @@ status_command() {
   if [[ -f "${contract_file}" ]]; then
     local contract_schema
     contract_schema="$(jq -r '.schema // "INVALID"' "${contract_file}" 2>/dev/null || printf 'INVALID')"
-    if [[ "${contract_schema}" != "aegis.issue_contract.v8" ]]; then
-      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v8"}\n' "${contract_schema}"
+    if [[ "${contract_schema}" != "aegis.issue_contract.v9" ]]; then
+      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v9"}\n' "${contract_schema}"
     elif [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
       printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
     elif [[ -f "${confirmation_file}" ]] || [[ ! -f "${semantic_file}" ]]; then
@@ -123,7 +123,7 @@ resolve_preflight_wizard() {
 
   local request_schema
   request_schema="$(jq -r '.schema // empty' <<< "${result}")"
-  if [[ "${request_schema}" != "aegis.confirmation_request.v3" ]]; then
+  if [[ "${request_schema}" != "aegis.confirmation_request.v4" ]]; then
     printf '\n[AEGIS] Este rascunho usa um contrato anterior. A intenção permanece no preflight, mas precisa de nova deliberação semântica antes do Wizard.\n' >&2
     return
   fi
@@ -153,7 +153,7 @@ resolve_preflight_wizard() {
       "$(jq -r '.acceptanceCaseIds | join(", ")' <<< "${question}")" \
       "$(jq -r '.invariantIds | join(", ")' <<< "${question}")" \
       "$(jq -r '.riskIds | join(", ")' <<< "${question}")" >&2
-    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     \(.value.rationale)"' <<< "${question}" >&2
+    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"' <<< "${question}" >&2
     printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
     while true; do
       read -r -p "Escolha [${recommended_index} recomendado]: " choice

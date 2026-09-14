@@ -117,7 +117,7 @@ printf '%s\n' "${arity_output}" | jq -e '.reason == "INVALID_DEMAND_ARITY"' >/de
 # Uma nova demanda substitui integralmente o runtime, mas nunca altera src/.
 printf '{}\n' > .harness/runtime/contract.json
 printf '{}\n' > .harness/runtime/stale.json
-draft_output="$(bash ./aegis 'Criar calculadora de precisão')"
+draft_output="$(bash ./aegis 'Criar calculadora de precisão com formato ainda a escolher')"
 printf '%s\n' "${draft_output}" | jq -e '
   .schema == "aegis.preflight_handoff.v2"
   and .status == "SEMANTIC_DELIBERATION_REQUIRED"
@@ -129,7 +129,7 @@ printf '%s\n' "${draft_output}" | jq -e '
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
-  .schema == "aegis.semantic_request.v4"
+  .schema == "aegis.semantic_request.v5"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
@@ -139,16 +139,16 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and .delivery.architecture == "TRUSTED_POLICY"
   and .delivery.intentSignals == "MECHANICAL_REVIEW_OBLIGATIONS"
   and .delivery.workspace == "UNTRUSTED_EVIDENCE"
-  and .outputSchema.id == "aegis.semantic_draft.v4"
+  and .outputSchema.id == "aegis.semantic_draft.v5"
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
-  and .outputSchema.document."$id" == "aegis.semantic_draft.v4"
+  and .outputSchema.document."$id" == "aegis.semantic_draft.v5"
   and .outputSchema.document.properties.sourceContextDigest.const == .contextDigest
   and .intentSignals.status == "CLEAR"
   and .intentSignals.signals == []
   and (.outputSchema.document.required | index("requirements") != null)
   and .revision == null
-  and .intent == "Criar calculadora de precisão"
+  and .intent == "Criar calculadora de precisão com formato ainda a escolher"
   and (.policy.rules | length) == 7
   and (.policy.contexts | length) == 14
   and (.workspace.observedTextPaths == ["src/index.ts"])
@@ -170,9 +170,12 @@ import { readFileSync } from 'node:fs';
 const mode = process.argv[2];
 const sourceContextDigest = process.argv[3];
 const withDecision = mode === 'yes';
+const selectedEffect = mode === 'resolved'
+  ? 'Um resultado com metadados adicionais deve ser retornado.'
+  : 'O resultado esperado deve ser retornado.';
 const requirementBasis = mode === 'resolved'
   ? [{ source: 'USER_DECISION', reference: 'Q-FORMAT' }]
-  : [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão' }];
+  : [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão com formato ainda a escolher' }];
 const decisions = withDecision ? [{
   questionId: 'Q-FORMAT',
   question: 'Qual formato público deve ser usado?',
@@ -181,8 +184,8 @@ const decisions = withDecision ? [{
   invariantIds: ['INV-DETERMINISTIC'],
   riskIds: [],
   answers: [
-    { id: 'ANS-SIMPLE', label: 'Resultado simples', rationale: 'Menor superfície pública.', recommended: true },
-    { id: 'ANS-DETAIL', label: 'Resultado detalhado', rationale: 'Expõe metadados adicionais.', recommended: false },
+    { id: 'ANS-SIMPLE', label: 'Resultado simples', rationale: 'Menor superfície pública.', contractEffect: 'O resultado esperado deve ser retornado.', recommended: true },
+    { id: 'ANS-DETAIL', label: 'Resultado detalhado', rationale: 'Expõe metadados adicionais.', contractEffect: 'Um resultado com metadados adicionais deve ser retornado.', recommended: false },
   ],
 }] : [];
 const unknowns = withDecision ? [{
@@ -191,10 +194,10 @@ const unknowns = withDecision ? [{
   material: true,
   decisionId: 'Q-FORMAT',
   intentSignalIds: [],
-  basis: [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão' }],
+  basis: [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }],
 }] : [];
 process.stdout.write(JSON.stringify({
-  schema: 'aegis.semantic_draft.v4',
+  schema: 'aegis.semantic_draft.v5',
   sourceContextDigest,
   title: 'Calculadora de precisão',
   interpretation: 'Definir o comportamento público de uma calculadora sem implementar o produto.',
@@ -203,11 +206,30 @@ process.stdout.write(JSON.stringify({
     inScope: ['Definir o comportamento público da calculadora.'],
     outOfScope: ['Interface gráfica da calculadora.'],
   },
+  intentClaims: [
+    {
+      id: 'CLAIM-CALCULATOR',
+      quote: 'Criar calculadora de precisão',
+      kind: 'OBLIGATION',
+      disposition: 'NORMATIVE',
+      targetIds: ['REQ-CALCULATE'],
+      rationale: 'A demanda solicita comportamento público da calculadora.',
+    },
+    {
+      id: 'CLAIM-CALCULATOR-FORMAT',
+      quote: 'formato ainda a escolher',
+      kind: 'AMBIGUITY',
+      disposition: 'DECISION',
+      targetIds: ['Q-FORMAT'],
+      rationale: 'O formato foi deixado explicitamente aberto.',
+    },
+  ],
+  nonNormativeItems: [],
   pathReferences: [],
   architectureContexts: [{
     tag: 'product-demand',
     rationale: 'A demanda define comportamento público do produto.',
-    basis: [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão' }],
+    basis: [{ source: 'USER_INTENT', reference: 'Criar calculadora de precisão com formato ainda a escolher' }],
   }],
   policyAssessments: JSON.parse(readFileSync('governance/architecture.policy.json', 'utf8')).rules
     .filter((rule) => rule.appliesWhen.includes('product-demand'))
@@ -227,19 +249,19 @@ process.stdout.write(JSON.stringify({
   requirements: [{
     id: 'REQ-CALCULATE',
     kind: 'FUNCTIONAL',
-    statement: 'A calculadora deve produzir resultado determinístico para entradas válidas.',
+    statement: 'A calculadora deve produzir resultado explícito para entradas válidas.',
     basis: requirementBasis,
     intentSignalIds: [],
     measurement: null,
     acceptanceCases: [
-      { id: 'AC-CALCULATE-HAPPY', kind: 'HAPPY_PATH', given: 'Entradas válidas.', when: 'O cálculo for solicitado.', then: 'O resultado esperado deve ser retornado.', decisionBinding: withDecision ? { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' } : null },
-      { id: 'AC-CALCULATE-FAILURE', kind: 'FAILURE', given: 'Uma entrada inválida.', when: 'O cálculo for solicitado.', then: 'Uma falha explícita deve ser retornada.', decisionBinding: null },
+      { id: 'AC-CALCULATE-HAPPY', kind: 'HAPPY_PATH', given: 'Entradas válidas.', when: 'O cálculo for solicitado.', then: selectedEffect, decisionBinding: withDecision ? { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' } : null, boundaryBinding: null },
+      { id: 'AC-CALCULATE-FAILURE', kind: 'FAILURE', given: 'Uma entrada inválida.', when: 'O cálculo for solicitado.', then: 'Uma falha explícita deve ser retornada.', decisionBinding: null, boundaryBinding: null },
     ],
   }],
   invariants: [{
     id: 'INV-DETERMINISTIC',
-    statement: 'Entradas equivalentes produzem resultados equivalentes.',
-    falsification: 'Duas entradas equivalentes produzem resultados diferentes.',
+    statement: 'Toda execução termina com resultado ou falha explícita.',
+    falsification: 'Uma execução termina sem resultado nem falha observável.',
     requirementIds: ['REQ-CALCULATE'],
   }],
   riskReview: {
@@ -253,11 +275,19 @@ process.stdout.write(JSON.stringify({
       : 'Os casos de falha e limite já cobrem a principal objeção à recomendação.',
     findings: withDecision ? [{
       id: 'ADV-FORMAT',
+      kind: 'TECHNICAL_RISK',
+      disposition: 'REQUIREMENT',
       challenge: 'O formato simples pode omitir informação necessária ao consumidor.',
-      response: 'A escolha permanece explícita e altera o contrato antes da assinatura.',
-      targetIds: ['REQ-CALCULATE', 'Q-FORMAT'],
+      response: 'O resultado esperado deve ser retornado.',
+      targetIds: ['REQ-CALCULATE'],
       basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
     }] : [],
+  },
+  determinismReview: {
+    status: 'NOT_APPLICABLE',
+    rationale: 'A demanda não promete determinismo.',
+    intentSignalIds: [],
+    dimensions: [],
   },
   boundaryRules: [],
   risks: [],
@@ -269,7 +299,7 @@ NODE
 
 # Uma resposta válida de outro contexto não pode ser carimbada com as entradas atuais.
 set +e
-context_output="$(make_draft no "$(printf '0%.0s' {1..64})" | bash ./aegis --semantic-compile 2>&1)"
+context_output="$(make_draft yes "$(printf '0%.0s' {1..64})" | bash ./aegis --semantic-compile 2>&1)"
 context_code=$?
 set -e
 [[ "${context_code}" -ne 0 ]]
@@ -277,7 +307,7 @@ printf '%s\n' "${context_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH
 [[ ! -e .harness/runtime/contract.json ]]
 
 # Saída semanticamente incompleta é rejeitada antes de criar contrato.
-invalid_draft="$(make_draft no "${semantic_context_digest}" | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
+invalid_draft="$(make_draft yes "${semantic_context_digest}" | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
 set +e
 invalid_output="$(printf '%s' "${invalid_draft}" | bash ./aegis --semantic-compile 2>&1)"
 invalid_code=$?
@@ -314,7 +344,7 @@ jq -e '.approval == null and .humanResolutions == []' .harness/runtime/contract.
 wizard_output="$(printf '\ns\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma proposta'
 jq -e '
-  .schema == "aegis.issue_contract.v8"
+  .schema == "aegis.issue_contract.v9"
   and .approval.method == "INTERACTIVE_WIZARD"
   and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and .humanResolutions[0].questionId == "Q-FORMAT"
@@ -323,6 +353,7 @@ jq -e '
   and .humanResolutions[0].answerId == "ANS-SIMPLE"
   and .humanResolutions[0].label == "Resultado simples"
   and .humanResolutions[0].rationale == "Menor superfície pública."
+  and .humanResolutions[0].contractEffect == "O resultado esperado deve ser retornado."
   and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
   and .humanResolutions[0].attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and .humanResolutions[0].sourceContractDigest == .approval.contractDraftDigest
@@ -340,7 +371,7 @@ set -e
 printf '%s\n' "${stale_verification_output}" | jq -e '.reason == "ACTIVE_PREFLIGHT_NOT_GOVERNED"' >/dev/null
 
 # Reabre a demanda original para exercitar uma alternativa que exige recompilação.
-bash ./aegis 'Criar calculadora de precisão' >/dev/null
+bash ./aegis 'Criar calculadora de precisão com formato ainda a escolher' >/dev/null
 revisionless_request="$(bash ./aegis --semantic-request)"
 semantic_context_digest="$(printf '%s\n' "${revisionless_request}" | jq -r '.contextDigest')"
 make_draft yes "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
@@ -367,7 +398,8 @@ printf '%s\n' "${revision_request}" | jq -e '
     questionId:"Q-FORMAT",
     answerId:"ANS-DETAIL",
     label:"Resultado detalhado",
-    rationale:"Expõe metadados adicionais."
+    rationale:"Expõe metadados adicionais.",
+    contractEffect:"Um resultado com metadados adicionais deve ser retornado."
   }]
 ' >/dev/null
 semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.contextDigest')"
@@ -375,10 +407,10 @@ semantic_context_digest="$(printf '%s\n' "${revision_request}" | jq -r '.context
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_draft resolved "${semantic_context_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v8"
+  .schema == "aegis.issue_contract.v9"
   and .implementationAuthorized == false
-  and .intent == "Criar calculadora de precisão"
-  and .specification.schema == "aegis.semantic_draft.v4"
+  and .intent == "Criar calculadora de precisão com formato ainda a escolher"
+  and .specification.schema == "aegis.semantic_draft.v5"
   and (.specification.requirements[0].acceptanceCases | length) == 2
   and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-FORMAT"}]
   and .approval == null
@@ -388,6 +420,7 @@ jq -e '
   and .humanResolutions[0].answerId == "ANS-DETAIL"
   and .humanResolutions[0].label == "Resultado detalhado"
   and .humanResolutions[0].rationale == "Expõe metadados adicionais."
+  and .humanResolutions[0].contractEffect == "Um resultado com metadados adicionais deve ser retornado."
   and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
   and .humanResolutions[0].attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
   and (.humanResolutions[0].sourceContractDigest | test("^[a-f0-9]{64}$"))
@@ -397,7 +430,7 @@ jq -e '
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v8"
+  .schema == "aegis.preflight_finalization.v9"
   and .status == "FINALIZED"
   and .approvalMethod == "DIRECT_COMMAND"
   and .humanDecisionCount == 1
@@ -405,8 +438,8 @@ printf '%s\n' "${approve_output}" | jq -e '
 ' >/dev/null
 [[ -s .harness/state/semantic-state.json ]]
 jq -e '
-  .schema == "aegis.semantic_state.v8"
-  and .contract.schema == "aegis.issue_contract.v8"
+  .schema == "aegis.semantic_state.v9"
+  and .contract.schema == "aegis.issue_contract.v9"
   and .contract.approval.method == "DIRECT_COMMAND"
   and .contract.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and (.contract.approval.contractDraftDigest | test("^[a-f0-9]{64}$"))

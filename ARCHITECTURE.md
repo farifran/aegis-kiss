@@ -110,12 +110,13 @@ mesmo se o modelo omitir um contexto. A política distingue sinais comuns de
 revisão (`reviewReferences`) de sinais de possível conflito
 (`forbiddenReferences`). A ocorrência literal não decide o veredito — ela pode
 estar negada ou citada como exemplo —, mas não pode desaparecer do contrato e
-exige um parecer adversarial vinculado à regra.
+exige avaliação explícita da regra em `policyAssessments`.
 
 `src/`, caminhos do Harness, TypeScript e relógio são sinais conservadores de
 contexto. `AbstractCycleResolver`, injeção dinâmica de dependências, `factories`
-e decoradores ativam parcimônia e tornam obrigatório o parecer adversarial.
-`any`, `@ts-ignore`, `try/catch`, `catch` vazio e `Date.now` são
-referências proibidas. A lista é deliberadamente curta: protege cláusulas
+e decoradores ativam parcimônia. `any`, `@ts-ignore`, `try/catch`, `catch` vazio
+e `Date.now` são referências proibidas. Todo sinal exige avaliação explícita da
+regra correspondente; a revisão adversarial residual não repete uma correção já
+resolvida pela política. A lista é deliberadamente curta: protege cláusulas
 universais sem tentar substituir interpretação semântica por um dicionário de
 domínio.

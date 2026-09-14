@@ -1,9 +1,9 @@
 {
-  "schema": "aegis.architecture_policy.v2",
-  "policyVersion": 7,
+  "schema": "aegis.architecture_policy.v3",
+  "policyVersion": 8,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "85c8e08ede9967abfa69f204c43b6863439a32ffaf57e23c2b7156b50be3b691"
+    "sourceDigest": "176644e835a2748ba7d244ad938fb326e69e66d748ecd588adcd36dfa9cbdc72"
   },
   "contexts": [
     { "tag": "product-demand", "description": "A demanda define comportamento ou fronteira pública do produto." },
@@ -30,7 +30,6 @@
       "appliesMode": "any",
       "reviewReferences": ["src/"],
       "forbiddenReferences": [],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 2011, "endByte": 2220 }]
     },
     {
@@ -41,7 +40,6 @@
       "appliesMode": "any",
       "reviewReferences": [".harness/state/", ".harness/runtime/", ".harness/config/roles.json"],
       "forbiddenReferences": [],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 2255, "endByte": 2606 }]
     },
     {
@@ -52,7 +50,6 @@
       "appliesMode": "any",
       "reviewReferences": ["provedor de modelo"],
       "forbiddenReferences": [],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 2652, "endByte": 2891 }]
     },
     {
@@ -63,7 +60,6 @@
       "appliesMode": "any",
       "reviewReferences": ["TypeScript"],
       "forbiddenReferences": ["any", "@ts-ignore"],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 2939, "endByte": 3150 }]
     },
     {
@@ -74,7 +70,6 @@
       "appliesMode": "any",
       "reviewReferences": ["AbstractCycleResolver", "injeção dinâmica de dependências", "factories", "decoradores"],
       "forbiddenReferences": [],
-      "requiresAdversarialReview": true,
       "sourceRanges": [{ "startByte": 3184, "endByte": 3477 }]
     },
     {
@@ -85,7 +80,6 @@
       "appliesMode": "any",
       "reviewReferences": ["rollback"],
       "forbiddenReferences": ["try/catch", "catch vazio"],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 3515, "endByte": 3723 }]
     },
     {
@@ -96,7 +90,6 @@
       "appliesMode": "any",
       "reviewReferences": ["relógio"],
       "forbiddenReferences": ["Date.now"],
-      "requiresAdversarialReview": false,
       "sourceRanges": [{ "startByte": 3763, "endByte": 4130 }]
     }
   ],

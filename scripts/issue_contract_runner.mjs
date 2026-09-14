@@ -40,7 +40,7 @@ async function readPolicy() {
   ]);
   try {
     const loaded = loadArchitecturePolicy(root);
-    assertSchema('aegis.architecture_policy.v2', loaded.policy);
+    assertSchema('aegis.architecture_policy.v3', loaded.policy);
     return loaded;
   } catch (error) {
     throw rejection('ARCHITECTURE_POLICY_UNAVAILABLE', error.message);
@@ -96,7 +96,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v8') return null;
+  if (contract.schema !== 'aegis.issue_contract.v9') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -226,7 +226,7 @@ async function handleSemanticCompile(args) {
   if (draft.sourceContextDigest !== request.contextDigest) {
     throw rejection('SEMANTIC_CONTEXT_MISMATCH');
   }
-  if (revision !== null) assertRevisionApplied(draft, revision.resolution);
+  if (revision !== null) assertRevisionApplied(draft, revision.request);
   const contract = compileSemanticContract({
     repositoryRoot: root,
     draft,
@@ -278,8 +278,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v8') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v8`);
+  if (draftContract.schema !== 'aegis.issue_contract.v9') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v9`);
   }
   assertContractDocument({
     repositoryRoot: root,
@@ -331,7 +331,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v8',
+    schema: 'aegis.semantic_state.v9',
     contract,
     contractDigest,
   };
@@ -349,7 +349,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v8',
+    schema: 'aegis.preflight_finalization.v9',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
