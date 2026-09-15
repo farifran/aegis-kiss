@@ -48,6 +48,7 @@ const schemaFiles = [
   'issue-contract.v8.schema.json',
   'issue-contract.v9.schema.json',
   'issue-contract.v10.schema.json',
+  'issue-contract.v11.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -57,12 +58,14 @@ const schemaFiles = [
   'semantic-draft.v4.schema.json',
   'semantic-draft.v5.schema.json',
   'semantic-draft.v6.schema.json',
+  'semantic-draft.v7.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
   'semantic-request.v3.schema.json',
   'semantic-request.v4.schema.json',
   'semantic-request.v5.schema.json',
   'semantic-request.v6.schema.json',
+  'semantic-request.v7.schema.json',
   'semantic-resolution.v1.schema.json',
   'semantic-resolution.v2.schema.json',
 ];
@@ -122,9 +125,9 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v6', semanticRequest);
+assertSchema('aegis.semantic_request.v7', semanticRequest);
 const { requestDigest: semanticRequestDigest, ...semanticRequestPayload } = semanticRequest;
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v6');
+const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v7');
 expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
@@ -143,6 +146,7 @@ if (semanticRequest.constitution.digest !== constitution.digest
 
 const userBasis = [{ source: 'USER_INTENT', reference: 'comportamento observável' }];
 const modelBasis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
+const determinismBasis = [{ source: 'CONSTITUTION', reference: 'CONST-OBSERVABLE' }];
 const semanticSchema = semanticRequest.outputSchema.document;
 if (semanticSchema.properties.riskReview.required.includes('consideredKinds')
   || semanticSchema.properties.riskReview.properties.consideredKinds !== undefined
@@ -181,7 +185,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v6',
+  schema: 'aegis.semantic_draft.v7',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -246,6 +250,7 @@ const draft = {
         given: 'Uma entrada válida.',
         when: 'A operação for solicitada.',
         then: 'Um resultado explícito deve ser observado.',
+        outcomeKind: 'RETURN_VALUE',
         decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
         boundaryBinding: null,
       },
@@ -255,6 +260,7 @@ const draft = {
         given: 'Uma entrada inválida.',
         when: 'A operação for solicitada.',
         then: 'Uma falha explícita deve ser observada.',
+        outcomeKind: 'REJECTION',
         decisionBinding: null,
         boundaryBinding: null,
       },
@@ -351,7 +357,7 @@ if (contract.intent !== preflight.intent
   || contract.sourceSemanticRequestDigest !== semanticRequest.requestDigest
   || contract.semanticRevision !== null
   || contract.constitutionDigest !== constitution.digest
-  || contract.schema !== 'aegis.issue_contract.v10'
+  || contract.schema !== 'aegis.issue_contract.v11'
   || contract.approval !== null
   || contract.humanResolutions.length !== 0
   || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
@@ -385,7 +391,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v10', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v11', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -714,6 +720,7 @@ deterministicDraft.requirements[0].acceptanceCases.push({
   given: 'A mesma entrada válida em duas execuções.',
   when: 'A operação for repetida sob o mesmo contexto.',
   then: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
+  outcomeKind: 'RETURN_VALUE',
   decisionBinding: null,
   boundaryBinding: null,
 });
@@ -723,21 +730,23 @@ deterministicDraft.determinismReview = {
   rationale: 'Todas as dimensões universais foram classificadas e a dimensão aplicável possui prova exata.',
   intentSignalIds: [deterministicSignal.id],
   dimensions: [
-    { kind: 'ORDERING', status: 'NOT_APPLICABLE', rationale: 'Não há coleção ou sequência observável.', targetIds: [] },
+    { kind: 'ORDERING', status: 'NOT_APPLICABLE', rationale: 'Não há coleção ou sequência observável.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
     {
       kind: 'CANONICALIZATION',
       status: 'SPECIFIED',
       rationale: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
       targetIds: ['REQ-RESULT'],
+      basis: [{ source: 'USER_INTENT', reference: 'saída determinística' }],
+      acceptanceCaseId: 'AC-DETERMINISTIC-REPLAY',
     },
-    { kind: 'DUPLICATES', status: 'NOT_APPLICABLE', rationale: 'Não há coleção com duplicatas.', targetIds: [] },
-    { kind: 'EMPTY_INPUT', status: 'NOT_APPLICABLE', rationale: 'A entrada vazia não integra a promessa de determinismo.', targetIds: [] },
-    { kind: 'ODD_CARDINALITY', status: 'NOT_APPLICABLE', rationale: 'Não há estrutura pareada.', targetIds: [] },
-    { kind: 'ROUNDING_REMAINDER', status: 'NOT_APPLICABLE', rationale: 'Não há divisão ou arredondamento.', targetIds: [] },
-    { kind: 'ZERO_DIVISOR', status: 'NOT_APPLICABLE', rationale: 'Não há divisão.', targetIds: [] },
-    { kind: 'TIE_BREAKING', status: 'NOT_APPLICABLE', rationale: 'Não há escolhas empatadas.', targetIds: [] },
-    { kind: 'COUNTING_IDENTITY', status: 'NOT_APPLICABLE', rationale: 'Não há contagem de identidades.', targetIds: [] },
-    { kind: 'BOUNDED_ARITHMETIC', status: 'NOT_APPLICABLE', rationale: 'Não há aritmética de largura fixa.', targetIds: [] },
+    { kind: 'DUPLICATES', status: 'NOT_APPLICABLE', rationale: 'Não há coleção com duplicatas.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'EMPTY_INPUT', status: 'NOT_APPLICABLE', rationale: 'A entrada vazia não integra a promessa de determinismo.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'ODD_CARDINALITY', status: 'NOT_APPLICABLE', rationale: 'Não há estrutura pareada.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'ROUNDING_REMAINDER', status: 'NOT_APPLICABLE', rationale: 'Não há divisão ou arredondamento.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'ZERO_DIVISOR', status: 'NOT_APPLICABLE', rationale: 'Não há divisão.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'TIE_BREAKING', status: 'NOT_APPLICABLE', rationale: 'Não há escolhas empatadas.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'COUNTING_IDENTITY', status: 'NOT_APPLICABLE', rationale: 'Não há contagem de identidades.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    { kind: 'BOUNDED_ARITHMETIC', status: 'NOT_APPLICABLE', rationale: 'Não há aritmética de largura fixa.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
   ],
 };
 const deterministicContext = {
@@ -774,6 +783,70 @@ try {
   falseClosureRejected = true;
 }
 if (!falseClosureRejected) throw new Error('determinism_dimension_closed_by_reference_only');
+
+const ambiguousOutcomeDraft = structuredClone(draft);
+ambiguousOutcomeDraft.requirements[0].acceptanceCases[0].then = 'A operação deve retornar zero ou rejeitar a entrada.';
+let ambiguousOutcomeRejected = false;
+try {
+  assertSemanticDraft(ambiguousOutcomeDraft, loadedPolicy.policy, {
+    constitutionRules: constitution.rules,
+    intent: preflight.intent,
+    resolvedDecisionIds: [],
+    workspaceEvidence: semanticRequest.workspace.sourceEvidence,
+  });
+} catch (error) {
+  ambiguousOutcomeRejected = error.message.startsWith('ambiguous_observable_outcome:');
+}
+if (!ambiguousOutcomeRejected) throw new Error('alternative_outcomes_were_treated_as_specified');
+
+const conflictingOutcomeDraft = structuredClone(draft);
+conflictingOutcomeDraft.requirements[0].acceptanceCases.push({
+  ...structuredClone(conflictingOutcomeDraft.requirements[0].acceptanceCases[0]),
+  id: 'AC-RESULT-CONFLICT',
+  then: 'A operação deve rejeitar a mesma entrada.',
+  outcomeKind: 'REJECTION',
+});
+let conflictingOutcomeRejected = false;
+try {
+  assertSemanticDraft(conflictingOutcomeDraft, loadedPolicy.policy, {
+    constitutionRules: constitution.rules,
+    intent: preflight.intent,
+    resolvedDecisionIds: [],
+    workspaceEvidence: semanticRequest.workspace.sourceEvidence,
+  });
+} catch (error) {
+  conflictingOutcomeRejected = error.message.startsWith('conflicting_observable_outcomes:');
+}
+if (!conflictingOutcomeRejected) throw new Error('conflicting_observable_outcomes_were_accepted');
+
+const unsupportedInapplicability = structuredClone(deterministicDraft);
+unsupportedInapplicability.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').basis = modelBasis;
+let unsupportedInapplicabilityRejected = false;
+try {
+  assertSemanticDraft(unsupportedInapplicability, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  unsupportedInapplicabilityRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_evidence:',
+  );
+}
+if (!unsupportedInapplicabilityRejected) {
+  throw new Error('model_analysis_closed_inapplicable_dimension');
+}
+
+const inventedSafeDefault = structuredClone(deterministicDraft);
+inventedSafeDefault.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').basis = [{
+    source: 'SAFE_MECHANICAL_DEFAULT',
+    reference: 'ARCH-NOT-REAL',
+  }];
+let inventedSafeDefaultRejected = false;
+try {
+  assertSemanticDraft(inventedSafeDefault, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  inventedSafeDefaultRejected = error.message === 'safe_default_references_unknown_policy:ARCH-NOT-REAL';
+}
+if (!inventedSafeDefaultRejected) throw new Error('unbound_safe_default_was_accepted');
 
 const exampleIntent = 'Garantir integridade criptográfica (como FNV-1a), com primitiva ainda a escolher.';
 const examplePreflight = buildPreflightHandoff({
@@ -1010,6 +1083,7 @@ boundedDraft.requirements[0].acceptanceCases[1] = {
   given: 'Uma quantidade igual a 64.',
   when: 'O campo público for compilado.',
   then: 'Valores abaixo de 0 devem ser rejeitados e valores acima de 63 devem saturar em 63.',
+  outcomeKind: 'OBSERVABLE_EFFECT',
   decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
   boundaryBinding: {
     ruleId: 'BOUND-PARTICIPANTS',
@@ -1024,6 +1098,7 @@ boundedDraft.requirements[0].acceptanceCases.push({
   given: 'Uma quantidade abaixo de 0.',
   when: 'O campo público for compilado.',
   then: 'Valores abaixo de 0 devem ser rejeitados e valores acima de 63 devem saturar em 63.',
+  outcomeKind: 'OBSERVABLE_EFFECT',
   decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
   boundaryBinding: {
     ruleId: 'BOUND-PARTICIPANTS',
@@ -1116,6 +1191,7 @@ fixedWidthDraft.requirements[0].acceptanceCases = [
     given: 'Um identificador válido.',
     when: 'Ele for exposto.',
     then: 'O identificador deve ser exposto.',
+    outcomeKind: 'RETURN_VALUE',
     decisionBinding: null,
     boundaryBinding: null,
   },
@@ -1125,6 +1201,7 @@ fixedWidthDraft.requirements[0].acceptanceCases = [
     given: 'Qualquer identificador público.',
     when: 'Sua representação for observada.',
     then: 'A representação deve ter exatamente 64 bits.',
+    outcomeKind: 'OBSERVABLE_EFFECT',
     decisionBinding: null,
     boundaryBinding: {
       ruleId: 'BOUND-FIXED-WIDTH',
@@ -1646,7 +1723,7 @@ const parsimonyContext = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v10',
+  schema: 'aegis.semantic_state.v11',
   contract: approvedContract,
   contractDigest: canonicalDigest(approvedContract),
 };

@@ -96,7 +96,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v10') return null;
+  if (contract.schema !== 'aegis.issue_contract.v11') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -299,8 +299,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v10') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v10`);
+  if (draftContract.schema !== 'aegis.issue_contract.v11') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v11`);
   }
   assertContractDocument({
     repositoryRoot: root,
@@ -352,7 +352,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v10',
+    schema: 'aegis.semantic_state.v11',
     contract,
     contractDigest,
   };
@@ -370,7 +370,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v10',
+    schema: 'aegis.preflight_finalization.v11',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

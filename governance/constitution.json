@@ -1,9 +1,9 @@
 {
   "schema": "aegis.constitution.v1",
-  "constitutionVersion": 8,
+  "constitutionVersion": 9,
   "origin": {
     "sourcePath": "AGENTS.md",
-    "sourceDigest": "dcd731d270c4bd2762e238d455743e12772ad52267b45b6eeceaad0cb3d158a1"
+    "sourceDigest": "ff977a28277525c432ffc036118f3e7f8cacf46f5d7f5ea77855e565450556e5"
   },
   "rules": [
     {
@@ -20,7 +20,7 @@
     },
     {
       "id": "CONST-OBSERVABLE",
-      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Caminhos são classificados como superfície pública, restrição de implementação explicitamente humana, sugestão não normativa ou evidência; superfície pública não confina topologia interna, e sugestões ou evidências não criam obrigações. Classes, buffers e estruturas de dados permanecem internos salvo exigência humana textual. Restrições de desempenho, latência ou alocação exigem método, métrica, alvo quantificado, procedência autorizada, estado de evidência e condições; adjetivos vagos permanecem metas não normativas e nunca originam SLO inventado. Toda representação pública finita exige revisão: largura de representação e comportamento aritmético são propriedades distintas; saída de largura fixa pode provar somente a largura exata, enquanto valores que recebem quantidades fora da faixa exigem comportamento e prova exclusivos para cada lado aplicável; wrap, módulo, saturação, truncamento ou rejeição nunca são inferidos apenas da largura. Cada requisito prevê caminho feliz e falha ou limite. Promessas de determinismo classificam todas as dimensões universais do protocolo; `SPECIFIED` exige regra concreta literalmente presente em caso de aceitação ligado ao requisito, nunca mera referência a requisito ou invariante. Depois das correções mecânicas e arquiteturais, a revisão adversarial residual procura contradições, deriva semântica, omissões, lacunas de determinismo e perguntas artificiais sem repetir achados já resolvidos pela política; cada achado é incorporado ao contrato."
+      "statement": "Especifique apenas fronteiras públicas observáveis, invariantes, riscos e critérios falsificáveis. Caminhos são classificados como superfície pública, restrição de implementação explicitamente humana, sugestão não normativa ou evidência; superfície pública não confina topologia interna, e sugestões ou evidências não criam obrigações. Classes, buffers e estruturas de dados permanecem internos salvo exigência humana textual. Restrições de desempenho, latência ou alocação exigem método, métrica, alvo quantificado, procedência autorizada, estado de evidência e condições; adjetivos vagos permanecem metas não normativas e nunca originam SLO inventado. Toda representação pública finita exige revisão: largura de representação e comportamento aritmético são propriedades distintas; saída de largura fixa pode provar somente a largura exata, enquanto valores que recebem quantidades fora da faixa exigem comportamento e prova exclusivos para cada lado aplicável; wrap, módulo, saturação, truncamento ou rejeição nunca são inferidos apenas da largura. Cada requisito prevê caminho feliz e falha ou limite, e cada caso declara um único tipo de resultado observável; alternativas como retornar zero ou rejeitar permanecem lacuna, enquanto casos sob a mesma condição e os mesmos vínculos não podem produzir efeitos incompatíveis. Promessas de determinismo classificam todas as dimensões universais do protocolo; `SPECIFIED` exige regra concreta literalmente presente em um único caso de aceitação ligado ao requisito, nunca mera referência a requisito ou invariante. Toda classificação declara origem; `NOT_APPLICABLE` não nasce apenas da análise do modelo, e default mecânico só é válido quando cita uma política arquitetural confiável. Depois das correções mecânicas e arquiteturais, a revisão adversarial residual procura contradições, deriva semântica, omissões, lacunas de determinismo e perguntas artificiais sem repetir achados já resolvidos pela política; cada achado é incorporado ao contrato."
     },
     {
       "id": "CONST-CONTRACT-ONLY",

@@ -232,14 +232,14 @@ export function buildSemanticRequest({
     revision,
   };
   const contextDigest = canonicalDigest(context);
-  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v6');
+  const outputSchemaDocument = schemaDocument('aegis.semantic_draft.v7');
   outputSchemaDocument.properties.sourceContextDigest = { const: contextDigest };
   const requestWithoutDigest = {
-    schema: 'aegis.semantic_request.v6',
+    schema: 'aegis.semantic_request.v7',
     contextDigest,
     ...context,
     outputSchema: {
-      id: 'aegis.semantic_draft.v6',
+      id: 'aegis.semantic_draft.v7',
       digest: canonicalDigest(outputSchemaDocument),
       strict: true,
       document: outputSchemaDocument,
@@ -249,7 +249,7 @@ export function buildSemanticRequest({
     ...requestWithoutDigest,
     requestDigest: canonicalDigest(requestWithoutDigest),
   };
-  assertSchema('aegis.semantic_request.v6', request);
+  assertSchema('aegis.semantic_request.v7', request);
   return request;
 }
 
@@ -257,6 +257,46 @@ function assertUniqueIds(items, field, kind) {
   const ids = items.map((item) => item[field]);
   if (new Set(ids).size !== ids.length) throw new Error(`duplicate_${kind}_id`);
   return new Set(ids);
+}
+
+function normalizedObservableText(text) {
+  return text.normalize('NFC')
+    .toLocaleLowerCase('pt-BR')
+    .replace(/\s+/gu, ' ')
+    .replace(/[.,;:!?]+$/gu, '')
+    .trim();
+}
+
+function hasDisjunctiveOutcome(text) {
+  const withoutAtomicComparators = normalizedObservableText(text)
+    .replace(/\b(?:maior|menor)\s+ou\s+igual(?:\s+a)?\b/giu, '')
+    .replace(/\b(?:greater|less)\s+than\s+or\s+equal(?:\s+to)?\b/giu, '')
+    .replace(/\b(?:um|uma|one)\s+(?:ou|or)\s+(?:mais|more)\b/giu, '');
+  return /\b(?:ou|or|either)\b|\s\/\s/iu.test(withoutAtomicComparators);
+}
+
+function acceptanceBranchKey(acceptanceCase) {
+  return JSON.stringify({
+    given: normalizedObservableText(acceptanceCase.given),
+    when: normalizedObservableText(acceptanceCase.when),
+    decisionBinding: acceptanceCase.decisionBinding,
+  });
+}
+
+function assertObservableOutcomesAreUnique(acceptanceCases) {
+  const outcomesByBranch = new Map();
+  for (const acceptanceCase of acceptanceCases) {
+    if (hasDisjunctiveOutcome(acceptanceCase.then)) {
+      throw new Error(`ambiguous_observable_outcome:${acceptanceCase.id}`);
+    }
+    const branch = acceptanceBranchKey(acceptanceCase);
+    const outcome = `${acceptanceCase.outcomeKind}\n${normalizedObservableText(acceptanceCase.then)}`;
+    const previous = outcomesByBranch.get(branch);
+    if (previous !== undefined && previous.outcome !== outcome) {
+      throw new Error(`conflicting_observable_outcomes:${previous.id}:${acceptanceCase.id}`);
+    }
+    outcomesByBranch.set(branch, { id: acceptanceCase.id, outcome });
+  }
 }
 
 function assertRequirementReferences(items, requirementIds, kind) {
@@ -280,6 +320,7 @@ function basisClaims(draft) {
     ...draft.boundaryRules,
     ...draft.unknowns,
     ...draft.adversarialReview.findings,
+    ...draft.determinismReview.dimensions,
   ];
 }
 
@@ -439,7 +480,7 @@ export function assertSemanticDraft(draft, policy, {
   humanResolutions = [],
   workspaceEvidence = [],
 } = {}) {
-  assertSchema('aegis.semantic_draft.v6', draft);
+  assertSchema('aegis.semantic_draft.v7', draft);
   assertUniqueIds(draft.intentClaims, 'id', 'intent_claim');
   const nonNormativeItemIds = assertUniqueIds(draft.nonNormativeItems, 'id', 'non_normative_item');
   const pathReferenceIds = assertUniqueIds(draft.pathReferences, 'id', 'path_reference');
@@ -452,6 +493,7 @@ export function assertSemanticDraft(draft, policy, {
   const acceptanceRequirementById = new Map(draft.requirements.flatMap((requirement) => (
     requirement.acceptanceCases.map((item) => [item.id, requirement.id])
   )));
+  assertObservableOutcomesAreUnique(acceptanceCases);
   const invariantIds = assertUniqueIds(draft.invariants, 'id', 'invariant');
   const riskIds = assertUniqueIds(draft.risks, 'id', 'risk');
   const boundaryRuleIds = assertUniqueIds(draft.boundaryRules, 'id', 'boundary_rule');
@@ -1028,12 +1070,12 @@ export function assertSemanticDraft(draft, policy, {
         if (targetRequirementIds.length === 0) {
           throw new Error(`specified_determinism_dimension_without_requirement:${dimension.kind}`);
         }
-        const exactProof = targetRequirementIds.some((requirementId) => (
-          requirementsById.get(requirementId)?.acceptanceCases.some(({ then }) => (
-            then.normalize('NFC') === dimension.rationale.normalize('NFC')
-          ))
-        ));
-        if (!exactProof) {
+        const proof = dimension.acceptanceCaseId === null
+          ? undefined
+          : acceptanceCasesById.get(dimension.acceptanceCaseId);
+        if (proof === undefined
+          || !targetRequirementIds.includes(acceptanceRequirementById.get(proof.id))
+          || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')) {
           throw new Error(`specified_determinism_dimension_without_exact_proof:${dimension.kind}`);
         }
       }
@@ -1043,6 +1085,13 @@ export function assertSemanticDraft(draft, policy, {
       }
       if (dimension.status === 'NOT_APPLICABLE' && dimension.targetIds.length !== 0) {
         throw new Error(`inapplicable_determinism_dimension_has_target:${dimension.kind}`);
+      }
+      if (dimension.status !== 'SPECIFIED' && dimension.acceptanceCaseId !== null) {
+        throw new Error(`non_specified_determinism_dimension_has_proof:${dimension.kind}`);
+      }
+      if (dimension.status === 'NOT_APPLICABLE'
+        && dimension.basis.every(({ source }) => source === 'MODEL_ANALYSIS')) {
+        throw new Error(`inapplicable_determinism_dimension_without_evidence:${dimension.kind}`);
       }
     }
     const gapsFound = draft.determinismReview.dimensions
@@ -1126,6 +1175,7 @@ export function assertSemanticDraft(draft, policy, {
   }
 
   const knownConstitutionRules = new Set(constitutionRules.map(({ id }) => id));
+  const policyRulesById = new Map(policy.rules.map((rule) => [rule.id, rule]));
   const knownPolicyReferences = new Set([
     ...policy.rules.map(({ id }) => id),
     ...(policy.amendments ?? []).map(({ id }) => id),
@@ -1150,6 +1200,25 @@ export function assertSemanticDraft(draft, policy, {
         && !knownPolicyReferences.has(basis.reference)) {
         throw new Error(`basis_references_unknown_policy:${basis.reference}`);
       }
+      if (basis.source === 'SAFE_MECHANICAL_DEFAULT'
+        && !knownPolicyReferences.has(basis.reference)) {
+        throw new Error(`safe_default_references_unknown_policy:${basis.reference}`);
+      }
+      if (basis.source === 'SAFE_MECHANICAL_DEFAULT') {
+        const rule = policyRulesById.get(basis.reference);
+        const claimText = [
+          claim.statement,
+          claim.rationale,
+          claim.contractEffect,
+          claim.mitigation,
+          claim.response,
+        ].filter((value) => typeof value === 'string');
+        if (rule === undefined
+          || !ruleApplication(rule, architectureTags, intent).applies
+          || !claimText.some((text) => literalReferenceAppears(rule.statement, text))) {
+          throw new Error(`safe_default_not_proven_by_policy:${basis.reference}`);
+        }
+      }
       if (basis.source === 'WORKSPACE_EVIDENCE') {
         const range = workspaceBasisRange(basis.reference);
         if (range === null || !workspaceEvidence.some((evidence) => evidence.path === range.path
@@ -1165,6 +1234,7 @@ export function assertSemanticDraft(draft, policy, {
     'USER_DECISION',
     'CONSTITUTION',
     'ARCHITECTURE_POLICY',
+    'SAFE_MECHANICAL_DEFAULT',
   ]);
   const trustedTechnicalText = [
     intent,
@@ -1420,7 +1490,7 @@ export function compileSemanticContract({
     throw new Error('semantic_context_mismatch');
   }
   const contract = {
-    schema: 'aegis.issue_contract.v10',
+    schema: 'aegis.issue_contract.v11',
     implementationAuthorized: false,
     sourceSemanticRequestDigest: semanticRequest.requestDigest,
     semanticRevision,
@@ -1436,7 +1506,7 @@ export function compileSemanticContract({
     humanResolutions,
     approval: null,
   };
-  assertSchema('aegis.issue_contract.v10', contract);
+  assertSchema('aegis.issue_contract.v11', contract);
   assertContractApprovalEvidence(contract);
   return contract;
 }
@@ -1536,7 +1606,7 @@ export function assertContractDocument({
   constitution,
   constitutionDigest,
 }) {
-  assertSchema('aegis.issue_contract.v10', contract);
+  assertSchema('aegis.issue_contract.v11', contract);
   const semanticRequest = buildSemanticRequest({
     repositoryRoot,
     preflight,
@@ -1795,6 +1865,7 @@ export function renderSemanticContractMarkdown(contract, {
         `  - Dado: ${acceptanceCase.given}`,
         `  - Quando: ${acceptanceCase.when}`,
         `  - Então: ${acceptanceCase.then}`,
+        `  - Resultado observável: ${acceptanceCase.outcomeKind}`,
       );
       if (acceptanceCase.boundaryBinding !== null) {
         lines.push(`  - Limite: ${acceptanceCase.boundaryBinding.ruleId}/${acceptanceCase.boundaryBinding.side} → ${acceptanceCase.boundaryBinding.expectedBehavior}${acceptanceCase.boundaryBinding.expectedValue === null ? '' : ` (${acceptanceCase.boundaryBinding.expectedValue})`}`);
@@ -1818,6 +1889,8 @@ export function renderSemanticContractMarkdown(contract, {
   lines.push(`- **${specification.determinismReview.status}:** ${specification.determinismReview.rationale}`);
   for (const dimension of specification.determinismReview.dimensions) {
     lines.push(`- **${dimension.kind}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
+    lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
+    if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
   }
 
   lines.push('', '## 6. Invariantes');
@@ -1950,7 +2023,7 @@ export function finalizeContractApproval({ contract, request, resolution }) {
       contractDraftDigest: resolution.contractDraftDigest,
     },
   };
-  assertSchema('aegis.issue_contract.v10', finalContract);
+  assertSchema('aegis.issue_contract.v11', finalContract);
   assertContractApprovalEvidence(finalContract, { required: true });
   return finalContract;
 }
