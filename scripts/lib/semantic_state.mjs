@@ -28,6 +28,7 @@ export function parseSemanticState(value) {
     ['aegis.semantic_state.v9', 'aegis.issue_contract.v9'],
     ['aegis.semantic_state.v10', 'aegis.issue_contract.v10'],
     ['aegis.semantic_state.v11', 'aegis.issue_contract.v11'],
+    ['aegis.semantic_state.v12', 'aegis.issue_contract.v12'],
   ]);
   const contractSchema = contractSchemaByState.get(state.schema);
   if (contractSchema === undefined || state.contract?.schema !== contractSchema) {
@@ -38,7 +39,8 @@ export function parseSemanticState(value) {
     || state.schema === 'aegis.semantic_state.v8'
     || state.schema === 'aegis.semantic_state.v9'
     || state.schema === 'aegis.semantic_state.v10'
-    || state.schema === 'aegis.semantic_state.v11') {
+    || state.schema === 'aegis.semantic_state.v11'
+    || state.schema === 'aegis.semantic_state.v12') {
     assertContractApprovalEvidence(state.contract, { required: true });
   }
   if (state.contractDigest !== canonicalDigest(state.contract)) {

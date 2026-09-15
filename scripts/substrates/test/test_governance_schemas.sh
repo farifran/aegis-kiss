@@ -49,6 +49,7 @@ const schemaFiles = [
   'issue-contract.v9.schema.json',
   'issue-contract.v10.schema.json',
   'issue-contract.v11.schema.json',
+  'issue-contract.v12.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -59,6 +60,7 @@ const schemaFiles = [
   'semantic-draft.v5.schema.json',
   'semantic-draft.v6.schema.json',
   'semantic-draft.v7.schema.json',
+  'semantic-opinion.v1.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
   'semantic-request.v3.schema.json',
@@ -66,6 +68,8 @@ const schemaFiles = [
   'semantic-request.v5.schema.json',
   'semantic-request.v6.schema.json',
   'semantic-request.v7.schema.json',
+  'semantic-request.v8.schema.json',
+  'semantic-worksheet.v1.schema.json',
   'semantic-resolution.v1.schema.json',
   'semantic-resolution.v2.schema.json',
 ];
@@ -125,17 +129,19 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v7', semanticRequest);
+assertSchema('aegis.semantic_request.v8', semanticRequest);
 const { requestDigest: semanticRequestDigest, ...semanticRequestPayload } = semanticRequest;
-const expectedOutputSchema = schemaDocument('aegis.semantic_draft.v7');
-expectedOutputSchema.properties.sourceContextDigest = { const: semanticRequest.contextDigest };
+const expectedOutputSchema = schemaDocument('aegis.semantic_opinion.v1');
+expectedOutputSchema.properties.worksheetDigest = { const: semanticRequest.worksheetDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
   || semanticRequestDigest !== canonicalDigest(semanticRequestPayload)
   || semanticRequest.outputSchema.digest !== canonicalDigest(expectedOutputSchema)
   || canonicalDigest(semanticRequest.outputSchema.document) !== canonicalDigest(expectedOutputSchema)
-  || semanticRequest.outputSchema.document.properties.sourceContextDigest.const
-    !== semanticRequest.contextDigest
+  || semanticRequest.outputSchema.document.properties.worksheetDigest.const
+    !== semanticRequest.worksheetDigest
+  || semanticRequest.worksheetDigest !== canonicalDigest(semanticRequest.worksheet)
+  || semanticRequest.worksheet.contextDigest !== semanticRequest.contextDigest
   || semanticRequest.intentSignals.status !== 'CLEAR'
   || semanticRequest.intentSignals.signals.length !== 0
   || semanticRequest.policy.signalSemantics.verdict !== 'SEMANTIC_NOT_LEXICAL'
@@ -357,7 +363,7 @@ if (contract.intent !== preflight.intent
   || contract.sourceSemanticRequestDigest !== semanticRequest.requestDigest
   || contract.semanticRevision !== null
   || contract.constitutionDigest !== constitution.digest
-  || contract.schema !== 'aegis.issue_contract.v11'
+  || contract.schema !== 'aegis.issue_contract.v12'
   || contract.approval !== null
   || contract.humanResolutions.length !== 0
   || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
@@ -391,7 +397,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v11', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v12', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -688,6 +694,9 @@ const deterministicSignal = deterministicRequest.intentSignals.signals
   .find(({ kind }) => kind === 'DETERMINISM_CLAIM');
 if (deterministicSignal?.handling !== 'DETERMINISM_REVIEW') {
   throw new Error('determinism_claim_was_not_detected');
+}
+if (deterministicRequest.worksheet.requiredDeterminismDimensions.length !== 10) {
+  throw new Error('deterministic_worksheet_omitted_review_slots');
 }
 const deterministicDraft = structuredClone(draft);
 deterministicDraft.sourceContextDigest = deterministicRequest.contextDigest;
@@ -1050,6 +1059,12 @@ if (boundedSignals.length !== 1
   || boundedSignals[0].kind !== 'BOUNDED_VALUE'
   || boundedSignals[0].handling !== 'BOUNDARY_RULE') {
   throw new Error('bounded_value_signal_was_not_detected');
+}
+if (boundedRequest.worksheet.bitFields.length !== 1
+  || boundedRequest.worksheet.bitFields[0].startBit !== 4
+  || boundedRequest.worksheet.bitFields[0].endBit !== 9
+  || boundedRequest.worksheet.bitFields[0].width !== 6) {
+  throw new Error('deterministic_worksheet_miscalculated_bit_field');
 }
 const boundedDraft = structuredClone(draft);
 boundedDraft.sourceContextDigest = boundedRequest.contextDigest;
@@ -1723,7 +1738,7 @@ const parsimonyContext = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v11',
+  schema: 'aegis.semantic_state.v12',
   contract: approvedContract,
   contractDigest: canonicalDigest(approvedContract),
 };

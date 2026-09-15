@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_worksheet.v1",
+  "title": "Aegis Deterministic Semantic Worksheet v1",
+  "description": "Ficha calculada pelo Harness antes da IA. Ela enumera revisões obrigatórias e campos que a IA não pode controlar.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "contextDigest",
+    "requiredDeterminismDimensions",
+    "bitFields",
+    "compilerOwnedFields"
+  ],
+  "properties": {
+    "schema": {
+      "const": "aegis.semantic_worksheet.v1"
+    },
+    "contextDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "requiredDeterminismDimensions": {
+      "type": "array",
+      "description": "Ordem canônica das dimensões que o parecer deve responder, uma vez cada e na mesma posição.",
+      "items": {
+        "enum": [
+          "ORDERING",
+          "CANONICALIZATION",
+          "DUPLICATES",
+          "EMPTY_INPUT",
+          "ODD_CARDINALITY",
+          "ROUNDING_REMAINDER",
+          "ZERO_DIVISOR",
+          "TIE_BREAKING",
+          "COUNTING_IDENTITY",
+          "BOUNDED_ARITHMETIC"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "bitFields": {
+      "type": "array",
+      "description": "Faixas de bits extraídas literalmente da demanda. signalIndex aponta para intentSignals.signals da solicitação.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signalIndex",
+          "startBit",
+          "endBit",
+          "width"
+        ],
+        "properties": {
+          "signalIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "startBit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endBit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "compilerOwnedFields": {
+      "description": "Partes do contrato reservadas ao compilador determinístico e proibidas no parecer da IA.",
+      "const": [
+        "SCHEMA",
+        "CONTEXT_BINDING",
+        "IDENTIFIERS",
+        "SOURCE_BINDINGS",
+        "AGGREGATE_STATUSES",
+        "CONTRACT_ENVELOPE",
+        "DIGESTS",
+        "APPROVAL_STATE"
+      ]
+    }
+  }
+}

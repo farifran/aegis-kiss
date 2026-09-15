@@ -15,7 +15,7 @@ const contractMdPath = resolve(runtimeDir, 'contract.md');
 const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
-const semanticDraftByteLimit = 262_144;
+const semanticOpinionByteLimit = 262_144;
 
 function rejection(reason, detail = '') {
   const error = new Error(reason);
@@ -96,7 +96,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v11') return null;
+  if (contract.schema !== 'aegis.issue_contract.v12') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -210,24 +210,25 @@ async function handleSemanticCompile(args) {
       buildConfirmationRequest,
       buildSemanticRequest,
       compileSemanticContract,
+      compileSemanticOpinion,
       renderSemanticContractMarkdown,
     },
   ] = await Promise.all([
     import('./lib/canonical_json.mjs'),
     import('./lib/semantic_contract.mjs'),
   ]);
-  let draft;
+  let opinion;
   try {
     let serializedDraft = '';
     let receivedBytes = 0;
     for await (const chunk of process.stdin) {
       receivedBytes += Buffer.byteLength(chunk);
-      if (receivedBytes > semanticDraftByteLimit) throw new Error('semantic_draft_too_large');
+      if (receivedBytes > semanticOpinionByteLimit) throw new Error('semantic_opinion_too_large');
       serializedDraft += chunk;
     }
-    draft = JSON.parse(serializedDraft);
+    opinion = JSON.parse(serializedDraft);
   } catch (error) {
-    throw rejection('INVALID_SEMANTIC_DRAFT', error.message);
+    throw rejection('INVALID_SEMANTIC_OPINION', error.message);
   }
   const [preflight, loadedPolicy, constitution] = await Promise.all([
     readPreflight(),
@@ -243,8 +244,14 @@ async function handleSemanticCompile(args) {
     constitution,
     revision: revision?.request ?? null,
   });
-  if (draft.sourceContextDigest !== request.contextDigest) {
-    throw rejection('SEMANTIC_CONTEXT_MISMATCH');
+  let draft;
+  try {
+    draft = compileSemanticOpinion(opinion, request);
+  } catch (error) {
+    if (error.message === 'semantic_opinion_worksheet_mismatch') {
+      throw rejection('SEMANTIC_CONTEXT_MISMATCH');
+    }
+    throw rejection('INVALID_SEMANTIC_OPINION', error.message);
   }
   if (revision !== null) assertRevisionApplied(draft, revision.request);
   const contract = compileSemanticContract({
@@ -299,8 +306,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v11') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v11`);
+  if (draftContract.schema !== 'aegis.issue_contract.v12') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v12`);
   }
   assertContractDocument({
     repositoryRoot: root,
@@ -352,7 +359,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v11',
+    schema: 'aegis.semantic_state.v12',
     contract,
     contractDigest,
   };
@@ -370,7 +377,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v11',
+    schema: 'aegis.preflight_finalization.v12',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
