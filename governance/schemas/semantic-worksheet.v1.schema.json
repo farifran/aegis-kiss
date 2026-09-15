@@ -49,7 +49,9 @@
           "signalIndex",
           "startBit",
           "endBit",
-          "width"
+          "width",
+          "patternCount",
+          "unsignedMaximum"
         ],
         "properties": {
           "signalIndex": {
@@ -67,6 +69,16 @@
           "width": {
             "type": "integer",
             "minimum": 1
+          },
+          "patternCount": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Quantidade de padrões representáveis pela largura. Para larguras pequenas, contém o inteiro exato; para larguras extremas, a expressão 2^width."
+          },
+          "unsignedMaximum": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Maior valor sem sinal representável. Não escolhe signedness nem política de overflow."
           }
         }
       }

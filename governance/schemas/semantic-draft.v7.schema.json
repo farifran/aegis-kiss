@@ -313,6 +313,12 @@
               "rationale": { "type": "string", "minLength": 1, "description": "Para SPECIFIED, contém uma regra concreta sem alternativas e idêntica ao resultado do único acceptanceCaseId vinculado." },
               "basis": { "$ref": "#/$defs/basis" },
               "acceptanceCaseId": { "type": ["string", "null"], "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$" },
+              "inapplicabilityProof": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "$ref": "#/$defs/inapplicabilityProof" }
+                ]
+              },
               "targetIds": {
                 "type": "array",
                 "uniqueItems": true,
@@ -333,6 +339,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^BOUND-[A-Z0-9][A-Z0-9-]+$" },
           "subject": { "type": "string", "minLength": 1 },
+          "representationKind": { "enum": ["REPRESENTATION_WIDTH", "ENCODED_VALUE"] },
           "lowerBound": { "type": "string", "minLength": 1 },
           "upperBound": { "type": "string", "minLength": 1 },
           "underflowBehavior": { "$ref": "#/$defs/rangeBehavior" },
@@ -375,6 +382,29 @@
           "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
           "invariantIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
           "riskIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "distinguishingCase": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["given", "when", "outcomes"],
+            "properties": {
+              "given": { "type": "string", "minLength": 1 },
+              "when": { "type": "string", "minLength": 1 },
+              "outcomes": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["answerId", "then"],
+                  "properties": {
+                    "answerId": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+                    "then": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          },
           "answers": {
             "type": "array",
             "minItems": 2,
@@ -466,6 +496,17 @@
     },
     "rangeBehavior": {
       "enum": ["REJECT", "SATURATE", "EXPLICIT_SENTINEL", "WRAP", "NOT_APPLICABLE"]
+    },
+    "inapplicabilityProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variedFactor", "baseline", "variation", "unchangedObservableOutcome"],
+      "properties": {
+        "variedFactor": { "type": "string", "minLength": 1 },
+        "baseline": { "type": "string", "minLength": 1 },
+        "variation": { "type": "string", "minLength": 1 },
+        "unchangedObservableOutcome": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

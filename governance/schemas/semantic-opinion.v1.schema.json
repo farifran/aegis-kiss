@@ -684,7 +684,7 @@
         },
         "dimensions": {
           "type": "array",
-          "description": "Lista posicional: o item i responde exatamente à dimensão i de worksheet.requiredDeterminismDimensions.",
+          "description": "Lista posicional: o item i responde exatamente à dimensão i de worksheet.requiredDeterminismDimensions. SPECIFIED exige regra única e prova vinculada; NOT_APPLICABLE exige prova contrafactual de independência observável; DECISION_REQUIRED aponta para decisão humana.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -693,7 +693,8 @@
               "rationale",
               "targets",
               "basis",
-              "acceptanceCase"
+              "acceptanceCase",
+              "inapplicabilityProof"
             ],
             "properties": {
               "status": {
@@ -727,6 +728,16 @@
                     "$ref": "#/$defs/acceptanceCaseRef"
                   }
                 ]
+              },
+              "inapplicabilityProof": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/inapplicabilityProof"
+                  }
+                ]
               }
             }
           }
@@ -741,6 +752,7 @@
         "additionalProperties": false,
         "required": [
           "subject",
+          "representationKind",
           "lowerBound",
           "upperBound",
           "underflowBehavior",
@@ -755,6 +767,13 @@
           "subject": {
             "type": "string",
             "minLength": 1
+          },
+          "representationKind": {
+            "enum": [
+              "REPRESENTATION_WIDTH",
+              "ENCODED_VALUE"
+            ],
+            "description": "REPRESENTATION_WIDTH prova apenas formato/largura. ENCODED_VALUE descreve o domínio do valor inserido e exige política para extrapolação."
           },
           "lowerBound": {
             "type": "string",
@@ -861,7 +880,8 @@
           "requirementIndexes",
           "invariantIndexes",
           "riskIndexes",
-          "answers"
+          "answers",
+          "distinguishingCase"
         ],
         "properties": {
           "question": {
@@ -924,6 +944,49 @@
               "minimum": 0
             },
             "uniqueItems": true
+          },
+          "distinguishingCase": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Um mesmo cenário no qual as alternativas produzem resultados observáveis diferentes. Sem esse testemunho não existe decisão humana material.",
+            "required": [
+              "given",
+              "when",
+              "outcomes"
+            ],
+            "properties": {
+              "given": {
+                "type": "string",
+                "minLength": 1
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcomes": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "answerIndex",
+                    "then"
+                  ],
+                  "properties": {
+                    "answerIndex": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "then": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1189,6 +1252,35 @@
         "caseIndex": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "inapplicabilityProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Prova contrafactual: altera-se somente o fator examinado e o resultado público permitido permanece idêntico.",
+      "required": [
+        "variedFactor",
+        "baseline",
+        "variation",
+        "unchangedObservableOutcome"
+      ],
+      "properties": {
+        "variedFactor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unchangedObservableOutcome": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

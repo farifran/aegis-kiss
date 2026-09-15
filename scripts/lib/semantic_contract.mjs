@@ -270,8 +270,20 @@ export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
     if (match === null) return [];
     const startBit = Number.parseInt(match[1], 10);
     const endBit = Number.parseInt(match[2], 10);
-    if (endBit < startBit) return [];
-    return [{ signalIndex, startBit, endBit, width: endBit - startBit + 1 }];
+    if (!Number.isSafeInteger(startBit)
+      || !Number.isSafeInteger(endBit)
+      || endBit < startBit) return [];
+    const width = endBit - startBit + 1;
+    const exactCapacity = Number.isSafeInteger(width) && width <= 256;
+    const patternCount = exactCapacity ? 1n << BigInt(width) : null;
+    return [{
+      signalIndex,
+      startBit,
+      endBit,
+      width,
+      patternCount: patternCount === null ? `2^${width}` : patternCount.toString(),
+      unsignedMaximum: patternCount === null ? `2^${width}-1` : (patternCount - 1n).toString(),
+    }];
   });
   const worksheet = {
     schema: 'aegis.semantic_worksheet.v1',
@@ -315,6 +327,42 @@ function hasDisjunctiveOutcome(text) {
     .replace(/\b(?:greater|less)\s+than\s+or\s+equal(?:\s+to)?\b/giu, '')
     .replace(/\b(?:um|uma|one)\s+(?:ou|or)\s+(?:mais|more)\b/giu, '');
   return /\b(?:ou|or|either)\b|\s\/\s/iu.test(withoutAtomicComparators);
+}
+
+function hasUnresolvedExpression(text) {
+  for (const match of text.matchAll(/\(\s*\)/gu)) {
+    const preceding = match.index === 0 ? '' : text[match.index - 1];
+    const following = text.slice(match.index + match[0].length);
+    if (/[\p{L}\p{N}_$\]})]/u.test(preceding) || /^\s*=>/u.test(following)) continue;
+    return true;
+  }
+  return /(?<!`)``(?!`)/u.test(text)
+    || /\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|above|below|greater\s+than|less\s+than)\s*(?=[.,;:!?)]|$)/iu.test(text);
+}
+
+function isBareDeterminismAssertion(text) {
+  const normalized = text.normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+  return /\bmesm[ao]\s+entrada\b[^.!?\n]{0,120}\bmesm[ao]\s+(?:saida|resultado)\b/u.test(normalized)
+    || /\bsame\s+input\b[^.!?\n]{0,120}\bsame\s+(?:output|result)\b/u.test(normalized);
+}
+
+function canonicalIntegerThreshold(text) {
+  const normalized = text.normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+  const forms = [
+    { pattern: /(?:maior\s+ou\s+igual\s+a|greater\s+than\s+or\s+equal\s+to|>=)\s*(-?\d+)/u, direction: 'MIN', shift: 0n },
+    { pattern: /(?:(?:estritamente\s+)?maior\s+que|strictly\s+greater\s+than|>)\s*(-?\d+)/u, direction: 'MIN', shift: 1n },
+    { pattern: /(?:menor\s+ou\s+igual\s+a|less\s+than\s+or\s+equal\s+to|<=)\s*(-?\d+)/u, direction: 'MAX', shift: 0n },
+    { pattern: /(?:(?:estritamente\s+)?menor\s+que|strictly\s+less\s+than|<)\s*(-?\d+)/u, direction: 'MAX', shift: -1n },
+  ];
+  for (const { pattern, direction, shift } of forms) {
+    const match = pattern.exec(normalized);
+    if (match !== null) return `${direction}:${BigInt(match[1]) + shift}`;
+  }
+  return null;
 }
 
 function acceptanceBranchKey(acceptanceCase) {
@@ -644,6 +692,31 @@ export function assertSemanticDraft(draft, policy, {
       throw new Error(`non_normative_claim_has_contract_effect:${claim.id}`);
     }
   }
+  const normativeFragments = [
+    ...draft.intentClaims
+      .filter(({ disposition }) => disposition === 'NORMATIVE')
+      .flatMap(({ id, contractEffect }) => [[`intent_claim:${id}`, contractEffect ?? '']]),
+    ...draft.requirements.flatMap((requirement) => [
+      [`requirement:${requirement.id}`, requirement.statement],
+      ...requirement.acceptanceCases.flatMap((acceptanceCase) => [
+        [`acceptance_given:${acceptanceCase.id}`, acceptanceCase.given],
+        [`acceptance_when:${acceptanceCase.id}`, acceptanceCase.when],
+        [`acceptance_then:${acceptanceCase.id}`, acceptanceCase.then],
+      ]),
+    ]),
+    ...draft.invariants.flatMap(({ id, statement, falsification }) => [
+      [`invariant:${id}`, statement],
+      [`invariant_falsification:${id}`, falsification],
+    ]),
+    ...draft.decisions.flatMap((decision) => decision.answers.map(({ id, contractEffect }) => (
+      [`decision_effect:${decision.questionId}:${id}`, contractEffect]
+    ))),
+  ];
+  for (const [location, text] of normativeFragments) {
+    if (hasUnresolvedExpression(text)) {
+      throw new Error(`unresolved_expression_in_normative_text:${location}`);
+    }
+  }
   for (const requirement of draft.requirements) {
     const userReferences = requirement.basis
       .filter(({ source }) => source === 'USER_INTENT')
@@ -912,6 +985,9 @@ export function assertSemanticDraft(draft, policy, {
   const boundarySignalOwners = new Map();
   const boundaryCaseOwners = new Map();
   for (const boundaryRule of draft.boundaryRules) {
+    if (boundaryRule.representationKind === undefined) {
+      throw new Error(`boundary_rule_without_representation_kind:${boundaryRule.id}`);
+    }
     assertRequirementReferences([boundaryRule], requirementIds, 'boundary_rule');
     const linkedCases = boundaryRule.acceptanceCaseIds.map((caseId) => {
       const acceptanceCase = acceptanceCasesById.get(caseId);
@@ -950,6 +1026,23 @@ export function assertSemanticDraft(draft, policy, {
       }
       return acceptanceCase;
     });
+    if (boundaryRule.representationKind === 'REPRESENTATION_WIDTH') {
+      if (boundaryRule.underflowBehavior !== 'NOT_APPLICABLE'
+        || boundaryRule.overflowBehavior !== 'NOT_APPLICABLE'
+        || linkedCases.some(({ boundaryBinding }) => boundaryBinding.side !== 'EXACT_WIDTH')) {
+        throw new Error(`representation_width_mixed_with_value_range:${boundaryRule.id}`);
+      }
+    }
+    if (boundaryRule.representationKind === 'ENCODED_VALUE') {
+      if (boundaryRule.underflowBehavior === 'NOT_APPLICABLE'
+        || boundaryRule.overflowBehavior === 'NOT_APPLICABLE') {
+        throw new Error(`encoded_value_without_both_range_policies:${boundaryRule.id}`);
+      }
+      if (/\bbits?\s+\d+\s*[–—-]\s*\d+\b/iu.test(boundaryRule.lowerBound)
+        || /\bbits?\s+\d+\s*[–—-]\s*\d+\b/iu.test(boundaryRule.upperBound)) {
+        throw new Error(`encoded_value_uses_bit_position_as_value_range:${boundaryRule.id}`);
+      }
+    }
     if (boundaryRule.underflowBehavior === 'NOT_APPLICABLE'
       && boundaryRule.overflowBehavior === 'NOT_APPLICABLE'
       && !linkedCases.some(({ boundaryBinding }) => boundaryBinding.side === 'EXACT_WIDTH')) {
@@ -1074,6 +1167,10 @@ export function assertSemanticDraft(draft, policy, {
 
   const determinismSignals = intentSignals
     .filter(({ kind }) => kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS');
+  const observableContractText = draft.requirements.flatMap((requirement) => [
+    requirement.statement,
+    ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
+  ]).join('\n');
   const reviewedDeterminismSignalIds = new Set(draft.determinismReview.intentSignalIds);
   const expectedDeterminismSignalIds = new Set(determinismSignals.map(({ id }) => id));
   if (reviewedDeterminismSignalIds.size !== expectedDeterminismSignalIds.size
@@ -1117,7 +1214,10 @@ export function assertSemanticDraft(draft, policy, {
           : acceptanceCasesById.get(dimension.acceptanceCaseId);
         if (proof === undefined
           || !targetRequirementIds.includes(acceptanceRequirementById.get(proof.id))
-          || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')) {
+          || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')
+          || hasUnresolvedExpression(dimension.rationale)
+          || hasDisjunctiveOutcome(dimension.rationale)
+          || isBareDeterminismAssertion(dimension.rationale)) {
           throw new Error(`specified_determinism_dimension_without_exact_proof:${dimension.kind}`);
         }
       }
@@ -1131,9 +1231,30 @@ export function assertSemanticDraft(draft, policy, {
       if (dimension.status !== 'SPECIFIED' && dimension.acceptanceCaseId !== null) {
         throw new Error(`non_specified_determinism_dimension_has_proof:${dimension.kind}`);
       }
-      if (dimension.status === 'NOT_APPLICABLE'
-        && dimension.basis.every(({ source }) => source === 'MODEL_ANALYSIS')) {
-        throw new Error(`inapplicable_determinism_dimension_without_evidence:${dimension.kind}`);
+      if (dimension.status === 'NOT_APPLICABLE') {
+        const proof = dimension.inapplicabilityProof;
+        const evidenceSources = new Set([
+          'USER_INTENT',
+          'USER_DECISION',
+          'ARCHITECTURE_POLICY',
+          'SAFE_MECHANICAL_DEFAULT',
+          'WORKSPACE_EVIDENCE',
+        ]);
+        if (proof === undefined
+          || proof === null
+          || normalizedObservableText(proof.baseline) === normalizedObservableText(proof.variation)
+          || hasUnresolvedExpression(proof.unchangedObservableOutcome)
+          || hasDisjunctiveOutcome(proof.unchangedObservableOutcome)
+          || !literalReferenceAppears(
+            observableContractText,
+            proof.unchangedObservableOutcome,
+          )
+          || !dimension.basis.some(({ source }) => evidenceSources.has(source))) {
+          throw new Error(`inapplicable_determinism_dimension_without_independence_proof:${dimension.kind}`);
+        }
+      } else if (dimension.inapplicabilityProof !== undefined
+        && dimension.inapplicabilityProof !== null) {
+        throw new Error(`applicable_determinism_dimension_has_independence_proof:${dimension.kind}`);
       }
     }
     const gapsFound = draft.determinismReview.dimensions
@@ -1175,9 +1296,39 @@ export function assertSemanticDraft(draft, policy, {
       throw new Error(`recommended_answer_invents_numeric_literal:${decision.questionId}`);
     }
     const answerEffects = decision.answers
-      .map(({ contractEffect }) => contractEffect.normalize('NFC'));
+      .map(({ contractEffect }) => normalizedObservableText(contractEffect));
     if (new Set(answerEffects).size !== answerEffects.length) {
       throw new Error(`decision_answers_without_distinct_effects:${decision.questionId}`);
+    }
+    if (/\b(?:bigint|inteiros?)\b/iu.test(intent)) {
+      const thresholdEffects = decision.answers
+        .map(({ contractEffect }) => canonicalIntegerThreshold(contractEffect))
+        .filter((effect) => effect !== null);
+      if (new Set(thresholdEffects).size !== thresholdEffects.length) {
+        throw new Error(`decision_answers_semantically_equivalent:${decision.questionId}`);
+      }
+    }
+    if (decision.distinguishingCase === undefined) {
+      throw new Error(`decision_without_observable_distinguishing_case:${decision.questionId}`);
+    }
+    {
+      const outcomeIds = decision.distinguishingCase.outcomes.map(({ answerId }) => answerId);
+      const knownAnswerIds = new Set(decision.answers.map(({ id }) => id));
+      if (outcomeIds.length !== knownAnswerIds.size
+        || new Set(outcomeIds).size !== knownAnswerIds.size
+        || outcomeIds.some((answerId) => !knownAnswerIds.has(answerId))) {
+        throw new Error(`decision_distinguishing_case_incomplete:${decision.questionId}`);
+      }
+      const outcomes = decision.distinguishingCase.outcomes
+        .map(({ then }) => normalizedObservableText(then));
+      if (new Set(outcomes).size !== outcomes.length
+        || hasUnresolvedExpression(decision.distinguishingCase.given)
+        || hasUnresolvedExpression(decision.distinguishingCase.when)
+        || decision.distinguishingCase.outcomes.some(({ then }) => (
+          hasUnresolvedExpression(then) || hasDisjunctiveOutcome(then)
+        ))) {
+        throw new Error(`decision_without_observable_distinguishing_case:${decision.questionId}`);
+      }
     }
     assertRequirementReferences([decision], requirementIds, 'decision');
     for (const invariantId of decision.invariantIds) {
@@ -1405,7 +1556,20 @@ export function assertSemanticDraft(draft, policy, {
     ]),
     ...draft.policyAssessments.map((assessment) => [assessment.ruleId, assessment.rationale]),
   ]);
+  const provisionalDecisionByEffect = new Map(acceptanceCases
+    .filter(({ decisionBinding }) => decisionBinding !== null)
+    .map((acceptanceCase) => [
+      normalizedObservableText(acceptanceCase.then),
+      acceptanceCase.decisionBinding.questionId,
+    ]));
   for (const finding of draft.adversarialReview.findings) {
+    const pendingDecisionId = provisionalDecisionByEffect
+      .get(normalizedObservableText(finding.response));
+    if (pendingDecisionId !== undefined
+      && (finding.disposition !== 'DECISION'
+        || !finding.targetIds.includes(pendingDecisionId))) {
+      throw new Error(`pending_decision_presented_as_resolved:${finding.id}:${pendingDecisionId}`);
+    }
     for (const targetId of finding.targetIds) {
       if (!semanticTargetIds.has(targetId)) {
         throw new Error(`adversarial_finding_references_unknown_target:${targetId}`);
@@ -1760,6 +1924,7 @@ export function compileSemanticOpinion(opinion, request) {
         rationale: item.rationale,
         targetIds: compileTargets(item.targets),
         basis: compileOpinionBasis(item.basis, request),
+        inapplicabilityProof: item.inapplicabilityProof,
         acceptanceCaseId: item.acceptanceCase === null
           ? null
           : compileAcceptanceReference(item.acceptanceCase),
@@ -1768,6 +1933,7 @@ export function compileSemanticOpinion(opinion, request) {
     boundaryRules: opinion.boundaryRules.map((item, index) => ({
       id: boundaryIds[index],
       subject: item.subject,
+      representationKind: item.representationKind,
       lowerBound: item.lowerBound,
       upperBound: item.upperBound,
       underflowBehavior: item.underflowBehavior,
@@ -1809,6 +1975,14 @@ export function compileSemanticOpinion(opinion, request) {
       requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
       invariantIds: compileIndexes(item.invariantIndexes, invariantIds, 'invariant'),
       riskIds: compileIndexes(item.riskIndexes, riskIds, 'risk'),
+      distinguishingCase: {
+        given: item.distinguishingCase.given,
+        when: item.distinguishingCase.when,
+        outcomes: item.distinguishingCase.outcomes.map(({ answerIndex, then }) => ({
+          answerId: indexedValue(answerIds[decisionIndex], answerIndex, 'distinguishing_answer'),
+          then,
+        })),
+      },
       answers: item.answers.map((answer, answerIndex) => ({
         id: answerIds[decisionIndex][answerIndex],
         label: answer.label,
@@ -2229,6 +2403,13 @@ export function renderSemanticContractMarkdown(contract, {
       if (acceptanceCase.boundaryBinding !== null) {
         lines.push(`  - Limite: ${acceptanceCase.boundaryBinding.ruleId}/${acceptanceCase.boundaryBinding.side} → ${acceptanceCase.boundaryBinding.expectedBehavior}${acceptanceCase.boundaryBinding.expectedValue === null ? '' : ` (${acceptanceCase.boundaryBinding.expectedValue})`}`);
       }
+      if (acceptanceCase.decisionBinding !== null) {
+        const selected = selections.get(acceptanceCase.decisionBinding.questionId)
+          === acceptanceCase.decisionBinding.answerId;
+        lines.push(selected
+          ? `  - Autoridade: **ESCOLHA HUMANA SELADA — ${acceptanceCase.decisionBinding.questionId}/${acceptanceCase.decisionBinding.answerId}.**`
+          : `  - Autoridade: **PROVISÓRIO — depende de ${acceptanceCase.decisionBinding.questionId}/${acceptanceCase.decisionBinding.answerId}; recomendação não é consentimento humano.**`);
+      }
     }
   }
 
@@ -2238,6 +2419,9 @@ export function renderSemanticContractMarkdown(contract, {
   }
   for (const boundaryRule of specification.boundaryRules) {
     lines.push(`- **${boundaryRule.id}: ${boundaryRule.subject}**`);
+    if (boundaryRule.representationKind !== undefined) {
+      lines.push(`  - Natureza: ${boundaryRule.representationKind}.`);
+    }
     lines.push(`  - Intervalo: ${boundaryRule.lowerBound} até ${boundaryRule.upperBound}.`);
     lines.push(`  - Abaixo: ${boundaryRule.underflowBehavior}; acima: ${boundaryRule.overflowBehavior}.`);
     if (boundaryRule.decisionId !== null) lines.push(`  - Decisão necessária: ${boundaryRule.decisionId}.`);
@@ -2250,6 +2434,11 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`- **${dimension.kind}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
+    if (dimension.inapplicabilityProof !== undefined
+      && dimension.inapplicabilityProof !== null) {
+      const proof = dimension.inapplicabilityProof;
+      lines.push(`  - Prova de independência: variar “${proof.variedFactor}” de “${proof.baseline}” para “${proof.variation}” mantém “${proof.unchangedObservableOutcome}”.`);
+    }
   }
 
   lines.push('', '## 6. Invariantes');
@@ -2307,6 +2496,12 @@ export function renderSemanticContractMarkdown(contract, {
         .filter(({ decisionBinding }) => decisionBinding?.questionId === decision.questionId)
         .map(({ id }) => id);
       lines.push(`Impacta requisitos: ${decision.requirementIds.join(', ') || 'nenhum'}; provas: ${decisionCases.join(', ') || 'nenhuma'}; invariantes: ${decision.invariantIds.join(', ') || 'nenhum'}; riscos: ${decision.riskIds.join(', ') || 'nenhum'}.`);
+      if (decision.distinguishingCase !== undefined) {
+        lines.push(`Caso que diferencia as opções — Dado: ${decision.distinguishingCase.given}; Quando: ${decision.distinguishingCase.when}.`);
+        for (const outcome of decision.distinguishingCase.outcomes) {
+          lines.push(`- ${outcome.answerId} → ${outcome.then}`);
+        }
+      }
     }
   }
   if (informationalUnknowns.length > 0) {

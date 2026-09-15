@@ -185,6 +185,14 @@ const decisions = withDecision ? [{
   requirementIndexes: [0],
   invariantIndexes: [0],
   riskIndexes: [],
+  distinguishingCase: {
+    given: 'Um cálculo válido concluído.',
+    when: 'O resultado público for observado.',
+    outcomes: [
+      { answerIndex: 0, then: 'Somente o resultado numérico é retornado.' },
+      { answerIndex: 1, then: 'O resultado numérico e metadados adicionais são retornados.' },
+    ],
+  },
   answers: [
     { label: 'Resultado simples', rationale: 'Menor superfície pública.', contractEffect: 'O resultado esperado deve ser retornado.' },
     { label: 'Resultado detalhado', rationale: 'Expõe metadados adicionais.', contractEffect: 'Um resultado com metadados adicionais deve ser retornado.' },
@@ -274,10 +282,10 @@ process.stdout.write(JSON.stringify({
       : 'Os casos de falha e limite já cobrem a principal objeção à recomendação.',
     findings: withDecision ? [{
       kind: 'TECHNICAL_RISK',
-      disposition: 'REQUIREMENT',
+      disposition: 'DECISION',
       challenge: 'O formato simples pode omitir informação necessária ao consumidor.',
       response: 'O resultado esperado deve ser retornado.',
-      targets: [{ kind: 'REQUIREMENT', index: 0 }],
+      targets: [{ kind: 'DECISION', index: 0 }],
       basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
     }] : [],
   },
@@ -324,6 +332,18 @@ printf '%s\n' "${mechanical_field_output}" | jq -e '
   and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v1"))
 ' >/dev/null
 
+# Toda decisão da IA precisa demonstrar um caso que diferencie suas alternativas.
+missing_distinguishing_case="$(make_opinion yes "${semantic_worksheet_digest}" | jq 'del(.decisions[0].distinguishingCase)')"
+set +e
+missing_distinguishing_output="$(printf '%s' "${missing_distinguishing_case}" | bash ./aegis --semantic-compile 2>&1)"
+missing_distinguishing_code=$?
+set -e
+[[ "${missing_distinguishing_code}" -ne 0 ]]
+printf '%s\n' "${missing_distinguishing_output}" | jq -e '
+  .reason == "INVALID_SEMANTIC_OPINION"
+  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v1"))
+' >/dev/null
+
 # Índices da ficha não podem apontar para itens inexistentes.
 invalid_index_opinion="$(make_opinion yes "${semantic_worksheet_digest}" | jq '.requirements[0].acceptanceCases[0].decisionBinding.decisionIndex = 9')"
 set +e
@@ -338,6 +358,7 @@ printf '%s\n' "${invalid_index_output}" | jq -e '
 
 # Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
 make_opinion yes "${semantic_worksheet_digest}" | bash ./aegis --semantic-compile >/dev/null
+grep -F 'PROVISÓRIO — depende de Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null
 cp .harness/runtime/user_confirmation_request.json .harness/runtime/user_confirmation_request.saved.json
 rm .harness/runtime/user_confirmation_request.json
 set +e
@@ -383,11 +404,14 @@ jq -e '
   and .specification.requirements[0].id == "REQ-0001"
   and .specification.requirements[0].acceptanceCases[0].id == "AC-0001-01"
   and .specification.invariants[0].id == "INV-0001"
+  and .specification.decisions[0].distinguishingCase.outcomes[0].answerId == "ANS-0001-01"
+  and .specification.decisions[0].distinguishingCase.outcomes[1].answerId == "ANS-0001-02"
   and .specification.riskReview.status == "NONE"
   and .specification.adversarialReview.status == "CHALLENGES_INTEGRATED"
   and .specification.determinismReview.status == "NOT_APPLICABLE"
 ' .harness/runtime/contract.json >/dev/null
 grep -F '[ESCOLHA HUMANA]' .harness/runtime/contract.md >/dev/null
+grep -F 'ESCOLHA HUMANA SELADA — Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null
 previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-state.json)"
 
 # Uma demanda diferente não herda a validade do contrato anterior.

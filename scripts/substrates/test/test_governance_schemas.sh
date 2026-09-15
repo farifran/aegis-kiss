@@ -326,6 +326,14 @@ const draft = {
     requirementIds: ['REQ-RESULT'],
     invariantIds: ['INV-EXPLICIT'],
     riskIds: ['RISK-SILENCE'],
+    distinguishingCase: {
+      given: 'Uma operação válida concluída.',
+      when: 'O resultado público for observado.',
+      outcomes: [
+        { answerId: 'ANS-SIMPLE', then: 'Somente o resultado essencial é observado.' },
+        { answerId: 'ANS-DETAIL', then: 'O resultado e metadados adicionais são observados.' },
+      ],
+    },
     answers: [
       { id: 'ANS-SIMPLE', label: 'Simples', rationale: 'Menor superfície pública.', contractEffect: 'Um resultado explícito deve ser observado.', recommended: true },
       { id: 'ANS-DETAIL', label: 'Detalhado', rationale: 'Expõe mais dados.', contractEffect: 'Um resultado detalhado com metadados deve ser observado.', recommended: false },
@@ -340,6 +348,62 @@ const semanticValidationContext = {
   workspaceEvidence: semanticRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(draft, loadedPolicy.policy, semanticValidationContext);
+
+const unresolvedNormativeExpression = structuredClone(draft);
+unresolvedNormativeExpression.requirements[0].acceptanceCases[1].then = 'Uma falha explícita deve ser observada ().';
+let unresolvedNormativeExpressionRejected = false;
+try {
+  assertSemanticDraft(unresolvedNormativeExpression, loadedPolicy.policy, semanticValidationContext);
+} catch (error) {
+  unresolvedNormativeExpressionRejected = error.message.startsWith(
+    'unresolved_expression_in_normative_text:',
+  );
+}
+if (!unresolvedNormativeExpressionRejected) {
+  throw new Error('incomplete_marker_survived_in_normative_contract');
+}
+
+const pendingDecisionClaimedAsResolved = structuredClone(draft);
+pendingDecisionClaimedAsResolved.adversarialReview.findings[0] = {
+  ...pendingDecisionClaimedAsResolved.adversarialReview.findings[0],
+  response: 'Um resultado explícito deve ser observado.',
+  targetIds: ['REQ-RESULT'],
+};
+let pendingDecisionClaimedAsResolvedRejected = false;
+try {
+  assertSemanticDraft(pendingDecisionClaimedAsResolved, loadedPolicy.policy, semanticValidationContext);
+} catch (error) {
+  pendingDecisionClaimedAsResolvedRejected = error.message.startsWith(
+    'pending_decision_presented_as_resolved:',
+  );
+}
+if (!pendingDecisionClaimedAsResolvedRejected) {
+  throw new Error('adversarial_review_preapproved_pending_decision');
+}
+
+const equivalentIntegerDecision = structuredClone(draft);
+equivalentIntegerDecision.decisions[0].answers[0].contractEffect = 'O bit deve ativar quando o volume for estritamente maior que 0.';
+equivalentIntegerDecision.decisions[0].answers[1].contractEffect = 'O bit deve ativar quando o volume for maior ou igual a 1.';
+equivalentIntegerDecision.requirements[0].acceptanceCases[0].then = equivalentIntegerDecision
+  .decisions[0].answers[0].contractEffect;
+equivalentIntegerDecision.unknowns[0].basis.push({
+  source: 'USER_INTENT',
+  reference: 'maior que 0 ou maior ou igual a 1',
+});
+let equivalentIntegerDecisionRejected = false;
+try {
+  assertSemanticDraft(equivalentIntegerDecision, loadedPolicy.policy, {
+    ...semanticValidationContext,
+    intent: `${preflight.intent} Usar BigInt com maior que 0 ou maior ou igual a 1.`,
+  });
+} catch (error) {
+  equivalentIntegerDecisionRejected = error.message.startsWith(
+    'decision_answers_semantically_equivalent:',
+  );
+}
+if (!equivalentIntegerDecisionRejected) {
+  throw new Error('equivalent_integer_thresholds_reached_wizard');
+}
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft,
@@ -521,6 +585,14 @@ gapDraft.decisions = [
     requirementIds: ['REQ-RESULT'],
     invariantIds: ['INV-EXPLICIT'],
     riskIds: [],
+    distinguishingCase: {
+      given: 'Uma ordem com liquidação parcial.',
+      when: 'A fração for calculada.',
+      outcomes: [
+        { answerId: 'ANS-SIMPLE', then: 'Uma fração calculada deve ser observada.' },
+        { answerId: 'ANS-DETAIL', then: 'Nenhum cálculo fracionário deve ser observado.' },
+      ],
+    },
     answers: [
       {
         id: 'ANS-SIMPLE',
@@ -545,6 +617,14 @@ gapDraft.decisions = [
     requirementIds: ['REQ-RESULT'],
     invariantIds: ['INV-EXPLICIT'],
     riskIds: [],
+    distinguishingCase: {
+      given: 'Um volume candidato à comparação.',
+      when: 'A regra de limite for avaliada.',
+      outcomes: [
+        { answerId: 'ANS-EXPLICIT', then: 'O valor deve ser comparado com o limite escolhido.' },
+        { answerId: 'ANS-REMOVE', then: 'Nenhuma comparação de volume deve ser realizada.' },
+      ],
+    },
     answers: [
       {
         id: 'ANS-EXPLICIT',
@@ -679,7 +759,7 @@ if (canonicalDigest(gapContract.intentSignals) !== canonicalDigest(gapSignals)
   throw new Error('contract_omitted_intent_signals_or_quality_goal');
 }
 
-const deterministicIntent = 'Produzir saída determinística com formato ainda a escolher.';
+const deterministicIntent = 'Produzir saída determinística, ordenar os campos alfabeticamente e manter o formato ainda a escolher.';
 const deterministicPreflight = buildPreflightHandoff({
   demand: deterministicIntent,
   discovery: discoverWorkspace(process.cwd(), deterministicIntent),
@@ -711,6 +791,15 @@ deterministicDraft.intentClaims = [
     rationale: 'A demanda promete resultado determinístico.',
   },
   {
+    id: 'CLAIM-DETERMINISTIC-ORDER',
+    quote: 'ordenar os campos alfabeticamente',
+    kind: 'OBLIGATION',
+    disposition: 'NORMATIVE',
+    contractEffect: 'A saída deve ordenar os campos alfabeticamente.',
+    targetIds: ['REQ-RESULT'],
+    rationale: 'A demanda fornece uma regra concreta de ordenação.',
+  },
+  {
     id: 'CLAIM-DETERMINISTIC-FORMAT',
     quote: 'formato ainda a escolher',
     kind: 'AMBIGUITY',
@@ -721,14 +810,14 @@ deterministicDraft.intentClaims = [
   },
 ];
 deterministicDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
-deterministicDraft.requirements[0].statement = 'A saída determinística deve ser explícita.';
+deterministicDraft.requirements[0].statement = 'A saída determinística deve ser explícita. A saída deve ordenar os campos alfabeticamente.';
 deterministicDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
 deterministicDraft.requirements[0].acceptanceCases.push({
   id: 'AC-DETERMINISTIC-REPLAY',
   kind: 'HAPPY_PATH',
   given: 'A mesma entrada válida em duas execuções.',
   when: 'A operação for repetida sob o mesmo contexto.',
-  then: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
+  then: 'A saída deve ordenar os campos alfabeticamente.',
   outcomeKind: 'RETURN_VALUE',
   decisionBinding: null,
   boundaryBinding: null,
@@ -739,23 +828,29 @@ deterministicDraft.determinismReview = {
   rationale: 'Todas as dimensões universais foram classificadas e a dimensão aplicável possui prova exata.',
   intentSignalIds: [deterministicSignal.id],
   dimensions: [
-    { kind: 'ORDERING', status: 'NOT_APPLICABLE', rationale: 'Não há coleção ou sequência observável.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
     {
-      kind: 'CANONICALIZATION',
+      kind: 'ORDERING',
       status: 'SPECIFIED',
-      rationale: 'A mesma entrada e o mesmo contexto devem produzir exatamente a mesma saída.',
+      rationale: 'A saída deve ordenar os campos alfabeticamente.',
       targetIds: ['REQ-RESULT'],
-      basis: [{ source: 'USER_INTENT', reference: 'saída determinística' }],
+      basis: [{ source: 'USER_INTENT', reference: 'ordenar os campos alfabeticamente' }],
       acceptanceCaseId: 'AC-DETERMINISTIC-REPLAY',
+      inapplicabilityProof: null,
     },
-    { kind: 'DUPLICATES', status: 'NOT_APPLICABLE', rationale: 'Não há coleção com duplicatas.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'EMPTY_INPUT', status: 'NOT_APPLICABLE', rationale: 'A entrada vazia não integra a promessa de determinismo.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'ODD_CARDINALITY', status: 'NOT_APPLICABLE', rationale: 'Não há estrutura pareada.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'ROUNDING_REMAINDER', status: 'NOT_APPLICABLE', rationale: 'Não há divisão ou arredondamento.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'ZERO_DIVISOR', status: 'NOT_APPLICABLE', rationale: 'Não há divisão.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'TIE_BREAKING', status: 'NOT_APPLICABLE', rationale: 'Não há escolhas empatadas.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'COUNTING_IDENTITY', status: 'NOT_APPLICABLE', rationale: 'Não há contagem de identidades.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
-    { kind: 'BOUNDED_ARITHMETIC', status: 'NOT_APPLICABLE', rationale: 'Não há aritmética de largura fixa.', targetIds: [], basis: determinismBasis, acceptanceCaseId: null },
+    ...['CANONICALIZATION', 'DUPLICATES', 'EMPTY_INPUT', 'ODD_CARDINALITY', 'ROUNDING_REMAINDER', 'ZERO_DIVISOR', 'TIE_BREAKING', 'COUNTING_IDENTITY', 'BOUNDED_ARITHMETIC'].map((kind) => ({
+      kind,
+      status: 'NOT_APPLICABLE',
+      rationale: `A dimensão ${kind} não altera a ordenação pública exigida nesta demanda.`,
+      targetIds: [],
+      basis: [{ source: 'USER_INTENT', reference: 'saída determinística' }],
+      acceptanceCaseId: null,
+      inapplicabilityProof: {
+        variedFactor: kind,
+        baseline: `${kind}: cenário A`,
+        variation: `${kind}: cenário B`,
+        unchangedObservableOutcome: 'A saída deve ordenar os campos alfabeticamente.',
+      },
+    })),
   ],
 };
 const deterministicContext = {
@@ -782,9 +877,9 @@ if (!omittedDeterminismRejected) throw new Error('determinism_review_was_optiona
 
 const falselySpecifiedDeterminism = structuredClone(deterministicDraft);
 falselySpecifiedDeterminism.determinismReview.dimensions
-  .find(({ kind }) => kind === 'ORDERING').status = 'SPECIFIED';
+  .find(({ kind }) => kind === 'CANONICALIZATION').status = 'SPECIFIED';
 falselySpecifiedDeterminism.determinismReview.dimensions
-  .find(({ kind }) => kind === 'ORDERING').targetIds = ['REQ-RESULT'];
+  .find(({ kind }) => kind === 'CANONICALIZATION').targetIds = ['REQ-RESULT'];
 let falseClosureRejected = false;
 try {
   assertSemanticDraft(falselySpecifiedDeterminism, loadedPolicy.policy, deterministicContext);
@@ -792,6 +887,39 @@ try {
   falseClosureRejected = true;
 }
 if (!falseClosureRejected) throw new Error('determinism_dimension_closed_by_reference_only');
+
+const missingIndependenceProof = structuredClone(deterministicDraft);
+missingIndependenceProof.determinismReview.dimensions
+  .find(({ kind }) => kind === 'CANONICALIZATION').inapplicabilityProof = null;
+let missingIndependenceProofRejected = false;
+try {
+  assertSemanticDraft(missingIndependenceProof, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  missingIndependenceProofRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_independence_proof:',
+  );
+}
+if (!missingIndependenceProofRejected) {
+  throw new Error('not_applicable_closed_without_independence_proof');
+}
+
+const tautologicalDeterminism = structuredClone(deterministicDraft);
+const orderingDimension = tautologicalDeterminism.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING');
+orderingDimension.rationale = 'A mesma entrada deve produzir a mesma saída.';
+tautologicalDeterminism.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then = orderingDimension.rationale;
+let tautologicalDeterminismRejected = false;
+try {
+  assertSemanticDraft(tautologicalDeterminism, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  tautologicalDeterminismRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:',
+  );
+}
+if (!tautologicalDeterminismRejected) {
+  throw new Error('tautology_was_accepted_as_determinism_rule');
+}
 
 const ambiguousOutcomeDraft = structuredClone(draft);
 ambiguousOutcomeDraft.requirements[0].acceptanceCases[0].then = 'A operação deve retornar zero ou rejeitar a entrada.';
@@ -830,13 +958,13 @@ if (!conflictingOutcomeRejected) throw new Error('conflicting_observable_outcome
 
 const unsupportedInapplicability = structuredClone(deterministicDraft);
 unsupportedInapplicability.determinismReview.dimensions
-  .find(({ kind }) => kind === 'ORDERING').basis = modelBasis;
+  .find(({ kind }) => kind === 'CANONICALIZATION').basis = modelBasis;
 let unsupportedInapplicabilityRejected = false;
 try {
   assertSemanticDraft(unsupportedInapplicability, loadedPolicy.policy, deterministicContext);
 } catch (error) {
   unsupportedInapplicabilityRejected = error.message.startsWith(
-    'inapplicable_determinism_dimension_without_evidence:',
+    'inapplicable_determinism_dimension_without_independence_proof:',
   );
 }
 if (!unsupportedInapplicabilityRejected) {
@@ -845,7 +973,7 @@ if (!unsupportedInapplicabilityRejected) {
 
 const inventedSafeDefault = structuredClone(deterministicDraft);
 inventedSafeDefault.determinismReview.dimensions
-  .find(({ kind }) => kind === 'ORDERING').basis = [{
+  .find(({ kind }) => kind === 'CANONICALIZATION').basis = [{
     source: 'SAFE_MECHANICAL_DEFAULT',
     reference: 'ARCH-NOT-REAL',
   }];
@@ -1063,7 +1191,9 @@ if (boundedSignals.length !== 1
 if (boundedRequest.worksheet.bitFields.length !== 1
   || boundedRequest.worksheet.bitFields[0].startBit !== 4
   || boundedRequest.worksheet.bitFields[0].endBit !== 9
-  || boundedRequest.worksheet.bitFields[0].width !== 6) {
+  || boundedRequest.worksheet.bitFields[0].width !== 6
+  || boundedRequest.worksheet.bitFields[0].patternCount !== '64'
+  || boundedRequest.worksheet.bitFields[0].unsignedMaximum !== '63') {
   throw new Error('deterministic_worksheet_miscalculated_bit_field');
 }
 const boundedDraft = structuredClone(draft);
@@ -1125,6 +1255,7 @@ boundedDraft.requirements[0].acceptanceCases.push({
 boundedDraft.boundaryRules = [{
   id: 'BOUND-PARTICIPANTS',
   subject: 'Quantidade de participantes no campo de seis bits',
+  representationKind: 'ENCODED_VALUE',
   lowerBound: '0',
   upperBound: '63',
   underflowBehavior: 'REJECT',
@@ -1143,6 +1274,14 @@ boundedDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'política
 boundedDraft.decisions[0] = {
   ...boundedDraft.decisions[0],
   question: 'Como representar quantidades acima de 63?',
+  distinguishingCase: {
+    given: 'Uma quantidade igual a 64.',
+    when: 'O campo de seis bits for compilado.',
+    outcomes: [
+      { answerId: 'ANS-SIMPLE', then: 'O campo deve conter 63.' },
+      { answerId: 'ANS-DETAIL', then: 'A operação deve ser rejeitada.' },
+    ],
+  },
   answers: [
     { id: 'ANS-SIMPLE', label: 'Rejeitar abaixo e saturar acima', rationale: 'Evita wrap e mantém a faixa observável.', contractEffect: 'Valores abaixo de 0 devem ser rejeitados e valores acima de 63 devem saturar em 63.', recommended: true },
     { id: 'ANS-DETAIL', label: 'Rejeitar fora da faixa', rationale: 'Não aproxima valores excedentes.', contractEffect: 'Todo valor fora de 0 a 63 deve ser rejeitado.', recommended: false },
@@ -1229,6 +1368,7 @@ fixedWidthDraft.requirements[0].acceptanceCases = [
 fixedWidthDraft.boundaryRules = [{
   id: 'BOUND-FIXED-WIDTH',
   subject: 'Largura do identificador público',
+  representationKind: 'REPRESENTATION_WIDTH',
   lowerBound: '64 bits',
   upperBound: '64 bits',
   underflowBehavior: 'NOT_APPLICABLE',
@@ -1248,6 +1388,19 @@ const fixedWidthContext = {
   workspaceEvidence: fixedWidthRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(fixedWidthDraft, loadedPolicy.policy, fixedWidthContext);
+const widthMisclassifiedAsEncodedValue = structuredClone(fixedWidthDraft);
+widthMisclassifiedAsEncodedValue.boundaryRules[0].representationKind = 'ENCODED_VALUE';
+let widthMisclassificationRejected = false;
+try {
+  assertSemanticDraft(widthMisclassifiedAsEncodedValue, loadedPolicy.policy, fixedWidthContext);
+} catch (error) {
+  widthMisclassificationRejected = error.message.startsWith(
+    'encoded_value_without_both_range_policies:',
+  );
+}
+if (!widthMisclassificationRejected) {
+  throw new Error('representation_width_was_treated_as_encoded_value_without_policy');
+}
 
 const tamperedIntentSignals = structuredClone(gapContract);
 tamperedIntentSignals.intentSignals.pop();
