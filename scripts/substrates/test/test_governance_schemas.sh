@@ -788,19 +788,20 @@ if (canonicalDigest(gapContract.intentSignals) !== canonicalDigest(gapSignals)
   throw new Error('contract_omitted_intent_signals_or_quality_goal');
 }
 
-const determinismIndependenceRules = {
-  DUPLICATES: 'Elementos duplicados preservam exatamente o resultado público permitido.',
-  EMPTY_INPUT: 'A coleção vazia preserva exatamente o resultado público permitido.',
-  ODD_CARDINALITY: 'A cardinalidade ímpar preserva exatamente o resultado público permitido.',
-  ROUNDING: 'A divisão não exata preserva exatamente o resultado público permitido.',
-  REMAINDER_DISTRIBUTION: 'Múltiplos destinatários com resto preservam exatamente o resultado público permitido.',
-  ZERO_DIVISOR: 'O divisor zero preserva exatamente o resultado público permitido.',
-  TIE_BREAKING: 'Candidatos com prioridade igual preservam exatamente o resultado público permitido.',
-  COUNTING_IDENTITY: 'Identidades repetidas preservam exatamente o resultado público permitido.',
-  BOUNDED_ARITHMETIC: 'Valores fora da faixa preservam exatamente o resultado público permitido.',
+const determinismAbsenceRules = {
+  DUPLICATES: 'Não existem elementos duplicados na fronteira pública contratada.',
+  EMPTY_INPUT: 'Não existe coleção vazia na fronteira pública contratada.',
+  ODD_CARDINALITY: 'Não existe coleção de cardinalidade ímpar na fronteira pública contratada.',
+  ROUNDING: 'Não existe divisão não exata na fronteira pública contratada.',
+  REMAINDER_DISTRIBUTION: 'Não existe distribuição de resto na fronteira pública contratada.',
+  ZERO_DIVISOR: 'Não existe divisor zero na fronteira pública contratada.',
+  TIE_BREAKING: 'Não existem candidatos empatados na fronteira pública contratada.',
+  COUNTING_IDENTITY: 'Não existe contagem de identidades na fronteira pública contratada.',
+  BOUNDED_ARITHMETIC: 'Não existe aritmética limitada na fronteira pública contratada.',
 };
-const determinismIndependenceRule = Object.values(determinismIndependenceRules).join(' ');
-const deterministicIntent = `Produzir saída determinística, ordenar os campos alfabeticamente e manter o formato ainda a escolher. ${determinismIndependenceRule}`;
+const orderingRule = 'Os campos ordenados alfabeticamente são preservados após permutar elementos equivalentes.';
+const determinismAbsenceRule = Object.values(determinismAbsenceRules).join(' ');
+const deterministicIntent = `Produzir saída determinística e manter o formato ainda a escolher. ${orderingRule} ${determinismAbsenceRule}`;
 const deterministicPreflight = buildPreflightHandoff({
   demand: deterministicIntent,
   discovery: discoverWorkspace(process.cwd(), deterministicIntent),
@@ -836,22 +837,13 @@ deterministicDraft.intentClaims = [
   },
   {
     id: 'CLAIM-DETERMINISTIC-ORDER',
-    quote: 'ordenar os campos alfabeticamente',
+    quote: orderingRule,
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
-    contractEffect: 'A saída deve ordenar os campos alfabeticamente.',
+    contractEffect: orderingRule,
     targetIds: ['REQ-RESULT'],
     rationale: 'A demanda fornece uma regra concreta de ordenação.',
   },
-  ...Object.entries(determinismIndependenceRules).map(([kind, rule], index) => ({
-    id: `CLAIM-DETERMINISTIC-INDEPENDENCE-${String(index + 1).padStart(2, '0')}`,
-    quote: rule,
-    kind: 'OBLIGATION',
-    disposition: 'NORMATIVE',
-    contractEffect: rule,
-    targetIds: ['REQ-RESULT'],
-    rationale: `A demanda declara explicitamente a independência de ${kind}.`,
-  })),
   {
     id: 'CLAIM-DETERMINISTIC-FORMAT',
     quote: 'formato ainda a escolher',
@@ -863,14 +855,14 @@ deterministicDraft.intentClaims = [
   },
 ];
 deterministicDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
-deterministicDraft.requirements[0].statement = `A saída determinística deve ser explícita. A saída deve ordenar os campos alfabeticamente. ${determinismIndependenceRule}`;
+deterministicDraft.requirements[0].statement = `A saída determinística deve ser explícita. ${orderingRule}`;
 deterministicDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
 deterministicDraft.requirements[0].acceptanceCases.push({
   id: 'AC-DETERMINISTIC-REPLAY',
   kind: 'HAPPY_PATH',
-  given: 'A mesma entrada válida em duas execuções.',
-  when: 'A operação for repetida sob o mesmo contexto.',
-  then: 'ordenar os campos alfabeticamente',
+  given: `${deterministicWitnesses.get('ORDERING').baseline} ${deterministicWitnesses.get('ORDERING').variation}`,
+  when: 'As duas variações forem processadas sob o mesmo contexto.',
+  then: orderingRule,
   outcomeKind: 'RETURN_VALUE',
   decisionBinding: null,
   boundaryBinding: null,
@@ -885,40 +877,49 @@ deterministicDraft.determinismReview = {
   dimensions: [
     {
       kind: 'ORDERING',
+      subjectId: 'REQ-RESULT',
       status: 'SPECIFIED',
-      rationale: 'ordenar os campos alfabeticamente',
+      rationale: orderingRule,
       targetIds: ['REQ-RESULT'],
-      basis: [{ source: 'USER_INTENT', reference: 'ordenar os campos alfabeticamente' }],
+      basis: [{ source: 'USER_INTENT', reference: orderingRule }],
       acceptanceCaseId: 'AC-DETERMINISTIC-REPLAY',
+      proofObligation: {
+        witnessId: 'WITNESS-ORDERING',
+        relation: 'OUTPUTS_EQUAL',
+        observables: ['campos ordenados alfabeticamente'],
+      },
       closureAuthority: 'AUTHORITATIVE_RULE',
       counterexampleWitness: deterministicWitnesses.get('ORDERING'),
       inapplicabilityProof: null,
     },
     {
       kind: 'CANONICALIZATION',
+      subjectId: 'REQ-RESULT',
       status: 'DECISION_REQUIRED',
       rationale: 'A representação canônica depende do formato público ainda não escolhido.',
-      targetIds: ['Q-FORMAT'],
+      targetIds: ['REQ-RESULT', 'Q-FORMAT'],
       basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
       acceptanceCaseId: null,
+      proofObligation: null,
       closureAuthority: 'MODEL_ARGUMENT',
       counterexampleWitness: deterministicWitnesses.get('CANONICALIZATION'),
       inapplicabilityProof: null,
     },
     ...['DUPLICATES', 'EMPTY_INPUT', 'ODD_CARDINALITY', 'ROUNDING', 'REMAINDER_DISTRIBUTION', 'ZERO_DIVISOR', 'TIE_BREAKING', 'COUNTING_IDENTITY', 'BOUNDED_ARITHMETIC'].map((kind) => ({
       kind,
+      subjectId: 'PUBLIC_CONTRACT',
       status: 'NOT_APPLICABLE',
-      rationale: `A dimensão ${kind} não altera a ordenação pública exigida nesta demanda.`,
+      rationale: determinismAbsenceRules[kind],
       targetIds: [],
-      basis: [{ source: 'USER_INTENT', reference: determinismIndependenceRules[kind] }],
+      basis: [{ source: 'USER_INTENT', reference: determinismAbsenceRules[kind] }],
       acceptanceCaseId: null,
+      proofObligation: null,
       closureAuthority: 'AUTHORITATIVE_RULE',
       counterexampleWitness: deterministicWitnesses.get(kind),
       inapplicabilityProof: {
-        variedFactor: deterministicWitnesses.get(kind).inputClass,
-        baseline: deterministicWitnesses.get(kind).baseline,
-        variation: deterministicWitnesses.get(kind).variation,
-        unchangedObservableOutcome: determinismIndependenceRules[kind],
+        proofKind: 'STRUCTURAL_ABSENCE',
+        absentStructure: deterministicWitnesses.get(kind).inputClass,
+        evidence: determinismAbsenceRules[kind],
       },
     })),
   ],
@@ -955,7 +956,7 @@ const approvedDeterminismContract = finalizeContractApproval({
     answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
   },
 });
-if (approvedDeterminismContract.effectiveDeterminismStatus !== 'COMPLETE') {
+if (approvedDeterminismContract.effectiveDeterminismStatus !== 'SEMANTICALLY_CLOSED') {
   throw new Error('human_determinism_decision_did_not_close_effective_status');
 }
 
@@ -964,7 +965,7 @@ const unresolvedCanonicalization = unresolvedDeterminismDraft.determinismReview.
   .find(({ kind }) => kind === 'CANONICALIZATION');
 unresolvedCanonicalization.status = 'GAP_FOUND';
 unresolvedCanonicalization.rationale = 'Não existe evidência suficiente para fechar canonicalização nem alternativas maduras para decisão.';
-unresolvedCanonicalization.targetIds = [];
+unresolvedCanonicalization.targetIds = ['REQ-RESULT'];
 const unresolvedDeterminismContract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft: unresolvedDeterminismDraft,
@@ -1042,17 +1043,108 @@ try {
 }
 if (!tamperedCounterexampleRejected) throw new Error('model_replaced_mechanical_counterexample');
 
+const genericDeterminismAsAbsence = structuredClone(deterministicDraft);
+const genericDuplicateDimension = genericDeterminismAsAbsence.determinismReview.dimensions
+  .find(({ kind }) => kind === 'DUPLICATES');
+genericDuplicateDimension.rationale = 'Produzir saída determinística';
+genericDuplicateDimension.basis = [{ source: 'USER_INTENT', reference: 'Produzir saída determinística' }];
+genericDuplicateDimension.inapplicabilityProof.evidence = 'Produzir saída determinística';
+let genericDeterminismRejected = false;
+try {
+  assertSemanticDraft(genericDeterminismAsAbsence, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  genericDeterminismRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_structural_absence:',
+  );
+}
+if (!genericDeterminismRejected) throw new Error('global_determinism_claim_proved_structural_absence');
+
+const invariantMisclassifiedAsInapplicable = structuredClone(deterministicDraft);
+const inapplicableOrdering = invariantMisclassifiedAsInapplicable.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING');
+const orderingAbsenceClaim = 'Não existe ordenação na fronteira pública contratada.';
+inapplicableOrdering.subjectId = 'PUBLIC_CONTRACT';
+inapplicableOrdering.status = 'NOT_APPLICABLE';
+inapplicableOrdering.rationale = orderingAbsenceClaim;
+inapplicableOrdering.targetIds = [];
+inapplicableOrdering.basis = [{ source: 'USER_INTENT', reference: orderingAbsenceClaim }];
+inapplicableOrdering.acceptanceCaseId = null;
+inapplicableOrdering.proofObligation = null;
+inapplicableOrdering.inapplicabilityProof = {
+  proofKind: 'STRUCTURAL_ABSENCE',
+  absentStructure: 'PERMUTED_EQUIVALENT_INPUTS',
+  evidence: orderingAbsenceClaim,
+};
+let invariantMisclassificationRejected = false;
+try {
+  assertSemanticDraft(invariantMisclassifiedAsInapplicable, loadedPolicy.policy, {
+    ...deterministicContext,
+    intent: `${deterministicIntent} ${orderingAbsenceClaim}`,
+  });
+} catch (error) {
+  invariantMisclassificationRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_structural_absence:',
+  );
+}
+if (!invariantMisclassificationRejected) throw new Error('specified_invariance_was_treated_as_not_applicable');
+
+const applicableZeroDivisor = structuredClone(deterministicDraft);
+applicableZeroDivisor.requirements[0].acceptanceCases.push({
+  id: 'AC-ZERO-DIVISOR',
+  kind: 'FAILURE',
+  given: 'Um denominador igual a zero.',
+  when: 'A operação aritmética for solicitada.',
+  then: 'Um denominador igual a zero deve causar rejeição explícita.',
+  outcomeKind: 'REJECTION',
+  decisionBinding: null,
+  boundaryBinding: null,
+});
+let applicableZeroDivisorRejected = false;
+try {
+  assertSemanticDraft(applicableZeroDivisor, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  applicableZeroDivisorRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_structural_absence:ZERO_DIVISOR',
+  );
+  if (!applicableZeroDivisorRejected) throw error;
+}
+if (!applicableZeroDivisorRejected) throw new Error('specified_zero_divisor_was_treated_as_not_applicable');
+
+const unboundMetamorphicWitness = structuredClone(deterministicDraft);
+unboundMetamorphicWitness.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').given = 'Somente o caso base foi descrito.';
+let unboundMetamorphicWitnessRejected = false;
+try {
+  assertSemanticDraft(unboundMetamorphicWitness, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  unboundMetamorphicWitnessRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:',
+  );
+}
+if (!unboundMetamorphicWitnessRejected) throw new Error('specified_dimension_omitted_witness_variation');
+
+const genericMetamorphicObservable = structuredClone(deterministicDraft);
+genericMetamorphicObservable.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').proofObligation.observables = ['resultado'];
+let genericMetamorphicObservableRejected = false;
+try {
+  assertSemanticDraft(genericMetamorphicObservable, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  genericMetamorphicObservableRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:',
+  );
+}
+if (!genericMetamorphicObservableRejected) throw new Error('generic_result_was_accepted_as_observable_proof');
+
 const missingIndependenceProof = structuredClone(deterministicDraft);
 missingIndependenceProof.determinismReview.dimensions
   .find(({ kind }) => kind === 'DUPLICATES').inapplicabilityProof = null;
-missingIndependenceProof.determinismReview.dimensions
-  .find(({ kind }) => kind === 'DUPLICATES').closureAuthority = 'MODEL_ARGUMENT';
 let missingIndependenceProofRejected = false;
 try {
   assertSemanticDraft(missingIndependenceProof, loadedPolicy.policy, deterministicContext);
 } catch (error) {
   missingIndependenceProofRejected = error.message.startsWith(
-    'inapplicable_determinism_dimension_without_independence_proof:',
+    'inapplicable_determinism_dimension_without_structural_absence:',
   );
 }
 if (!missingIndependenceProofRejected) {
@@ -1123,7 +1215,7 @@ try {
   assertSemanticDraft(unsupportedInapplicability, loadedPolicy.policy, deterministicContext);
 } catch (error) {
   unsupportedInapplicabilityRejected = error.message.startsWith(
-    'inapplicable_determinism_dimension_without_independence_proof:',
+    'inapplicable_determinism_dimension_without_structural_absence:',
   );
 }
 if (!unsupportedInapplicabilityRejected) {

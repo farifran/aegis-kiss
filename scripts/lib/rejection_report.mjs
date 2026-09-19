@@ -33,6 +33,11 @@ const diagnostics = new Map([
     remediation: 'Forneça uma prova contrafactual de independência ou marque a dimensão como especificada ou pendente.',
     ruleId: 'CONST-OBSERVABLE',
   }],
+  ['INAPPLICABLE_DETERMINISM_DIMENSION_WITHOUT_STRUCTURAL_ABSENCE', {
+    message: 'Uma dimensão foi declarada inaplicável sem provar que sua estrutura ativadora está ausente da fronteira pública.',
+    remediation: 'Classifique uma regra de invariância como SPECIFIED; use NOT_APPLICABLE somente com ausência estrutural autorizada.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
   ['CONTRACT_HAS_UNRESOLVED_DETERMINISM', {
     message: 'O contrato ainda contém uma lacuna ou decisão de determinismo não resolvida.',
     remediation: 'Resolva a decisão material ou regenere o parecer com evidência autorizada antes de assinar.',

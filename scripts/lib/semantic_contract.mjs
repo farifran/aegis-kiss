@@ -83,6 +83,19 @@ const counterexampleByDimension = {
     variation: 'Uma unidade acima do maior valor representável.',
   },
 };
+const dimensionTriggerPattern = {
+  ORDERING: /\b(?:ordem|orden\p{L}*|permut\p{L}*|travers\p{L}*|order\p{L}*)\b/iu,
+  CANONICALIZATION: /\b(?:canoni\p{L}*|codifica\p{L}*|serializa\p{L}*|representa\p{L}*|encod\p{L}*)\b/iu,
+  DUPLICATES: /\b(?:duplic\p{L}*|repetid\p{L}*|duplicate\p{L}*)\b/iu,
+  EMPTY_INPUT: /\b(?:vazi\p{L}*|empty|null|nulo)\b/iu,
+  ODD_CARDINALITY: /\b(?:[ií]mpar|odd|merkle|bin[aá]ri\p{L}*)\b/iu,
+  ROUNDING: /\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|round\p{L}*)\b/iu,
+  REMAINDER_DISTRIBUTION: /\b(?:resto|res[ií]du\p{L}*|remainder)\b/iu,
+  ZERO_DIVISOR: /\b(?:divis\p{L}*\s+por\s+zero|zero\s+divisor|zero\s+denominator|denominador\s+(?:igual\s+a\s+)?zero)\b/iu,
+  TIE_BREAKING: /\b(?:empate\p{L}*|tie(?:-?break\p{L}*)?|prioridade\s+igual)\b/iu,
+  COUNTING_IDENTITY: /\b(?:conta(?:gem|r)|quantidade|participante\p{L}*|identidade\p{L}*|unique\p{L}*)\b/iu,
+  BOUNDED_ARITHMETIC: /\b(?:bits?|bitmask|overflow|underflow|satura\p{L}*|limite\p{L}*|bounded)\b/iu,
+};
 const explicitUncertaintyPattern = /\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|escolh\p{L}*|defin\p{L}*|ainda|alternativ\p{L}*|ou|either|choose|undefined|unspecified)\b/iu;
 
 export function loadSemanticConstitution(repositoryRoot) {
@@ -410,7 +423,20 @@ function isBareDeterminismAssertion(text) {
     .replace(/\p{M}/gu, '')
     .toLocaleLowerCase('pt-BR');
   return /\bmesm[ao]\s+entrada\b[^.!?\n]{0,120}\bmesm[ao]\s+(?:saida|resultado)\b/u.test(normalized)
-    || /\bsame\s+input\b[^.!?\n]{0,120}\bsame\s+(?:output|result)\b/u.test(normalized);
+    || /\bsame\s+input\b[^.!?\n]{0,120}\bsame\s+(?:output|result)\b/u.test(normalized)
+    || /\b(?:total\s+)?determinismo\b/u.test(normalized)
+    || /\b(?:totalmente\s+)?deterministic[oa]s?\b/u.test(normalized)
+    || /\b(?:fully\s+)?deterministic\b/u.test(normalized);
+}
+
+function observableIsGeneric(text) {
+  const normalized = text.normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('pt-BR')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return /^(?:o |a )?(?:resultado|saida|comportamento|estado|determinismo)(?: publico| final| total)?$/u
+    .test(normalized);
 }
 
 function canonicalIntegerThreshold(text) {
@@ -1281,7 +1307,14 @@ export function assertSemanticDraft(draft, policy, {
       .some((signalId) => !reviewedDeterminismSignalIds.has(signalId))) {
     throw new Error('incomplete_determinism_signal_review');
   }
-  assertUniqueIds(draft.determinismReview.dimensions, 'kind', 'determinism_dimension');
+  const determinismDimensionKeys = new Set();
+  for (const dimension of draft.determinismReview.dimensions) {
+    const key = `${dimension.kind}:${dimension.subjectId}`;
+    if (determinismDimensionKeys.has(key)) {
+      throw new Error(`duplicate_determinism_dimension_subject:${key}`);
+    }
+    determinismDimensionKeys.add(key);
+  }
   if (determinismSignals.length === 0) {
     if (draft.determinismReview.status !== 'NOT_APPLICABLE'
       || draft.determinismReview.dimensions.length !== 0) {
@@ -1292,12 +1325,23 @@ export function assertSemanticDraft(draft, policy, {
       || draft.determinismReview.dimensions.length === 0) {
       throw new Error('determinism_claim_without_review');
     }
-    const reviewedDimensionKinds = new Set(draft.determinismReview.dimensions
-      .map(({ kind }) => kind));
+    const reviewedDimensionKinds = new Set(draft.determinismReview.dimensions.map(({ kind }) => kind));
     if (reviewedDimensionKinds.size !== determinismDimensionKinds.length
       || determinismDimensionKinds.some((kind) => !reviewedDimensionKinds.has(kind))) {
       throw new Error('incomplete_determinism_dimension_review');
     }
+    const applicabilityText = [
+      ...draft.requirements.flatMap((requirement) => [
+        requirement.statement,
+        ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
+      ]),
+      ...draft.invariants.flatMap(({ statement, falsification }) => [statement, falsification]),
+      ...draft.boundaryRules.flatMap(({ subject, lowerBound, upperBound }) => [
+        subject,
+        lowerBound,
+        upperBound,
+      ]),
+    ].join('\n');
     for (const dimension of draft.determinismReview.dimensions) {
       const expectedWitness = {
         id: `WITNESS-${dimension.kind}`,
@@ -1308,7 +1352,7 @@ export function assertSemanticDraft(draft, policy, {
         throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
       }
       const closureText = dimension.status === 'NOT_APPLICABLE'
-        ? dimension.inapplicabilityProof?.unchangedObservableOutcome ?? dimension.rationale
+        ? dimension.inapplicabilityProof?.evidence ?? dimension.rationale
         : dimension.rationale;
       const expectedClosureAuthority = closureAuthorityForDimension({
         status: dimension.status,
@@ -1325,9 +1369,20 @@ export function assertSemanticDraft(draft, policy, {
       for (const targetId of dimension.targetIds) {
         if (!requirementIds.has(targetId)
           && !invariantIds.has(targetId)
-          && !decisionIds.has(targetId)) {
+          && !decisionIds.has(targetId)
+          && !boundaryRuleIds.has(targetId)) {
           throw new Error(`determinism_dimension_references_unknown_target:${dimension.kind}:${targetId}`);
         }
+      }
+      if (dimension.status === 'NOT_APPLICABLE') {
+        if (dimension.subjectId !== 'PUBLIC_CONTRACT' || dimension.targetIds.length !== 0) {
+          throw new Error(`inapplicable_determinism_dimension_has_subject:${dimension.kind}`);
+        }
+      } else if ((dimension.subjectId !== 'PUBLIC_CONTRACT'
+          && !requirementIds.has(dimension.subjectId)
+          && !boundaryRuleIds.has(dimension.subjectId))
+        || !dimension.targetIds.includes(dimension.subjectId)) {
+        throw new Error(`determinism_dimension_without_observable_subject:${dimension.kind}`);
       }
       if (dimension.status === 'SPECIFIED') {
         const targetRequirementIds = dimension.targetIds
@@ -1338,7 +1393,20 @@ export function assertSemanticDraft(draft, policy, {
         const proof = dimension.acceptanceCaseId === null
           ? undefined
           : acceptanceCasesById.get(dimension.acceptanceCaseId);
+        const obligation = dimension.proofObligation;
         if (proof === undefined
+          || obligation === undefined
+          || obligation === null
+          || obligation.witnessId !== dimension.counterexampleWitness.id
+          || !literalReferenceAppears(proof.given, dimension.counterexampleWitness.baseline)
+          || !literalReferenceAppears(proof.given, dimension.counterexampleWitness.variation)
+          || obligation.observables.some((observable) => (
+            observableIsGeneric(observable) || !literalReferenceAppears(proof.then, observable)
+          ))
+          || (obligation.relation === 'OUTPUTS_EQUAL'
+            && !/\b(?:mesm\p{L}*|igual\p{L}*|id[eê]ntic\p{L}*|preserv\p{L}*|same|equal|unchanged)\b/iu.test(proof.then))
+          || (obligation.relation === 'EXPLICIT_REJECTION'
+            && proof.outcomeKind !== 'REJECTION')
           || !targetRequirementIds.includes(acceptanceRequirementById.get(proof.id))
           || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')
           || hasUnresolvedExpression(dimension.rationale)
@@ -1356,27 +1424,36 @@ export function assertSemanticDraft(draft, policy, {
         && dimension.targetIds.some((targetId) => decisionIds.has(targetId))) {
         throw new Error(`unresolved_determinism_gap_has_decision:${dimension.kind}`);
       }
-      if (dimension.status === 'NOT_APPLICABLE' && dimension.targetIds.length !== 0) {
-        throw new Error(`inapplicable_determinism_dimension_has_target:${dimension.kind}`);
-      }
       if (dimension.status !== 'SPECIFIED' && dimension.acceptanceCaseId !== null) {
         throw new Error(`non_specified_determinism_dimension_has_proof:${dimension.kind}`);
+      }
+      if (dimension.status !== 'SPECIFIED' && dimension.proofObligation !== null) {
+        throw new Error(`non_specified_determinism_dimension_has_proof_obligation:${dimension.kind}`);
       }
       if (dimension.status === 'NOT_APPLICABLE') {
         const proof = dimension.inapplicabilityProof;
         if (proof === undefined
           || proof === null
-          || proof.variedFactor !== dimension.counterexampleWitness.inputClass
-          || proof.baseline !== dimension.counterexampleWitness.baseline
-          || proof.variation !== dimension.counterexampleWitness.variation
-          || hasUnresolvedExpression(proof.unchangedObservableOutcome)
-          || hasDisjunctiveOutcome(proof.unchangedObservableOutcome)
+          || proof.proofKind !== 'STRUCTURAL_ABSENCE'
+          || proof.absentStructure !== dimension.counterexampleWitness.inputClass
+          || hasUnresolvedExpression(proof.evidence)
+          || hasDisjunctiveOutcome(proof.evidence)
+          || isBareDeterminismAssertion(proof.evidence)
+          || dimensionTriggerPattern[dimension.kind].test(applicabilityText)
           || dimension.closureAuthority === 'MODEL_ARGUMENT') {
-          throw new Error(`inapplicable_determinism_dimension_without_independence_proof:${dimension.kind}`);
+          throw new Error(`inapplicable_determinism_dimension_without_structural_absence:${dimension.kind}`);
         }
       } else if (dimension.inapplicabilityProof !== undefined
         && dimension.inapplicabilityProof !== null) {
         throw new Error(`applicable_determinism_dimension_has_independence_proof:${dimension.kind}`);
+      }
+    }
+    for (const boundaryRuleId of boundaryRuleIds) {
+      const boundedReviews = draft.determinismReview.dimensions.filter(({ kind, subjectId }) => (
+        kind === 'BOUNDED_ARITHMETIC' && subjectId === boundaryRuleId
+      ));
+      if (boundedReviews.length !== 1 || boundedReviews[0].status === 'NOT_APPLICABLE') {
+        throw new Error(`bounded_subject_without_determinism_review:${boundaryRuleId}`);
       }
     }
     const gapsFound = draft.determinismReview.dimensions
@@ -1903,7 +1980,10 @@ export function compileSemanticOpinion(opinion, request) {
     return { ...measurement, target };
   };
   const dimensions = opinion.determinismReview.dimensions;
-  if (dimensions.length !== request.worksheet.requiredDeterminismDimensions.length) {
+  const requiredDimensionKinds = new Set(request.worksheet.requiredDeterminismDimensions);
+  const witnessByDimension = new Map(request.worksheet.counterexampleWitnesses
+    .map((witness) => [witness.dimension, witness]));
+  if (dimensions.length === 0 && requiredDimensionKinds.size > 0) {
     throw new Error('semantic_opinion_determinism_dimension_count_mismatch');
   }
   const determinismSignalIds = request.intentSignals.signals
@@ -2052,16 +2132,23 @@ export function compileSemanticOpinion(opinion, request) {
           status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
         ))
           ? 'GAPS_FOUND'
-          : 'COMPLETE',
+          : 'SEMANTICALLY_CLOSED',
       rationale: opinion.determinismReview.rationale,
       intentSignalIds: determinismSignalIds,
-      dimensions: dimensions.map((item, index) => {
+      dimensions: dimensions.map((item) => {
+        if (!requiredDimensionKinds.has(item.kind)) {
+          throw new Error(`semantic_opinion_unrequested_determinism_dimension:${item.kind}`);
+        }
         const basis = compileOpinionBasis(item.basis, request);
         const closureText = item.status === 'NOT_APPLICABLE'
-          ? item.inapplicabilityProof?.unchangedObservableOutcome ?? item.rationale
+          ? item.inapplicabilityProof?.evidence ?? item.rationale
           : item.rationale;
+        const subjectId = item.subject === null
+          ? 'PUBLIC_CONTRACT'
+          : compileTargets([item.subject])[0];
         return {
-          kind: request.worksheet.requiredDeterminismDimensions[index],
+          kind: item.kind,
+          subjectId,
           status: item.status,
           rationale: item.rationale,
           targetIds: compileTargets(item.targets),
@@ -2075,7 +2162,8 @@ export function compileSemanticOpinion(opinion, request) {
             constitutionRules: request.constitution.rules,
             policyRules: request.policy.rules,
           }),
-          counterexampleWitness: request.worksheet.counterexampleWitnesses[index],
+          counterexampleWitness: witnessByDimension.get(item.kind),
+          proofObligation: item.proofObligation,
           inapplicabilityProof: item.inapplicabilityProof,
           acceptanceCaseId: item.acceptanceCase === null
             ? null
@@ -2209,7 +2297,7 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
     .flatMap(({ targetIds }) => targetIds)
     .filter((targetId) => targetId.startsWith('Q-'))
     .filter((targetId) => !resolvedDecisionIds.has(targetId));
-  return pendingDecisionIds.length > 0 ? 'PENDING_HUMAN_DECISIONS' : 'COMPLETE';
+  return pendingDecisionIds.length > 0 ? 'PENDING_HUMAN_DECISIONS' : 'SEMANTICALLY_CLOSED';
 }
 
 function decisionMap(contract) {
@@ -2361,7 +2449,7 @@ export function buildConfirmationRequest(contract) {
   if (contract.approval !== null) throw new Error('contract_already_approved');
   const unresolvedDimensions = contract.specification.determinismReview.dimensions
     .filter(({ status }) => status === 'GAP_FOUND')
-    .map(({ kind }) => kind);
+    .map(({ kind, subjectId }) => `${kind}:${subjectId}`);
   if (unresolvedDimensions.length > 0) {
     throw new Error(`unresolved_semantic_gap:${unresolvedDimensions.join(',')}`);
   }
@@ -2615,17 +2703,20 @@ export function renderSemanticContractMarkdown(contract, {
   lines.push('', '### Revisão de determinismo');
   lines.push(`- **${specification.determinismReview.status}:** ${specification.determinismReview.rationale}`);
   for (const dimension of specification.determinismReview.dimensions) {
-    lines.push(`- **${dimension.kind}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
+    lines.push(`- **${dimension.kind}/${dimension.subjectId}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
     lines.push(`  - Autoridade de fechamento: ${dimension.closureAuthority}.`);
     lines.push(`  - Contraexemplo obrigatório: ${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}.`);
     lines.push(`    - Base mecânica: ${dimension.counterexampleWitness.baseline}`);
     lines.push(`    - Variação mecânica: ${dimension.counterexampleWitness.variation}`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
+    if (dimension.proofObligation !== null) {
+      lines.push(`  - Obrigação de prova: ${dimension.proofObligation.relation} sobre ${dimension.proofObligation.observables.join(', ')}.`);
+    }
     if (dimension.inapplicabilityProof !== undefined
       && dimension.inapplicabilityProof !== null) {
       const proof = dimension.inapplicabilityProof;
-      lines.push(`  - Prova de independência: variar “${proof.variedFactor}” de “${proof.baseline}” para “${proof.variation}” mantém “${proof.unchangedObservableOutcome}”.`);
+      lines.push(`  - Ausência estrutural: ${proof.absentStructure} — ${proof.evidence}`);
     }
   }
 

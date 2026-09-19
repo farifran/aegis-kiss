@@ -298,7 +298,7 @@
       "description": "Quando a demanda promete determinismo, classifica cada dimensão universal separadamente. O compilador anexa autoridade e testemunho mecânico; lacunas sem prova permanecem GAP_FOUND.",
       "required": ["status", "rationale", "intentSignalIds", "dimensions"],
       "properties": {
-        "status": { "enum": ["NOT_APPLICABLE", "COMPLETE", "GAPS_FOUND"] },
+        "status": { "enum": ["NOT_APPLICABLE", "SEMANTICALLY_CLOSED", "GAPS_FOUND"] },
         "rationale": { "type": "string", "minLength": 1 },
         "intentSignalIds": { "$ref": "#/$defs/intentSignalIds" },
         "dimensions": {
@@ -306,13 +306,25 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "status", "rationale", "targetIds", "basis", "acceptanceCaseId", "closureAuthority", "counterexampleWitness"],
+            "required": ["kind", "subjectId", "status", "rationale", "targetIds", "basis", "acceptanceCaseId", "proofObligation", "closureAuthority", "counterexampleWitness"],
             "properties": {
               "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
+              "subjectId": {
+                "oneOf": [
+                  { "const": "PUBLIC_CONTRACT" },
+                  { "type": "string", "pattern": "^(REQ|BOUND)-[A-Z0-9][A-Z0-9-]+$" }
+                ]
+              },
               "status": { "enum": ["SPECIFIED", "NOT_APPLICABLE", "DECISION_REQUIRED", "GAP_FOUND"] },
               "rationale": { "type": "string", "minLength": 1, "description": "Para SPECIFIED, contém uma regra concreta sem alternativas e idêntica ao resultado do único acceptanceCaseId vinculado." },
               "basis": { "$ref": "#/$defs/basis" },
               "acceptanceCaseId": { "type": ["string", "null"], "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$" },
+              "proofObligation": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "$ref": "#/$defs/determinismProofObligation" }
+                ]
+              },
               "closureAuthority": { "enum": ["MECHANICAL_FACT", "AUTHORITATIVE_RULE", "HUMAN_DECISION", "MODEL_ARGUMENT"] },
               "counterexampleWitness": { "$ref": "#/$defs/counterexampleWitness" },
               "inapplicabilityProof": {
@@ -324,7 +336,7 @@
               "targetIds": {
                 "type": "array",
                 "uniqueItems": true,
-                "items": { "type": "string", "pattern": "^(REQ|INV|Q)-[A-Z0-9][A-Z0-9-]+$" }
+                "items": { "type": "string", "pattern": "^(REQ|INV|Q|BOUND)-[A-Z0-9][A-Z0-9-]+$" }
               }
             }
           }
@@ -502,12 +514,27 @@
     "inapplicabilityProof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["variedFactor", "baseline", "variation", "unchangedObservableOutcome"],
+      "required": ["proofKind", "absentStructure", "evidence"],
       "properties": {
-        "variedFactor": { "type": "string", "minLength": 1 },
-        "baseline": { "type": "string", "minLength": 1 },
-        "variation": { "type": "string", "minLength": 1 },
-        "unchangedObservableOutcome": { "type": "string", "minLength": 1 }
+        "proofKind": { "const": "STRUCTURAL_ABSENCE" },
+        "absentStructure": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "determinismProofObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["witnessId", "relation", "observables"],
+      "properties": {
+        "witnessId": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+        "relation": { "enum": ["OUTPUTS_EQUAL", "DEFINED_RESULT", "EXPLICIT_REJECTION"] },
+        "observables": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 2, "maxLength": 120 }
+        }
       }
     },
     "counterexampleWitness": {

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "aegis.semantic_opinion.v1",
   "title": "Aegis Semantic Opinion v1",
-  "description": "Preencha somente juízos semânticos. Todos os índices são base zero. Índices de requisitos, invariantes, riscos, decisões, notas, caminhos e regras de fronteira apontam para arrays deste parecer. intentSignalIndexes apontam para intentSignals.signals da solicitação; contextIndex para policy.contexts; ruleIndex e amendmentIndex para policy.rules e policy.amendments; resolutionIndex e targets RESOLVED_DECISION para revision.answers. determinismReview.dimensions[i] responde a worksheet.requiredDeterminismDimensions[i]. O Harness valida os vínculos e compila schema final, IDs, referências resolvidas, estados agregados, digests, envelope e aprovação.",
+  "description": "Preencha somente juízos semânticos. Todos os índices são base zero. Índices de requisitos, invariantes, riscos, decisões, notas, caminhos e regras de fronteira apontam para arrays deste parecer. intentSignalIndexes apontam para intentSignals.signals da solicitação; contextIndex para policy.contexts; ruleIndex e amendmentIndex para policy.rules e policy.amendments; resolutionIndex e targets RESOLVED_DECISION para revision.answers. Cada determinismReview.dimension declara kind e subject; kinds podem repetir para subjects diferentes e todos os kinds exigidos pela worksheet devem estar cobertos. O Harness valida os vínculos e compila schema final, IDs, referências resolvidas, estados agregados, digests, envelope e aprovação.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -672,7 +672,7 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Quando a demanda promete determinismo, responde separadamente a cada dimensão e testemunho da ficha. Sem regra autorizada, prova de independência ou decisão material, preserve GAP_FOUND.",
+      "description": "Quando a demanda promete determinismo, responde separadamente a cada dimensão, subject e testemunho da ficha. Sem regra autorizada, ausência estrutural ou decisão material, preserve GAP_FOUND.",
       "required": [
         "rationale",
         "dimensions"
@@ -684,19 +684,43 @@
         },
         "dimensions": {
           "type": "array",
-          "description": "Lista posicional: o item i responde exatamente à dimensão e ao testemunho i da worksheet. SPECIFIED exige regra única e prova vinculada; NOT_APPLICABLE exige fundamento autorizado fora da própria conclusão do modelo; DECISION_REQUIRED aponta para decisão humana; GAP_FOUND preserva lacuna ainda sem alternativas suficientes.",
+          "description": "Cada item declara uma dimensão e seu subject. Uma dimensão pode repetir-se para subjects diferentes. SPECIFIED exige regra única e obrigação de prova vinculada ao witness; NOT_APPLICABLE exige ausência estrutural autorizada; DECISION_REQUIRED aponta para decisão humana; GAP_FOUND preserva lacuna sem falso fechamento.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "kind",
+              "subject",
               "status",
               "rationale",
               "targets",
               "basis",
               "acceptanceCase",
+              "proofObligation",
               "inapplicabilityProof"
             ],
             "properties": {
+              "kind": {
+                "enum": [
+                  "ORDERING",
+                  "CANONICALIZATION",
+                  "DUPLICATES",
+                  "EMPTY_INPUT",
+                  "ODD_CARDINALITY",
+                  "ROUNDING",
+                  "REMAINDER_DISTRIBUTION",
+                  "ZERO_DIVISOR",
+                  "TIE_BREAKING",
+                  "COUNTING_IDENTITY",
+                  "BOUNDED_ARITHMETIC"
+                ]
+              },
+              "subject": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "$ref": "#/$defs/targetRef" }
+                ]
+              },
               "status": {
                 "enum": [
                   "SPECIFIED",
@@ -728,6 +752,12 @@
                   {
                     "$ref": "#/$defs/acceptanceCaseRef"
                   }
+                ]
+              },
+              "proofObligation": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "$ref": "#/$defs/determinismProofObligation" }
                 ]
               },
               "inapplicabilityProof": {
@@ -1259,29 +1289,31 @@
     "inapplicabilityProof": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Prova contrafactual: altera-se somente o fator examinado e o resultado público permitido permanece idêntico.",
+      "description": "Prova autorizada de que a estrutura que ativaria a dimensão não existe na fronteira pública contratada.",
       "required": [
-        "variedFactor",
-        "baseline",
-        "variation",
-        "unchangedObservableOutcome"
+        "proofKind",
+        "absentStructure",
+        "evidence"
       ],
       "properties": {
-        "variedFactor": {
-          "type": "string",
-          "minLength": 1
-        },
-        "baseline": {
-          "type": "string",
-          "minLength": 1
-        },
-        "variation": {
-          "type": "string",
-          "minLength": 1
-        },
-        "unchangedObservableOutcome": {
-          "type": "string",
-          "minLength": 1
+        "proofKind": { "const": "STRUCTURAL_ABSENCE" },
+        "absentStructure": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "determinismProofObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["witnessId", "relation", "observables"],
+      "properties": {
+        "witnessId": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+        "relation": { "enum": ["OUTPUTS_EQUAL", "DEFINED_RESULT", "EXPLICIT_REJECTION"] },
+        "observables": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 2, "maxLength": 120 }
         }
       }
     }
