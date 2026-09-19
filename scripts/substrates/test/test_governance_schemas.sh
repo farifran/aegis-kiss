@@ -98,6 +98,16 @@ if (equivalentDecisionRejection.cause !== 'DECISION_ANSWERS_SEMANTICALLY_EQUIVAL
   || !equivalentDecisionRejection.remediation.includes('alternativas')) {
   throw new Error('semantic_rejection_is_not_actionable');
 }
+const unresolvedGapRejection = buildRejectionReport({
+  phase: 'SEMANTIC',
+  reason: 'unresolved_semantic_gap',
+  detail: 'CANONICALIZATION',
+});
+if (unresolvedGapRejection.reason !== 'UNRESOLVED_SEMANTIC_GAP'
+  || unresolvedGapRejection.ruleId !== 'CONST-OBSERVABLE'
+  || !unresolvedGapRejection.remediation.includes('Wizard')) {
+  throw new Error('unresolved_gap_rejection_is_not_actionable');
+}
 
 const roleAssignment = {
   schema: 'aegis.role_assignment.v1',
@@ -778,7 +788,19 @@ if (canonicalDigest(gapContract.intentSignals) !== canonicalDigest(gapSignals)
   throw new Error('contract_omitted_intent_signals_or_quality_goal');
 }
 
-const deterministicIntent = 'Produzir saída determinística, ordenar os campos alfabeticamente e manter o formato ainda a escolher.';
+const determinismIndependenceRules = {
+  DUPLICATES: 'Elementos duplicados preservam exatamente o resultado público permitido.',
+  EMPTY_INPUT: 'A coleção vazia preserva exatamente o resultado público permitido.',
+  ODD_CARDINALITY: 'A cardinalidade ímpar preserva exatamente o resultado público permitido.',
+  ROUNDING: 'A divisão não exata preserva exatamente o resultado público permitido.',
+  REMAINDER_DISTRIBUTION: 'Múltiplos destinatários com resto preservam exatamente o resultado público permitido.',
+  ZERO_DIVISOR: 'O divisor zero preserva exatamente o resultado público permitido.',
+  TIE_BREAKING: 'Candidatos com prioridade igual preservam exatamente o resultado público permitido.',
+  COUNTING_IDENTITY: 'Identidades repetidas preservam exatamente o resultado público permitido.',
+  BOUNDED_ARITHMETIC: 'Valores fora da faixa preservam exatamente o resultado público permitido.',
+};
+const determinismIndependenceRule = Object.values(determinismIndependenceRules).join(' ');
+const deterministicIntent = `Produzir saída determinística, ordenar os campos alfabeticamente e manter o formato ainda a escolher. ${determinismIndependenceRule}`;
 const deterministicPreflight = buildPreflightHandoff({
   demand: deterministicIntent,
   discovery: discoverWorkspace(process.cwd(), deterministicIntent),
@@ -794,9 +816,12 @@ const deterministicSignal = deterministicRequest.intentSignals.signals
 if (deterministicSignal?.handling !== 'DETERMINISM_REVIEW') {
   throw new Error('determinism_claim_was_not_detected');
 }
-if (deterministicRequest.worksheet.requiredDeterminismDimensions.length !== 10) {
+if (deterministicRequest.worksheet.requiredDeterminismDimensions.length !== 11
+  || deterministicRequest.worksheet.counterexampleWitnesses.length !== 11) {
   throw new Error('deterministic_worksheet_omitted_review_slots');
 }
+const deterministicWitnesses = new Map(deterministicRequest.worksheet.counterexampleWitnesses
+  .map((witness) => [witness.dimension, witness]));
 const deterministicDraft = structuredClone(draft);
 deterministicDraft.sourceContextDigest = deterministicRequest.contextDigest;
 deterministicDraft.intentClaims = [
@@ -818,6 +843,15 @@ deterministicDraft.intentClaims = [
     targetIds: ['REQ-RESULT'],
     rationale: 'A demanda fornece uma regra concreta de ordenação.',
   },
+  ...Object.entries(determinismIndependenceRules).map(([kind, rule], index) => ({
+    id: `CLAIM-DETERMINISTIC-INDEPENDENCE-${String(index + 1).padStart(2, '0')}`,
+    quote: rule,
+    kind: 'OBLIGATION',
+    disposition: 'NORMATIVE',
+    contractEffect: rule,
+    targetIds: ['REQ-RESULT'],
+    rationale: `A demanda declara explicitamente a independência de ${kind}.`,
+  })),
   {
     id: 'CLAIM-DETERMINISTIC-FORMAT',
     quote: 'formato ainda a escolher',
@@ -829,45 +863,62 @@ deterministicDraft.intentClaims = [
   },
 ];
 deterministicDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
-deterministicDraft.requirements[0].statement = 'A saída determinística deve ser explícita. A saída deve ordenar os campos alfabeticamente.';
+deterministicDraft.requirements[0].statement = `A saída determinística deve ser explícita. A saída deve ordenar os campos alfabeticamente. ${determinismIndependenceRule}`;
 deterministicDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'saída determinística' }];
 deterministicDraft.requirements[0].acceptanceCases.push({
   id: 'AC-DETERMINISTIC-REPLAY',
   kind: 'HAPPY_PATH',
   given: 'A mesma entrada válida em duas execuções.',
   when: 'A operação for repetida sob o mesmo contexto.',
-  then: 'A saída deve ordenar os campos alfabeticamente.',
+  then: 'ordenar os campos alfabeticamente',
   outcomeKind: 'RETURN_VALUE',
   decisionBinding: null,
   boundaryBinding: null,
 });
 deterministicDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }];
+deterministicDraft.adversarialReview.findings[0].kind = 'DETERMINISM_GAP';
+deterministicDraft.adversarialReview.findings[0].challenge = 'Representações equivalentes podem divergir enquanto o formato público estiver em aberto.';
 deterministicDraft.determinismReview = {
-  status: 'COMPLETE',
-  rationale: 'Todas as dimensões universais foram classificadas e a dimensão aplicável possui prova exata.',
+  status: 'GAPS_FOUND',
+  rationale: 'Todas as dimensões universais foram classificadas; canonicalização depende da escolha humana de formato.',
   intentSignalIds: [deterministicSignal.id],
   dimensions: [
     {
       kind: 'ORDERING',
       status: 'SPECIFIED',
-      rationale: 'A saída deve ordenar os campos alfabeticamente.',
+      rationale: 'ordenar os campos alfabeticamente',
       targetIds: ['REQ-RESULT'],
       basis: [{ source: 'USER_INTENT', reference: 'ordenar os campos alfabeticamente' }],
       acceptanceCaseId: 'AC-DETERMINISTIC-REPLAY',
+      closureAuthority: 'AUTHORITATIVE_RULE',
+      counterexampleWitness: deterministicWitnesses.get('ORDERING'),
       inapplicabilityProof: null,
     },
-    ...['CANONICALIZATION', 'DUPLICATES', 'EMPTY_INPUT', 'ODD_CARDINALITY', 'ROUNDING_REMAINDER', 'ZERO_DIVISOR', 'TIE_BREAKING', 'COUNTING_IDENTITY', 'BOUNDED_ARITHMETIC'].map((kind) => ({
+    {
+      kind: 'CANONICALIZATION',
+      status: 'DECISION_REQUIRED',
+      rationale: 'A representação canônica depende do formato público ainda não escolhido.',
+      targetIds: ['Q-FORMAT'],
+      basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
+      acceptanceCaseId: null,
+      closureAuthority: 'MODEL_ARGUMENT',
+      counterexampleWitness: deterministicWitnesses.get('CANONICALIZATION'),
+      inapplicabilityProof: null,
+    },
+    ...['DUPLICATES', 'EMPTY_INPUT', 'ODD_CARDINALITY', 'ROUNDING', 'REMAINDER_DISTRIBUTION', 'ZERO_DIVISOR', 'TIE_BREAKING', 'COUNTING_IDENTITY', 'BOUNDED_ARITHMETIC'].map((kind) => ({
       kind,
       status: 'NOT_APPLICABLE',
       rationale: `A dimensão ${kind} não altera a ordenação pública exigida nesta demanda.`,
       targetIds: [],
-      basis: [{ source: 'USER_INTENT', reference: 'saída determinística' }],
+      basis: [{ source: 'USER_INTENT', reference: determinismIndependenceRules[kind] }],
       acceptanceCaseId: null,
+      closureAuthority: 'AUTHORITATIVE_RULE',
+      counterexampleWitness: deterministicWitnesses.get(kind),
       inapplicabilityProof: {
-        variedFactor: kind,
-        baseline: `${kind}: cenário A`,
-        variation: `${kind}: cenário B`,
-        unchangedObservableOutcome: 'A saída deve ordenar os campos alfabeticamente.',
+        variedFactor: deterministicWitnesses.get(kind).inputClass,
+        baseline: deterministicWitnesses.get(kind).baseline,
+        variation: deterministicWitnesses.get(kind).variation,
+        unchangedObservableOutcome: determinismIndependenceRules[kind],
       },
     })),
   ],
@@ -879,6 +930,62 @@ const deterministicContext = {
   workspaceEvidence: deterministicRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(deterministicDraft, loadedPolicy.policy, deterministicContext);
+const pendingDeterminismContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: deterministicDraft,
+  preflight: deterministicPreflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (pendingDeterminismContract.effectiveDeterminismStatus !== 'PENDING_HUMAN_DECISIONS') {
+  throw new Error('pending_determinism_was_reported_as_complete');
+}
+const pendingDeterminismRequest = buildConfirmationRequest(pendingDeterminismContract);
+const approvedDeterminismContract = finalizeContractApproval({
+  contract: pendingDeterminismContract,
+  request: pendingDeterminismRequest,
+  resolution: {
+    schema: 'aegis.semantic_resolution.v2',
+    executionId: pendingDeterminismRequest.executionId,
+    contractDraftDigest: pendingDeterminismRequest.contractDraftDigest,
+    method: 'INTERACTIVE_WIZARD',
+    attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
+    answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
+  },
+});
+if (approvedDeterminismContract.effectiveDeterminismStatus !== 'COMPLETE') {
+  throw new Error('human_determinism_decision_did_not_close_effective_status');
+}
+
+const unresolvedDeterminismDraft = structuredClone(deterministicDraft);
+const unresolvedCanonicalization = unresolvedDeterminismDraft.determinismReview.dimensions
+  .find(({ kind }) => kind === 'CANONICALIZATION');
+unresolvedCanonicalization.status = 'GAP_FOUND';
+unresolvedCanonicalization.rationale = 'Não existe evidência suficiente para fechar canonicalização nem alternativas maduras para decisão.';
+unresolvedCanonicalization.targetIds = [];
+const unresolvedDeterminismContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: unresolvedDeterminismDraft,
+  preflight: deterministicPreflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (unresolvedDeterminismContract.effectiveDeterminismStatus !== 'BLOCKED_BY_GAP') {
+  throw new Error('unresolved_determinism_gap_was_not_fail_closed');
+}
+let unresolvedGapReachedWizard = false;
+try {
+  buildConfirmationRequest(unresolvedDeterminismContract);
+  unresolvedGapReachedWizard = true;
+} catch (error) {
+  if (!error.message.startsWith('unresolved_semantic_gap:CANONICALIZATION')) throw error;
+}
+if (unresolvedGapReachedWizard) throw new Error('unresolved_semantic_gap_reached_wizard');
+
 const omittedDeterminismReview = structuredClone(deterministicDraft);
 omittedDeterminismReview.determinismReview = {
   status: 'NOT_APPLICABLE',
@@ -907,9 +1014,39 @@ try {
 }
 if (!falseClosureRejected) throw new Error('determinism_dimension_closed_by_reference_only');
 
+const selfCertifiedDeterminism = structuredClone(deterministicDraft);
+const selfCertifiedOrdering = selfCertifiedDeterminism.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING');
+selfCertifiedOrdering.basis = modelBasis;
+selfCertifiedOrdering.closureAuthority = 'MODEL_ARGUMENT';
+let selfCertificationRejected = false;
+try {
+  assertSemanticDraft(selfCertifiedDeterminism, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  selfCertificationRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:',
+  );
+}
+if (!selfCertificationRejected) throw new Error('model_certified_its_own_determinism_claim');
+
+const tamperedCounterexample = structuredClone(deterministicDraft);
+tamperedCounterexample.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ODD_CARDINALITY').counterexampleWitness.inputClass = 'EMPTY_COLLECTION';
+let tamperedCounterexampleRejected = false;
+try {
+  assertSemanticDraft(tamperedCounterexample, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  tamperedCounterexampleRejected = error.message.startsWith(
+    'determinism_dimension_witness_mismatch:',
+  );
+}
+if (!tamperedCounterexampleRejected) throw new Error('model_replaced_mechanical_counterexample');
+
 const missingIndependenceProof = structuredClone(deterministicDraft);
 missingIndependenceProof.determinismReview.dimensions
-  .find(({ kind }) => kind === 'CANONICALIZATION').inapplicabilityProof = null;
+  .find(({ kind }) => kind === 'DUPLICATES').inapplicabilityProof = null;
+missingIndependenceProof.determinismReview.dimensions
+  .find(({ kind }) => kind === 'DUPLICATES').closureAuthority = 'MODEL_ARGUMENT';
 let missingIndependenceProofRejected = false;
 try {
   assertSemanticDraft(missingIndependenceProof, loadedPolicy.policy, deterministicContext);
@@ -926,6 +1063,7 @@ const tautologicalDeterminism = structuredClone(deterministicDraft);
 const orderingDimension = tautologicalDeterminism.determinismReview.dimensions
   .find(({ kind }) => kind === 'ORDERING');
 orderingDimension.rationale = 'A mesma entrada deve produzir a mesma saída.';
+orderingDimension.closureAuthority = 'MODEL_ARGUMENT';
 tautologicalDeterminism.requirements[0].acceptanceCases
   .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then = orderingDimension.rationale;
 let tautologicalDeterminismRejected = false;
@@ -977,7 +1115,9 @@ if (!conflictingOutcomeRejected) throw new Error('conflicting_observable_outcome
 
 const unsupportedInapplicability = structuredClone(deterministicDraft);
 unsupportedInapplicability.determinismReview.dimensions
-  .find(({ kind }) => kind === 'CANONICALIZATION').basis = modelBasis;
+  .find(({ kind }) => kind === 'DUPLICATES').basis = modelBasis;
+unsupportedInapplicability.determinismReview.dimensions
+  .find(({ kind }) => kind === 'DUPLICATES').closureAuthority = 'MODEL_ARGUMENT';
 let unsupportedInapplicabilityRejected = false;
 try {
   assertSemanticDraft(unsupportedInapplicability, loadedPolicy.policy, deterministicContext);
@@ -992,15 +1132,15 @@ if (!unsupportedInapplicabilityRejected) {
 
 const inventedSafeDefault = structuredClone(deterministicDraft);
 inventedSafeDefault.determinismReview.dimensions
-  .find(({ kind }) => kind === 'CANONICALIZATION').basis = [{
+  .find(({ kind }) => kind === 'DUPLICATES').basis = [{
     source: 'SAFE_MECHANICAL_DEFAULT',
     reference: 'ARCH-NOT-REAL',
   }];
 let inventedSafeDefaultRejected = false;
 try {
   assertSemanticDraft(inventedSafeDefault, loadedPolicy.policy, deterministicContext);
-} catch (error) {
-  inventedSafeDefaultRejected = error.message === 'safe_default_references_unknown_policy:ARCH-NOT-REAL';
+} catch {
+  inventedSafeDefaultRejected = true;
 }
 if (!inventedSafeDefaultRejected) throw new Error('unbound_safe_default_was_accepted');
 

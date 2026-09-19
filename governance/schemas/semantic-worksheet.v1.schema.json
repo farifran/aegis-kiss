@@ -9,6 +9,7 @@
     "schema",
     "contextDigest",
     "requiredDeterminismDimensions",
+    "counterexampleWitnesses",
     "bitFields",
     "compilerOwnedFields"
   ],
@@ -30,7 +31,8 @@
           "DUPLICATES",
           "EMPTY_INPUT",
           "ODD_CARDINALITY",
-          "ROUNDING_REMAINDER",
+          "ROUNDING",
+          "REMAINDER_DISTRIBUTION",
           "ZERO_DIVISOR",
           "TIE_BREAKING",
           "COUNTING_IDENTITY",
@@ -38,6 +40,50 @@
         ]
       },
       "uniqueItems": true
+    },
+    "counterexampleWitnesses": {
+      "type": "array",
+      "description": "Pares mínimos de entrada gerados mecanicamente para contestar cada dimensão sem incorporar regra de negócio. A IA deve responder ao par, mas não pode alterá-lo.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "dimension", "inputClass", "baseline", "variation"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+          "dimension": {
+            "enum": [
+              "ORDERING",
+              "CANONICALIZATION",
+              "DUPLICATES",
+              "EMPTY_INPUT",
+              "ODD_CARDINALITY",
+              "ROUNDING",
+              "REMAINDER_DISTRIBUTION",
+              "ZERO_DIVISOR",
+              "TIE_BREAKING",
+              "COUNTING_IDENTITY",
+              "BOUNDED_ARITHMETIC"
+            ]
+          },
+          "inputClass": {
+            "enum": [
+              "PERMUTED_EQUIVALENT_INPUTS",
+              "EQUIVALENT_REPRESENTATIONS",
+              "DUPLICATED_ELEMENT",
+              "EMPTY_COLLECTION",
+              "THREE_ELEMENTS",
+              "NON_EXACT_DIVISION",
+              "MULTIPLE_RECIPIENTS_WITH_REMAINDER",
+              "ZERO_DENOMINATOR",
+              "EQUAL_PRIORITY_CANDIDATES",
+              "DUPLICATED_IDENTITY_OCCURRENCES",
+              "OUTSIDE_REPRESENTABLE_RANGE"
+            ]
+          },
+          "baseline": { "type": "string", "minLength": 1 },
+          "variation": { "type": "string", "minLength": 1 }
+        }
+      }
     },
     "bitFields": {
       "type": "array",
@@ -90,6 +136,7 @@
         "CONTEXT_BINDING",
         "IDENTIFIERS",
         "SOURCE_BINDINGS",
+        "COUNTEREXAMPLE_WITNESSES",
         "AGGREGATE_STATUSES",
         "CONTRACT_ENVELOPE",
         "DIGESTS",

@@ -33,6 +33,11 @@ const diagnostics = new Map([
     remediation: 'Forneça uma prova contrafactual de independência ou marque a dimensão como especificada ou pendente.',
     ruleId: 'CONST-OBSERVABLE',
   }],
+  ['CONTRACT_HAS_UNRESOLVED_DETERMINISM', {
+    message: 'O contrato ainda contém uma lacuna ou decisão de determinismo não resolvida.',
+    remediation: 'Resolva a decisão material ou regenere o parecer com evidência autorizada antes de assinar.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
   ['INVALID_SEMANTIC_OPINION', {
     message: 'O parecer da IA não satisfaz a interface semântica obrigatória.',
     remediation: 'Corrija o campo indicado em detail e gere novamente somente o parecer semântico.',
@@ -75,6 +80,11 @@ const diagnostics = new Map([
   ['SPECIFIED_DETERMINISM_DIMENSION_WITHOUT_EXACT_PROOF', {
     message: 'Uma dimensão determinística foi fechada sem um único comportamento falsificável e comprovado.',
     remediation: 'Vincule uma regra concreta a um caso de aceitação exato ou mantenha a dimensão pendente.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNRESOLVED_SEMANTIC_GAP', {
+    message: 'O parecer preservou uma lacuna sem evidência suficiente nem alternativas humanas maduras.',
+    remediation: 'Não abra o Wizard ainda: obtenha uma regra autorizada, formule uma decisão material ou mantenha a demanda bloqueada.',
     ruleId: 'CONST-OBSERVABLE',
   }],
 ]);

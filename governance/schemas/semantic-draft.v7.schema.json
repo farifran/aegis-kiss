@@ -295,7 +295,7 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Quando a demanda promete determinismo, explicita somente dimensões materialmente aplicáveis; lacunas observáveis viram decisão, nunca suposição.",
+      "description": "Quando a demanda promete determinismo, classifica cada dimensão universal separadamente. O compilador anexa autoridade e testemunho mecânico; lacunas sem prova permanecem GAP_FOUND.",
       "required": ["status", "rationale", "intentSignalIds", "dimensions"],
       "properties": {
         "status": { "enum": ["NOT_APPLICABLE", "COMPLETE", "GAPS_FOUND"] },
@@ -306,13 +306,15 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "status", "rationale", "targetIds", "basis", "acceptanceCaseId"],
+            "required": ["kind", "status", "rationale", "targetIds", "basis", "acceptanceCaseId", "closureAuthority", "counterexampleWitness"],
             "properties": {
-              "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING_REMAINDER", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
-              "status": { "enum": ["SPECIFIED", "NOT_APPLICABLE", "DECISION_REQUIRED"] },
+              "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
+              "status": { "enum": ["SPECIFIED", "NOT_APPLICABLE", "DECISION_REQUIRED", "GAP_FOUND"] },
               "rationale": { "type": "string", "minLength": 1, "description": "Para SPECIFIED, contém uma regra concreta sem alternativas e idêntica ao resultado do único acceptanceCaseId vinculado." },
               "basis": { "$ref": "#/$defs/basis" },
               "acceptanceCaseId": { "type": ["string", "null"], "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$" },
+              "closureAuthority": { "enum": ["MECHANICAL_FACT", "AUTHORITATIVE_RULE", "HUMAN_DECISION", "MODEL_ARGUMENT"] },
+              "counterexampleWitness": { "$ref": "#/$defs/counterexampleWitness" },
               "inapplicabilityProof": {
                 "oneOf": [
                   { "type": "null" },
@@ -506,6 +508,18 @@
         "baseline": { "type": "string", "minLength": 1 },
         "variation": { "type": "string", "minLength": 1 },
         "unchangedObservableOutcome": { "type": "string", "minLength": 1 }
+      }
+    },
+    "counterexampleWitness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "dimension", "inputClass", "baseline", "variation"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+        "dimension": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
+        "inputClass": { "enum": ["PERMUTED_EQUIVALENT_INPUTS", "EQUIVALENT_REPRESENTATIONS", "DUPLICATED_ELEMENT", "EMPTY_COLLECTION", "THREE_ELEMENTS", "NON_EXACT_DIVISION", "MULTIPLE_RECIPIENTS_WITH_REMAINDER", "ZERO_DENOMINATOR", "EQUAL_PRIORITY_CANDIDATES", "DUPLICATED_IDENTITY_OCCURRENCES", "OUTSIDE_REPRESENTABLE_RANGE"] },
+        "baseline": { "type": "string", "minLength": 1 },
+        "variation": { "type": "string", "minLength": 1 }
       }
     }
   }

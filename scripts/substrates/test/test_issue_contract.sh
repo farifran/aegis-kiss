@@ -450,6 +450,7 @@ jq -e '
   and .specification.riskReview.status == "NONE"
   and .specification.adversarialReview.status == "CHALLENGES_INTEGRATED"
   and .specification.determinismReview.status == "NOT_APPLICABLE"
+  and .effectiveDeterminismStatus == "NOT_APPLICABLE"
 ' .harness/runtime/contract.json >/dev/null
 grep -F '[ESCOLHA HUMANA]' .harness/runtime/contract.md >/dev/null
 grep -F 'ESCOLHA HUMANA SELADA — Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null

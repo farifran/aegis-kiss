@@ -19,12 +19,70 @@ const determinismDimensionKinds = [
   'DUPLICATES',
   'EMPTY_INPUT',
   'ODD_CARDINALITY',
-  'ROUNDING_REMAINDER',
+  'ROUNDING',
+  'REMAINDER_DISTRIBUTION',
   'ZERO_DIVISOR',
   'TIE_BREAKING',
   'COUNTING_IDENTITY',
   'BOUNDED_ARITHMETIC',
 ];
+const counterexampleByDimension = {
+  ORDERING: {
+    inputClass: 'PERMUTED_EQUIVALENT_INPUTS',
+    baseline: 'Elementos equivalentes na ordem [A, B].',
+    variation: 'Os mesmos elementos na ordem [B, A].',
+  },
+  CANONICALIZATION: {
+    inputClass: 'EQUIVALENT_REPRESENTATIONS',
+    baseline: 'Um valor lógico na representação A.',
+    variation: 'O mesmo valor lógico na representação B.',
+  },
+  DUPLICATES: {
+    inputClass: 'DUPLICATED_ELEMENT',
+    baseline: 'Coleção [A].',
+    variation: 'Coleção [A, A].',
+  },
+  EMPTY_INPUT: {
+    inputClass: 'EMPTY_COLLECTION',
+    baseline: 'Coleção com um elemento válido.',
+    variation: 'Coleção vazia.',
+  },
+  ODD_CARDINALITY: {
+    inputClass: 'THREE_ELEMENTS',
+    baseline: 'Coleção com dois elementos.',
+    variation: 'Coleção com três elementos.',
+  },
+  ROUNDING: {
+    inputClass: 'NON_EXACT_DIVISION',
+    baseline: 'Divisão inteira exata 4/2.',
+    variation: 'Divisão inteira não exata 5/2.',
+  },
+  REMAINDER_DISTRIBUTION: {
+    inputClass: 'MULTIPLE_RECIPIENTS_WITH_REMAINDER',
+    baseline: 'Dois destinatários sem resto.',
+    variation: 'Dois destinatários com uma unidade de resto.',
+  },
+  ZERO_DIVISOR: {
+    inputClass: 'ZERO_DENOMINATOR',
+    baseline: 'Divisão 1/1.',
+    variation: 'Divisão 1/0.',
+  },
+  TIE_BREAKING: {
+    inputClass: 'EQUAL_PRIORITY_CANDIDATES',
+    baseline: 'Dois candidatos com prioridades distintas.',
+    variation: 'Os mesmos candidatos com prioridade igual.',
+  },
+  COUNTING_IDENTITY: {
+    inputClass: 'DUPLICATED_IDENTITY_OCCURRENCES',
+    baseline: 'Identidades [A, B].',
+    variation: 'Ocorrências [A, A, B].',
+  },
+  BOUNDED_ARITHMETIC: {
+    inputClass: 'OUTSIDE_REPRESENTABLE_RANGE',
+    baseline: 'Maior valor representável.',
+    variation: 'Uma unidade acima do maior valor representável.',
+  },
+};
 const explicitUncertaintyPattern = /\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|escolh\p{L}*|defin\p{L}*|ainda|alternativ\p{L}*|ou|either|choose|undefined|unspecified)\b/iu;
 
 export function loadSemanticConstitution(repositoryRoot) {
@@ -264,6 +322,9 @@ export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
   const requiresDeterminismReview = intentSignals.some(({ kind }) => (
     kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS'
   ));
+  const requiredDeterminismDimensions = requiresDeterminismReview
+    ? determinismDimensionKinds
+    : [];
   const bitFields = intentSignals.flatMap((signal, signalIndex) => {
     if (signal.kind !== 'BOUNDED_VALUE') return [];
     const match = /\bbits?\s+(\d+)\s*[–—-]\s*(\d+)\b/iu.exec(signal.reference);
@@ -288,15 +349,19 @@ export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
   const worksheet = {
     schema: 'aegis.semantic_worksheet.v1',
     contextDigest,
-    requiredDeterminismDimensions: requiresDeterminismReview
-      ? determinismDimensionKinds
-      : [],
+    requiredDeterminismDimensions,
+    counterexampleWitnesses: requiredDeterminismDimensions.map((dimension) => ({
+      id: `WITNESS-${dimension}`,
+      dimension,
+      ...counterexampleByDimension[dimension],
+    })),
     bitFields,
     compilerOwnedFields: [
       'SCHEMA',
       'CONTEXT_BINDING',
       'IDENTIFIERS',
       'SOURCE_BINDINGS',
+      'COUNTEREXAMPLE_WITNESSES',
       'AGGREGATE_STATUSES',
       'CONTRACT_ENVELOPE',
       'DIGESTS',
@@ -421,6 +486,48 @@ function literalReferenceAppears(text, reference) {
     return normalizedText.split(/[^\p{L}\p{N}_-]+/u).includes(normalizedReference);
   }
   return normalizedText.includes(normalizedReference);
+}
+
+function closureAuthorityForDimension({
+  status,
+  basis,
+  closureText,
+  intent,
+  decisionEvidence,
+  constitutionRules,
+  policyRules,
+}) {
+  if (status === 'DECISION_REQUIRED' || status === 'GAP_FOUND') return 'MODEL_ARGUMENT';
+  for (const item of basis) {
+    if (item.source === 'USER_DECISION'
+      && literalReferenceAppears(decisionEvidence.get(item.reference) ?? '', closureText)) {
+      return 'HUMAN_DECISION';
+    }
+    if (item.source === 'SAFE_MECHANICAL_DEFAULT') {
+      const rule = policyRules.find(({ id }) => id === item.reference);
+      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
+        return 'MECHANICAL_FACT';
+      }
+    }
+    if (item.source === 'USER_INTENT'
+      && intent.includes(item.reference)
+      && literalReferenceAppears(item.reference, closureText)) {
+      return 'AUTHORITATIVE_RULE';
+    }
+    if (item.source === 'CONSTITUTION') {
+      const rule = constitutionRules.find(({ id }) => id === item.reference);
+      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
+        return 'AUTHORITATIVE_RULE';
+      }
+    }
+    if (item.source === 'ARCHITECTURE_POLICY') {
+      const rule = policyRules.find(({ id }) => id === item.reference);
+      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
+        return 'AUTHORITATIVE_RULE';
+      }
+    }
+  }
+  return 'MODEL_ARGUMENT';
 }
 
 function matchingReferences(intent, references) {
@@ -1167,10 +1274,6 @@ export function assertSemanticDraft(draft, policy, {
 
   const determinismSignals = intentSignals
     .filter(({ kind }) => kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS');
-  const observableContractText = draft.requirements.flatMap((requirement) => [
-    requirement.statement,
-    ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
-  ]).join('\n');
   const reviewedDeterminismSignalIds = new Set(draft.determinismReview.intentSignalIds);
   const expectedDeterminismSignalIds = new Set(determinismSignals.map(({ id }) => id));
   if (reviewedDeterminismSignalIds.size !== expectedDeterminismSignalIds.size
@@ -1196,6 +1299,29 @@ export function assertSemanticDraft(draft, policy, {
       throw new Error('incomplete_determinism_dimension_review');
     }
     for (const dimension of draft.determinismReview.dimensions) {
+      const expectedWitness = {
+        id: `WITNESS-${dimension.kind}`,
+        dimension: dimension.kind,
+        ...counterexampleByDimension[dimension.kind],
+      };
+      if (canonicalDigest(dimension.counterexampleWitness) !== canonicalDigest(expectedWitness)) {
+        throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
+      }
+      const closureText = dimension.status === 'NOT_APPLICABLE'
+        ? dimension.inapplicabilityProof?.unchangedObservableOutcome ?? dimension.rationale
+        : dimension.rationale;
+      const expectedClosureAuthority = closureAuthorityForDimension({
+        status: dimension.status,
+        basis: dimension.basis,
+        closureText,
+        intent,
+        decisionEvidence: humanResolutionEvidence,
+        constitutionRules,
+        policyRules: policy.rules,
+      });
+      if (dimension.closureAuthority !== expectedClosureAuthority) {
+        throw new Error(`determinism_closure_authority_mismatch:${dimension.kind}`);
+      }
       for (const targetId of dimension.targetIds) {
         if (!requirementIds.has(targetId)
           && !invariantIds.has(targetId)
@@ -1217,13 +1343,18 @@ export function assertSemanticDraft(draft, policy, {
           || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')
           || hasUnresolvedExpression(dimension.rationale)
           || hasDisjunctiveOutcome(dimension.rationale)
-          || isBareDeterminismAssertion(dimension.rationale)) {
+          || isBareDeterminismAssertion(dimension.rationale)
+          || dimension.closureAuthority === 'MODEL_ARGUMENT') {
           throw new Error(`specified_determinism_dimension_without_exact_proof:${dimension.kind}`);
         }
       }
       if (dimension.status === 'DECISION_REQUIRED'
         && !dimension.targetIds.some((targetId) => decisionIds.has(targetId))) {
         throw new Error(`determinism_gap_without_decision:${dimension.kind}`);
+      }
+      if (dimension.status === 'GAP_FOUND'
+        && dimension.targetIds.some((targetId) => decisionIds.has(targetId))) {
+        throw new Error(`unresolved_determinism_gap_has_decision:${dimension.kind}`);
       }
       if (dimension.status === 'NOT_APPLICABLE' && dimension.targetIds.length !== 0) {
         throw new Error(`inapplicable_determinism_dimension_has_target:${dimension.kind}`);
@@ -1233,23 +1364,14 @@ export function assertSemanticDraft(draft, policy, {
       }
       if (dimension.status === 'NOT_APPLICABLE') {
         const proof = dimension.inapplicabilityProof;
-        const evidenceSources = new Set([
-          'USER_INTENT',
-          'USER_DECISION',
-          'ARCHITECTURE_POLICY',
-          'SAFE_MECHANICAL_DEFAULT',
-          'WORKSPACE_EVIDENCE',
-        ]);
         if (proof === undefined
           || proof === null
-          || normalizedObservableText(proof.baseline) === normalizedObservableText(proof.variation)
+          || proof.variedFactor !== dimension.counterexampleWitness.inputClass
+          || proof.baseline !== dimension.counterexampleWitness.baseline
+          || proof.variation !== dimension.counterexampleWitness.variation
           || hasUnresolvedExpression(proof.unchangedObservableOutcome)
           || hasDisjunctiveOutcome(proof.unchangedObservableOutcome)
-          || !literalReferenceAppears(
-            observableContractText,
-            proof.unchangedObservableOutcome,
-          )
-          || !dimension.basis.some(({ source }) => evidenceSources.has(source))) {
+          || dimension.closureAuthority === 'MODEL_ARGUMENT') {
           throw new Error(`inapplicable_determinism_dimension_without_independence_proof:${dimension.kind}`);
         }
       } else if (dimension.inapplicabilityProof !== undefined
@@ -1258,7 +1380,7 @@ export function assertSemanticDraft(draft, policy, {
       }
     }
     const gapsFound = draft.determinismReview.dimensions
-      .some(({ status }) => status === 'DECISION_REQUIRED');
+      .some(({ status }) => status === 'DECISION_REQUIRED' || status === 'GAP_FOUND');
     if ((draft.determinismReview.status === 'GAPS_FOUND') !== gapsFound) {
       throw new Error('determinism_review_status_mismatch');
     }
@@ -1787,6 +1909,12 @@ export function compileSemanticOpinion(opinion, request) {
   const determinismSignalIds = request.intentSignals.signals
     .filter(({ kind }) => kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS')
     .map(({ id }) => id);
+  const revisionEvidence = new Map((request.revision?.answers ?? []).map((answer) => [
+    answer.questionId,
+    [answer.label, answer.rationale, answer.contractEffect, answer.correction]
+      .filter((value) => typeof value === 'string')
+      .join('\n'),
+  ]));
 
   return {
     schema: 'aegis.semantic_draft.v7',
@@ -1920,22 +2048,40 @@ export function compileSemanticOpinion(opinion, request) {
     determinismReview: {
       status: dimensions.length === 0
         ? 'NOT_APPLICABLE'
-        : dimensions.some(({ status }) => status === 'DECISION_REQUIRED')
+        : dimensions.some(({ status }) => (
+          status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
+        ))
           ? 'GAPS_FOUND'
           : 'COMPLETE',
       rationale: opinion.determinismReview.rationale,
       intentSignalIds: determinismSignalIds,
-      dimensions: dimensions.map((item, index) => ({
-        kind: request.worksheet.requiredDeterminismDimensions[index],
-        status: item.status,
-        rationale: item.rationale,
-        targetIds: compileTargets(item.targets),
-        basis: compileOpinionBasis(item.basis, request),
-        inapplicabilityProof: item.inapplicabilityProof,
-        acceptanceCaseId: item.acceptanceCase === null
-          ? null
-          : compileAcceptanceReference(item.acceptanceCase),
-      })),
+      dimensions: dimensions.map((item, index) => {
+        const basis = compileOpinionBasis(item.basis, request);
+        const closureText = item.status === 'NOT_APPLICABLE'
+          ? item.inapplicabilityProof?.unchangedObservableOutcome ?? item.rationale
+          : item.rationale;
+        return {
+          kind: request.worksheet.requiredDeterminismDimensions[index],
+          status: item.status,
+          rationale: item.rationale,
+          targetIds: compileTargets(item.targets),
+          basis,
+          closureAuthority: closureAuthorityForDimension({
+            status: item.status,
+            basis,
+            closureText,
+            intent: request.intent,
+            decisionEvidence: revisionEvidence,
+            constitutionRules: request.constitution.rules,
+            policyRules: request.policy.rules,
+          }),
+          counterexampleWitness: request.worksheet.counterexampleWitnesses[index],
+          inapplicabilityProof: item.inapplicabilityProof,
+          acceptanceCaseId: item.acceptanceCase === null
+            ? null
+            : compileAcceptanceReference(item.acceptanceCase),
+        };
+      }),
     },
     boundaryRules: opinion.boundaryRules.map((item, index) => ({
       id: boundaryIds[index],
@@ -2043,12 +2189,27 @@ export function compileSemanticContract({
     intentSignals: detectIntentSignals(preflight.intent),
     policySignals: mechanicalPolicySignals(policy, preflight.intent),
     specification: draft,
+    effectiveDeterminismStatus: effectiveDeterminismStatus(draft, humanResolutions),
     humanResolutions,
     approval: null,
   };
   assertSchema('aegis.issue_contract.v12', contract);
   assertContractApprovalEvidence(contract);
   return contract;
+}
+
+function effectiveDeterminismStatus(specification, humanResolutions) {
+  if (specification.determinismReview.status === 'NOT_APPLICABLE') return 'NOT_APPLICABLE';
+  if (specification.determinismReview.dimensions.some(({ status }) => status === 'GAP_FOUND')) {
+    return 'BLOCKED_BY_GAP';
+  }
+  const resolvedDecisionIds = new Set(humanResolutions.map(({ questionId }) => questionId));
+  const pendingDecisionIds = specification.determinismReview.dimensions
+    .filter(({ status }) => status === 'DECISION_REQUIRED')
+    .flatMap(({ targetIds }) => targetIds)
+    .filter((targetId) => targetId.startsWith('Q-'))
+    .filter((targetId) => !resolvedDecisionIds.has(targetId));
+  return pendingDecisionIds.length > 0 ? 'PENDING_HUMAN_DECISIONS' : 'COMPLETE';
 }
 
 function decisionMap(contract) {
@@ -2124,10 +2285,15 @@ export function assertContractApprovalEvidence(contract, { required = false } = 
     }
   }
   const pendingIds = new Set(decisions.keys());
+  const retainedResolutions = contract.humanResolutions
+    .filter(({ questionId }) => !pendingIds.has(questionId));
   const draft = {
     ...contract,
-    humanResolutions: contract.humanResolutions
-      .filter(({ questionId }) => !pendingIds.has(questionId)),
+    effectiveDeterminismStatus: effectiveDeterminismStatus(
+      contract.specification,
+      retainedResolutions,
+    ),
+    humanResolutions: retainedResolutions,
     approval: null,
   };
   const draftDigest = canonicalDigest(draft);
@@ -2172,6 +2338,10 @@ export function assertContractDocument({
   if (contract.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest) throw new Error('contract_snapshot_mismatch');
   if (contract.policyDigest !== policyDigest) throw new Error('contract_policy_mismatch');
   if (contract.constitutionDigest !== constitutionDigest) throw new Error('contract_constitution_mismatch');
+  if (contract.effectiveDeterminismStatus
+    !== effectiveDeterminismStatus(contract.specification, contract.humanResolutions)) {
+    throw new Error('contract_effective_determinism_status_mismatch');
+  }
   if (contract.intent !== preflight.intent) throw new Error('contract_intent_mismatch');
   if (canonicalDigest(contract.observedPaths) !== canonicalDigest(observedPaths(preflight))) {
     throw new Error('contract_observed_paths_mismatch');
@@ -2189,6 +2359,12 @@ export function assertContractDocument({
 
 export function buildConfirmationRequest(contract) {
   if (contract.approval !== null) throw new Error('contract_already_approved');
+  const unresolvedDimensions = contract.specification.determinismReview.dimensions
+    .filter(({ status }) => status === 'GAP_FOUND')
+    .map(({ kind }) => kind);
+  if (unresolvedDimensions.length > 0) {
+    throw new Error(`unresolved_semantic_gap:${unresolvedDimensions.join(',')}`);
+  }
   const contractDraftDigest = canonicalDigest(contract);
   const request = {
     schema: 'aegis.confirmation_request.v4',
@@ -2300,6 +2476,7 @@ export function renderSemanticContractMarkdown(contract, {
     '',
     `> **Status:** ${governed ? 'Selado & Governado' : 'Rascunho aguardando confirmação'}`,
     `> **Modo:** ${specification.changeKind}`,
+    `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     ...(governed ? [
@@ -2440,6 +2617,10 @@ export function renderSemanticContractMarkdown(contract, {
   for (const dimension of specification.determinismReview.dimensions) {
     lines.push(`- **${dimension.kind}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
+    lines.push(`  - Autoridade de fechamento: ${dimension.closureAuthority}.`);
+    lines.push(`  - Contraexemplo obrigatório: ${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}.`);
+    lines.push(`    - Base mecânica: ${dimension.counterexampleWitness.baseline}`);
+    lines.push(`    - Variação mecânica: ${dimension.counterexampleWitness.variation}`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
     if (dimension.inapplicabilityProof !== undefined
       && dimension.inapplicabilityProof !== null) {
@@ -2571,12 +2752,17 @@ export function finalizeContractApproval({ contract, request, resolution }) {
   if (resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED') {
     throw new Error('contract_approval_attestation_required');
   }
+  const humanResolutions = [
+    ...contract.humanResolutions,
+    ...buildHumanResolutionRecords(contract, resolution),
+  ];
   const finalContract = {
     ...contract,
-    humanResolutions: [
-      ...contract.humanResolutions,
-      ...buildHumanResolutionRecords(contract, resolution),
-    ],
+    effectiveDeterminismStatus: effectiveDeterminismStatus(
+      contract.specification,
+      humanResolutions,
+    ),
+    humanResolutions,
     approval: {
       method: resolution.method,
       attestation: resolution.attestation,
@@ -2584,6 +2770,10 @@ export function finalizeContractApproval({ contract, request, resolution }) {
       contractDraftDigest: resolution.contractDraftDigest,
     },
   };
+  if (finalContract.effectiveDeterminismStatus === 'PENDING_HUMAN_DECISIONS'
+    || finalContract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
+    throw new Error('contract_has_unresolved_determinism');
+  }
   assertSchema('aegis.issue_contract.v12', finalContract);
   assertContractApprovalEvidence(finalContract, { required: true });
   return finalContract;

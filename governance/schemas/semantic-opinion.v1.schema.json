@@ -672,7 +672,7 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Quando a demanda promete determinismo, explicita somente dimensões materialmente aplicáveis; lacunas observáveis viram decisão, nunca suposição.",
+      "description": "Quando a demanda promete determinismo, responde separadamente a cada dimensão e testemunho da ficha. Sem regra autorizada, prova de independência ou decisão material, preserve GAP_FOUND.",
       "required": [
         "rationale",
         "dimensions"
@@ -684,7 +684,7 @@
         },
         "dimensions": {
           "type": "array",
-          "description": "Lista posicional: o item i responde exatamente à dimensão i de worksheet.requiredDeterminismDimensions. SPECIFIED exige regra única e prova vinculada; NOT_APPLICABLE exige prova contrafactual de independência observável; DECISION_REQUIRED aponta para decisão humana.",
+          "description": "Lista posicional: o item i responde exatamente à dimensão e ao testemunho i da worksheet. SPECIFIED exige regra única e prova vinculada; NOT_APPLICABLE exige fundamento autorizado fora da própria conclusão do modelo; DECISION_REQUIRED aponta para decisão humana; GAP_FOUND preserva lacuna ainda sem alternativas suficientes.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -701,7 +701,8 @@
                 "enum": [
                   "SPECIFIED",
                   "NOT_APPLICABLE",
-                  "DECISION_REQUIRED"
+                  "DECISION_REQUIRED",
+                  "GAP_FOUND"
                 ]
               },
               "rationale": {
