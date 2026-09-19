@@ -32,66 +32,6 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
 EOF
 }
 
-preflight_is_valid() {
-  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" validate-preflight >/dev/null 2>&1
-}
-
-contract_is_valid() {
-  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" validate-contract >/dev/null 2>&1
-}
-
-status_command() {
-  local contract_file="${RUNTIME_DIR}/contract.json"
-  local preflight_file="${RUNTIME_DIR}/preflight.json"
-  local confirmation_file="${RUNTIME_DIR}/user_confirmation_request.json"
-  local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
-  if [[ -f "${contract_file}" ]]; then
-    local contract_schema
-    contract_schema="$(jq -r '.schema // "INVALID"' "${contract_file}" 2>/dev/null || printf 'INVALID')"
-    if [[ "${contract_schema}" != "aegis.issue_contract.v12" ]]; then
-      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","foundSchema":"%s","requiredSchema":"aegis.issue_contract.v12"}\n' "${contract_schema}"
-    elif [[ ! -f "${preflight_file}" ]] || ! preflight_is_valid; then
-      printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
-    elif ! contract_is_valid; then
-      printf '{"status":"SEMANTIC_REDELIBERATION_REQUIRED","reason":"INVALID_OR_STALE_CONTRACT"}\n'
-    elif [[ -f "${confirmation_file}" ]] || [[ ! -f "${semantic_file}" ]]; then
-      printf '{"status":"DRAFT_PENDING_CONFIRMATION","draftPath":"%s"}\n' "${contract_file}"
-    else
-      local digest
-      digest="$(node -e '
-        const fs = require("fs");
-        try {
-          const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-          console.log(state.contractDigest || "unknown");
-        } catch {
-          console.log("invalid");
-        }
-      ' "${semantic_file}")"
-      printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
-    fi
-  elif [[ -f "${preflight_file}" ]]; then
-    if preflight_is_valid; then
-      printf '{"status":"SEMANTIC_DELIBERATION_REQUIRED","phase":"DISCOVERED","preflightPath":"%s"}\n' "${preflight_file}"
-    else
-      printf '{"status":"INVALID_PREFLIGHT","preflightPath":"%s"}\n' "${preflight_file}"
-    fi
-  elif [[ -f "${semantic_file}" ]]; then
-    local digest
-    digest="$(node -e '
-      const fs = require("fs");
-      try {
-        const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-        console.log(state.contractDigest || "unknown");
-      } catch {
-        console.log("invalid");
-      }
-    ' "${semantic_file}")"
-    printf '{"status":"GOVERNED","contractDigest":"%s","semanticState":"%s"}\n' "${digest}" "${semantic_file}"
-  else
-    printf '{"status":"IDLE","workspace":"clean"}\n'
-  fi
-}
-
 clean_command() {
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
@@ -211,16 +151,18 @@ resolve_preflight_wizard() {
     return
   fi
 
-  local execution_id contract_draft_digest
+  local execution_id contract_draft_digest resolution_staging
   execution_id="$(jq -r '.executionId' <<< "${result}")"
   contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
+  resolution_staging="$(mktemp "${RUNTIME_DIR}/.preflight_resolution.XXXXXX")"
   jq -n \
     --arg executionId "${execution_id}" \
     --arg contractDraftDigest "${contract_draft_digest}" \
     --arg attestation "${attestation}" \
     --argjson answers "${answers}" \
     '{schema:"aegis.semantic_resolution.v2",executionId:$executionId,contractDraftDigest:$contractDraftDigest,method:"INTERACTIVE_WIZARD",attestation:$attestation,answers:$answers}' \
-    > "${resolution_file}"
+    > "${resolution_staging}"
+  mv "${resolution_staging}" "${resolution_file}"
   if (( requires_recompilation == 1 )); then
     printf '[AEGIS] Escolhas gravadas e vinculadas ao rascunho. Recompilação semântica necessária antes da assinatura.\n' >&2
     return
@@ -264,7 +206,7 @@ main() {
       ;;
     --status)
       require_command_arity "$@"
-      status_command
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" status
       ;;
     --clean)
       require_command_arity "$@"

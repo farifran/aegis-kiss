@@ -1302,10 +1302,17 @@ export function assertSemanticDraft(draft, policy, {
     }
     if (/\b(?:bigint|inteiros?)\b/iu.test(intent)) {
       const thresholdEffects = decision.answers
-        .map(({ contractEffect }) => canonicalIntegerThreshold(contractEffect))
-        .filter((effect) => effect !== null);
-      if (new Set(thresholdEffects).size !== thresholdEffects.length) {
-        throw new Error(`decision_answers_semantically_equivalent:${decision.questionId}`);
+        .map(({ id, contractEffect }) => ({
+          id,
+          canonical: canonicalIntegerThreshold(contractEffect),
+        }))
+        .filter(({ canonical }) => canonical !== null);
+      if (new Set(thresholdEffects.map(({ canonical }) => canonical)).size
+        !== thresholdEffects.length) {
+        const equivalence = thresholdEffects
+          .map(({ id, canonical }) => `${id}=${canonical}`)
+          .join(',');
+        throw new Error(`decision_answers_semantically_equivalent:${decision.questionId}:${equivalence}`);
       }
     }
     if (decision.distinguishingCase === undefined) {

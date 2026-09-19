@@ -14,6 +14,7 @@ import {
   roleAssignmentRelativePath,
 } from './lib/role_assignment.mjs';
 import { canonicalJson } from './lib/canonical_json.mjs';
+import { buildRejectionReport } from './lib/rejection_report.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 
@@ -141,12 +142,13 @@ try {
   else throw rejection('INVALID_SETUP_ARITY');
 } catch (error) {
   const message = error instanceof Error ? error.message : 'setup_failed';
-  process.stderr.write(`${JSON.stringify({
-    schema: 'aegis.rejection.v1',
-    status: 'REJECTED',
+  const separator = message.indexOf(':');
+  const reason = separator === -1 ? message : message.slice(0, separator);
+  const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
+  process.stderr.write(`${JSON.stringify(buildRejectionReport({
     phase: 'SETUP',
-    reason: message.replace(/[^a-z0-9]+/giu, '_').toUpperCase(),
-    ...(error?.detail ? { detail: error.detail } : {}),
-  })}\n`);
+    reason,
+    detail: error?.detail || inferredDetail,
+  }))}\n`);
   process.exitCode = 1;
 }

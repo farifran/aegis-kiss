@@ -25,6 +25,7 @@ import {
 import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
 import { assertSchema, schemaDocument, schemaErrors } from './scripts/lib/schema_validator.mjs';
 import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
+import { buildRejectionReport } from './scripts/lib/rejection_report.mjs';
 import { detectIntentSignals } from './scripts/lib/intent_signals.mjs';
 import {
   assertRoleAssignment,
@@ -35,9 +36,6 @@ const schemaFiles = [
   'architecture-policy.v1.schema.json',
   'architecture-policy.v2.schema.json',
   'architecture-policy.v3.schema.json',
-  'confirmation-request.v1.schema.json',
-  'confirmation-request.v2.schema.json',
-  'confirmation-request.v3.schema.json',
   'confirmation-request.v4.schema.json',
   'constitution.v1.schema.json',
   'issue-contract.v3.schema.json',
@@ -70,7 +68,6 @@ const schemaFiles = [
   'semantic-request.v7.schema.json',
   'semantic-request.v8.schema.json',
   'semantic-worksheet.v1.schema.json',
-  'semantic-resolution.v1.schema.json',
   'semantic-resolution.v2.schema.json',
 ];
 for (const file of schemaFiles) {
@@ -79,6 +76,27 @@ for (const file of schemaFiles) {
     || !schema.$id.startsWith('aegis.')) {
     throw new Error(`invalid_schema_metadata:${file}`);
   }
+}
+
+for (const rejection of [
+  buildRejectionReport({
+    phase: 'SEMANTIC',
+    reason: 'INVALID_SEMANTIC_OPINION',
+    detail: 'decision_answers_semantically_equivalent:Q-0001',
+  }),
+  buildRejectionReport({ phase: 'SETUP', reason: 'SETUP_VALUE_REQUIRED' }),
+]) {
+  assertSchema('aegis.rejection.v1', rejection);
+}
+const equivalentDecisionRejection = buildRejectionReport({
+  phase: 'SEMANTIC',
+  reason: 'INVALID_SEMANTIC_OPINION',
+  detail: 'decision_answers_semantically_equivalent:Q-0001',
+});
+if (equivalentDecisionRejection.cause !== 'DECISION_ANSWERS_SEMANTICALLY_EQUIVALENT'
+  || equivalentDecisionRejection.ruleId !== 'CONST-DECISIONS'
+  || !equivalentDecisionRejection.remediation.includes('alternativas')) {
+  throw new Error('semantic_rejection_is_not_actionable');
 }
 
 const roleAssignment = {
@@ -399,7 +417,8 @@ try {
 } catch (error) {
   equivalentIntegerDecisionRejected = error.message.startsWith(
     'decision_answers_semantically_equivalent:',
-  );
+  ) && error.message.includes('ANS-SIMPLE=MIN:1')
+    && error.message.includes('ANS-DETAIL=MIN:1');
 }
 if (!equivalentIntegerDecisionRejected) {
   throw new Error('equivalent_integer_thresholds_reached_wizard');

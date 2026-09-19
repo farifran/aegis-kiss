@@ -38,6 +38,7 @@ export default [
       "dist/**",
       "coverage/**",
       "build/**",
+      "scratch/**",
 
       ".harness/runtime/**",
       ".harness/artifacts/**",

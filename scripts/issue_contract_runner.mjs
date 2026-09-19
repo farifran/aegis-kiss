@@ -3,13 +3,16 @@
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
+
+import { buildRejectionReport } from './lib/rejection_report.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const harnessDir = resolve(root, '.harness');
 const runtimeDir = resolve(harnessDir, 'runtime');
+const semanticStateJsonPath = resolve(harnessDir, 'state', 'semantic-state.json');
 const contractJsonPath = resolve(runtimeDir, 'contract.json');
 const contractMdPath = resolve(runtimeDir, 'contract.md');
 const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
@@ -21,6 +24,19 @@ function rejection(reason, detail = '') {
   const error = new Error(reason);
   if (detail) error.detail = detail;
   return error;
+}
+
+async function writeFileAtomic(target, content) {
+  const parent = dirname(target);
+  await mkdir(parent, { recursive: true });
+  const stagingDirectory = await mkdtemp(resolve(parent, '.aegis-write-'));
+  const stagedPath = resolve(stagingDirectory, basename(target));
+  try {
+    await writeFile(stagedPath, content, { encoding: 'utf8', flush: true });
+    await rename(stagedPath, target);
+  } finally {
+    await rm(stagingDirectory, { recursive: true, force: true });
+  }
 }
 
 async function readPreflight() {
@@ -159,11 +175,9 @@ async function handleValidatePreflight() {
   await readPreflight();
 }
 
-async function handleValidateContract() {
+async function validateContract(contract, preflight) {
   const { assertContractDocument } = await import('./lib/semantic_contract.mjs');
-  const [contract, preflight, loadedPolicy, constitution] = await Promise.all([
-    readFile(contractJsonPath, 'utf8').then(JSON.parse),
-    readPreflight(),
+  const [loadedPolicy, constitution] = await Promise.all([
     readPolicy(),
     readConstitution(),
   ]);
@@ -177,6 +191,103 @@ async function handleValidateContract() {
     constitution,
     constitutionDigest: constitution.digest,
   });
+}
+
+async function handleValidateContract() {
+  const [contract, preflight] = await Promise.all([
+    readFile(contractJsonPath, 'utf8').then(JSON.parse),
+    readPreflight(),
+  ]);
+  await validateContract(contract, preflight);
+}
+
+async function readGovernedState(statePath) {
+  const { parseSemanticState } = await import('./lib/semantic_state.mjs');
+  return parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
+}
+
+function writeStatus(status) {
+  process.stdout.write(`${JSON.stringify(status)}\n`);
+}
+
+async function handleStatus() {
+  const statePath = semanticStateJsonPath;
+
+  if (existsSync(contractJsonPath)) {
+    let contract;
+    try {
+      contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
+    } catch {
+      writeStatus({
+        status: 'SEMANTIC_REDELIBERATION_REQUIRED',
+        foundSchema: 'INVALID',
+        requiredSchema: 'aegis.issue_contract.v12',
+      });
+      return;
+    }
+    if (contract.schema !== 'aegis.issue_contract.v12') {
+      writeStatus({
+        status: 'SEMANTIC_REDELIBERATION_REQUIRED',
+        foundSchema: contract.schema ?? 'INVALID',
+        requiredSchema: 'aegis.issue_contract.v12',
+      });
+      return;
+    }
+    let preflight;
+    try {
+      preflight = await readPreflight();
+    } catch {
+      writeStatus({ status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath });
+      return;
+    }
+    try {
+      await validateContract(contract, preflight);
+    } catch {
+      writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' });
+      return;
+    }
+    if (existsSync(userConfirmationPath) || !existsSync(statePath)) {
+      writeStatus({ status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath });
+      return;
+    }
+    try {
+      const state = await readGovernedState(statePath);
+      if (state.contractDigest !== (await import('./lib/canonical_json.mjs')).canonicalDigest(contract)) {
+        writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'RUNTIME_STATE_MISMATCH' });
+        return;
+      }
+      writeStatus({ status: 'GOVERNED', contractDigest: state.contractDigest, semanticState: statePath });
+    } catch {
+      writeStatus({ status: 'INVALID_SEMANTIC_STATE', semanticState: statePath });
+    }
+    return;
+  }
+
+  if (existsSync(preflightJsonPath)) {
+    try {
+      await readPreflight();
+      writeStatus({
+        status: 'SEMANTIC_DELIBERATION_REQUIRED',
+        phase: 'DISCOVERED',
+        preflightPath: preflightJsonPath,
+      });
+    } catch {
+      writeStatus({ status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath });
+    }
+    return;
+  }
+
+  if (existsSync(statePath)) {
+    try {
+      const state = await readGovernedState(statePath);
+      writeStatus({ status: 'GOVERNED', contractDigest: state.contractDigest, semanticState: statePath });
+    } catch {
+      writeStatus({ status: 'INVALID_SEMANTIC_STATE', semanticState: statePath });
+    }
+    return;
+  }
+
+  writeStatus({ status: 'IDLE', workspace: 'clean' });
 }
 
 async function handleSemanticRequest() {
@@ -269,13 +380,13 @@ async function handleSemanticCompile(args) {
 
   await mkdir(runtimeDir, { recursive: true });
   await Promise.all([
-    writeFile(contractJsonPath, `${canonicalJson(contract)}\n`, 'utf8'),
-    writeFile(contractMdPath, `${renderSemanticContractMarkdown(contract, {
+    writeFileAtomic(contractJsonPath, `${canonicalJson(contract)}\n`),
+    writeFileAtomic(contractMdPath, `${renderSemanticContractMarkdown(contract, {
       policyRules: loadedPolicy.policy.rules,
-    })}\n`, 'utf8'),
-    writeFile(userConfirmationPath, `${canonicalJson(confirmation)}\n`, 'utf8'),
+    })}\n`),
     rm(resolutionPath, { force: true }),
   ]);
+  await writeFileAtomic(userConfirmationPath, `${canonicalJson(confirmation)}\n`);
   process.stdout.write(`${canonicalJson(confirmation)}\n`);
 }
 
@@ -365,13 +476,13 @@ async function handleApprove() {
   };
   await mkdir(dirname(statePath), { recursive: true });
   await Promise.all([
-    writeFile(statePath, `${canonicalJson(semanticState)}\n`, 'utf8'),
-    writeFile(contractJsonPath, `${canonicalJson(contract)}\n`, 'utf8'),
-    writeFile(contractMdPath, `${renderSemanticContractMarkdown(contract, {
+    writeFileAtomic(contractJsonPath, `${canonicalJson(contract)}\n`),
+    writeFileAtomic(contractMdPath, `${renderSemanticContractMarkdown(contract, {
       contractDigest,
       policyRules: loadedPolicy.policy.rules,
-    })}\n`, 'utf8'),
+    })}\n`),
   ]);
+  await writeFileAtomic(statePath, `${canonicalJson(semanticState)}\n`);
   await Promise.all([
     rm(userConfirmationPath, { force: true }),
     rm(resolutionPath, { force: true }),
@@ -413,6 +524,7 @@ try {
   if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'validate-preflight') await handleValidatePreflight();
   else if (command === 'validate-contract') await handleValidateContract();
+  else if (command === 'status') await handleStatus();
   else if (command === 'semantic-request') await handleSemanticRequest();
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();
@@ -428,12 +540,10 @@ try {
     : command === 'semantic-request' || command === 'semantic-compile' || command === 'validate-contract'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';
-  process.stderr.write(`${JSON.stringify({
-    schema: 'aegis.rejection.v1',
-    status: 'REJECTED',
+  process.stderr.write(`${JSON.stringify(buildRejectionReport({
     phase,
-    reason: rawReason.replace(/[^a-z0-9]+/giu, '_').toUpperCase(),
-    ...(error?.detail || inferredDetail ? { detail: error?.detail || inferredDetail } : {}),
-  })}\n`);
+    reason: rawReason,
+    detail: error?.detail || inferredDetail,
+  }))}\n`);
   process.exitCode = 1;
 }

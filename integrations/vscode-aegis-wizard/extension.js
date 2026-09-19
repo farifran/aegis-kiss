@@ -4,19 +4,15 @@ const vscode = require('vscode');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const process = require('node:process');
+
+const { buildResolution, validRequest, validResolutionForRequest } = require('./protocol.js');
 
 const requestRelPath = '.harness/runtime/user_confirmation_request.json';
 const resolutionRelPath = '.harness/runtime/preflight_resolution.json';
 
 function workspaceRoot() {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
-}
-
-function validRequest(value) {
-  return value?.schema === 'aegis.confirmation_request.v1'
-    && value.status === 'USER_CONFIRMATION_REQUIRED'
-    && typeof value.contractDraftDigest === 'string'
-    && Array.isArray(value.questions);
 }
 
 let isPrompting = false;
@@ -49,11 +45,7 @@ function isAlreadyResolved(root, request) {
     if (!fs.existsSync(fullPath)) return false;
     const raw = fs.readFileSync(fullPath, 'utf8');
     const resolution = JSON.parse(raw);
-    return Boolean(
-      request.executionId
-      && resolution?.executionId === request.executionId
-      && resolution?.contractDraftDigest === request.contractDraftDigest,
-    );
+    return validResolutionForRequest(resolution, request);
   } catch {
     return false;
   }
@@ -80,19 +72,22 @@ async function choose(question) {
     ignoreFocusOut: true,
     validateInput: (value) => value.trim().length === 0 ? 'A interpretação não pode ficar vazia.' : undefined,
   });
-  return correction === undefined ? undefined : { questionId: question.id, action: 'CORRECT_INTERPRETATION', correction };
+  return correction === undefined ? undefined : { questionId: question.id, correction };
 }
 
 async function writeResolution(root, request, answers) {
   const target = path.join(root.fsPath, resolutionRelPath);
-  const payload = `${JSON.stringify({
-    schema: 'aegis.semantic_resolution.v1',
-    executionId: request.executionId,
-    contractDraftDigest: request.contractDraftDigest,
-    answers,
-  }, null, 2)}\n`;
+  const result = buildResolution(request, answers);
+  const payload = `${JSON.stringify(result.resolution, null, 2)}\n`;
+  const temporary = `${target}.${process.pid}.tmp`;
   await fs.promises.mkdir(path.dirname(target), { recursive: true });
-  await fs.promises.writeFile(target, payload, 'utf8');
+  try {
+    await fs.promises.writeFile(temporary, payload, { encoding: 'utf8', flush: true });
+    await fs.promises.rename(temporary, target);
+  } finally {
+    await fs.promises.rm(temporary, { force: true });
+  }
+  return result.recompilationRequired;
 }
 
 function resume(root) {
@@ -159,7 +154,14 @@ async function presentPending(force = false) {
       }
       answers.push(answer);
     }
-    await writeResolution(root, request, answers);
+    const recompilationRequired = await writeResolution(root, request, answers);
+    if (recompilationRequired) {
+      await vscode.window.showInformationMessage(
+        'Aegis registrou suas decisões. O supervisor deve recompilar o contrato antes da assinatura.',
+      );
+      lastCancelledId = null;
+      return;
+    }
     await resume(root);
     lastCancelledId = null;
   } catch (error) {
@@ -174,7 +176,7 @@ function activate(context) {
   if (root === undefined) return;
 
   // 1. VSCode File System Watcher
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/' + path.basename(requestRelPath)));
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, requestRelPath));
   context.subscriptions.push(
     watcher,
     watcher.onDidCreate(() => presentPending()),
