@@ -49,7 +49,7 @@ A Issue e o Contrato deixam de ser dois conceitos separados e tornam-se **duas p
 | Projeção | Formato / Destino | Para que serve? |
 | :--- | :--- | :--- |
 | **Face Humana (`contract.md`)** | Markdown conciso na IDE | Leitura dos requisitos, riscos, recomendações e evidências de aprovação. |
-| **Face Máquina (`contract.json`)** | JSON canônico determinístico do Aegis | Tipagem formal, invariantes, IDs de falha e geração do hash imutável (`contractDigest`). |
+| **Face Máquina (`contract.json`)** | JSON canônico determinístico do Aegis | Tipagem formal, invariantes, IDs de falha e geração do identificador de integridade (`contractDigest`). |
 
 O **Hash Raiz Único** é gerado no aceite final e cobre o contrato, as decisões humanas e a evidência de qual digest de rascunho foi aprovado. O registro não inventa identidade nem horário: essas garantias exigiriam uma assinatura externa real.
 
@@ -64,7 +64,9 @@ O **Discovery mecânico** observa exclusivamente `src/`, com limites explícitos
 3. entradas ignoradas, como links simbólicos;
 4. evidência lexical limitada à primeira ocorrência de cada termo.
 
-A evidência lexical é apenas uma pista textual. Ela não afirma compreender regras de negócio, detectar vulnerabilidades, provar código morto nem estabelecer relações semânticas. Antes da assinatura, o snapshot de `src/` é recalculado; qualquer mudança invalida o preflight e exige um novo Discovery.
+A evidência lexical é apenas uma pista textual. Ela não afirma compreender regras de negócio, detectar vulnerabilidades, provar código morto nem estabelecer relações semânticas. Antes da assinatura, o snapshot de `src/` é recalculado; qualquer mudança invalida o preflight e exige um novo Discovery. Depois da assinatura, o contrato permanece um registro histórico válido: mudanças em `src/` alteram `workspaceFreshness` para `CHANGED_SINCE_BASELINE`, sem alterar `contractIntegrity`. `implementationCompliance` permanece `NOT_EVALUATED` até existir uma fase futura e explícita que confronte implementação e contrato.
+
+Os três estados possuem responsabilidades distintas: `contractIntegrity` verifica o contrato e sua aprovação; `workspaceFreshness` informa se o workspace ainda coincide com o baseline observado; `implementationCompliance` nunca é inferida apenas por hashes ou igualdade de arquivos. `./aegis --verify` verifica somente a integridade histórica e declara o frescor como `NOT_CHECKED`; `./aegis --status` também calcula o frescor atual.
 
 Os caminhos mantêm a identidade nativa dos arquivos: barras invertidas só são convertidas no Windows. Controles direcionais Unicode invisíveis são rejeitados para impedir nomes visualmente enganosos no contrato.
 

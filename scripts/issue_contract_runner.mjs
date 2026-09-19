@@ -210,6 +210,60 @@ function writeStatus(status) {
   process.stdout.write(`${JSON.stringify(status)}\n`);
 }
 
+async function inspectWorkspaceFreshness(contract) {
+  try {
+    const { discoverWorkspace } = await import('./lib/issue_contract_core.mjs');
+    const currentSnapshotDigest = discoverWorkspace(root).sourceSnapshotDigest;
+    return {
+      workspaceFreshness: currentSnapshotDigest === contract.sourceSnapshotDigest
+        ? 'MATCHES_BASELINE'
+        : 'CHANGED_SINCE_BASELINE',
+    };
+  } catch (error) {
+    return {
+      workspaceFreshness: 'UNAVAILABLE',
+      workspaceFreshnessReason: error instanceof Error ? error.message : 'unknown_error',
+    };
+  }
+}
+
+async function writeGovernedStatus(statePath, runtimeContract = null) {
+  try {
+    const [{ canonicalDigest }, state] = await Promise.all([
+      import('./lib/canonical_json.mjs'),
+      readGovernedState(statePath),
+    ]);
+    if (runtimeContract !== null && canonicalDigest(runtimeContract) !== state.contractDigest) {
+      writeStatus({
+        status: 'INVALID_SEMANTIC_STATE',
+        reason: 'RUNTIME_CONTRACT_MISMATCH',
+        contractIntegrity: 'INVALID',
+        workspaceFreshness: 'NOT_CHECKED',
+        implementationCompliance: 'NOT_EVALUATED',
+        semanticState: statePath,
+      });
+      return;
+    }
+    const freshness = await inspectWorkspaceFreshness(state.contract);
+    writeStatus({
+      status: 'GOVERNED',
+      contractDigest: state.contractDigest,
+      contractIntegrity: 'VALID',
+      ...freshness,
+      implementationCompliance: 'NOT_EVALUATED',
+      semanticState: statePath,
+    });
+  } catch {
+    writeStatus({
+      status: 'INVALID_SEMANTIC_STATE',
+      contractIntegrity: 'INVALID',
+      workspaceFreshness: 'NOT_CHECKED',
+      implementationCompliance: 'NOT_EVALUATED',
+      semanticState: statePath,
+    });
+  }
+}
+
 async function handleStatus() {
   const statePath = semanticStateJsonPath;
 
@@ -233,6 +287,22 @@ async function handleStatus() {
       });
       return;
     }
+    if (contract.approval !== null) {
+      if (!existsSync(statePath)) {
+        writeStatus({
+          status: 'INVALID_SEMANTIC_STATE',
+          reason: 'MISSING_GOVERNED_STATE',
+          contractIntegrity: 'INVALID',
+          workspaceFreshness: 'NOT_CHECKED',
+          implementationCompliance: 'NOT_EVALUATED',
+          semanticState: statePath,
+        });
+        return;
+      }
+      await writeGovernedStatus(statePath, contract);
+      return;
+    }
+
     let preflight;
     try {
       preflight = await readPreflight();
@@ -246,20 +316,7 @@ async function handleStatus() {
       writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' });
       return;
     }
-    if (existsSync(userConfirmationPath) || !existsSync(statePath)) {
-      writeStatus({ status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath });
-      return;
-    }
-    try {
-      const state = await readGovernedState(statePath);
-      if (state.contractDigest !== (await import('./lib/canonical_json.mjs')).canonicalDigest(contract)) {
-        writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'RUNTIME_STATE_MISMATCH' });
-        return;
-      }
-      writeStatus({ status: 'GOVERNED', contractDigest: state.contractDigest, semanticState: statePath });
-    } catch {
-      writeStatus({ status: 'INVALID_SEMANTIC_STATE', semanticState: statePath });
-    }
+    writeStatus({ status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath });
     return;
   }
 
@@ -278,12 +335,7 @@ async function handleStatus() {
   }
 
   if (existsSync(statePath)) {
-    try {
-      const state = await readGovernedState(statePath);
-      writeStatus({ status: 'GOVERNED', contractDigest: state.contractDigest, semanticState: statePath });
-    } catch {
-      writeStatus({ status: 'INVALID_SEMANTIC_STATE', semanticState: statePath });
-    }
+    await writeGovernedStatus(statePath);
     return;
   }
 
@@ -492,6 +544,9 @@ async function handleApprove() {
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
+    contractIntegrity: 'VALID',
+    workspaceFreshness: 'MATCHES_BASELINE',
+    implementationCompliance: 'NOT_EVALUATED',
     approvalMethod: contract.approval.method,
     humanDecisionCount: contract.humanResolutions.length,
     implementationAuthorized: false,
@@ -503,17 +558,25 @@ async function handleVerify() {
   const statePath = semanticStatePath(root);
   if (!existsSync(statePath)) throw rejection('NO_GOVERNED_CONTRACT');
   const state = parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
+  let activeContext = 'NOT_PRESENT';
   if (existsSync(preflightJsonPath)) {
-    const preflight = await readPreflight();
-    if (state.contract.sourcePreflightDigest !== preflight.preflightDigest) {
-      throw rejection('ACTIVE_PREFLIGHT_NOT_GOVERNED');
+    try {
+      const preflight = await readPreflight();
+      activeContext = state.contract.sourcePreflightDigest === preflight.preflightDigest
+        ? 'MATCHES_CONTRACT'
+        : 'DIFFERENT_PREFLIGHT';
+    } catch {
+      activeContext = 'INVALID_PREFLIGHT';
     }
   }
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.contract_verification.v1',
+    schema: 'aegis.contract_verification.v2',
     status: 'VALID',
     contractDigest: state.contractDigest,
-    implementationExecuted: false,
+    contractIntegrity: 'VALID',
+    workspaceFreshness: 'NOT_CHECKED',
+    implementationCompliance: 'NOT_EVALUATED',
+    activeContext,
   })}\n`);
 }
 

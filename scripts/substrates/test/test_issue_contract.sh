@@ -201,6 +201,17 @@ printf '%s\n' "${semantic_request}" | jq -e '
 semantic_worksheet_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.worksheetDigest')"
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -print)" == ".harness/runtime/preflight.json" ]]
 
+# Antes da assinatura, mudança no workspace continua bloqueando o contexto semântico.
+cp src/index.ts "${WORK_DIR}/index.before-preflight-check.ts"
+printf '\nexport const prematureChange = true;\n' >> src/index.ts
+set +e
+stale_request_output="$(bash ./aegis --semantic-request 2>&1)"
+stale_request_code=$?
+set -e
+[[ "${stale_request_code}" -ne 0 ]]
+printf '%s\n' "${stale_request_output}" | jq -e '.reason == "SOURCE_SNAPSHOT_CHANGED"' >/dev/null
+mv "${WORK_DIR}/index.before-preflight-check.ts" src/index.ts
+
 make_opinion() {
   local mode="$1"
   local context_digest="$2"
@@ -456,14 +467,18 @@ grep -F '[ESCOLHA HUMANA]' .harness/runtime/contract.md >/dev/null
 grep -F 'ESCOLHA HUMANA SELADA — Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null
 previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-state.json)"
 
-# Uma demanda diferente não herda a validade do contrato anterior.
+# Uma demanda diferente não torna o contrato anterior historicamente inválido,
+# mas o verify informa que ele não pertence ao preflight ativo.
 bash ./aegis 'Criar contrato diferente' >/dev/null
-set +e
 stale_verification_output="$(bash ./aegis --verify 2>&1)"
-stale_verification_code=$?
-set -e
-[[ "${stale_verification_code}" -ne 0 ]]
-printf '%s\n' "${stale_verification_output}" | jq -e '.reason == "ACTIVE_PREFLIGHT_NOT_GOVERNED"' >/dev/null
+printf '%s\n' "${stale_verification_output}" | jq -e '
+  .schema == "aegis.contract_verification.v2"
+  and .status == "VALID"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "NOT_CHECKED"
+  and .implementationCompliance == "NOT_EVALUATED"
+  and .activeContext == "DIFFERENT_PREFLIGHT"
+' >/dev/null
 
 # Reabre a demanda original para exercitar uma alternativa que exige recompilação.
 bash ./aegis 'Criar calculadora de precisão com formato ainda a escolher' >/dev/null
@@ -527,6 +542,9 @@ approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
   .schema == "aegis.preflight_finalization.v12"
   and .status == "FINALIZED"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "MATCHES_BASELINE"
+  and .implementationCompliance == "NOT_EVALUATED"
   and .approvalMethod == "DIRECT_COMMAND"
   and .humanDecisionCount == 1
   and .implementationAuthorized == false
@@ -543,12 +561,43 @@ jq -e '
 [[ ! -e .harness/runtime/preflight_resolution.json ]]
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
-printf '%s\n' "$(bash ./aegis --status)" | jq -e '.status == "GOVERNED"' >/dev/null
+printf '%s\n' "$(bash ./aegis --status)" | jq -e '
+  .status == "GOVERNED"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "MATCHES_BASELINE"
+  and .implementationCompliance == "NOT_EVALUATED"
+' >/dev/null
 printf '%s\n' "$(bash ./aegis --verify)" | jq -e '
-  .status == "VALID"
-  and .implementationExecuted == false
+  .schema == "aegis.contract_verification.v2"
+  and .status == "VALID"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "NOT_CHECKED"
+  and .implementationCompliance == "NOT_EVALUATED"
+  and .activeContext == "MATCHES_CONTRACT"
 ' >/dev/null
 [[ ! -e .harness/runtime/verification_receipt.json ]]
+
+# Alterar src/ depois da assinatura muda apenas o frescor do workspace. O
+# contrato histórico permanece íntegro e conformidade de implementação não é inferida.
+cp src/index.ts "${WORK_DIR}/index.before-implementation.ts"
+printf '\nexport const implementationChange = true;\n' >> src/index.ts
+printf '%s\n' "$(bash ./aegis --status)" | jq -e '
+  .status == "GOVERNED"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "CHANGED_SINCE_BASELINE"
+  and .implementationCompliance == "NOT_EVALUATED"
+' >/dev/null
+printf '%s\n' "$(bash ./aegis --verify)" | jq -e '
+  .status == "VALID"
+  and .contractIntegrity == "VALID"
+  and .workspaceFreshness == "NOT_CHECKED"
+  and .implementationCompliance == "NOT_EVALUATED"
+' >/dev/null
+mv "${WORK_DIR}/index.before-implementation.ts" src/index.ts
+printf '%s\n' "$(bash ./aegis --status)" | jq -e '
+  .status == "GOVERNED"
+  and .workspaceFreshness == "MATCHES_BASELINE"
+' >/dev/null
 
 # Um contrato não pode ser aprovado sob uma constituição diferente da usada na compilação.
 cp AGENTS.md AGENTS.original.md
