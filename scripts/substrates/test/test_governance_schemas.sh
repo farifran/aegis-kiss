@@ -931,6 +931,130 @@ const deterministicContext = {
   workspaceEvidence: deterministicRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(deterministicDraft, loadedPolicy.policy, deterministicContext);
+const boundedSubjectIntent = `${deterministicIntent} Expor a quantidade nos Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63.`;
+const boundedSubjectPreflight = buildPreflightHandoff({
+  demand: boundedSubjectIntent,
+  discovery: discoverWorkspace(process.cwd(), boundedSubjectIntent),
+});
+const boundedSubjectRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: boundedSubjectPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const boundedSubjectSignal = boundedSubjectRequest.intentSignals.signals
+  .find(({ kind }) => kind === 'BOUNDED_VALUE');
+const boundedSubjectDraft = structuredClone(deterministicDraft);
+boundedSubjectDraft.sourceContextDigest = boundedSubjectRequest.contextDigest;
+boundedSubjectDraft.intentClaims.push({
+  id: 'CLAIM-BOUNDED-SUBJECT',
+  quote: 'Bits 4–9',
+  kind: 'OBLIGATION',
+  disposition: 'NORMATIVE',
+  contractEffect: 'Bits 4–9 devem representar a quantidade pública.',
+  targetIds: ['REQ-RESULT', 'BOUND-COUNTER'],
+  rationale: 'A demanda define layout e domínio observáveis.',
+});
+boundedSubjectDraft.requirements[0].statement += ' Bits 4–9 devem representar a quantidade pública.';
+boundedSubjectDraft.requirements[0].acceptanceCases.push(
+  {
+    id: 'AC-BOUND-UNDERFLOW',
+    kind: 'BOUNDARY',
+    given: 'Uma quantidade abaixo de 0.',
+    when: 'O campo for compilado.',
+    then: 'Valores abaixo de 0 devem ser rejeitados.',
+    outcomeKind: 'REJECTION',
+    decisionBinding: null,
+    boundaryBinding: {
+      ruleId: 'BOUND-COUNTER',
+      side: 'UNDERFLOW',
+      expectedBehavior: 'REJECT',
+      expectedValue: null,
+    },
+  },
+  {
+    id: 'AC-BOUND-OVERFLOW',
+    kind: 'BOUNDARY',
+    given: 'Uma quantidade acima de 63.',
+    when: 'O campo for compilado.',
+    then: 'Valores acima de 63 devem saturar em 63.',
+    outcomeKind: 'OBSERVABLE_EFFECT',
+    decisionBinding: null,
+    boundaryBinding: {
+      ruleId: 'BOUND-COUNTER',
+      side: 'OVERFLOW',
+      expectedBehavior: 'SATURATE',
+      expectedValue: '63',
+    },
+  },
+);
+boundedSubjectDraft.boundaryRules = [{
+  id: 'BOUND-COUNTER',
+  subject: 'Quantidade pública em Bits 4–9',
+  representationKind: 'ENCODED_VALUE',
+  lowerBound: '0',
+  upperBound: '63',
+  underflowBehavior: 'REJECT',
+  overflowBehavior: 'SATURATE',
+  decisionId: null,
+  requirementIds: ['REQ-RESULT'],
+  acceptanceCaseIds: ['AC-BOUND-UNDERFLOW', 'AC-BOUND-OVERFLOW'],
+  intentSignalIds: [boundedSubjectSignal.id],
+  basis: [{
+    source: 'USER_INTENT',
+    reference: 'Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63',
+  }],
+}];
+const boundedDimension = boundedSubjectDraft.determinismReview.dimensions
+  .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC');
+boundedDimension.subjectId = 'BOUND-COUNTER';
+boundedDimension.status = 'GAP_FOUND';
+boundedDimension.rationale = 'A aritmética limitada do contador exige revisão ligada ao seu próprio campo.';
+boundedDimension.targetIds = ['BOUND-COUNTER'];
+boundedDimension.basis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
+boundedDimension.closureAuthority = 'MODEL_ARGUMENT';
+boundedDimension.inapplicabilityProof = null;
+const boundedCountingDimension = boundedSubjectDraft.determinismReview.dimensions
+  .find(({ kind }) => kind === 'COUNTING_IDENTITY');
+boundedCountingDimension.subjectId = 'BOUND-COUNTER';
+boundedCountingDimension.status = 'GAP_FOUND';
+boundedCountingDimension.rationale = 'A identidade contada precisa ser definida para o contador público.';
+boundedCountingDimension.targetIds = ['BOUND-COUNTER'];
+boundedCountingDimension.basis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
+boundedCountingDimension.closureAuthority = 'MODEL_ARGUMENT';
+boundedCountingDimension.inapplicabilityProof = null;
+assertSemanticDraft(boundedSubjectDraft, loadedPolicy.policy, {
+  constitutionRules: constitution.rules,
+  intent: boundedSubjectIntent,
+  resolvedDecisionIds: [],
+  workspaceEvidence: boundedSubjectRequest.workspace.sourceEvidence,
+});
+const wrongBoundedSubject = structuredClone(boundedSubjectDraft);
+wrongBoundedSubject.determinismReview.dimensions
+  .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC').subjectId = 'REQ-RESULT';
+wrongBoundedSubject.determinismReview.dimensions
+  .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC').targetIds = ['REQ-RESULT'];
+let wrongBoundedSubjectRejected = false;
+try {
+  assertSemanticDraft(wrongBoundedSubject, loadedPolicy.policy, {
+    constitutionRules: constitution.rules,
+    intent: boundedSubjectIntent,
+    resolvedDecisionIds: [],
+    workspaceEvidence: boundedSubjectRequest.workspace.sourceEvidence,
+  });
+} catch (error) {
+  wrongBoundedSubjectRejected = error.message === 'bounded_subject_without_determinism_review:BOUND-COUNTER';
+}
+if (!wrongBoundedSubjectRejected) throw new Error('bounded_arithmetic_was_reviewed_only_globally');
+
+const scopedStructuralAbsence = structuredClone(deterministicDraft);
+const scopedUnboundedDimension = structuredClone(scopedStructuralAbsence.determinismReview.dimensions
+  .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC'));
+scopedUnboundedDimension.subjectId = 'REQ-RESULT';
+scopedUnboundedDimension.targetIds = ['REQ-RESULT'];
+scopedStructuralAbsence.determinismReview.dimensions.push(scopedUnboundedDimension);
+assertSemanticDraft(scopedStructuralAbsence, loadedPolicy.policy, deterministicContext);
+
 const pendingDeterminismContract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft: deterministicDraft,
@@ -1136,19 +1260,19 @@ try {
 }
 if (!genericMetamorphicObservableRejected) throw new Error('generic_result_was_accepted_as_observable_proof');
 
-const missingIndependenceProof = structuredClone(deterministicDraft);
-missingIndependenceProof.determinismReview.dimensions
+const missingStructuralAbsence = structuredClone(deterministicDraft);
+missingStructuralAbsence.determinismReview.dimensions
   .find(({ kind }) => kind === 'DUPLICATES').inapplicabilityProof = null;
-let missingIndependenceProofRejected = false;
+let missingStructuralAbsenceRejected = false;
 try {
-  assertSemanticDraft(missingIndependenceProof, loadedPolicy.policy, deterministicContext);
+  assertSemanticDraft(missingStructuralAbsence, loadedPolicy.policy, deterministicContext);
 } catch (error) {
-  missingIndependenceProofRejected = error.message.startsWith(
+  missingStructuralAbsenceRejected = error.message.startsWith(
     'inapplicable_determinism_dimension_without_structural_absence:',
   );
 }
-if (!missingIndependenceProofRejected) {
-  throw new Error('not_applicable_closed_without_independence_proof');
+if (!missingStructuralAbsenceRejected) {
+  throw new Error('not_applicable_closed_without_structural_absence');
 }
 
 const tautologicalDeterminism = structuredClone(deterministicDraft);
@@ -1168,6 +1292,30 @@ try {
 }
 if (!tautologicalDeterminismRejected) {
   throw new Error('tautology_was_accepted_as_determinism_rule');
+}
+
+const decoratedTautology = structuredClone(deterministicDraft);
+const decoratedOrdering = decoratedTautology.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING');
+const decoratedTautologyRule = 'Produzir saída determinística';
+decoratedOrdering.rationale = decoratedTautologyRule;
+decoratedOrdering.basis = [{ source: 'USER_INTENT', reference: decoratedTautologyRule }];
+decoratedOrdering.closureAuthority = 'AUTHORITATIVE_RULE';
+decoratedOrdering.proofObligation.relation = 'DEFINED_RESULT';
+decoratedOrdering.proofObligation.observables = ['saída determinística'];
+decoratedTautology.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then = decoratedOrdering.rationale;
+let decoratedTautologyRejected = false;
+try {
+  assertSemanticDraft(decoratedTautology, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  decoratedTautologyRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:',
+  );
+  if (!decoratedTautologyRejected) throw error;
+}
+if (!decoratedTautologyRejected) {
+  throw new Error('generic_determinism_with_named_observable_closed_dimension');
 }
 
 const ambiguousOutcomeDraft = structuredClone(draft);

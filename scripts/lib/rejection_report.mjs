@@ -28,11 +28,6 @@ const diagnostics = new Map([
     remediation: 'Abra o Wizard, revise cada opção e confirme suas escolhas.',
     ruleId: 'CONST-DECISIONS',
   }],
-  ['INAPPLICABLE_DETERMINISM_DIMENSION_WITHOUT_INDEPENDENCE_PROOF', {
-    message: 'Uma dimensão foi declarada inaplicável sem provar que sua variação não altera o resultado público.',
-    remediation: 'Forneça uma prova contrafactual de independência ou marque a dimensão como especificada ou pendente.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
   ['INAPPLICABLE_DETERMINISM_DIMENSION_WITHOUT_STRUCTURAL_ABSENCE', {
     message: 'Uma dimensão foi declarada inaplicável sem provar que sua estrutura ativadora está ausente da fronteira pública.',
     remediation: 'Classifique uma regra de invariância como SPECIFIED; use NOT_APPLICABLE somente com ausência estrutural autorizada.',

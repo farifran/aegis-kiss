@@ -1330,7 +1330,7 @@ export function assertSemanticDraft(draft, policy, {
       || determinismDimensionKinds.some((kind) => !reviewedDimensionKinds.has(kind))) {
       throw new Error('incomplete_determinism_dimension_review');
     }
-    const applicabilityText = [
+    const publicApplicabilityText = [
       ...draft.requirements.flatMap((requirement) => [
         requirement.statement,
         ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
@@ -1342,6 +1342,32 @@ export function assertSemanticDraft(draft, policy, {
         upperBound,
       ]),
     ].join('\n');
+    const applicabilityTextForSubject = (subjectId) => {
+      if (subjectId === 'PUBLIC_CONTRACT') return publicApplicabilityText;
+      if (requirementIds.has(subjectId)) {
+        const requirement = requirementsById.get(subjectId);
+        return [
+          requirement.statement,
+          ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
+          ...draft.invariants
+            .filter(({ requirementIds: linkedIds }) => linkedIds.includes(subjectId))
+            .flatMap(({ statement, falsification }) => [statement, falsification]),
+        ].join('\n');
+      }
+      const boundaryRule = draft.boundaryRules.find(({ id }) => id === subjectId);
+      if (boundaryRule === undefined) return '';
+      return [
+        boundaryRule.subject,
+        boundaryRule.lowerBound,
+        boundaryRule.upperBound,
+        ...boundaryRule.acceptanceCaseIds.flatMap((caseId) => {
+          const acceptanceCase = acceptanceCasesById.get(caseId);
+          return acceptanceCase === undefined
+            ? []
+            : [acceptanceCase.given, acceptanceCase.when, acceptanceCase.then];
+        }),
+      ].join('\n');
+    };
     for (const dimension of draft.determinismReview.dimensions) {
       const expectedWitness = {
         id: `WITNESS-${dimension.kind}`,
@@ -1374,12 +1400,11 @@ export function assertSemanticDraft(draft, policy, {
           throw new Error(`determinism_dimension_references_unknown_target:${dimension.kind}:${targetId}`);
         }
       }
-      if (dimension.status === 'NOT_APPLICABLE') {
-        if (dimension.subjectId !== 'PUBLIC_CONTRACT' || dimension.targetIds.length !== 0) {
+      if (dimension.subjectId === 'PUBLIC_CONTRACT') {
+        if (dimension.status !== 'NOT_APPLICABLE' || dimension.targetIds.length !== 0) {
           throw new Error(`inapplicable_determinism_dimension_has_subject:${dimension.kind}`);
         }
-      } else if ((dimension.subjectId !== 'PUBLIC_CONTRACT'
-          && !requirementIds.has(dimension.subjectId)
+      } else if ((!requirementIds.has(dimension.subjectId)
           && !boundaryRuleIds.has(dimension.subjectId))
         || !dimension.targetIds.includes(dimension.subjectId)) {
         throw new Error(`determinism_dimension_without_observable_subject:${dimension.kind}`);
@@ -1439,7 +1464,8 @@ export function assertSemanticDraft(draft, policy, {
           || hasUnresolvedExpression(proof.evidence)
           || hasDisjunctiveOutcome(proof.evidence)
           || isBareDeterminismAssertion(proof.evidence)
-          || dimensionTriggerPattern[dimension.kind].test(applicabilityText)
+          || dimensionTriggerPattern[dimension.kind]
+            .test(applicabilityTextForSubject(dimension.subjectId))
           || dimension.closureAuthority === 'MODEL_ARGUMENT') {
           throw new Error(`inapplicable_determinism_dimension_without_structural_absence:${dimension.kind}`);
         }

@@ -306,7 +306,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "subjectId", "status", "rationale", "targetIds", "basis", "acceptanceCaseId", "proofObligation", "closureAuthority", "counterexampleWitness"],
+            "required": ["kind", "subjectId", "status", "rationale", "targetIds", "basis", "acceptanceCaseId", "proofObligation", "inapplicabilityProof", "closureAuthority", "counterexampleWitness"],
             "properties": {
               "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
               "subjectId": {
