@@ -165,7 +165,7 @@ printf '%s\n' "${draft_output}" | jq -e '
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
-  .schema == "aegis.semantic_request.v8"
+  .schema == "aegis.semantic_request.v9"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
   and (.constitution.digest | test("^[a-f0-9]{64}$"))
@@ -176,10 +176,10 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and .delivery.architecture == "TRUSTED_POLICY"
   and .delivery.intentSignals == "MECHANICAL_REVIEW_OBLIGATIONS"
   and .delivery.workspace == "UNTRUSTED_EVIDENCE"
-  and .outputSchema.id == "aegis.semantic_opinion.v1"
+  and .outputSchema.id == "aegis.semantic_opinion.v2"
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
-  and .outputSchema.document."$id" == "aegis.semantic_opinion.v1"
+  and .outputSchema.document."$id" == "aegis.semantic_opinion.v2"
   and .outputSchema.document.properties.worksheetDigest.const == .worksheetDigest
   and .worksheet.schema == "aegis.semantic_worksheet.v1"
   and (.worksheet.compilerOwnedFields | index("IDENTIFIERS") != null)
@@ -253,7 +253,7 @@ const unknowns = withDecision ? [{
   basis: [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }],
 }] : [];
 process.stdout.write(JSON.stringify({
-  schema: 'aegis.semantic_opinion.v1',
+  schema: 'aegis.semantic_opinion.v2',
   worksheetDigest,
   title: 'Calculadora de precisão',
   interpretation: 'Definir o comportamento público de uma calculadora sem implementar o produto.',
@@ -381,7 +381,7 @@ set -e
 [[ "${mechanical_field_code}" -ne 0 ]]
 printf '%s\n' "${mechanical_field_output}" | jq -e '
   .reason == "INVALID_SEMANTIC_OPINION"
-  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v1"))
+  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v2"))
 ' >/dev/null
 
 # Toda decisão da IA precisa demonstrar um caso que diferencie suas alternativas.
@@ -393,7 +393,7 @@ set -e
 [[ "${missing_distinguishing_code}" -ne 0 ]]
 printf '%s\n' "${missing_distinguishing_output}" | jq -e '
   .reason == "INVALID_SEMANTIC_OPINION"
-  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v1"))
+  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v2"))
 ' >/dev/null
 
 # Índices da ficha não podem apontar para itens inexistentes.
@@ -437,7 +437,7 @@ jq -e '.approval == null and .humanResolutions == []' .harness/runtime/contract.
 wizard_output="$(printf '\ns\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma proposta'
 jq -e '
-  .schema == "aegis.issue_contract.v12"
+  .schema == "aegis.issue_contract.v13"
   and (.sourceSemanticRequestDigest | test("^[a-f0-9]{64}$"))
   and .semanticRevision == null
   and .approval.method == "INTERACTIVE_WIZARD"
@@ -517,10 +517,10 @@ semantic_worksheet_digest="$(printf '%s\n' "${revision_request}" | jq -r '.works
 # Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
 make_opinion resolved "${semantic_worksheet_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
-  .schema == "aegis.issue_contract.v12"
+  .schema == "aegis.issue_contract.v13"
   and .implementationAuthorized == false
   and .intent == "Criar calculadora de precisão com formato ainda a escolher"
-  and .specification.schema == "aegis.semantic_draft.v7"
+  and .specification.schema == "aegis.semantic_draft.v8"
   and (.specification.requirements[0].acceptanceCases | length) == 2
   and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-0001"}]
   and .approval == null
@@ -540,7 +540,7 @@ jq -e '
 
 approve_output="$(bash ./aegis --approve)"
 printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v12"
+  .schema == "aegis.preflight_finalization.v13"
   and .status == "FINALIZED"
   and .contractIntegrity == "VALID"
   and .workspaceFreshness == "MATCHES_BASELINE"
@@ -551,8 +551,8 @@ printf '%s\n' "${approve_output}" | jq -e '
 ' >/dev/null
 [[ -s .harness/state/semantic-state.json ]]
 jq -e '
-  .schema == "aegis.semantic_state.v12"
-  and .contract.schema == "aegis.issue_contract.v12"
+  .schema == "aegis.semantic_state.v13"
+  and .contract.schema == "aegis.issue_contract.v13"
   and .contract.approval.method == "DIRECT_COMMAND"
   and .contract.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and (.contract.approval.contractDraftDigest | test("^[a-f0-9]{64}$"))

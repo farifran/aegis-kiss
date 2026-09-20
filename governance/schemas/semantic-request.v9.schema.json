@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_request.v9",
+  "title": "Aegis Semantic Deliberation Request v9",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "requestDigest",
+    "contextDigest",
+    "delivery",
+    "constitution",
+    "intent",
+    "intentSignals",
+    "workspace",
+    "policy",
+    "revision",
+    "worksheetDigest",
+    "worksheet",
+    "outputSchema"
+  ],
+  "properties": {
+    "schema": {
+      "const": "aegis.semantic_request.v9"
+    },
+    "requestDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "contextDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "constitution",
+        "architecture",
+        "intent",
+        "intentSignals",
+        "workspace",
+        "revision",
+        "outputSchema"
+      ],
+      "properties": {
+        "constitution": {
+          "const": "SYSTEM_INSTRUCTION"
+        },
+        "architecture": {
+          "const": "TRUSTED_POLICY"
+        },
+        "intent": {
+          "const": "USER_DATA"
+        },
+        "intentSignals": {
+          "const": "MECHANICAL_REVIEW_OBLIGATIONS"
+        },
+        "workspace": {
+          "const": "UNTRUSTED_EVIDENCE"
+        },
+        "revision": {
+          "const": "USER_DECISION"
+        },
+        "outputSchema": {
+          "const": "STRICT_STRUCTURED_OUTPUT"
+        }
+      }
+    },
+    "constitution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "version",
+        "digest",
+        "authority",
+        "rules"
+      ],
+      "properties": {
+        "schema": {
+          "const": "aegis.constitution.v1"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "authority": {
+          "const": "TRUSTED_CONSTITUTION"
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "statement"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^CONST-[A-Z0-9][A-Z0-9-]+$"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intentSignals": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sinais mecânicos não são veredictos. INCOMPLETE_EXPRESSION exige UNKNOWN material; QUALITY_CONSTRAINT exige medição; QUALITY_GOAL permanece não normativo; BOUNDED_VALUE exige regra explícita; DETERMINISM_CLAIM exige revisão de determinismo.",
+      "required": [
+        "method",
+        "status",
+        "signals"
+      ],
+      "properties": {
+        "method": {
+          "const": "DETERMINISTIC_INTENT_REVIEW_V2"
+        },
+        "status": {
+          "enum": [
+            "CLEAR",
+            "REVIEW_REQUIRED"
+          ]
+        },
+        "signals": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "handling",
+              "offset",
+              "reference",
+              "excerpt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^INPUT-[0-9]{4}$"
+              },
+              "kind": {
+                "enum": [
+                  "INCOMPLETE_EXPRESSION",
+                  "QUALITY_CONSTRAINT",
+                  "QUALITY_GOAL",
+                  "BOUNDED_VALUE",
+                  "DETERMINISM_CLAIM",
+                  "ARITHMETIC_SEMANTICS",
+                  "EXAMPLE"
+                ]
+              },
+              "handling": {
+                "enum": [
+                  "MATERIAL_DECISION",
+                  "SEMANTIC_REVIEW",
+                  "MEASURABLE_REQUIREMENT",
+                  "NON_NORMATIVE_GOAL",
+                  "NON_NORMATIVE_EXAMPLE",
+                  "BOUNDARY_RULE",
+                  "DETERMINISM_REVIEW"
+                ],
+                "description": "MATERIAL_DECISION exige lacuna observável; SEMANTIC_REVIEW verifica se um marcador incompleto já foi determinado pelo texto; MEASURABLE_REQUIREMENT exige alvo autorizado; metas e exemplos permanecem não normativos; BOUNDARY_RULE exige intervalo e prova; DETERMINISM_REVIEW exige examinar todas as dimensões universais."
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              }
+            }
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "observedTextPaths",
+        "unavailablePaths",
+        "lexicalEvidence",
+        "sourceEvidence"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "SOURCE_OBSERVED",
+            "NO_TEXT_SOURCE",
+            "EMPTY_SOURCE"
+          ]
+        },
+        "observedTextPaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "unavailablePaths": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "enum": [
+                  "BINARY",
+                  "INVALID_UTF8",
+                  "SYMLINK"
+                ]
+              }
+            }
+          }
+        },
+        "lexicalEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "termsTruncated",
+            "matches"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "MATCH",
+                "NO_MATCH",
+                "NOT_APPLICABLE"
+              ]
+            },
+            "termsTruncated": {
+              "type": "boolean"
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "term",
+                  "path",
+                  "line"
+                ],
+                "properties": {
+                  "term": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sourceEvidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "content",
+              "startLine",
+              "endLine",
+              "truncated",
+              "selection",
+              "trust"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "string"
+              },
+              "startLine": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "endLine": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "selection": {
+                "enum": [
+                  "FULL_SOURCE",
+                  "LEXICAL_WINDOW",
+                  "ENTRYPOINT_PREFIX"
+                ]
+              },
+              "trust": {
+                "const": "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS"
+              }
+            }
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contexts",
+        "signalSemantics",
+        "rules",
+        "signals",
+        "amendments"
+      ],
+      "properties": {
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tag",
+              "description"
+            ],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "signalSemantics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verdict",
+            "assessment",
+            "residualReview"
+          ],
+          "properties": {
+            "verdict": {
+              "const": "SEMANTIC_NOT_LEXICAL"
+            },
+            "assessment": {
+              "const": "REQUIRED_FOR_EACH_SIGNAL_RULE"
+            },
+            "residualReview": {
+              "const": "SEPARATE_FROM_POLICY_ASSESSMENT"
+            }
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "level",
+              "statement",
+              "appliesWhen",
+              "appliesMode",
+              "reviewReferences",
+              "forbiddenReferences"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "enum": [
+                  "hard",
+                  "default",
+                  "preference"
+                ]
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "appliesWhen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "appliesMode": {
+                "enum": [
+                  "any",
+                  "all"
+                ]
+              },
+              "reviewReferences": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "forbiddenReferences": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ruleId",
+              "kind",
+              "reference"
+            ],
+            "properties": {
+              "ruleId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "REVIEW",
+                  "POSSIBLE_CONFLICT"
+                ]
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "amendments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "ruleId",
+              "reason"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ruleId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "revision": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "sourceContractDigest",
+        "answers"
+      ],
+      "properties": {
+        "sourceContractDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "questionId",
+                  "answerId",
+                  "label",
+                  "rationale",
+                  "contractEffect"
+                ],
+                "properties": {
+                  "questionId": {
+                    "type": "string"
+                  },
+                  "answerId": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "contractEffect": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "questionId",
+                  "correction"
+                ],
+                "properties": {
+                  "questionId": {
+                    "type": "string"
+                  },
+                  "correction": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "digest",
+        "strict",
+        "document"
+      ],
+      "properties": {
+        "id": {
+          "const": "aegis.semantic_opinion.v2"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "strict": {
+          "const": true
+        },
+        "document": {
+          "type": "object",
+          "required": [
+            "$schema",
+            "$id",
+            "type",
+            "properties"
+          ],
+          "properties": {
+            "$schema": {
+              "const": "https://json-schema.org/draft/2020-12/schema"
+            },
+            "$id": {
+              "const": "aegis.semantic_opinion.v2"
+            },
+            "type": {
+              "const": "object"
+            },
+            "properties": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "worksheetDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "worksheet": {
+      "$ref": "aegis.semantic_worksheet.v1"
+    }
+  }
+}

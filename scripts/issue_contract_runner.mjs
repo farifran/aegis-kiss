@@ -112,7 +112,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v12') return null;
+  if (contract.schema !== 'aegis.issue_contract.v13') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -275,15 +275,15 @@ async function handleStatus() {
       writeStatus({
         status: 'SEMANTIC_REDELIBERATION_REQUIRED',
         foundSchema: 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v12',
+        requiredSchema: 'aegis.issue_contract.v13',
       });
       return;
     }
-    if (contract.schema !== 'aegis.issue_contract.v12') {
+    if (contract.schema !== 'aegis.issue_contract.v13') {
       writeStatus({
         status: 'SEMANTIC_REDELIBERATION_REQUIRED',
         foundSchema: contract.schema ?? 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v12',
+        requiredSchema: 'aegis.issue_contract.v13',
       });
       return;
     }
@@ -469,8 +469,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v12') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v12`);
+  if (draftContract.schema !== 'aegis.issue_contract.v13') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v13`);
   }
   assertContractDocument({
     repositoryRoot: root,
@@ -522,7 +522,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v12',
+    schema: 'aegis.semantic_state.v13',
     contract,
     contractDigest,
   };
@@ -540,7 +540,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v12',
+    schema: 'aegis.preflight_finalization.v13',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

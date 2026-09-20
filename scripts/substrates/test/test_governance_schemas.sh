@@ -48,6 +48,7 @@ const schemaFiles = [
   'issue-contract.v10.schema.json',
   'issue-contract.v11.schema.json',
   'issue-contract.v12.schema.json',
+  'issue-contract.v13.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -58,7 +59,9 @@ const schemaFiles = [
   'semantic-draft.v5.schema.json',
   'semantic-draft.v6.schema.json',
   'semantic-draft.v7.schema.json',
+  'semantic-draft.v8.schema.json',
   'semantic-opinion.v1.schema.json',
+  'semantic-opinion.v2.schema.json',
   'semantic-request.v1.schema.json',
   'semantic-request.v2.schema.json',
   'semantic-request.v3.schema.json',
@@ -67,6 +70,7 @@ const schemaFiles = [
   'semantic-request.v6.schema.json',
   'semantic-request.v7.schema.json',
   'semantic-request.v8.schema.json',
+  'semantic-request.v9.schema.json',
   'semantic-worksheet.v1.schema.json',
   'semantic-resolution.v2.schema.json',
 ];
@@ -157,9 +161,9 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v8', semanticRequest);
+assertSchema('aegis.semantic_request.v9', semanticRequest);
 const { requestDigest: semanticRequestDigest, ...semanticRequestPayload } = semanticRequest;
-const expectedOutputSchema = schemaDocument('aegis.semantic_opinion.v1');
+const expectedOutputSchema = schemaDocument('aegis.semantic_opinion.v2');
 expectedOutputSchema.properties.worksheetDigest = { const: semanticRequest.worksheetDigest };
 if (semanticRequest.constitution.digest !== constitution.digest
   || semanticRequest.constitution.rules.length !== 5
@@ -219,7 +223,7 @@ try {
 }
 
 const draft = {
-  schema: 'aegis.semantic_draft.v7',
+  schema: 'aegis.semantic_draft.v8',
   sourceContextDigest: semanticRequest.contextDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
@@ -456,7 +460,7 @@ if (contract.intent !== preflight.intent
   || contract.sourceSemanticRequestDigest !== semanticRequest.requestDigest
   || contract.semanticRevision !== null
   || contract.constitutionDigest !== constitution.digest
-  || contract.schema !== 'aegis.issue_contract.v12'
+  || contract.schema !== 'aegis.issue_contract.v13'
   || contract.approval !== null
   || contract.humanResolutions.length !== 0
   || contract.specification.decisions[0].recommendedAnswerId !== 'ANS-SIMPLE') {
@@ -490,7 +494,7 @@ if (humanContract.includes(preflight.intent)
   || !humanContract.includes('## 8. Parecer adversarial')) {
   throw new Error('human_contract_retained_redundant_sections');
 }
-if (schemaErrors('aegis.issue_contract.v12', { ...contract, implementationAuthorized: true }).length === 0) {
+if (schemaErrors('aegis.issue_contract.v13', { ...contract, implementationAuthorized: true }).length === 0) {
   throw new Error('contract_authorized_implementation');
 }
 
@@ -799,7 +803,8 @@ const determinismAbsenceRules = {
   COUNTING_IDENTITY: 'Não existe contagem de identidades na fronteira pública contratada.',
   BOUNDED_ARITHMETIC: 'Não existe aritmética limitada na fronteira pública contratada.',
 };
-const orderingRule = 'Os campos ordenados alfabeticamente são preservados após permutar elementos equivalentes.';
+const orderingRule = 'Os campos são apresentados em ordem alfabética após permutar elementos equivalentes.';
+const orderingProofConclusion = 'Base: campos em ordem alfabética; Variação: campos em ordem alfabética; Resolução: CANONICAL_ORDER (ordem alfabética).';
 const determinismAbsenceRule = Object.values(determinismAbsenceRules).join(' ');
 const deterministicIntent = `Produzir saída determinística e manter o formato ainda a escolher. ${orderingRule} ${determinismAbsenceRule}`;
 const deterministicPreflight = buildPreflightHandoff({
@@ -862,7 +867,7 @@ deterministicDraft.requirements[0].acceptanceCases.push({
   kind: 'HAPPY_PATH',
   given: `${deterministicWitnesses.get('ORDERING').baseline} ${deterministicWitnesses.get('ORDERING').variation}`,
   when: 'As duas variações forem processadas sob o mesmo contexto.',
-  then: orderingRule,
+  then: orderingProofConclusion,
   outcomeKind: 'RETURN_VALUE',
   decisionBinding: null,
   boundaryBinding: null,
@@ -886,7 +891,11 @@ deterministicDraft.determinismReview = {
       proofObligation: {
         witnessId: 'WITNESS-ORDERING',
         relation: 'OUTPUTS_EQUAL',
-        observables: ['campos ordenados alfabeticamente'],
+        resolutionKind: 'CANONICAL_ORDER',
+        resolutionParameter: 'ordem alfabética',
+        baselineOutcome: 'campos em ordem alfabética',
+        variationOutcome: 'campos em ordem alfabética',
+        observables: ['campos em ordem alfabética'],
       },
       closureAuthority: 'AUTHORITATIVE_RULE',
       counterexampleWitness: deterministicWitnesses.get('ORDERING'),
@@ -918,6 +927,7 @@ deterministicDraft.determinismReview = {
       counterexampleWitness: deterministicWitnesses.get(kind),
       inapplicabilityProof: {
         proofKind: 'STRUCTURAL_ABSENCE',
+        structuralRule: 'OPERATION_ABSENT',
         absentStructure: deterministicWitnesses.get(kind).inputClass,
         evidence: determinismAbsenceRules[kind],
       },
@@ -1046,6 +1056,53 @@ try {
   wrongBoundedSubjectRejected = error.message === 'bounded_subject_without_determinism_review:BOUND-COUNTER';
 }
 if (!wrongBoundedSubjectRejected) throw new Error('bounded_arithmetic_was_reviewed_only_globally');
+
+const widthClaimedAsArithmetic = structuredClone(boundedSubjectDraft);
+const widthBoundary = widthClaimedAsArithmetic.boundaryRules[0];
+widthBoundary.representationKind = 'REPRESENTATION_WIDTH';
+widthBoundary.lowerBound = '6 bits';
+widthBoundary.upperBound = '6 bits';
+widthBoundary.underflowBehavior = 'NOT_APPLICABLE';
+widthBoundary.overflowBehavior = 'NOT_APPLICABLE';
+widthBoundary.acceptanceCaseIds = ['AC-BOUND-UNDERFLOW'];
+widthClaimedAsArithmetic.requirements[0].acceptanceCases = widthClaimedAsArithmetic
+  .requirements[0].acceptanceCases.filter(({ id }) => id !== 'AC-BOUND-OVERFLOW');
+const exactWidthCase = widthClaimedAsArithmetic.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-BOUND-UNDERFLOW');
+exactWidthCase.given = 'A representação pública do contador.';
+exactWidthCase.when = 'A largura do campo for observada.';
+exactWidthCase.then = 'A representação deve ter exatamente 6 bits.';
+exactWidthCase.outcomeKind = 'OBSERVABLE_EFFECT';
+exactWidthCase.boundaryBinding = {
+  ruleId: 'BOUND-COUNTER',
+  side: 'EXACT_WIDTH',
+  expectedBehavior: 'NOT_APPLICABLE',
+  expectedValue: '6 bits',
+};
+const widthBoundedDimension = widthClaimedAsArithmetic.determinismReview.dimensions
+  .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC');
+widthBoundedDimension.status = 'SPECIFIED';
+widthBoundedDimension.rationale = 'Bits 4–9';
+widthBoundedDimension.basis = [{
+  source: 'USER_INTENT',
+  reference: 'Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63',
+}];
+widthBoundedDimension.closureAuthority = 'AUTHORITATIVE_RULE';
+let widthClaimedAsArithmeticRejected = false;
+try {
+  assertSemanticDraft(widthClaimedAsArithmetic, loadedPolicy.policy, {
+    constitutionRules: constitution.rules,
+    intent: boundedSubjectIntent,
+    resolvedDecisionIds: [],
+    workspaceEvidence: boundedSubjectRequest.workspace.sourceEvidence,
+  });
+} catch (error) {
+  widthClaimedAsArithmeticRejected = error.message ===
+    'bounded_arithmetic_confuses_width_with_value:BOUND-COUNTER';
+}
+if (!widthClaimedAsArithmeticRejected) {
+  throw new Error('representation_width_closed_value_overflow_policy');
+}
 
 const scopedStructuralAbsence = structuredClone(deterministicDraft);
 const scopedUnboundedDimension = structuredClone(scopedStructuralAbsence.determinismReview.dimensions
@@ -1196,6 +1253,7 @@ inapplicableOrdering.acceptanceCaseId = null;
 inapplicableOrdering.proofObligation = null;
 inapplicableOrdering.inapplicabilityProof = {
   proofKind: 'STRUCTURAL_ABSENCE',
+  structuralRule: 'OPERATION_ABSENT',
   absentStructure: 'PERMUTED_EQUIVALENT_INPUTS',
   evidence: orderingAbsenceClaim,
 };
@@ -1259,6 +1317,106 @@ try {
   );
 }
 if (!genericMetamorphicObservableRejected) throw new Error('generic_result_was_accepted_as_observable_proof');
+
+const proofTargetMismatch = structuredClone(deterministicDraft);
+const mismatchedOrderingProof = proofTargetMismatch.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').proofObligation;
+mismatchedOrderingProof.relation = 'DEFINED_RESULT';
+mismatchedOrderingProof.resolutionKind = 'ROUND_TRUNCATE_TOWARD_ZERO';
+mismatchedOrderingProof.resolutionParameter = null;
+mismatchedOrderingProof.baselineOutcome = 'valor dois';
+mismatchedOrderingProof.variationOutcome = 'valor dois';
+mismatchedOrderingProof.observables = ['valor dois'];
+proofTargetMismatch.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then =
+    'Base: valor dois; Variação: valor dois; Resolução: ROUND_TRUNCATE_TOWARD_ZERO.';
+let proofTargetMismatchRejected = false;
+try {
+  assertSemanticDraft(proofTargetMismatch, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  proofTargetMismatchRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:ORDERING',
+  );
+  if (!proofTargetMismatchRejected) throw error;
+}
+if (!proofTargetMismatchRejected) {
+  throw new Error('proof_for_another_dimension_closed_ordering');
+}
+
+const relatedButNonEntailingRule = structuredClone(deterministicDraft);
+const nonEntailingOrdering = relatedButNonEntailingRule.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING');
+const bigintRule = 'A matemática BigInt é preservada.';
+nonEntailingOrdering.rationale = bigintRule;
+nonEntailingOrdering.basis = [{ source: 'USER_INTENT', reference: bigintRule }];
+nonEntailingOrdering.proofObligation.resolutionKind = 'PERMUTATION_INVARIANT';
+nonEntailingOrdering.proofObligation.resolutionParameter = null;
+relatedButNonEntailingRule.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then =
+    'Base: campos em ordem alfabética; Variação: campos em ordem alfabética; Resolução: PERMUTATION_INVARIANT.';
+let relatedButNonEntailingRuleRejected = false;
+try {
+  assertSemanticDraft(relatedButNonEntailingRule, loadedPolicy.policy, {
+    ...deterministicContext,
+    intent: `${deterministicIntent} ${bigintRule}`,
+  });
+} catch (error) {
+  relatedButNonEntailingRuleRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:ORDERING',
+  );
+  if (!relatedButNonEntailingRuleRejected) throw error;
+}
+if (!relatedButNonEntailingRuleRejected) {
+  throw new Error('bigint_claim_closed_ordering_dimension');
+}
+
+const unequalMetamorphicOutcomes = structuredClone(deterministicDraft);
+const unequalOrderingProof = unequalMetamorphicOutcomes.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ORDERING').proofObligation;
+unequalOrderingProof.baselineOutcome = 'campos em ordem alfabética';
+unequalOrderingProof.variationOutcome = 'campos na ordem de entrada';
+unequalOrderingProof.observables = [
+  'campos em ordem alfabética',
+  'campos na ordem de entrada',
+];
+unequalMetamorphicOutcomes.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').then =
+    'Base: campos em ordem alfabética; Variação: campos na ordem de entrada; Resolução: CANONICAL_ORDER (ordem alfabética).';
+let unequalMetamorphicOutcomesRejected = false;
+try {
+  assertSemanticDraft(unequalMetamorphicOutcomes, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  unequalMetamorphicOutcomesRejected = error.message.startsWith(
+    'specified_determinism_dimension_without_exact_proof:ORDERING',
+  );
+  if (!unequalMetamorphicOutcomesRejected) throw error;
+}
+if (!unequalMetamorphicOutcomesRejected) {
+  throw new Error('unequal_outputs_closed_outputs_equal_proof');
+}
+
+const unrelatedStructuralAbsence = structuredClone(deterministicDraft);
+const unrelatedDuplicateDimension = unrelatedStructuralAbsence.determinismReview.dimensions
+  .find(({ kind }) => kind === 'DUPLICATES');
+const unrelatedAbsenceClaim = 'O processamento não exige saldo prévio dos participantes.';
+unrelatedDuplicateDimension.rationale = unrelatedAbsenceClaim;
+unrelatedDuplicateDimension.basis = [{ source: 'USER_INTENT', reference: unrelatedAbsenceClaim }];
+unrelatedDuplicateDimension.inapplicabilityProof.evidence = unrelatedAbsenceClaim;
+let unrelatedStructuralAbsenceRejected = false;
+try {
+  assertSemanticDraft(unrelatedStructuralAbsence, loadedPolicy.policy, {
+    ...deterministicContext,
+    intent: `${deterministicIntent} ${unrelatedAbsenceClaim}`,
+  });
+} catch (error) {
+  unrelatedStructuralAbsenceRejected = error.message.startsWith(
+    'inapplicable_determinism_dimension_without_structural_absence:DUPLICATES',
+  );
+  if (!unrelatedStructuralAbsenceRejected) throw error;
+}
+if (!unrelatedStructuralAbsenceRejected) {
+  throw new Error('unrelated_absence_claim_closed_duplicate_semantics');
+}
 
 const missingStructuralAbsence = structuredClone(deterministicDraft);
 missingStructuralAbsence.determinismReview.dimensions
@@ -2290,7 +2448,7 @@ const parsimonyContext = {
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
 
 const semanticState = {
-  schema: 'aegis.semantic_state.v12',
+  schema: 'aegis.semantic_state.v13',
   contract: approvedContract,
   contractDigest: canonicalDigest(approvedContract),
 };

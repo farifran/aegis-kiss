@@ -88,13 +88,106 @@ const dimensionTriggerPattern = {
   CANONICALIZATION: /\b(?:canoni\p{L}*|codifica\p{L}*|serializa\p{L}*|representa\p{L}*|encod\p{L}*)\b/iu,
   DUPLICATES: /\b(?:duplic\p{L}*|repetid\p{L}*|duplicate\p{L}*)\b/iu,
   EMPTY_INPUT: /\b(?:vazi\p{L}*|empty|null|nulo)\b/iu,
-  ODD_CARDINALITY: /\b(?:[ií]mpar|odd|merkle|bin[aá]ri\p{L}*)\b/iu,
+  ODD_CARDINALITY: /(?:[ií]mpar|\b(?:odd|merkle|bin[aá]ri\p{L}*)\b)/iu,
   ROUNDING: /\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|round\p{L}*)\b/iu,
   REMAINDER_DISTRIBUTION: /\b(?:resto|res[ií]du\p{L}*|remainder)\b/iu,
-  ZERO_DIVISOR: /\b(?:divis\p{L}*\s+por\s+zero|zero\s+divisor|zero\s+denominator|denominador\s+(?:igual\s+a\s+)?zero)\b/iu,
-  TIE_BREAKING: /\b(?:empate\p{L}*|tie(?:-?break\p{L}*)?|prioridade\s+igual)\b/iu,
+  ZERO_DIVISOR: /\b(?:divis\p{L}*\s+(?:por\s+)?zero|zero\s+divisor|zero\s+denominator|denominador\s+(?:igual\s+a\s+)?zero)\b/iu,
+  TIE_BREAKING: /\b(?:empat\p{L}*|tie(?:-?break\p{L}*)?|prioridade\s+igual)\b/iu,
   COUNTING_IDENTITY: /\b(?:conta(?:gem|r)|quantidade|participante\p{L}*|identidade\p{L}*|unique\p{L}*)\b/iu,
-  BOUNDED_ARITHMETIC: /\b(?:bits?|bitmask|overflow|underflow|satura\p{L}*|limite\p{L}*|bounded)\b/iu,
+  BOUNDED_ARITHMETIC: /\b(?:bits?|bitmask|overflow|underflow|satura\p{L}*|limit\p{L}*|bounded)\b/iu,
+};
+const structuralAbsencePattern = /\b(?:n[aã]o\s+(?:exist\p{L}*|aceit\p{L}*|admit\p{L}*|possu\p{L}*|cont[eé]m)|ausente\p{L}*|proibid\p{L}*|exclu[ií]d\p{L}*|rejeitad\p{L}*|imposs[ií]ve\p{L}*|forbidden|excluded|rejected|absent)\b/iu;
+const structuralRulePattern = {
+  OPERATION_ABSENT: /\b(?:n[aã]o\s+(?:exist\p{L}*|possu\p{L}*|cont[eé]m)|ausente\p{L}*|imposs[ií]ve\p{L}*|absent)\b/iu,
+  INPUT_CLASS_FORBIDDEN: /\b(?:n[aã]o\s+(?:aceit\p{L}*|admit\p{L}*)|proibid\p{L}*|rejeitad\p{L}*|forbidden|rejected)\b/iu,
+  INPUT_SCHEMA_EXCLUDES_CLASS: /\b(?:schema|esquema)\b[^.!?\n]{0,120}\b(?:exclu[ií]d\p{L}*|n[aã]o\s+(?:aceit\p{L}*|admit\p{L}*)|excluded)\b/iu,
+};
+const explicitRejectionPattern = /\b(?:rejeit\p{L}*|recus\p{L}*|falha\p{L}*|inv[aá]lid\p{L}*|reject\p{L}*|error|failure)\b/iu;
+const dimensionResolutionRules = {
+  ORDERING: {
+    INPUT_ORDER_PRESERVED: { relation: 'DEFINED_RESULT', parameter: false },
+    CANONICAL_ORDER: { relation: 'OUTPUTS_EQUAL', parameter: true },
+    PERMUTATION_INVARIANT: { relation: 'OUTPUTS_EQUAL', parameter: false },
+  },
+  CANONICALIZATION: {
+    CANONICAL_REPRESENTATION: { relation: 'OUTPUTS_EQUAL', parameter: true },
+  },
+  DUPLICATES: {
+    DUPLICATES_PRESERVED: { relation: 'DEFINED_RESULT', parameter: false },
+    DUPLICATES_MERGED: { relation: 'DEFINED_RESULT', parameter: true },
+    DUPLICATES_REJECTED: { relation: 'EXPLICIT_REJECTION', parameter: false },
+  },
+  EMPTY_INPUT: {
+    EMPTY_RETURNS_IDENTITY: { relation: 'DEFINED_RESULT', parameter: true },
+    EMPTY_REJECTED: { relation: 'EXPLICIT_REJECTION', parameter: false },
+  },
+  ODD_CARDINALITY: {
+    ODD_DUPLICATE_LAST: { relation: 'DEFINED_RESULT', parameter: false },
+    ODD_PROMOTE_LAST: { relation: 'DEFINED_RESULT', parameter: false },
+    ODD_REJECTED: { relation: 'EXPLICIT_REJECTION', parameter: false },
+  },
+  ROUNDING: {
+    ROUND_TRUNCATE_TOWARD_ZERO: { relation: 'DEFINED_RESULT', parameter: false },
+    ROUND_FLOOR: { relation: 'DEFINED_RESULT', parameter: false },
+    ROUND_CEILING: { relation: 'DEFINED_RESULT', parameter: false },
+    ROUND_EXACT_ONLY: { relation: 'EXPLICIT_REJECTION', parameter: false },
+  },
+  REMAINDER_DISTRIBUTION: {
+    REMAINDER_RETAINED: { relation: 'DEFINED_RESULT', parameter: false },
+    REMAINDER_DISTRIBUTED_BY_RULE: { relation: 'DEFINED_RESULT', parameter: true },
+    REMAINDER_REJECTED: { relation: 'EXPLICIT_REJECTION', parameter: false },
+  },
+  ZERO_DIVISOR: {
+    ZERO_DIVISOR_REJECTED: { relation: 'EXPLICIT_REJECTION', parameter: false },
+    ZERO_DIVISOR_RETURNS_ZERO: { relation: 'DEFINED_RESULT', parameter: false },
+    ZERO_DIVISOR_RETURNS_SENTINEL: { relation: 'DEFINED_RESULT', parameter: true },
+  },
+  TIE_BREAKING: {
+    TIE_BREAK_BY_KEY: { relation: 'DEFINED_RESULT', parameter: true },
+    TIE_PRESERVE_INPUT_ORDER: { relation: 'DEFINED_RESULT', parameter: false },
+  },
+  COUNTING_IDENTITY: {
+    COUNT_UNIQUE_IDENTITIES: { relation: 'DEFINED_RESULT', parameter: true },
+    COUNT_OCCURRENCES: { relation: 'DEFINED_RESULT', parameter: false },
+  },
+  BOUNDED_ARITHMETIC: {
+    OVERFLOW_REJECT: { relation: 'EXPLICIT_REJECTION', parameter: false },
+    OVERFLOW_SATURATE: { relation: 'DEFINED_RESULT', parameter: true },
+    OVERFLOW_WRAP: { relation: 'DEFINED_RESULT', parameter: true },
+    OVERFLOW_MODULO: { relation: 'DEFINED_RESULT', parameter: true },
+  },
+};
+const resolutionEvidenceTerms = {
+  INPUT_ORDER_PRESERVED: [/ordem\s+(?:de\s+)?entrada|input\s+order/iu],
+  CANONICAL_ORDER: [/ordem|order|sort/iu, /can[oô]nic\p{L}*|alfab[eé]tic\p{L}*|lexicogr[aá]fic\p{L}*/iu],
+  PERMUTATION_INVARIANT: [/permut\p{L}*/iu, /invari\p{L}*|mesm\p{L}*|igual\p{L}*/iu],
+  CANONICAL_REPRESENTATION: [/representa\p{L}*|codifica\p{L}*|serializa\p{L}*|encod\p{L}*/iu, /can[oô]nic\p{L}*/iu],
+  DUPLICATES_PRESERVED: [/duplic\p{L}*/iu, /preserv\p{L}*/iu],
+  DUPLICATES_MERGED: [/duplic\p{L}*/iu, /mescl\p{L}*|consolid\p{L}*|agreg\p{L}*|deduplic\p{L}*|merge\p{L}*/iu],
+  DUPLICATES_REJECTED: [/duplic\p{L}*/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  EMPTY_RETURNS_IDENTITY: [/vazi\p{L}*|empty/iu, /identidade|identity/iu],
+  EMPTY_REJECTED: [/vazi\p{L}*|empty/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  ODD_DUPLICATE_LAST: [/[ií]mpar|odd/iu, /duplic\p{L}*/iu, /[uú]ltim\p{L}*|last/iu],
+  ODD_PROMOTE_LAST: [/[ií]mpar|odd/iu, /promov\p{L}*|promote\p{L}*/iu, /[uú]ltim\p{L}*|last/iu],
+  ODD_REJECTED: [/[ií]mpar|odd/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  ROUND_TRUNCATE_TOWARD_ZERO: [/trunc\p{L}*/iu, /zero/iu],
+  ROUND_FLOOR: [/arredond\p{L}*|round\p{L}*|floor/iu, /baixo|inferior|floor/iu],
+  ROUND_CEILING: [/arredond\p{L}*|round\p{L}*|ceiling/iu, /cima|superior|ceiling/iu],
+  ROUND_EXACT_ONLY: [/exat\p{L}*|exact/iu, /rejeit\p{L}*|exig\p{L}*|reject\p{L}*|require\p{L}*/iu],
+  REMAINDER_RETAINED: [/resto|res[ií]du\p{L}*|remainder/iu, /retid\p{L}*|mantid\p{L}*|retain\p{L}*/iu],
+  REMAINDER_DISTRIBUTED_BY_RULE: [/resto|res[ií]du\p{L}*|remainder/iu, /distribu\p{L}*/iu],
+  REMAINDER_REJECTED: [/resto|res[ií]du\p{L}*|remainder/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  ZERO_DIVISOR_REJECTED: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  ZERO_DIVISOR_RETURNS_ZERO: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /retorn\p{L}*|produz\p{L}*|return\p{L}*/iu],
+  ZERO_DIVISOR_RETURNS_SENTINEL: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /sentinela|sentinel/iu],
+  TIE_BREAK_BY_KEY: [/empat\p{L}*|tie/iu, /chave|key/iu],
+  TIE_PRESERVE_INPUT_ORDER: [/empat\p{L}*|tie/iu, /ordem\s+(?:de\s+)?entrada|input\s+order/iu],
+  COUNT_UNIQUE_IDENTITIES: [/cont\p{L}*|quantidade|count/iu, /identidade\p{L}*|participante\p{L}*|identit\p{L}*/iu, /[uú]nic\p{L}*|unique/iu],
+  COUNT_OCCURRENCES: [/cont\p{L}*|quantidade|count/iu, /ocorr[eê]nci\p{L}*|occurrence\p{L}*/iu],
+  OVERFLOW_REJECT: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  OVERFLOW_SATURATE: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /satur\p{L}*/iu],
+  OVERFLOW_WRAP: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /wrap|circular/iu],
+  OVERFLOW_MODULO: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /m[oó]dulo|modulo/iu],
 };
 const explicitUncertaintyPattern = /\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|escolh\p{L}*|defin\p{L}*|ainda|alternativ\p{L}*|ou|either|choose|undefined|unspecified)\b/iu;
 
@@ -308,16 +401,16 @@ export function buildSemanticRequest({
     intentSignals: detectedIntentSignals,
   });
   const worksheetDigest = canonicalDigest(worksheet);
-  const outputSchemaDocument = schemaDocument('aegis.semantic_opinion.v1');
+  const outputSchemaDocument = schemaDocument('aegis.semantic_opinion.v2');
   outputSchemaDocument.properties.worksheetDigest = { const: worksheetDigest };
   const requestWithoutDigest = {
-    schema: 'aegis.semantic_request.v8',
+    schema: 'aegis.semantic_request.v9',
     contextDigest,
     ...context,
     worksheetDigest,
     worksheet,
     outputSchema: {
-      id: 'aegis.semantic_opinion.v1',
+      id: 'aegis.semantic_opinion.v2',
       digest: canonicalDigest(outputSchemaDocument),
       strict: true,
       document: outputSchemaDocument,
@@ -327,7 +420,7 @@ export function buildSemanticRequest({
     ...requestWithoutDigest,
     requestDigest: canonicalDigest(requestWithoutDigest),
   };
-  assertSchema('aegis.semantic_request.v8', request);
+  assertSchema('aegis.semantic_request.v9', request);
   return request;
 }
 
@@ -437,6 +530,48 @@ function observableIsGeneric(text) {
     .trim();
   return /^(?:o |a )?(?:resultado|saida|comportamento|estado|determinismo)(?: publico| final| total)?$/u
     .test(normalized);
+}
+
+function proofConclusion(obligation) {
+  const parameter = obligation.resolutionParameter === null
+    ? ''
+    : ` (${obligation.resolutionParameter})`;
+  return `Base: ${obligation.baselineOutcome}; Variação: ${obligation.variationOutcome}; Resolução: ${obligation.resolutionKind}${parameter}.`;
+}
+
+function proofObligationMatchesDimension(dimension, proof) {
+  const obligation = dimension.proofObligation;
+  if (obligation === null || obligation === undefined) return false;
+  const resolutionRule = dimensionResolutionRules[dimension.kind]?.[obligation.resolutionKind];
+  if (resolutionRule === undefined || obligation.relation !== resolutionRule.relation) return false;
+  const evidenceTerms = resolutionEvidenceTerms[obligation.resolutionKind];
+  if (evidenceTerms === undefined
+    || evidenceTerms.some((pattern) => !pattern.test(dimension.rationale))) return false;
+  const hasParameter = obligation.resolutionParameter !== null;
+  if (hasParameter !== resolutionRule.parameter) return false;
+  if (observableIsGeneric(obligation.baselineOutcome)
+    || observableIsGeneric(obligation.variationOutcome)
+    || proof.then.normalize('NFC') !== proofConclusion(obligation).normalize('NFC')) {
+    return false;
+  }
+  if (obligation.relation === 'OUTPUTS_EQUAL'
+    && normalizedObservableText(obligation.baselineOutcome)
+      !== normalizedObservableText(obligation.variationOutcome)) {
+    return false;
+  }
+  if (obligation.relation === 'EXPLICIT_REJECTION'
+    && (proof.outcomeKind !== 'REJECTION'
+      || !explicitRejectionPattern.test(obligation.variationOutcome))) {
+    return false;
+  }
+  if (obligation.relation !== 'EXPLICIT_REJECTION' && proof.outcomeKind === 'REJECTION') {
+    return false;
+  }
+  if (obligation.resolutionParameter !== null
+    && !literalReferenceAppears(dimension.rationale, obligation.resolutionParameter)) {
+    return false;
+  }
+  return true;
 }
 
 function canonicalIntegerThreshold(text) {
@@ -703,7 +838,7 @@ export function assertSemanticDraft(draft, policy, {
   humanResolutions = [],
   workspaceEvidence = [],
 } = {}) {
-  assertSchema('aegis.semantic_draft.v7', draft);
+  assertSchema('aegis.semantic_draft.v8', draft);
   assertUniqueIds(draft.intentClaims, 'id', 'intent_claim');
   const nonNormativeItemIds = assertUniqueIds(draft.nonNormativeItems, 'id', 'non_normative_item');
   const pathReferenceIds = assertUniqueIds(draft.pathReferences, 'id', 'path_reference');
@@ -1409,6 +1544,12 @@ export function assertSemanticDraft(draft, policy, {
         || !dimension.targetIds.includes(dimension.subjectId)) {
         throw new Error(`determinism_dimension_without_observable_subject:${dimension.kind}`);
       }
+      if (dimension.kind === 'BOUNDED_ARITHMETIC'
+        && dimension.status === 'SPECIFIED'
+        && draft.boundaryRules.find(({ id }) => id === dimension.subjectId)
+          ?.representationKind !== 'ENCODED_VALUE') {
+        throw new Error(`bounded_arithmetic_confuses_width_with_value:${dimension.subjectId}`);
+      }
       if (dimension.status === 'SPECIFIED') {
         const targetRequirementIds = dimension.targetIds
           .filter((targetId) => requirementIds.has(targetId));
@@ -1425,15 +1566,11 @@ export function assertSemanticDraft(draft, policy, {
           || obligation.witnessId !== dimension.counterexampleWitness.id
           || !literalReferenceAppears(proof.given, dimension.counterexampleWitness.baseline)
           || !literalReferenceAppears(proof.given, dimension.counterexampleWitness.variation)
+          || !proofObligationMatchesDimension(dimension, proof)
           || obligation.observables.some((observable) => (
             observableIsGeneric(observable) || !literalReferenceAppears(proof.then, observable)
           ))
-          || (obligation.relation === 'OUTPUTS_EQUAL'
-            && !/\b(?:mesm\p{L}*|igual\p{L}*|id[eê]ntic\p{L}*|preserv\p{L}*|same|equal|unchanged)\b/iu.test(proof.then))
-          || (obligation.relation === 'EXPLICIT_REJECTION'
-            && proof.outcomeKind !== 'REJECTION')
           || !targetRequirementIds.includes(acceptanceRequirementById.get(proof.id))
-          || proof.then.normalize('NFC') !== dimension.rationale.normalize('NFC')
           || hasUnresolvedExpression(dimension.rationale)
           || hasDisjunctiveOutcome(dimension.rationale)
           || isBareDeterminismAssertion(dimension.rationale)
@@ -1460,7 +1597,13 @@ export function assertSemanticDraft(draft, policy, {
         if (proof === undefined
           || proof === null
           || proof.proofKind !== 'STRUCTURAL_ABSENCE'
+          || !['OPERATION_ABSENT', 'INPUT_CLASS_FORBIDDEN', 'INPUT_SCHEMA_EXCLUDES_CLASS']
+            .includes(proof.structuralRule)
           || proof.absentStructure !== dimension.counterexampleWitness.inputClass
+          || proof.evidence.normalize('NFC') !== dimension.rationale.normalize('NFC')
+          || !structuralAbsencePattern.test(proof.evidence)
+          || !structuralRulePattern[proof.structuralRule]?.test(proof.evidence)
+          || !dimensionTriggerPattern[dimension.kind].test(proof.evidence)
           || hasUnresolvedExpression(proof.evidence)
           || hasDisjunctiveOutcome(proof.evidence)
           || isBareDeterminismAssertion(proof.evidence)
@@ -1475,6 +1618,8 @@ export function assertSemanticDraft(draft, policy, {
       }
     }
     for (const boundaryRuleId of boundaryRuleIds) {
+      const boundaryRule = draft.boundaryRules.find(({ id }) => id === boundaryRuleId);
+      if (boundaryRule?.representationKind !== 'ENCODED_VALUE') continue;
       const boundedReviews = draft.determinismReview.dimensions.filter(({ kind, subjectId }) => (
         kind === 'BOUNDED_ARITHMETIC' && subjectId === boundaryRuleId
       ));
@@ -1920,7 +2065,7 @@ function compileOpinionBasis(basis, request) {
 }
 
 export function compileSemanticOpinion(opinion, request) {
-  assertSchema('aegis.semantic_request.v8', request);
+  assertSchema('aegis.semantic_request.v9', request);
   const { requestDigest, ...requestPayload } = request;
   if (requestDigest !== canonicalDigest(requestPayload)) {
     throw new Error('semantic_request_digest_mismatch');
@@ -1929,7 +2074,7 @@ export function compileSemanticOpinion(opinion, request) {
     || request.worksheet.contextDigest !== request.contextDigest) {
     throw new Error('semantic_worksheet_digest_mismatch');
   }
-  assertSchema('aegis.semantic_opinion.v1', opinion);
+  assertSchema('aegis.semantic_opinion.v2', opinion);
   if (opinion.worksheetDigest !== request.worksheetDigest) {
     throw new Error('semantic_opinion_worksheet_mismatch');
   }
@@ -2023,7 +2168,7 @@ export function compileSemanticOpinion(opinion, request) {
   ]));
 
   return {
-    schema: 'aegis.semantic_draft.v7',
+    schema: 'aegis.semantic_draft.v8',
     sourceContextDigest: request.contextDigest,
     title: opinion.title,
     interpretation: opinion.interpretation,
@@ -2290,7 +2435,7 @@ export function compileSemanticContract({
     throw new Error('semantic_context_mismatch');
   }
   const contract = {
-    schema: 'aegis.issue_contract.v12',
+    schema: 'aegis.issue_contract.v13',
     implementationAuthorized: false,
     sourceSemanticRequestDigest: semanticRequest.requestDigest,
     semanticRevision,
@@ -2307,7 +2452,7 @@ export function compileSemanticContract({
     humanResolutions,
     approval: null,
   };
-  assertSchema('aegis.issue_contract.v12', contract);
+  assertSchema('aegis.issue_contract.v13', contract);
   assertContractApprovalEvidence(contract);
   return contract;
 }
@@ -2318,11 +2463,9 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
     return 'BLOCKED_BY_GAP';
   }
   const resolvedDecisionIds = new Set(humanResolutions.map(({ questionId }) => questionId));
-  const pendingDecisionIds = specification.determinismReview.dimensions
-    .filter(({ status }) => status === 'DECISION_REQUIRED')
-    .flatMap(({ targetIds }) => targetIds)
-    .filter((targetId) => targetId.startsWith('Q-'))
-    .filter((targetId) => !resolvedDecisionIds.has(targetId));
+  const pendingDecisionIds = specification.decisions
+    .map(({ questionId }) => questionId)
+    .filter((questionId) => !resolvedDecisionIds.has(questionId));
   return pendingDecisionIds.length > 0 ? 'PENDING_HUMAN_DECISIONS' : 'SEMANTICALLY_CLOSED';
 }
 
@@ -2426,7 +2569,7 @@ export function assertContractDocument({
   constitution,
   constitutionDigest,
 }) {
-  assertSchema('aegis.issue_contract.v12', contract);
+  assertSchema('aegis.issue_contract.v13', contract);
   const semanticRequest = buildSemanticRequest({
     repositoryRoot,
     preflight,
@@ -2891,7 +3034,7 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     || finalContract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
     throw new Error('contract_has_unresolved_determinism');
   }
-  assertSchema('aegis.issue_contract.v12', finalContract);
+  assertSchema('aegis.issue_contract.v13', finalContract);
   assertContractApprovalEvidence(finalContract, { required: true });
   return finalContract;
 }
