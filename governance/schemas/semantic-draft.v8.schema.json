@@ -345,7 +345,7 @@
     },
     "boundaryRules": {
       "type": "array",
-      "description": "Declara comportamento observável para valores públicos de representação finita. Saídas de largura fixa podem provar apenas EXACT_WIDTH; valores que recebem quantidades fora da faixa precisam de política lateral explícita.",
+      "description": "Declara comportamento observável para representações finitas. Um campo posicional que codifica quantidade exige REPRESENTATION_WIDTH para a posição/largura e ENCODED_VALUE para domínio e extrapolação. Largura nunca prova overflow.",
       "items": {
         "type": "object",
         "additionalProperties": false,

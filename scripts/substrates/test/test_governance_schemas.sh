@@ -381,6 +381,25 @@ const semanticValidationContext = {
 };
 assertSemanticDraft(draft, loadedPolicy.policy, semanticValidationContext);
 
+const decisionThatDeletesRequestedBehavior = structuredClone(draft);
+decisionThatDeletesRequestedBehavior.decisions[0].answers[1].contractEffect =
+  'O comportamento solicitado deve permanecer sempre desativado.';
+let decisionThatDeletesRequestedBehaviorRejected = false;
+try {
+  assertSemanticDraft(
+    decisionThatDeletesRequestedBehavior,
+    loadedPolicy.policy,
+    semanticValidationContext,
+  );
+} catch (error) {
+  decisionThatDeletesRequestedBehaviorRejected = error.message ===
+    'decision_answer_negates_user_intent:Q-FORMAT:ANS-DETAIL';
+  if (!decisionThatDeletesRequestedBehaviorRejected) throw error;
+}
+if (!decisionThatDeletesRequestedBehaviorRejected) {
+  throw new Error('wizard_offered_deleting_explicit_user_behavior');
+}
+
 const unresolvedNormativeExpression = structuredClone(draft);
 unresolvedNormativeExpression.requirements[0].acceptanceCases[1].then = 'Uma falha explícita deve ser observada ().';
 let unresolvedNormativeExpressionRejected = false;
@@ -436,6 +455,32 @@ try {
 }
 if (!equivalentIntegerDecisionRejected) {
   throw new Error('equivalent_integer_thresholds_reached_wizard');
+}
+
+const positionalNumberAsThreshold = structuredClone(draft);
+const bitZeroReference = 'Bit 0 representa a trava geral.';
+const missingBitThreeThreshold = 'Bit 3 possui limiar ausente.';
+positionalNumberAsThreshold.unknowns[0].basis.push(
+  { source: 'USER_INTENT', reference: bitZeroReference },
+  { source: 'USER_INTENT', reference: missingBitThreeThreshold },
+);
+positionalNumberAsThreshold.decisions[0].answers[0].contractEffect =
+  'O bit 3 deve ativar quando o volume for maior que 0.';
+positionalNumberAsThreshold.requirements[0].acceptanceCases[0].then =
+  positionalNumberAsThreshold.decisions[0].answers[0].contractEffect;
+let positionalNumberAsThresholdRejected = false;
+try {
+  assertSemanticDraft(positionalNumberAsThreshold, loadedPolicy.policy, {
+    ...semanticValidationContext,
+    intent: `${preflight.intent} ${bitZeroReference} ${missingBitThreeThreshold}`,
+  });
+} catch (error) {
+  positionalNumberAsThresholdRejected = error.message ===
+    'decision_answer_invents_threshold:Q-FORMAT:ANS-SIMPLE';
+  if (!positionalNumberAsThresholdRejected) throw error;
+}
+if (!positionalNumberAsThresholdRejected) {
+  throw new Error('bit_position_was_reused_as_business_threshold');
 }
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),
@@ -590,8 +635,8 @@ gapDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'P
 gapDraft.requirements[0].statement = 'Processar com resultado público explícito.';
 gapDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'Processar' }];
 gapDraft.requirements[0].intentSignalIds = [];
-gapDraft.requirements[0].acceptanceCases[0].then = 'A fração deve seguir a fórmula explicitamente escolhida.';
-gapDraft.requirements[0].acceptanceCases[1].then = 'O limite comparado deve ser o valor explicitamente escolhido.';
+gapDraft.requirements[0].acceptanceCases[0].then = 'A fração deve ser calculada diretamente sobre os valores de entrada.';
+gapDraft.requirements[0].acceptanceCases[1].then = 'O limite comparado deve ser fornecido pela configuração.';
 gapDraft.unknowns = [
   {
     id: 'UNKNOWN-FRACTION',
@@ -622,8 +667,8 @@ gapDraft.decisions = [
       given: 'Uma ordem com liquidação parcial.',
       when: 'A fração for calculada.',
       outcomes: [
-        { answerId: 'ANS-SIMPLE', then: 'Uma fração calculada deve ser observada.' },
-        { answerId: 'ANS-DETAIL', then: 'Nenhum cálculo fracionário deve ser observado.' },
+        { answerId: 'ANS-SIMPLE', then: 'A fração é calculada diretamente sobre os valores de entrada.' },
+        { answerId: 'ANS-DETAIL', then: 'A fração usa uma razão inteira escalada previamente.' },
       ],
     },
     answers: [
@@ -631,14 +676,14 @@ gapDraft.decisions = [
         id: 'ANS-SIMPLE',
         label: 'Fórmula explícita',
         rationale: 'Define o comportamento antes da assinatura.',
-        contractEffect: 'A fração deve seguir a fórmula explicitamente escolhida.',
+        contractEffect: 'A fração deve ser calculada diretamente sobre os valores de entrada.',
         recommended: true,
       },
       {
         id: 'ANS-DETAIL',
-        label: 'Remover a fração',
-        rationale: 'Retira o comportamento incompleto.',
-        contractEffect: 'O contrato não deve exigir cálculo fracionário.',
+        label: 'Razão escalada',
+        rationale: 'Mantém uma escala inteira explícita antes da aplicação.',
+        contractEffect: 'A fração deve ser calculada por uma razão inteira escalada previamente.',
         recommended: false,
       },
     ],
@@ -654,8 +699,8 @@ gapDraft.decisions = [
       given: 'Um volume candidato à comparação.',
       when: 'A regra de limite for avaliada.',
       outcomes: [
-        { answerId: 'ANS-EXPLICIT', then: 'O valor deve ser comparado com o limite escolhido.' },
-        { answerId: 'ANS-REMOVE', then: 'Nenhuma comparação de volume deve ser realizada.' },
+        { answerId: 'ANS-EXPLICIT', then: 'O valor é comparado com o limite fornecido pela configuração.' },
+        { answerId: 'ANS-REMOVE', then: 'O valor é comparado com o limite fornecido como argumento.' },
       ],
     },
     answers: [
@@ -663,14 +708,14 @@ gapDraft.decisions = [
         id: 'ANS-EXPLICIT',
         label: 'Limite explícito',
         rationale: 'Elimina o comparador incompleto.',
-        contractEffect: 'O limite comparado deve ser o valor explicitamente escolhido.',
+        contractEffect: 'O limite comparado deve ser fornecido pela configuração.',
         recommended: true,
       },
       {
         id: 'ANS-REMOVE',
-        label: 'Remover comparação',
-        rationale: 'Retira o comportamento incompleto.',
-        contractEffect: 'O contrato não deve exigir comparação de volume.',
+        label: 'Limite por argumento',
+        rationale: 'Torna o limite explícito em cada chamada.',
+        contractEffect: 'O limite comparado deve ser fornecido como argumento.',
         recommended: false,
       },
     ],
@@ -733,13 +778,13 @@ assertSemanticDraft(resolvedGapDraft, loadedPolicy.policy, {
       questionId: 'Q-FORMAT',
       kind: 'ANSWER',
       label: 'Fórmula explícita',
-      contractEffect: 'A fração deve seguir a fórmula explicitamente escolhida.',
+      contractEffect: 'A fração deve ser calculada diretamente sobre os valores de entrada.',
     },
     {
       questionId: 'Q-EXPRESSION',
       kind: 'ANSWER',
       label: 'Limite explícito',
-      contractEffect: 'O limite comparado deve ser o valor explicitamente escolhido.',
+      contractEffect: 'O limite comparado deve ser fornecido pela configuração.',
     },
   ],
 });
@@ -872,6 +917,29 @@ deterministicDraft.requirements[0].acceptanceCases.push({
   decisionBinding: null,
   boundaryBinding: null,
 });
+const canonicalizationWitness = deterministicWitnesses.get('CANONICALIZATION');
+const canonicalFormatDecision = deterministicDraft.decisions[0];
+canonicalFormatDecision.question = 'Qual representação canônica deve ser usada?';
+canonicalFormatDecision.answers[0].contractEffect =
+  'Valores logicamente equivalentes devem usar representação canônica JSON.';
+canonicalFormatDecision.answers[1].contractEffect =
+  'Valores logicamente equivalentes devem usar representação canônica textual.';
+canonicalFormatDecision.distinguishingCase = {
+  given: `${canonicalizationWitness.baseline} ${canonicalizationWitness.variation}`,
+  when: 'As duas representações logicamente equivalentes forem serializadas.',
+  outcomes: [
+    {
+      answerId: 'ANS-SIMPLE',
+      then: 'As duas entradas produzem a mesma representação canônica JSON.',
+    },
+    {
+      answerId: 'ANS-DETAIL',
+      then: 'As duas entradas produzem a mesma representação canônica textual.',
+    },
+  ],
+};
+deterministicDraft.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-RESULT-HAPPY').then = canonicalFormatDecision.answers[0].contractEffect;
 deterministicDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }];
 deterministicDraft.adversarialReview.findings[0].kind = 'DETERMINISM_GAP';
 deterministicDraft.adversarialReview.findings[0].challenge = 'Representações equivalentes podem divergir enquanto o formato público estiver em aberto.';
@@ -941,6 +1009,49 @@ const deterministicContext = {
   workspaceEvidence: deterministicRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(deterministicDraft, loadedPolicy.policy, deterministicContext);
+
+const unrelatedDeterminismDecision = structuredClone(deterministicDraft);
+const unrelatedDecision = unrelatedDeterminismDecision.decisions[0];
+unrelatedDecision.question = 'Qual limiar deve ativar o bit 3?';
+unrelatedDecision.answers[0].contractEffect = 'O bit 3 deve ativar para volume positivo.';
+unrelatedDecision.answers[1].contractEffect = 'O bit 3 deve permanecer desativado.';
+unrelatedDecision.distinguishingCase = {
+  given: 'Um ciclo com volume compensado positivo.',
+  when: 'A bitmask for compilada.',
+  outcomes: [
+    { answerId: 'ANS-SIMPLE', then: 'O bit 3 fica ativado.' },
+    { answerId: 'ANS-DETAIL', then: 'O bit 3 fica desativado.' },
+  ],
+};
+unrelatedDeterminismDecision.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-RESULT-HAPPY').then = unrelatedDecision.answers[0].contractEffect;
+let unrelatedDeterminismDecisionRejected = false;
+try {
+  assertSemanticDraft(unrelatedDeterminismDecision, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  unrelatedDeterminismDecisionRejected = error.message ===
+    'determinism_decision_does_not_cover_witness:CANONICALIZATION';
+  if (!unrelatedDeterminismDecisionRejected) throw error;
+}
+if (!unrelatedDeterminismDecisionRejected) {
+  throw new Error('unrelated_decision_closed_determinism_dimension');
+}
+
+const activatedDimensionOnWrongSubject = structuredClone(deterministicDraft);
+activatedDimensionOnWrongSubject.requirements[0].statement +=
+  ' A operação executa divisão fracionária sobre inteiros.';
+let activatedDimensionOnWrongSubjectRejected = false;
+try {
+  assertSemanticDraft(activatedDimensionOnWrongSubject, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  activatedDimensionOnWrongSubjectRejected = error.message ===
+    'inapplicable_determinism_dimension_without_structural_absence:ROUNDING';
+  if (!activatedDimensionOnWrongSubjectRejected) throw error;
+}
+if (!activatedDimensionOnWrongSubjectRejected) {
+  throw new Error('activated_dimension_was_parked_on_unrelated_subject');
+}
+
 const boundedSubjectIntent = `${deterministicIntent} Expor a quantidade nos Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63.`;
 const boundedSubjectPreflight = buildPreflightHandoff({
   demand: boundedSubjectIntent,
@@ -962,7 +1073,7 @@ boundedSubjectDraft.intentClaims.push({
   kind: 'OBLIGATION',
   disposition: 'NORMATIVE',
   contractEffect: 'Bits 4–9 devem representar a quantidade pública.',
-  targetIds: ['REQ-RESULT', 'BOUND-COUNTER'],
+  targetIds: ['REQ-RESULT', 'BOUND-COUNTER', 'BOUND-COUNTER-WIDTH'],
   rationale: 'A demanda define layout e domínio observáveis.',
 });
 boundedSubjectDraft.requirements[0].statement += ' Bits 4–9 devem representar a quantidade pública.';
@@ -997,24 +1108,58 @@ boundedSubjectDraft.requirements[0].acceptanceCases.push(
       expectedValue: '63',
     },
   },
+  {
+    id: 'AC-BOUND-WIDTH',
+    kind: 'BOUNDARY',
+    given: 'A representação pública da quantidade.',
+    when: 'A posição do campo for observada.',
+    then: 'A quantidade deve ocupar exatamente Bits 4–9.',
+    outcomeKind: 'OBSERVABLE_EFFECT',
+    decisionBinding: null,
+    boundaryBinding: {
+      ruleId: 'BOUND-COUNTER-WIDTH',
+      side: 'EXACT_WIDTH',
+      expectedBehavior: 'NOT_APPLICABLE',
+      expectedValue: 'Bits 4–9',
+    },
+  },
 );
-boundedSubjectDraft.boundaryRules = [{
-  id: 'BOUND-COUNTER',
-  subject: 'Quantidade pública em Bits 4–9',
-  representationKind: 'ENCODED_VALUE',
-  lowerBound: '0',
-  upperBound: '63',
-  underflowBehavior: 'REJECT',
-  overflowBehavior: 'SATURATE',
-  decisionId: null,
-  requirementIds: ['REQ-RESULT'],
-  acceptanceCaseIds: ['AC-BOUND-UNDERFLOW', 'AC-BOUND-OVERFLOW'],
-  intentSignalIds: [boundedSubjectSignal.id],
-  basis: [{
-    source: 'USER_INTENT',
-    reference: 'Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63',
-  }],
-}];
+boundedSubjectDraft.boundaryRules = [
+  {
+    id: 'BOUND-COUNTER',
+    subject: 'Quantidade pública codificada em Bits 4–9',
+    representationKind: 'ENCODED_VALUE',
+    lowerBound: '0',
+    upperBound: '63',
+    underflowBehavior: 'REJECT',
+    overflowBehavior: 'SATURATE',
+    decisionId: null,
+    requirementIds: ['REQ-RESULT'],
+    acceptanceCaseIds: ['AC-BOUND-UNDERFLOW', 'AC-BOUND-OVERFLOW'],
+    intentSignalIds: [boundedSubjectSignal.id],
+    basis: [{
+      source: 'USER_INTENT',
+      reference: 'Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63',
+    }],
+  },
+  {
+    id: 'BOUND-COUNTER-WIDTH',
+    subject: 'Posição da quantidade pública em Bits 4–9',
+    representationKind: 'REPRESENTATION_WIDTH',
+    lowerBound: 'Bits 4–9',
+    upperBound: 'Bits 4–9',
+    underflowBehavior: 'NOT_APPLICABLE',
+    overflowBehavior: 'NOT_APPLICABLE',
+    decisionId: null,
+    requirementIds: ['REQ-RESULT'],
+    acceptanceCaseIds: ['AC-BOUND-WIDTH'],
+    intentSignalIds: [boundedSubjectSignal.id],
+    basis: [{
+      source: 'USER_INTENT',
+      reference: 'Bits 4–9, rejeitar abaixo de 0 e saturar acima de 63',
+    }],
+  },
+];
 const boundedDimension = boundedSubjectDraft.determinismReview.dimensions
   .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC');
 boundedDimension.subjectId = 'BOUND-COUNTER';
@@ -1058,29 +1203,10 @@ try {
 if (!wrongBoundedSubjectRejected) throw new Error('bounded_arithmetic_was_reviewed_only_globally');
 
 const widthClaimedAsArithmetic = structuredClone(boundedSubjectDraft);
-const widthBoundary = widthClaimedAsArithmetic.boundaryRules[0];
-widthBoundary.representationKind = 'REPRESENTATION_WIDTH';
-widthBoundary.lowerBound = '6 bits';
-widthBoundary.upperBound = '6 bits';
-widthBoundary.underflowBehavior = 'NOT_APPLICABLE';
-widthBoundary.overflowBehavior = 'NOT_APPLICABLE';
-widthBoundary.acceptanceCaseIds = ['AC-BOUND-UNDERFLOW'];
-widthClaimedAsArithmetic.requirements[0].acceptanceCases = widthClaimedAsArithmetic
-  .requirements[0].acceptanceCases.filter(({ id }) => id !== 'AC-BOUND-OVERFLOW');
-const exactWidthCase = widthClaimedAsArithmetic.requirements[0].acceptanceCases
-  .find(({ id }) => id === 'AC-BOUND-UNDERFLOW');
-exactWidthCase.given = 'A representação pública do contador.';
-exactWidthCase.when = 'A largura do campo for observada.';
-exactWidthCase.then = 'A representação deve ter exatamente 6 bits.';
-exactWidthCase.outcomeKind = 'OBSERVABLE_EFFECT';
-exactWidthCase.boundaryBinding = {
-  ruleId: 'BOUND-COUNTER',
-  side: 'EXACT_WIDTH',
-  expectedBehavior: 'NOT_APPLICABLE',
-  expectedValue: '6 bits',
-};
 const widthBoundedDimension = widthClaimedAsArithmetic.determinismReview.dimensions
   .find(({ kind }) => kind === 'BOUNDED_ARITHMETIC');
+widthBoundedDimension.subjectId = 'BOUND-COUNTER-WIDTH';
+widthBoundedDimension.targetIds = ['REQ-RESULT', 'BOUND-COUNTER-WIDTH'];
 widthBoundedDimension.status = 'SPECIFIED';
 widthBoundedDimension.rationale = 'Bits 4–9';
 widthBoundedDimension.basis = [{
@@ -1098,7 +1224,7 @@ try {
   });
 } catch (error) {
   widthClaimedAsArithmeticRejected = error.message ===
-    'bounded_arithmetic_confuses_width_with_value:BOUND-COUNTER';
+    'bounded_arithmetic_confuses_width_with_value:BOUND-COUNTER-WIDTH';
 }
 if (!widthClaimedAsArithmeticRejected) {
   throw new Error('representation_width_closed_value_overflow_policy');
@@ -1641,6 +1767,20 @@ const exampleContext = {
 };
 assertSemanticDraft(exampleDraft, loadedPolicy.policy, exampleContext);
 
+const promotedExampleDraft = structuredClone(exampleDraft);
+promotedExampleDraft.requirements[0].statement += ' A função deve usar como FNV-1a.';
+let promotedExampleRejected = false;
+try {
+  assertSemanticDraft(promotedExampleDraft, loadedPolicy.policy, exampleContext);
+} catch (error) {
+  promotedExampleRejected = error.message ===
+    `non_normative_example_promoted_to_contract:${exampleSignal.id}`;
+  if (!promotedExampleRejected) throw error;
+}
+if (!promotedExampleRejected) {
+  throw new Error('non_normative_example_survived_in_normative_requirement');
+}
+
 const pathIntent = 'Expor o resultado por src/index.ts; src/engine.ts é somente uma sugestão; formato ainda a escolher.';
 const pathPreflight = buildPreflightHandoff({
   demand: pathIntent,
@@ -1762,7 +1902,7 @@ boundedDraft.intentClaims = [
     kind: 'OBLIGATION',
     disposition: 'NORMATIVE',
     contractEffect: 'Bits 4–9 devem representar a quantidade pública.',
-    targetIds: ['REQ-RESULT', 'BOUND-PARTICIPANTS'],
+    targetIds: ['REQ-RESULT', 'BOUND-PARTICIPANTS', 'BOUND-PARTICIPANTS-WIDTH'],
     rationale: 'A demanda define uma representação pública finita.',
   },
   {
@@ -1809,23 +1949,54 @@ boundedDraft.requirements[0].acceptanceCases.push({
     expectedValue: null,
   },
 });
-boundedDraft.boundaryRules = [{
-  id: 'BOUND-PARTICIPANTS',
-  subject: 'Quantidade de participantes no campo de seis bits',
-  representationKind: 'ENCODED_VALUE',
-  lowerBound: '0',
-  upperBound: '63',
-  underflowBehavior: 'REJECT',
-  overflowBehavior: 'SATURATE',
-  decisionId: 'Q-FORMAT',
-  requirementIds: ['REQ-RESULT'],
-  acceptanceCaseIds: ['AC-RESULT-FAILURE', 'AC-RESULT-UNDERFLOW'],
-  intentSignalIds: [boundedSignals[0].id],
-  basis: [
-    { source: 'USER_INTENT', reference: 'Bits 4–9' },
-    { source: 'CONSTITUTION', reference: 'CONST-OBSERVABLE' },
-  ],
-}];
+boundedDraft.requirements[0].acceptanceCases.push({
+  id: 'AC-RESULT-WIDTH',
+  kind: 'BOUNDARY',
+  given: 'A representação pública da quantidade.',
+  when: 'A posição do campo for observada.',
+  then: 'A quantidade deve ocupar exatamente Bits 4–9.',
+  outcomeKind: 'OBSERVABLE_EFFECT',
+  decisionBinding: null,
+  boundaryBinding: {
+    ruleId: 'BOUND-PARTICIPANTS-WIDTH',
+    side: 'EXACT_WIDTH',
+    expectedBehavior: 'NOT_APPLICABLE',
+    expectedValue: 'Bits 4–9',
+  },
+});
+boundedDraft.boundaryRules = [
+  {
+    id: 'BOUND-PARTICIPANTS',
+    subject: 'Quantidade de participantes no campo de seis bits',
+    representationKind: 'ENCODED_VALUE',
+    lowerBound: '0',
+    upperBound: '63',
+    underflowBehavior: 'REJECT',
+    overflowBehavior: 'SATURATE',
+    decisionId: 'Q-FORMAT',
+    requirementIds: ['REQ-RESULT'],
+    acceptanceCaseIds: ['AC-RESULT-FAILURE', 'AC-RESULT-UNDERFLOW'],
+    intentSignalIds: [boundedSignals[0].id],
+    basis: [
+      { source: 'USER_INTENT', reference: 'Bits 4–9' },
+      { source: 'CONSTITUTION', reference: 'CONST-OBSERVABLE' },
+    ],
+  },
+  {
+    id: 'BOUND-PARTICIPANTS-WIDTH',
+    subject: 'Posição da quantidade em Bits 4–9',
+    representationKind: 'REPRESENTATION_WIDTH',
+    lowerBound: 'Bits 4–9',
+    upperBound: 'Bits 4–9',
+    underflowBehavior: 'NOT_APPLICABLE',
+    overflowBehavior: 'NOT_APPLICABLE',
+    decisionId: null,
+    requirementIds: ['REQ-RESULT'],
+    acceptanceCaseIds: ['AC-RESULT-WIDTH'],
+    intentSignalIds: [boundedSignals[0].id],
+    basis: [{ source: 'USER_INTENT', reference: 'Bits 4–9' }],
+  },
+];
 boundedDraft.unknowns[0].statement = 'O comportamento fora da capacidade de seis bits precisa de decisão.';
 boundedDraft.unknowns[0].basis = [{ source: 'USER_INTENT', reference: 'política fora do limite ainda deve ser escolhida' }];
 boundedDraft.decisions[0] = {
@@ -1945,6 +2116,21 @@ const fixedWidthContext = {
   workspaceEvidence: fixedWidthRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(fixedWidthDraft, loadedPolicy.policy, fixedWidthContext);
+const widthUsingValueWitness = structuredClone(fixedWidthDraft);
+widthUsingValueWitness.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-FIXED-WIDTH').given =
+    'Maior valor representável. Uma unidade acima do maior valor representável.';
+let widthUsingValueWitnessRejected = false;
+try {
+  assertSemanticDraft(widthUsingValueWitness, loadedPolicy.policy, fixedWidthContext);
+} catch (error) {
+  widthUsingValueWitnessRejected = error.message ===
+    'representation_width_uses_value_range_witness:BOUND-FIXED-WIDTH';
+  if (!widthUsingValueWitnessRejected) throw error;
+}
+if (!widthUsingValueWitnessRejected) {
+  throw new Error('value_range_witness_was_used_to_prove_representation_width');
+}
 const widthMisclassifiedAsEncodedValue = structuredClone(fixedWidthDraft);
 widthMisclassifiedAsEncodedValue.boundaryRules[0].representationKind = 'ENCODED_VALUE';
 let widthMisclassificationRejected = false;

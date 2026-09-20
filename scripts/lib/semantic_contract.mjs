@@ -103,6 +103,7 @@ const structuralRulePattern = {
   INPUT_SCHEMA_EXCLUDES_CLASS: /\b(?:schema|esquema)\b[^.!?\n]{0,120}\b(?:exclu[ií]d\p{L}*|n[aã]o\s+(?:aceit\p{L}*|admit\p{L}*)|excluded)\b/iu,
 };
 const explicitRejectionPattern = /\b(?:rejeit\p{L}*|recus\p{L}*|falha\p{L}*|inv[aá]lid\p{L}*|reject\p{L}*|error|failure)\b/iu;
+const requestedBehaviorRemovalPattern = /\b(?:sempre\s+desativ\p{L}*|permanec\p{L}*\s+sempre\s+desativ\p{L}*|n[aã]o\s+deve\s+(?:exigir|executar|produzir|expor|calcular)|remov\p{L}*|omit\p{L}*|nenhum\p{L}*\s+(?:c[aá]lculo|resultado|efeito|indicador|compara(?:ç|c)[aã]o))\b/iu;
 const dimensionResolutionRules = {
   ORDERING: {
     INPUT_ORDER_PRESERVED: { relation: 'DEFINED_RESULT', parameter: false },
@@ -156,6 +157,18 @@ const dimensionResolutionRules = {
     OVERFLOW_WRAP: { relation: 'DEFINED_RESULT', parameter: true },
     OVERFLOW_MODULO: { relation: 'DEFINED_RESULT', parameter: true },
   },
+};
+const dimensionActivationPatterns = {
+  ORDERING: /\b(?:arvore|tree|sequencia|sequence|ordenacao|ordering|permutacao|permutation)\b/u,
+  CANONICALIZATION: /\b(?:hash|serializacao|serialization|codificacao|encoding|representacao canonica|canonical representation)\b/u,
+  DUPLICATES: /\b(?:arvore|tree|colecao|collection|lote|batch)\b/u,
+  EMPTY_INPUT: /\b(?:arvore|tree|colecao|collection|lote|batch)\b/u,
+  ODD_CARDINALITY: /\b(?:arvore binaria|binary tree)\b/u,
+  ROUNDING: /\b(?:fracion\p{L}*|fraction\p{L}*|divis\p{L}*|ratio|razao|bigint)\b/u,
+  REMAINDER_DISTRIBUTION: /\b(?:fracion\p{L}*|fraction\p{L}*|divis\p{L}*|resto|remainder|residu\p{L}*)\b/u,
+  ZERO_DIVISOR: /\b(?:divis\p{L}*|denominador|denominator|ratio|razao)\b/u,
+  TIE_BREAKING: /\b(?:ciclo\p{L}*|cycle\p{L}*|prioridade|priority|ranking)\b/u,
+  COUNTING_IDENTITY: /\b(?:quantidade|contagem|contador\p{L}*|count|counter|participante\p{L}*)\b/u,
 };
 const resolutionEvidenceTerms = {
   INPUT_ORDER_PRESERVED: [/ordem\s+(?:de\s+)?entrada|input\s+order/iu],
@@ -589,6 +602,25 @@ function canonicalIntegerThreshold(text) {
     if (match !== null) return `${direction}:${BigInt(match[1]) + shift}`;
   }
   return null;
+}
+
+function boundedSignalRequiresEncodedValue(intent, signal) {
+  if (!/\bbits?\s+\d+\s*[–—-]\s*\d+\b/iu.test(signal.reference)) return false;
+  const lineStart = intent.lastIndexOf('\n', Math.max(0, signal.offset - 1)) + 1;
+  const followingBreak = intent.indexOf('\n', signal.offset + signal.reference.length);
+  const lineEnd = followingBreak === -1 ? intent.length : followingBreak;
+  const localStatement = intent.slice(lineStart, lineEnd);
+  return /\b(?:quantidade|contador\p{L}*|contagem|n[uú]mero|count|counter|volume)\b/iu
+    .test(localStatement);
+}
+
+function activatedDeterminismDimensions(text) {
+  const normalized = text.normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+  return Object.entries(dimensionActivationPatterns)
+    .filter(([, pattern]) => pattern.test(normalized))
+    .map(([kind]) => kind);
 }
 
 function acceptanceBranchKey(acceptanceCase) {
@@ -1300,6 +1332,12 @@ export function assertSemanticDraft(draft, policy, {
         || linkedCases.some(({ boundaryBinding }) => boundaryBinding.side !== 'EXACT_WIDTH')) {
         throw new Error(`representation_width_mixed_with_value_range:${boundaryRule.id}`);
       }
+      if (linkedCases.some(({ given }) => (
+        /\b(?:maior\s+valor\s+represent[aá]vel|uma\s+unidade\s+acima|maximum\s+representable\s+value|one\s+unit\s+above)\b/iu
+          .test(given)
+      ))) {
+        throw new Error(`representation_width_uses_value_range_witness:${boundaryRule.id}`);
+      }
     }
     if (boundaryRule.representationKind === 'ENCODED_VALUE') {
       if (boundaryRule.underflowBehavior === 'NOT_APPLICABLE'
@@ -1394,7 +1432,15 @@ export function assertSemanticDraft(draft, policy, {
     }
     if (signal.kind === 'BOUNDED_VALUE') {
       const boundaryRules = boundarySignalOwners.get(signal.id) ?? [];
-      if (boundaryRules.length !== 1) {
+      const widthRules = boundaryRules
+        .filter(({ representationKind }) => representationKind === 'REPRESENTATION_WIDTH');
+      const encodedRules = boundaryRules
+        .filter(({ representationKind }) => representationKind === 'ENCODED_VALUE');
+      if (boundedSignalRequiresEncodedValue(intent, signal)) {
+        if (widthRules.length !== 1 || encodedRules.length !== 1 || boundaryRules.length !== 2) {
+          throw new Error(`bounded_quantity_without_width_and_value_rules:${signal.id}`);
+        }
+      } else if (boundaryRules.length !== 1) {
         throw new Error(`bounded_value_without_boundary_rule:${signal.id}`);
       }
       continue;
@@ -1421,6 +1467,21 @@ export function assertSemanticDraft(draft, policy, {
         && (quote.includes(signal.reference) || signal.reference.includes(quote))
       ))) {
         throw new Error(`example_signal_without_intent_claim:${signal.id}`);
+      }
+      const normativeText = [
+        ...draft.requirements.flatMap((requirement) => [
+          requirement.statement,
+          ...requirement.acceptanceCases.map(({ then }) => then),
+        ]),
+        ...draft.invariants.flatMap(({ statement, falsification }) => [statement, falsification]),
+        ...draft.boundaryRules.flatMap(({ subject, lowerBound, upperBound }) => [
+          subject,
+          lowerBound,
+          upperBound,
+        ]),
+      ].join('\n');
+      if (literalReferenceAppears(normativeText, signal.reference)) {
+        throw new Error(`non_normative_example_promoted_to_contract:${signal.id}`);
       }
       continue;
     }
@@ -1578,9 +1639,42 @@ export function assertSemanticDraft(draft, policy, {
           throw new Error(`specified_determinism_dimension_without_exact_proof:${dimension.kind}`);
         }
       }
-      if (dimension.status === 'DECISION_REQUIRED'
-        && !dimension.targetIds.some((targetId) => decisionIds.has(targetId))) {
-        throw new Error(`determinism_gap_without_decision:${dimension.kind}`);
+      if (dimension.status === 'DECISION_REQUIRED') {
+        const targetDecisionIds = dimension.targetIds
+          .filter((targetId) => decisionIds.has(targetId));
+        if (targetDecisionIds.length !== 1) {
+          throw new Error(`determinism_gap_without_single_decision:${dimension.kind}`);
+        }
+        const decision = decisionsById.get(targetDecisionIds[0]);
+        const subjectRequirementIds = requirementIds.has(dimension.subjectId)
+          ? [dimension.subjectId]
+          : draft.boundaryRules
+            .find(({ id }) => id === dimension.subjectId)?.requirementIds ?? [];
+        if (decision === undefined
+          || !subjectRequirementIds.some((requirementId) => (
+            decision.requirementIds.includes(requirementId)
+          ))) {
+          throw new Error(`determinism_decision_has_wrong_subject:${dimension.kind}`);
+        }
+        const scenarioText = [
+          decision.distinguishingCase.given,
+          decision.distinguishingCase.when,
+        ].join('\n');
+        if (!literalReferenceAppears(scenarioText, dimension.counterexampleWitness.baseline)
+          || !literalReferenceAppears(scenarioText, dimension.counterexampleWitness.variation)) {
+          throw new Error(`determinism_decision_does_not_cover_witness:${dimension.kind}`);
+        }
+        const outcomesByAnswerId = new Map(decision.distinguishingCase.outcomes
+          .map((outcome) => [outcome.answerId, outcome.then]));
+        if (decision.answers.some((answer) => {
+          const outcome = outcomesByAnswerId.get(answer.id);
+          return outcome === undefined || !dimensionTriggerPattern[dimension.kind].test([
+            answer.contractEffect,
+            outcome,
+          ].join('\n'));
+        })) {
+          throw new Error(`determinism_decision_does_not_resolve_dimension:${dimension.kind}`);
+        }
       }
       if (dimension.status === 'GAP_FOUND'
         && dimension.targetIds.some((targetId) => decisionIds.has(targetId))) {
@@ -1627,6 +1721,28 @@ export function assertSemanticDraft(draft, policy, {
         throw new Error(`bounded_subject_without_determinism_review:${boundaryRuleId}`);
       }
     }
+    for (const requirement of draft.requirements) {
+      const subjectIds = new Set([
+        requirement.id,
+        ...draft.boundaryRules
+          .filter(({ requirementIds: linkedRequirementIds }) => (
+            linkedRequirementIds.includes(requirement.id)
+          ))
+          .map(({ id }) => id),
+      ]);
+      for (const kind of activatedDeterminismDimensions(
+        applicabilityTextForSubject(requirement.id),
+      )) {
+        const covered = draft.determinismReview.dimensions.some((dimension) => (
+          dimension.kind === kind
+          && subjectIds.has(dimension.subjectId)
+          && dimension.status !== 'NOT_APPLICABLE'
+        ));
+        if (!covered) {
+          throw new Error(`activated_determinism_dimension_without_subject:${kind}:${requirement.id}`);
+        }
+      }
+    }
     const gapsFound = draft.determinismReview.dimensions
       .some(({ status }) => status === 'DECISION_REQUIRED' || status === 'GAP_FOUND');
     if ((draft.determinismReview.status === 'GAPS_FOUND') !== gapsFound) {
@@ -1645,12 +1761,17 @@ export function assertSemanticDraft(draft, policy, {
     ))) {
       throw new Error(`decision_based_only_on_placeholder:${decision.questionId}`);
     }
+    const protectsExplicitUserBehavior = decision.requirementIds.some((requirementId) => (
+      (intentClaimsByTarget.get(requirementId) ?? []).some(({ kind, disposition }) => (
+        disposition === 'NORMATIVE' && (kind === 'OBLIGATION' || kind === 'PROHIBITION')
+      ))
+    ));
     assertUniqueIds(decision.answers, 'id', `answer_${decision.questionId}`);
     const recommended = decision.answers.filter(({ recommended }) => recommended);
     if (recommended.length !== 1 || recommended[0].id !== decision.recommendedAnswerId) {
       throw new Error(`invalid_recommendation:${decision.questionId}`);
     }
-    const authorizedDecisionText = [
+    const authorizedDecisionFragments = [
       ...draft.unknowns
         .filter(({ decisionId }) => decisionId === decision.questionId)
         .flatMap(({ basis }) => basis
@@ -1659,11 +1780,25 @@ export function assertSemanticDraft(draft, policy, {
       ...draft.boundaryRules
         .filter(({ decisionId }) => decisionId === decision.questionId)
         .flatMap(({ lowerBound, upperBound }) => [lowerBound, upperBound]),
-    ].join('\n');
+    ];
+    const authorizedDecisionText = authorizedDecisionFragments.join('\n');
     const authorizedNumbers = new Set(numericTokens(authorizedDecisionText));
-    if (numericTokens(recommended[0].contractEffect)
-      .some((number) => !authorizedNumbers.has(number))) {
-      throw new Error(`recommended_answer_invents_numeric_literal:${decision.questionId}`);
+    for (const answer of decision.answers) {
+      if (protectsExplicitUserBehavior
+        && requestedBehaviorRemovalPattern.test(answer.contractEffect)) {
+        throw new Error(`decision_answer_negates_user_intent:${decision.questionId}:${answer.id}`);
+      }
+      if (numericTokens(answer.contractEffect)
+        .some((number) => !authorizedNumbers.has(number))) {
+        throw new Error(`decision_answer_invents_numeric_literal:${decision.questionId}:${answer.id}`);
+      }
+      const answerThreshold = canonicalIntegerThreshold(answer.contractEffect);
+      if (answerThreshold !== null
+        && !authorizedDecisionFragments.some((fragment) => (
+          canonicalIntegerThreshold(fragment) === answerThreshold
+        ))) {
+        throw new Error(`decision_answer_invents_threshold:${decision.questionId}:${answer.id}`);
+      }
     }
     const answerEffects = decision.answers
       .map(({ contractEffect }) => normalizedObservableText(contractEffect));
