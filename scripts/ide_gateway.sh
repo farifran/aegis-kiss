@@ -4,7 +4,7 @@
 
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${AEGIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export AEGIS_ROOT="${ROOT_DIR}"
 RUNTIME_DIR="${ROOT_DIR}/.harness/runtime"
 
@@ -24,8 +24,8 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --wizard    Abre as decisões pendentes no terminal
-  ./aegis --setup     Define supervisor do contrato e agente de código locais
-  ./aegis --setup --show  Exibe a atribuição local sem expor chaves
+  ./aegis --setup     Registra atribuições externas; não executa API nem IDE
+  ./aegis --setup --show  Exibe a configuração externa sem expor chaves
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
   ./aegis --clean     Remove artefatos transientes e redefine src/index.ts
   ./aegis --help      Exibe esta mensagem de ajuda
@@ -175,7 +175,7 @@ main() {
   [[ $# -ge 1 ]] || fatal 'MISSING_ARGUMENT'
 
   case "${1}" in
-    --approve|approve)
+    --approve)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve
       ;;

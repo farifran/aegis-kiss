@@ -39,6 +39,7 @@ export default [
       "coverage/**",
       "build/**",
       "scratch/**",
+      "scripts/generated/**",
 
       ".harness/runtime/**",
       ".harness/artifacts/**",

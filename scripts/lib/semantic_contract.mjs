@@ -246,7 +246,15 @@ function decodeUtf8Prefix(bytes, byteLimit) {
   return '';
 }
 
-function verifiedTextSource(repositoryRoot, manifestEntry) {
+function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
+  const observedBytes = workspaceObservation?.sourceBytesByPath?.get(manifestEntry.path);
+  if (observedBytes !== undefined) {
+    if (observedBytes.byteLength !== manifestEntry.bytes
+      || sha256(observedBytes) !== manifestEntry.digest) {
+      throw new Error(`semantic_source_changed:${manifestEntry.path}`);
+    }
+    return observedBytes;
+  }
   const absolutePath = resolve(repositoryRoot, manifestEntry.path);
   const metadata = lstatSync(absolutePath);
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -281,7 +289,7 @@ function lineWindow(bytes, targetLine, byteLimit) {
   return { content, startLine: start + 1, endLine: end };
 }
 
-function buildSourceEvidence(repositoryRoot, preflight) {
+function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = null) {
   const textFiles = preflight.discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
   const filesByPath = new Map(textFiles.map((file) => [file.path, file]));
   const smallWorkspace = textFiles.reduce((total, { bytes }) => total + bytes, 0)
@@ -309,7 +317,7 @@ function buildSourceEvidence(repositoryRoot, preflight) {
     if (remainingBytes === 0) break;
     const manifestEntry = filesByPath.get(path);
     if (manifestEntry === undefined) continue;
-    const bytes = verifiedTextSource(repositoryRoot, manifestEntry);
+    const bytes = verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation);
     const limit = Math.min(smallWorkspace ? bytes.byteLength : sourceEvidenceFileByteLimit, remainingBytes);
     let excerpt;
     if (!smallWorkspace && matchLine !== null) {
@@ -347,6 +355,7 @@ export function buildSemanticRequest({
   policy,
   constitution,
   revision = null,
+  workspaceObservation = null,
 }) {
   const detectedIntentSignals = detectIntentSignals(preflight.intent);
   const observedTextPaths = preflight.discovery.files
@@ -385,7 +394,7 @@ export function buildSemanticRequest({
         matches: preflight.discovery.lexicalEvidence.matches
           .map(({ term, path, line }) => ({ term, path, line })),
       },
-      sourceEvidence: buildSourceEvidence(repositoryRoot, preflight),
+      sourceEvidence: buildSourceEvidence(repositoryRoot, preflight, workspaceObservation),
     },
     policy: {
       contexts: policy.contexts,
@@ -2551,28 +2560,31 @@ export function compileSemanticContract({
   constitutionDigest,
   humanResolutions = [],
   semanticRevision = null,
+  semanticRequest = null,
+  workspaceObservation = null,
 }) {
-  assertSemanticDraft(draft, policy, {
-    constitutionRules: constitution?.rules,
-    intent: preflight.intent,
-    resolvedDecisionIds: humanResolutions.map(({ questionId }) => questionId),
-    humanResolutions,
-    workspaceEvidence: buildSourceEvidence(repositoryRoot, preflight),
-  });
-  const semanticRequest = buildSemanticRequest({
+  const effectiveSemanticRequest = semanticRequest ?? buildSemanticRequest({
     repositoryRoot,
     preflight,
     policy,
     constitution,
     revision: semanticRevision,
+    workspaceObservation,
   });
-  if (draft.sourceContextDigest !== semanticRequest.contextDigest) {
+  assertSemanticDraft(draft, policy, {
+    constitutionRules: constitution?.rules,
+    intent: preflight.intent,
+    resolvedDecisionIds: humanResolutions.map(({ questionId }) => questionId),
+    humanResolutions,
+    workspaceEvidence: effectiveSemanticRequest.workspace.sourceEvidence,
+  });
+  if (draft.sourceContextDigest !== effectiveSemanticRequest.contextDigest) {
     throw new Error('semantic_context_mismatch');
   }
   const contract = {
     schema: 'aegis.issue_contract.v13',
     implementationAuthorized: false,
-    sourceSemanticRequestDigest: semanticRequest.requestDigest,
+    sourceSemanticRequestDigest: effectiveSemanticRequest.requestDigest,
     semanticRevision,
     sourcePreflightDigest: preflight.preflightDigest,
     sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
@@ -2703,6 +2715,7 @@ export function assertContractDocument({
   policyDigest,
   constitution,
   constitutionDigest,
+  workspaceObservation = null,
 }) {
   assertSchema('aegis.issue_contract.v13', contract);
   const semanticRequest = buildSemanticRequest({
@@ -2711,6 +2724,7 @@ export function assertContractDocument({
     policy,
     constitution,
     revision: contract.semanticRevision,
+    workspaceObservation,
   });
   if (contract.sourceSemanticRequestDigest !== semanticRequest.requestDigest) {
     throw new Error('contract_semantic_request_mismatch');
@@ -2723,7 +2737,7 @@ export function assertContractDocument({
     intent: preflight.intent,
     resolvedDecisionIds: contract.humanResolutions.map(({ questionId }) => questionId),
     humanResolutions: contract.humanResolutions,
-    workspaceEvidence: buildSourceEvidence(repositoryRoot, preflight),
+    workspaceEvidence: semanticRequest.workspace.sourceEvidence,
   });
   if (contract.implementationAuthorized !== false) throw new Error('implementation_authorized');
   if (contract.sourcePreflightDigest !== preflight.preflightDigest) throw new Error('contract_preflight_mismatch');

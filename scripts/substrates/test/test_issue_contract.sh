@@ -43,7 +43,7 @@ printf '%s\n' "${role_assignment}" | jq -e '
   and .roles.contractSupervisor.credentialAvailable == false
   and .roles.codingAgent.channel == "IDE"
   and .roles.codingAgent.credentialEnv == null
-  and .executionBoundary == "EXTERNAL_HUMAN_AUTHORIZATION_REQUIRED"
+  and .executionBoundary == "EXTERNAL_CONFIGURATION_ONLY"
 ' >/dev/null
 set +e
 setup_arity_output="$(bash ./aegis --setup invalid 2>&1)"
@@ -129,6 +129,18 @@ try {
     || !evidence.queryTerms.includes('any')) {
     throw new Error('late_identifier_was_omitted');
   }
+  const domainDiscovery = discoverWorkspace(
+    root,
+    'Precisamos garantir um leilão de liquidez com ciclos e Árvore de Merkle determinística.',
+  );
+  if (domainDiscovery.lexicalEvidence.queryTerms.includes('Precisamos')
+    || domainDiscovery.lexicalEvidence.queryTerms.includes('garantir')
+    || !domainDiscovery.lexicalEvidence.queryTerms.includes('Merkle')
+    || !domainDiscovery.lexicalEvidence.queryTerms.includes('ciclos')
+    || !domainDiscovery.lexicalEvidence.queryTerms.includes('leilão')
+    || !domainDiscovery.lexicalEvidence.queryTerms.includes('liquidez')) {
+    throw new Error('lexical_domain_terms_lost_to_generic_words');
+  }
   if (!discovery.ignoredEntries.some(({ reason }) => reason === 'SYMLINK')) {
     throw new Error('symlink_was_not_reported');
   }
@@ -141,6 +153,8 @@ NODE
 # Conteúdo e comandos permanecem separados.
 source_before="$(shasum src/index.ts)"
 printf '%s\n' "$(bash ./aegis 'clean')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
+[[ "${source_before}" == "$(shasum src/index.ts)" ]]
+printf '%s\n' "$(bash ./aegis 'approve')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
 set +e

@@ -22,7 +22,12 @@ import {
   renderSemanticContractMarkdown,
   resolutionRequiresRecompilation,
 } from './scripts/lib/semantic_contract.mjs';
-import { buildPreflightHandoff, discoverWorkspace, loadArchitecturePolicy } from './scripts/lib/issue_contract_core.mjs';
+import {
+  buildPreflightHandoff,
+  discoverWorkspace,
+  loadArchitecturePolicy,
+  observeWorkspace,
+} from './scripts/lib/issue_contract_core.mjs';
 import { assertSchema, schemaDocument, schemaErrors } from './scripts/lib/schema_validator.mjs';
 import { parseSemanticState, semanticStateRelativePath } from './scripts/lib/semantic_state.mjs';
 import { buildRejectionReport } from './scripts/lib/rejection_report.mjs';
@@ -33,8 +38,6 @@ import {
 } from './scripts/lib/role_assignment.mjs';
 
 const schemaFiles = [
-  'architecture-policy.v1.schema.json',
-  'architecture-policy.v2.schema.json',
   'architecture-policy.v3.schema.json',
   'confirmation-request.v4.schema.json',
   'constitution.v1.schema.json',
@@ -60,13 +63,7 @@ const schemaFiles = [
   'semantic-draft.v6.schema.json',
   'semantic-draft.v7.schema.json',
   'semantic-draft.v8.schema.json',
-  'semantic-opinion.v1.schema.json',
   'semantic-opinion.v2.schema.json',
-  'semantic-request.v1.schema.json',
-  'semantic-request.v2.schema.json',
-  'semantic-request.v3.schema.json',
-  'semantic-request.v4.schema.json',
-  'semantic-request.v5.schema.json',
   'semantic-request.v6.schema.json',
   'semantic-request.v7.schema.json',
   'semantic-request.v8.schema.json',
@@ -135,7 +132,7 @@ const roleSummary = publicRoleAssignmentSummary(roleAssignment);
 if (roleSummary.roles.contractSupervisor.credentialEnv !== 'AEGIS_SUPERVISOR_API_KEY'
   || roleSummary.roles.contractSupervisor.credentialAvailable !== false
   || roleSummary.roles.codingAgent.credentialEnv !== undefined
-  || roleSummary.executionBoundary !== 'EXTERNAL_HUMAN_AUTHORIZATION_REQUIRED') {
+  || roleSummary.executionBoundary !== 'EXTERNAL_CONFIGURATION_ONLY') {
   throw new Error('role_assignment_exposed_or_omitted_public_configuration');
 }
 if (schemaErrors('aegis.role_assignment.v1', {
@@ -200,15 +197,18 @@ try {
     join(largeRoot, 'src/index.ts'),
     `${'const filler = 1;\n'.repeat(3_000)}export const needleterm = true;\n`,
   );
+  const largeObservation = observeWorkspace(largeRoot, 'Encontrar needleterm.');
   const largePreflight = buildPreflightHandoff({
     demand: 'Encontrar needleterm.',
-    discovery: discoverWorkspace(largeRoot, 'Encontrar needleterm.'),
+    discovery: largeObservation.discovery,
   });
+  rmSync(join(largeRoot, 'src/index.ts'));
   const largeRequest = buildSemanticRequest({
     repositoryRoot: largeRoot,
     preflight: largePreflight,
     policy: loadedPolicy.policy,
     constitution,
+    workspaceObservation: largeObservation,
   });
   const lexicalMatch = largeRequest.workspace.lexicalEvidence.matches[0];
   const sourceWindow = largeRequest.workspace.sourceEvidence[0];

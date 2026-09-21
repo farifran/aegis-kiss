@@ -2,7 +2,7 @@
 
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
@@ -39,6 +39,13 @@ async function writeFileAtomic(target, content) {
   }
 }
 
+async function clearSupersededRuntime() {
+  const entries = await readdir(runtimeDir, { withFileTypes: true });
+  await Promise.all(entries
+    .filter(({ name }) => name !== basename(preflightJsonPath))
+    .map(({ name }) => rm(resolve(runtimeDir, name), { recursive: true, force: true })));
+}
+
 async function readPreflight() {
   if (!existsSync(preflightJsonPath)) throw rejection('MISSING_PREFLIGHT');
   const [{ assertPreflightDocument }, preflight] = await Promise.all([
@@ -73,20 +80,22 @@ async function readConstitution() {
 }
 
 async function assertDiscoveryUnchanged(preflight) {
-  const [{ canonicalDigest }, { discoverWorkspace }] = await Promise.all([
+  const [{ canonicalDigest }, { observeWorkspace }] = await Promise.all([
     import('./lib/canonical_json.mjs'),
     import('./lib/issue_contract_core.mjs'),
   ]);
-  const currentDiscovery = discoverWorkspace(root, preflight.intent);
+  const workspaceObservation = observeWorkspace(root, preflight.intent);
+  const currentDiscovery = workspaceObservation.discovery;
   if (currentDiscovery.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest) {
     throw rejection('SOURCE_SNAPSHOT_CHANGED');
   }
   if (canonicalDigest(currentDiscovery) !== canonicalDigest(preflight.discovery)) {
     throw rejection('DISCOVERY_EVIDENCE_MISMATCH');
   }
+  return workspaceObservation;
 }
 
-async function readPendingRevision(preflight, loadedPolicy, constitution) {
+async function readPendingRevision(preflight, loadedPolicy, constitution, workspaceObservation = null) {
   const pathsExist = [contractJsonPath, userConfirmationPath, resolutionPath]
     .map((path) => existsSync(path));
   if (!pathsExist[2]) return null;
@@ -121,6 +130,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
     policyDigest: loadedPolicy.policyDigest,
     constitution,
     constitutionDigest: constitution.digest,
+    workspaceObservation,
   });
   if (!resolutionRequiresRecompilation({ contract, request, resolution })) return null;
   return {
@@ -136,7 +146,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution) {
 async function handleDraft(args) {
   const [
     { canonicalJson },
-    { buildPreflightHandoff, captureDemand, discoverWorkspace },
+    { buildPreflightHandoff, captureDemand, observeWorkspace },
     { assertPreflightDocument },
   ] = await Promise.all([
     import('./lib/canonical_json.mjs'),
@@ -144,22 +154,13 @@ async function handleDraft(args) {
     import('./lib/preflight_integrity.mjs'),
   ]);
   const demand = captureDemand(args);
-  const discovery = discoverWorkspace(root, demand);
+  const { discovery } = observeWorkspace(root, demand);
   const preflight = buildPreflightHandoff({ demand, discovery });
   assertPreflightDocument(preflight);
   const serializedPreflight = `${canonicalJson(preflight)}\n`;
 
-  await mkdir(harnessDir, { recursive: true });
-  const stagingDir = await mkdtemp(resolve(harnessDir, '.preflight-'));
-  const stagedPreflightPath = resolve(stagingDir, 'preflight.json');
-  try {
-    await writeFile(stagedPreflightPath, serializedPreflight, { encoding: 'utf8', flush: true });
-    await rm(runtimeDir, { recursive: true, force: true });
-    await mkdir(runtimeDir, { recursive: true });
-    await rename(stagedPreflightPath, preflightJsonPath);
-  } finally {
-    await rm(stagingDir, { recursive: true, force: true });
-  }
+  await writeFileAtomic(preflightJsonPath, serializedPreflight);
+  await clearSupersededRuntime();
 
   process.stdout.write(`${JSON.stringify({
     schema: preflight.schema,
@@ -181,7 +182,7 @@ async function validateContract(contract, preflight) {
     readPolicy(),
     readConstitution(),
   ]);
-  await assertDiscoveryUnchanged(preflight);
+  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -190,6 +191,7 @@ async function validateContract(contract, preflight) {
     policyDigest: loadedPolicy.policyDigest,
     constitution,
     constitutionDigest: constitution.digest,
+    workspaceObservation,
   });
 }
 
@@ -352,14 +354,20 @@ async function handleSemanticRequest() {
     readPolicy(),
     readConstitution(),
   ]);
-  await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(preflight, loadedPolicy, constitution);
+  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
+  const revision = await readPendingRevision(
+    preflight,
+    loadedPolicy,
+    constitution,
+    workspaceObservation,
+  );
   const request = buildSemanticRequest({
     repositoryRoot: root,
     preflight,
     policy: loadedPolicy.policy,
     constitution,
     revision: revision?.request ?? null,
+    workspaceObservation,
   });
   process.stdout.write(`${canonicalJson(request)}\n`);
 }
@@ -398,14 +406,20 @@ async function handleSemanticCompile(args) {
     readPolicy(),
     readConstitution(),
   ]);
-  await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(preflight, loadedPolicy, constitution);
+  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
+  const revision = await readPendingRevision(
+    preflight,
+    loadedPolicy,
+    constitution,
+    workspaceObservation,
+  );
   const request = buildSemanticRequest({
     repositoryRoot: root,
     preflight,
     policy: loadedPolicy.policy,
     constitution,
     revision: revision?.request ?? null,
+    workspaceObservation,
   });
   let draft;
   try {
@@ -427,6 +441,7 @@ async function handleSemanticCompile(args) {
     constitutionDigest: constitution.digest,
     humanResolutions: revision?.humanResolutions ?? [],
     semanticRevision: request.revision,
+    semanticRequest: request,
   });
   const confirmation = buildConfirmationRequest(contract);
 
@@ -472,6 +487,7 @@ async function handleApprove() {
   if (draftContract.schema !== 'aegis.issue_contract.v13') {
     throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v13`);
   }
+  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
   assertContractDocument({
     repositoryRoot: root,
     contract: draftContract,
@@ -480,6 +496,7 @@ async function handleApprove() {
     policyDigest: loadedPolicy.policyDigest,
     constitution,
     constitutionDigest: constitution.digest,
+    workspaceObservation,
   });
 
   if (!existsSync(userConfirmationPath)) throw rejection('MISSING_USER_CONFIRMATION');
@@ -504,7 +521,6 @@ async function handleApprove() {
     };
   }
 
-  await assertDiscoveryUnchanged(preflight);
   const contract = finalizeContractApproval({
     contract: draftContract,
     request,
@@ -518,6 +534,7 @@ async function handleApprove() {
     policyDigest: loadedPolicy.policyDigest,
     constitution,
     constitutionDigest: constitution.digest,
+    workspaceObservation,
   });
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);

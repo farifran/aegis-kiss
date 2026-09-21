@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "aegis.role_assignment.v1",
+  "description": "Configuração declarativa para integrações externas. O Harness não executa API nem IDE a partir deste documento.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "roles"],

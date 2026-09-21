@@ -1,95 +1,49 @@
-import Ajv2020 from 'ajv/dist/2020.js';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
+import {
+  schemaFiles,
+  validatorFileName,
+  validatorSchemaIds,
+} from './schema_catalog.mjs';
+
 const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const schemaDirectory = resolve(repositoryRoot, 'governance/schemas');
-const schemaFiles = new Map([
-  ['aegis.architecture_policy.v1', 'architecture-policy.v1.schema.json'],
-  ['aegis.architecture_policy.v2', 'architecture-policy.v2.schema.json'],
-  ['aegis.architecture_policy.v3', 'architecture-policy.v3.schema.json'],
-  ['aegis.confirmation_request.v4', 'confirmation-request.v4.schema.json'],
-  ['aegis.constitution.v1', 'constitution.v1.schema.json'],
-  ['aegis.issue_contract.v3', 'issue-contract.v3.schema.json'],
-  ['aegis.issue_contract.v4', 'issue-contract.v4.schema.json'],
-  ['aegis.issue_contract.v5', 'issue-contract.v5.schema.json'],
-  ['aegis.issue_contract.v6', 'issue-contract.v6.schema.json'],
-  ['aegis.issue_contract.v7', 'issue-contract.v7.schema.json'],
-  ['aegis.issue_contract.v8', 'issue-contract.v8.schema.json'],
-  ['aegis.issue_contract.v9', 'issue-contract.v9.schema.json'],
-  ['aegis.issue_contract.v10', 'issue-contract.v10.schema.json'],
-  ['aegis.issue_contract.v11', 'issue-contract.v11.schema.json'],
-  ['aegis.issue_contract.v12', 'issue-contract.v12.schema.json'],
-  ['aegis.issue_contract.v13', 'issue-contract.v13.schema.json'],
-  ['aegis.preflight_handoff.v2', 'preflight-handoff.v2.schema.json'],
-  ['aegis.rejection.v1', 'rejection.v1.schema.json'],
-  ['aegis.semantic_draft.v1', 'semantic-draft.v1.schema.json'],
-  ['aegis.semantic_draft.v2', 'semantic-draft.v2.schema.json'],
-  ['aegis.semantic_draft.v3', 'semantic-draft.v3.schema.json'],
-  ['aegis.semantic_draft.v4', 'semantic-draft.v4.schema.json'],
-  ['aegis.semantic_draft.v5', 'semantic-draft.v5.schema.json'],
-  ['aegis.semantic_draft.v6', 'semantic-draft.v6.schema.json'],
-  ['aegis.semantic_draft.v7', 'semantic-draft.v7.schema.json'],
-  ['aegis.semantic_draft.v8', 'semantic-draft.v8.schema.json'],
-  ['aegis.semantic_opinion.v1', 'semantic-opinion.v1.schema.json'],
-  ['aegis.semantic_opinion.v2', 'semantic-opinion.v2.schema.json'],
-  ['aegis.semantic_request.v1', 'semantic-request.v1.schema.json'],
-  ['aegis.semantic_request.v2', 'semantic-request.v2.schema.json'],
-  ['aegis.semantic_request.v3', 'semantic-request.v3.schema.json'],
-  ['aegis.semantic_request.v4', 'semantic-request.v4.schema.json'],
-  ['aegis.semantic_request.v5', 'semantic-request.v5.schema.json'],
-  ['aegis.semantic_request.v6', 'semantic-request.v6.schema.json'],
-  ['aegis.semantic_request.v7', 'semantic-request.v7.schema.json'],
-  ['aegis.semantic_request.v8', 'semantic-request.v8.schema.json'],
-  ['aegis.semantic_request.v9', 'semantic-request.v9.schema.json'],
-  ['aegis.semantic_worksheet.v1', 'semantic-worksheet.v1.schema.json'],
-  ['aegis.semantic_resolution.v2', 'semantic-resolution.v2.schema.json'],
-  ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],
-]);
+const generatedDirectory = resolve(repositoryRoot, 'scripts/generated/schema_validators');
+const require = createRequire(import.meta.url);
+const validatorIds = new Set(validatorSchemaIds);
+const validators = new Map();
 
-const validator = new Ajv2020({ allErrors: true, strict: true });
-
-function referencedSchemaIds(value, result = new Set()) {
-  if (Array.isArray(value)) {
-    for (const item of value) referencedSchemaIds(item, result);
-  } else if (value !== null && typeof value === 'object') {
-    for (const [key, item] of Object.entries(value)) {
-      if (key === '$ref' && typeof item === 'string' && item.startsWith('aegis.')) {
-        result.add(item.split('#', 1)[0]);
-      } else {
-        referencedSchemaIds(item, result);
-      }
-    }
+function loadValidator(schemaId) {
+  if (!validatorIds.has(schemaId)) {
+    throw new Error(`schema_has_no_runtime_validator:${schemaId}`);
   }
-  return result;
-}
-
-function loadSchema(schemaId, loading = new Set()) {
-  if (validator.getSchema(schemaId) !== undefined) return;
-  if (loading.has(schemaId)) throw new Error('circular_schema_reference:' + schemaId);
-  loading.add(schemaId);
-  const schema = schemaDocument(schemaId);
-  for (const referenceId of referencedSchemaIds(schema)) loadSchema(referenceId, loading);
-  validator.addSchema(schema);
-  loading.delete(schemaId);
+  const existing = validators.get(schemaId);
+  if (existing !== undefined) return existing;
+  const validate = require(resolve(generatedDirectory, validatorFileName(schemaId)));
+  validators.set(schemaId, validate);
+  return validate;
 }
 
 export function schemaDocument(schemaId) {
   const file = schemaFiles.get(schemaId);
-  if (file === undefined) throw new Error('unknown_schema:' + schemaId);
+  if (file === undefined) throw new Error(`unknown_schema:${schemaId}`);
   return JSON.parse(readFileSync(resolve(schemaDirectory, file), 'utf8'));
 }
 
 export function schemaErrors(schemaId, value) {
-  loadSchema(schemaId);
-  const validate = validator.getSchema(schemaId);
-  if (validate === undefined) throw new Error('schema_unavailable:' + schemaId);
+  const validate = loadValidator(schemaId);
   if (validate(value)) return [];
-  return (validate.errors ?? []).map((error) => (error.instancePath || '/') + ':' + error.keyword);
+  return (validate.errors ?? []).map((error) => (
+    `${error.instancePath || '/'}:${error.keyword}`
+  ));
 }
 
 export function assertSchema(schemaId, value) {
   const errors = schemaErrors(schemaId, value);
-  if (errors.length > 0) throw new Error('schema_validation_failed:' + schemaId + ':' + errors.join(','));
+  if (errors.length > 0) {
+    throw new Error(`schema_validation_failed:${schemaId}:${errors.join(',')}`);
+  }
 }

@@ -45,6 +45,14 @@ const minimumPlainTermLength = 5;
 const lexicalTokenPattern = /[\p{L}\p{N}_$-]{3,}/gu;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+const lexicalStopWords = new Set([
+  'agora', 'ainda', 'alguma', 'algumas', 'algum', 'alguns', 'através', 'caso', 'como',
+  'automaticamente', 'completamente', 'durante', 'então', 'essa', 'essas', 'esse', 'esses',
+  'esta', 'este', 'fazer', 'garantir', 'garantindo',
+  'muitas', 'nosso', 'nossa', 'onde', 'para', 'podem', 'ponto', 'precisamos', 'quando', 'sistema', 'somente',
+  'também', 'toda', 'todo', 'total', 'vocês', 'with', 'from', 'into', 'must', 'should',
+  'that', 'this', 'when', 'where',
+]);
 
 function compareText(left, right) {
   if (left < right) return -1;
@@ -69,6 +77,12 @@ function isIdentifierLike(term) {
   return /[_$\d-]/u.test(term) || /\p{Ll}\p{Lu}/u.test(term);
 }
 
+function isTechnicalName(text, matchIndex, term) {
+  if (!/^\p{Lu}/u.test(term)) return false;
+  const preceding = text.slice(0, matchIndex).trimEnd().at(-1);
+  return preceding !== undefined && !/[.!?:\n*-]/u.test(preceding);
+}
+
 function demandTerms(text) {
   const codeRanges = codeSpanRanges(text);
   const termsByKey = new Map();
@@ -81,13 +95,16 @@ function demandTerms(text) {
     const inCodeSpan = codeRanges[codeRangeIndex]?.start <= match.index
       && match.index < codeRanges[codeRangeIndex]?.end;
     const codeLike = inCodeSpan || isIdentifierLike(term);
+    const technicalName = !codeLike && isTechnicalName(text, match.index, term);
     const length = [...term].length;
+    if (!codeLike && lexicalStopWords.has(key)) continue;
     if (!codeLike && length < minimumPlainTermLength) continue;
 
     const existing = termsByKey.get(key);
     if (existing) {
       existing.occurrences += 1;
       existing.codeLike ||= codeLike;
+      existing.technicalName ||= technicalName;
       continue;
     }
     termsByKey.set(key, {
@@ -95,6 +112,7 @@ function demandTerms(text) {
       term,
       length,
       codeLike,
+      technicalName,
       occurrences: 1,
       position,
     });
@@ -103,9 +121,10 @@ function demandTerms(text) {
 
   const terms = [...termsByKey.values()]
     .sort((left, right) => Number(right.codeLike) - Number(left.codeLike)
-      || right.length - left.length
-      || left.occurrences - right.occurrences
-      || left.position - right.position);
+      || Number(right.technicalName) - Number(left.technicalName)
+      || right.occurrences - left.occurrences
+      || left.position - right.position
+      || right.length - left.length);
   return {
     terms: terms.slice(0, discoveryTermLimit),
     termsTruncated: terms.length > discoveryTermLimit,
@@ -170,9 +189,10 @@ export function computeSourceSnapshotDigest(files, ignoredEntries) {
  * Descobre apenas fatos estruturais já presentes em src/.
  * Todo o resultado existe em RAM até ser incorporado à evidência do contrato.
  */
-export function discoverWorkspace(repositoryRoot, intent = '') {
+export function observeWorkspace(repositoryRoot, intent = '') {
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
+  const sourceBytesByPath = new Map();
   const files = [];
   const ignoredEntries = [];
   let visitedEntries = 0;
@@ -214,6 +234,7 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
         throw new Error('discovery_byte_limit_exceeded');
       }
       scannedBytes += sourceBytes.byteLength;
+      sourceBytesByPath.set(relativePath, sourceBytes);
       const file = {
         path: relativePath,
         bytes: sourceBytes.byteLength,
@@ -254,7 +275,7 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
   const lexicalEvidence = buildLexicalEvidence(sourceRecords, intent);
   const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
-  return {
+  const discovery = {
     sourceRoot: 'src',
     status: hasTextSource
       ? 'SOURCE_OBSERVED'
@@ -266,6 +287,11 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
     sourceSnapshotDigest: computeSourceSnapshotDigest(files, ignoredEntries),
     lexicalEvidence,
   };
+  return { discovery, sourceBytesByPath };
+}
+
+export function discoverWorkspace(repositoryRoot, intent = '') {
+  return observeWorkspace(repositoryRoot, intent).discovery;
 }
 
 /**

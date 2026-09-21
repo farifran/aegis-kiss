@@ -94,10 +94,10 @@ async function configure() {
     }
     const contractSupervisor = await configureRole(
       terminal,
-      'Quem supervisiona o contrato?',
+      'Qual integração externa supervisionará o contrato?',
       previous?.roles.contractSupervisor,
     );
-    process.stderr.write('\nQuem executará código depois de uma autorização humana separada?\n  1) A mesma opção do supervisor\n  2) Configurar outra opção\n');
+    process.stderr.write('\nQual agente externo poderá executar código depois de uma autorização humana separada?\n  1) A mesma opção do supervisor\n  2) Configurar outra opção\n');
     const codingChoice = await askRequired(terminal, 'Escolha [1]: ', '1');
     let codingAgent;
     if (codingChoice === '1') {
