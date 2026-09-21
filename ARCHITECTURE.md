@@ -93,6 +93,43 @@ aprovada.
 Aplica-se a comportamento dependente de tempo. `Date.now()` é uma referência
 proibida enquanto não houver emenda aprovada.
 
+### ARCH-BIGINT-ARITHMETIC — hard
+
+Quando uma demanda TypeScript ou JavaScript usa a divisão nativa de `BigInt`
+sem exigir outra política, o resultado trunca em direção a zero e divisor zero
+produz rejeição explícita. Esses comportamentos são fatos mecânicos da
+plataforma e não criam decisões para o Wizard.
+
+Aplica-se a contratos que exponham aritmética inteira `BigInt`.
+
+### ARCH-OBSERVABILITY-COUNTERS — default
+
+Campos públicos de contagem sem sinal usados somente para observabilidade
+rejeitam valores negativos e saturam no maior valor representável quando a
+demanda não define outra política. Wrap ou truncamento silencioso são
+proibidos porque falseiam a telemetria.
+
+Aplica-se a contadores limitados em bitmasks ou telemetria pública.
+
+### ARCH-HASH-SECURITY-LABEL — hard
+
+Um fingerprint determinístico não criptográfico não pode ser apresentado como
+garantia criptográfica. Uma raiz de 64 bits descrita como criptográfica exige
+risco explícito de colisão e resolução coerente da propriedade de segurança;
+algoritmos não criptográficos, como FNV-1a, permanecem apenas exemplos ou
+alternativas incompatíveis com essa propriedade.
+
+Aplica-se a hashes, fingerprints e raízes de integridade públicas.
+
+### ARCH-PUBLIC-INTERFACE — hard
+
+Toda função pública exigida pelo contrato possui entradas, saídas e falhas
+observáveis definidas. Quando a intenção não fornece uma assinatura ou modelo
+de dados suficiente, a ausência permanece uma lacuna bloqueante; o modelo não
+inventa uma API nem transfere uma opção imatura ao Wizard.
+
+Aplica-se a funções, APIs e exports públicos.
+
 ## Evolução da política
 
 O Contract IR calcula localmente quais regras são aplicáveis e exige avaliação
@@ -112,11 +149,12 @@ revisão (`reviewReferences`) de sinais de possível conflito
 estar negada ou citada como exemplo —, mas não pode desaparecer do contrato e
 exige avaliação explícita da regra em `policyAssessments`.
 
-`src/`, caminhos do Harness, TypeScript e relógio são sinais conservadores de
-contexto. `AbstractCycleResolver`, injeção dinâmica de dependências, `factories`
-e decoradores ativam parcimônia. `any`, `@ts-ignore`, `try/catch`, `catch` vazio
-e `Date.now` são referências proibidas. Todo sinal exige avaliação explícita da
-regra correspondente; a revisão adversarial residual não repete uma correção já
-resolvida pela política. A lista é deliberadamente curta: protege cláusulas
-universais sem tentar substituir interpretação semântica por um dicionário de
-domínio.
+`src/`, caminhos do Harness, TypeScript, `BigInt`, bitmask, função pública,
+hash criptográfico e relógio são sinais conservadores de contexto.
+`AbstractCycleResolver`, injeção dinâmica de dependências, `factories` e
+decoradores ativam parcimônia. `any`, `@ts-ignore`, `try/catch`, `catch` vazio,
+FNV-1a usado como primitiva criptográfica e `Date.now` são referências
+proibidas. Todo sinal exige avaliação explícita da regra correspondente; a
+revisão adversarial residual não repete uma correção já resolvida pela política.
+A lista é deliberadamente curta: protege cláusulas universais sem tentar
+substituir interpretação semântica por um dicionário de domínio.

@@ -282,6 +282,7 @@
             "minimum": 0
           },
           "decisionIndex": {
+            "description": "Índice da decisão somente quando já existem alternativas maduras e materialmente distintas. Use null para lacuna material bloqueante que ainda não pode chegar ao Wizard.",
             "type": [
               "integer",
               "null"

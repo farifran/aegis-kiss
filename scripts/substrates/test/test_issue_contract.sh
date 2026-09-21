@@ -202,8 +202,20 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and (.outputSchema.document.required | index("requirements") != null)
   and .revision == null
   and .intent == "Criar calculadora de precisão com formato ainda a escolher"
-  and (.policy.rules | length) == 7
-  and (.policy.contexts | length) == 14
+  and ([.policy.rules[].id] | contains([
+    "ARCH-PRODUCT-BOUNDARY",
+    "ARCH-BIGINT-ARITHMETIC",
+    "ARCH-OBSERVABILITY-COUNTERS",
+    "ARCH-HASH-SECURITY-LABEL",
+    "ARCH-PUBLIC-INTERFACE"
+  ]))
+  and ([.policy.contexts[].tag] | contains([
+    "product-demand",
+    "integer-arithmetic",
+    "bounded-observability",
+    "integrity-hash",
+    "public-interface"
+  ]))
   and (.workspace.observedTextPaths == ["src/index.ts"])
   and (.workspace.sourceEvidence[0].trust == "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS")
   and .workspace.sourceEvidence[0].selection == "FULL_SOURCE"

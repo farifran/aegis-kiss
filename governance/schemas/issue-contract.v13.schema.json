@@ -107,7 +107,7 @@
     },
     "specification": { "$ref": "aegis.semantic_draft.v8" },
     "effectiveDeterminismStatus": {
-      "description": "Estado recalculado pelo Harness após aplicar somente resoluções humanas vinculadas.",
+      "description": "Estado recalculado pelo Harness após aplicar resoluções humanas e considerar lacunas materiais sem decisão madura.",
       "enum": ["NOT_APPLICABLE", "SEMANTICALLY_CLOSED", "PENDING_HUMAN_DECISIONS", "BLOCKED_BY_GAP"]
     },
     "humanResolutions": {

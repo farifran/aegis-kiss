@@ -109,6 +109,35 @@ if (unresolvedGapRejection.reason !== 'UNRESOLVED_SEMANTIC_GAP'
   || !unresolvedGapRejection.remediation.includes('Wizard')) {
   throw new Error('unresolved_gap_rejection_is_not_actionable');
 }
+for (const [detail, expectedCause, expectedRule] of [
+  [
+    'incomplete_operand_requires_gap:Q-0001',
+    'INCOMPLETE_OPERAND_REQUIRES_GAP',
+    'CONST-EVIDENCE',
+  ],
+  [
+    'mechanical_dimension_must_be_specified:ROUNDING:ARCH-BIGINT-ARITHMETIC',
+    'MECHANICAL_DIMENSION_MUST_BE_SPECIFIED',
+    'CONST-OBSERVABLE',
+  ],
+  [
+    'cryptographic_small_hash_without_collision_risk:REQ-0001',
+    'CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_COLLISION_RISK',
+    'CONST-OBSERVABLE',
+  ],
+]) {
+  const report = buildRejectionReport({
+    phase: 'SEMANTIC',
+    reason: 'INVALID_SEMANTIC_OPINION',
+    detail,
+  });
+  if (report.cause !== expectedCause
+    || report.ruleId !== expectedRule
+    || report.message === undefined
+    || report.remediation === undefined) {
+    throw new Error(`new_semantic_rejection_is_not_actionable:${expectedCause}`);
+  }
+}
 
 const roleAssignment = {
   schema: 'aegis.role_assignment.v1',
@@ -1724,6 +1753,14 @@ exampleDraft.nonNormativeItems = [{
   basis: [{ source: 'USER_INTENT', reference: 'como FNV-1a' }],
 }];
 exampleDraft.architectureContexts[0].basis = [{ source: 'USER_INTENT', reference: 'integridade criptográfica' }];
+exampleDraft.policyAssessments.push({
+  ruleId: 'ARCH-HASH-SECURITY-LABEL',
+  demandStatus: 'COMPLIANT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'A garantia criptográfica foi separada do algoritmo citado apenas como exemplo.',
+  decisionId: null,
+  amendmentId: null,
+});
 exampleDraft.requirements[0].statement = 'A operação deve garantir integridade criptográfica.';
 exampleDraft.requirements[0].basis = [{ source: 'USER_INTENT', reference: 'integridade criptográfica' }];
 exampleDraft.requirements[0].acceptanceCases[0].then = 'A primitiva escolhida deve satisfazer a garantia criptográfica declarada.';
@@ -1766,6 +1803,32 @@ const exampleContext = {
   workspaceEvidence: exampleRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(exampleDraft, loadedPolicy.policy, exampleContext);
+
+const cryptographicSmallHashWithoutRisk = structuredClone(exampleDraft);
+cryptographicSmallHashWithoutRisk.requirements[0].statement +=
+  ' A raiz criptográfica deve ter 64 bits.';
+let cryptographicSmallHashWithoutRiskRejected = false;
+try {
+  assertSemanticDraft(cryptographicSmallHashWithoutRisk, loadedPolicy.policy, exampleContext);
+} catch (error) {
+  cryptographicSmallHashWithoutRiskRejected = error.message ===
+    'cryptographic_small_hash_without_collision_risk:REQ-RESULT';
+  if (!cryptographicSmallHashWithoutRiskRejected) throw error;
+}
+if (!cryptographicSmallHashWithoutRiskRejected) {
+  throw new Error('cryptographic_small_hash_omitted_collision_risk');
+}
+const cryptographicSmallHashWithRisk = structuredClone(cryptographicSmallHashWithoutRisk);
+cryptographicSmallHashWithRisk.risks.push({
+  id: 'RISK-HASH-COLLISION',
+  kind: 'SECURITY',
+  level: 'HIGH',
+  statement: 'Uma raiz criptográfica de 64 bits possui risco de colisão adversarial.',
+  mitigation: 'Resolver a propriedade de segurança ou declarar a saída apenas como fingerprint.',
+  requirementIds: ['REQ-RESULT'],
+  basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
+});
+assertSemanticDraft(cryptographicSmallHashWithRisk, loadedPolicy.policy, exampleContext);
 
 const promotedExampleDraft = structuredClone(exampleDraft);
 promotedExampleDraft.requirements[0].statement += ' A função deve usar como FNV-1a.';
@@ -1894,6 +1957,14 @@ if (boundedRequest.worksheet.bitFields.length !== 1
   throw new Error('deterministic_worksheet_miscalculated_bit_field');
 }
 const boundedDraft = structuredClone(draft);
+boundedDraft.policyAssessments.push({
+  ruleId: 'ARCH-OBSERVABILITY-COUNTERS',
+  demandStatus: 'COMPLIANT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'A política de extrapolação observacional permanece explícita e deliberável.',
+  decisionId: null,
+  amendmentId: null,
+});
 boundedDraft.sourceContextDigest = boundedRequest.contextDigest;
 boundedDraft.intentClaims = [
   {
@@ -2632,6 +2703,200 @@ const parsimonyContext = {
   workspaceEvidence: parsimonyRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(parsimonyDraft, loadedPolicy.policy, parsimonyContext);
+
+const blockingGapDraft = structuredClone(draft);
+blockingGapDraft.intentClaims = blockingGapDraft.intentClaims
+  .filter(({ targetIds }) => !targetIds.includes('Q-FORMAT'));
+blockingGapDraft.unknowns[0].decisionId = null;
+blockingGapDraft.decisions = [];
+blockingGapDraft.requirements[0].acceptanceCases[0].decisionBinding = null;
+assertSemanticDraft(blockingGapDraft, loadedPolicy.policy, semanticValidationContext);
+const blockingGapContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: blockingGapDraft,
+  preflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+});
+if (blockingGapContract.effectiveDeterminismStatus !== 'BLOCKED_BY_GAP') {
+  throw new Error('material_gap_was_not_blocking');
+}
+let blockingGapReachedConfirmation = false;
+try {
+  buildConfirmationRequest(blockingGapContract);
+  blockingGapReachedConfirmation = true;
+} catch (error) {
+  if (!error.message.includes('UNKNOWN-FORMAT')) throw error;
+}
+if (blockingGapReachedConfirmation) throw new Error('material_gap_reached_wizard');
+
+const inventedOperandDecision = structuredClone(gapDraft);
+const operandDecision = inventedOperandDecision.decisions
+  .find(({ questionId }) => questionId === 'Q-EXPRESSION');
+operandDecision.answers[0].contractEffect = 'O indicador deve ativar para qualquer valor positivo.';
+operandDecision.answers[1].contractEffect = 'O indicador deve ativar quando o valor igualar a demanda total.';
+inventedOperandDecision.requirements[0].acceptanceCases
+  .find(({ decisionBinding }) => decisionBinding?.questionId === 'Q-EXPRESSION').then =
+    operandDecision.answers[0].contractEffect;
+let inventedOperandDecisionRejected = false;
+try {
+  assertSemanticDraft(inventedOperandDecision, loadedPolicy.policy, gapContext);
+} catch (error) {
+  inventedOperandDecisionRejected = error.message ===
+    'incomplete_operand_requires_gap:Q-EXPRESSION';
+  if (!inventedOperandDecisionRejected) throw error;
+}
+if (!inventedOperandDecisionRejected) throw new Error('model_filled_missing_operand');
+
+const mechanicalBigIntDecision = structuredClone(deterministicDraft);
+mechanicalBigIntDecision.policyAssessments.push({
+  ruleId: 'ARCH-BIGINT-ARITHMETIC',
+  demandStatus: 'COMPLIANT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'A semântica nativa de BigInt foi reconhecida como fato mecânico.',
+  decisionId: null,
+  amendmentId: null,
+});
+const mechanicalRoundingDimension = mechanicalBigIntDecision.determinismReview.dimensions
+  .find(({ kind }) => kind === 'ROUNDING');
+mechanicalRoundingDimension.subjectId = 'REQ-RESULT';
+mechanicalRoundingDimension.status = 'DECISION_REQUIRED';
+mechanicalRoundingDimension.rationale = 'O arredondamento BigInt foi enviado ao Wizard.';
+mechanicalRoundingDimension.targetIds = ['REQ-RESULT', 'Q-FORMAT'];
+mechanicalRoundingDimension.basis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
+mechanicalRoundingDimension.closureAuthority = 'MODEL_ARGUMENT';
+mechanicalRoundingDimension.inapplicabilityProof = null;
+let mechanicalBigIntDecisionRejected = false;
+try {
+  assertSemanticDraft(mechanicalBigIntDecision, loadedPolicy.policy, {
+    ...deterministicContext,
+    intent: `${deterministicIntent} Usar divisão nativa BigInt.`,
+  });
+} catch (error) {
+  mechanicalBigIntDecisionRejected = error.message ===
+    'mechanical_dimension_must_be_specified:ROUNDING:ARCH-BIGINT-ARITHMETIC';
+  if (!mechanicalBigIntDecisionRejected) throw error;
+}
+if (!mechanicalBigIntDecisionRejected) throw new Error('bigint_default_reached_wizard');
+
+const vagueCanonicalDecision = structuredClone(deterministicDraft);
+const vagueDecision = vagueCanonicalDecision.decisions[0];
+vagueDecision.answers[0].contractEffect =
+  'Valores equivalentes devem usar representação canônica normalizada.';
+vagueDecision.answers[1].contractEffect =
+  'Valores equivalentes devem usar codificação binária direta.';
+vagueDecision.distinguishingCase.outcomes[0].then =
+  'As duas entradas usam representação canônica normalizada.';
+vagueDecision.distinguishingCase.outcomes[1].then =
+  'As duas entradas usam codificação binária direta.';
+vagueCanonicalDecision.requirements[0].acceptanceCases
+  .find(({ decisionBinding }) => decisionBinding?.questionId === 'Q-FORMAT').then =
+    vagueDecision.answers[0].contractEffect;
+let vagueCanonicalDecisionRejected = false;
+try {
+  assertSemanticDraft(vagueCanonicalDecision, loadedPolicy.policy, deterministicContext);
+} catch (error) {
+  vagueCanonicalDecisionRejected = error.message ===
+    'determinism_decision_option_not_concrete:CANONICALIZATION';
+  if (!vagueCanonicalDecisionRejected) throw error;
+}
+if (!vagueCanonicalDecisionRejected) throw new Error('vague_canonical_option_reached_wizard');
+
+const unrelatedDecisionRisk = structuredClone(draft);
+const unrelatedRequirement = structuredClone(unrelatedDecisionRisk.requirements[0]);
+unrelatedRequirement.id = 'REQ-OTHER';
+unrelatedRequirement.acceptanceCases[0].id = 'AC-OTHER-HAPPY';
+unrelatedRequirement.acceptanceCases[0].decisionBinding = null;
+unrelatedRequirement.acceptanceCases[1].id = 'AC-OTHER-FAILURE';
+unrelatedDecisionRisk.requirements.push(unrelatedRequirement);
+unrelatedDecisionRisk.intentClaims
+  .find(({ id }) => id === 'CLAIM-RESULT').targetIds.push('REQ-OTHER');
+unrelatedDecisionRisk.decisions[0].requirementIds = ['REQ-OTHER'];
+let unrelatedDecisionRiskRejected = false;
+try {
+  assertSemanticDraft(unrelatedDecisionRisk, loadedPolicy.policy, semanticValidationContext);
+} catch (error) {
+  unrelatedDecisionRiskRejected = error.message ===
+    'decision_references_unrelated_risk:Q-FORMAT:RISK-SILENCE';
+  if (!unrelatedDecisionRiskRejected) throw error;
+}
+if (!unrelatedDecisionRiskRejected) throw new Error('unrelated_risk_was_reused');
+
+const publicInterfaceWithoutGap = structuredClone(draft);
+publicInterfaceWithoutGap.policyAssessments.push({
+  ruleId: 'ARCH-PUBLIC-INTERFACE',
+  demandStatus: 'COMPLIANT',
+  recommendedStatus: 'COMPLIANT',
+  rationale: 'A interface pública foi revisada.',
+  decisionId: null,
+  amendmentId: null,
+});
+let publicInterfaceWithoutGapRejected = false;
+try {
+  assertSemanticDraft(publicInterfaceWithoutGap, loadedPolicy.policy, {
+    ...semanticValidationContext,
+    intent: `${preflight.intent} Expor função pública.`,
+  });
+} catch (error) {
+  publicInterfaceWithoutGapRejected = error.message ===
+    'public_interface_without_contract_or_blocking_gap';
+  if (!publicInterfaceWithoutGapRejected) throw error;
+}
+if (!publicInterfaceWithoutGapRejected) throw new Error('undefined_public_interface_was_closed');
+
+const unverifiedQualityWithoutRisk = structuredClone(draft);
+unverifiedQualityWithoutRisk.requirements[0].kind = 'QUALITY';
+unverifiedQualityWithoutRisk.requirements[0].measurement = {
+  method: 'Medir a duração observável da operação.',
+  metric: 'Duração em milissegundos.',
+  target: {
+    value: '10 ms',
+    source: 'USER_INTENT',
+    reference: '10 ms',
+    evidenceStatus: 'UNVERIFIED',
+  },
+  conditions: 'Nas condições fornecidas pelo usuário.',
+};
+unverifiedQualityWithoutRisk.requirements[0].acceptanceCases.push({
+  id: 'AC-QUALITY-TARGET',
+  kind: 'BOUNDARY',
+  given: 'Uma execução nas condições de medição declaradas.',
+  when: 'A duração observável for medida.',
+  then: 'A duração observada deve ser no máximo 10 ms.',
+  outcomeKind: 'OBSERVABLE_EFFECT',
+  decisionBinding: null,
+  boundaryBinding: null,
+});
+let unverifiedQualityWithoutRiskRejected = false;
+try {
+  assertSemanticDraft(unverifiedQualityWithoutRisk, loadedPolicy.policy, {
+    ...semanticValidationContext,
+    intent: `${preflight.intent} O alvo é 10 ms.`,
+  });
+} catch (error) {
+  unverifiedQualityWithoutRiskRejected = error.message ===
+    'unverified_quality_without_feasibility_risk:REQ-RESULT';
+  if (!unverifiedQualityWithoutRiskRejected) throw error;
+}
+if (!unverifiedQualityWithoutRiskRejected) {
+  throw new Error('unverified_quality_omitted_feasibility_risk');
+}
+const unverifiedQualityWithRisk = structuredClone(unverifiedQualityWithoutRisk);
+unverifiedQualityWithRisk.risks.push({
+  id: 'RISK-QUALITY-FEASIBILITY',
+  kind: 'PERFORMANCE',
+  level: 'MEDIUM',
+  statement: 'O alvo de desempenho pode não ser viável sem evidência de medição.',
+  mitigation: 'Executar medição nas condições declaradas antes de tratar o alvo como comprovado.',
+  requirementIds: ['REQ-RESULT'],
+  basis: [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }],
+});
+assertSemanticDraft(unverifiedQualityWithRisk, loadedPolicy.policy, {
+  ...semanticValidationContext,
+  intent: `${preflight.intent} O alvo é 10 ms.`,
+});
 
 const semanticState = {
   schema: 'aegis.semantic_state.v13',

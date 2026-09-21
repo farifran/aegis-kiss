@@ -203,6 +203,31 @@ const resolutionEvidenceTerms = {
   OVERFLOW_MODULO: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /m[oó]dulo|modulo/iu],
 };
 const explicitUncertaintyPattern = /\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|escolh\p{L}*|defin\p{L}*|ainda|alternativ\p{L}*|ou|either|choose|undefined|unspecified)\b/iu;
+const incompleteOperandPattern = /\(\s*\)|``|\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|above|below|greater\s+than|less\s+than)\s*(?=[.,;:!?)]|$)/iu;
+const explicitAlternativePattern = /\b(?:ou|alternativ\p{L}*|escolh\p{L}*|either|or|choose)\b/iu;
+const publicInterfaceIntentPattern = /\b(?:fun(?:ç|c)[aã]o\s+(?:pura|p[uú]blica)|public\s+function|api\s+p[uú]blica|re-?exportad\p{L}*|public\s+api)\b/iu;
+const explicitInterfacePattern = /\b(?:assinatura|signature|entradas?|inputs?|sa[ií]das?|outputs?|par[aâ]metros?|parameters?|interface|type|tipo)\b/iu;
+const cryptographicSmallHashPattern = /\bcriptogr[aá]fic\p{L}*\b[^.!?\n]{0,180}\b(?:32|64|96|128)\s*bits?\b|\b(?:32|64|96|128)\s*bits?\b[^.!?\n]{0,180}\bcriptogr[aá]fic\p{L}*\b/iu;
+const hashRiskPattern = /\b(?:colis(?:ão|oes|ões)|collision|segunda\s+preimagem|second\s+preimage|criptogr[aá]fic\p{L}*|adversarial)\b/iu;
+const feasibilityRiskPattern = /\b(?:viabil\p{L}*|feasibility|evid[eê]nci\p{L}*|medi(?:ç|c)[aã]o|measurement|perfilamento|profiling|aloca(?:ç|c)(?:ão|ões)|lat[eê]ncia|throughput|desempenho|performance)\b/iu;
+const mechanicalDimensionPolicyIds = {
+  ROUNDING: 'ARCH-BIGINT-ARITHMETIC',
+  ZERO_DIVISOR: 'ARCH-BIGINT-ARITHMETIC',
+  BOUNDED_ARITHMETIC: 'ARCH-OBSERVABILITY-COUNTERS',
+};
+const concreteResolutionParameterPatterns = {
+  CANONICAL_ORDER: /\b(?:alfab[eé]tic\p{L}*|lexicogr[aá]fic\p{L}*|por\s+(?:id|identificador|chave|campo)|by\s+(?:id|identifier|key|field))\b/iu,
+  CANONICAL_REPRESENTATION: /\b(?:json|utf-?8|cbor|protobuf|big[- ]endian|little[- ]endian|length[- ]?prefix\p{L}*|prefixo\s+de\s+comprimento|bin[aá]ri\p{L}*\s+fix\p{L}*|textual)\b/iu,
+  DUPLICATES_MERGED: /\b(?:som\p{L}*|m[ií]nim\p{L}*|m[aá]xim\p{L}*|primeir\p{L}*|[uú]ltim\p{L}*|mesmo\s+(?:id|identificador)|same\s+(?:id|identifier))\b/iu,
+  EMPTY_RETURNS_IDENTITY: /(?:\b0x[0-9a-f]+\b|\b0n?\b|\bhash\b[^.!?\n]{0,80}\b(?:vazi\p{L}*|empty)\b|\b(?:vazi\p{L}*|empty)\b[^.!?\n]{0,80}\bhash\b)/iu,
+  REMAINDER_DISTRIBUTED_BY_RULE: /\b(?:maior\s+resto|largest\s+remainder|ordem\s+(?:de\s+)?entrada|input\s+order|menor\s+(?:id|identificador)|smallest\s+(?:id|identifier))\b/iu,
+  ZERO_DIVISOR_RETURNS_SENTINEL: /\b(?:null|undefined|nan|none|0x[0-9a-f]+|-?\d+n?)\b/iu,
+  TIE_BREAK_BY_KEY: /\b(?:id|identificador|identifier|chave\s+[\p{L}\p{N}_-]+|key\s+[\p{L}\p{N}_-]+)\b/iu,
+  COUNT_UNIQUE_IDENTITIES: /\b(?:id|identificador|identifier|conta|account|endere(?:ç|c)o|address)\b/iu,
+  OVERFLOW_SATURATE: /\b(?:\d+|2\s*\^\s*\d+\s*-\s*1|m[aá]xim\p{L}*\s+represent[aá]vel)\b/iu,
+  OVERFLOW_WRAP: /\b(?:\d+|2\s*\^\s*\d+|largura\s+de\s+\d+\s*bits?|\d+\s*bits?)\b/iu,
+  OVERFLOW_MODULO: /\b(?:\d+|2\s*\^\s*\d+|m[oó]dulo\s+\d+)\b/iu,
+};
 
 export function loadSemanticConstitution(repositoryRoot) {
   const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
@@ -512,6 +537,52 @@ function normalizedObservableText(text) {
     .replace(/\s+/gu, ' ')
     .replace(/[.,;:!?]+$/gu, '')
     .trim();
+}
+
+function matchingDimensionResolutions(kind, text) {
+  const allowedKinds = Object.keys(dimensionResolutionRules[kind] ?? {});
+  return allowedKinds.filter((resolutionKind) => (
+    resolutionEvidenceTerms[resolutionKind]?.every((pattern) => pattern.test(text))
+  ));
+}
+
+function decisionResolutionIsConcrete(kind, text) {
+  const matches = matchingDimensionResolutions(kind, text);
+  if (matches.length !== 1) return false;
+  const resolutionKind = matches[0];
+  if (dimensionResolutionRules[kind][resolutionKind].parameter !== true) return true;
+  return concreteResolutionParameterPatterns[resolutionKind]?.test(text) === true;
+}
+
+function mechanicalPolicyForDimension(dimension, subjectText, intent) {
+  const policyId = mechanicalDimensionPolicyIds[dimension.kind];
+  if (policyId === undefined) return null;
+  if ((dimension.kind === 'ROUNDING' || dimension.kind === 'ZERO_DIVISOR')
+    && !/\bbigint\b/iu.test(intent)) return null;
+  if ((dimension.kind === 'ROUNDING' || dimension.kind === 'ZERO_DIVISOR')
+    && /(?:\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|denominador|round\p{L}*|zero)\b[^.!?\n]{0,100}\b(?:escolh\p{L}*|alternativ\p{L}*|ou|choose|alternative|or)\b|\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|denominador|round\p{L}*|zero)\b)/iu
+      .test(intent)) return null;
+  if (dimension.kind === 'BOUNDED_ARITHMETIC'
+    && !/\b(?:bitmask|observabilidade|telemetria|observability|telemetry)\b/iu
+      .test(subjectText)) return null;
+  if (dimension.kind === 'BOUNDED_ARITHMETIC'
+    && /(?:\b(?:pol[ií]tica|overflow|satura\p{L}*|rejeit\p{L}*|wrap|limit\p{L}*)\b[^.!?\n]{0,100}\b(?:escolh\p{L}*|alternativ\p{L}*|ou|choose|alternative|or)\b|\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:overflow|satura\p{L}*|rejeit\p{L}*|wrap|limit\p{L}*)\b)/iu
+      .test(intent)) return null;
+  return policyId;
+}
+
+function hasMatureAlternativesForIncompleteOperand(unknown, intent, decision) {
+  const userReferences = unknown.basis
+    .filter(({ source }) => source === 'USER_INTENT')
+    .map(({ reference }) => reference);
+  if (!userReferences.some((reference) => incompleteOperandPattern.test(reference))) return true;
+  if (userReferences.some((reference) => (
+    explicitAlternativePattern.test(reference) && intent.includes(reference)
+  ))) return true;
+  return decision.answers.every(({ contractEffect }) => (
+    /\b(?:configura(?:ç|c)[aã]o|configur[aá]vel|par[aâ]metro|argumento|fornecid\p{L}*|configuration|parameter|argument|provided)\b/iu
+      .test(contractEffect)
+  ));
 }
 
 function hasDisjunctiveOutcome(text) {
@@ -895,6 +966,7 @@ export function assertSemanticDraft(draft, policy, {
   assertObservableOutcomesAreUnique(acceptanceCases);
   const invariantIds = assertUniqueIds(draft.invariants, 'id', 'invariant');
   const riskIds = assertUniqueIds(draft.risks, 'id', 'risk');
+  const risksById = new Map(draft.risks.map((risk) => [risk.id, risk]));
   const boundaryRuleIds = assertUniqueIds(draft.boundaryRules, 'id', 'boundary_rule');
   assertUniqueIds(draft.unknowns, 'id', 'unknown');
   const decisionIds = assertUniqueIds(draft.decisions, 'questionId', 'decision');
@@ -1214,9 +1286,6 @@ export function assertSemanticDraft(draft, policy, {
   assertRequirementReferences(draft.risks, requirementIds, 'risk');
 
   for (const unknown of draft.unknowns) {
-    if (unknown.material && unknown.decisionId === null) {
-      throw new Error(`material_unknown_without_decision:${unknown.id}`);
-    }
     if (!unknown.material && unknown.decisionId !== null) {
       throw new Error(`non_material_unknown_with_decision:${unknown.id}`);
     }
@@ -1225,7 +1294,7 @@ export function assertSemanticDraft(draft, policy, {
     }
   }
   const materialDecisionIds = new Set(draft.unknowns
-    .filter(({ material }) => material)
+    .filter(({ material, decisionId }) => material && decisionId !== null)
     .map(({ decisionId }) => decisionId));
 
   const requirementSignalOwners = new Map();
@@ -1261,8 +1330,8 @@ export function assertSemanticDraft(draft, policy, {
       if (!intentSignalsById.has(signalId)) {
         throw new Error(`unknown_references_unknown_intent_signal:${signalId}`);
       }
-      if (!unknown.material || unknown.decisionId === null) {
-        throw new Error(`intent_signal_without_material_decision:${signalId}`);
+      if (!unknown.material) {
+        throw new Error(`intent_signal_without_material_unknown:${signalId}`);
       }
       if (!basisCitesIntentSignal(unknown, intentSignalsById.get(signalId))) {
         throw new Error(`unknown_omits_intent_signal_basis:${unknown.id}:${signalId}`);
@@ -1431,7 +1500,8 @@ export function assertSemanticDraft(draft, policy, {
       const resolved = requirements.length === 1 && unknowns.length === 0;
       const unresolved = requirements.length === 0
         && unknowns.length === 1
-        && (signal.handling === 'MATERIAL_DECISION'
+        && (unknowns[0].decisionId === null
+          || signal.handling === 'MATERIAL_DECISION'
           || (intentClaimsByTarget.get(unknowns[0].decisionId) ?? [])
             .some(({ quote }) => explicitUncertaintyPattern.test(quote)));
       if (!resolved && !unresolved) {
@@ -1574,6 +1644,7 @@ export function assertSemanticDraft(draft, policy, {
       ].join('\n');
     };
     for (const dimension of draft.determinismReview.dimensions) {
+      const subjectText = applicabilityTextForSubject(dimension.subjectId);
       const expectedWitness = {
         id: `WITNESS-${dimension.kind}`,
         dimension: dimension.kind,
@@ -1596,6 +1667,19 @@ export function assertSemanticDraft(draft, policy, {
       });
       if (dimension.closureAuthority !== expectedClosureAuthority) {
         throw new Error(`determinism_closure_authority_mismatch:${dimension.kind}`);
+      }
+      const mechanicalPolicyId = mechanicalPolicyForDimension(
+        dimension,
+        subjectText,
+        intent,
+      );
+      const mechanicalPolicy = policy.rules.find(({ id }) => id === mechanicalPolicyId);
+      if (mechanicalPolicy !== undefined
+        && ruleApplication(mechanicalPolicy, architectureTags, intent).applies
+        && dimension.status !== 'SPECIFIED') {
+        throw new Error(
+          `mechanical_dimension_must_be_specified:${dimension.kind}:${mechanicalPolicy.id}`,
+        );
       }
       for (const targetId of dimension.targetIds) {
         if (!requirementIds.has(targetId)
@@ -1675,6 +1759,15 @@ export function assertSemanticDraft(draft, policy, {
         }
         const outcomesByAnswerId = new Map(decision.distinguishingCase.outcomes
           .map((outcome) => [outcome.answerId, outcome.then]));
+        if (decision.answers.some((answer) => {
+          const outcome = outcomesByAnswerId.get(answer.id) ?? '';
+          return !decisionResolutionIsConcrete(
+            dimension.kind,
+            `${answer.contractEffect}\n${outcome}`,
+          );
+        })) {
+          throw new Error(`determinism_decision_option_not_concrete:${dimension.kind}`);
+        }
         if (decision.answers.some((answer) => {
           const outcome = outcomesByAnswerId.get(answer.id);
           return outcome === undefined || !dimensionTriggerPattern[dimension.kind].test([
@@ -1762,6 +1855,14 @@ export function assertSemanticDraft(draft, policy, {
   for (const decision of draft.decisions) {
     if (!materialDecisionIds.has(decision.questionId)) {
       throw new Error(`decision_without_material_unknown:${decision.questionId}`);
+    }
+    const decisionUnknowns = draft.unknowns.filter(({ decisionId }) => (
+      decisionId === decision.questionId
+    ));
+    if (decisionUnknowns.some((unknown) => (
+      !hasMatureAlternativesForIncompleteOperand(unknown, intent, decision)
+    ))) {
+      throw new Error(`incomplete_operand_requires_gap:${decision.questionId}`);
     }
     const ambiguityClaims = intentClaimsByTarget.get(decision.questionId) ?? [];
     if (ambiguityClaims.some(({ quote }) => (
@@ -1859,6 +1960,12 @@ export function assertSemanticDraft(draft, policy, {
     }
     for (const riskId of decision.riskIds) {
       if (!riskIds.has(riskId)) throw new Error(`decision_references_unknown_risk:${riskId}`);
+      const risk = risksById.get(riskId);
+      if (risk === undefined || !risk.requirementIds.some((requirementId) => (
+        decision.requirementIds.includes(requirementId)
+      ))) {
+        throw new Error(`decision_references_unrelated_risk:${decision.questionId}:${riskId}`);
+      }
     }
     const boundCases = acceptanceCases.filter(({ decisionBinding }) => (
       decisionBinding?.questionId === decision.questionId
@@ -2128,6 +2235,36 @@ export function assertSemanticDraft(draft, policy, {
   if (draft.riskReview.status === 'UNKNOWN'
     && !draft.unknowns.some(({ material }) => material)) {
     throw new Error('unknown_risk_without_material_unknown');
+  }
+  for (const requirement of draft.requirements) {
+    if (requirement.kind === 'QUALITY'
+      && requirement.measurement?.target.evidenceStatus === 'UNVERIFIED') {
+      const feasibilityCovered = draft.risks.some((risk) => (
+        risk.requirementIds.includes(requirement.id)
+        && (risk.kind === 'PERFORMANCE' || risk.kind === 'RELIABILITY')
+        && feasibilityRiskPattern.test(`${risk.statement}\n${risk.mitigation}`)
+      ));
+      if (!feasibilityCovered) {
+        throw new Error(`unverified_quality_without_feasibility_risk:${requirement.id}`);
+      }
+    }
+    if (cryptographicSmallHashPattern.test(requirement.statement)) {
+      const collisionCovered = draft.risks.some((risk) => (
+        risk.requirementIds.includes(requirement.id)
+        && (risk.kind === 'SECURITY' || risk.kind === 'INTEGRITY')
+        && hashRiskPattern.test(`${risk.statement}\n${risk.mitigation}`)
+      ));
+      if (!collisionCovered) {
+        throw new Error(`cryptographic_small_hash_without_collision_risk:${requirement.id}`);
+      }
+    }
+  }
+  if (publicInterfaceIntentPattern.test(intent)
+    && !explicitInterfacePattern.test(intent)
+    && !draft.unknowns.some((unknown) => (
+      unknown.material && explicitInterfacePattern.test(unknown.statement)
+    ))) {
+    throw new Error('public_interface_without_contract_or_blocking_gap');
   }
   const rulesById = new Map(policy.rules.map((rule) => [rule.id, rule]));
   const amendmentsById = new Map((policy.amendments ?? []).map((item) => [item.id, item]));
@@ -2605,6 +2742,9 @@ export function compileSemanticContract({
 }
 
 function effectiveDeterminismStatus(specification, humanResolutions) {
+  if (specification.unknowns.some(({ material, decisionId }) => (
+    material && decisionId === null
+  ))) return 'BLOCKED_BY_GAP';
   if (specification.determinismReview.status === 'NOT_APPLICABLE') return 'NOT_APPLICABLE';
   if (specification.determinismReview.dimensions.some(({ status }) => status === 'GAP_FOUND')) {
     return 'BLOCKED_BY_GAP';
@@ -2669,6 +2809,10 @@ export function assertContractApprovalEvidence(contract, { required = false } = 
       if (resolutions.has(questionId)) throw new Error(`pending_decision_marked_resolved:${questionId}`);
     }
     return;
+  }
+  if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP'
+    || contract.effectiveDeterminismStatus === 'PENDING_HUMAN_DECISIONS') {
+    throw new Error('approval_with_unresolved_semantics');
   }
 
   for (const decision of decisions.values()) {
@@ -2765,11 +2909,16 @@ export function assertContractDocument({
 
 export function buildConfirmationRequest(contract) {
   if (contract.approval !== null) throw new Error('contract_already_approved');
-  const unresolvedDimensions = contract.specification.determinismReview.dimensions
+  const unresolvedGaps = [
+    ...contract.specification.determinismReview.dimensions
     .filter(({ status }) => status === 'GAP_FOUND')
-    .map(({ kind, subjectId }) => `${kind}:${subjectId}`);
-  if (unresolvedDimensions.length > 0) {
-    throw new Error(`unresolved_semantic_gap:${unresolvedDimensions.join(',')}`);
+      .map(({ kind, subjectId }) => `${kind}:${subjectId}`),
+    ...contract.specification.unknowns
+      .filter(({ material, decisionId }) => material && decisionId === null)
+      .map(({ id }) => id),
+  ];
+  if (unresolvedGaps.length > 0) {
+    throw new Error(`unresolved_semantic_gap:${unresolvedGaps.join(',')}`);
   }
   const contractDraftDigest = canonicalDigest(contract);
   const request = {
@@ -3068,11 +3217,18 @@ export function renderSemanticContractMarkdown(contract, {
     related.push(unknown);
     unknownsByDecision.set(unknown.decisionId, related);
   }
-  const informationalUnknowns = specification.unknowns.filter(({ decisionId }) => decisionId === null);
+  const blockingUnknowns = specification.unknowns.filter(({ material, decisionId }) => (
+    material && decisionId === null
+  ));
+  const informationalUnknowns = specification.unknowns.filter(({ material, decisionId }) => (
+    !material && decisionId === null
+  ));
 
   lines.push('', governed ? '## 9. Decisões humanas seladas' : '## 9. Decisões aguardando escolha humana');
   if (specification.decisions.length === 0) {
-    lines.push('Nenhuma ambiguidade material detectada.');
+    lines.push(blockingUnknowns.length === 0
+      ? 'Nenhuma ambiguidade material detectada.'
+      : 'Nenhuma decisão madura está disponível enquanto existirem lacunas bloqueantes.');
   } else {
     for (const decision of specification.decisions) {
       lines.push('', `### ${decision.questionId}: ${decision.question}`);
@@ -3100,6 +3256,10 @@ export function renderSemanticContractMarkdown(contract, {
         }
       }
     }
+  }
+  if (blockingUnknowns.length > 0) {
+    lines.push('', '### Lacunas bloqueantes — não chegam ao Wizard');
+    for (const unknown of blockingUnknowns) lines.push(`- **${unknown.id}:** ${unknown.statement}`);
   }
   if (informationalUnknowns.length > 0) {
     lines.push('', '### Lacunas informativas — não exigem decisão');

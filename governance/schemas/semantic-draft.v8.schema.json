@@ -376,7 +376,10 @@
           "id": { "type": "string", "pattern": "^UNKNOWN-[A-Z0-9][A-Z0-9-]+$" },
           "statement": { "type": "string", "minLength": 1 },
           "material": { "type": "boolean" },
-          "decisionId": { "type": ["string", "null"] },
+          "decisionId": {
+            "description": "Decisão madura vinculada; null com material=true representa lacuna bloqueante sem alternativas aptas ao Wizard.",
+            "type": ["string", "null"]
+          },
           "intentSignalIds": { "$ref": "#/$defs/intentSignalIds" },
           "basis": { "$ref": "#/$defs/basis" }
         }
