@@ -8,11 +8,6 @@ const diagnostics = new Map([
     message: 'A política arquitetural não pôde ser autenticada ou validada.',
     remediation: 'Restaure ARCHITECTURE.md e governance/architecture.policy.json para versões mutuamente vinculadas.',
   }],
-  ['DECISION_ANSWERS_SEMANTICALLY_EQUIVALENT', {
-    message: 'Duas alternativas produzem o mesmo resultado observável após normalização.',
-    remediation: 'Remova a pergunta ou formule alternativas com efeitos contratuais realmente diferentes.',
-    ruleId: 'CONST-DECISIONS',
-  }],
   ['DECISION_ANSWERS_WITHOUT_DISTINCT_EFFECTS', {
     message: 'Duas alternativas descrevem o mesmo efeito contratual.',
     remediation: 'Remova a pergunta ou diferencie os resultados observáveis de cada alternativa.',
@@ -28,16 +23,6 @@ const diagnostics = new Map([
     remediation: 'Abra o Wizard, revise cada opção e confirme suas escolhas.',
     ruleId: 'CONST-DECISIONS',
   }],
-  ['INCOMPLETE_OPERAND_REQUIRES_GAP', {
-    message: 'A demanda contém um operando ausente, mas o parecer inventou alternativas para preenchê-lo.',
-    remediation: 'Preserve a ausência como lacuna bloqueante ou ofereça somente formas de parametrização que não inventem o valor.',
-    ruleId: 'CONST-EVIDENCE',
-  }],
-  ['INAPPLICABLE_DETERMINISM_DIMENSION_WITHOUT_STRUCTURAL_ABSENCE', {
-    message: 'Uma dimensão foi declarada inaplicável sem provar que sua estrutura ativadora está ausente da fronteira pública.',
-    remediation: 'Classifique uma regra de invariância como SPECIFIED; use NOT_APPLICABLE somente com ausência estrutural autorizada.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
   ['CONTRACT_HAS_UNRESOLVED_DETERMINISM', {
     message: 'O contrato ainda contém uma lacuna ou decisão de determinismo não resolvida.',
     remediation: 'Resolva a decisão material ou regenere o parecer com evidência autorizada antes de assinar.',
@@ -52,51 +37,6 @@ const diagnostics = new Map([
     message: 'Não existe um pedido de confirmação vinculado ao rascunho atual.',
     remediation: 'Recompile o parecer semântico para gerar um novo pedido de confirmação.',
     ruleId: 'CONST-DECISIONS',
-  }],
-  ['MECHANICAL_DIMENSION_MUST_BE_SPECIFIED', {
-    message: 'Uma semântica já determinada pela plataforma ou pela política foi enviada indevidamente ao Wizard.',
-    remediation: 'Aplique a regra mecânica autorizada, vincule sua prova falsificável e remova a pergunta artificial.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['PUBLIC_INTERFACE_WITHOUT_CONTRACT_OR_BLOCKING_GAP', {
-    message: 'A demanda exige uma função pública, mas sua interface observável não foi definida nem preservada como lacuna.',
-    remediation: 'Defina entradas, saídas e falhas a partir de fonte autorizada ou mantenha a interface como lacuna bloqueante.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_COLLISION_RISK', {
-    message: 'Uma representação curta foi tratada como garantia criptográfica sem explicitar o risco de colisão.',
-    remediation: 'Registre o risco e resolva a propriedade de segurança, ou classifique a saída apenas como fingerprint determinístico.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_SECURITY_DECISION', {
-    message: 'O contrato mantém simultaneamente largura curta e garantia criptográfica sem resolver a incompatibilidade.',
-    remediation: 'Abra uma decisão entre fingerprint não criptográfico e integridade criptográfica com primitiva e largura coerentes.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['SPECIFIED_DIMENSION_DEPENDS_ON_DECISION', {
-    message: 'Uma dimensão declarada como especificada ainda depende de uma decisão humana provisória.',
-    remediation: 'Aplique a regra autorizada sem Wizard ou mantenha a dimensão como DECISION_REQUIRED, nunca ambos.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['INJECTIVE_INVARIANT_WITH_LOSSY_ENCODING', {
-    message: 'O contrato exige injetividade para uma representação que satura, comprime ou substitui valores.',
-    remediation: 'Descreva a saída como projeção determinística e remova a promessa impossível de injetividade.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['CONSERVATION_OMITS_RETAINED_RESIDUAL', {
-    message: 'A equação de conservação ignora um resíduo que o próprio contrato mantém não liquidado.',
-    remediation: 'Inclua explicitamente o resíduo nos dois lados da propriedade de conservação.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['RECOMMENDED_ANSWER_INVENTS_NUMERIC_LITERAL', {
-    message: 'A alternativa recomendada introduz um número não autorizado pelas fontes confiáveis.',
-    remediation: 'Remova o número inventado ou vincule a decisão a um valor fornecido pelo usuário.',
-    ruleId: 'CONST-EVIDENCE',
-  }],
-  ['REQUIREMENT_WITHOUT_DUAL_ACCEPTANCE', {
-    message: 'Um requisito não possui simultaneamente prova de sucesso e prova de falha ou limite.',
-    remediation: 'Adicione casos de aceitação falsificáveis para o caminho feliz e para falha ou fronteira.',
-    ruleId: 'CONST-OBSERVABLE',
   }],
   ['SEMANTIC_CONSTITUTION_UNAVAILABLE', {
     message: 'A constituição cognitiva não pôde ser autenticada ou validada.',
@@ -125,11 +65,6 @@ const diagnostics = new Map([
   ['UNRESOLVED_SEMANTIC_GAP', {
     message: 'O parecer preservou uma lacuna sem evidência suficiente nem alternativas humanas maduras.',
     remediation: 'Não abra o Wizard ainda: obtenha uma regra autorizada, formule uma decisão material ou mantenha a demanda bloqueada.',
-    ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['UNVERIFIED_QUALITY_WITHOUT_FEASIBILITY_RISK', {
-    message: 'Um alvo de qualidade sem evidência foi fechado sem registrar o risco de viabilidade da medição.',
-    remediation: 'Mantenha o alvo como não verificado e vincule um risco de desempenho ou confiabilidade com método de validação.',
     ruleId: 'CONST-OBSERVABLE',
   }],
   ['APPROVAL_WITH_UNRESOLVED_SEMANTICS', {

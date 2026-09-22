@@ -180,7 +180,7 @@
                   "BOUNDARY_RULE",
                   "DETERMINISM_REVIEW"
                 ],
-                "description": "MATERIAL_DECISION exige lacuna observável; SEMANTIC_REVIEW verifica se um marcador incompleto já foi determinado pelo texto; MEASURABLE_REQUIREMENT exige alvo autorizado; metas e exemplos permanecem não normativos; BOUNDARY_RULE exige separar largura de valor codificado; DETERMINISM_REVIEW exige examinar todas as dimensões universais."
+                "description": "MATERIAL_DECISION exige lacuna observável; SEMANTIC_REVIEW verifica se um marcador incompleto já foi determinado pelo texto; MEASURABLE_REQUIREMENT exige alvo autorizado; metas e exemplos permanecem não normativos; BOUNDARY_RULE exige separar largura de valor codificado; DETERMINISM_REVIEW exige reportar somente dimensões materialmente aplicáveis."
               },
               "offset": {
                 "type": "integer",

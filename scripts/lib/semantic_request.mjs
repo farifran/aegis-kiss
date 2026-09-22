@@ -6,13 +6,11 @@ import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { detectIntentSignals } from './intent_signals.mjs';
 import { assertSchema, schemaDocument } from './schema_validator.mjs';
 import {
-  counterexampleByDimension,
-  determinismDimensionKinds,
   mechanicalPolicySignals,
   policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
-} from './semantic_rules.mjs';
+} from './semantic_authority.mjs';
 
 export function loadSemanticConstitution(repositoryRoot) {
   const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
@@ -54,6 +52,14 @@ function decodeUtf8Prefix(bytes, byteLimit) {
     }
   }
   return '';
+}
+
+function compactOutputSchema(value) {
+  if (Array.isArray(value)) return value.map(compactOutputSchema);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== 'description' && key !== 'title')
+    .map(([key, item]) => [key, compactOutputSchema(item)]));
 }
 
 function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
@@ -233,7 +239,7 @@ export function buildSemanticRequest({
     intentSignals: detectedIntentSignals,
   });
   const worksheetDigest = canonicalDigest(worksheet);
-  const outputSchemaDocument = schemaDocument('aegis.semantic_opinion.v2');
+  const outputSchemaDocument = compactOutputSchema(schemaDocument('aegis.semantic_opinion.v2'));
   outputSchemaDocument.properties.worksheetDigest = { const: worksheetDigest };
   const requestWithoutDigest = {
     schema: 'aegis.semantic_request.v9',
@@ -257,12 +263,6 @@ export function buildSemanticRequest({
 }
 
 export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
-  const requiresDeterminismReview = intentSignals.some(({ kind }) => (
-    kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS'
-  ));
-  const requiredDeterminismDimensions = requiresDeterminismReview
-    ? determinismDimensionKinds
-    : [];
   const bitFields = intentSignals.flatMap((signal, signalIndex) => {
     if (signal.kind !== 'BOUNDED_VALUE') return [];
     const match = /\bbits?\s+(\d+)\s*[–—-]\s*(\d+)\b/iu.exec(signal.reference);
@@ -287,12 +287,10 @@ export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
   const worksheet = {
     schema: 'aegis.semantic_worksheet.v1',
     contextDigest,
-    requiredDeterminismDimensions,
-    counterexampleWitnesses: requiredDeterminismDimensions.map((dimension) => ({
-      id: `WITNESS-${dimension}`,
-      dimension,
-      ...counterexampleByDimension[dimension],
-    })),
+    // Semantic dimensions are reported only when material. Requiring the full
+    // universal catalogue made every deterministic demand produce boilerplate.
+    requiredDeterminismDimensions: [],
+    counterexampleWitnesses: [],
     bitFields,
     compilerOwnedFields: [
       'SCHEMA',

@@ -43,7 +43,7 @@
     },
     "counterexampleWitnesses": {
       "type": "array",
-      "description": "Pares mínimos de entrada gerados mecanicamente para contestar cada dimensão sem incorporar regra de negócio. A IA deve responder ao par, mas não pode alterá-lo.",
+      "description": "Pares mínimos opcionais fornecidos pelo compilador. O Harness anexa o witness canônico apenas às dimensões materiais reportadas pela IA.",
       "items": {
         "type": "object",
         "additionalProperties": false,

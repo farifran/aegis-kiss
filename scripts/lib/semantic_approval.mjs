@@ -6,7 +6,6 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
   if (specification.unknowns.some(({ material, decisionId }) => (
     material && decisionId === null
   ))) return 'BLOCKED_BY_GAP';
-  if (specification.determinismReview.status === 'NOT_APPLICABLE') return 'NOT_APPLICABLE';
   if (specification.determinismReview.dimensions.some(({ status }) => status === 'GAP_FOUND')) {
     return 'BLOCKED_BY_GAP';
   }
@@ -14,7 +13,10 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
   const pendingDecisionIds = specification.decisions
     .map(({ questionId }) => questionId)
     .filter((questionId) => !resolvedDecisionIds.has(questionId));
-  return pendingDecisionIds.length > 0 ? 'PENDING_HUMAN_DECISIONS' : 'SEMANTICALLY_CLOSED';
+  if (pendingDecisionIds.length > 0) return 'PENDING_HUMAN_DECISIONS';
+  return specification.determinismReview.status === 'NOT_APPLICABLE'
+    ? 'NOT_APPLICABLE'
+    : 'SEMANTICALLY_CLOSED';
 }
 
 function decisionMap(contract) {

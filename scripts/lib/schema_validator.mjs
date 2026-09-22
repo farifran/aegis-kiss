@@ -37,7 +37,9 @@ export function schemaErrors(schemaId, value) {
   const validate = loadValidator(schemaId);
   if (validate(value)) return [];
   return (validate.errors ?? []).map((error) => (
-    `${error.instancePath || '/'}:${error.keyword}`
+    `${error.instancePath || '/'}:${error.keyword}${
+      error.keyword === 'required' ? `:${error.params.missingProperty}` : ''
+    }`
   ));
 }
 

@@ -673,7 +673,7 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Quando a demanda promete determinismo, responde separadamente a cada dimensão, subject e testemunho da ficha. Sem regra autorizada, ausência estrutural ou decisão material, preserve GAP_FOUND.",
+      "description": "Reporte somente dimensões de determinismo materialmente aplicáveis a um subject observável. Sem regra autorizada, ausência estrutural ou decisão material, preserve GAP_FOUND; não gere stubs para dimensões irrelevantes.",
       "required": [
         "rationale",
         "dimensions"

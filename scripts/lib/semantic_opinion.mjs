@@ -1,6 +1,9 @@
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
-import { closureAuthorityForDimension } from './semantic_rules.mjs';
+import {
+  closureAuthorityForDimension,
+  counterexampleForDimension,
+} from './semantic_authority.mjs';
 
 function generatedId(prefix, index) {
   return `${prefix}-${String(index + 1).padStart(4, '0')}`;
@@ -109,21 +112,9 @@ export function compileSemanticOpinion(opinion, request) {
     return { ...measurement, target };
   };
   const dimensions = opinion.determinismReview.dimensions;
-  const requiredDimensionKinds = new Set(request.worksheet.requiredDeterminismDimensions);
-  const witnessByDimension = new Map(request.worksheet.counterexampleWitnesses
-    .map((witness) => [witness.dimension, witness]));
-  if (dimensions.length === 0 && requiredDimensionKinds.size > 0) {
-    throw new Error('semantic_opinion_determinism_dimension_count_mismatch');
-  }
   const determinismSignalIds = request.intentSignals.signals
     .filter(({ kind }) => kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS')
     .map(({ id }) => id);
-  const revisionEvidence = new Map((request.revision?.answers ?? []).map((answer) => [
-    answer.questionId,
-    [answer.label, answer.rationale, answer.contractEffect, answer.correction]
-      .filter((value) => typeof value === 'string')
-      .join('\n'),
-  ]));
 
   return {
     schema: 'aegis.semantic_draft.v8',
@@ -265,13 +256,7 @@ export function compileSemanticOpinion(opinion, request) {
       rationale: opinion.determinismReview.rationale,
       intentSignalIds: determinismSignalIds,
       dimensions: dimensions.map((item) => {
-        if (!requiredDimensionKinds.has(item.kind)) {
-          throw new Error(`semantic_opinion_unrequested_determinism_dimension:${item.kind}`);
-        }
         const basis = compileOpinionBasis(item.basis, request);
-        const closureText = item.status === 'NOT_APPLICABLE'
-          ? item.inapplicabilityProof?.evidence ?? item.rationale
-          : item.rationale;
         const subjectId = item.subject === null
           ? 'PUBLIC_CONTRACT'
           : compileTargets([item.subject])[0];
@@ -285,13 +270,8 @@ export function compileSemanticOpinion(opinion, request) {
           closureAuthority: closureAuthorityForDimension({
             status: item.status,
             basis,
-            closureText,
-            intent: request.intent,
-            decisionEvidence: revisionEvidence,
-            constitutionRules: request.constitution.rules,
-            policyRules: request.policy.rules,
           }),
-          counterexampleWitness: witnessByDimension.get(item.kind),
+          counterexampleWitness: counterexampleForDimension(item.kind),
           proofObligation: item.proofObligation,
           inapplicabilityProof: item.inapplicabilityProof,
           acceptanceCaseId: item.acceptanceCase === null
