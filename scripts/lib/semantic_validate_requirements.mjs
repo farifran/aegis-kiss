@@ -44,6 +44,7 @@ export function validateRequirementsAndBoundaries(context) {
     intentSignals,
     intentSignalsById,
     nonNormativeSignalOwners,
+    policy,
     requirementIds,
     requirementSignalOwners,
     unknownSignalOwners,
@@ -148,6 +149,7 @@ export function validateRequirementsAndBoundaries(context) {
       boundaryRule,
       behavior,
       humanResolutionEvidence,
+      policy?.rules ?? [],
     ));
     if (unresolvedSides.length > 0
       && (boundaryRule.decisionId === null
@@ -168,7 +170,7 @@ export function validateRequirementsAndBoundaries(context) {
       }
     }
     if ((boundaryRule.underflowBehavior === 'WRAP' || boundaryRule.overflowBehavior === 'WRAP')
-      && !boundaryBehaviorIsExplicit(boundaryRule, 'WRAP', humanResolutionEvidence)) {
+      && !boundaryBehaviorIsExplicit(boundaryRule, 'WRAP', humanResolutionEvidence, policy?.rules ?? [])) {
       throw new Error(`silent_wrap_forbidden:${boundaryRule.id}`);
     }
   }
@@ -505,9 +507,14 @@ export function validateDecisionsAndEvidence(context) {
           claim.mitigation,
           claim.response,
         ].filter((value) => typeof value === 'string');
+        const sentences = rule.statement.split(/[.!?;]\s+/u);
         if (rule === undefined
           || !ruleApplication(rule, architectureTags, intent).applies
-          || !claimText.some((text) => literalReferenceAppears(rule.statement, text))) {
+          || !claimText.some((text) => (
+            literalReferenceAppears(rule.statement, text)
+            || literalReferenceAppears(text, rule.statement)
+            || sentences.some((sentence) => literalReferenceAppears(text, sentence))
+          ))) {
           throw new Error(`safe_default_not_proven_by_policy:${basis.reference}`);
         }
       }

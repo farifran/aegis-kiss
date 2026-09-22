@@ -474,24 +474,29 @@ function closureAuthorityForDimension({
     }
     if (item.source === 'SAFE_MECHANICAL_DEFAULT') {
       const rule = policyRules.find(({ id }) => id === item.reference);
-      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
-        return 'MECHANICAL_FACT';
+      if (rule !== undefined) {
+        const sentences = rule.statement.split(/[.!?;]\s+/u);
+        if (sentences.some((sentence) => literalReferenceAppears(closureText, sentence))
+          || literalReferenceAppears(closureText, rule.statement)
+          || literalReferenceAppears(rule.statement, closureText)) {
+          return 'MECHANICAL_FACT';
+        }
       }
     }
     if (item.source === 'USER_INTENT'
       && intent.includes(item.reference)
-      && literalReferenceAppears(item.reference, closureText)) {
+      && (literalReferenceAppears(closureText, item.reference) || literalReferenceAppears(item.reference, closureText))) {
       return 'AUTHORITATIVE_RULE';
     }
     if (item.source === 'CONSTITUTION') {
       const rule = constitutionRules.find(({ id }) => id === item.reference);
-      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
+      if (rule !== undefined && (literalReferenceAppears(closureText, rule.statement) || literalReferenceAppears(rule.statement, closureText))) {
         return 'AUTHORITATIVE_RULE';
       }
     }
     if (item.source === 'ARCHITECTURE_POLICY') {
       const rule = policyRules.find(({ id }) => id === item.reference);
-      if (rule !== undefined && literalReferenceAppears(rule.statement, closureText)) {
+      if (rule !== undefined && (literalReferenceAppears(closureText, rule.statement) || literalReferenceAppears(rule.statement, closureText))) {
         return 'AUTHORITATIVE_RULE';
       }
     }
@@ -616,10 +621,16 @@ function textStatesBoundaryBehavior(text, behavior) {
   return behavior === 'NOT_APPLICABLE' || boundaryBehaviorPatterns[behavior].test(text);
 }
 
-function boundaryBehaviorIsExplicit(boundaryRule, behavior, humanResolutionEvidence) {
+function boundaryBehaviorIsExplicit(boundaryRule, behavior, humanResolutionEvidence, policyRules = []) {
   if (behavior === 'NOT_APPLICABLE') return true;
   if (boundaryRule.basis.some(({ source, reference }) => source === 'USER_DECISION'
     && textStatesBoundaryBehavior(humanResolutionEvidence.get(reference) ?? '', behavior))) {
+    return true;
+  }
+  if (boundaryRule.basis.some(({ source, reference }) => (
+    (source === 'SAFE_MECHANICAL_DEFAULT' || source === 'ARCHITECTURE_POLICY')
+    && textStatesBoundaryBehavior(policyRules.find((r) => r.id === reference)?.statement ?? '', behavior)
+  ))) {
     return true;
   }
   return boundaryRule.basis.some(({ source, reference }) => source === 'USER_INTENT'
