@@ -72,7 +72,7 @@ async function readPolicy() {
 
 async function readConstitution() {
   try {
-    const { loadSemanticConstitution } = await import('./lib/semantic_contract.mjs');
+    const { loadSemanticConstitution } = await import('./lib/semantic_request.mjs');
     return loadSemanticConstitution(root);
   } catch (error) {
     throw rejection('SEMANTIC_CONSTITUTION_UNAVAILABLE', error.message);
@@ -102,8 +102,8 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
   if (!pathsExist[0] || !pathsExist[1]) throw rejection('INCOMPLETE_SEMANTIC_REVISION_STATE');
 
   const [
+    { assertContractDocument },
     {
-      assertContractDocument,
       buildHumanResolutionRecords,
       buildSemanticRevision,
       resolutionRequiresRecompilation,
@@ -112,7 +112,8 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
     request,
     resolution,
   ] = await Promise.all([
-    import('./lib/semantic_contract.mjs'),
+    import('./lib/semantic_contract_lifecycle.mjs'),
+    import('./lib/semantic_approval.mjs'),
     readFile(contractJsonPath, 'utf8').then(JSON.parse),
     readFile(userConfirmationPath, 'utf8').then(JSON.parse),
     readFile(resolutionPath, 'utf8').then(JSON.parse),
@@ -177,7 +178,7 @@ async function handleValidatePreflight() {
 }
 
 async function validateContract(contract, preflight) {
-  const { assertContractDocument } = await import('./lib/semantic_contract.mjs');
+  const { assertContractDocument } = await import('./lib/semantic_contract_lifecycle.mjs');
   const [loadedPolicy, constitution] = await Promise.all([
     readPolicy(),
     readConstitution(),
@@ -347,7 +348,7 @@ async function handleStatus() {
 async function handleSemanticRequest() {
   const [{ canonicalJson }, { buildSemanticRequest }] = await Promise.all([
     import('./lib/canonical_json.mjs'),
-    import('./lib/semantic_contract.mjs'),
+    import('./lib/semantic_request.mjs'),
   ]);
   const [preflight, loadedPolicy, constitution] = await Promise.all([
     readPreflight(),
@@ -467,15 +468,17 @@ async function handleApprove() {
     { canonicalDigest, canonicalJson },
     {
       assertConfirmationRequest,
-      assertContractDocument,
       finalizeContractApproval,
-      renderSemanticContractMarkdown,
       resolutionRequiresRecompilation,
     },
+    { assertContractDocument },
+    { renderSemanticContractMarkdown },
     { semanticStatePath },
   ] = await Promise.all([
     import('./lib/canonical_json.mjs'),
-    import('./lib/semantic_contract.mjs'),
+    import('./lib/semantic_approval.mjs'),
+    import('./lib/semantic_contract_lifecycle.mjs'),
+    import('./lib/semantic_contract_markdown.mjs'),
     import('./lib/semantic_state.mjs'),
   ]);
   const [draftContract, preflight, loadedPolicy, constitution] = await Promise.all([

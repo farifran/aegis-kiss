@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { assertSchema } from './schema_validator.mjs';
 import { canonicalDigest } from './canonical_json.mjs';
-import { assertContractApprovalEvidence } from './semantic_contract.mjs';
+import { assertContractApprovalEvidence } from './semantic_approval.mjs';
 
 export const semanticStateRelativePath = '.harness/state/semantic-state.json';
 
