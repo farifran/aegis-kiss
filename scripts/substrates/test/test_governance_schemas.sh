@@ -48,7 +48,7 @@ for (const file of currentSchemas) {
 
 const loadedPolicy = loadArchitecturePolicy(process.cwd());
 const constitution = loadSemanticConstitution(process.cwd());
-const demand = 'Criar comportamento observável de teste com formato ainda a escolher.';
+const demand = 'Definir comportamento observável de teste com saída ainda a escolher.';
 const preflight = buildPreflightHandoff({
   demand,
   discovery: discoverWorkspace(process.cwd(), demand),
@@ -101,7 +101,7 @@ const draft = {
     },
     {
       id: 'CLAIM-FORMAT',
-      quote: 'formato ainda a escolher',
+      quote: 'saída ainda a escolher',
       kind: 'AMBIGUITY',
       disposition: 'DECISION',
       contractEffect: null,
@@ -201,7 +201,7 @@ const draft = {
     material: true,
     decisionId: 'Q-FORMAT',
     intentSignalIds: [],
-    basis: [{ source: 'USER_INTENT', reference: 'formato ainda a escolher' }],
+    basis: [{ source: 'USER_INTENT', reference: 'saída ainda a escolher' }],
   }],
   decisions: [{
     questionId: 'Q-FORMAT',

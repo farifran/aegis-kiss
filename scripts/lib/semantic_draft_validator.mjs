@@ -126,6 +126,11 @@ function validateRequirements(draft, context) {
     if (!requirement.basis.some(({ source }) => authoritativeSources.has(source))) {
       throw new Error(`requirement_without_authoritative_basis:${requirement.id}`);
     }
+    const acceptanceKinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
+    if (!acceptanceKinds.has('HAPPY_PATH')
+      || (![...acceptanceKinds].some((kind) => kind !== 'HAPPY_PATH'))) {
+      throw new Error(`requirement_without_dual_acceptance:${requirement.id}`);
+    }
     assertKnownReferences(requirement.intentSignalIds, context.intentSignalIds, `requirement:${requirement.id}`);
     if (hasIncompleteMarker(requirement.statement)) {
       throw new Error(`unresolved_expression_in_normative_text:${requirement.id}`);

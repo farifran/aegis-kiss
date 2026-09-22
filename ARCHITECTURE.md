@@ -100,13 +100,10 @@ sem exigir outra política, o resultado trunca em direção a zero e divisor zer
 produz rejeição explícita. Esses comportamentos são fatos mecânicos da
 plataforma e não criam decisões para o Wizard.
 
-Quando a intenção define um rateio proporcional pela razão entre numerador e
-denominador, cada parcela é calculada diretamente como
-`(base * numerador) / denominador`, sem quantizar uma razão intermediária. A
-diferença entre o total disponível e a soma das parcelas permanece explícita na
-conservação como quantidade ainda não liquidada. Sua localização em uma
-estrutura interna não é decisão de negócio. Redistribuir esse resíduo ou
-rejeitar toda a operação exige autoridade humana explícita.
+Divisão inteira não define, por si só, o destino de restos nem autoriza
+redistribuição, descarte ou rejeição da operação. Quando esse efeito altera o
+resultado público, ele precisa estar explícito na intenção, em decisão humana
+ou em política aplicável.
 
 Aplica-se a contratos que exponham aritmética inteira `BigInt`.
 
@@ -122,14 +119,11 @@ Aplica-se a contadores limitados em bitmasks ou telemetria pública.
 ### ARCH-HASH-SECURITY-LABEL — hard
 
 Um fingerprint determinístico não criptográfico não pode ser apresentado como
-garantia criptográfica. Uma raiz de 64 bits descrita como criptográfica exige
-resolução coerente da propriedade de segurança. Escolher integridade
-criptográfica reabre o preflight para revisar primitiva, largura da raiz e
-projeções dependentes; não é uma alternativa aplicável silenciosamente ao
-contrato de 64 bits. Enquanto houver decisão pendente, requisitos e riscos usam
-o termo neutro `raiz de integridade`. Algoritmos não criptográficos, como
-FNV-1a, permanecem apenas exemplos ou alternativas incompatíveis com garantia
-criptográfica.
+garantia criptográfica. Quando a propriedade de segurança exigida for
+incompatível com a primitiva, a largura ou uma projeção solicitada, o preflight
+deve reabrir esses pontos em vez de aplicar a escolha silenciosamente. Enquanto
+houver decisão pendente, requisitos e riscos usam terminologia neutra de
+integridade.
 
 Aplica-se a hashes, fingerprints e raízes de integridade públicas.
 
@@ -146,13 +140,11 @@ Aplica-se a funções, APIs e exports públicos.
 
 Um contrato não pode declarar a mesma propriedade simultaneamente fechada e
 dependente de decisão humana. Invariantes, casos de aceitação, limites, riscos
-e alternativas devem ser mutuamente compatíveis: projeções com saturação não
-são injetivas; resíduos retidos participam da equação de conservação; redução
-de volume bruto preserva posição líquida, não o volume reduzido; e um risco não
-pode substituir a resolução de uma contradição semântica. Texto normativo
-permanece neutro enquanto uma decisão puder alterar a propriedade. Alternativas
-que apenas mudam a localização do mesmo parâmetro são detalhes internos; opções
-incompatíveis reabrem o preflight. Decisões dependentes são avaliadas em
+e alternativas devem ser mutuamente compatíveis, e um risco não pode substituir
+a resolução de uma contradição semântica. Texto normativo permanece neutro
+enquanto uma decisão puder alterar a propriedade. Alternativas que mudam apenas
+um detalhe interno sem alterar resultados observáveis não formam decisão;
+opções incompatíveis reabrem o preflight. Decisões dependentes são avaliadas em
 conjunto, e nenhuma recomendação pode descartar entrada silenciosamente.
 
 Uma função pública declarada pura exige caso metamórfico que demonstre que
@@ -179,12 +171,11 @@ revisão (`reviewReferences`) de sinais de possível conflito
 estar negada ou citada como exemplo —, mas não pode desaparecer do contrato e
 exige avaliação explícita da regra em `policyAssessments`.
 
-`src/`, caminhos do Harness, TypeScript, `BigInt`, bitmask, função pública,
-hash criptográfico e relógio são sinais conservadores de contexto.
-`AbstractCycleResolver`, injeção dinâmica de dependências, `factories` e
-decoradores ativam parcimônia. `any`, `@ts-ignore`, `try/catch`, `catch` vazio,
-FNV-1a usado como primitiva criptográfica e `Date.now` são referências
-proibidas. Todo sinal exige avaliação explícita da regra correspondente; a
-revisão adversarial residual não repete uma correção já resolvida pela política.
-A lista é deliberadamente curta: protege cláusulas universais sem tentar
-substituir interpretação semântica por um dicionário de domínio.
+Os sinais se limitam a fronteiras e construções técnicas genéricas, como
+caminhos, tipos, efeitos, tempo, representação limitada, segurança declarada e
+abstrações estruturais. Nomes de domínio, algoritmos concretos e exemplos de
+demandas anteriores não pertencem ao detector mecânico. Todo sinal exige
+avaliação explícita da regra correspondente; a revisão adversarial residual não
+repete uma correção já resolvida pela política. A lista é deliberadamente curta:
+protege cláusulas universais sem tentar substituir interpretação semântica por
+um dicionário de domínio.
