@@ -8,6 +8,7 @@ cd "${ROOT_DIR}"
 node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 import { canonicalDigest } from './scripts/lib/canonical_json.mjs';
+import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
   assertSemanticDraft,
@@ -65,6 +66,10 @@ if (requestDigest !== canonicalDigest(requestPayload)
   || semanticRequest.outputSchema.digest !== canonicalDigest(semanticRequest.outputSchema.document)
   || semanticRequest.outputSchema.document.$id !== 'aegis.semantic_opinion.v2'
   || Object.hasOwn(semanticRequest.outputSchema.document, 'description')
+  || Object.hasOwn(
+    semanticRequest.outputSchema.document.$defs.determinismProofObligation.properties,
+    'witnessId',
+  )
   || semanticRequest.worksheet.requiredDeterminismDimensions.length !== 0
   || semanticRequest.worksheet.counterexampleWitnesses.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
@@ -276,6 +281,117 @@ expectDraftFailure(
   (invalid) => { invalid.decisions[0].answers[1].contractEffect = invalid.decisions[0].answers[0].contractEffect; },
   'decision_answers_without_distinct_effects:',
 );
+expectDraftFailure(
+  (invalid) => {
+    invalid.requirements[0].basis = [{
+      source: 'SAFE_MECHANICAL_DEFAULT',
+      reference: 'ARCH-PRODUCT-BOUNDARY',
+    }];
+  },
+  'mechanical_default_references_non_default_rule:',
+);
+expectDraftFailure(
+  (invalid) => {
+    invalid.intentClaims = invalid.intentClaims.filter(({ disposition }) => disposition !== 'DECISION');
+    invalid.unknowns[0].basis = modelBasis;
+  },
+  'decision_without_material_unknown:',
+);
+
+const deterministicDraft = structuredClone(draft);
+const proof = {
+  witnessId: 'WITNESS-ORDERING',
+  relation: 'OUTPUTS_EQUAL',
+  resolutionKind: 'PERMUTATION_INVARIANT',
+  resolutionParameter: null,
+  baselineOutcome: 'resultado estável',
+  variationOutcome: 'resultado estável',
+  observables: ['resultado público'],
+};
+deterministicDraft.requirements[0].acceptanceCases.push({
+  id: 'AC-ORDERING-PROOF',
+  kind: 'BOUNDARY',
+  given: 'Duas entradas equivalentes em ordens diferentes.',
+  when: 'A operação for executada.',
+  then: 'Base: resultado estável; Variação: resultado estável; Resolução: PERMUTATION_INVARIANT.',
+  outcomeKind: 'RETURN_VALUE',
+  decisionBinding: null,
+  boundaryBinding: null,
+});
+deterministicDraft.determinismReview = {
+  status: 'SEMANTICALLY_CLOSED',
+  rationale: 'A ordem não altera o resultado público.',
+  intentSignalIds: [],
+  dimensions: [{
+    kind: 'ORDERING',
+    subjectId: 'REQ-RESULT',
+    status: 'SPECIFIED',
+    rationale: 'Entradas equivalentes produzem o mesmo resultado em qualquer ordem.',
+    targetIds: ['REQ-RESULT'],
+    basis: userBasis,
+    acceptanceCaseId: 'AC-ORDERING-PROOF',
+    proofObligation: proof,
+    inapplicabilityProof: null,
+    closureAuthority: 'AUTHORITATIVE_RULE',
+    counterexampleWitness: counterexampleForDimension('ORDERING'),
+  }],
+};
+assertSemanticDraft(deterministicDraft, loadedPolicy.policy, validationContext);
+
+function expectDeterminismFailure(mutator, expectedPrefix) {
+  const invalid = structuredClone(deterministicDraft);
+  mutator(invalid.determinismReview.dimensions[0], invalid);
+  try {
+    assertSemanticDraft(invalid, loadedPolicy.policy, validationContext);
+  } catch (error) {
+    if (error.message.startsWith(expectedPrefix)) return;
+    throw error;
+  }
+  throw new Error(`determinism_mismatch_was_not_rejected:${expectedPrefix}`);
+}
+
+expectDeterminismFailure(
+  (dimension) => { dimension.proofObligation.resolutionKind = 'OVERFLOW_SATURATE'; },
+  'determinism_resolution_kind_mismatch:',
+);
+expectDeterminismFailure(
+  (dimension) => { dimension.proofObligation.relation = 'DEFINED_RESULT'; },
+  'determinism_resolution_relation_mismatch:',
+);
+expectDeterminismFailure(
+  (_dimension, invalid) => {
+    invalid.requirements[0].acceptanceCases[2].then = 'Texto apenas relacionado ao tema.';
+  },
+  'determinism_proof_outcome_mismatch:',
+);
+expectDeterminismFailure(
+  (dimension) => { dimension.targetIds = []; },
+  'determinism_dimension_does_not_target_subject:',
+);
+
+const signaledIntent = `${demand} Alta frequência.`;
+try {
+  assertSemanticDraft(draft, loadedPolicy.policy, {
+    ...validationContext,
+    intent: signaledIntent,
+  });
+  throw new Error('unhandled_intent_signal_was_accepted');
+} catch (error) {
+  if (!error.message.startsWith('unhandled_intent_signal:')) throw error;
+}
+const signalHandledDraft = structuredClone(draft);
+signalHandledDraft.nonNormativeItems.push({
+  id: 'NOTE-QUALITY-GOAL',
+  kind: 'GOAL',
+  statement: 'Alta frequência permanece meta qualitativa sem SLO inventado.',
+  status: 'NON_NORMATIVE',
+  intentSignalIds: ['INPUT-0001'],
+  basis: [{ source: 'USER_INTENT', reference: 'Alta frequência' }],
+});
+assertSemanticDraft(signalHandledDraft, loadedPolicy.policy, {
+  ...validationContext,
+  intent: signaledIntent,
+});
 
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),

@@ -433,6 +433,61 @@ printf '%s\n' "${invalid_index_output}" | jq -e '
   and .detail == "semantic_opinion_index_out_of_range:decision:9"
 ' >/dev/null
 
+# O modelo descreve a resolução semântica; witnessId e fechamento agregado são
+# acrescentados pelo compilador e não podem ser forjados no parecer.
+deterministic_opinion="$(make_opinion yes "${semantic_worksheet_digest}" | jq '
+  .requirements[0].acceptanceCases += [{
+    kind:"BOUNDARY",
+    given:"Duas entradas equivalentes em ordens diferentes.",
+    when:"A operação for executada.",
+    then:"Base: resultado estável; Variação: resultado estável; Resolução: PERMUTATION_INVARIANT.",
+    outcomeKind:"RETURN_VALUE",
+    decisionBinding:null,
+    boundaryBinding:null
+  }]
+  | .determinismReview = {
+    rationale:"A ordem não altera o resultado público.",
+    dimensions:[{
+      kind:"ORDERING",
+      subject:{kind:"REQUIREMENT",index:0},
+      status:"SPECIFIED",
+      rationale:"Entradas equivalentes produzem o mesmo resultado em qualquer ordem.",
+      targets:[{kind:"REQUIREMENT",index:0}],
+      basis:[{source:"USER_INTENT",reference:"Definir transformador de registros"}],
+      acceptanceCase:{requirementIndex:0,caseIndex:2},
+      proofObligation:{
+        relation:"OUTPUTS_EQUAL",
+        resolutionKind:"PERMUTATION_INVARIANT",
+        resolutionParameter:null,
+        baselineOutcome:"resultado estável",
+        variationOutcome:"resultado estável",
+        observables:["resultado público"]
+      },
+      inapplicabilityProof:null
+    }]
+  }
+')"
+forged_witness_opinion="$(printf '%s' "${deterministic_opinion}" | jq '
+  .determinismReview.dimensions[0].proofObligation.witnessId = "WITNESS-ORDERING"
+')"
+set +e
+forged_witness_output="$(printf '%s' "${forged_witness_opinion}" | bash ./aegis --semantic-compile 2>&1)"
+forged_witness_code=$?
+set -e
+[[ "${forged_witness_code}" -ne 0 ]]
+printf '%s\n' "${forged_witness_output}" | jq -e '
+  .reason == "INVALID_SEMANTIC_OPINION"
+  and (.detail | contains("schema_validation_failed:aegis.semantic_opinion.v2"))
+' >/dev/null
+
+printf '%s' "${deterministic_opinion}" | bash ./aegis --semantic-compile >/dev/null
+jq -e '
+  .specification.determinismReview.status == "SEMANTICALLY_CLOSED"
+  and .specification.determinismReview.dimensions[0].counterexampleWitness.id == "WITNESS-ORDERING"
+  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING"
+  and .specification.determinismReview.dimensions[0].closureAuthority == "AUTHORITATIVE_RULE"
+' .harness/runtime/contract.json >/dev/null
+
 # Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
 make_opinion yes "${semantic_worksheet_digest}" | bash ./aegis --semantic-compile >/dev/null
 grep -F 'PROVISÓRIO — depende de Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null

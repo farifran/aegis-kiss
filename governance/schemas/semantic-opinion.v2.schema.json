@@ -1313,9 +1313,8 @@
     "determinismProofObligation": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Resolução tipada do witness. O Harness valida se resolutionKind pertence à dimensão, se relation é compatível e se o AC contém exatamente os dois resultados. O campo then do AC deve ser: Base: <baselineOutcome>; Variação: <variationOutcome>; Resolução: <resolutionKind>. Quando houver parâmetro: Resolução: <resolutionKind> (<resolutionParameter>).",
+      "description": "Resolução semântica do witness. O Harness acrescenta witnessId, valida se resolutionKind pertence à dimensão, se relation é compatível e se o AC contém exatamente os dois resultados. O campo then do AC deve ser: Base: <baselineOutcome>; Variação: <variationOutcome>; Resolução: <resolutionKind>. Quando houver parâmetro: Resolução: <resolutionKind> (<resolutionParameter>).",
       "required": [
-        "witnessId",
         "relation",
         "resolutionKind",
         "resolutionParameter",
@@ -1324,7 +1323,6 @@
         "observables"
       ],
       "properties": {
-        "witnessId": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
         "relation": { "enum": ["OUTPUTS_EQUAL", "DEFINED_RESULT", "EXPLICIT_REJECTION"] },
         "resolutionKind": {
           "enum": [

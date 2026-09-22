@@ -254,7 +254,7 @@ export function compileSemanticOpinion(opinion, request) {
           ? 'GAPS_FOUND'
           : 'SEMANTICALLY_CLOSED',
       rationale: opinion.determinismReview.rationale,
-      intentSignalIds: determinismSignalIds,
+      intentSignalIds: dimensions.length === 0 ? [] : determinismSignalIds,
       dimensions: dimensions.map((item) => {
         const basis = compileOpinionBasis(item.basis, request);
         const subjectId = item.subject === null
@@ -272,7 +272,12 @@ export function compileSemanticOpinion(opinion, request) {
             basis,
           }),
           counterexampleWitness: counterexampleForDimension(item.kind),
-          proofObligation: item.proofObligation,
+          proofObligation: item.proofObligation === null
+            ? null
+            : {
+              ...item.proofObligation,
+              witnessId: counterexampleForDimension(item.kind).id,
+            },
           inapplicabilityProof: item.inapplicabilityProof,
           acceptanceCaseId: item.acceptanceCase === null
             ? null
