@@ -190,15 +190,15 @@ const resolutionEvidenceTerms = {
   REMAINDER_RETAINED: [/resto|res[ií]du\p{L}*|remainder/iu, /retid\p{L}*|mantid\p{L}*|retain\p{L}*/iu],
   REMAINDER_DISTRIBUTED_BY_RULE: [/resto|res[ií]du\p{L}*|remainder/iu, /distribu\p{L}*/iu],
   REMAINDER_REJECTED: [/resto|res[ií]du\p{L}*|remainder/iu, /rejeit\p{L}*|reject\p{L}*/iu],
-  ZERO_DIVISOR_REJECTED: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  ZERO_DIVISOR_REJECTED: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /rejei\p{L}*|reject\p{L}*/iu],
   ZERO_DIVISOR_RETURNS_ZERO: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /retorn\p{L}*|produz\p{L}*|return\p{L}*/iu],
   ZERO_DIVISOR_RETURNS_SENTINEL: [/divis\p{L}*|denominador|denominator/iu, /zero/iu, /sentinela|sentinel/iu],
   TIE_BREAK_BY_KEY: [/empat\p{L}*|tie/iu, /chave|key/iu],
   TIE_PRESERVE_INPUT_ORDER: [/empat\p{L}*|tie/iu, /ordem\s+(?:de\s+)?entrada|input\s+order/iu],
   COUNT_UNIQUE_IDENTITIES: [/cont\p{L}*|quantidade|count/iu, /identidade\p{L}*|participante\p{L}*|identit\p{L}*/iu, /[uú]nic\p{L}*|unique/iu],
   COUNT_OCCURRENCES: [/cont\p{L}*|quantidade|count/iu, /ocorr[eê]nci\p{L}*|occurrence\p{L}*/iu],
-  OVERFLOW_REJECT: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /rejeit\p{L}*|reject\p{L}*/iu],
-  OVERFLOW_SATURATE: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /satur\p{L}*/iu],
+  OVERFLOW_REJECT: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*|maior\s+valor\s+represent[aá]vel/iu, /rejeit\p{L}*|reject\p{L}*/iu],
+  OVERFLOW_SATURATE: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*|maior\s+valor\s+represent[aá]vel/iu, /satur\p{L}*/iu],
   OVERFLOW_WRAP: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /wrap|circular/iu],
   OVERFLOW_MODULO: [/overflow|acima\s+d\p{L}+\s+limit\p{L}*/iu, /m[oó]dulo|modulo/iu],
 };
@@ -206,9 +206,15 @@ const explicitUncertaintyPattern = /\b(?:acima\s+de|abaixo\s+de|maior\s+que|meno
 const incompleteOperandPattern = /\(\s*\)|``|\b(?:acima\s+de|abaixo\s+de|maior\s+que|menor\s+que|above|below|greater\s+than|less\s+than)\s*(?=[.,;:!?)]|$)/iu;
 const explicitAlternativePattern = /\b(?:ou|alternativ\p{L}*|escolh\p{L}*|either|or|choose)\b/iu;
 const publicInterfaceIntentPattern = /\b(?:fun(?:ç|c)[aã]o\s+(?:pura|p[uú]blica)|public\s+function|api\s+p[uú]blica|re-?exportad\p{L}*|public\s+api)\b/iu;
-const explicitInterfacePattern = /\b(?:assinatura|signature|entradas?|inputs?|sa[ií]das?|outputs?|par[aâ]metros?|parameters?|interface|type|tipo)\b/iu;
+const explicitInterfaceDefinitionPattern = /(?:\b(?:assinatura|signature|interface|data\s+model|modelo\s+de\s+dados)\b[^.!?\n]{0,240}\b(?:retorn\p{L}*|returns?|sa[ií]da|output|falha|erro|error)\b|\b(?:fun(?:ç|c)[aã]o|function)\s+[\p{L}_$][\p{L}\p{N}_$]*\s*\([^)]*\)\s*(?:->|:)|\b(?:recebe|accepts?|inputs?)\b[^.!?\n]{0,240}\b(?:retorn\p{L}*|returns?|sa[ií]da|output)\b)/iu;
+const publicInterfaceGapPattern = /\b(?:assinatura|signature|interface\s+p[uú]blica|modelo\s+de\s+dados|data\s+model|entradas?\s+e\s+sa[ií]das?|inputs?\s+and\s+outputs?|par[aâ]metros?\s+p[uú]blicos?|public\s+parameters?)\b/iu;
 const cryptographicSmallHashPattern = /\bcriptogr[aá]fic\p{L}*\b[^.!?\n]{0,180}\b(?:32|64|96|128)\s*bits?\b|\b(?:32|64|96|128)\s*bits?\b[^.!?\n]{0,180}\bcriptogr[aá]fic\p{L}*\b/iu;
 const hashRiskPattern = /\b(?:colis(?:ão|oes|ões)|collision|segunda\s+preimagem|second\s+preimage|criptogr[aá]fic\p{L}*|adversarial)\b/iu;
+const hashSecurityDecisionPattern = /\b(?:fingerprint|n[aã]o\s+criptogr[aá]fic\p{L}*|non[- ]?cryptographic|criptogr[aá]fic\p{L}*|cryptographic|colis(?:ão|oes|ões)|collision|segunda\s+preimagem|second\s+preimage)\b/iu;
+const thresholdRiskPattern = /\b(?:limiar|threshold)\b/iu;
+const injectiveInvariantPattern = /\b(?:injetiv\p{L}*|injective)\b/iu;
+const retainedResidualPattern = /\b(?:resto|res[ií]du\p{L}*|remainder)\b[^.!?\n]{0,140}\b(?:retid\p{L}*|mantid\p{L}*|retain\p{L}*|n[aã]o\s+liquid\p{L}*)\b/iu;
+const conservationInvariantPattern = /\b(?:conserv\p{L}*|soma\s+total|total\s+sum|balance\p{L}*|igual|equal|diferen(?:ç|c)a\s+n[aã]o\s+nula)\b/iu;
 const feasibilityRiskPattern = /\b(?:viabil\p{L}*|feasibility|evid[eê]nci\p{L}*|medi(?:ç|c)[aã]o|measurement|perfilamento|profiling|aloca(?:ç|c)(?:ão|ões)|lat[eê]ncia|throughput|desempenho|performance)\b/iu;
 const mechanicalDimensionPolicyIds = {
   ROUNDING: 'ARCH-BIGINT-ARITHMETIC',
@@ -216,15 +222,15 @@ const mechanicalDimensionPolicyIds = {
   BOUNDED_ARITHMETIC: 'ARCH-OBSERVABILITY-COUNTERS',
 };
 const concreteResolutionParameterPatterns = {
-  CANONICAL_ORDER: /\b(?:alfab[eé]tic\p{L}*|lexicogr[aá]fic\p{L}*|por\s+(?:id|identificador|chave|campo)|by\s+(?:id|identifier|key|field))\b/iu,
-  CANONICAL_REPRESENTATION: /\b(?:json|utf-?8|cbor|protobuf|big[- ]endian|little[- ]endian|length[- ]?prefix\p{L}*|prefixo\s+de\s+comprimento|bin[aá]ri\p{L}*\s+fix\p{L}*|textual)\b/iu,
-  DUPLICATES_MERGED: /\b(?:som\p{L}*|m[ií]nim\p{L}*|m[aá]xim\p{L}*|primeir\p{L}*|[uú]ltim\p{L}*|mesmo\s+(?:id|identificador)|same\s+(?:id|identifier))\b/iu,
-  EMPTY_RETURNS_IDENTITY: /(?:\b0x[0-9a-f]+\b|\b0n?\b|\bhash\b[^.!?\n]{0,80}\b(?:vazi\p{L}*|empty)\b|\b(?:vazi\p{L}*|empty)\b[^.!?\n]{0,80}\bhash\b)/iu,
+  CANONICAL_ORDER: /(?=.*\b(?:alfab[eé]tic\p{L}*|lexicogr[aá]fic\p{L}*|crescente|decrescente|ascending|descending|min(?:im\p{L}*)?|m[aá]xim\p{L}*)\b)(?=.*\b(?:id|identificador|identifier|chave|key|campo\s+[\p{L}\p{N}_-]+|field\s+[\p{L}\p{N}_-]+)\b)/isu,
+  CANONICAL_REPRESENTATION: /(?=.*\b(?:json|utf-?8|cbor|protobuf|big[- ]endian|little[- ]endian|bin[aá]ri\p{L}*\s+fix\p{L}*|textual)\b)(?=.*\b(?:ordem\s+(?:fixa|de\s+campos)|fixed\s+field\s+order|length[- ]?prefix\p{L}*|prefixo\s+de\s+comprimento|delimit\p{L}*|separador\p{L}*|tag\p{L}*)\b)/isu,
+  DUPLICATES_MERGED: /(?=.*\b(?:id|identificador|identifier|chave|key)\b)(?=.*\b(?:som\p{L}*|m[ií]nim\p{L}*|m[aá]xim\p{L}*|primeir\p{L}*|[uú]ltim\p{L}*|merge\p{L}*\s+por\s+[\p{L}\p{N}_-]+)\b)/isu,
+  EMPTY_RETURNS_IDENTITY: /(?:\b0x[0-9a-f]+\b|\b-?\d+n\b|\bhash\s*\([^)]*(?:vazi\p{L}*|empty)[^)]*\))/iu,
   REMAINDER_DISTRIBUTED_BY_RULE: /\b(?:maior\s+resto|largest\s+remainder|ordem\s+(?:de\s+)?entrada|input\s+order|menor\s+(?:id|identificador)|smallest\s+(?:id|identifier))\b/iu,
   ZERO_DIVISOR_RETURNS_SENTINEL: /\b(?:null|undefined|nan|none|0x[0-9a-f]+|-?\d+n?)\b/iu,
   TIE_BREAK_BY_KEY: /\b(?:id|identificador|identifier|chave\s+[\p{L}\p{N}_-]+|key\s+[\p{L}\p{N}_-]+)\b/iu,
   COUNT_UNIQUE_IDENTITIES: /\b(?:id|identificador|identifier|conta|account|endere(?:ç|c)o|address)\b/iu,
-  OVERFLOW_SATURATE: /\b(?:\d+|2\s*\^\s*\d+\s*-\s*1|m[aá]xim\p{L}*\s+represent[aá]vel)\b/iu,
+  OVERFLOW_SATURATE: /\b(?:\d+|2\s*\^\s*\d+\s*-\s*1|m[aá]xim\p{L}*\s+represent[aá]vel|maior\s+valor\s+represent[aá]vel)\b/iu,
   OVERFLOW_WRAP: /\b(?:\d+|2\s*\^\s*\d+|largura\s+de\s+\d+\s*bits?|\d+\s*bits?)\b/iu,
   OVERFLOW_MODULO: /\b(?:\d+|2\s*\^\s*\d+|m[oó]dulo\s+\d+)\b/iu,
 };
@@ -560,13 +566,13 @@ function mechanicalPolicyForDimension(dimension, subjectText, intent) {
   if ((dimension.kind === 'ROUNDING' || dimension.kind === 'ZERO_DIVISOR')
     && !/\bbigint\b/iu.test(intent)) return null;
   if ((dimension.kind === 'ROUNDING' || dimension.kind === 'ZERO_DIVISOR')
-    && /(?:\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|denominador|round\p{L}*|zero)\b[^.!?\n]{0,100}\b(?:escolh\p{L}*|alternativ\p{L}*|ou|choose|alternative|or)\b|\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|denominador|round\p{L}*|zero)\b)/iu
+    && /(?:\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:arredond\p{L}*|trunc\p{L}*|divis\p{L}*|denominador|round\p{L}*|zero)\b|\b(?:arredondamento|rounding|divisor\s+zero|zero\s+divisor)\b[^.!?\n]{0,100}\b(?:ou|or|versus|vs\.?|alternativ\p{L}*)\b)/iu
       .test(intent)) return null;
   if (dimension.kind === 'BOUNDED_ARITHMETIC'
     && !/\b(?:bitmask|observabilidade|telemetria|observability|telemetry)\b/iu
       .test(subjectText)) return null;
   if (dimension.kind === 'BOUNDED_ARITHMETIC'
-    && /(?:\b(?:pol[ií]tica|overflow|satura\p{L}*|rejeit\p{L}*|wrap|limit\p{L}*)\b[^.!?\n]{0,100}\b(?:escolh\p{L}*|alternativ\p{L}*|ou|choose|alternative|or)\b|\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:overflow|satura\p{L}*|rejeit\p{L}*|wrap|limit\p{L}*)\b)/iu
+    && /(?:\b(?:escolh\p{L}*|alternativ\p{L}*|choose|alternative)\b[^.!?\n]{0,100}\b(?:overflow|satura\p{L}*|rejeit\p{L}*|wrap|fora\s+da\s+faixa)\b|\b(?:overflow|fora\s+da\s+faixa)\b[^.!?\n]{0,100}\b(?:ou|or|versus|vs\.?|alternativ\p{L}*)\b[^.!?\n]{0,100}\b(?:satura\p{L}*|rejeit\p{L}*|wrap)\b)/iu
       .test(intent)) return null;
   return policyId;
 }
@@ -1713,6 +1719,13 @@ export function assertSemanticDraft(draft, policy, {
         const proof = dimension.acceptanceCaseId === null
           ? undefined
           : acceptanceCasesById.get(dimension.acceptanceCaseId);
+        const boundarySubject = boundaryRuleIds.has(dimension.subjectId)
+          ? draft.boundaryRules.find(({ id }) => id === dimension.subjectId)
+          : undefined;
+        if ((proof !== undefined && proof.decisionBinding !== null)
+          || (boundarySubject !== undefined && boundarySubject.decisionId !== null)) {
+          throw new Error(`specified_dimension_depends_on_decision:${dimension.kind}:${dimension.subjectId}`);
+        }
         const obligation = dimension.proofObligation;
         if (proof === undefined
           || obligation === undefined
@@ -1966,6 +1979,20 @@ export function assertSemanticDraft(draft, policy, {
       ))) {
         throw new Error(`decision_references_unrelated_risk:${decision.questionId}:${riskId}`);
       }
+      const riskText = `${risk.statement}\n${risk.mitigation}`;
+      const decisionText = [
+        decision.question,
+        ...decision.answers.flatMap(({ label, rationale, contractEffect }) => (
+          [label, rationale, contractEffect]
+        )),
+        decision.distinguishingCase.given,
+        decision.distinguishingCase.when,
+        ...decision.distinguishingCase.outcomes.map(({ then }) => then),
+      ].join('\n');
+      if ((hashRiskPattern.test(riskText) && !hashSecurityDecisionPattern.test(decisionText))
+        || (thresholdRiskPattern.test(riskText) && !thresholdRiskPattern.test(decisionText))) {
+        throw new Error(`decision_references_unrelated_risk:${decision.questionId}:${riskId}`);
+      }
     }
     const boundCases = acceptanceCases.filter(({ decisionBinding }) => (
       decisionBinding?.questionId === decision.questionId
@@ -1983,6 +2010,32 @@ export function assertSemanticDraft(draft, policy, {
       then.normalize('NFC') === recommended[0].contractEffect.normalize('NFC')
     ))) {
       throw new Error(`decision_effect_not_proven:${decision.questionId}`);
+    }
+  }
+
+  for (const invariant of draft.invariants) {
+    const invariantText = `${invariant.statement}\n${invariant.falsification}`;
+    const linkedRequirements = invariant.requirementIds
+      .map((requirementId) => requirementsById.get(requirementId))
+      .filter((requirement) => requirement !== undefined);
+    const linkedRequirementText = linkedRequirements.flatMap((requirement) => [
+      requirement.statement,
+      ...requirement.acceptanceCases.flatMap(({ given, when, then }) => [given, when, then]),
+    ]).join('\n');
+    const linkedBoundaryRules = draft.boundaryRules.filter(({ requirementIds: linkedIds }) => (
+      linkedIds.some((requirementId) => invariant.requirementIds.includes(requirementId))
+    ));
+    const hasLossyEncoding = linkedBoundaryRules.some(({ underflowBehavior, overflowBehavior }) => (
+      ['SATURATE', 'WRAP', 'EXPLICIT_SENTINEL'].includes(underflowBehavior)
+      || ['SATURATE', 'WRAP', 'EXPLICIT_SENTINEL'].includes(overflowBehavior)
+    ));
+    if (injectiveInvariantPattern.test(invariantText) && hasLossyEncoding) {
+      throw new Error(`injective_invariant_with_lossy_encoding:${invariant.id}`);
+    }
+    if (conservationInvariantPattern.test(invariantText)
+      && retainedResidualPattern.test(linkedRequirementText)
+      && !/\b(?:resto|res[ií]du\p{L}*|remainder)\b/iu.test(invariantText)) {
+      throw new Error(`conservation_omits_retained_residual:${invariant.id}`);
     }
   }
 
@@ -2257,12 +2310,30 @@ export function assertSemanticDraft(draft, policy, {
       if (!collisionCovered) {
         throw new Error(`cryptographic_small_hash_without_collision_risk:${requirement.id}`);
       }
+      const securityDecision = draft.decisions.find((decision) => (
+        decision.requirementIds.includes(requirement.id)
+        && decision.answers.some(({ contractEffect }) => (
+          /\b(?:fingerprint|n[aã]o\s+criptogr[aá]fic\p{L}*|non[- ]?cryptographic)\b/iu
+            .test(contractEffect)
+        ))
+        && decision.answers.some(({ contractEffect }) => (
+          /\b(?:integridade\s+criptogr[aá]fic\p{L}*|garantia\s+criptogr[aá]fic\p{L}*|cryptographic\s+integrity|cryptographic\s+guarantee)\b/iu
+            .test(contractEffect)
+        ))
+      ));
+      if (securityDecision === undefined) {
+        throw new Error(`cryptographic_small_hash_without_security_decision:${requirement.id}`);
+      }
     }
   }
+  const trustedInterfaceDefinition = [
+    intent,
+    ...humanResolutionEvidence.values(),
+  ].join('\n');
   if (publicInterfaceIntentPattern.test(intent)
-    && !explicitInterfacePattern.test(intent)
+    && !explicitInterfaceDefinitionPattern.test(trustedInterfaceDefinition)
     && !draft.unknowns.some((unknown) => (
-      unknown.material && explicitInterfacePattern.test(unknown.statement)
+      unknown.material && publicInterfaceGapPattern.test(unknown.statement)
     ))) {
     throw new Error('public_interface_without_contract_or_blocking_gap');
   }

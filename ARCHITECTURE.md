@@ -100,6 +100,12 @@ sem exigir outra política, o resultado trunca em direção a zero e divisor zer
 produz rejeição explícita. Esses comportamentos são fatos mecânicos da
 plataforma e não criam decisões para o Wizard.
 
+Quando a intenção define um rateio proporcional pela razão entre numerador e
+denominador, cada parcela é calculada diretamente como
+`(base * numerador) / denominador`, sem quantizar uma razão intermediária. A
+diferença entre o total disponível e a soma das parcelas permanece explícita na
+conservação; seu destino é semântico e não pode ser inventado pelo modelo.
+
 Aplica-se a contratos que exponham aritmética inteira `BigInt`.
 
 ### ARCH-OBSERVABILITY-COUNTERS — default
@@ -129,6 +135,17 @@ de dados suficiente, a ausência permanece uma lacuna bloqueante; o modelo não
 inventa uma API nem transfere uma opção imatura ao Wizard.
 
 Aplica-se a funções, APIs e exports públicos.
+
+### ARCH-CONTRACT-CONSISTENCY — hard
+
+Um contrato não pode declarar a mesma propriedade simultaneamente fechada e
+dependente de decisão humana. Invariantes, casos de aceitação, limites, riscos
+e alternativas devem ser mutuamente compatíveis: projeções com saturação não
+são injetivas; resíduos retidos participam da equação de conservação; redução
+de volume bruto preserva posição líquida, não o volume reduzido; e um risco não
+pode substituir a resolução de uma contradição semântica.
+
+Aplica-se à compilação e à promoção de todo contrato semântico.
 
 ## Evolução da política
 

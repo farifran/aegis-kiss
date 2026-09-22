@@ -68,6 +68,26 @@ const diagnostics = new Map([
     remediation: 'Registre o risco e resolva a propriedade de segurança, ou classifique a saída apenas como fingerprint determinístico.',
     ruleId: 'CONST-OBSERVABLE',
   }],
+  ['CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_SECURITY_DECISION', {
+    message: 'O contrato mantém simultaneamente largura curta e garantia criptográfica sem resolver a incompatibilidade.',
+    remediation: 'Abra uma decisão entre fingerprint não criptográfico e integridade criptográfica com primitiva e largura coerentes.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['SPECIFIED_DIMENSION_DEPENDS_ON_DECISION', {
+    message: 'Uma dimensão declarada como especificada ainda depende de uma decisão humana provisória.',
+    remediation: 'Aplique a regra autorizada sem Wizard ou mantenha a dimensão como DECISION_REQUIRED, nunca ambos.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INJECTIVE_INVARIANT_WITH_LOSSY_ENCODING', {
+    message: 'O contrato exige injetividade para uma representação que satura, comprime ou substitui valores.',
+    remediation: 'Descreva a saída como projeção determinística e remova a promessa impossível de injetividade.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['CONSERVATION_OMITS_RETAINED_RESIDUAL', {
+    message: 'A equação de conservação ignora um resíduo que o próprio contrato mantém não liquidado.',
+    remediation: 'Inclua explicitamente o resíduo nos dois lados da propriedade de conservação.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
   ['RECOMMENDED_ANSWER_INVENTS_NUMERIC_LITERAL', {
     message: 'A alternativa recomendada introduz um número não autorizado pelas fontes confiáveis.',
     remediation: 'Remova o número inventado ou vincule a decisão a um valor fornecido pelo usuário.',

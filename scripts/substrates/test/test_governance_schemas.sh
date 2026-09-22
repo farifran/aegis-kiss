@@ -125,6 +125,21 @@ for (const [detail, expectedCause, expectedRule] of [
     'CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_COLLISION_RISK',
     'CONST-OBSERVABLE',
   ],
+  [
+    'cryptographic_small_hash_without_security_decision:REQ-0001',
+    'CRYPTOGRAPHIC_SMALL_HASH_WITHOUT_SECURITY_DECISION',
+    'CONST-OBSERVABLE',
+  ],
+  [
+    'specified_dimension_depends_on_decision:ORDERING:REQ-0001',
+    'SPECIFIED_DIMENSION_DEPENDS_ON_DECISION',
+    'CONST-OBSERVABLE',
+  ],
+  [
+    'injective_invariant_with_lossy_encoding:INV-0001',
+    'INJECTIVE_INVARIANT_WITH_LOSSY_ENCODING',
+    'CONST-OBSERVABLE',
+  ],
 ]) {
   const report = buildRejectionReport({
     phase: 'SEMANTIC',
@@ -950,20 +965,20 @@ const canonicalizationWitness = deterministicWitnesses.get('CANONICALIZATION');
 const canonicalFormatDecision = deterministicDraft.decisions[0];
 canonicalFormatDecision.question = 'Qual representação canônica deve ser usada?';
 canonicalFormatDecision.answers[0].contractEffect =
-  'Valores logicamente equivalentes devem usar representação canônica JSON.';
+  'Valores logicamente equivalentes devem usar representação canônica JSON, com campos em ordem fixa e prefixo de comprimento.';
 canonicalFormatDecision.answers[1].contractEffect =
-  'Valores logicamente equivalentes devem usar representação canônica textual.';
+  'Valores logicamente equivalentes devem usar representação canônica textual, com campos em ordem fixa e delimitador explícito.';
 canonicalFormatDecision.distinguishingCase = {
   given: `${canonicalizationWitness.baseline} ${canonicalizationWitness.variation}`,
   when: 'As duas representações logicamente equivalentes forem serializadas.',
   outcomes: [
     {
       answerId: 'ANS-SIMPLE',
-      then: 'As duas entradas produzem a mesma representação canônica JSON.',
+      then: 'As duas entradas produzem a mesma representação canônica JSON, com campos em ordem fixa e prefixo de comprimento.',
     },
     {
       answerId: 'ANS-DETAIL',
-      then: 'As duas entradas produzem a mesma representação canônica textual.',
+      then: 'As duas entradas produzem a mesma representação canônica textual, com campos em ordem fixa e delimitador explícito.',
     },
   ],
 };
@@ -2837,7 +2852,7 @@ let publicInterfaceWithoutGapRejected = false;
 try {
   assertSemanticDraft(publicInterfaceWithoutGap, loadedPolicy.policy, {
     ...semanticValidationContext,
-    intent: `${preflight.intent} Expor função pública.`,
+    intent: `${preflight.intent} Expor função pública no ponto de entrada principal.`,
   });
 } catch (error) {
   publicInterfaceWithoutGapRejected = error.message ===
@@ -2897,6 +2912,101 @@ assertSemanticDraft(unverifiedQualityWithRisk, loadedPolicy.policy, {
   ...semanticValidationContext,
   intent: `${preflight.intent} O alvo é 10 ms.`,
 });
+
+const specifiedDimensionDependingOnDecision = structuredClone(deterministicDraft);
+specifiedDimensionDependingOnDecision.requirements[0].acceptanceCases
+  .find(({ id }) => id === 'AC-DETERMINISTIC-REPLAY').decisionBinding = {
+    questionId: 'Q-FORMAT',
+    answerId: 'ANS-SIMPLE',
+  };
+let specifiedDimensionDependingOnDecisionRejected = false;
+try {
+  assertSemanticDraft(
+    specifiedDimensionDependingOnDecision,
+    loadedPolicy.policy,
+    deterministicContext,
+  );
+} catch (error) {
+  specifiedDimensionDependingOnDecisionRejected = error.message ===
+    'specified_dimension_depends_on_decision:ORDERING:REQ-RESULT';
+  if (!specifiedDimensionDependingOnDecisionRejected) throw error;
+}
+if (!specifiedDimensionDependingOnDecisionRejected) {
+  throw new Error('specified_dimension_remained_provisional');
+}
+
+const injectiveLossyBoundary = structuredClone(boundedDraft);
+injectiveLossyBoundary.invariants[0].statement =
+  'A representação limitada deve ser injetiva para todo estado interno.';
+injectiveLossyBoundary.invariants[0].falsification =
+  'Dois estados internos produzem a mesma representação pública.';
+let injectiveLossyBoundaryRejected = false;
+try {
+  assertSemanticDraft(injectiveLossyBoundary, loadedPolicy.policy, boundedContext);
+} catch (error) {
+  injectiveLossyBoundaryRejected = error.message ===
+    'injective_invariant_with_lossy_encoding:INV-EXPLICIT';
+  if (!injectiveLossyBoundaryRejected) throw error;
+}
+if (!injectiveLossyBoundaryRejected) {
+  throw new Error('injective_claim_survived_lossy_encoding');
+}
+
+const residualConservationConflict = structuredClone(draft);
+residualConservationConflict.requirements[0].acceptanceCases.push({
+  id: 'AC-RESIDUAL-RETAINED',
+  kind: 'BOUNDARY',
+  given: 'Uma divisão produz uma unidade de resto.',
+  when: 'Os preenchimentos forem calculados.',
+  then: 'O resíduo deve permanecer retido e não liquidado.',
+  outcomeKind: 'STATE_CHANGE',
+  decisionBinding: null,
+  boundaryBinding: null,
+});
+residualConservationConflict.invariants[0].statement =
+  'A soma dos preenchimentos deve ser igual ao volume casado.';
+residualConservationConflict.invariants[0].falsification =
+  'A diferença entre a soma dos preenchimentos e o volume casado é não nula.';
+let residualConservationConflictRejected = false;
+try {
+  assertSemanticDraft(
+    residualConservationConflict,
+    loadedPolicy.policy,
+    semanticValidationContext,
+  );
+} catch (error) {
+  residualConservationConflictRejected = error.message ===
+    'conservation_omits_retained_residual:INV-EXPLICIT';
+  if (!residualConservationConflictRejected) throw error;
+}
+if (!residualConservationConflictRejected) {
+  throw new Error('conservation_ignored_retained_residual');
+}
+
+const cryptographicSmallHashWithoutDecision = structuredClone(cryptographicSmallHashWithRisk);
+cryptographicSmallHashWithoutDecision.decisions[0].answers[1].label =
+  'Outra garantia criptográfica';
+cryptographicSmallHashWithoutDecision.decisions[0].answers[1].rationale =
+  'Mantém a classificação criptográfica com outra primitiva.';
+cryptographicSmallHashWithoutDecision.decisions[0].answers[1].contractEffect =
+  'Outra primitiva deve satisfazer a garantia criptográfica declarada.';
+cryptographicSmallHashWithoutDecision.decisions[0].distinguishingCase.outcomes[1].then =
+  'Outra primitiva satisfaz a garantia criptográfica declarada.';
+let cryptographicSmallHashWithoutDecisionRejected = false;
+try {
+  assertSemanticDraft(
+    cryptographicSmallHashWithoutDecision,
+    loadedPolicy.policy,
+    exampleContext,
+  );
+} catch (error) {
+  cryptographicSmallHashWithoutDecisionRejected = error.message ===
+    'cryptographic_small_hash_without_security_decision:REQ-RESULT';
+  if (!cryptographicSmallHashWithoutDecisionRejected) throw error;
+}
+if (!cryptographicSmallHashWithoutDecisionRejected) {
+  throw new Error('cryptographic_width_conflict_lacked_human_decision');
+}
 
 const semanticState = {
   schema: 'aegis.semantic_state.v13',
