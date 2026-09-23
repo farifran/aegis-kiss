@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.jev_decision_batch.v1",
+  "title": "Aegis JEV Decision Batch v1",
+  "description": "Projeção determinística e não normativa da requisição semântica para decisões tipadas em paralelo pelo JEV.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "batchDigest",
+    "sourceSemanticRequestDigest",
+    "sourceWorksheetDigest",
+    "protocol",
+    "state",
+    "questions",
+    "bindings",
+    "projection"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.jev_decision_batch.v1" },
+    "batchDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceWorksheetDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "transport", "questionMode", "authority", "onUnavailable", "onUncertain"],
+      "properties": {
+        "provider": { "const": "TYPESAFE_JEV" },
+        "transport": { "const": "VERCEL_AI_GATEWAY" },
+        "questionMode": { "const": "PARALLEL_CHOICE" },
+        "authority": { "const": "ADVISORY_ONLY" },
+        "onUnavailable": { "const": "BYPASS_TO_SEMANTIC_MODEL" },
+        "onUncertain": { "const": "FULL_SEMANTIC_REVIEW" }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "revision",
+        "reviewSignals",
+        "policyReviews",
+        "determinismActivations",
+        "unclassifiedFiniteRepresentations"
+      ],
+      "properties": {
+        "intent": { "type": "string", "minLength": 1 },
+        "revision": { "$ref": "aegis.semantic_request.v9#/properties/revision" },
+        "reviewSignals": {
+          "type": "array",
+          "items": { "$ref": "aegis.semantic_request.v9#/properties/intentSignals/properties/signals/items" }
+        },
+        "policyReviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "ruleId", "signalKinds", "references", "ruleLevel", "ruleStatement"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^POLICY-REVIEW-[0-9]{4}$" },
+              "ruleId": { "type": "string", "minLength": 1 },
+              "signalKinds": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "enum": ["REVIEW", "POSSIBLE_CONFLICT"] },
+                "uniqueItems": true
+              },
+              "references": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              },
+              "ruleLevel": { "enum": ["hard", "default", "preference"] },
+              "ruleStatement": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "determinismActivations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "dimension", "subject", "triggerReference", "counterexampleWitness"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^DET-ACT-[0-9]{4}$" },
+              "dimension": { "$ref": "aegis.semantic_worksheet.v1#/$defs/determinismDimension" },
+              "subject": { "$ref": "aegis.semantic_worksheet.v1#/properties/determinismActivations/items/properties/subject" },
+              "triggerReference": { "type": "string", "minLength": 1 },
+              "counterexampleWitness": { "$ref": "aegis.semantic_worksheet.v1#/$defs/counterexampleWitness" }
+            }
+          }
+        },
+        "unclassifiedFiniteRepresentations": {
+          "type": "array",
+          "items": { "$ref": "aegis.semantic_worksheet.v1#/properties/finiteRepresentations/items" }
+        }
+      }
+    },
+    "questions": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 255,
+      "propertyNames": { "pattern": "^(intent|policy|determinism|representation|complexity)\\.[A-Za-z0-9_.-]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "instructions", "criteria"],
+        "properties": {
+          "type": { "const": "choice" },
+          "instructions": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "criteria": {
+            "type": "object",
+            "minProperties": 2,
+            "maxProperties": 255,
+            "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" },
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 255,
+      "propertyNames": { "pattern": "^(intent|policy|determinism|representation|complexity)\\.[A-Za-z0-9_.-]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["family", "subjectId", "semanticTarget", "allowedUse"],
+        "properties": {
+          "family": { "enum": ["INTENT_SIGNAL", "POLICY_SIGNAL", "DETERMINISM_ACTIVATION", "FINITE_REPRESENTATION", "COMPLEXITY_REVIEW"] },
+          "subjectId": { "type": "string", "minLength": 1 },
+          "semanticTarget": {
+            "enum": ["INTENT_CLAIM_KIND", "POLICY_DEMAND_STATUS", "DETERMINISM_PRECLASSIFICATION", "REPRESENTATION_ROLE", "COMPLEXITY_STATUS"]
+          },
+          "allowedUse": { "const": "CANDIDATE_ONLY" }
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["questionCount", "intentQuestionCount", "policyQuestionCount", "determinismQuestionCount", "finiteRepresentationQuestionCount", "complexityQuestionCount", "mechanicallySettledIntentSignalCount", "omittedSections"],
+      "properties": {
+        "questionCount": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "intentQuestionCount": { "type": "integer", "minimum": 0 },
+        "policyQuestionCount": { "type": "integer", "minimum": 0 },
+        "determinismQuestionCount": { "type": "integer", "minimum": 0 },
+        "finiteRepresentationQuestionCount": { "type": "integer", "minimum": 0 },
+        "complexityQuestionCount": { "const": 1 },
+        "mechanicallySettledIntentSignalCount": { "type": "integer", "minimum": 0 },
+        "omittedSections": {
+          "const": ["CONSTITUTION_TEXT", "SOURCE_EVIDENCE", "OUTPUT_SCHEMA", "COMPILER_OWNED_FIELDS", "MECHANICALLY_SETTLED_SIGNALS"]
+        }
+      }
+    }
+  }
+}

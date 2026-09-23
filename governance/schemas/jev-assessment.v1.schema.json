@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.jev_assessment.v1",
+  "title": "Aegis JEV Assessment v1",
+  "description": "Envelope auditável para respostas tipadas do JEV. O conteúdo é consultivo e nunca fecha o contrato.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "assessmentDigest", "sourceBatchDigest", "authority", "provider", "transport", "model", "answers", "usage"],
+  "properties": {
+    "schema": { "const": "aegis.jev_assessment.v1" },
+    "assessmentDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceBatchDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "authority": { "const": "ADVISORY_ONLY" },
+    "provider": { "const": "TYPESAFE_JEV" },
+    "transport": { "const": "VERCEL_AI_GATEWAY" },
+    "model": { "type": "string", "minLength": 1 },
+    "answers": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 255,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "choice", "probabilities", "confidence"],
+        "properties": {
+          "type": { "const": "choice" },
+          "choice": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "probabilities": {
+            "type": "object",
+            "minProperties": 2,
+            "maxProperties": 255,
+            "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputTokens", "outputTokens"],
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

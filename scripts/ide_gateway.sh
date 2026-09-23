@@ -23,6 +23,8 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>" Captura a intenção e executa o Discovery (.harness/runtime/preflight.json)
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
+  ./aegis --jev-request  Exibe o lote tipado e consultivo preparado para o JEV
+  ./aegis --jev-run      Executa o lote no JEV via Vercel AI Gateway
   ./aegis --wizard    Abre as decisões pendentes no terminal
   ./aegis --setup     Registra atribuições externas; não executa API nem IDE
   ./aegis --setup --show  Exibe a configuração externa sem expor chaves
@@ -186,6 +188,14 @@ main() {
     --semantic-request)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-request
+      ;;
+    --jev-request)
+      require_command_arity "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" jev-request
+      ;;
+    --jev-run)
+      require_command_arity "$@"
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" jev-run
       ;;
     --semantic-compile)
       require_command_arity "$@"

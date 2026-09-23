@@ -363,11 +363,8 @@ async function handleStatus() {
   writeStatus({ status: 'IDLE', workspace: 'clean' });
 }
 
-async function handleSemanticRequest() {
-  const [{ canonicalJson }, { buildSemanticRequest }] = await Promise.all([
-    import('./lib/canonical_json.mjs'),
-    import('./lib/semantic_request.mjs'),
-  ]);
+async function buildCurrentSemanticRequest() {
+  const { buildSemanticRequest } = await import('./lib/semantic_request.mjs');
   const [preflight, loadedPolicy, constitution] = await Promise.all([
     readPreflight(),
     readPolicy(),
@@ -388,7 +385,44 @@ async function handleSemanticRequest() {
     revision: revision?.request ?? null,
     workspaceObservation,
   });
+  return {
+    request,
+    preflight,
+    loadedPolicy,
+    constitution,
+    workspaceObservation,
+    revision,
+  };
+}
+
+async function handleSemanticRequest() {
+  const { canonicalJson } = await import('./lib/canonical_json.mjs');
+  const { request } = await buildCurrentSemanticRequest();
   process.stdout.write(`${canonicalJson(request)}\n`);
+}
+
+async function handleJevRequest() {
+  const [{ canonicalJson }, { buildJevDecisionBatch }] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/jev_projection.mjs'),
+  ]);
+  const { request } = await buildCurrentSemanticRequest();
+  process.stdout.write(`${canonicalJson(buildJevDecisionBatch(request))}\n`);
+}
+
+async function handleJevRun() {
+  const [
+    { canonicalJson },
+    { requestJevAssessment },
+    { buildJevDecisionBatch },
+  ] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/jev_gateway.mjs'),
+    import('./lib/jev_projection.mjs'),
+  ]);
+  const { request } = await buildCurrentSemanticRequest();
+  const batch = buildJevDecisionBatch(request);
+  process.stdout.write(`${canonicalJson(await requestJevAssessment(batch))}\n`);
 }
 
 async function handleSemanticCompile(args) {
@@ -398,7 +432,6 @@ async function handleSemanticCompile(args) {
     {
       assertRevisionApplied,
       buildConfirmationRequest,
-      buildSemanticRequest,
       compileSemanticContract,
       compileSemanticOpinion,
       renderSemanticContractMarkdown,
@@ -420,26 +453,13 @@ async function handleSemanticCompile(args) {
   } catch (error) {
     throw rejection('INVALID_SEMANTIC_OPINION', error.message);
   }
-  const [preflight, loadedPolicy, constitution] = await Promise.all([
-    readPreflight(),
-    readPolicy(),
-    readConstitution(),
-  ]);
-  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(
+  const {
+    request,
     preflight,
     loadedPolicy,
     constitution,
-    workspaceObservation,
-  );
-  const request = buildSemanticRequest({
-    repositoryRoot: root,
-    preflight,
-    policy: loadedPolicy.policy,
-    constitution,
-    revision: revision?.request ?? null,
-    workspaceObservation,
-  });
+    revision,
+  } = await buildCurrentSemanticRequest();
   let draft;
   try {
     draft = compileSemanticOpinion(opinion, request);
@@ -627,6 +647,8 @@ try {
   else if (command === 'validate-contract') await handleValidateContract();
   else if (command === 'status') await handleStatus();
   else if (command === 'semantic-request') await handleSemanticRequest();
+  else if (command === 'jev-request') await handleJevRequest();
+  else if (command === 'jev-run') await handleJevRun();
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();
   else if (command === 'verify') await handleVerify();
@@ -638,7 +660,8 @@ try {
   const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
   const phase = command === 'draft' || command === 'validate-preflight'
     ? 'PREFLIGHT'
-    : command === 'semantic-request' || command === 'semantic-compile' || command === 'validate-contract'
+    : command === 'semantic-request' || command === 'jev-request' || command === 'jev-run'
+      || command === 'semantic-compile' || command === 'validate-contract'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';
   process.stderr.write(`${JSON.stringify(buildRejectionReport({

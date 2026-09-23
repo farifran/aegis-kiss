@@ -8,6 +8,14 @@ cd "${ROOT_DIR}"
 node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 import { canonicalDigest } from './scripts/lib/canonical_json.mjs';
+import {
+  assertJevAssessment,
+  buildJevDecisionBatch,
+} from './scripts/lib/jev_projection.mjs';
+import {
+  compileJevAssessment,
+  requestJevAssessment,
+} from './scripts/lib/jev_gateway.mjs';
 import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
@@ -32,6 +40,8 @@ const currentSchemas = [
   'confirmation-request.v4.schema.json',
   'constitution.v1.schema.json',
   'issue-contract.v13.schema.json',
+  'jev-assessment.v1.schema.json',
+  'jev-decision-batch.v1.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -74,6 +84,92 @@ if (requestDigest !== canonicalDigest(requestPayload)
   || semanticRequest.worksheet.mechanicalProofObligations.length !== 0
   || semanticRequest.worksheet.finiteRepresentations.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
+}
+
+const jevBatch = buildJevDecisionBatch(semanticRequest);
+if (jevBatch.schema !== 'aegis.jev_decision_batch.v1'
+  || jevBatch.sourceSemanticRequestDigest !== semanticRequest.requestDigest
+  || jevBatch.sourceWorksheetDigest !== semanticRequest.worksheetDigest
+  || jevBatch.protocol.authority !== 'ADVISORY_ONLY'
+  || jevBatch.protocol.onUnavailable !== 'BYPASS_TO_SEMANTIC_MODEL'
+  || jevBatch.projection.questionCount !== Object.keys(jevBatch.questions).length
+  || jevBatch.bindings['complexity.global'].allowedUse !== 'CANDIDATE_ONLY'
+  || Object.hasOwn(jevBatch.state, 'sourceEvidence')
+  || Object.hasOwn(jevBatch.state, 'outputSchema')) {
+  throw new Error('jev_projection_is_not_compact_or_advisory');
+}
+const jevAnswers = Object.fromEntries(Object.entries(jevBatch.questions).map(([id, question]) => {
+  const optionIds = Object.keys(question.criteria);
+  return [id, {
+    type: 'choice',
+    choice: optionIds[0],
+    probabilities: Object.fromEntries(optionIds.map((optionId, index) => [
+      optionId,
+      index === 0 ? 1 : 0,
+    ])),
+    confidence: 1,
+  }];
+}));
+const jevAssessmentPayload = {
+  schema: 'aegis.jev_assessment.v1',
+  sourceBatchDigest: jevBatch.batchDigest,
+  authority: 'ADVISORY_ONLY',
+  provider: 'TYPESAFE_JEV',
+  transport: 'VERCEL_AI_GATEWAY',
+  model: 'jev-test-pinned',
+  answers: jevAnswers,
+  usage: { inputTokens: 10, outputTokens: 0 },
+};
+const jevAssessment = {
+  ...jevAssessmentPayload,
+  assessmentDigest: canonicalDigest(jevAssessmentPayload),
+};
+assertJevAssessment(jevAssessment, jevBatch);
+const compiledJevAssessment = compileJevAssessment(jevBatch, {
+  model: 'jev-test-pinned',
+  answers: jevAnswers,
+  usage: { input_tokens: 10, output_tokens: 0 },
+});
+if (compiledJevAssessment.assessmentDigest !== jevAssessment.assessmentDigest) {
+  throw new Error('jev_gateway_response_was_not_compiled_deterministically');
+}
+try {
+  await requestJevAssessment(jevBatch, {
+    apiKey: 'test-key',
+    client: {
+      async systemOne() {
+        const error = new Error('AI Gateway requires a valid credit card on file');
+        error.status = 403;
+        throw error;
+      },
+    },
+  });
+  throw new Error('jev_gateway_billing_failure_was_not_normalized');
+} catch (error) {
+  if (!error.message.startsWith('jev_gateway_billing_required:')) throw error;
+}
+const invalidJevAssessment = structuredClone(jevAssessment);
+invalidJevAssessment.answers['complexity.global'].choice = 'FORGED_OPTION';
+const { assessmentDigest: previousAssessmentDigest, ...invalidJevAssessmentPayload } = invalidJevAssessment;
+void previousAssessmentDigest;
+invalidJevAssessment.assessmentDigest = canonicalDigest(invalidJevAssessmentPayload);
+try {
+  assertJevAssessment(invalidJevAssessment, jevBatch);
+  throw new Error('forged_jev_choice_was_accepted');
+} catch (error) {
+  if (!error.message.startsWith('jev_assessment_choice_space_mismatch:')) throw error;
+}
+const nonMaximalJevAssessment = structuredClone(jevAssessment);
+const complexityOptions = Object.keys(jevBatch.questions['complexity.global'].criteria);
+nonMaximalJevAssessment.answers['complexity.global'].choice = complexityOptions[1];
+const { assessmentDigest: previousNonMaximalDigest, ...nonMaximalPayload } = nonMaximalJevAssessment;
+void previousNonMaximalDigest;
+nonMaximalJevAssessment.assessmentDigest = canonicalDigest(nonMaximalPayload);
+try {
+  assertJevAssessment(nonMaximalJevAssessment, jevBatch);
+  throw new Error('non_maximal_jev_choice_was_accepted');
+} catch (error) {
+  if (!error.message.startsWith('jev_assessment_selected_choice_mismatch:')) throw error;
 }
 
 const userBasis = [{ source: 'USER_INTENT', reference: 'comportamento observável' }];

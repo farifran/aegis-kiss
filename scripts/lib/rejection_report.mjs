@@ -33,6 +33,18 @@ const diagnostics = new Map([
     remediation: 'Corrija o campo indicado em detail e gere novamente somente o parecer semântico.',
     ruleId: 'CONST-EVIDENCE',
   }],
+  ['JEV_GATEWAY_AUTHENTICATION_FAILED', {
+    message: 'O Vercel AI Gateway recusou a credencial configurada para o JEV.',
+    remediation: 'Revogue a chave exposta, gere uma nova chave e exporte-a como AI_GATEWAY_API_KEY.',
+  }],
+  ['JEV_GATEWAY_BILLING_REQUIRED', {
+    message: 'A conta Vercel ainda não está habilitada para executar o JEV pelo AI Gateway.',
+    remediation: 'Habilite a cobrança exigida pela Vercel e execute novamente ./aegis --jev-run.',
+  }],
+  ['JEV_GATEWAY_UNAVAILABLE', {
+    message: 'O JEV não pôde ser consultado pelo Vercel AI Gateway.',
+    remediation: 'Use o bypass para a IA semântica ou tente novamente quando o serviço estiver disponível.',
+  }],
   ['MISSING_USER_CONFIRMATION', {
     message: 'Não existe um pedido de confirmação vinculado ao rascunho atual.',
     remediation: 'Recompile o parecer semântico para gerar um novo pedido de confirmação.',

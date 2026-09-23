@@ -453,6 +453,32 @@ printf '%s\n' "${semantic_request}" | jq -e '
 semantic_worksheet_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.worksheetDigest')"
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 
+# A projeção JEV é compacta, consultiva e não grava estado nem chama serviço externo.
+jev_request="$(bash ./aegis --jev-request)"
+printf '%s\n' "${jev_request}" | jq -e --arg semanticDigest "$(printf '%s\n' "${semantic_request}" | jq -r '.requestDigest')" '
+  .schema == "aegis.jev_decision_batch.v1"
+  and .sourceSemanticRequestDigest == $semanticDigest
+  and .protocol.authority == "ADVISORY_ONLY"
+  and .protocol.transport == "VERCEL_AI_GATEWAY"
+  and .protocol.onUnavailable == "BYPASS_TO_SEMANTIC_MODEL"
+  and .protocol.onUncertain == "FULL_SEMANTIC_REVIEW"
+  and .projection.questionCount == (.questions | length)
+  and .projection.questionCount == (.bindings | length)
+  and .questions."complexity.global".type == "choice"
+  and .bindings."complexity.global".allowedUse == "CANDIDATE_ONLY"
+  and (.state | has("sourceEvidence") | not)
+  and (.state | has("outputSchema") | not)
+' >/dev/null
+[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
+set +e
+missing_jev_key_output="$(env -u AI_GATEWAY_API_KEY bash ./aegis --jev-run 2>&1)"
+missing_jev_key_code=$?
+set -e
+[[ "${missing_jev_key_code}" -ne 0 ]]
+printf '%s\n' "${missing_jev_key_output}" | jq -e '
+  .phase == "SEMANTIC" and .reason == "JEV_GATEWAY_API_KEY_MISSING"
+' >/dev/null
+
 # Antes da assinatura, mudança no workspace continua bloqueando o contexto semântico.
 cp src/index.ts "${WORK_DIR}/index.before-preflight-check.ts"
 printf '\nexport const prematureChange = true;\n' >> src/index.ts
@@ -939,6 +965,18 @@ printf '%s\n' "${policy_output}" | jq -e '
 bash ./aegis 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
 deterministic_request="$(bash ./aegis --semantic-request)"
 deterministic_worksheet_digest="$(printf '%s\n' "${deterministic_request}" | jq -r '.worksheetDigest')"
+deterministic_jev_request="$(bash ./aegis --jev-request)"
+printf '%s\n' "${deterministic_jev_request}" | jq -e '
+  .projection.intentQuestionCount == (.state.reviewSignals | length)
+  and .projection.policyQuestionCount > 0
+  and .projection.determinismQuestionCount == (.state.determinismActivations | length)
+  and .projection.mechanicallySettledIntentSignalCount > 0
+  and ([.bindings[].family] | index("POLICY_SIGNAL") != null)
+  and ([.bindings[].family] | index("DETERMINISM_ACTIVATION") != null)
+  and ([.bindings[].family] | index("COMPLEXITY_REVIEW") != null)
+  and ([.bindings[].allowedUse] | all(. == "CANDIDATE_ONLY"))
+' >/dev/null
+[[ "$(printf '%s\n' "${deterministic_jev_request}" | jq -r '.batchDigest')" == "$(bash ./aegis --jev-request | jq -r '.batchDigest')" ]]
 set +e
 missing_dimension_output="$(make_opinion yes "${deterministic_worksheet_digest}" | bash ./aegis --semantic-compile 2>&1)"
 missing_dimension_code=$?
@@ -946,7 +984,7 @@ set -e
 [[ "${missing_dimension_code}" -ne 0 ]]
 printf '%s\n' "${missing_dimension_output}" | jq -e '
   .reason == "INVALID_SEMANTIC_OPINION"
-  and (.detail | startswith("semantic_opinion_missing_required_determinism:"))
+  and (.detail | startswith("semantic_opinion_missing_activation:"))
 ' >/dev/null
 
 printf '[AEGIS][TEST] capture, discovery and semantic contract flow: PASS\n'

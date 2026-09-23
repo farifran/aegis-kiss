@@ -619,7 +619,6 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "activationId",
               "kind",
               "disposition",
               "challenge",
@@ -628,13 +627,6 @@
               "basis"
             ],
             "properties": {
-              "activationId": {
-                "oneOf": [
-                  { "type": "null" },
-                  { "type": "string", "pattern": "^DET-ACT-[0-9]{4}$" }
-                ],
-                "description": "Identificador da ativação mecânica respondida. null é permitido somente para revisão adicional descoberta semanticamente pela IA."
-              },
               "kind": {
                 "enum": [
                   "CONTRADICTION",
@@ -698,6 +690,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "activationId",
               "kind",
               "subject",
               "status",
@@ -709,6 +702,13 @@
               "inapplicabilityProof"
             ],
             "properties": {
+              "activationId": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^DET-ACT-[0-9]{4}$" }
+                ],
+                "description": "Identificador da ativação mecânica respondida. null é permitido somente para revisão adicional descoberta semanticamente pela IA."
+              },
               "kind": {
                 "enum": [
                   "ORDERING",
