@@ -76,7 +76,7 @@
     },
     "intentSignals": {
       "type": "array",
-      "maxItems": 32,
+      "maxItems": 128,
       "uniqueItems": true,
       "items": {
         "type": "object",
@@ -84,8 +84,8 @@
         "required": ["id", "kind", "handling", "offset", "reference", "excerpt"],
         "properties": {
           "id": { "type": "string", "pattern": "^INPUT-[0-9]{4}$" },
-          "kind": { "enum": ["INCOMPLETE_EXPRESSION", "QUALITY_CONSTRAINT", "QUALITY_GOAL", "BOUNDED_VALUE", "DETERMINISM_CLAIM", "ARITHMETIC_SEMANTICS", "EXAMPLE"] },
-          "handling": { "enum": ["MATERIAL_DECISION", "SEMANTIC_REVIEW", "MEASURABLE_REQUIREMENT", "NON_NORMATIVE_GOAL", "NON_NORMATIVE_EXAMPLE", "BOUNDARY_RULE", "DETERMINISM_REVIEW"] },
+          "kind": { "enum": ["INCOMPLETE_EXPRESSION", "BIT_LAYOUT_ISSUE", "QUALITY_CONSTRAINT", "QUALITY_GOAL", "BOUNDED_VALUE", "DETERMINISM_CLAIM", "ARITHMETIC_SEMANTICS", "EXAMPLE"] },
+          "handling": { "enum": ["MATERIAL_DECISION", "MATERIAL_REVIEW", "SEMANTIC_REVIEW", "MEASURABLE_REQUIREMENT", "NON_NORMATIVE_GOAL", "NON_NORMATIVE_EXAMPLE", "BOUNDARY_RULE", "DETERMINISM_REVIEW"] },
           "offset": { "type": "integer", "minimum": 0 },
           "reference": { "type": "string", "minLength": 1, "maxLength": 120 },
           "excerpt": { "type": "string", "minLength": 1, "maxLength": 240 }

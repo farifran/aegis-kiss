@@ -393,6 +393,30 @@ assertSemanticDraft(signalHandledDraft, loadedPolicy.policy, {
   intent: signaledIntent,
 });
 
+const arithmeticGapIntent = `${demand} Calcular a fração pela fórmula ().`;
+try {
+  assertSemanticDraft(draft, loadedPolicy.policy, {
+    ...validationContext,
+    intent: arithmeticGapIntent,
+  });
+  throw new Error('unhandled_material_review_was_accepted');
+} catch (error) {
+  if (!error.message.startsWith('unhandled_intent_signal:')) throw error;
+}
+const materialGapDraft = structuredClone(draft);
+materialGapDraft.unknowns.push({
+  id: 'UNKNOWN-ARITHMETIC-FORMULA',
+  statement: 'A fórmula aritmética indicada pelo marcador vazio não foi fornecida.',
+  material: true,
+  decisionId: null,
+  intentSignalIds: ['INPUT-0001'],
+  basis: [{ source: 'USER_INTENT', reference: 'fórmula ()' }],
+});
+assertSemanticDraft(materialGapDraft, loadedPolicy.policy, {
+  ...validationContext,
+  intent: arithmeticGapIntent,
+});
+
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft,

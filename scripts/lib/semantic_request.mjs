@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
-import { detectIntentSignals } from './intent_signals.mjs';
+import { analyzeBitLayouts, detectIntentSignals } from './intent_signals.mjs';
 import { assertSchema, schemaDocument } from './schema_validator.mjs';
 import {
   mechanicalPolicySignals,
@@ -196,7 +196,7 @@ export function buildSemanticRequest({
     constitution,
     intent: preflight.intent,
     intentSignals: {
-      method: 'DETERMINISTIC_INTENT_REVIEW_V2',
+      method: 'DETERMINISTIC_INTENT_REVIEW_V3',
       status: detectedIntentSignals.length === 0 ? 'CLEAR' : 'REVIEW_REQUIRED',
       signals: detectedIntentSignals,
     },
@@ -236,6 +236,7 @@ export function buildSemanticRequest({
   const contextDigest = canonicalDigest(context);
   const worksheet = buildSemanticWorksheet({
     contextDigest,
+    intent: preflight.intent,
     intentSignals: detectedIntentSignals,
   });
   const worksheetDigest = canonicalDigest(worksheet);
@@ -262,13 +263,13 @@ export function buildSemanticRequest({
   return request;
 }
 
-export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
+export function buildSemanticWorksheet({ contextDigest, intent, intentSignals }) {
   const bitFields = intentSignals.flatMap((signal, signalIndex) => {
     if (signal.kind !== 'BOUNDED_VALUE') return [];
-    const match = /\bbits?\s+(\d+)\s*[–—-]\s*(\d+)\b/iu.exec(signal.reference);
+    const match = /\bbits?\s+(\d+)(?:\s*[–—-]\s*(\d+))?\b/iu.exec(signal.reference);
     if (match === null) return [];
     const startBit = Number.parseInt(match[1], 10);
-    const endBit = Number.parseInt(match[2], 10);
+    const endBit = Number.parseInt(match[2] ?? match[1], 10);
     if (!Number.isSafeInteger(startBit)
       || !Number.isSafeInteger(endBit)
       || endBit < startBit) return [];
@@ -292,6 +293,17 @@ export function buildSemanticWorksheet({ contextDigest, intentSignals }) {
     requiredDeterminismDimensions: [],
     counterexampleWitnesses: [],
     bitFields,
+    bitLayouts: analyzeBitLayouts(intent, intentSignals).map((layout) => ({
+      id: layout.id,
+      declaredWidthSignalIndex: layout.declaredWidthSignalIndex,
+      declaredWidth: layout.declaredWidth,
+      fieldSignalIndexes: layout.fieldSignalIndexes,
+      coveredWidth: layout.coveredWidth,
+      status: layout.status,
+      gaps: layout.gaps,
+      overlaps: layout.overlaps,
+      outOfRange: layout.outOfRange,
+    })),
     compilerOwnedFields: [
       'SCHEMA',
       'CONTEXT_BINDING',

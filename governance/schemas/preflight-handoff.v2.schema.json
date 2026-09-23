@@ -78,7 +78,7 @@
           "required": ["status", "method", "queryTerms", "termsTruncated", "matches"],
           "properties": {
             "status": { "enum": ["MATCH", "NO_MATCH", "NOT_APPLICABLE"] },
-            "method": { "const": "NFC_UNICODE_LOWERCASE_EXACT_TOKEN" },
+            "method": { "const": "BM25_IDF_EXACT_TOKEN_V1" },
             "queryTerms": {
               "type": "array",
               "maxItems": 64,

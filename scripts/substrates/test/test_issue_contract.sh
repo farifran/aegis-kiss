@@ -109,7 +109,6 @@ const root = mkdtempSync(join(tmpdir(), 'aegis-discovery.'));
 const outside = mkdtempSync(join(tmpdir(), 'aegis-outside.'));
 try {
   mkdirSync(join(root, 'src'));
-  writeFileSync(join(root, 'src/index.ts'), '// superfície pública\nexport const tokenAlfa = true;\n');
   writeFileSync(join(outside, 'secret.txt'), 'secret\n');
   symlinkSync(join(outside, 'secret.txt'), join(root, 'src/link.txt'));
   const naturalTerms = Array.from({ length: 70 }, (_, index) => {
@@ -117,12 +116,23 @@ try {
     const second = String.fromCharCode(97 + (index % 26));
     return `palavralonga${first}${second}`;
   }).join(' ');
+  writeFileSync(
+    join(root, 'src/index.ts'),
+    `// ${naturalTerms}\n// processador registros ${'sistema '.repeat(20)}\nexport const tokenAlfa = true;\n`,
+  );
+  writeFileSync(
+    join(root, 'src/long.ts'),
+    `// ${'preenchimento '.repeat(120)}alvoRaro\n`,
+  );
+  writeFileSync(join(root, 'src/short.ts'), '// alvoRaro alvoRaro\n');
   const discovery = discoverWorkspace(
     root,
     `${naturalTerms} para \`ComponenteExtensivel\` \`TipoExplicito\` observar tokenAlfa`,
   );
   const evidence = discovery.lexicalEvidence;
-  if (!evidence.termsTruncated || evidence.queryTerms.includes('para')) {
+  if (evidence.method !== 'BM25_IDF_EXACT_TOKEN_V1'
+    || !evidence.termsTruncated
+    || evidence.queryTerms.includes('para')) {
     throw new Error('lexical_selection_failed');
   }
   if (!evidence.queryTerms.includes('ComponenteExtensivel')
@@ -131,14 +141,31 @@ try {
   }
   const vocabularyDiscovery = discoverWorkspace(
     root,
-    'Precisamos garantir um processador de registros com protocolo Aurora determinístico.',
+    'Precisamos garantir, utilizando qualquer forma possível, um processador de registros com protocolo Aurora determinístico.',
   );
   if (vocabularyDiscovery.lexicalEvidence.queryTerms.includes('Precisamos')
     || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('garantir')
+    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('utilizando')
+    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('qualquer')
+    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('possível')
     || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('processador')
     || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('registros')
     || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('Aurora')) {
     throw new Error('lexical_specific_terms_lost_to_generic_words');
+  }
+  const rankedDiscovery = discoverWorkspace(root, 'sistema processador');
+  if (rankedDiscovery.lexicalEvidence.queryTerms[0] !== 'processador'
+    || rankedDiscovery.lexicalEvidence.queryTerms[1] !== 'sistema') {
+    throw new Error('rare_repository_term_was_not_prioritized');
+  }
+  const documentRanking = discoverWorkspace(root, 'alvoRaro');
+  if (documentRanking.lexicalEvidence.matches[0]?.path !== 'src/short.ts') {
+    throw new Error('bm25_did_not_select_best_document');
+  }
+  const repeatedDiscovery = discoverWorkspace(root, 'alvoRaro');
+  if (JSON.stringify(documentRanking.lexicalEvidence)
+    !== JSON.stringify(repeatedDiscovery.lexicalEvidence)) {
+    throw new Error('lexical_ranking_is_not_deterministic');
   }
   if (!discovery.ignoredEntries.some(({ reason }) => reason === 'SYMLINK')) {
     throw new Error('symlink_was_not_reported');
@@ -146,6 +173,76 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
   rmSync(outside, { recursive: true, force: true });
+}
+NODE
+
+# Layouts de bits são medidos pelo Harness, incluindo bits unitários, gaps e overlaps.
+node --input-type=module <<'NODE'
+import { detectIntentSignals } from './scripts/lib/intent_signals.mjs';
+import { buildSemanticWorksheet } from './scripts/lib/semantic_request.mjs';
+
+const contextDigest = 'a'.repeat(64);
+const completeIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bit 1: ciclo; Bits 2–31: dados.';
+const completeSignals = detectIntentSignals(completeIntent);
+const complete = buildSemanticWorksheet({
+  contextDigest,
+  intent: completeIntent,
+  intentSignals: completeSignals,
+});
+if (complete.bitFields.length !== 3
+  || complete.bitFields[0].startBit !== 0
+  || complete.bitFields[0].endBit !== 0
+  || complete.bitLayouts.length !== 1
+  || complete.bitLayouts[0].status !== 'COMPLETE'
+  || complete.bitLayouts[0].coveredWidth !== 32) {
+  throw new Error('complete_bit_layout_was_not_measured');
+}
+
+const gapIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bits 2–31: dados.';
+const gapSignals = detectIntentSignals(gapIntent);
+const gap = buildSemanticWorksheet({
+  contextDigest,
+  intent: gapIntent,
+  intentSignals: gapSignals,
+});
+if (!gapSignals.some(({ kind, handling }) => (
+  kind === 'BIT_LAYOUT_ISSUE' && handling === 'SEMANTIC_REVIEW'
+)) || gap.bitLayouts[0].status !== 'INCOMPLETE'
+  || gap.bitLayouts[0].gaps[0]?.startBit !== 1
+  || gap.bitLayouts[0].gaps[0]?.endBit !== 1) {
+  throw new Error('bit_layout_gap_was_not_reported');
+}
+
+const overlapIntent = 'Expor máscara de 32 bits: Bits 0–4: a; Bits 4–31: b.';
+const overlapSignals = detectIntentSignals(overlapIntent);
+const overlap = buildSemanticWorksheet({
+  contextDigest,
+  intent: overlapIntent,
+  intentSignals: overlapSignals,
+});
+if (overlap.bitLayouts[0].overlaps[0]?.startBit !== 4
+  || overlap.bitLayouts[0].overlaps[0]?.endBit !== 4) {
+  throw new Error('bit_layout_overlap_was_not_reported');
+}
+
+const arithmeticGap = detectIntentSignals('Calcular a fração pela fórmula ().');
+if (!arithmeticGap.some(({ kind, handling }) => (
+  kind === 'INCOMPLETE_EXPRESSION' && handling === 'MATERIAL_REVIEW'
+))) {
+  throw new Error('arithmetic_gap_was_not_elevated_for_material_review');
+}
+
+const individualBits = Array.from({ length: 32 }, (_, bit) => `Bit ${bit}: campo${bit}`).join('; ');
+const fullyEnumeratedIntent = `Expor bitmask de 32 bits: ${individualBits}.`;
+const fullyEnumeratedSignals = detectIntentSignals(fullyEnumeratedIntent);
+const fullyEnumerated = buildSemanticWorksheet({
+  contextDigest,
+  intent: fullyEnumeratedIntent,
+  intentSignals: fullyEnumeratedSignals,
+});
+if (fullyEnumerated.bitFields.length !== 32
+  || fullyEnumerated.bitLayouts[0].status !== 'COMPLETE') {
+  throw new Error('fully_enumerated_32_bit_layout_was_rejected');
 }
 NODE
 
@@ -215,6 +312,8 @@ printf '%s\n' "${semantic_request}" | jq -e '
     "integrity-hash",
     "public-interface"
   ]))
+  and .policy.signalSemantics.verdict == "SEMANTIC_NOT_LEXICAL"
+  and .policy.signalSemantics.assessment == "REQUIRED_FOR_EACH_SIGNAL_RULE"
   and (.workspace.observedTextPaths == ["src/index.ts"])
   and (.workspace.sourceEvidence[0].trust == "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS")
   and .workspace.sourceEvidence[0].selection == "FULL_SOURCE"

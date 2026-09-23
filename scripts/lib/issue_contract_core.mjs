@@ -45,14 +45,6 @@ const minimumPlainTermLength = 5;
 const lexicalTokenPattern = /[\p{L}\p{N}_$-]{3,}/gu;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
-const lexicalStopWords = new Set([
-  'agora', 'ainda', 'alguma', 'algumas', 'algum', 'alguns', 'através', 'caso', 'como',
-  'automaticamente', 'completamente', 'durante', 'então', 'essa', 'essas', 'esse', 'esses',
-  'esta', 'este', 'fazer', 'garantir', 'garantindo',
-  'muitas', 'nosso', 'nossa', 'onde', 'para', 'podem', 'ponto', 'precisamos', 'quando', 'sistema', 'somente',
-  'também', 'toda', 'todo', 'total', 'vocês', 'with', 'from', 'into', 'must', 'should',
-  'that', 'this', 'when', 'where',
-]);
 
 function compareText(left, right) {
   if (left < right) return -1;
@@ -83,7 +75,37 @@ function isTechnicalName(text, matchIndex, term) {
   return preceding !== undefined && !/[.!?:\n*-]/u.test(preceding);
 }
 
-function demandTerms(text) {
+function buildSourceTermIndex(sourceRecords) {
+  const collectionFrequency = new Map();
+  const documentFrequency = new Map();
+  const documents = sourceRecords.map((record) => {
+    const normalizedText = record.text.normalize('NFC').toLowerCase();
+    const frequencies = new Map();
+    const firstOffsets = new Map();
+    let length = 0;
+    for (const match of normalizedText.matchAll(lexicalTokenPattern)) {
+      const key = match[0];
+      length += 1;
+      frequencies.set(key, (frequencies.get(key) ?? 0) + 1);
+      collectionFrequency.set(key, (collectionFrequency.get(key) ?? 0) + 1);
+      if (!firstOffsets.has(key)) firstOffsets.set(key, match.index);
+    }
+    for (const key of frequencies.keys()) {
+      documentFrequency.set(key, (documentFrequency.get(key) ?? 0) + 1);
+    }
+    return { ...record, normalizedText, frequencies, firstOffsets, length };
+  });
+  const totalDocumentLength = documents.reduce((total, { length }) => total + length, 0);
+  return {
+    documents,
+    documentCount: documents.length,
+    totalDocumentLength,
+    collectionFrequency,
+    documentFrequency,
+  };
+}
+
+function demandTerms(text, sourceIndex) {
   const codeRanges = codeSpanRanges(text);
   const termsByKey = new Map();
   let codeRangeIndex = 0;
@@ -97,7 +119,6 @@ function demandTerms(text) {
     const codeLike = inCodeSpan || isIdentifierLike(term);
     const technicalName = !codeLike && isTechnicalName(text, match.index, term);
     const length = [...term].length;
-    if (!codeLike && lexicalStopWords.has(key)) continue;
     if (!codeLike && length < minimumPlainTermLength) continue;
 
     const existing = termsByKey.get(key);
@@ -120,8 +141,23 @@ function demandTerms(text) {
   }
 
   const terms = [...termsByKey.values()]
+    .filter(({ key, codeLike, technicalName }) => (
+      codeLike || technicalName || sourceIndex.collectionFrequency.has(key)
+    ))
+    .map((term) => {
+      const documentFrequency = sourceIndex.documentFrequency.get(term.key) ?? 0;
+      const collectionFrequency = sourceIndex.collectionFrequency.get(term.key) ?? 0;
+      return {
+        ...term,
+        documentFrequency,
+        collectionFrequency,
+      };
+    })
     .sort((left, right) => Number(right.codeLike) - Number(left.codeLike)
       || Number(right.technicalName) - Number(left.technicalName)
+      || Number(right.collectionFrequency > 0) - Number(left.collectionFrequency > 0)
+      || left.documentFrequency - right.documentFrequency
+      || left.collectionFrequency - right.collectionFrequency
       || right.occurrences - left.occurrences
       || left.position - right.position
       || right.length - left.length);
@@ -129,6 +165,45 @@ function demandTerms(text) {
     terms: terms.slice(0, discoveryTermLimit),
     termsTruncated: terms.length > discoveryTermLimit,
   };
+}
+
+function compareFractions(leftNumerator, leftDenominator, rightNumerator, rightDenominator) {
+  const left = leftNumerator * rightDenominator;
+  const right = rightNumerator * leftDenominator;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function bestDocumentForTerm(sourceIndex, key) {
+  const documentFrequency = sourceIndex.documentFrequency.get(key);
+  if (documentFrequency === undefined || sourceIndex.totalDocumentLength === 0) return null;
+  const totalLength = BigInt(sourceIndex.totalDocumentLength);
+  const documentCount = BigInt(sourceIndex.documentCount);
+  let best = null;
+  for (const document of sourceIndex.documents) {
+    const frequency = document.frequencies.get(key);
+    if (frequency === undefined) continue;
+    // BM25 com k1=1.2 e b=0.75. O IDF é constante para este termo;
+    // a fração inteira evita ponto flutuante e preserva a mesma ordenação.
+    const termFrequency = BigInt(frequency);
+    const numerator = termFrequency * 10n * totalLength;
+    const denominator = numerator
+      + (3n * totalLength)
+      + (9n * BigInt(document.length) * documentCount);
+    const comparison = best === null
+      ? 1
+      : compareFractions(numerator, denominator, best.numerator, best.denominator);
+    if (best === null
+      || comparison > 0
+      || (comparison === 0 && compareText(document.path, best.document.path) < 0)) {
+      best = {
+        document,
+        numerator,
+        denominator,
+        offset: document.firstOffsets.get(key),
+      };
+    }
+  }
+  return best;
 }
 
 function assignLineNumbers(text, pendingMatches) {
@@ -145,32 +220,30 @@ function assignLineNumbers(text, pendingMatches) {
 }
 
 function buildLexicalEvidence(sourceRecords, intent) {
-  const { terms, termsTruncated } = demandTerms(intent);
-  const pendingTerms = new Map(terms.map(({ key, term }) => [key, term]));
-  const matches = [];
-
-  for (const record of sourceRecords) {
-    if (pendingTerms.size === 0) break;
-    const lowerText = record.text.normalize('NFC').toLowerCase();
-    const recordMatches = [];
-    for (const match of lowerText.matchAll(lexicalTokenPattern)) {
-      const key = match[0];
-      const term = pendingTerms.get(key);
-      if (term === undefined) continue;
-      const offset = match.index;
-      recordMatches.push({ term, path: record.path, offset });
-      pendingTerms.delete(key);
-      if (pendingTerms.size === 0) break;
-    }
-    assignLineNumbers(lowerText, recordMatches);
-    matches.push(...recordMatches.map(({ term, path, line }) => ({ term, path, line })));
+  const sourceIndex = buildSourceTermIndex(sourceRecords);
+  const { terms, termsTruncated } = demandTerms(intent, sourceIndex);
+  const pendingMatches = terms.flatMap(({ key, term }) => {
+    const best = bestDocumentForTerm(sourceIndex, key);
+    return best === null ? [] : [{
+      term,
+      path: best.document.path,
+      document: best.document,
+      offset: best.offset,
+    }];
+  });
+  for (const document of sourceIndex.documents) {
+    assignLineNumbers(
+      document.normalizedText,
+      pendingMatches.filter((match) => match.document === document),
+    );
   }
+  const matches = pendingMatches.map(({ term, path, line }) => ({ term, path, line }));
 
   const applicable = sourceRecords.length > 0 && terms.length > 0;
 
   return {
     status: applicable ? (matches.length > 0 ? 'MATCH' : 'NO_MATCH') : 'NOT_APPLICABLE',
-    method: 'NFC_UNICODE_LOWERCASE_EXACT_TOKEN',
+    method: 'BM25_IDF_EXACT_TOKEN_V1',
     queryTerms: terms.map(({ term }) => term),
     termsTruncated,
     matches,

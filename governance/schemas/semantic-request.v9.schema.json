@@ -123,7 +123,7 @@
     "intentSignals": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Sinais mecânicos não são veredictos. INCOMPLETE_EXPRESSION exige UNKNOWN material; QUALITY_CONSTRAINT exige medição; QUALITY_GOAL permanece não normativo; BOUNDED_VALUE exige regra explícita; DETERMINISM_CLAIM exige revisão de determinismo.",
+      "description": "Sinais mecânicos não são veredictos. INCOMPLETE_EXPRESSION e BIT_LAYOUT_ISSUE exigem resolução semântica explícita; QUALITY_CONSTRAINT exige medição; QUALITY_GOAL permanece não normativo; BOUNDED_VALUE exige regra explícita; DETERMINISM_CLAIM exige revisão de determinismo.",
       "required": [
         "method",
         "status",
@@ -131,7 +131,7 @@
       ],
       "properties": {
         "method": {
-          "const": "DETERMINISTIC_INTENT_REVIEW_V2"
+          "const": "DETERMINISTIC_INTENT_REVIEW_V3"
         },
         "status": {
           "enum": [
@@ -141,7 +141,7 @@
         },
         "signals": {
           "type": "array",
-          "maxItems": 32,
+          "maxItems": 128,
           "uniqueItems": true,
           "items": {
             "type": "object",
@@ -162,6 +162,7 @@
               "kind": {
                 "enum": [
                   "INCOMPLETE_EXPRESSION",
+                  "BIT_LAYOUT_ISSUE",
                   "QUALITY_CONSTRAINT",
                   "QUALITY_GOAL",
                   "BOUNDED_VALUE",
@@ -173,6 +174,7 @@
               "handling": {
                 "enum": [
                   "MATERIAL_DECISION",
+                  "MATERIAL_REVIEW",
                   "SEMANTIC_REVIEW",
                   "MEASURABLE_REQUIREMENT",
                   "NON_NORMATIVE_GOAL",
@@ -180,7 +182,7 @@
                   "BOUNDARY_RULE",
                   "DETERMINISM_REVIEW"
                 ],
-                "description": "MATERIAL_DECISION exige lacuna observável; SEMANTIC_REVIEW verifica se um marcador incompleto já foi determinado pelo texto; MEASURABLE_REQUIREMENT exige alvo autorizado; metas e exemplos permanecem não normativos; BOUNDARY_RULE exige separar largura de valor codificado; DETERMINISM_REVIEW exige reportar somente dimensões materialmente aplicáveis."
+                "description": "MATERIAL_DECISION exige alternativas maduras e resultados observáveis distintos; MATERIAL_REVIEW exige resolução normativa ou UNKNOWN material sem inventar pergunta; SEMANTIC_REVIEW verifica se o texto já resolveu o marcador; MEASURABLE_REQUIREMENT exige alvo autorizado; metas e exemplos permanecem não normativos; BOUNDARY_RULE exige separar largura de valor codificado; DETERMINISM_REVIEW exige reportar somente dimensões materialmente aplicáveis."
               },
               "offset": {
                 "type": "integer",

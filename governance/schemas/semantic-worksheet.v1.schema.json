@@ -11,6 +11,7 @@
     "requiredDeterminismDimensions",
     "counterexampleWitnesses",
     "bitFields",
+    "bitLayouts",
     "compilerOwnedFields"
   ],
   "properties": {
@@ -129,6 +130,40 @@
         }
       }
     },
+    "bitLayouts": {
+      "type": "array",
+      "description": "Auditoria mecânica de layouts explicitamente declarados como bitmask ou máscara de N bits. COMPLETE exige cobertura exata de 0 a N-1, sem gaps, overlaps ou campos fora do intervalo.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "declaredWidthSignalIndex",
+          "declaredWidth",
+          "fieldSignalIndexes",
+          "coveredWidth",
+          "status",
+          "gaps",
+          "overlaps",
+          "outOfRange"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^BIT-LAYOUT-[0-9]{4}$" },
+          "declaredWidthSignalIndex": { "type": "integer", "minimum": 0 },
+          "declaredWidth": { "type": "integer", "minimum": 1 },
+          "fieldSignalIndexes": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 },
+            "uniqueItems": true
+          },
+          "coveredWidth": { "type": "integer", "minimum": 0 },
+          "status": { "enum": ["COMPLETE", "INCOMPLETE"] },
+          "gaps": { "$ref": "#/$defs/bitRanges" },
+          "overlaps": { "$ref": "#/$defs/bitRanges" },
+          "outOfRange": { "$ref": "#/$defs/bitRanges" }
+        }
+      }
+    },
     "compilerOwnedFields": {
       "description": "Partes do contrato reservadas ao compilador determinístico e proibidas no parecer da IA.",
       "const": [
@@ -142,6 +177,20 @@
         "DIGESTS",
         "APPROVAL_STATE"
       ]
+    }
+  },
+  "$defs": {
+    "bitRanges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["startBit", "endBit"],
+        "properties": {
+          "startBit": { "type": "integer", "minimum": 0 },
+          "endBit": { "type": "integer", "minimum": 0 }
+        }
+      }
     }
   }
 }

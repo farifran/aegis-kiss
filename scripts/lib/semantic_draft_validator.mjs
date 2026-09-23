@@ -398,8 +398,13 @@ function validateIntentSignalCoverage(draft, context) {
     .flatMap(({ intentSignalIds }) => intentSignalIds));
   const unknowns = new Set(draft.unknowns
     .flatMap(({ intentSignalIds }) => intentSignalIds));
+  const semanticRequirements = new Set(draft.requirements
+    .flatMap(({ intentSignalIds }) => intentSignalIds));
   const materialDecisions = new Set(draft.unknowns
     .filter(({ material, decisionId }) => material && decisionId !== null)
+    .flatMap(({ intentSignalIds }) => intentSignalIds));
+  const materialUnknowns = new Set(draft.unknowns
+    .filter(({ material }) => material)
     .flatMap(({ intentSignalIds }) => intentSignalIds));
   const determinism = draft.determinismReview.dimensions.length === 0
     ? new Set()
@@ -417,8 +422,12 @@ function validateIntentSignalCoverage(draft, context) {
       covered = boundaryRules.has(signal.id);
     } else if (signal.handling === 'MATERIAL_DECISION') {
       covered = materialDecisions.has(signal.id);
+    } else if (signal.handling === 'MATERIAL_REVIEW') {
+      covered = materialUnknowns.has(signal.id) || semanticRequirements.has(signal.id);
     } else if (signal.handling === 'SEMANTIC_REVIEW') {
-      covered = unknowns.has(signal.id);
+      covered = signal.kind === 'BIT_LAYOUT_ISSUE'
+        ? materialUnknowns.has(signal.id)
+        : unknowns.has(signal.id) || semanticRequirements.has(signal.id);
     } else if (signal.handling === 'DETERMINISM_REVIEW') {
       covered = determinism.has(signal.id);
     }
