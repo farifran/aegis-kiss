@@ -78,7 +78,7 @@
           "required": ["status", "method", "queryTerms", "termsTruncated", "matches"],
           "properties": {
             "status": { "enum": ["MATCH", "NO_MATCH", "NOT_APPLICABLE"] },
-            "method": { "const": "BM25_IDF_EXACT_TOKEN_V1" },
+            "method": { "const": "HYBRID_BM25_IDENTIFIER_V1" },
             "queryTerms": {
               "type": "array",
               "maxItems": 64,
@@ -92,9 +92,11 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["term", "path", "line"],
+                "required": ["term", "sourceToken", "matchKind", "path", "line"],
                 "properties": {
                   "term": { "type": "string", "minLength": 3 },
+                  "sourceToken": { "type": "string", "minLength": 3 },
+                  "matchKind": { "enum": ["EXACT_TOKEN", "IDENTIFIER_COMPONENT"] },
                   "path": { "type": "string", "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$" },
                   "line": { "type": "integer", "minimum": 1 }
                 }

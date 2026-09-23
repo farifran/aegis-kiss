@@ -61,6 +61,11 @@ export function assertPreflightDocument(preflight) {
     if (!queryTermKeySet.has(termKey) || matchedTermKeys.has(termKey) || !textPaths.has(match.path)) {
       integrityFailure('lexical_match');
     }
+    const sourceTokenKey = match.sourceToken.normalize('NFC').toLowerCase();
+    if ((match.matchKind === 'EXACT_TOKEN' && sourceTokenKey !== termKey)
+      || (match.matchKind === 'IDENTIFIER_COMPONENT' && sourceTokenKey === termKey)) {
+      integrityFailure('lexical_match_kind');
+    }
     matchedTermKeys.add(termKey);
   }
 

@@ -103,7 +103,7 @@ node --input-type=module <<'NODE'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverWorkspace } from './scripts/lib/issue_contract_core.mjs';
+import { discoverWorkspace, observeWorkspace } from './scripts/lib/issue_contract_core.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'aegis-discovery.'));
 const outside = mkdtempSync(join(tmpdir(), 'aegis-outside.'));
@@ -118,7 +118,7 @@ try {
   }).join(' ');
   writeFileSync(
     join(root, 'src/index.ts'),
-    `// ${naturalTerms}\n// processador registros ${'sistema '.repeat(20)}\nexport const tokenAlfa = true;\n`,
+    `// ${naturalTerms}\n// processador registros ${'sistema '.repeat(20)}\nexport const tokenAlfa = true;\nexport const LiquidityResolver = true;\n`,
   );
   writeFileSync(
     join(root, 'src/long.ts'),
@@ -130,7 +130,7 @@ try {
     `${naturalTerms} para \`ComponenteExtensivel\` \`TipoExplicito\` observar tokenAlfa`,
   );
   const evidence = discovery.lexicalEvidence;
-  if (evidence.method !== 'BM25_IDF_EXACT_TOKEN_V1'
+  if (evidence.method !== 'HYBRID_BM25_IDENTIFIER_V1'
     || !evidence.termsTruncated
     || evidence.queryTerms.includes('para')) {
     throw new Error('lexical_selection_failed');
@@ -166,6 +166,39 @@ try {
   if (JSON.stringify(documentRanking.lexicalEvidence)
     !== JSON.stringify(repeatedDiscovery.lexicalEvidence)) {
     throw new Error('lexical_ranking_is_not_deterministic');
+  }
+  const structuralDiscovery = discoverWorkspace(root, 'liquidity resolver');
+  if (!structuralDiscovery.lexicalEvidence.matches.some((match) => (
+    match.matchKind === 'IDENTIFIER_COMPONENT'
+    && match.sourceToken === 'LiquidityResolver'
+    && match.path === 'src/index.ts'
+  ))) {
+    throw new Error('identifier_component_fallback_failed');
+  }
+  const firstObservation = observeWorkspace(root, 'liquidity resolver');
+  const reusedObservation = observeWorkspace(root, 'liquidity resolver', {
+    cachedSourceIndex: firstObservation.sourceIndex,
+  });
+  if (firstObservation.sourceIndex !== reusedObservation.sourceIndex
+    || JSON.stringify(firstObservation.discovery) !== JSON.stringify(reusedObservation.discovery)) {
+    throw new Error('hybrid_index_was_not_reused');
+  }
+  const corruptedIndex = { ...firstObservation.sourceIndex, digest: '0'.repeat(64) };
+  const rebuiltObservation = observeWorkspace(root, 'liquidity resolver', {
+    cachedSourceIndex: corruptedIndex,
+  });
+  if (rebuiltObservation.sourceIndex === corruptedIndex
+    || rebuiltObservation.sourceIndex.digest !== firstObservation.sourceIndex.digest) {
+    throw new Error('corrupt_hybrid_index_was_not_rebuilt');
+  }
+  writeFileSync(join(root, 'src/new.ts'), 'export const newlyIndexed = true;\n');
+  const changedObservation = observeWorkspace(root, 'newly indexed', {
+    cachedSourceIndex: firstObservation.sourceIndex,
+  });
+  if (changedObservation.sourceIndex === firstObservation.sourceIndex
+    || changedObservation.discovery.sourceSnapshotDigest
+      === firstObservation.discovery.sourceSnapshotDigest) {
+    throw new Error('stale_hybrid_index_was_reused');
   }
   if (!discovery.ignoredEntries.some(({ reason }) => reason === 'SYMLINK')) {
     throw new Error('symlink_was_not_reported');
@@ -269,7 +302,12 @@ printf '%s\n' "${draft_output}" | jq -e '
   and .status == "SEMANTIC_DELIBERATION_REQUIRED"
   and .phase == "DISCOVERED"
 ' >/dev/null
-[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -print)" == ".harness/runtime/preflight.json" ]]
+[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
+jq -e '
+  .schema == "aegis.hybrid_source_index.v1"
+  and (.sourceSnapshotDigest | test("^[a-f0-9]{64}$"))
+  and (.digest | test("^[a-f0-9]{64}$"))
+' .harness/runtime/source-index.json >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
 # A projeção semântica é produzida em RAM com a constituição e o schema completos.
@@ -323,7 +361,7 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and (has("sourceSnapshotDigest") | not)
 ' >/dev/null
 semantic_worksheet_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.worksheetDigest')"
-[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -print)" == ".harness/runtime/preflight.json" ]]
+[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 
 # Antes da assinatura, mudança no workspace continua bloqueando o contexto semântico.
 cp src/index.ts "${WORK_DIR}/index.before-preflight-check.ts"

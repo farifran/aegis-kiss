@@ -3,6 +3,11 @@ import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node
 import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
+import {
+  buildHybridSourceIndex,
+  isReusableHybridSourceIndex,
+  searchHybridSourceIndex,
+} from './hybrid_source_index.mjs';
 
 const maxDemandBytes = 65_536;
 
@@ -40,9 +45,6 @@ export function captureDemand(args) {
 const discoveryFileLimit = 256;
 const discoveryEntryLimit = 512;
 const discoveryByteLimit = 1_048_576;
-const discoveryTermLimit = 64;
-const minimumPlainTermLength = 5;
-const lexicalTokenPattern = /[\p{L}\p{N}_$-]{3,}/gu;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -57,199 +59,6 @@ function portableRelativePath(repositoryRoot, absolutePath) {
   return sep === '\\' ? nativePath.replaceAll('\\', '/') : nativePath;
 }
 
-function codeSpanRanges(text) {
-  const ranges = [];
-  for (const match of text.matchAll(/`[^`\r\n]+`/gu)) {
-    ranges.push({ start: match.index + 1, end: match.index + match[0].length - 1 });
-  }
-  return ranges;
-}
-
-function isIdentifierLike(term) {
-  return /[_$\d-]/u.test(term) || /\p{Ll}\p{Lu}/u.test(term);
-}
-
-function isTechnicalName(text, matchIndex, term) {
-  if (!/^\p{Lu}/u.test(term)) return false;
-  const preceding = text.slice(0, matchIndex).trimEnd().at(-1);
-  return preceding !== undefined && !/[.!?:\n*-]/u.test(preceding);
-}
-
-function buildSourceTermIndex(sourceRecords) {
-  const collectionFrequency = new Map();
-  const documentFrequency = new Map();
-  const documents = sourceRecords.map((record) => {
-    const normalizedText = record.text.normalize('NFC').toLowerCase();
-    const frequencies = new Map();
-    const firstOffsets = new Map();
-    let length = 0;
-    for (const match of normalizedText.matchAll(lexicalTokenPattern)) {
-      const key = match[0];
-      length += 1;
-      frequencies.set(key, (frequencies.get(key) ?? 0) + 1);
-      collectionFrequency.set(key, (collectionFrequency.get(key) ?? 0) + 1);
-      if (!firstOffsets.has(key)) firstOffsets.set(key, match.index);
-    }
-    for (const key of frequencies.keys()) {
-      documentFrequency.set(key, (documentFrequency.get(key) ?? 0) + 1);
-    }
-    return { ...record, normalizedText, frequencies, firstOffsets, length };
-  });
-  const totalDocumentLength = documents.reduce((total, { length }) => total + length, 0);
-  return {
-    documents,
-    documentCount: documents.length,
-    totalDocumentLength,
-    collectionFrequency,
-    documentFrequency,
-  };
-}
-
-function demandTerms(text, sourceIndex) {
-  const codeRanges = codeSpanRanges(text);
-  const termsByKey = new Map();
-  let codeRangeIndex = 0;
-  let position = 0;
-  for (const match of text.matchAll(lexicalTokenPattern)) {
-    const term = match[0];
-    const key = term.normalize('NFC').toLowerCase();
-    while (codeRanges[codeRangeIndex]?.end <= match.index) codeRangeIndex += 1;
-    const inCodeSpan = codeRanges[codeRangeIndex]?.start <= match.index
-      && match.index < codeRanges[codeRangeIndex]?.end;
-    const codeLike = inCodeSpan || isIdentifierLike(term);
-    const technicalName = !codeLike && isTechnicalName(text, match.index, term);
-    const length = [...term].length;
-    if (!codeLike && length < minimumPlainTermLength) continue;
-
-    const existing = termsByKey.get(key);
-    if (existing) {
-      existing.occurrences += 1;
-      existing.codeLike ||= codeLike;
-      existing.technicalName ||= technicalName;
-      continue;
-    }
-    termsByKey.set(key, {
-      key,
-      term,
-      length,
-      codeLike,
-      technicalName,
-      occurrences: 1,
-      position,
-    });
-    position += 1;
-  }
-
-  const terms = [...termsByKey.values()]
-    .filter(({ key, codeLike, technicalName }) => (
-      codeLike || technicalName || sourceIndex.collectionFrequency.has(key)
-    ))
-    .map((term) => {
-      const documentFrequency = sourceIndex.documentFrequency.get(term.key) ?? 0;
-      const collectionFrequency = sourceIndex.collectionFrequency.get(term.key) ?? 0;
-      return {
-        ...term,
-        documentFrequency,
-        collectionFrequency,
-      };
-    })
-    .sort((left, right) => Number(right.codeLike) - Number(left.codeLike)
-      || Number(right.technicalName) - Number(left.technicalName)
-      || Number(right.collectionFrequency > 0) - Number(left.collectionFrequency > 0)
-      || left.documentFrequency - right.documentFrequency
-      || left.collectionFrequency - right.collectionFrequency
-      || right.occurrences - left.occurrences
-      || left.position - right.position
-      || right.length - left.length);
-  return {
-    terms: terms.slice(0, discoveryTermLimit),
-    termsTruncated: terms.length > discoveryTermLimit,
-  };
-}
-
-function compareFractions(leftNumerator, leftDenominator, rightNumerator, rightDenominator) {
-  const left = leftNumerator * rightDenominator;
-  const right = rightNumerator * leftDenominator;
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function bestDocumentForTerm(sourceIndex, key) {
-  const documentFrequency = sourceIndex.documentFrequency.get(key);
-  if (documentFrequency === undefined || sourceIndex.totalDocumentLength === 0) return null;
-  const totalLength = BigInt(sourceIndex.totalDocumentLength);
-  const documentCount = BigInt(sourceIndex.documentCount);
-  let best = null;
-  for (const document of sourceIndex.documents) {
-    const frequency = document.frequencies.get(key);
-    if (frequency === undefined) continue;
-    // BM25 com k1=1.2 e b=0.75. O IDF é constante para este termo;
-    // a fração inteira evita ponto flutuante e preserva a mesma ordenação.
-    const termFrequency = BigInt(frequency);
-    const numerator = termFrequency * 10n * totalLength;
-    const denominator = numerator
-      + (3n * totalLength)
-      + (9n * BigInt(document.length) * documentCount);
-    const comparison = best === null
-      ? 1
-      : compareFractions(numerator, denominator, best.numerator, best.denominator);
-    if (best === null
-      || comparison > 0
-      || (comparison === 0 && compareText(document.path, best.document.path) < 0)) {
-      best = {
-        document,
-        numerator,
-        denominator,
-        offset: document.firstOffsets.get(key),
-      };
-    }
-  }
-  return best;
-}
-
-function assignLineNumbers(text, pendingMatches) {
-  const orderedMatches = [...pendingMatches].sort((left, right) => left.offset - right.offset);
-  let line = 1;
-  let cursor = 0;
-  for (const match of orderedMatches) {
-    while (cursor < match.offset) {
-      if (text.charCodeAt(cursor) === 0x0A) line += 1;
-      cursor += 1;
-    }
-    match.line = line;
-  }
-}
-
-function buildLexicalEvidence(sourceRecords, intent) {
-  const sourceIndex = buildSourceTermIndex(sourceRecords);
-  const { terms, termsTruncated } = demandTerms(intent, sourceIndex);
-  const pendingMatches = terms.flatMap(({ key, term }) => {
-    const best = bestDocumentForTerm(sourceIndex, key);
-    return best === null ? [] : [{
-      term,
-      path: best.document.path,
-      document: best.document,
-      offset: best.offset,
-    }];
-  });
-  for (const document of sourceIndex.documents) {
-    assignLineNumbers(
-      document.normalizedText,
-      pendingMatches.filter((match) => match.document === document),
-    );
-  }
-  const matches = pendingMatches.map(({ term, path, line }) => ({ term, path, line }));
-
-  const applicable = sourceRecords.length > 0 && terms.length > 0;
-
-  return {
-    status: applicable ? (matches.length > 0 ? 'MATCH' : 'NO_MATCH') : 'NOT_APPLICABLE',
-    method: 'BM25_IDF_EXACT_TOKEN_V1',
-    queryTerms: terms.map(({ term }) => term),
-    termsTruncated,
-    matches,
-  };
-}
-
 export function computeSourceSnapshotDigest(files, ignoredEntries) {
   return canonicalDigest({
     sourceRoot: 'src',
@@ -260,9 +69,10 @@ export function computeSourceSnapshotDigest(files, ignoredEntries) {
 
 /**
  * Descobre apenas fatos estruturais já presentes em src/.
- * Todo o resultado existe em RAM até ser incorporado à evidência do contrato.
+ * A evidência nasce em RAM; somente o índice derivado pode ser reutilizado como
+ * cache transitório e nunca substitui a leitura/hash do snapshot atual.
  */
-export function observeWorkspace(repositoryRoot, intent = '') {
+export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceIndex = null } = {}) {
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
@@ -345,7 +155,11 @@ export function observeWorkspace(repositoryRoot, intent = '') {
   files.sort((left, right) => compareText(left.path, right.path));
   ignoredEntries.sort((left, right) => compareText(left.path, right.path));
   sourceRecords.sort((left, right) => compareText(left.path, right.path));
-  const lexicalEvidence = buildLexicalEvidence(sourceRecords, intent);
+  const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries);
+  const sourceIndex = isReusableHybridSourceIndex(cachedSourceIndex, sourceSnapshotDigest)
+    ? cachedSourceIndex
+    : buildHybridSourceIndex(sourceRecords, sourceSnapshotDigest);
+  const lexicalEvidence = searchHybridSourceIndex(sourceIndex, intent);
   const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
   const discovery = {
@@ -357,10 +171,10 @@ export function observeWorkspace(repositoryRoot, intent = '') {
     ignoredEntries,
     visitedEntries,
     scannedBytes,
-    sourceSnapshotDigest: computeSourceSnapshotDigest(files, ignoredEntries),
+    sourceSnapshotDigest,
     lexicalEvidence,
   };
-  return { discovery, sourceBytesByPath };
+  return { discovery, sourceBytesByPath, sourceIndex };
 }
 
 export function discoverWorkspace(repositoryRoot, intent = '') {

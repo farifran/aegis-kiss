@@ -208,7 +208,13 @@ export function buildSemanticRequest({
         status: preflight.discovery.lexicalEvidence.status,
         termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
         matches: preflight.discovery.lexicalEvidence.matches
-          .map(({ term, path, line }) => ({ term, path, line })),
+          .map(({ term, sourceToken, matchKind, path, line }) => ({
+            term,
+            sourceToken,
+            matchKind,
+            path,
+            line,
+          })),
       },
       sourceEvidence: buildSourceEvidence(repositoryRoot, preflight, workspaceObservation),
     },
