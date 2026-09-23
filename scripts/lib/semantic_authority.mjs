@@ -81,13 +81,77 @@ function counterexampleForDimension(kind) {
   };
 }
 
+function counterexampleForSubject(kind, subjectKey) {
+  const witness = counterexampleForDimension(kind);
+  return {
+    ...witness,
+    id: `${witness.id}-${subjectKey}`,
+  };
+}
+
 function literalReferenceAppears(text, reference) {
   return text.normalize('NFC').toLocaleLowerCase('pt-BR')
     .includes(reference.normalize('NFC').toLocaleLowerCase('pt-BR'));
 }
 
 function matchingReferences(intent, references) {
-  return references.filter((reference) => literalReferenceAppears(intent, reference));
+  const tokens = [...intent.normalize('NFC').matchAll(/[\p{L}\p{N}_$@.-]+/gu)]
+    .map((match) => ({
+      key: match[0].toLocaleLowerCase('pt-BR'),
+      offset: match.index,
+      endOffset: match.index + match[0].length,
+    }));
+  const candidates = references.flatMap((reference) => {
+    const referenceTokens = [...reference.normalize('NFC').matchAll(/[\p{L}\p{N}_$@.-]+/gu)]
+      .map((match) => match[0].toLocaleLowerCase('pt-BR'));
+    if (referenceTokens.length === 0) return [];
+    let best = null;
+    for (let start = 0; start < tokens.length; start += 1) {
+      if (tokens[start].key !== referenceTokens[0]) continue;
+      let cursor = start + 1;
+      let skipped = 0;
+      let matched = true;
+      for (const expected of referenceTokens.slice(1)) {
+        if (tokens[cursor]?.key === expected) {
+          cursor += 1;
+          continue;
+        }
+        if (skipped === 0 && tokens[cursor + 1]?.key === expected) {
+          skipped = 1;
+          cursor += 2;
+          continue;
+        }
+        matched = false;
+        break;
+      }
+      if (!matched) continue;
+      const candidate = {
+        reference,
+        startToken: start,
+        endToken: cursor - 1,
+        skipped,
+        tokenCount: referenceTokens.length,
+      };
+      if (best === null
+        || candidate.skipped < best.skipped
+        || (candidate.skipped === best.skipped && candidate.startToken < best.startToken)) {
+        best = candidate;
+      }
+    }
+    return best === null ? [] : [best];
+  }).sort((left, right) => left.startToken - right.startToken
+    || left.skipped - right.skipped
+    || right.tokenCount - left.tokenCount
+    || right.reference.length - left.reference.length);
+
+  const selected = [];
+  for (const candidate of candidates) {
+    const overlap = selected.find((existing) => (
+      candidate.startToken <= existing.endToken && existing.startToken <= candidate.endToken
+    ));
+    if (overlap === undefined) selected.push(candidate);
+  }
+  return selected.map(({ reference }) => reference);
 }
 
 function mechanicalPolicySignals(policy, intent) {
@@ -123,6 +187,7 @@ export {
   canonicalProofOutcome,
   closureAuthorityForDimension,
   counterexampleForDimension,
+  counterexampleForSubject,
   expectedRelationForResolution,
   literalReferenceAppears,
   mechanicalPolicySignals,

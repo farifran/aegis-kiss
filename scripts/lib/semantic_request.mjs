@@ -6,26 +6,20 @@ import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { analyzeBitLayouts, detectIntentSignals } from './intent_signals.mjs';
 import { assertSchema, schemaDocument } from './schema_validator.mjs';
 import {
-  counterexampleForDimension,
+  counterexampleForSubject,
   mechanicalPolicySignals,
   policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
 } from './semantic_authority.mjs';
 
-const determinismDimensionOrder = [
-  'ORDERING',
-  'ROUNDING',
-  'REMAINDER_DISTRIBUTION',
-  'ZERO_DIVISOR',
-  'BOUNDED_ARITHMETIC',
-];
 const counterLabelPattern = /\b(?:quantidade|contagem|contador(?:es)?|n[uú]mero\s+de|cantidad|conteo|count(?:er)?|number\s+of)\b/iu;
 const explicitBoundaryPattern = /\b(?:satur\w*|wrap\w*|m[oó]dulo|modulo|trunc\w*|rejeit\w*|reject\w*|erro|error)\b/iu;
 const merklePattern = /\bmerkle\b/iu;
 const integerArithmeticPattern = /\b(?:bigint|inteiros?\s+puros?|integer\s+arithmetic|divis[aã]o\s+inteira|integer\s+division)\b/iu;
 const divisionOperationPattern = /\b(?:divis[aã]o|division|partial\s+fill|preenchimento\s+(?:parcial|fracion[aá]rio)|raz[aã]o\s+entre|ratio\s+between)\b/iu;
 const distributedDivisionPattern = /\b(?:partial\s+fill|preenchimento\s+(?:parcial|fracion[aá]rio))\b/iu;
+const purityPattern = /\b(?:fun[cç][aã]o\s+pura|pure\s+function)\b/giu;
 
 function fieldClause(intent, signal) {
   const start = signal.offset + signal.reference.length;
@@ -58,22 +52,134 @@ function counterBoundaryFor({ intent, signal, width, semanticRole }) {
   };
 }
 
-function requiredDeterminismDimensions(intent, bitFields) {
-  const required = new Set();
+function signalIndexesMatching(intentSignals, pattern) {
+  return intentSignals.flatMap((signal, index) => (
+    pattern.test(`${signal.reference} ${signal.excerpt}`) ? [index] : []
+  ));
+}
+
+function firstPatternTrigger(intent, pattern) {
+  const match = pattern.exec(intent);
+  if (match === null) throw new Error('semantic_worksheet_activation_without_trigger');
+  return { triggerOffset: match.index, triggerReference: match[0] };
+}
+
+function determinismActivations(intent, intentSignals, bitFields) {
+  const pending = [];
   if (merklePattern.test(intent)) {
-    required.add('ORDERING');
+    pending.push({
+      dimension: 'ORDERING',
+      subject: { kind: 'OPERATION', key: 'MERKLE_SEQUENCE' },
+      triggerSignalIndexes: signalIndexesMatching(intentSignals, merklePattern),
+      ...firstPatternTrigger(intent, merklePattern),
+    });
   }
   if (integerArithmeticPattern.test(intent) && divisionOperationPattern.test(intent)) {
-    required.add('ROUNDING');
-    required.add('ZERO_DIVISOR');
+    const triggerSignalIndexes = signalIndexesMatching(
+      intentSignals,
+      /\b(?:bigint|partial\s+fill|preenchimento\s+(?:parcial|fracion[aá]rio)|divis[aã]o|raz[aã]o)\b/iu,
+    );
+    pending.push(
+      {
+        dimension: 'ROUNDING',
+        subject: { kind: 'OPERATION', key: 'INTEGER_DIVISION' },
+        triggerSignalIndexes,
+        ...firstPatternTrigger(intent, divisionOperationPattern),
+      },
+      {
+        dimension: 'ZERO_DIVISOR',
+        subject: { kind: 'OPERATION', key: 'INTEGER_DIVISION' },
+        triggerSignalIndexes,
+        ...firstPatternTrigger(intent, divisionOperationPattern),
+      },
+    );
     if (distributedDivisionPattern.test(intent)) {
-      required.add('REMAINDER_DISTRIBUTION');
+      pending.push({
+        dimension: 'REMAINDER_DISTRIBUTION',
+        subject: { kind: 'OPERATION', key: 'DISTRIBUTED_INTEGER_DIVISION' },
+        triggerSignalIndexes,
+        ...firstPatternTrigger(intent, distributedDivisionPattern),
+      });
     }
   }
-  if (bitFields.some(({ semanticRole }) => semanticRole === 'OBSERVABILITY_COUNTER')) {
-    required.add('BOUNDED_ARITHMETIC');
+  for (const field of bitFields.filter(({ semanticRole }) => (
+    semanticRole === 'OBSERVABILITY_COUNTER'
+  ))) {
+    pending.push({
+      dimension: 'BOUNDED_ARITHMETIC',
+      subject: { kind: 'BIT_FIELD', key: `BITS_${field.startBit}_${field.endBit}` },
+      triggerSignalIndexes: [field.signalIndex],
+      triggerOffset: intentSignals[field.signalIndex].offset,
+      triggerReference: intentSignals[field.signalIndex].reference,
+    });
   }
-  return determinismDimensionOrder.filter((dimension) => required.has(dimension));
+  return pending.map((activation, index) => ({
+    id: `DET-ACT-${String(index + 1).padStart(4, '0')}`,
+    ...activation,
+    counterexampleWitness: counterexampleForSubject(
+      activation.dimension,
+      activation.subject.key,
+    ),
+  }));
+}
+
+function finiteRepresentation(intent, signal, signalIndex, bitLayouts) {
+  if (signal.kind !== 'BOUNDED_VALUE') return null;
+  const range = /\bbits?\s+(\d+)(?:\s*[–—-]\s*(\d+))?\b/iu.exec(signal.reference);
+  const declared = /\b(\d+)\s*bits?\b/iu.exec(signal.reference);
+  if (range === null && declared === null) return null;
+  const startBit = range === null ? null : Number.parseInt(range[1], 10);
+  const endBit = range === null ? null : Number.parseInt(range[2] ?? range[1], 10);
+  const width = range === null ? Number.parseInt(declared[1], 10) : endBit - startBit + 1;
+  if (!Number.isSafeInteger(width) || width < 1) return null;
+  const declaredLayout = bitLayouts.some(({ declaredWidthSignalIndex }) => (
+    declaredWidthSignalIndex === signalIndex
+  ));
+  const layoutField = bitLayouts.some(({ fieldSignalIndexes }) => (
+    fieldSignalIndexes.includes(signalIndex)
+  ));
+  let role = 'UNCLASSIFIED';
+  const preceding = intent.slice(Math.max(0, signal.offset - 64), signal.offset);
+  const following = intent.slice(
+    signal.offset + signal.reference.length,
+    signal.offset + signal.reference.length + 64,
+  );
+  if (declaredLayout) role = 'BITMASK_LAYOUT';
+  else if (layoutField) role = 'BIT_FIELD';
+  else if (/^\s*(?:mais\s+significativos|most\s+significant)\b/iu.test(following)) {
+    role = 'PROJECTION_WIDTH';
+  } else if (/\b(?:hash|fingerprint|raiz|merkle)\b/iu.test(preceding)
+    || /^\s*(?:de\s+)?(?:hash|fingerprint|raiz|merkle|fnv)\b/iu.test(following)) {
+    role = 'HASH_WIDTH';
+  }
+  const exactCapacity = width <= 256;
+  const patternCount = exactCapacity ? 1n << BigInt(width) : null;
+  return {
+    id: `REP-${String(signalIndex + 1).padStart(4, '0')}`,
+    signalIndex,
+    form: range === null ? 'DECLARED_WIDTH' : 'BIT_RANGE',
+    role,
+    startBit,
+    endBit,
+    width,
+    patternCount: patternCount === null ? `2^${width}` : patternCount.toString(),
+    unsignedMaximum: patternCount === null ? `2^${width}-1` : (patternCount - 1n).toString(),
+  };
+}
+
+function mechanicalProofObligations(intent) {
+  return [...intent.matchAll(purityPattern)].map((match, index) => ({
+    id: `MECH-PROOF-${String(index + 1).padStart(4, '0')}`,
+    kind: 'OBSERVATIONAL_PURITY',
+    triggerOffset: match.index,
+    triggerReference: match[0],
+    acceptanceCase: {
+      given: 'Um estado válido S e uma entrada válida X.',
+      when: 'X for processada após chamadas repetidas da função observacional.',
+      then: 'O resultado e o estado futuro observável devem ser idênticos à execução de X sem chamadas observacionais intermediárias.',
+      outcomeKind: 'RETURN_VALUE',
+    },
+  }));
 }
 
 export function loadSemanticConstitution(repositoryRoot) {
@@ -272,12 +378,13 @@ export function buildSemanticRequest({
         status: preflight.discovery.lexicalEvidence.status,
         termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
         matches: preflight.discovery.lexicalEvidence.matches
-          .map(({ term, sourceToken, matchKind, path, line }) => ({
+          .map(({ term, sourceToken, matchKind, path, line, sourceRegion }) => ({
             term,
             sourceToken,
             matchKind,
             path,
             line,
+            sourceRegion,
           })),
       },
       sourceEvidence: buildSourceEvidence(repositoryRoot, preflight, workspaceObservation),
@@ -335,6 +442,14 @@ export function buildSemanticRequest({
 
 export function buildSemanticWorksheet({ contextDigest, intent, intentSignals }) {
   const bitLayouts = analyzeBitLayouts(intent, intentSignals);
+  const finiteRepresentations = intentSignals
+    .map((signal, signalIndex) => finiteRepresentation(
+      intent,
+      signal,
+      signalIndex,
+      bitLayouts,
+    ))
+    .filter((representation) => representation !== null);
   const bitFields = intentSignals.flatMap((signal, signalIndex) => {
     if (signal.kind !== 'BOUNDED_VALUE') return [];
     const match = /\bbits?\s+(\d+)(?:\s*[–—-]\s*(\d+))?\b/iu.exec(signal.reference);
@@ -367,12 +482,13 @@ export function buildSemanticWorksheet({ contextDigest, intent, intentSignals })
       counterBoundary: counterBoundaryFor({ intent, signal, width, semanticRole }),
     }];
   });
-  const requiredDimensions = requiredDeterminismDimensions(intent, bitFields);
+  const activations = determinismActivations(intent, intentSignals, bitFields);
   const worksheet = {
     schema: 'aegis.semantic_worksheet.v1',
     contextDigest,
-    requiredDeterminismDimensions: requiredDimensions,
-    counterexampleWitnesses: requiredDimensions.map(counterexampleForDimension),
+    determinismActivations: activations,
+    mechanicalProofObligations: mechanicalProofObligations(intent),
+    finiteRepresentations,
     bitFields,
     bitLayouts: bitLayouts.map((layout) => ({
       id: layout.id,
@@ -390,7 +506,9 @@ export function buildSemanticWorksheet({ contextDigest, intent, intentSignals })
       'CONTEXT_BINDING',
       'IDENTIFIERS',
       'SOURCE_BINDINGS',
-      'COUNTEREXAMPLE_WITNESSES',
+      'DETERMINISM_ACTIVATIONS',
+      'MECHANICAL_PROOF_OBLIGATIONS',
+      'FINITE_REPRESENTATIONS',
       'AGGREGATE_STATUSES',
       'CONTRACT_ENVELOPE',
       'DIGESTS',

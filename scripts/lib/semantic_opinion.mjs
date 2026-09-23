@@ -3,6 +3,7 @@ import { assertSchema } from './schema_validator.mjs';
 import {
   closureAuthorityForDimension,
   counterexampleForDimension,
+  counterexampleForSubject,
 } from './semantic_authority.mjs';
 
 function generatedId(prefix, index) {
@@ -26,29 +27,52 @@ function compileOpinionBasis(basis, request) {
 }
 
 function assertWorksheetRequirements(opinion, request) {
-  const requiredDimensions = request.worksheet.requiredDeterminismDimensions;
-  const expectedWitnesses = requiredDimensions.map(counterexampleForDimension);
-  if (JSON.stringify(request.worksheet.counterexampleWitnesses)
-    !== JSON.stringify(expectedWitnesses)) {
-    throw new Error('semantic_worksheet_witnesses_mismatch');
+  const activations = new Map(request.worksheet.determinismActivations
+    .map((activation) => [activation.id, activation]));
+  const coveredActivations = new Set();
+  for (const dimension of opinion.determinismReview.dimensions) {
+    if (dimension.activationId === null) continue;
+    const activation = activations.get(dimension.activationId);
+    if (activation === undefined) {
+      throw new Error(`semantic_opinion_unknown_activation:${dimension.activationId}`);
+    }
+    if (coveredActivations.has(dimension.activationId)) {
+      throw new Error(`semantic_opinion_duplicate_activation:${dimension.activationId}`);
+    }
+    if (dimension.kind !== activation.dimension) {
+      throw new Error(`semantic_opinion_activation_kind_mismatch:${dimension.activationId}`);
+    }
+    if (JSON.stringify(activation.counterexampleWitness)
+      !== JSON.stringify(counterexampleForSubject(
+        activation.dimension,
+        activation.subject.key,
+      ))) {
+      throw new Error(`semantic_worksheet_witness_mismatch:${dimension.activationId}`);
+    }
+    coveredActivations.add(dimension.activationId);
   }
-  const reportedKinds = new Set(opinion.determinismReview.dimensions.map(({ kind }) => kind));
-  for (const dimension of requiredDimensions) {
-    if (!reportedKinds.has(dimension)) {
-      throw new Error(`semantic_opinion_missing_required_determinism:${dimension}`);
+  for (const activation of activations.values()) {
+    if (!coveredActivations.has(activation.id)) {
+      throw new Error(`semantic_opinion_missing_activation:${activation.id}`);
     }
   }
 
-  const counterBoundaries = request.worksheet.bitFields
-    .map(({ counterBoundary }) => counterBoundary)
-    .filter((boundary) => boundary !== null);
-  const availableProofs = opinion.determinismReview.dimensions
-    .filter((dimension) => dimension.kind === 'BOUNDED_ARITHMETIC')
-    .map((dimension) => ({ dimension, used: false }));
-  for (const boundary of counterBoundaries) {
+  const dimensionsByActivation = new Map(opinion.determinismReview.dimensions
+    .filter(({ activationId }) => activationId !== null)
+    .map((dimension) => [dimension.activationId, dimension]));
+  const counterFields = request.worksheet.bitFields
+    .filter(({ counterBoundary }) => counterBoundary !== null);
+  for (const field of counterFields) {
+    const boundary = field.counterBoundary;
+    const activation = request.worksheet.determinismActivations.find((candidate) => (
+      candidate.dimension === 'BOUNDED_ARITHMETIC'
+      && candidate.triggerSignalIndexes.includes(field.signalIndex)
+    ));
+    const dimension = activation === undefined
+      ? undefined
+      : dimensionsByActivation.get(activation.id);
     const maximum = boundary.proofCases[1].expected;
-    const match = availableProofs.find(({ dimension, used }) => (
-      !used
+    const matches = dimension !== undefined
       && dimension.status === 'SPECIFIED'
       && dimension.basis.some(({ source, reference }) => (
         source === 'ARCHITECTURE_POLICY' && reference === boundary.authority
@@ -57,12 +81,24 @@ function assertWorksheetRequirements(opinion, request) {
       && dimension.proofObligation.resolutionKind === boundary.resolutionKind
       && dimension.proofObligation.resolutionParameter === boundary.resolutionParameter
       && dimension.proofObligation.baselineOutcome === maximum
-      && dimension.proofObligation.variationOutcome === maximum
-    ));
-    if (match === undefined) {
+      && dimension.proofObligation.variationOutcome === maximum;
+    if (!matches) {
       throw new Error(`semantic_opinion_missing_counter_saturation_proof:${boundary.resolutionParameter}`);
     }
-    match.used = true;
+  }
+
+  const acceptanceCases = opinion.requirements.flatMap(({ acceptanceCases: cases }) => cases);
+  for (const obligation of request.worksheet.mechanicalProofObligations) {
+    const expected = obligation.acceptanceCase;
+    const present = acceptanceCases.some((acceptanceCase) => (
+      acceptanceCase.given === expected.given
+      && acceptanceCase.when === expected.when
+      && acceptanceCase.then === expected.then
+      && acceptanceCase.outcomeKind === expected.outcomeKind
+    ));
+    if (!present) {
+      throw new Error(`semantic_opinion_missing_mechanical_proof:${obligation.id}`);
+    }
   }
 }
 
@@ -299,6 +335,12 @@ export function compileSemanticOpinion(opinion, request) {
       intentSignalIds: dimensions.length === 0 ? [] : determinismSignalIds,
       dimensions: dimensions.map((item) => {
         const basis = compileOpinionBasis(item.basis, request);
+        const activation = item.activationId === null
+          ? null
+          : request.worksheet.determinismActivations.find(({ id }) => id === item.activationId);
+        const witness = activation === null
+          ? counterexampleForDimension(item.kind)
+          : activation.counterexampleWitness;
         const subjectId = item.subject === null
           ? 'PUBLIC_CONTRACT'
           : compileTargets([item.subject])[0];
@@ -313,12 +355,12 @@ export function compileSemanticOpinion(opinion, request) {
             status: item.status,
             basis,
           }),
-          counterexampleWitness: counterexampleForDimension(item.kind),
+          counterexampleWitness: witness,
           proofObligation: item.proofObligation === null
             ? null
             : {
               ...item.proofObligation,
-              witnessId: counterexampleForDimension(item.kind).id,
+              witnessId: witness.id,
             },
           inapplicabilityProof: item.inapplicabilityProof,
           acceptanceCaseId: item.acceptanceCase === null

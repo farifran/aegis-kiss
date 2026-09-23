@@ -3,7 +3,9 @@ import { canonicalDigest } from './canonical_json.mjs';
 const tokenPattern = /[\p{L}\p{N}_$-]{3,}/gu;
 const minimumPlainTermLength = 5;
 const queryTermLimit = 64;
-const indexSchema = 'aegis.hybrid_source_index.v1';
+const indexSchema = 'aegis.hybrid_source_index.v2';
+const codeExtensions = new Set(['.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx']);
+const sourceRegionRank = { COMMENT: 0, UNKNOWN: 1, CODE: 2 };
 
 function compareText(left, right) {
   if (left < right) return -1;
@@ -33,13 +35,34 @@ function isCompoundIdentifier(term, parts) {
   return parts.length > 1 || /[_$-]/u.test(term) || /\p{Ll}\p{Lu}/u.test(term);
 }
 
+function sourceLineRegions(path, text) {
+  const extension = /\.[^./]+$/u.exec(path)?.[0]?.toLowerCase();
+  const lines = text.split('\n');
+  if (!codeExtensions.has(extension)) return lines.map(() => 'UNKNOWN');
+  let blockComment = false;
+  return lines.map((line) => {
+    const trimmed = line.trimStart();
+    if (blockComment) {
+      if (trimmed.includes('*/')) blockComment = false;
+      return 'COMMENT';
+    }
+    if (trimmed.startsWith('//')) return 'COMMENT';
+    if (trimmed.startsWith('/*')) {
+      blockComment = !trimmed.includes('*/');
+      return 'COMMENT';
+    }
+    return 'CODE';
+  });
+}
+
 /** Constrói uma representação compacta e serializável uma única vez por snapshot. */
 export function buildHybridSourceIndex(sourceRecords, sourceSnapshotDigest) {
   const documents = sourceRecords.map(({ path }) => ({ path, length: 0 }));
   const termsByKey = new Map();
 
-  sourceRecords.forEach(({ text }, documentIndex) => {
+  sourceRecords.forEach(({ text, path }, documentIndex) => {
     const normalizedText = text.normalize('NFC');
+    const lineRegions = sourceLineRegions(path, normalizedText);
     let line = 1;
     let cursor = 0;
     const occurrences = new Map();
@@ -51,12 +74,18 @@ export function buildHybridSourceIndex(sourceRecords, sourceSnapshotDigest) {
       }
       const sourceToken = match[0];
       const key = sourceToken.toLowerCase();
+      const sourceRegion = lineRegions[line - 1] ?? 'UNKNOWN';
       documents[documentIndex].length += 1;
       const occurrence = occurrences.get(key);
       if (occurrence === undefined) {
-        occurrences.set(key, { frequency: 1, line, sourceToken });
+        occurrences.set(key, { frequency: 1, line, sourceToken, sourceRegion });
       } else {
         occurrence.frequency += 1;
+        if (sourceRegionRank[sourceRegion] > sourceRegionRank[occurrence.sourceRegion]) {
+          occurrence.line = line;
+          occurrence.sourceToken = sourceToken;
+          occurrence.sourceRegion = sourceRegion;
+        }
       }
     }
 
@@ -78,6 +107,8 @@ export function buildHybridSourceIndex(sourceRecords, sourceSnapshotDigest) {
         document: documentIndex,
         frequency: occurrence.frequency,
         line: occurrence.line,
+        sourceToken: occurrence.sourceToken,
+        sourceRegion: occurrence.sourceRegion,
       });
     }
   });
@@ -140,7 +171,9 @@ export function isReusableHybridSourceIndex(index, sourceSnapshotDigest) {
         || occurrence.document >= index.documents.length
         || seenDocuments.has(occurrence.document)
         || !validInteger(occurrence.frequency, 1)
-        || !validInteger(occurrence.line, 1)) return false;
+        || !validInteger(occurrence.line, 1)
+        || typeof occurrence.sourceToken !== 'string'
+        || !Object.hasOwn(sourceRegionRank, occurrence.sourceRegion)) return false;
       seenDocuments.add(occurrence.document);
       totalFrequency += occurrence.frequency;
     }
@@ -266,9 +299,22 @@ function bestDocument(index, term) {
     const comparison = best === null
       ? 1
       : compareFractions(numerator, denominator, best.numerator, best.denominator);
-    if (best === null || comparison > 0
-      || (comparison === 0 && compareText(document.path, best.path) < 0)) {
-      best = { path: document.path, line: occurrence.line, numerator, denominator };
+    const regionComparison = best === null
+      ? 1
+      : sourceRegionRank[occurrence.sourceRegion] - sourceRegionRank[best.sourceRegion];
+    if (best === null || regionComparison > 0
+      || (regionComparison === 0 && comparison > 0)
+      || (regionComparison === 0
+        && comparison === 0
+        && compareText(document.path, best.path) < 0)) {
+      best = {
+        path: document.path,
+        line: occurrence.line,
+        sourceToken: occurrence.sourceToken,
+        sourceRegion: occurrence.sourceRegion,
+        numerator,
+        denominator,
+      };
     }
   }
   return best;
@@ -296,17 +342,18 @@ export function searchHybridSourceIndex(index, intent) {
     if (document === null) continue;
     matches.push({
       term: query.term,
-      sourceToken: sourceTerm.sourceToken,
+      sourceToken: document.sourceToken,
       matchKind: query.exact === undefined ? 'IDENTIFIER_COMPONENT' : 'EXACT_TOKEN',
       path: document.path,
       line: document.line,
+      sourceRegion: document.sourceRegion,
     });
   }
 
   const applicable = index.documents.length > 0 && terms.length > 0;
   return {
     status: applicable ? (matches.length > 0 ? 'MATCH' : 'NO_MATCH') : 'NOT_APPLICABLE',
-    method: 'HYBRID_BM25_IDENTIFIER_V1',
+    method: 'HYBRID_BM25_IDENTIFIER_V2',
     queryTerms: terms.map(({ term }) => term),
     termsTruncated,
     matches,

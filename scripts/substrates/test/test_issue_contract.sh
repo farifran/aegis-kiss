@@ -118,7 +118,7 @@ try {
   }).join(' ');
   writeFileSync(
     join(root, 'src/index.ts'),
-    `// ${naturalTerms}\n// processador registros ${'sistema '.repeat(20)}\nexport const tokenAlfa = true;\nexport const LiquidityResolver = true;\n`,
+    `// ${naturalTerms}\n// processador registros tokenAlfa ${'sistema '.repeat(20)}\nexport const tokenAlfa = true;\nexport const LiquidityResolver = true;\n`,
   );
   writeFileSync(
     join(root, 'src/long.ts'),
@@ -130,7 +130,7 @@ try {
     `${naturalTerms} para \`ComponenteExtensivel\` \`TipoExplicito\` observar tokenAlfa`,
   );
   const evidence = discovery.lexicalEvidence;
-  if (evidence.method !== 'HYBRID_BM25_IDENTIFIER_V1'
+  if (evidence.method !== 'HYBRID_BM25_IDENTIFIER_V2'
     || !evidence.termsTruncated
     || evidence.queryTerms.includes('para')) {
     throw new Error('lexical_selection_failed');
@@ -159,8 +159,14 @@ try {
     throw new Error('rare_repository_term_was_not_prioritized');
   }
   const documentRanking = discoverWorkspace(root, 'alvoRaro');
-  if (documentRanking.lexicalEvidence.matches[0]?.path !== 'src/short.ts') {
+  if (documentRanking.lexicalEvidence.matches[0]?.path !== 'src/short.ts'
+    || documentRanking.lexicalEvidence.matches[0]?.sourceRegion !== 'COMMENT') {
     throw new Error('bm25_did_not_select_best_document');
+  }
+  const codePreferredDiscovery = discoverWorkspace(root, 'tokenAlfa');
+  if (codePreferredDiscovery.lexicalEvidence.matches[0]?.sourceRegion !== 'CODE'
+    || codePreferredDiscovery.lexicalEvidence.matches[0]?.line !== 3) {
+    throw new Error('code_occurrence_was_not_preferred_over_comment');
   }
   const repeatedDiscovery = discoverWorkspace(root, 'alvoRaro');
   if (JSON.stringify(documentRanking.lexicalEvidence)
@@ -213,8 +219,21 @@ NODE
 node --input-type=module <<'NODE'
 import { detectIntentSignals } from './scripts/lib/intent_signals.mjs';
 import { buildSemanticWorksheet } from './scripts/lib/semantic_request.mjs';
+import { mechanicalPolicySignals } from './scripts/lib/semantic_authority.mjs';
 
 const contextDigest = 'a'.repeat(64);
+const policySignals = mechanicalPolicySignals({
+  rules: [{
+    id: 'ARCH-PARSIMONY',
+    reviewReferences: ['injeção de dependências', 'decorador', 'decoradores'],
+    forbiddenReferences: [],
+  }],
+}, 'Usar injeção dinâmica de dependências e decoradores; decoradorX não é uma referência.');
+if (JSON.stringify(policySignals.map(({ reference }) => reference))
+  !== JSON.stringify(['injeção de dependências', 'decoradores'])) {
+  throw new Error('policy_matching_was_not_structural_and_bounded');
+}
+
 const completeIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bit 1: ciclo; Bits 2–31: dados.';
 const completeSignals = detectIntentSignals(completeIntent);
 const complete = buildSemanticWorksheet({
@@ -293,15 +312,19 @@ const deterministicWorksheet = buildSemanticWorksheet({
 const expectedDimensions = [
   'ORDERING',
   'ROUNDING',
-  'REMAINDER_DISTRIBUTION',
   'ZERO_DIVISOR',
+  'REMAINDER_DISTRIBUTION',
   'BOUNDED_ARITHMETIC',
 ];
 const counterField = deterministicWorksheet.bitFields
   .find(({ startBit, endBit }) => startBit === 4 && endBit === 9);
-if (JSON.stringify(deterministicWorksheet.requiredDeterminismDimensions)
+if (JSON.stringify(deterministicWorksheet.determinismActivations.map(({ dimension }) => dimension))
     !== JSON.stringify(expectedDimensions)
-  || deterministicWorksheet.counterexampleWitnesses.length !== expectedDimensions.length
+  || deterministicWorksheet.determinismActivations.some((activation) => (
+    activation.counterexampleWitness.dimension !== activation.dimension
+    || activation.triggerReference.length === 0
+  ))
+  || deterministicWorksheet.determinismActivations.at(-1)?.subject.key !== 'BITS_4_9'
   || counterField?.semanticRole !== 'OBSERVABILITY_COUNTER'
   || counterField.counterBoundary?.resolutionParameter !== 'SATURATE_MAX=63'
   || JSON.stringify(counterField.counterBoundary.proofCases) !== JSON.stringify([
@@ -322,8 +345,27 @@ const explicitCounter = explicitWrapWorksheet.bitFields
   .find(({ startBit, endBit }) => startBit === 2 && endBit === 7);
 if (explicitCounter?.semanticRole !== 'OBSERVABILITY_COUNTER'
   || explicitCounter.counterBoundary !== null
-  || !explicitWrapWorksheet.requiredDeterminismDimensions.includes('BOUNDED_ARITHMETIC')) {
+  || !explicitWrapWorksheet.determinismActivations.some(({ dimension }) => (
+    dimension === 'BOUNDED_ARITHMETIC'
+  ))) {
   throw new Error('explicit_counter_boundary_was_overridden_by_default');
+}
+
+const purityWorksheet = buildSemanticWorksheet({
+  contextDigest,
+  intent: 'Expor uma função pura que observa estado sem alterá-lo.',
+  intentSignals: detectIntentSignals('Expor uma função pura que observa estado sem alterá-lo.'),
+});
+if (purityWorksheet.mechanicalProofObligations.length !== 1
+  || purityWorksheet.mechanicalProofObligations[0].kind !== 'OBSERVATIONAL_PURITY'
+  || !purityWorksheet.mechanicalProofObligations[0].acceptanceCase.then.includes('estado futuro')) {
+  throw new Error('pure_function_did_not_create_mechanical_proof');
+}
+
+const finiteRoles = deterministicWorksheet.finiteRepresentations.map(({ role }) => role);
+if (!finiteRoles.includes('BITMASK_LAYOUT')
+  || finiteRoles.filter((role) => role === 'BIT_FIELD').length !== 3) {
+  throw new Error('finite_representations_were_not_fully_inventoried');
 }
 NODE
 
@@ -352,7 +394,7 @@ printf '%s\n' "${draft_output}" | jq -e '
 ' >/dev/null
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 jq -e '
-  .schema == "aegis.hybrid_source_index.v1"
+  .schema == "aegis.hybrid_source_index.v2"
   and (.sourceSnapshotDigest | test("^[a-f0-9]{64}$"))
   and (.digest | test("^[a-f0-9]{64}$"))
 ' .harness/runtime/source-index.json >/dev/null
@@ -633,6 +675,7 @@ deterministic_opinion="$(make_opinion yes "${semantic_worksheet_digest}" | jq '
   | .determinismReview = {
     rationale:"A ordem não altera o resultado público.",
     dimensions:[{
+      activationId:null,
       kind:"ORDERING",
       subject:{kind:"REQUIREMENT",index:0},
       status:"SPECIFIED",

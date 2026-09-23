@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "aegis.semantic_opinion.v2",
   "title": "Aegis Semantic Opinion v2",
-  "description": "Preencha somente juízos semânticos. Todos os índices são base zero. Índices de requisitos, invariantes, riscos, decisões, notas, caminhos e regras de fronteira apontam para arrays deste parecer. intentSignalIndexes apontam para intentSignals.signals da solicitação; contextIndex para policy.contexts; ruleIndex e amendmentIndex para policy.rules e policy.amendments; resolutionIndex e targets RESOLVED_DECISION para revision.answers. Cada determinismReview.dimension declara kind e subject; kinds podem repetir para subjects diferentes e todos os kinds exigidos pela worksheet devem estar cobertos. O Harness valida os vínculos e compila schema final, IDs, referências resolvidas, estados agregados, digests, envelope e aprovação.",
+  "description": "Preencha somente juízos semânticos. Todos os índices são base zero. Índices de requisitos, invariantes, riscos, decisões, notas, caminhos e regras de fronteira apontam para arrays deste parecer. intentSignalIndexes apontam para intentSignals.signals da solicitação; contextIndex para policy.contexts; ruleIndex e amendmentIndex para policy.rules e policy.amendments; resolutionIndex e targets RESOLVED_DECISION para revision.answers. Cada determinismReview.dimension responde no máximo uma determinismActivation pelo activationId; dimensões adicionais descobertas semanticamente usam activationId null. O Harness valida os vínculos e compila schema final, IDs, referências resolvidas, estados agregados, digests, envelope e aprovação.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -619,6 +619,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "activationId",
               "kind",
               "disposition",
               "challenge",
@@ -627,6 +628,13 @@
               "basis"
             ],
             "properties": {
+              "activationId": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^DET-ACT-[0-9]{4}$" }
+                ],
+                "description": "Identificador da ativação mecânica respondida. null é permitido somente para revisão adicional descoberta semanticamente pela IA."
+              },
               "kind": {
                 "enum": [
                   "CONTRADICTION",
@@ -685,7 +693,7 @@
         },
         "dimensions": {
           "type": "array",
-          "description": "Cada item declara uma dimensão e seu subject. Uma dimensão pode repetir-se para subjects diferentes. SPECIFIED exige regra única e obrigação de prova vinculada ao witness; NOT_APPLICABLE exige ausência estrutural autorizada; DECISION_REQUIRED exige uma única decisão sobre o mesmo subject, cobrindo literalmente os dois lados do witness e resolvendo a própria dimensão em cada alternativa; GAP_FOUND preserva lacuna sem alternativas maduras.",
+          "description": "Cada item declara uma dimensão e seu subject. Uma dimensão pode repetir-se para subjects diferentes. Toda ativação mecânica deve ser respondida exatamente uma vez pelo activationId correspondente. SPECIFIED exige regra única e obrigação de prova vinculada ao witness; NOT_APPLICABLE exige ausência estrutural autorizada; DECISION_REQUIRED exige uma única decisão sobre o mesmo subject, cobrindo literalmente os dois lados do witness e resolvendo a própria dimensão em cada alternativa; GAP_FOUND preserva lacuna sem alternativas maduras.",
           "items": {
             "type": "object",
             "additionalProperties": false,

@@ -70,8 +70,9 @@ if (requestDigest !== canonicalDigest(requestPayload)
     semanticRequest.outputSchema.document.$defs.determinismProofObligation.properties,
     'witnessId',
   )
-  || semanticRequest.worksheet.requiredDeterminismDimensions.length !== 0
-  || semanticRequest.worksheet.counterexampleWitnesses.length !== 0) {
+  || semanticRequest.worksheet.determinismActivations.length !== 0
+  || semanticRequest.worksheet.mechanicalProofObligations.length !== 0
+  || semanticRequest.worksheet.finiteRepresentations.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
 }
 

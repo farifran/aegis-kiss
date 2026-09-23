@@ -532,7 +532,7 @@
       "additionalProperties": false,
       "required": ["witnessId", "relation", "resolutionKind", "resolutionParameter", "baselineOutcome", "variationOutcome", "observables"],
       "properties": {
-        "witnessId": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+        "witnessId": { "type": "string", "pattern": "^WITNESS-[A-Z0-9_-]+$" },
         "relation": { "enum": ["OUTPUTS_EQUAL", "DEFINED_RESULT", "EXPLICIT_REJECTION"] },
         "resolutionKind": {
           "enum": [
@@ -566,7 +566,7 @@
       "additionalProperties": false,
       "required": ["id", "dimension", "inputClass", "baseline", "variation"],
       "properties": {
-        "id": { "type": "string", "pattern": "^WITNESS-[A-Z_]+$" },
+        "id": { "type": "string", "pattern": "^WITNESS-[A-Z0-9_-]+$" },
         "dimension": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
         "inputClass": { "enum": ["PERMUTED_EQUIVALENT_INPUTS", "EQUIVALENT_REPRESENTATIONS", "DUPLICATED_ELEMENT", "EMPTY_COLLECTION", "THREE_ELEMENTS", "NON_EXACT_DIVISION", "MULTIPLE_RECIPIENTS_WITH_REMAINDER", "ZERO_DENOMINATOR", "EQUAL_PRIORITY_CANDIDATES", "DUPLICATED_IDENTITY_OCCURRENCES", "OUTSIDE_REPRESENTABLE_RANGE"] },
         "baseline": { "type": "string", "minLength": 1 },

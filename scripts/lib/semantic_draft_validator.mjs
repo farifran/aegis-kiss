@@ -291,7 +291,11 @@ function validateDeterminism(draft, context) {
     if (seen.has(key)) throw new Error(`duplicate_determinism_dimension_subject:${key}`);
     seen.add(key);
     const expectedWitness = counterexampleForDimension(dimension.kind);
-    if (JSON.stringify(dimension.counterexampleWitness) !== JSON.stringify(expectedWitness)) {
+    const { id: actualWitnessId, ...actualWitnessBody } = dimension.counterexampleWitness;
+    const { id: expectedWitnessId, ...expectedWitnessBody } = expectedWitness;
+    if (JSON.stringify(actualWitnessBody) !== JSON.stringify(expectedWitnessBody)
+      || (actualWitnessId !== expectedWitnessId
+        && !actualWitnessId.startsWith(`${expectedWitnessId}-`))) {
       throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
     }
     validateBasis(dimension.basis, context, key);
@@ -324,7 +328,7 @@ function validateDeterminism(draft, context) {
         throw new Error(`specified_determinism_dimension_without_exact_proof:${key}`);
       }
       const proof = dimension.proofObligation;
-      if (proof.witnessId !== expectedWitness.id) {
+      if (proof.witnessId !== dimension.counterexampleWitness.id) {
         throw new Error(`determinism_proof_witness_mismatch:${key}`);
       }
       if (!resolutionAllowedForDimension(dimension.kind, proof.resolutionKind)) {
