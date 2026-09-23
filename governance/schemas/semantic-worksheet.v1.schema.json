@@ -98,7 +98,9 @@
           "endBit",
           "width",
           "patternCount",
-          "unsignedMaximum"
+          "unsignedMaximum",
+          "semanticRole",
+          "counterBoundary"
         ],
         "properties": {
           "signalIndex": {
@@ -126,6 +128,40 @@
             "type": "string",
             "minLength": 1,
             "description": "Maior valor sem sinal representável. Não escolhe signedness nem política de overflow."
+          },
+          "semanticRole": {
+            "enum": ["OBSERVABILITY_COUNTER", "UNCLASSIFIED"],
+            "description": "Classificação mecânica restrita ao rótulo explícito do campo; não define identidade de contagem."
+          },
+          "counterBoundary": {
+            "description": "Default mecânico somente para contador observacional explícito sem política de borda fornecida pela demanda.",
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["authority", "resolutionKind", "resolutionParameter", "proofCases"],
+                "properties": {
+                  "authority": { "const": "ARCH-OBSERVABILITY-COUNTERS" },
+                  "resolutionKind": { "const": "OVERFLOW_SATURATE" },
+                  "resolutionParameter": { "type": "string", "pattern": "^SATURATE_MAX=.+$" },
+                  "proofCases": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["input", "expected"],
+                      "properties": {
+                        "input": { "type": "string", "minLength": 1 },
+                        "expected": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }

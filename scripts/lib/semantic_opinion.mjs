@@ -25,6 +25,47 @@ function compileOpinionBasis(basis, request) {
     : item));
 }
 
+function assertWorksheetRequirements(opinion, request) {
+  const requiredDimensions = request.worksheet.requiredDeterminismDimensions;
+  const expectedWitnesses = requiredDimensions.map(counterexampleForDimension);
+  if (JSON.stringify(request.worksheet.counterexampleWitnesses)
+    !== JSON.stringify(expectedWitnesses)) {
+    throw new Error('semantic_worksheet_witnesses_mismatch');
+  }
+  const reportedKinds = new Set(opinion.determinismReview.dimensions.map(({ kind }) => kind));
+  for (const dimension of requiredDimensions) {
+    if (!reportedKinds.has(dimension)) {
+      throw new Error(`semantic_opinion_missing_required_determinism:${dimension}`);
+    }
+  }
+
+  const counterBoundaries = request.worksheet.bitFields
+    .map(({ counterBoundary }) => counterBoundary)
+    .filter((boundary) => boundary !== null);
+  const availableProofs = opinion.determinismReview.dimensions
+    .filter((dimension) => dimension.kind === 'BOUNDED_ARITHMETIC')
+    .map((dimension) => ({ dimension, used: false }));
+  for (const boundary of counterBoundaries) {
+    const maximum = boundary.proofCases[1].expected;
+    const match = availableProofs.find(({ dimension, used }) => (
+      !used
+      && dimension.status === 'SPECIFIED'
+      && dimension.basis.some(({ source, reference }) => (
+        source === 'ARCHITECTURE_POLICY' && reference === boundary.authority
+      ))
+      && dimension.proofObligation?.relation === 'DEFINED_RESULT'
+      && dimension.proofObligation.resolutionKind === boundary.resolutionKind
+      && dimension.proofObligation.resolutionParameter === boundary.resolutionParameter
+      && dimension.proofObligation.baselineOutcome === maximum
+      && dimension.proofObligation.variationOutcome === maximum
+    ));
+    if (match === undefined) {
+      throw new Error(`semantic_opinion_missing_counter_saturation_proof:${boundary.resolutionParameter}`);
+    }
+    match.used = true;
+  }
+}
+
 export function compileSemanticOpinion(opinion, request) {
   assertSchema('aegis.semantic_request.v9', request);
   const { requestDigest, ...requestPayload } = request;
@@ -39,6 +80,7 @@ export function compileSemanticOpinion(opinion, request) {
   if (opinion.worksheetDigest !== request.worksheetDigest) {
     throw new Error('semantic_opinion_worksheet_mismatch');
   }
+  assertWorksheetRequirements(opinion, request);
 
   const requirementIds = opinion.requirements.map((_, index) => generatedId('REQ', index));
   const invariantIds = opinion.invariants.map((_, index) => generatedId('INV', index));

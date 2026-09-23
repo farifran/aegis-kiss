@@ -277,6 +277,54 @@ if (fullyEnumerated.bitFields.length !== 32
   || fullyEnumerated.bitLayouts[0].status !== 'COMPLETE') {
   throw new Error('fully_enumerated_32_bit_layout_was_rejected');
 }
+
+const deterministicIntent = [
+  'Executar Partial Fill com divisão BigInt.',
+  'Consolidar os resultados em uma árvore Merkle.',
+  'Expor bitmask de 16 bits: Bits 0–3: flags; Bits 4–9: quantidade de participantes;',
+  'Bits 10–15: código de integridade.',
+].join(' ');
+const deterministicSignals = detectIntentSignals(deterministicIntent);
+const deterministicWorksheet = buildSemanticWorksheet({
+  contextDigest,
+  intent: deterministicIntent,
+  intentSignals: deterministicSignals,
+});
+const expectedDimensions = [
+  'ORDERING',
+  'ROUNDING',
+  'REMAINDER_DISTRIBUTION',
+  'ZERO_DIVISOR',
+  'BOUNDED_ARITHMETIC',
+];
+const counterField = deterministicWorksheet.bitFields
+  .find(({ startBit, endBit }) => startBit === 4 && endBit === 9);
+if (JSON.stringify(deterministicWorksheet.requiredDeterminismDimensions)
+    !== JSON.stringify(expectedDimensions)
+  || deterministicWorksheet.counterexampleWitnesses.length !== expectedDimensions.length
+  || counterField?.semanticRole !== 'OBSERVABILITY_COUNTER'
+  || counterField.counterBoundary?.resolutionParameter !== 'SATURATE_MAX=63'
+  || JSON.stringify(counterField.counterBoundary.proofCases) !== JSON.stringify([
+    { input: '62', expected: '62' },
+    { input: '63', expected: '63' },
+    { input: '64', expected: '63' },
+  ])) {
+  throw new Error('material_determinism_witnesses_were_not_precomputed');
+}
+
+const explicitWrapIntent = 'Expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade com wrap.';
+const explicitWrapWorksheet = buildSemanticWorksheet({
+  contextDigest,
+  intent: explicitWrapIntent,
+  intentSignals: detectIntentSignals(explicitWrapIntent),
+});
+const explicitCounter = explicitWrapWorksheet.bitFields
+  .find(({ startBit, endBit }) => startBit === 2 && endBit === 7);
+if (explicitCounter?.semanticRole !== 'OBSERVABILITY_COUNTER'
+  || explicitCounter.counterBoundary !== null
+  || !explicitWrapWorksheet.requiredDeterminismDimensions.includes('BOUNDED_ARITHMETIC')) {
+  throw new Error('explicit_counter_boundary_was_overridden_by_default');
+}
 NODE
 
 # Conteúdo e comandos permanecem separados.
@@ -842,6 +890,20 @@ mv ARCHITECTURE.original.md ARCHITECTURE.md
 printf '%s\n' "${policy_output}" | jq -e '
   .reason == "ARCHITECTURE_POLICY_UNAVAILABLE"
   and (.detail | contains("architecture_policy_origin_mismatch"))
+' >/dev/null
+
+# A IA não pode omitir dimensões que a ficha mecânica ativou.
+bash ./aegis 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
+deterministic_request="$(bash ./aegis --semantic-request)"
+deterministic_worksheet_digest="$(printf '%s\n' "${deterministic_request}" | jq -r '.worksheetDigest')"
+set +e
+missing_dimension_output="$(make_opinion yes "${deterministic_worksheet_digest}" | bash ./aegis --semantic-compile 2>&1)"
+missing_dimension_code=$?
+set -e
+[[ "${missing_dimension_code}" -ne 0 ]]
+printf '%s\n' "${missing_dimension_output}" | jq -e '
+  .reason == "INVALID_SEMANTIC_OPINION"
+  and (.detail | startswith("semantic_opinion_missing_required_determinism:"))
 ' >/dev/null
 
 printf '[AEGIS][TEST] capture, discovery and semantic contract flow: PASS\n'

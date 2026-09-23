@@ -6,11 +6,75 @@ import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { analyzeBitLayouts, detectIntentSignals } from './intent_signals.mjs';
 import { assertSchema, schemaDocument } from './schema_validator.mjs';
 import {
+  counterexampleForDimension,
   mechanicalPolicySignals,
   policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
 } from './semantic_authority.mjs';
+
+const determinismDimensionOrder = [
+  'ORDERING',
+  'ROUNDING',
+  'REMAINDER_DISTRIBUTION',
+  'ZERO_DIVISOR',
+  'BOUNDED_ARITHMETIC',
+];
+const counterLabelPattern = /\b(?:quantidade|contagem|contador(?:es)?|n[uú]mero\s+de|cantidad|conteo|count(?:er)?|number\s+of)\b/iu;
+const explicitBoundaryPattern = /\b(?:satur\w*|wrap\w*|m[oó]dulo|modulo|trunc\w*|rejeit\w*|reject\w*|erro|error)\b/iu;
+const merklePattern = /\bmerkle\b/iu;
+const integerArithmeticPattern = /\b(?:bigint|inteiros?\s+puros?|integer\s+arithmetic|divis[aã]o\s+inteira|integer\s+division)\b/iu;
+const divisionOperationPattern = /\b(?:divis[aã]o|division|partial\s+fill|preenchimento\s+(?:parcial|fracion[aá]rio)|raz[aã]o\s+entre|ratio\s+between)\b/iu;
+const distributedDivisionPattern = /\b(?:partial\s+fill|preenchimento\s+(?:parcial|fracion[aá]rio))\b/iu;
+
+function fieldClause(intent, signal) {
+  const start = signal.offset + signal.reference.length;
+  return intent.slice(start, start + 180).split(/[;\n.]/u, 1)[0].trim();
+}
+
+function exactBoundaryValue(width, offset) {
+  if (width <= 256) return ((1n << BigInt(width)) + BigInt(offset)).toString();
+  if (offset === -2) return `2^${width}-2`;
+  if (offset === -1) return `2^${width}-1`;
+  return `2^${width}`;
+}
+
+function counterBoundaryFor({ intent, signal, width, semanticRole }) {
+  if (semanticRole !== 'OBSERVABILITY_COUNTER') return null;
+  const clause = fieldClause(intent, signal);
+  if (explicitBoundaryPattern.test(clause)) return null;
+  const belowMaximum = exactBoundaryValue(width, -2);
+  const maximum = exactBoundaryValue(width, -1);
+  const aboveMaximum = exactBoundaryValue(width, 0);
+  return {
+    authority: 'ARCH-OBSERVABILITY-COUNTERS',
+    resolutionKind: 'OVERFLOW_SATURATE',
+    resolutionParameter: `SATURATE_MAX=${maximum}`,
+    proofCases: [
+      { input: belowMaximum, expected: belowMaximum },
+      { input: maximum, expected: maximum },
+      { input: aboveMaximum, expected: maximum },
+    ],
+  };
+}
+
+function requiredDeterminismDimensions(intent, bitFields) {
+  const required = new Set();
+  if (merklePattern.test(intent)) {
+    required.add('ORDERING');
+  }
+  if (integerArithmeticPattern.test(intent) && divisionOperationPattern.test(intent)) {
+    required.add('ROUNDING');
+    required.add('ZERO_DIVISOR');
+    if (distributedDivisionPattern.test(intent)) {
+      required.add('REMAINDER_DISTRIBUTION');
+    }
+  }
+  if (bitFields.some(({ semanticRole }) => semanticRole === 'OBSERVABILITY_COUNTER')) {
+    required.add('BOUNDED_ARITHMETIC');
+  }
+  return determinismDimensionOrder.filter((dimension) => required.has(dimension));
+}
 
 export function loadSemanticConstitution(repositoryRoot) {
   const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
@@ -270,6 +334,7 @@ export function buildSemanticRequest({
 }
 
 export function buildSemanticWorksheet({ contextDigest, intent, intentSignals }) {
+  const bitLayouts = analyzeBitLayouts(intent, intentSignals);
   const bitFields = intentSignals.flatMap((signal, signalIndex) => {
     if (signal.kind !== 'BOUNDED_VALUE') return [];
     const match = /\bbits?\s+(\d+)(?:\s*[–—-]\s*(\d+))?\b/iu.exec(signal.reference);
@@ -282,6 +347,15 @@ export function buildSemanticWorksheet({ contextDigest, intent, intentSignals })
     const width = endBit - startBit + 1;
     const exactCapacity = Number.isSafeInteger(width) && width <= 256;
     const patternCount = exactCapacity ? 1n << BigInt(width) : null;
+    const isLayoutField = bitLayouts.some((layout) => (
+      layout.fieldSignalIndexes.includes(signalIndex)
+      && layout.declaredWidthSignalIndex !== signalIndex
+    ));
+    const semanticRole = isLayoutField
+      && width > 1
+      && counterLabelPattern.test(fieldClause(intent, signal))
+      ? 'OBSERVABILITY_COUNTER'
+      : 'UNCLASSIFIED';
     return [{
       signalIndex,
       startBit,
@@ -289,17 +363,18 @@ export function buildSemanticWorksheet({ contextDigest, intent, intentSignals })
       width,
       patternCount: patternCount === null ? `2^${width}` : patternCount.toString(),
       unsignedMaximum: patternCount === null ? `2^${width}-1` : (patternCount - 1n).toString(),
+      semanticRole,
+      counterBoundary: counterBoundaryFor({ intent, signal, width, semanticRole }),
     }];
   });
+  const requiredDimensions = requiredDeterminismDimensions(intent, bitFields);
   const worksheet = {
     schema: 'aegis.semantic_worksheet.v1',
     contextDigest,
-    // Semantic dimensions are reported only when material. Requiring the full
-    // universal catalogue made every deterministic demand produce boilerplate.
-    requiredDeterminismDimensions: [],
-    counterexampleWitnesses: [],
+    requiredDeterminismDimensions: requiredDimensions,
+    counterexampleWitnesses: requiredDimensions.map(counterexampleForDimension),
     bitFields,
-    bitLayouts: analyzeBitLayouts(intent, intentSignals).map((layout) => ({
+    bitLayouts: bitLayouts.map((layout) => ({
       id: layout.id,
       declaredWidthSignalIndex: layout.declaredWidthSignalIndex,
       declaredWidth: layout.declaredWidth,
