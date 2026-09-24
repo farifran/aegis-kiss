@@ -399,10 +399,14 @@ async function buildCurrentSemanticRequest() {
   };
 }
 
-async function handleSemanticRequest() {
+async function writeSemanticRequest(request) {
   const { canonicalJson } = await import('./lib/canonical_json.mjs');
-  const { request } = await buildCurrentSemanticRequest();
   process.stdout.write(`${canonicalJson(request)}\n`);
+}
+
+async function handleSemanticRequest() {
+  const { request } = await buildCurrentSemanticRequest();
+  await writeSemanticRequest(request);
 }
 
 async function handleJevRequest() {
@@ -589,7 +593,12 @@ async function handleSemanticRun(args) {
   const assignment = await loadRoleAssignment(root);
   if (assignment === null) throw rejection('ROLE_ASSIGNMENT_NOT_CONFIGURED');
   const role = assignment.roles.contractSupervisor;
-  if (role.channel !== 'API') throw rejection('SEMANTIC_SUPERVISOR_EXTERNAL_IDE');
+  if (role.channel === 'IDE') {
+    const context = await buildCurrentSemanticRequest();
+    await ensureJevAdvisory(context.request);
+    await writeSemanticRequest(context.request);
+    return;
+  }
   assertSemanticSupervisorReady(role);
   const context = await buildCurrentSemanticRequest();
   const jevEvaluation = await ensureJevAdvisory(context.request);

@@ -24,7 +24,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
-  ./aegis --semantic-run  Reusa/executa o JEV e faz uma única deliberação pelo supervisor API
+  ./aegis --semantic-run  API delibera; supervisor IDE recebe a ficha para responder
   ./aegis --jev-request  Exibe o lote de avaliação paralela preparado para o JEV
   ./aegis --jev-run      Executa o JEV em modo sombra via Vercel AI Gateway
   ./aegis --wizard    Abre as decisões pendentes no terminal

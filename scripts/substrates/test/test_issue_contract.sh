@@ -401,6 +401,30 @@ printf '%s\n' "${jev_request}" | jq -e \
 ' >/dev/null
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 
+# Com supervisor IDE, --semantic-run entrega a mesma ficha em vez de tentar uma API.
+node --input-type=module <<'NODE'
+import { writeFileSync } from 'node:fs';
+writeFileSync('.harness/config/roles.json', `${JSON.stringify({
+  schema: 'aegis.role_assignment.v1',
+  roles: {
+    contractSupervisor: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
+    codingAgent: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
+  },
+})}\n`);
+NODE
+ide_handoff="$(bash ./aegis --semantic-run)"
+[[ "$(printf '%s\n' "${ide_handoff}" | jq -r '.requestDigest')" == "$(printf '%s\n' "${semantic_request}" | jq -r '.requestDigest')" ]]
+node --input-type=module <<'NODE'
+import { writeFileSync } from 'node:fs';
+writeFileSync('.harness/config/roles.json', `${JSON.stringify({
+  schema: 'aegis.role_assignment.v1',
+  roles: {
+    contractSupervisor: { channel: 'API', adapter: 'openai-compatible', model: 'supervisor-model', credentialEnv: 'AEGIS_SUPERVISOR_API_KEY' },
+    codingAgent: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
+  },
+})}\n`);
+NODE
+
 # Antes da assinatura, mudança no workspace continua bloqueando o contexto semântico.
 cp src/index.ts "${WORK_DIR}/index.before-preflight-check.ts"
 printf '\nexport const prematureChange = true;\n' >> src/index.ts

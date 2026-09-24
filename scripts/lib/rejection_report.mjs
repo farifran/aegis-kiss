@@ -64,8 +64,8 @@ const diagnostics = new Map([
     remediation: 'Exporte a variável indicada em detail ou execute ./aegis --setup para escolher outra integração.',
   }],
   ['SEMANTIC_SUPERVISOR_EXTERNAL_IDE', {
-    message: 'O supervisor configurado é uma IDE externa e não pode ser iniciado pelo CLI.',
-    remediation: 'Use ./aegis --semantic-request na IDE ou configure um supervisor API com ./aegis --setup.',
+    message: 'O supervisor configurado é uma IDE externa e precisa devolver o parecer ao Harness.',
+    remediation: 'Consuma a ficha emitida por ./aegis --semantic-run e devolva o parecer por ./aegis --semantic-compile.',
   }],
   ['SEMANTIC_SUPERVISOR_MODEL_INVALID', {
     message: 'O modelo do AI Gateway não usa um identificador provider/model válido.',
