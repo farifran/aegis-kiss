@@ -17,6 +17,7 @@ const contractJsonPath = resolve(runtimeDir, 'contract.json');
 const contractMdPath = resolve(runtimeDir, 'contract.md');
 const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
 const sourceIndexPath = resolve(runtimeDir, 'source-index.json');
+const jevAdvisoryPath = resolve(runtimeDir, 'jev-advisory.json');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 const semanticOpinionByteLimit = 262_144;
@@ -135,7 +136,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
     || contract.policyDigest !== loadedPolicy.policyDigest) {
     return null;
   }
-  if (contract.schema !== 'aegis.issue_contract.v13') return null;
+  if (contract.schema !== 'aegis.issue_contract.v14') return null;
   assertContractDocument({
     repositoryRoot: root,
     contract,
@@ -168,9 +169,10 @@ async function handleDraft(args) {
     import('./lib/preflight_integrity.mjs'),
   ]);
   const demand = captureDemand(args);
-  const { discovery, sourceIndex } = observeWorkspace(root, demand, {
+  const workspaceObservation = observeWorkspace(root, demand, {
     cachedSourceIndex: await readCachedSourceIndex(),
   });
+  const { discovery, sourceIndex } = workspaceObservation;
   const preflight = buildPreflightHandoff({ demand, discovery });
   assertPreflightDocument(preflight);
   const serializedPreflight = `${canonicalJson(preflight)}\n`;
@@ -296,15 +298,15 @@ async function handleStatus() {
       writeStatus({
         status: 'SEMANTIC_REDELIBERATION_REQUIRED',
         foundSchema: 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v13',
+        requiredSchema: 'aegis.issue_contract.v14',
       });
       return;
     }
-    if (contract.schema !== 'aegis.issue_contract.v13') {
+    if (contract.schema !== 'aegis.issue_contract.v14') {
       writeStatus({
         status: 'SEMANTIC_REDELIBERATION_REQUIRED',
         foundSchema: contract.schema ?? 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v13',
+        requiredSchema: 'aegis.issue_contract.v14',
       });
       return;
     }
@@ -414,15 +416,20 @@ async function handleJevRun() {
   const [
     { canonicalJson },
     { requestJevAssessment },
+    { compileJevAdvisory },
     { buildJevDecisionBatch },
   ] = await Promise.all([
     import('./lib/canonical_json.mjs'),
     import('./lib/jev_gateway.mjs'),
+    import('./lib/jev_advisory.mjs'),
     import('./lib/jev_projection.mjs'),
   ]);
   const { request } = await buildCurrentSemanticRequest();
   const batch = buildJevDecisionBatch(request);
-  process.stdout.write(`${canonicalJson(await requestJevAssessment(batch))}\n`);
+  const assessment = await requestJevAssessment(batch);
+  const advisory = compileJevAdvisory(request, batch, assessment);
+  await writeFileAtomic(jevAdvisoryPath, `${canonicalJson(advisory)}\n`);
+  process.stdout.write(`${canonicalJson(assessment)}\n`);
 }
 
 async function handleSemanticCompile(args) {
@@ -464,7 +471,7 @@ async function handleSemanticCompile(args) {
   try {
     draft = compileSemanticOpinion(opinion, request);
   } catch (error) {
-    if (error.message === 'semantic_opinion_worksheet_mismatch') {
+    if (error.message === 'semantic_opinion_evidence_mismatch') {
       throw rejection('SEMANTIC_CONTEXT_MISMATCH');
     }
     throw rejection('INVALID_SEMANTIC_OPINION', error.message);
@@ -525,8 +532,8 @@ async function handleApprove() {
     readPolicy(),
     readConstitution(),
   ]);
-  if (draftContract.schema !== 'aegis.issue_contract.v13') {
-    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v13`);
+  if (draftContract.schema !== 'aegis.issue_contract.v14') {
+    throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v14`);
   }
   const workspaceObservation = await assertDiscoveryUnchanged(preflight);
   assertContractDocument({
@@ -580,7 +587,7 @@ async function handleApprove() {
   const contractDigest = canonicalDigest(contract);
   const statePath = semanticStatePath(root);
   const semanticState = {
-    schema: 'aegis.semantic_state.v13',
+    schema: 'aegis.semantic_state.v14',
     contract,
     contractDigest,
   };
@@ -598,7 +605,7 @@ async function handleApprove() {
     rm(resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.preflight_finalization.v13',
+    schema: 'aegis.preflight_finalization.v14',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',

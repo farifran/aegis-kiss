@@ -66,11 +66,7 @@ export function renderSemanticContractMarkdown(contract, {
       .map(({ ruleId, kind, reference }) => `${ruleId}/${kind}: ${reference}`)
       .join('; ')}.`);
   }
-  if (contract.intentSignals.length > 0) {
-    lines.push(`- **Sinais da intenção:** ${contract.intentSignals
-      .map(({ id, kind, reference }) => `${id}/${kind}: ${reference}`)
-      .join('; ')}.`);
-  }
+  lines.push(`- **Evidência neutra:** ${contract.intentEvidence.fragments.length} fragmento(s), ${contract.intentEvidence.literalFacts.length} fato(s) literal(is).`);
   if (compliantAssessments.length > 0) {
     lines.push(`- **Regras aplicáveis já conformes:** ${compliantAssessments.map(({ ruleId }) => ruleId).join(', ')}.`);
   }

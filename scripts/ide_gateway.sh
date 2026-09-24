@@ -20,11 +20,12 @@ require_command_arity() {
 usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
-  ./aegis "<demanda>" Captura a intenção e executa o Discovery (.harness/runtime/preflight.json)
+  ./aegis "<demanda>" Captura a demanda e executa o Discovery mecânico
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
-  ./aegis --jev-request  Exibe o lote tipado e consultivo preparado para o JEV
-  ./aegis --jev-run      Executa o lote no JEV via Vercel AI Gateway
+  ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
+  ./aegis --jev-request  Exibe o lote de avaliação paralela preparado para o JEV
+  ./aegis --jev-run      Executa o JEV em modo sombra via Vercel AI Gateway
   ./aegis --wizard    Abre as decisões pendentes no terminal
   ./aegis --setup     Registra atribuições externas; não executa API nem IDE
   ./aegis --setup --show  Exibe a configuração externa sem expor chaves

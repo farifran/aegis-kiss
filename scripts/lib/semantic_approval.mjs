@@ -280,7 +280,7 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     || finalContract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
     throw new Error('contract_has_unresolved_determinism');
   }
-  assertSchema('aegis.issue_contract.v13', finalContract);
+  assertSchema('aegis.issue_contract.v14', finalContract);
   assertContractApprovalEvidence(finalContract, { required: true });
   return finalContract;
 }

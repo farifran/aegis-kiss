@@ -1,47 +1,16 @@
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
 
-const intentCriteria = {
-  OBLIGATION: 'Exigência que deve produzir uma obrigação normativa no contrato.',
-  PROHIBITION: 'Comportamento explicitamente proibido pela intenção.',
-  GOAL: 'Objetivo qualitativo não falsificável por si só.',
-  OPTION: 'Possibilidade ou sugestão que não cria obrigação.',
-  EXAMPLE: 'Exemplo ilustrativo que não limita sozinho a solução.',
-  AMBIGUITY: 'Ausência ou conflito que pode alterar comportamento observável.',
-  UNCERTAIN: 'O trecho não permite classificação segura entre as opções anteriores.',
+const fragmentCriteria = {
+  OBLIGATION: 'O fragmento contém exigência que pode originar obrigação normativa.',
+  PROHIBITION: 'O fragmento contém comportamento explicitamente proibido.',
+  GOAL: 'O fragmento contém objetivo qualitativo que não é obrigação falsificável por si só.',
+  OPTION: 'O fragmento contém sugestão ou possibilidade não obrigatória.',
+  EXAMPLE: 'O fragmento contém ilustração que não limita sozinha a solução.',
+  AMBIGUITY: 'O fragmento contém ausência ou conflito que pode alterar comportamento observável.',
+  CONTEXT_ONLY: 'O fragmento fornece contexto sem claim contratual próprio.',
+  MIXED_OR_UNCLEAR: 'O fragmento mistura papéis ou não permite classificação primária segura.',
 };
-
-const policyCriteria = {
-  COMPLIANT: 'A intenção é compatível com a regra arquitetural indicada.',
-  CONFLICT: 'A intenção solicita algo incompatível com a regra arquitetural indicada.',
-  UNCERTAIN: 'O estado fornecido não permite concluir compatibilidade ou conflito.',
-};
-
-const determinismCriteria = {
-  RULE_EVIDENCED: 'Existe no estado uma regra concreta candidata a resolver exatamente o witness.',
-  GAP_FOUND: 'A dimensão é aplicável, mas falta regra concreta para o comportamento observável.',
-  DECISION_REQUIRED: 'Há ao menos duas alternativas materiais compatíveis que exigem escolha humana.',
-  NOT_APPLICABLE: 'Uma regra estrutural explícita exclui a operação ou classe de entrada do witness.',
-  UNCERTAIN: 'Não é possível classificar com segurança usando somente o estado fornecido.',
-};
-
-const complexityCriteria = {
-  NO_EXCESS: 'A intenção não sugere complexidade arquitetural desnecessária.',
-  SIMPLIFICATION_CANDIDATE: 'Há sugestões opcionais de complexidade que podem ser podadas por KISS.',
-  COMPLEXITY_JUSTIFIED: 'A complexidade está ligada a comportamento observável explicitamente exigido.',
-  UNCERTAIN: 'O estado não permite avaliar a necessidade da complexidade citada.',
-};
-
-const representationCriteria = {
-  BITMASK_LAYOUT: 'Largura total de uma máscara composta por campos posicionais.',
-  BIT_FIELD: 'Campo que ocupa uma posição ou faixa dentro de uma máscara.',
-  PROJECTION_WIDTH: 'Quantidade de bits extraída ou projetada de outro valor.',
-  HASH_WIDTH: 'Largura de hash, fingerprint ou raiz de integridade.',
-  OTHER: 'Representação finita com outro papel observável.',
-  UNCERTAIN: 'O estado não permite determinar o papel da representação.',
-};
-
-const jevReviewSignalKinds = new Set(['INCOMPLETE_EXPRESSION', 'BIT_LAYOUT_ISSUE']);
 
 function withoutDigest(value, digestField) {
   const { [digestField]: digest, ...payload } = value;
@@ -49,37 +18,8 @@ function withoutDigest(value, digestField) {
   return payload;
 }
 
-function policyState(request) {
-  const rulesById = new Map(request.policy.rules.map((rule) => [rule.id, rule]));
-  const grouped = new Map();
-  for (const signal of request.policy.signals) {
-    const current = grouped.get(signal.ruleId) ?? { signalKinds: new Set(), references: new Set() };
-    current.signalKinds.add(signal.kind);
-    current.references.add(signal.reference);
-    grouped.set(signal.ruleId, current);
-  }
-  return [...grouped.entries()].map(([ruleId, signals], index) => {
-    const rule = rulesById.get(ruleId);
-    if (rule === undefined) throw new Error(`jev_projection_unknown_policy_rule:${ruleId}`);
-    return {
-      id: `POLICY-REVIEW-${String(index + 1).padStart(4, '0')}`,
-      ruleId,
-      signalKinds: [...signals.signalKinds].sort(),
-      references: [...signals.references].sort(),
-      ruleLevel: rule.level,
-      ruleStatement: rule.statement,
-    };
-  });
-}
-
-function addQuestion(questions, bindings, id, question, binding) {
-  if (Object.hasOwn(questions, id)) throw new Error(`jev_projection_duplicate_question:${id}`);
-  questions[id] = question;
-  bindings[id] = { ...binding, allowedUse: 'CANDIDATE_ONLY' };
-}
-
 export function assertJevDecisionBatch(batch, semanticRequest = null) {
-  assertSchema('aegis.jev_decision_batch.v1', batch);
+  assertSchema('aegis.jev_decision_batch.v2', batch);
   if (batch.batchDigest !== canonicalDigest(withoutDigest(batch, 'batchDigest'))) {
     throw new Error('jev_batch_digest_mismatch');
   }
@@ -89,155 +29,70 @@ export function assertJevDecisionBatch(batch, semanticRequest = null) {
     throw new Error('jev_batch_bindings_mismatch');
   }
   if (batch.projection.questionCount !== questionIds.length
-    || batch.projection.intentQuestionCount
-      !== Object.values(batch.bindings).filter(({ family }) => family === 'INTENT_SIGNAL').length
-    || batch.projection.policyQuestionCount
-      !== Object.values(batch.bindings).filter(({ family }) => family === 'POLICY_SIGNAL').length
-    || batch.projection.determinismQuestionCount
-      !== Object.values(batch.bindings).filter(({ family }) => (
-        family === 'DETERMINISM_ACTIVATION'
-      )).length
-    || batch.projection.finiteRepresentationQuestionCount
-      !== Object.values(batch.bindings).filter(({ family }) => (
-        family === 'FINITE_REPRESENTATION'
-      )).length
-    || batch.projection.complexityQuestionCount
-      !== Object.values(batch.bindings).filter(({ family }) => family === 'COMPLEXITY_REVIEW').length) {
+    || batch.projection.fragmentCount !== batch.state.fragments.length
+    || questionIds.length !== batch.state.fragments.length) {
     throw new Error('jev_batch_projection_counts_mismatch');
   }
   if (semanticRequest !== null) {
     if (batch.sourceSemanticRequestDigest !== semanticRequest.requestDigest
-      || batch.sourceWorksheetDigest !== semanticRequest.worksheetDigest) {
+      || batch.sourceEvidenceDigest !== semanticRequest.intentEvidence.evidenceDigest) {
       throw new Error('jev_batch_source_mismatch');
+    }
+    for (const fragment of batch.state.fragments) {
+      const source = semanticRequest.intent.slice(fragment.startOffset, fragment.endOffset);
+      const expected = source.length <= 240 ? source : `${source.slice(0, 239)}…`;
+      if (fragment.anchor !== expected) throw new Error(`jev_fragment_binding_mismatch:${fragment.id}`);
     }
   }
 }
 
 export function buildJevDecisionBatch(semanticRequest) {
-  assertSchema('aegis.semantic_request.v9', semanticRequest);
+  assertSchema('aegis.semantic_request.v10', semanticRequest);
   if (semanticRequest.requestDigest
     !== canonicalDigest(withoutDigest(semanticRequest, 'requestDigest'))) {
     throw new Error('semantic_request_digest_mismatch');
   }
-
-  const policySignals = policyState(semanticRequest);
-  const reviewSignals = semanticRequest.intentSignals.signals.filter(({ kind }) => (
-    jevReviewSignalKinds.has(kind)
-  ));
-  const determinismActivations = semanticRequest.worksheet.determinismActivations
-    .map(({ id, dimension, subject, triggerReference, counterexampleWitness }) => ({
-      id,
-      dimension,
-      subject,
-      triggerReference,
-      counterexampleWitness,
-    }));
-  const unclassifiedFiniteRepresentations = semanticRequest.worksheet.finiteRepresentations
-    .filter(({ role }) => role === 'UNCLASSIFIED');
   const questions = {};
   const bindings = {};
-
-  for (const signal of reviewSignals) {
-    const id = `intent.${signal.id}`;
-    addQuestion(questions, bindings, id, {
+  for (const fragment of semanticRequest.intentEvidence.fragments) {
+    const questionId = `fragment.${fragment.id}`;
+    questions[questionId] = {
       type: 'choice',
-      instructions: `Classifique o papel semântico do sinal ${signal.id} sem criar obrigação ausente.`,
-      criteria: intentCriteria,
-    }, {
-      family: 'INTENT_SIGNAL',
-      subjectId: signal.id,
-      semanticTarget: 'INTENT_CLAIM_KIND',
-    });
+      instructions: `Classifique o papel semântico primário de ${fragment.id}. Use MIXED_OR_UNCLEAR quando houver mais de um claim ou contexto insuficiente.`,
+      criteria: fragmentCriteria,
+    };
+    bindings[questionId] = {
+      family: 'INTENT_FRAGMENT',
+      subjectId: fragment.id,
+      semanticTarget: 'CLAIM_KIND_CANDIDATE',
+      allowedUse: 'SHADOW_METRIC_ONLY',
+    };
   }
-
-  for (const signal of policySignals) {
-    const id = `policy.${signal.id}`;
-    addQuestion(questions, bindings, id, {
-      type: 'choice',
-      instructions: `Avalie a compatibilidade da intenção com a regra ${signal.ruleId}.`,
-      criteria: policyCriteria,
-    }, {
-      family: 'POLICY_SIGNAL',
-      subjectId: signal.id,
-      semanticTarget: 'POLICY_DEMAND_STATUS',
-    });
-  }
-
-  for (const activation of determinismActivations) {
-    const id = `determinism.${activation.id}`;
-    addQuestion(questions, bindings, id, {
-      type: 'choice',
-      instructions: `Pré-classifique ${activation.dimension} para o sujeito ${activation.subject.key}; fechamento exige prova posterior do Harness.`,
-      criteria: determinismCriteria,
-    }, {
-      family: 'DETERMINISM_ACTIVATION',
-      subjectId: activation.id,
-      semanticTarget: 'DETERMINISM_PRECLASSIFICATION',
-    });
-  }
-
-  for (const representation of unclassifiedFiniteRepresentations) {
-    const id = `representation.${representation.id}`;
-    addQuestion(questions, bindings, id, {
-      type: 'choice',
-      instructions: `Classifique o papel observável da representação finita ${representation.id}.`,
-      criteria: representationCriteria,
-    }, {
-      family: 'FINITE_REPRESENTATION',
-      subjectId: representation.id,
-      semanticTarget: 'REPRESENTATION_ROLE',
-    });
-  }
-
-  addQuestion(questions, bindings, 'complexity.global', {
-    type: 'choice',
-    instructions: 'Avalie se a intenção contém complexidade arquitetural que o princípio KISS permite simplificar.',
-    criteria: complexityCriteria,
-  }, {
-    family: 'COMPLEXITY_REVIEW',
-    subjectId: 'PUBLIC_CONTRACT',
-    semanticTarget: 'COMPLEXITY_STATUS',
-  });
-
-  const questionCount = Object.keys(questions).length;
-  if (questionCount > 255) throw new Error(`jev_question_limit_exceeded:${questionCount}`);
   const payload = {
-    schema: 'aegis.jev_decision_batch.v1',
+    schema: 'aegis.jev_decision_batch.v2',
     sourceSemanticRequestDigest: semanticRequest.requestDigest,
-    sourceWorksheetDigest: semanticRequest.worksheetDigest,
+    sourceEvidenceDigest: semanticRequest.intentEvidence.evidenceDigest,
     protocol: {
       provider: 'TYPESAFE_JEV',
       transport: 'VERCEL_AI_GATEWAY',
       questionMode: 'PARALLEL_CHOICE',
       authority: 'ADVISORY_ONLY',
-      onUnavailable: 'BYPASS_TO_SEMANTIC_MODEL',
-      onUncertain: 'FULL_SEMANTIC_REVIEW',
+      purpose: 'SHADOW_EVALUATION',
     },
     state: {
       intent: semanticRequest.intent,
-      revision: semanticRequest.revision,
-      reviewSignals,
-      policyReviews: policySignals,
-      determinismActivations,
-      unclassifiedFiniteRepresentations,
+      fragments: semanticRequest.intentEvidence.fragments,
     },
     questions,
     bindings,
     projection: {
-      questionCount,
-      intentQuestionCount: reviewSignals.length,
-      policyQuestionCount: policySignals.length,
-      determinismQuestionCount: determinismActivations.length,
-      finiteRepresentationQuestionCount: unclassifiedFiniteRepresentations.length,
-      complexityQuestionCount: 1,
-      mechanicallySettledIntentSignalCount:
-        semanticRequest.intentSignals.signals.length - reviewSignals.length,
+      questionCount: Object.keys(questions).length,
+      fragmentCount: semanticRequest.intentEvidence.fragments.length,
       omittedSections: [
         'CONSTITUTION_TEXT',
         'SOURCE_EVIDENCE',
         'OUTPUT_SCHEMA',
         'COMPILER_OWNED_FIELDS',
-        'MECHANICALLY_SETTLED_SIGNALS',
       ],
     },
   };
@@ -275,8 +130,7 @@ export function assertJevAssessment(assessment, batch) {
       throw new Error(`jev_assessment_probability_sum_mismatch:${questionId}`);
     }
     const selectedProbability = answer.probabilities[answer.choice];
-    const maximumProbability = Math.max(...Object.values(answer.probabilities));
-    if (maximumProbability - selectedProbability > 1e-3) {
+    if (Math.max(...Object.values(answer.probabilities)) - selectedProbability > 1e-3) {
       throw new Error(`jev_assessment_selected_choice_mismatch:${questionId}`);
     }
   }

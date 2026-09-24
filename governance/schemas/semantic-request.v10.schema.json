@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_request.v10",
+  "title": "Aegis Semantic Request v10",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "requestDigest", "contextDigest", "delivery", "constitution", "intent", "intentEvidence", "workspace", "policy", "revision", "outputSchema"],
+  "properties": {
+    "schema": { "const": "aegis.semantic_request.v10" },
+    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constitution", "architecture", "intent", "intentEvidence", "workspace", "revision", "outputSchema"],
+      "properties": {
+        "constitution": { "const": "SYSTEM_INSTRUCTION" },
+        "architecture": { "const": "TRUSTED_POLICY" },
+        "intent": { "const": "USER_DATA" },
+        "intentEvidence": { "const": "MECHANICAL_FACTS_NOT_SEMANTIC_VERDICTS" },
+        "workspace": { "const": "UNTRUSTED_EVIDENCE" },
+        "revision": { "const": "USER_DECISION" },
+        "outputSchema": { "const": "STRICT_STRUCTURED_OUTPUT" }
+      }
+    },
+    "constitution": { "$ref": "aegis.semantic_request.v9#/properties/constitution" },
+    "intent": { "type": "string", "minLength": 1 },
+    "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
+    "workspace": { "$ref": "aegis.semantic_request.v9#/properties/workspace" },
+    "policy": { "$ref": "aegis.semantic_request.v9#/properties/policy" },
+    "revision": { "$ref": "aegis.semantic_request.v9#/properties/revision" },
+    "outputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "digest", "strict", "document"],
+      "properties": {
+        "id": { "const": "aegis.semantic_opinion.v3" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "strict": { "const": true },
+        "document": {
+          "type": "object",
+          "required": ["$schema", "$id"],
+          "properties": {
+            "$schema": { "type": "string", "minLength": 1 },
+            "$id": { "const": "aegis.semantic_opinion.v3" }
+          }
+        }
+      }
+    }
+  }
+}

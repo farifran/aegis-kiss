@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.issue_contract.v14",
+  "title": "Aegis Auditable Issue-Contract v14",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "implementationAuthorized", "sourceSemanticRequestDigest", "semanticRevision",
+    "sourcePreflightDigest", "sourceSnapshotDigest", "policyDigest", "constitutionDigest",
+    "intent", "observedPaths", "intentEvidence", "policySignals", "specification",
+    "effectiveDeterminismStatus", "humanResolutions", "approval"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.issue_contract.v14" },
+    "implementationAuthorized": { "const": false },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "semanticRevision": { "$ref": "aegis.semantic_request.v10#/properties/revision" },
+    "sourcePreflightDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSnapshotDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "constitutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "intent": { "type": "string", "minLength": 1 },
+    "observedPaths": { "$ref": "aegis.issue_contract.v13#/properties/observedPaths" },
+    "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
+    "policySignals": { "$ref": "aegis.issue_contract.v13#/properties/policySignals" },
+    "specification": { "$ref": "aegis.semantic_draft.v9" },
+    "effectiveDeterminismStatus": { "$ref": "aegis.issue_contract.v13#/properties/effectiveDeterminismStatus" },
+    "humanResolutions": { "$ref": "aegis.issue_contract.v13#/properties/humanResolutions" },
+    "approval": { "$ref": "aegis.issue_contract.v13#/properties/approval" }
+  }
+}

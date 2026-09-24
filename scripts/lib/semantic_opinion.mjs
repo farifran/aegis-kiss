@@ -3,7 +3,6 @@ import { assertSchema } from './schema_validator.mjs';
 import {
   closureAuthorityForDimension,
   counterexampleForDimension,
-  counterexampleForSubject,
 } from './semantic_authority.mjs';
 
 function generatedId(prefix, index) {
@@ -26,97 +25,60 @@ function compileOpinionBasis(basis, request) {
     : item));
 }
 
-function assertWorksheetRequirements(opinion, request) {
-  const activations = new Map(request.worksheet.determinismActivations
-    .map((activation) => [activation.id, activation]));
-  const coveredActivations = new Set();
+function assertEvidenceCoverage(opinion, request) {
+  if (opinion.sourceEvidenceDigest !== request.intentEvidence.evidenceDigest) {
+    throw new Error('semantic_opinion_evidence_mismatch');
+  }
+  const fragmentCount = request.intentEvidence.fragments.length;
+  const seenFragments = new Set();
+  const claimCoverage = new Set();
+  for (const disposition of opinion.fragmentDispositions) {
+    if (disposition.fragmentIndex >= fragmentCount) {
+      throw new Error(`semantic_opinion_fragment_out_of_range:${disposition.fragmentIndex}`);
+    }
+    if (seenFragments.has(disposition.fragmentIndex)) {
+      throw new Error(`semantic_opinion_duplicate_fragment:${disposition.fragmentIndex}`);
+    }
+    seenFragments.add(disposition.fragmentIndex);
+    if (disposition.status === 'CLAIMS_EXTRACTED' && disposition.claimIndexes.length === 0) {
+      throw new Error(`semantic_opinion_fragment_without_claim:${disposition.fragmentIndex}`);
+    }
+    if (disposition.status === 'CONTEXT_ONLY' && disposition.claimIndexes.length > 0) {
+      throw new Error(`semantic_opinion_context_with_claim:${disposition.fragmentIndex}`);
+    }
+    for (const claimIndex of disposition.claimIndexes) {
+      if (opinion.intentClaims[claimIndex] === undefined) {
+        throw new Error(`semantic_opinion_claim_out_of_range:${claimIndex}`);
+      }
+      claimCoverage.add(claimIndex);
+    }
+  }
+  if (seenFragments.size !== fragmentCount) throw new Error('semantic_opinion_incomplete_fragment_coverage');
+  for (let index = 0; index < opinion.intentClaims.length; index += 1) {
+    const claim = opinion.intentClaims[index];
+    if (!claimCoverage.has(index)) throw new Error(`semantic_opinion_unassigned_claim:${index}`);
+    for (const fragmentIndex of claim.fragmentIndexes) {
+      const fragment = request.intentEvidence.fragments[fragmentIndex];
+      if (fragment === undefined) throw new Error(`semantic_opinion_fragment_out_of_range:${fragmentIndex}`);
+      const source = request.intent.slice(fragment.startOffset, fragment.endOffset);
+      if (!source.includes(claim.quote)) throw new Error(`semantic_opinion_claim_quote_outside_fragment:${index}`);
+    }
+  }
   for (const dimension of opinion.determinismReview.dimensions) {
-    if (dimension.activationId === null) continue;
-    const activation = activations.get(dimension.activationId);
-    if (activation === undefined) {
-      throw new Error(`semantic_opinion_unknown_activation:${dimension.activationId}`);
-    }
-    if (coveredActivations.has(dimension.activationId)) {
-      throw new Error(`semantic_opinion_duplicate_activation:${dimension.activationId}`);
-    }
-    if (dimension.kind !== activation.dimension) {
-      throw new Error(`semantic_opinion_activation_kind_mismatch:${dimension.activationId}`);
-    }
-    if (JSON.stringify(activation.counterexampleWitness)
-      !== JSON.stringify(counterexampleForSubject(
-        activation.dimension,
-        activation.subject.key,
-      ))) {
-      throw new Error(`semantic_worksheet_witness_mismatch:${dimension.activationId}`);
-    }
-    coveredActivations.add(dimension.activationId);
-  }
-  for (const activation of activations.values()) {
-    if (!coveredActivations.has(activation.id)) {
-      throw new Error(`semantic_opinion_missing_activation:${activation.id}`);
-    }
-  }
-
-  const dimensionsByActivation = new Map(opinion.determinismReview.dimensions
-    .filter(({ activationId }) => activationId !== null)
-    .map((dimension) => [dimension.activationId, dimension]));
-  const counterFields = request.worksheet.bitFields
-    .filter(({ counterBoundary }) => counterBoundary !== null);
-  for (const field of counterFields) {
-    const boundary = field.counterBoundary;
-    const activation = request.worksheet.determinismActivations.find((candidate) => (
-      candidate.dimension === 'BOUNDED_ARITHMETIC'
-      && candidate.triggerSignalIndexes.includes(field.signalIndex)
-    ));
-    const dimension = activation === undefined
-      ? undefined
-      : dimensionsByActivation.get(activation.id);
-    const maximum = boundary.proofCases[1].expected;
-    const matches = dimension !== undefined
-      && dimension.status === 'SPECIFIED'
-      && dimension.basis.some(({ source, reference }) => (
-        source === 'ARCHITECTURE_POLICY' && reference === boundary.authority
-      ))
-      && dimension.proofObligation?.relation === 'DEFINED_RESULT'
-      && dimension.proofObligation.resolutionKind === boundary.resolutionKind
-      && dimension.proofObligation.resolutionParameter === boundary.resolutionParameter
-      && dimension.proofObligation.baselineOutcome === maximum
-      && dimension.proofObligation.variationOutcome === maximum;
-    if (!matches) {
-      throw new Error(`semantic_opinion_missing_counter_saturation_proof:${boundary.resolutionParameter}`);
-    }
-  }
-
-  const acceptanceCases = opinion.requirements.flatMap(({ acceptanceCases: cases }) => cases);
-  for (const obligation of request.worksheet.mechanicalProofObligations) {
-    const expected = obligation.acceptanceCase;
-    const present = acceptanceCases.some((acceptanceCase) => (
-      acceptanceCase.given === expected.given
-      && acceptanceCase.when === expected.when
-      && acceptanceCase.then === expected.then
-      && acceptanceCase.outcomeKind === expected.outcomeKind
-    ));
-    if (!present) {
-      throw new Error(`semantic_opinion_missing_mechanical_proof:${obligation.id}`);
+    if (dimension.activationId !== null) {
+      throw new Error(`semantic_opinion_mechanical_activation_forbidden:${dimension.activationId}`);
     }
   }
 }
 
 export function compileSemanticOpinion(opinion, request) {
-  assertSchema('aegis.semantic_request.v9', request);
+  assertSchema('aegis.semantic_request.v10', request);
   const { requestDigest, ...requestPayload } = request;
   if (requestDigest !== canonicalDigest(requestPayload)) {
     throw new Error('semantic_request_digest_mismatch');
   }
-  if (request.worksheetDigest !== canonicalDigest(request.worksheet)
-    || request.worksheet.contextDigest !== request.contextDigest) {
-    throw new Error('semantic_worksheet_digest_mismatch');
-  }
-  assertSchema('aegis.semantic_opinion.v2', opinion);
-  if (opinion.worksheetDigest !== request.worksheetDigest) {
-    throw new Error('semantic_opinion_worksheet_mismatch');
-  }
-  assertWorksheetRequirements(opinion, request);
+  assertSchema('aegis.semantic_opinion.v3', opinion);
+  assertEvidenceCoverage(opinion, request);
 
   const requirementIds = opinion.requirements.map((_, index) => generatedId('REQ', index));
   const invariantIds = opinion.invariants.map((_, index) => generatedId('INV', index));
@@ -190,20 +152,31 @@ export function compileSemanticOpinion(opinion, request) {
     return { ...measurement, target };
   };
   const dimensions = opinion.determinismReview.dimensions;
-  const determinismSignalIds = request.intentSignals.signals
-    .filter(({ kind }) => kind === 'DETERMINISM_CLAIM' || kind === 'ARITHMETIC_SEMANTICS')
-    .map(({ id }) => id);
+  const fragmentIds = request.intentEvidence.fragments.map(({ id }) => id);
+  const compileFragmentIndexes = (indexes) => compileIndexes(indexes, fragmentIds, 'fragment');
 
   return {
-    schema: 'aegis.semantic_draft.v8',
+    schema: 'aegis.semantic_draft.v9',
     sourceContextDigest: request.contextDigest,
+    sourceEvidenceDigest: request.intentEvidence.evidenceDigest,
     title: opinion.title,
     interpretation: opinion.interpretation,
     changeKind: opinion.changeKind,
     scope: opinion.scope,
+    fragmentDispositions: opinion.fragmentDispositions.map((item) => ({
+      fragmentId: indexedValue(fragmentIds, item.fragmentIndex, 'fragment'),
+      status: item.status,
+      claimIds: compileIndexes(
+        item.claimIndexes,
+        opinion.intentClaims.map((_, index) => generatedId('CLAIM', index)),
+        'claim',
+      ),
+      rationale: item.rationale,
+    })),
     intentClaims: opinion.intentClaims.map((claim, index) => ({
       id: generatedId('CLAIM', index),
       quote: claim.quote,
+      sourceFragmentIds: compileFragmentIndexes(claim.fragmentIndexes),
       kind: claim.kind,
       disposition: claim.disposition,
       contractEffect: claim.contractEffect,
@@ -215,11 +188,7 @@ export function compileSemanticOpinion(opinion, request) {
       kind: item.kind,
       statement: item.statement,
       status: 'NON_NORMATIVE',
-      intentSignalIds: compileIndexes(
-        item.intentSignalIndexes,
-        request.intentSignals.signals.map(({ id }) => id),
-        'intent_signal',
-      ),
+      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
     pathReferences: opinion.pathReferences.map((item, index) => ({
@@ -259,11 +228,7 @@ export function compileSemanticOpinion(opinion, request) {
       kind: requirement.kind,
       statement: requirement.statement,
       basis: compileOpinionBasis(requirement.basis, request),
-      intentSignalIds: compileIndexes(
-        requirement.intentSignalIndexes,
-        request.intentSignals.signals.map(({ id }) => id),
-        'intent_signal',
-      ),
+      sourceFragmentIds: compileFragmentIndexes(requirement.fragmentIndexes),
       measurement: compileMeasurement(requirement.measurement),
       acceptanceCases: requirement.acceptanceCases.map((acceptanceCase, caseIndex) => ({
         id: acceptanceIds[requirementIndex][caseIndex],
@@ -332,15 +297,10 @@ export function compileSemanticOpinion(opinion, request) {
           ? 'GAPS_FOUND'
           : 'SEMANTICALLY_CLOSED',
       rationale: opinion.determinismReview.rationale,
-      intentSignalIds: dimensions.length === 0 ? [] : determinismSignalIds,
+      sourceFragmentIds: compileFragmentIndexes(opinion.determinismReview.fragmentIndexes),
       dimensions: dimensions.map((item) => {
         const basis = compileOpinionBasis(item.basis, request);
-        const activation = item.activationId === null
-          ? null
-          : request.worksheet.determinismActivations.find(({ id }) => id === item.activationId);
-        const witness = activation === null
-          ? counterexampleForDimension(item.kind)
-          : activation.counterexampleWitness;
+        const witness = counterexampleForDimension(item.kind);
         const subjectId = item.subject === null
           ? 'PUBLIC_CONTRACT'
           : compileTargets([item.subject])[0];
@@ -382,11 +342,7 @@ export function compileSemanticOpinion(opinion, request) {
         : indexedValue(decisionIds, item.decisionIndex, 'boundary_decision'),
       requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
       acceptanceCaseIds: item.acceptanceCases.map(compileAcceptanceReference),
-      intentSignalIds: compileIndexes(
-        item.intentSignalIndexes,
-        request.intentSignals.signals.map(({ id }) => id),
-        'intent_signal',
-      ),
+      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
     unknowns: opinion.unknowns.map((item, index) => ({
@@ -396,11 +352,7 @@ export function compileSemanticOpinion(opinion, request) {
       decisionId: item.decisionIndex === null
         ? null
         : indexedValue(decisionIds, item.decisionIndex, 'unknown_decision'),
-      intentSignalIds: compileIndexes(
-        item.intentSignalIndexes,
-        request.intentSignals.signals.map(({ id }) => id),
-        'intent_signal',
-      ),
+      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
     decisions: opinion.decisions.map((item, decisionIndex) => ({

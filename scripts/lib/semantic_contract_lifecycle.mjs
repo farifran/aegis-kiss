@@ -38,6 +38,7 @@ export function compileSemanticContract({
   assertSemanticDraft(draft, policy, {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
+    intentEvidence: effectiveSemanticRequest.intentEvidence,
     resolvedDecisionIds: humanResolutions.map(({ questionId }) => questionId),
     humanResolutions,
     workspaceEvidence: effectiveSemanticRequest.workspace.sourceEvidence,
@@ -46,7 +47,7 @@ export function compileSemanticContract({
     throw new Error('semantic_context_mismatch');
   }
   const contract = {
-    schema: 'aegis.issue_contract.v13',
+    schema: 'aegis.issue_contract.v14',
     implementationAuthorized: false,
     sourceSemanticRequestDigest: effectiveSemanticRequest.requestDigest,
     semanticRevision,
@@ -56,14 +57,14 @@ export function compileSemanticContract({
     constitutionDigest,
     intent: preflight.intent,
     observedPaths: observedPaths(preflight),
-    intentSignals: effectiveSemanticRequest.intentSignals.signals,
+    intentEvidence: effectiveSemanticRequest.intentEvidence,
     policySignals: effectiveSemanticRequest.policy.signals,
     specification: draft,
     effectiveDeterminismStatus: effectiveDeterminismStatus(draft, humanResolutions),
     humanResolutions,
     approval: null,
   };
-  assertSchema('aegis.issue_contract.v13', contract);
+  assertSchema('aegis.issue_contract.v14', contract);
   assertContractApprovalEvidence(contract);
   return contract;
 }
@@ -79,7 +80,7 @@ export function assertContractDocument({
   constitutionDigest,
   workspaceObservation = null,
 }) {
-  assertSchema('aegis.issue_contract.v13', contract);
+  assertSchema('aegis.issue_contract.v14', contract);
   const semanticRequest = buildSemanticRequest({
     repositoryRoot,
     preflight,
@@ -97,6 +98,7 @@ export function assertContractDocument({
   assertSemanticDraft(contract.specification, policy, {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
+    intentEvidence: semanticRequest.intentEvidence,
     resolvedDecisionIds: contract.humanResolutions.map(({ questionId }) => questionId),
     humanResolutions: contract.humanResolutions,
     workspaceEvidence: semanticRequest.workspace.sourceEvidence,
@@ -114,9 +116,9 @@ export function assertContractDocument({
   if (canonicalDigest(contract.observedPaths) !== canonicalDigest(observedPaths(preflight))) {
     throw new Error('contract_observed_paths_mismatch');
   }
-  if (canonicalDigest(contract.intentSignals)
-    !== canonicalDigest(semanticRequest.intentSignals.signals)) {
-    throw new Error('contract_intent_signals_mismatch');
+  if (canonicalDigest(contract.intentEvidence)
+    !== canonicalDigest(semanticRequest.intentEvidence)) {
+    throw new Error('contract_intent_evidence_mismatch');
   }
   if (canonicalDigest(contract.policySignals)
     !== canonicalDigest(semanticRequest.policy.signals)) {

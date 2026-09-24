@@ -16,6 +16,10 @@ import {
   compileJevAssessment,
   requestJevAssessment,
 } from './scripts/lib/jev_gateway.mjs';
+import {
+  assertJevAdvisory,
+  compileJevAdvisory,
+} from './scripts/lib/jev_advisory.mjs';
 import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
@@ -39,17 +43,18 @@ const currentSchemas = [
   'architecture-policy.v3.schema.json',
   'confirmation-request.v4.schema.json',
   'constitution.v1.schema.json',
-  'issue-contract.v13.schema.json',
+  'intent-evidence.v1.schema.json',
+  'issue-contract.v14.schema.json',
+  'jev-advisory.v2.schema.json',
   'jev-assessment.v1.schema.json',
-  'jev-decision-batch.v1.schema.json',
+  'jev-decision-batch.v2.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
-  'semantic-draft.v8.schema.json',
-  'semantic-opinion.v2.schema.json',
-  'semantic-request.v9.schema.json',
+  'semantic-draft.v9.schema.json',
+  'semantic-opinion.v3.schema.json',
+  'semantic-request.v10.schema.json',
   'semantic-resolution.v2.schema.json',
-  'semantic-worksheet.v1.schema.json',
 ];
 for (const file of currentSchemas) {
   const schema = JSON.parse(readFileSync(`governance/schemas/${file}`, 'utf8'));
@@ -70,30 +75,41 @@ const semanticRequest = buildSemanticRequest({
   policy: loadedPolicy.policy,
   constitution,
 });
-assertSchema('aegis.semantic_request.v9', semanticRequest);
+assertSchema('aegis.semantic_request.v10', semanticRequest);
 const { requestDigest, ...requestPayload } = semanticRequest;
 if (requestDigest !== canonicalDigest(requestPayload)
   || semanticRequest.outputSchema.digest !== canonicalDigest(semanticRequest.outputSchema.document)
-  || semanticRequest.outputSchema.document.$id !== 'aegis.semantic_opinion.v2'
+  || semanticRequest.outputSchema.document.$id !== 'aegis.semantic_opinion.v3'
   || Object.hasOwn(semanticRequest.outputSchema.document, 'description')
   || Object.hasOwn(
-    semanticRequest.outputSchema.document.$defs.determinismProofObligation.properties,
-    'witnessId',
+    semanticRequest.outputSchema.document.properties,
+    'worksheetDigest',
   )
-  || semanticRequest.worksheet.determinismActivations.length !== 0
-  || semanticRequest.worksheet.mechanicalProofObligations.length !== 0
-  || semanticRequest.worksheet.finiteRepresentations.length !== 0) {
+  || semanticRequest.intentEvidence.fragments.length !== 1
+  || semanticRequest.intentEvidence.literalFacts.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
 }
 
-const jevBatch = buildJevDecisionBatch(semanticRequest);
-if (jevBatch.schema !== 'aegis.jev_decision_batch.v1'
-  || jevBatch.sourceSemanticRequestDigest !== semanticRequest.requestDigest
-  || jevBatch.sourceWorksheetDigest !== semanticRequest.worksheetDigest
+const jevDemand = 'Definir comportamento observável usando uma factory opcional e hash de 64 bits.';
+const jevPreflight = buildPreflightHandoff({
+  demand: jevDemand,
+  discovery: discoverWorkspace(process.cwd(), jevDemand),
+});
+const jevSemanticRequest = buildSemanticRequest({
+  repositoryRoot: process.cwd(),
+  preflight: jevPreflight,
+  policy: loadedPolicy.policy,
+  constitution,
+});
+const jevBatch = buildJevDecisionBatch(jevSemanticRequest);
+if (jevBatch.schema !== 'aegis.jev_decision_batch.v2'
+  || jevBatch.sourceSemanticRequestDigest !== jevSemanticRequest.requestDigest
+  || jevBatch.sourceEvidenceDigest !== jevSemanticRequest.intentEvidence.evidenceDigest
   || jevBatch.protocol.authority !== 'ADVISORY_ONLY'
-  || jevBatch.protocol.onUnavailable !== 'BYPASS_TO_SEMANTIC_MODEL'
+  || jevBatch.protocol.purpose !== 'SHADOW_EVALUATION'
   || jevBatch.projection.questionCount !== Object.keys(jevBatch.questions).length
-  || jevBatch.bindings['complexity.global'].allowedUse !== 'CANDIDATE_ONLY'
+  || jevBatch.projection.questionCount !== jevSemanticRequest.intentEvidence.fragments.length
+  || !Object.values(jevBatch.bindings).every(({ allowedUse }) => allowedUse === 'SHADOW_METRIC_ONLY')
   || Object.hasOwn(jevBatch.state, 'sourceEvidence')
   || Object.hasOwn(jevBatch.state, 'outputSchema')) {
   throw new Error('jev_projection_is_not_compact_or_advisory');
@@ -133,6 +149,20 @@ const compiledJevAssessment = compileJevAssessment(jevBatch, {
 if (compiledJevAssessment.assessmentDigest !== jevAssessment.assessmentDigest) {
   throw new Error('jev_gateway_response_was_not_compiled_deterministically');
 }
+const jevAdvisory = compileJevAdvisory(jevSemanticRequest, jevBatch, jevAssessment);
+assertJevAdvisory(jevAdvisory, jevSemanticRequest, jevBatch);
+if (jevAdvisory.purpose !== 'SHADOW_EVALUATION') throw new Error('jev_not_shadow_only');
+const forgedAdvisory = structuredClone(jevAdvisory);
+forgedAdvisory.sourceSemanticRequestDigest = '0'.repeat(64);
+const { advisoryDigest: discardedAdvisoryDigest, ...forgedAdvisoryPayload } = forgedAdvisory;
+void discardedAdvisoryDigest;
+forgedAdvisory.advisoryDigest = canonicalDigest(forgedAdvisoryPayload);
+try {
+  assertJevAdvisory(forgedAdvisory, jevSemanticRequest, jevBatch);
+  throw new Error('forged_jev_advisory_was_accepted');
+} catch (error) {
+  if (error.message !== 'jev_advisory_source_mismatch') throw error;
+}
 try {
   await requestJevAssessment(jevBatch, {
     apiKey: 'test-key',
@@ -149,7 +179,8 @@ try {
   if (!error.message.startsWith('jev_gateway_billing_required:')) throw error;
 }
 const invalidJevAssessment = structuredClone(jevAssessment);
-invalidJevAssessment.answers['complexity.global'].choice = 'FORGED_OPTION';
+const firstJevQuestionId = Object.keys(jevBatch.questions).sort()[0];
+invalidJevAssessment.answers[firstJevQuestionId].choice = 'FORGED_OPTION';
 const { assessmentDigest: previousAssessmentDigest, ...invalidJevAssessmentPayload } = invalidJevAssessment;
 void previousAssessmentDigest;
 invalidJevAssessment.assessmentDigest = canonicalDigest(invalidJevAssessmentPayload);
@@ -160,8 +191,8 @@ try {
   if (!error.message.startsWith('jev_assessment_choice_space_mismatch:')) throw error;
 }
 const nonMaximalJevAssessment = structuredClone(jevAssessment);
-const complexityOptions = Object.keys(jevBatch.questions['complexity.global'].criteria);
-nonMaximalJevAssessment.answers['complexity.global'].choice = complexityOptions[1];
+const firstJevOptions = Object.keys(jevBatch.questions[firstJevQuestionId].criteria);
+nonMaximalJevAssessment.answers[firstJevQuestionId].choice = firstJevOptions[1];
 const { assessmentDigest: previousNonMaximalDigest, ...nonMaximalPayload } = nonMaximalJevAssessment;
 void previousNonMaximalDigest;
 nonMaximalJevAssessment.assessmentDigest = canonicalDigest(nonMaximalPayload);
@@ -182,8 +213,9 @@ const applicableRules = loadedPolicy.policy.rules.filter((rule) => (
 ));
 
 const draft = {
-  schema: 'aegis.semantic_draft.v8',
+  schema: 'aegis.semantic_draft.v9',
   sourceContextDigest: semanticRequest.contextDigest,
+  sourceEvidenceDigest: semanticRequest.intentEvidence.evidenceDigest,
   title: 'Comportamento observável de teste',
   interpretation: 'Definir uma operação pública sem implementar o produto.',
   changeKind: 'PRODUCT',
@@ -191,10 +223,17 @@ const draft = {
     inScope: ['Definir o resultado público da operação.'],
     outOfScope: ['Implementar o produto.'],
   },
+  fragmentDispositions: [{
+    fragmentId: 'FRAG-0001',
+    status: 'CLAIMS_EXTRACTED',
+    claimIds: ['CLAIM-RESULT', 'CLAIM-FORMAT'],
+    rationale: 'As duas afirmações materiais do fragmento foram classificadas.',
+  }],
   intentClaims: [
     {
       id: 'CLAIM-RESULT',
       quote: 'comportamento observável',
+      sourceFragmentIds: ['FRAG-0001'],
       kind: 'OBLIGATION',
       disposition: 'NORMATIVE',
       contractEffect: 'A operação deve produzir comportamento observável para toda entrada.',
@@ -204,6 +243,7 @@ const draft = {
     {
       id: 'CLAIM-FORMAT',
       quote: 'saída ainda a escolher',
+      sourceFragmentIds: ['FRAG-0001'],
       kind: 'AMBIGUITY',
       disposition: 'DECISION',
       contractEffect: null,
@@ -236,7 +276,7 @@ const draft = {
     kind: 'FUNCTIONAL',
     statement: 'A operação deve produzir comportamento observável para toda entrada.',
     basis: userBasis,
-    intentSignalIds: [],
+    sourceFragmentIds: ['FRAG-0001'],
     measurement: null,
     acceptanceCases: [
       {
@@ -293,7 +333,7 @@ const draft = {
   determinismReview: {
     status: 'NOT_APPLICABLE',
     rationale: 'Nenhuma dimensão material de determinismo foi identificada.',
-    intentSignalIds: [],
+    sourceFragmentIds: [],
     dimensions: [],
   },
   boundaryRules: [],
@@ -302,7 +342,7 @@ const draft = {
     statement: 'O formato final do resultado não foi definido.',
     material: true,
     decisionId: 'Q-FORMAT',
-    intentSignalIds: [],
+    sourceFragmentIds: ['FRAG-0001'],
     basis: [{ source: 'USER_INTENT', reference: 'saída ainda a escolher' }],
   }],
   decisions: [{
@@ -342,6 +382,7 @@ const draft = {
 const validationContext = {
   constitutionRules: constitution.rules,
   intent: demand,
+  intentEvidence: semanticRequest.intentEvidence,
   workspaceEvidence: semanticRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(draft, loadedPolicy.policy, validationContext);
@@ -418,7 +459,7 @@ deterministicDraft.requirements[0].acceptanceCases.push({
 deterministicDraft.determinismReview = {
   status: 'SEMANTICALLY_CLOSED',
   rationale: 'A ordem não altera o resultado público.',
-  intentSignalIds: [],
+  sourceFragmentIds: ['FRAG-0001'],
   dimensions: [{
     kind: 'ORDERING',
     subjectId: 'REQ-RESULT',
@@ -466,54 +507,6 @@ expectDeterminismFailure(
   'determinism_dimension_does_not_target_subject:',
 );
 
-const signaledIntent = `${demand} Alta frequência.`;
-try {
-  assertSemanticDraft(draft, loadedPolicy.policy, {
-    ...validationContext,
-    intent: signaledIntent,
-  });
-  throw new Error('unhandled_intent_signal_was_accepted');
-} catch (error) {
-  if (!error.message.startsWith('unhandled_intent_signal:')) throw error;
-}
-const signalHandledDraft = structuredClone(draft);
-signalHandledDraft.nonNormativeItems.push({
-  id: 'NOTE-QUALITY-GOAL',
-  kind: 'GOAL',
-  statement: 'Alta frequência permanece meta qualitativa sem SLO inventado.',
-  status: 'NON_NORMATIVE',
-  intentSignalIds: ['INPUT-0001'],
-  basis: [{ source: 'USER_INTENT', reference: 'Alta frequência' }],
-});
-assertSemanticDraft(signalHandledDraft, loadedPolicy.policy, {
-  ...validationContext,
-  intent: signaledIntent,
-});
-
-const arithmeticGapIntent = `${demand} Calcular a fração pela fórmula ().`;
-try {
-  assertSemanticDraft(draft, loadedPolicy.policy, {
-    ...validationContext,
-    intent: arithmeticGapIntent,
-  });
-  throw new Error('unhandled_material_review_was_accepted');
-} catch (error) {
-  if (!error.message.startsWith('unhandled_intent_signal:')) throw error;
-}
-const materialGapDraft = structuredClone(draft);
-materialGapDraft.unknowns.push({
-  id: 'UNKNOWN-ARITHMETIC-FORMULA',
-  statement: 'A fórmula aritmética indicada pelo marcador vazio não foi fornecida.',
-  material: true,
-  decisionId: null,
-  intentSignalIds: ['INPUT-0001'],
-  basis: [{ source: 'USER_INTENT', reference: 'fórmula ()' }],
-});
-assertSemanticDraft(materialGapDraft, loadedPolicy.policy, {
-  ...validationContext,
-  intent: arithmeticGapIntent,
-});
-
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft,
@@ -555,7 +548,7 @@ if (approved.approval === null || approved.effectiveDeterminismStatus !== 'NOT_A
   throw new Error('approved_contract_has_invalid_state');
 }
 parseSemanticState({
-  schema: 'aegis.semantic_state.v13',
+  schema: 'aegis.semantic_state.v14',
   contractDigest: canonicalDigest(approved),
   contract: approved,
 });
@@ -563,6 +556,7 @@ parseSemanticState({
 const blocked = structuredClone(draft);
 blocked.decisions = [];
 blocked.intentClaims = blocked.intentClaims.filter(({ disposition }) => disposition !== 'DECISION');
+blocked.fragmentDispositions[0].claimIds = ['CLAIM-RESULT'];
 blocked.unknowns[0].decisionId = null;
 blocked.requirements[0].acceptanceCases[0].decisionBinding = null;
 const blockedContract = compileSemanticContract({

@@ -63,8 +63,8 @@ export async function requestJevAssessment(batch, options = {}) {
     baseURL: gatewayBaseUrl,
     defaultModel: 'jev-latest',
     logLevel: 'off',
-    timeout: 10_000,
-    retry: { maxRetries: 2 },
+    timeout: options.timeoutMs ?? 10_000,
+    retry: { maxRetries: options.maxRetries ?? 2 },
   });
   let response;
   try {

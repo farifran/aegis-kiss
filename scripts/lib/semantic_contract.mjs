@@ -1,6 +1,5 @@
 export {
   buildSemanticRequest,
-  buildSemanticWorksheet,
   loadSemanticConstitution,
 } from './semantic_request.mjs';
 export { assertSemanticDraft } from './semantic_draft_validator.mjs';

@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_opinion.v3",
+  "title": "Aegis Semantic IR Opinion v3",
+  "description": "Parecer exclusivamente semântico. Fragmentos e fatos são evidência mecânica; classificações, claims e destinos são responsabilidade da IA. O Harness compila identificadores, vínculos, estados e digests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "sourceEvidenceDigest", "title", "interpretation", "changeKind", "scope",
+    "fragmentDispositions", "intentClaims", "nonNormativeItems", "pathReferences",
+    "architectureContexts", "policyAssessments", "complexityReview", "requirements",
+    "invariants", "riskReview", "risks", "adversarialReview", "determinismReview",
+    "boundaryRules", "unknowns", "decisions"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.semantic_opinion.v3" },
+    "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "title": { "$ref": "aegis.semantic_opinion.v2#/properties/title" },
+    "interpretation": { "$ref": "aegis.semantic_opinion.v2#/properties/interpretation" },
+    "changeKind": { "$ref": "aegis.semantic_opinion.v2#/properties/changeKind" },
+    "scope": { "$ref": "aegis.semantic_opinion.v2#/properties/scope" },
+    "fragmentDispositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fragmentIndex", "status", "claimIndexes", "rationale"],
+        "properties": {
+          "fragmentIndex": { "type": "integer", "minimum": 0 },
+          "status": { "enum": ["CLAIMS_EXTRACTED", "CONTEXT_ONLY", "UNCLEAR"] },
+          "claimIndexes": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 },
+            "uniqueItems": true
+          },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "intentClaims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["quote", "fragmentIndexes", "kind", "disposition", "contractEffect", "targets", "rationale"],
+        "properties": {
+          "quote": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "fragmentIndexes": { "$ref": "#/$defs/fragmentIndexes" },
+          "kind": { "enum": ["OBLIGATION", "PROHIBITION", "GOAL", "OPTION", "EXAMPLE", "AMBIGUITY"] },
+          "disposition": { "enum": ["NORMATIVE", "DECISION", "POLICY_CORRECTION", "NON_NORMATIVE"] },
+          "contractEffect": { "type": ["string", "null"], "minLength": 1 },
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "aegis.semantic_opinion.v2#/$defs/targetRef" },
+            "uniqueItems": true
+          },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "nonNormativeItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "statement", "fragmentIndexes", "basis"],
+        "properties": {
+          "kind": { "enum": ["GOAL", "OPTION", "EXAMPLE"] },
+          "statement": { "type": "string", "minLength": 1 },
+          "fragmentIndexes": { "$ref": "#/$defs/fragmentIndexes" },
+          "basis": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
+        }
+      }
+    },
+    "pathReferences": { "$ref": "aegis.semantic_opinion.v2#/properties/pathReferences" },
+    "architectureContexts": { "$ref": "aegis.semantic_opinion.v2#/properties/architectureContexts" },
+    "policyAssessments": { "$ref": "aegis.semantic_opinion.v2#/properties/policyAssessments" },
+    "complexityReview": { "$ref": "aegis.semantic_opinion.v2#/properties/complexityReview" },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "statement", "basis", "fragmentIndexes", "measurement", "acceptanceCases"],
+        "properties": {
+          "kind": { "enum": ["FUNCTIONAL", "QUALITY"] },
+          "statement": { "type": "string", "minLength": 1 },
+          "basis": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" },
+          "fragmentIndexes": { "$ref": "#/$defs/fragmentIndexes" },
+          "measurement": {
+            "oneOf": [
+              { "type": "null" },
+              { "$ref": "aegis.semantic_opinion.v2#/$defs/measurement" }
+            ]
+          },
+          "acceptanceCases": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "given", "when", "then", "outcomeKind", "decisionBinding", "boundaryBinding"],
+              "properties": {
+                "kind": { "enum": ["HAPPY_PATH", "FAILURE", "BOUNDARY"] },
+                "given": { "type": "string", "minLength": 1 },
+                "when": { "type": "string", "minLength": 1 },
+                "then": { "type": "string", "minLength": 1 },
+                "outcomeKind": { "enum": ["RETURN_VALUE", "REJECTION", "NO_OP", "STATE_CHANGE", "OBSERVABLE_EFFECT"] },
+                "decisionBinding": {
+                  "oneOf": [
+                    { "type": "null" },
+                    { "$ref": "aegis.semantic_opinion.v2#/$defs/decisionBinding" }
+                  ]
+                },
+                "boundaryBinding": {
+                  "oneOf": [
+                    { "type": "null" },
+                    { "$ref": "aegis.semantic_opinion.v2#/$defs/boundaryBinding" }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "QUALITY" } } },
+            "then": { "properties": { "measurement": { "$ref": "aegis.semantic_opinion.v2#/$defs/measurement" } } },
+            "else": { "properties": { "measurement": { "const": null } } }
+          }
+        ]
+      }
+    },
+    "invariants": { "$ref": "aegis.semantic_opinion.v2#/properties/invariants" },
+    "riskReview": { "$ref": "aegis.semantic_opinion.v2#/properties/riskReview" },
+    "risks": { "$ref": "aegis.semantic_opinion.v2#/properties/risks" },
+    "adversarialReview": { "$ref": "aegis.semantic_opinion.v2#/properties/adversarialReview" },
+    "determinismReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rationale", "fragmentIndexes", "dimensions"],
+      "properties": {
+        "rationale": { "type": "string", "minLength": 1 },
+        "fragmentIndexes": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "uniqueItems": true
+        },
+        "dimensions": { "$ref": "aegis.semantic_opinion.v2#/properties/determinismReview/properties/dimensions" }
+      }
+    },
+    "boundaryRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subject", "representationKind", "lowerBound", "upperBound", "underflowBehavior", "overflowBehavior", "decisionIndex", "requirementIndexes", "acceptanceCases", "fragmentIndexes", "basis"],
+        "properties": {
+          "subject": { "type": "string", "minLength": 1 },
+          "representationKind": { "enum": ["REPRESENTATION_WIDTH", "ENCODED_VALUE"] },
+          "lowerBound": { "type": "string", "minLength": 1 },
+          "upperBound": { "type": "string", "minLength": 1 },
+          "underflowBehavior": { "$ref": "aegis.semantic_opinion.v2#/$defs/rangeBehavior" },
+          "overflowBehavior": { "$ref": "aegis.semantic_opinion.v2#/$defs/rangeBehavior" },
+          "decisionIndex": { "type": ["integer", "null"], "minimum": 0 },
+          "requirementIndexes": {
+            "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true
+          },
+          "acceptanceCases": {
+            "type": "array", "minItems": 1,
+            "items": { "$ref": "aegis.semantic_opinion.v2#/$defs/acceptanceCaseRef" },
+            "uniqueItems": true
+          },
+          "fragmentIndexes": { "$ref": "#/$defs/fragmentIndexes" },
+          "basis": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "material", "decisionIndex", "fragmentIndexes", "basis"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1 },
+          "material": { "type": "boolean" },
+          "decisionIndex": { "type": ["integer", "null"], "minimum": 0 },
+          "fragmentIndexes": { "$ref": "#/$defs/fragmentIndexes" },
+          "basis": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
+        }
+      }
+    },
+    "decisions": { "$ref": "aegis.semantic_opinion.v2#/properties/decisions" }
+  },
+  "$defs": {
+    "fragmentIndexes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "integer", "minimum": 0 },
+      "uniqueItems": true
+    }
+  }
+}

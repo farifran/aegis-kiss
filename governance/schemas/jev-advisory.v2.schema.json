@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.jev_advisory.v2",
+  "title": "Aegis JEV Shadow Advisory v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "advisoryDigest", "sourceSemanticRequestDigest", "sourceEvidenceDigest", "sourceBatchDigest", "authority", "purpose", "assessment"],
+  "properties": {
+    "schema": { "const": "aegis.jev_advisory.v2" },
+    "advisoryDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceBatchDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "authority": { "const": "ADVISORY_ONLY" },
+    "purpose": { "const": "SHADOW_EVALUATION" },
+    "assessment": { "$ref": "aegis.jev_assessment.v1" }
+  }
+}

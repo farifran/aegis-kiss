@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_draft.v9",
+  "title": "Aegis Compiled Semantic Draft v9",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "sourceContextDigest", "sourceEvidenceDigest", "title", "interpretation", "changeKind", "scope",
+    "fragmentDispositions", "intentClaims", "nonNormativeItems", "pathReferences", "architectureContexts",
+    "policyAssessments", "complexityReview", "requirements", "invariants", "riskReview", "risks",
+    "adversarialReview", "determinismReview", "boundaryRules", "unknowns", "decisions"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.semantic_draft.v9" },
+    "sourceContextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "title": { "$ref": "aegis.semantic_draft.v8#/properties/title" },
+    "interpretation": { "$ref": "aegis.semantic_draft.v8#/properties/interpretation" },
+    "changeKind": { "$ref": "aegis.semantic_draft.v8#/properties/changeKind" },
+    "scope": { "$ref": "aegis.semantic_draft.v8#/properties/scope" },
+    "fragmentDispositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fragmentId", "status", "claimIds", "rationale"],
+        "properties": {
+          "fragmentId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+          "status": { "enum": ["CLAIMS_EXTRACTED", "CONTEXT_ONLY", "UNCLEAR"] },
+          "claimIds": { "type": "array", "items": { "type": "string", "pattern": "^CLAIM-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "intentClaims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "quote", "sourceFragmentIds", "kind", "disposition", "contractEffect", "targetIds", "rationale"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^CLAIM-[A-Z0-9][A-Z0-9-]+$" },
+          "quote": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
+          "kind": { "enum": ["OBLIGATION", "PROHIBITION", "GOAL", "OPTION", "EXAMPLE", "AMBIGUITY"] },
+          "disposition": { "enum": ["NORMATIVE", "DECISION", "POLICY_CORRECTION", "NON_NORMATIVE"] },
+          "contractEffect": { "type": ["string", "null"], "minLength": 1 },
+          "targetIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^(REQ|Q|NOTE|PATH|ARCH|BOUND)-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "nonNormativeItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "statement", "status", "sourceFragmentIds", "basis"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^NOTE-[A-Z0-9][A-Z0-9-]+$" },
+          "kind": { "enum": ["GOAL", "OPTION", "EXAMPLE"] },
+          "statement": { "type": "string", "minLength": 1 },
+          "status": { "const": "NON_NORMATIVE" },
+          "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
+          "basis": { "$ref": "aegis.semantic_draft.v8#/$defs/basis" }
+        }
+      }
+    },
+    "pathReferences": { "$ref": "aegis.semantic_draft.v8#/properties/pathReferences" },
+    "architectureContexts": { "$ref": "aegis.semantic_draft.v8#/properties/architectureContexts" },
+    "policyAssessments": { "$ref": "aegis.semantic_draft.v8#/properties/policyAssessments" },
+    "complexityReview": { "$ref": "aegis.semantic_draft.v8#/properties/complexityReview" },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "statement", "basis", "sourceFragmentIds", "measurement", "acceptanceCases"],
+        "properties": {
+          "id": { "$ref": "aegis.semantic_draft.v8#/properties/requirements/items/properties/id" },
+          "kind": { "$ref": "aegis.semantic_draft.v8#/properties/requirements/items/properties/kind" },
+          "statement": { "$ref": "aegis.semantic_draft.v8#/properties/requirements/items/properties/statement" },
+          "basis": { "$ref": "aegis.semantic_draft.v8#/$defs/basis" },
+          "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
+          "measurement": { "$ref": "aegis.semantic_draft.v8#/properties/requirements/items/properties/measurement" },
+          "acceptanceCases": { "$ref": "aegis.semantic_draft.v8#/properties/requirements/items/properties/acceptanceCases" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "QUALITY" } } },
+            "then": { "properties": { "measurement": { "$ref": "aegis.semantic_draft.v8#/$defs/measurement" } } },
+            "else": { "properties": { "measurement": { "const": null } } }
+          }
+        ]
+      }
+    },
+    "invariants": { "$ref": "aegis.semantic_draft.v8#/properties/invariants" },
+    "riskReview": { "$ref": "aegis.semantic_draft.v8#/properties/riskReview" },
+    "risks": { "$ref": "aegis.semantic_draft.v8#/properties/risks" },
+    "adversarialReview": { "$ref": "aegis.semantic_draft.v8#/properties/adversarialReview" },
+    "determinismReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale", "sourceFragmentIds", "dimensions"],
+      "properties": {
+        "status": { "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/status" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "sourceFragmentIds": { "type": "array", "items": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" }, "uniqueItems": true },
+        "dimensions": { "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/dimensions" }
+      }
+    },
+    "boundaryRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "subject", "representationKind", "lowerBound", "upperBound", "underflowBehavior", "overflowBehavior", "decisionId", "requirementIds", "acceptanceCaseIds", "sourceFragmentIds", "basis"],
+        "properties": {
+          "id": { "$ref": "aegis.semantic_draft.v8#/properties/boundaryRules/items/properties/id" },
+          "subject": { "type": "string", "minLength": 1 },
+          "representationKind": { "enum": ["REPRESENTATION_WIDTH", "ENCODED_VALUE"] },
+          "lowerBound": { "type": "string", "minLength": 1 },
+          "upperBound": { "type": "string", "minLength": 1 },
+          "underflowBehavior": { "$ref": "aegis.semantic_draft.v8#/$defs/rangeBehavior" },
+          "overflowBehavior": { "$ref": "aegis.semantic_draft.v8#/$defs/rangeBehavior" },
+          "decisionId": { "type": ["string", "null"], "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+          "acceptanceCaseIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+          "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
+          "basis": { "$ref": "aegis.semantic_draft.v8#/$defs/basis" }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "material", "decisionId", "sourceFragmentIds", "basis"],
+        "properties": {
+          "id": { "$ref": "aegis.semantic_draft.v8#/properties/unknowns/items/properties/id" },
+          "statement": { "type": "string", "minLength": 1 },
+          "material": { "type": "boolean" },
+          "decisionId": { "type": ["string", "null"] },
+          "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
+          "basis": { "$ref": "aegis.semantic_draft.v8#/$defs/basis" }
+        }
+      }
+    },
+    "decisions": { "$ref": "aegis.semantic_draft.v8#/properties/decisions" }
+  },
+  "$defs": {
+    "sourceFragmentIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+      "uniqueItems": true
+    }
+  }
+}

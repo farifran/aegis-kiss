@@ -1,6 +1,6 @@
 import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_collections.mjs';
-import { detectIntentSignals } from './intent_signals.mjs';
+import { assertIntentEvidence } from './intent_evidence.mjs';
 import {
   canonicalProofOutcome,
   counterexampleForDimension,
@@ -117,6 +117,11 @@ function validateClaims(draft, context) {
 
   for (const claim of draft.intentClaims) {
     if (!context.intent.includes(claim.quote)) throw new Error(`intent_claim_not_literal:${claim.id}`);
+    assertKnownReferences(claim.sourceFragmentIds, context.fragmentIds, `intent_claim:${claim.id}`);
+    if (!claim.sourceFragmentIds.some((fragmentId) => {
+      const fragment = context.fragmentsById.get(fragmentId);
+      return context.intent.slice(fragment.startOffset, fragment.endOffset).includes(claim.quote);
+    })) throw new Error(`intent_claim_quote_outside_source_fragment:${claim.id}`);
     const quote = normalized(claim.quote);
     if (seenQuotes.has(quote)) throw new Error(`duplicate_intent_claim_quote:${claim.id}`);
     seenQuotes.add(quote);
@@ -156,7 +161,7 @@ function validateRequirements(draft, context) {
       || (![...acceptanceKinds].some((kind) => kind !== 'HAPPY_PATH'))) {
       throw new Error(`requirement_without_dual_acceptance:${requirement.id}`);
     }
-    assertKnownReferences(requirement.intentSignalIds, context.intentSignalIds, `requirement:${requirement.id}`);
+    assertKnownReferences(requirement.sourceFragmentIds, context.fragmentIds, `requirement:${requirement.id}`);
     if (hasIncompleteMarker(requirement.statement)) {
       throw new Error(`unresolved_expression_in_normative_text:${requirement.id}`);
     }
@@ -202,7 +207,7 @@ function validateRequirements(draft, context) {
   for (const boundary of draft.boundaryRules) {
     validateBasis(boundary.basis, context, boundary.id);
     assertKnownReferences(boundary.requirementIds, context.requirementIds, `boundary:${boundary.id}`);
-    assertKnownReferences(boundary.intentSignalIds, context.intentSignalIds, `boundary:${boundary.id}`);
+    assertKnownReferences(boundary.sourceFragmentIds, context.fragmentIds, `boundary:${boundary.id}`);
     assertKnownReferences(boundary.acceptanceCaseIds, acceptanceIds, `boundary:${boundary.id}`);
     if (boundary.decisionId !== null && !context.decisionIds.has(boundary.decisionId)) {
       throw new Error(`boundary_rule_references_invalid_decision:${boundary.id}`);
@@ -388,55 +393,49 @@ function validateDeterminism(draft, context) {
   }
 }
 
-function validateIntentSignalCoverage(draft, context) {
-  const nonNormativeByKind = new Map(['GOAL', 'OPTION', 'EXAMPLE'].map((kind) => [
-    kind,
-    new Set(draft.nonNormativeItems
-      .filter((item) => item.kind === kind)
-      .flatMap(({ intentSignalIds }) => intentSignalIds)),
-  ]));
-  const qualityRequirements = new Set(draft.requirements
-    .filter(({ kind, measurement }) => kind === 'QUALITY' && measurement !== null)
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const boundaryRules = new Set(draft.boundaryRules
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const unknowns = new Set(draft.unknowns
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const semanticRequirements = new Set(draft.requirements
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const materialDecisions = new Set(draft.unknowns
-    .filter(({ material, decisionId }) => material && decisionId !== null)
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const materialUnknowns = new Set(draft.unknowns
-    .filter(({ material }) => material)
-    .flatMap(({ intentSignalIds }) => intentSignalIds));
-  const determinism = draft.determinismReview.dimensions.length === 0
-    ? new Set()
-    : new Set(draft.determinismReview.intentSignalIds);
-
-  for (const signal of context.intentSignals) {
-    let covered = false;
-    if (signal.handling === 'NON_NORMATIVE_GOAL') {
-      covered = nonNormativeByKind.get('GOAL').has(signal.id);
-    } else if (signal.handling === 'NON_NORMATIVE_EXAMPLE') {
-      covered = nonNormativeByKind.get('EXAMPLE').has(signal.id);
-    } else if (signal.handling === 'MEASURABLE_REQUIREMENT') {
-      covered = qualityRequirements.has(signal.id);
-    } else if (signal.handling === 'BOUNDARY_RULE') {
-      covered = boundaryRules.has(signal.id);
-    } else if (signal.handling === 'MATERIAL_DECISION') {
-      covered = materialDecisions.has(signal.id);
-    } else if (signal.handling === 'MATERIAL_REVIEW') {
-      covered = materialUnknowns.has(signal.id) || semanticRequirements.has(signal.id);
-    } else if (signal.handling === 'SEMANTIC_REVIEW') {
-      covered = signal.kind === 'BIT_LAYOUT_ISSUE'
-        ? materialUnknowns.has(signal.id)
-        : unknowns.has(signal.id) || semanticRequirements.has(signal.id);
-    } else if (signal.handling === 'DETERMINISM_REVIEW') {
-      covered = determinism.has(signal.id);
-    }
-    if (!covered) throw new Error(`unhandled_intent_signal:${signal.id}:${signal.handling}`);
+function validateFragmentCoverage(draft, context) {
+  const dispositionIds = assertUniqueIds(draft.fragmentDispositions, 'fragmentId', 'fragment_disposition');
+  if (dispositionIds.size !== context.fragmentIds.size
+    || [...context.fragmentIds].some((id) => !dispositionIds.has(id))) {
+    throw new Error('incomplete_fragment_disposition');
   }
+  const claimsById = new Map(draft.intentClaims.map((claim) => [claim.id, claim]));
+  const assignedClaims = new Set();
+  for (const disposition of draft.fragmentDispositions) {
+    assertKnownReferences(disposition.claimIds, context.claimIds, `fragment:${disposition.fragmentId}`);
+    if (disposition.status === 'CLAIMS_EXTRACTED' && disposition.claimIds.length === 0) {
+      throw new Error(`fragment_without_claim:${disposition.fragmentId}`);
+    }
+    if (disposition.status === 'CONTEXT_ONLY' && disposition.claimIds.length > 0) {
+      throw new Error(`context_fragment_with_claim:${disposition.fragmentId}`);
+    }
+    for (const claimId of disposition.claimIds) {
+      const claim = claimsById.get(claimId);
+      if (!claim.sourceFragmentIds.includes(disposition.fragmentId)) {
+        throw new Error(`fragment_claim_source_mismatch:${disposition.fragmentId}:${claimId}`);
+      }
+      assignedClaims.add(claimId);
+    }
+  }
+  if (assignedClaims.size !== context.claimIds.size
+    || [...context.claimIds].some((id) => !assignedClaims.has(id))) {
+    throw new Error('unassigned_intent_claim');
+  }
+  for (const collection of [
+    draft.nonNormativeItems,
+    draft.requirements,
+    draft.boundaryRules,
+    draft.unknowns,
+  ]) {
+    for (const item of collection) {
+      assertKnownReferences(item.sourceFragmentIds, context.fragmentIds, `semantic_item:${item.id}`);
+    }
+  }
+  assertKnownReferences(
+    draft.determinismReview.sourceFragmentIds,
+    context.fragmentIds,
+    'determinism_review',
+  );
 }
 
 function validateReviews(draft, context) {
@@ -474,7 +473,7 @@ function validateReviews(draft, context) {
     ...draft.unknowns,
   ]) validateBasis(item.basis, context, item.id ?? item.tag ?? 'review_item');
   for (const item of draft.nonNormativeItems) {
-    assertKnownReferences(item.intentSignalIds, context.intentSignalIds, `non_normative:${item.id}`);
+    assertKnownReferences(item.sourceFragmentIds, context.fragmentIds, `non_normative:${item.id}`);
   }
   for (const item of draft.pathReferences) {
     assertKnownReferences(item.requirementIds, context.requirementIds, `path:${item.id}`);
@@ -484,7 +483,7 @@ function validateReviews(draft, context) {
     }
   }
   for (const unknown of draft.unknowns) {
-    assertKnownReferences(unknown.intentSignalIds, context.intentSignalIds, `unknown:${unknown.id}`);
+    assertKnownReferences(unknown.sourceFragmentIds, context.fragmentIds, `unknown:${unknown.id}`);
     if (unknown.decisionId !== null && !context.decisionIds.has(unknown.decisionId)) {
       throw new Error(`unknown_references_missing_decision:${unknown.id}`);
     }
@@ -522,11 +521,17 @@ function validateReviews(draft, context) {
 export function assertSemanticDraft(draft, policy, {
   constitutionRules = [],
   intent = '',
+  intentEvidence = null,
   resolvedDecisionIds = [],
   humanResolutions = [],
   workspaceEvidence = [],
 } = {}) {
-  assertSchema('aegis.semantic_draft.v8', draft);
+  assertSchema('aegis.semantic_draft.v9', draft);
+  if (intentEvidence === null) throw new Error('semantic_draft_without_intent_evidence');
+  assertIntentEvidence(intentEvidence, intent);
+  if (draft.sourceEvidenceDigest !== intentEvidence.evidenceDigest) {
+    throw new Error('semantic_draft_evidence_mismatch');
+  }
   const requirementIds = assertUniqueIds(draft.requirements, 'id', 'requirement');
   const invariantIds = assertUniqueIds(draft.invariants, 'id', 'invariant');
   const riskIds = assertUniqueIds(draft.risks, 'id', 'risk');
@@ -534,7 +539,7 @@ export function assertSemanticDraft(draft, policy, {
   const decisionIds = assertUniqueIds(draft.decisions, 'questionId', 'decision');
   const noteIds = assertUniqueIds(draft.nonNormativeItems, 'id', 'non_normative_item');
   const pathIds = assertUniqueIds(draft.pathReferences, 'id', 'path_reference');
-  assertUniqueIds(draft.intentClaims, 'id', 'intent_claim');
+  const claimIds = assertUniqueIds(draft.intentClaims, 'id', 'intent_claim');
   assertUniqueIds(draft.unknowns, 'id', 'unknown');
   assertUniqueIds(draft.adversarialReview.findings, 'id', 'adversarial_finding');
   const architectureTags = assertUniqueIds(draft.architectureContexts, 'tag', 'architecture_context');
@@ -559,8 +564,7 @@ export function assertSemanticDraft(draft, policy, {
   for (const rule of policy.rules) {
     assertKnownReferences(rule.appliesWhen, knownPolicyTags, `policy_rule:${rule.id}`);
   }
-  const intentSignals = detectIntentSignals(intent);
-  const intentSignalIds = new Set(intentSignals.map(({ id }) => id));
+  const fragmentIds = new Set(intentEvidence.fragments.map(({ id }) => id));
   const applicableRuleIds = applicablePolicyRuleIds(policy, architectureTags, intent);
   const context = {
     policy,
@@ -576,8 +580,9 @@ export function assertSemanticDraft(draft, policy, {
     acceptanceCasesById,
     architectureTags,
     decisionsById: new Map(draft.decisions.map((decision) => [decision.questionId, decision])),
-    intentSignalIds,
-    intentSignals,
+    fragmentIds,
+    fragmentsById: new Map(intentEvidence.fragments.map((fragment) => [fragment.id, fragment])),
+    claimIds,
     resolvedDecisionIds: knownResolved,
     constitutionRuleIds: new Set(constitutionRules.map(({ id }) => id)),
     policyReferenceIds: new Set([...policyRulesById.keys(), ...policyAmendmentIds]),
@@ -609,6 +614,6 @@ export function assertSemanticDraft(draft, policy, {
   validateRequirements(draft, context);
   validateDecisions(draft, context);
   validateDeterminism(draft, context);
-  validateIntentSignalCoverage(draft, context);
+  validateFragmentCoverage(draft, context);
   validateReviews(draft, context);
 }

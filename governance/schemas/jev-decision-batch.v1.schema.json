@@ -101,9 +101,9 @@
     },
     "questions": {
       "type": "object",
-      "minProperties": 1,
+      "minProperties": 0,
       "maxProperties": 255,
-      "propertyNames": { "pattern": "^(intent|policy|determinism|representation|complexity)\\.[A-Za-z0-9_.-]+$" },
+      "propertyNames": { "pattern": "^(intent|policy|determinism|representation)\\.[A-Za-z0-9_.-]+$" },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
@@ -123,18 +123,18 @@
     },
     "bindings": {
       "type": "object",
-      "minProperties": 1,
+      "minProperties": 0,
       "maxProperties": 255,
-      "propertyNames": { "pattern": "^(intent|policy|determinism|representation|complexity)\\.[A-Za-z0-9_.-]+$" },
+      "propertyNames": { "pattern": "^(intent|policy|determinism|representation)\\.[A-Za-z0-9_.-]+$" },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "required": ["family", "subjectId", "semanticTarget", "allowedUse"],
         "properties": {
-          "family": { "enum": ["INTENT_SIGNAL", "POLICY_SIGNAL", "DETERMINISM_ACTIVATION", "FINITE_REPRESENTATION", "COMPLEXITY_REVIEW"] },
+          "family": { "enum": ["INTENT_SIGNAL", "POLICY_SIGNAL", "DETERMINISM_ACTIVATION", "FINITE_REPRESENTATION"] },
           "subjectId": { "type": "string", "minLength": 1 },
           "semanticTarget": {
-            "enum": ["INTENT_CLAIM_KIND", "POLICY_DEMAND_STATUS", "DETERMINISM_PRECLASSIFICATION", "REPRESENTATION_ROLE", "COMPLEXITY_STATUS"]
+            "enum": ["INTENT_CLAIM_KIND", "POLICY_DEMAND_STATUS", "DETERMINISM_PRECLASSIFICATION", "REPRESENTATION_ROLE"]
           },
           "allowedUse": { "const": "CANDIDATE_ONLY" }
         }
@@ -143,14 +143,13 @@
     "projection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["questionCount", "intentQuestionCount", "policyQuestionCount", "determinismQuestionCount", "finiteRepresentationQuestionCount", "complexityQuestionCount", "mechanicallySettledIntentSignalCount", "omittedSections"],
+      "required": ["questionCount", "intentQuestionCount", "policyQuestionCount", "determinismQuestionCount", "finiteRepresentationQuestionCount", "mechanicallySettledIntentSignalCount", "omittedSections"],
       "properties": {
-        "questionCount": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "questionCount": { "type": "integer", "minimum": 0, "maximum": 255 },
         "intentQuestionCount": { "type": "integer", "minimum": 0 },
         "policyQuestionCount": { "type": "integer", "minimum": 0 },
         "determinismQuestionCount": { "type": "integer", "minimum": 0 },
         "finiteRepresentationQuestionCount": { "type": "integer", "minimum": 0 },
-        "complexityQuestionCount": { "const": 1 },
         "mechanicallySettledIntentSignalCount": { "type": "integer", "minimum": 0 },
         "omittedSections": {
           "const": ["CONSTITUTION_TEXT", "SOURCE_EVIDENCE", "OUTPUT_SCHEMA", "COMPILER_OWNED_FIELDS", "MECHANICALLY_SETTLED_SIGNALS"]

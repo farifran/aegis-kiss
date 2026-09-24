@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.jev_decision_batch.v2",
+  "title": "Aegis JEV Shadow Classification Batch v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "batchDigest", "sourceSemanticRequestDigest", "sourceEvidenceDigest", "protocol", "state", "questions", "bindings", "projection"],
+  "properties": {
+    "schema": { "const": "aegis.jev_decision_batch.v2" },
+    "batchDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "transport", "questionMode", "authority", "purpose"],
+      "properties": {
+        "provider": { "const": "TYPESAFE_JEV" },
+        "transport": { "const": "VERCEL_AI_GATEWAY" },
+        "questionMode": { "const": "PARALLEL_CHOICE" },
+        "authority": { "const": "ADVISORY_ONLY" },
+        "purpose": { "const": "SHADOW_EVALUATION" }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "fragments"],
+      "properties": {
+        "intent": { "type": "string", "minLength": 1 },
+        "fragments": { "$ref": "aegis.intent_evidence.v1#/properties/fragments" }
+      }
+    },
+    "questions": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 255,
+      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "instructions", "criteria"],
+        "properties": {
+          "type": { "const": "choice" },
+          "instructions": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "criteria": {
+            "type": "object",
+            "minProperties": 2,
+            "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" },
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 255,
+      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["family", "subjectId", "semanticTarget", "allowedUse"],
+        "properties": {
+          "family": { "const": "INTENT_FRAGMENT" },
+          "subjectId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+          "semanticTarget": { "const": "CLAIM_KIND_CANDIDATE" },
+          "allowedUse": { "const": "SHADOW_METRIC_ONLY" }
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["questionCount", "fragmentCount", "omittedSections"],
+      "properties": {
+        "questionCount": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "fragmentCount": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "omittedSections": {
+          "const": ["CONSTITUTION_TEXT", "SOURCE_EVIDENCE", "OUTPUT_SCHEMA", "COMPILER_OWNED_FIELDS"]
+        }
+      }
+    }
+  }
+}
