@@ -47,31 +47,32 @@ function validResolutionForRequest(value, request) {
     && Array.isArray(value.answers);
 }
 
-function requiresRecompilation(request, answers) {
+function requiresSemanticRevision(request, answers) {
   const questions = new Map(request.questions.map((question) => [question.id, question]));
   for (const answer of answers) {
     const question = questions.get(answer.questionId);
     if (question === undefined) return true;
-    if (!('correction' in answer)
-      && !question.answers.some(({ id }) => id === answer.answerId)) return true;
+    if ('correction' in answer) return true;
+    const selected = question.answers.find(({ id }) => id === answer.answerId);
+    if (selected === undefined || selected.requiresSemanticRevision) return true;
   }
-  return questions.size > 0;
+  return false;
 }
 
 function buildResolution(request, answers) {
-  const recompilationRequired = requiresRecompilation(request, answers);
+  const semanticRevisionRequired = requiresSemanticRevision(request, answers);
   return {
     resolution: {
       schema: resolutionSchema,
       executionId: request.executionId,
       contractDraftDigest: request.contractDraftDigest,
       method: 'INTERACTIVE_WIZARD',
-      attestation: recompilationRequired
+      attestation: semanticRevisionRequired
         ? 'DECISIONS_REVIEWED_AND_CONFIRMED'
         : 'CONTRACT_REVIEWED_AND_APPROVED',
       answers,
     },
-    recompilationRequired,
+    semanticRevisionRequired,
   };
 }
 

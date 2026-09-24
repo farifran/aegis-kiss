@@ -83,7 +83,10 @@ const request = {
       recommendationReasoning: 'A forma simples reduz a superfície pública e atende ao princípio KISS sem perder o resultado solicitado.',
       glossary: [],
     },
-    answers: [],
+    answers: [
+      { id: 'ANS-0001-01', requiresSemanticRevision: false },
+      { id: 'ANS-0001-02', requiresSemanticRevision: false },
+    ],
     distinguishingCase: { outcomes: [] },
     traceability: { requirements: [], acceptanceCases: [], invariants: [], risks: [] },
   }],
@@ -105,17 +108,22 @@ if (JSON.stringify(bulk) !== JSON.stringify([{ questionId: 'Q-0002', answerId: '
   throw new Error('wizard_bulk_recommendation_selection_mismatch');
 }
 const recommended = buildResolution(request, [{ questionId: 'Q-0001', answerId: 'ANS-0001-01' }]);
-if (!recommended.recompilationRequired
+if (recommended.semanticRevisionRequired
   || recommended.resolution.schema !== 'aegis.semantic_resolution.v2'
-  || recommended.resolution.attestation !== 'DECISIONS_REVIEWED_AND_CONFIRMED'
+  || recommended.resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED'
   || !validResolutionForRequest(recommended.resolution, request)
   || validResolutionForRequest({ ...recommended.resolution, schema: 'aegis.semantic_resolution.v1' }, request)) {
   throw new Error('wizard_recommended_resolution_mismatch');
 }
 const alternative = buildResolution(request, [{ questionId: 'Q-0001', answerId: 'ANS-0001-02' }]);
-if (!alternative.recompilationRequired
-  || alternative.resolution.attestation !== 'DECISIONS_REVIEWED_AND_CONFIRMED') {
+if (alternative.semanticRevisionRequired
+  || alternative.resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED') {
   throw new Error('wizard_alternative_resolution_mismatch');
+}
+const correction = buildResolution(request, [{ questionId: 'Q-0001', correction: 'Outra interpretação.' }]);
+if (!correction.semanticRevisionRequired
+  || correction.resolution.attestation !== 'DECISIONS_REVIEWED_AND_CONFIRMED') {
+  throw new Error('wizard_correction_resolution_mismatch');
 }
 NODE
 
@@ -506,8 +514,26 @@ const decisions = withDecision ? [{
     ],
   },
   answers: [
-    { label: 'Resultado simples', rationale: 'Menor superfície pública.', contractEffect: 'O resultado esperado deve ser retornado.' },
-    { label: 'Resultado detalhado', rationale: 'Expõe metadados adicionais.', contractEffect: 'Um resultado com metadados adicionais deve ser retornado.' },
+    {
+      label: 'Resultado simples',
+      rationale: 'Menor superfície pública.',
+      contractEffect: 'O resultado esperado deve ser retornado.',
+      closure: {
+        mode: 'MATERIALIZE',
+        acceptanceCases: [{ requirementIndex: 0, caseIndex: 0 }],
+        determinismResolutions: [],
+      },
+    },
+    {
+      label: 'Resultado detalhado',
+      rationale: 'Expõe metadados adicionais.',
+      contractEffect: 'Um resultado com metadados adicionais deve ser retornado.',
+      closure: {
+        mode: 'MATERIALIZE',
+        acceptanceCases: [{ requirementIndex: 0, caseIndex: 1 }],
+        determinismResolutions: [],
+      },
+    },
   ],
 }] : [];
 const unknowns = withDecision ? [{
@@ -582,8 +608,12 @@ process.stdout.write(JSON.stringify({
     basis: requirementBasis,
     fragmentIndexes: [0],
     measurement: null,
-    acceptanceCases: [
-      { kind: 'HAPPY_PATH', given: 'Entradas válidas.', when: 'O cálculo for solicitado.', then: selectedEffect, outcomeKind: 'RETURN_VALUE', decisionBinding: withDecision ? { decisionIndex: 0, answerIndex: 0 } : null, boundaryBinding: null },
+    acceptanceCases: withDecision ? [
+      { kind: 'HAPPY_PATH', given: 'Entradas válidas com resultado simples escolhido.', when: 'O cálculo for solicitado.', then: 'O resultado esperado deve ser retornado.', outcomeKind: 'RETURN_VALUE', decisionBinding: { decisionIndex: 0, answerIndex: 0 }, boundaryBinding: null },
+      { kind: 'HAPPY_PATH', given: 'Entradas válidas com resultado detalhado escolhido.', when: 'O cálculo for solicitado.', then: 'Um resultado com metadados adicionais deve ser retornado.', outcomeKind: 'RETURN_VALUE', decisionBinding: { decisionIndex: 0, answerIndex: 1 }, boundaryBinding: null },
+      { kind: 'FAILURE', given: 'Uma entrada inválida.', when: 'O cálculo for solicitado.', then: 'Uma falha explícita deve ser retornada.', outcomeKind: 'REJECTION', decisionBinding: null, boundaryBinding: null },
+    ] : [
+      { kind: 'HAPPY_PATH', given: 'Entradas válidas.', when: 'O cálculo for solicitado.', then: selectedEffect, outcomeKind: 'RETURN_VALUE', decisionBinding: null, boundaryBinding: null },
       { kind: 'FAILURE', given: 'Uma entrada inválida.', when: 'O cálculo for solicitado.', then: 'Uma falha explícita deve ser retornada.', outcomeKind: 'REJECTION', decisionBinding: null, boundaryBinding: null },
     ],
   }],
@@ -632,7 +662,7 @@ printf '%s\n' "${context_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH
 [[ ! -e .harness/runtime/contract.json ]]
 
 # Saída semanticamente incompleta é rejeitada antes de criar contrato.
-invalid_draft="$(make_opinion yes "${semantic_evidence_digest}" | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
+invalid_draft="$(make_opinion yes "${semantic_evidence_digest}" | jq '.requirements[0].acceptanceCases[2].kind = "HAPPY_PATH"')"
 set +e
 invalid_output="$(printf '%s' "${invalid_draft}" | bash ./aegis --semantic-compile 2>&1)"
 invalid_code=$?
@@ -705,7 +735,7 @@ deterministic_opinion="$(make_opinion yes "${semantic_evidence_digest}" | jq '
       rationale:"Entradas equivalentes produzem o mesmo resultado em qualquer ordem.",
       targets:[{kind:"REQUIREMENT",index:0}],
       basis:[{source:"USER_INTENT",reference:"Definir transformador de registros"}],
-      acceptanceCase:{requirementIndex:0,caseIndex:2},
+      acceptanceCase:{requirementIndex:0,caseIndex:3},
       proofObligation:{
         relation:"OUTPUTS_EQUAL",
         resolutionKind:"PERMUTATION_INVARIANT",
@@ -739,7 +769,8 @@ jq -e '
   and .specification.determinismReview.dimensions[0].closureAuthority == "AUTHORITATIVE_RULE"
 ' .harness/runtime/contract.json >/dev/null
 
-# Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
+# Cada alternativa chega ao Wizard com seu fechamento validado e a escolha é
+# materializada mecanicamente, sem nova chamada semântica.
 make_opinion yes "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
 draft_status="$(bash ./aegis --status)"
 printf '%s\n' "${draft_status}" | jq -e '.status == "DRAFT_PENDING_CONFIRMATION"' >/dev/null
@@ -760,8 +791,6 @@ set -e
 [[ "${missing_decisions_code}" -ne 0 ]]
 printf '%s\n' "${missing_decisions_output}" | jq -e '.reason == "HUMAN_DECISIONS_REQUIRED"' >/dev/null
 
-# Toda decisão, inclusive a recomendada, precisa ser recompilada antes de uma
-# confirmação final do contrato já sem decisões ativas.
 cancelled_wizard_output="$(printf '\nn\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${cancelled_wizard_output}" | grep -F 'Nenhuma nova decisão ou aprovação foi gravada'
 [[ ! -e .harness/runtime/preflight_resolution.json ]]
@@ -772,37 +801,17 @@ printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma pro
 printf '%s\n' "${wizard_output}" | grep -F '[1/1] [Q-0001]'
 printf '%s\n' "${wizard_output}" | grep -F 'Aceitar esta recomendação e todas as restantes'
 printf '%s\n' "${wizard_output}" | grep -F 'A confirmação final continua obrigatória'
-printf '%s\n' "${wizard_output}" | grep -F 'Recompilação semântica necessária antes da assinatura'
 jq -e '
-  .schema == "aegis.semantic_resolution.v2"
-  and .attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
-  and .answers == [{questionId:"Q-0001",answerId:"ANS-0001-01"}]
-' .harness/runtime/preflight_resolution.json >/dev/null
-recommended_revision_request="$(bash ./aegis --semantic-request)"
-printf '%s\n' "${recommended_revision_request}" | jq -e '
-  .revision.answers == [{
-    questionId:"Q-0001",
-    answerId:"ANS-0001-01",
-    label:"Resultado simples",
-    rationale:"Menor superfície pública.",
-    contractEffect:"O resultado esperado deve ser retornado."
-  }]
-' >/dev/null
-semantic_evidence_digest="$(printf '%s\n' "${recommended_revision_request}" | jq -r '.intentEvidence.evidenceDigest')"
-make_opinion resolved-simple "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
-jq -e '
-  .approval == null
+  .approval.method == "INTERACTIVE_WIZARD"
+  and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and .effectiveDeterminismStatus == "NOT_APPLICABLE"
   and (.specification.decisions | length) == 0
-  and (.specification.determinismReview.dimensions | all(.status != "DECISION_REQUIRED"))
+  and (.specification.requirements[0].acceptanceCases | length) == 2
+  and (.specification.requirements[0].acceptanceCases | all(.decisionBinding == null))
+  and (.specification.requirements[0].basis | any(.source == "USER_DECISION" and .reference == "Q-0001"))
   and .humanResolutions[0].answerId == "ANS-0001-01"
-  and .humanResolutions[0].attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
+  and .humanResolutions[0].attestation == "CONTRACT_REVIEWED_AND_APPROVED"
 ' .harness/runtime/contract.json >/dev/null
-recommended_approval_output="$(bash ./aegis --approve)"
-printf '%s\n' "${recommended_approval_output}" | jq -e '.status == "FINALIZED" and .implementationAuthorized == false' >/dev/null
-grep -F 'Decisões humanas incorporadas por recompilação' .harness/runtime/contract.md >/dev/null
-previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-state.json)"
-
 # Uma demanda diferente não torna o contrato anterior historicamente inválido,
 # mas o verify informa que ele não pertence ao preflight ativo.
 bash ./aegis 'Criar contrato diferente' >/dev/null
@@ -816,50 +825,23 @@ printf '%s\n' "${stale_verification_output}" | jq -e '
   and .activeContext == "DIFFERENT_PREFLIGHT"
 ' >/dev/null
 
-# Reabre a demanda original para exercitar uma alternativa que exige recompilação.
+# Reabre a demanda original para provar que uma alternativa não recomendada,
+# mas previamente fechada, também é materializada sem nova chamada à IA.
 bash ./aegis 'Definir transformador de registros com saída ainda a escolher' >/dev/null
 revisionless_request="$(bash ./aegis --semantic-request)"
 semantic_evidence_digest="$(printf '%s\n' "${revisionless_request}" | jq -r '.intentEvidence.evidenceDigest')"
 make_opinion yes "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
 alternative_wizard_output="$(printf '2\ns\n' | bash ./aegis --wizard 2>&1)"
-printf '%s\n' "${alternative_wizard_output}" | grep -F 'Recompilação semântica necessária antes da assinatura'
-jq -e '
-  .schema == "aegis.semantic_resolution.v2"
-  and .method == "INTERACTIVE_WIZARD"
-  and .attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
-  and .answers == [{questionId:"Q-0001",answerId:"ANS-0001-02"}]
-' .harness/runtime/preflight_resolution.json >/dev/null
-set +e
-alternative_output="$(bash ./aegis --approve 2>&1)"
-alternative_code=$?
-set -e
-[[ "${alternative_code}" -ne 0 ]]
-printf '%s\n' "${alternative_output}" | jq -e '.reason == "SEMANTIC_RECOMPILATION_REQUIRED"' >/dev/null
-[[ "${previous_contract_digest}" == "$(jq -r '.contractDigest' .harness/state/semantic-state.json)" ]]
-
-revision_request="$(bash ./aegis --semantic-request)"
-printf '%s\n' "${revision_request}" | jq -e '
-  (.revision.sourceContractDigest | test("^[a-f0-9]{64}$"))
-  and .revision.answers == [{
-    questionId:"Q-0001",
-    answerId:"ANS-0001-02",
-    label:"Resultado detalhado",
-    rationale:"Expõe metadados adicionais.",
-    contractEffect:"Um resultado com metadados adicionais deve ser retornado."
-  }]
-' >/dev/null
-semantic_evidence_digest="$(printf '%s\n' "${revision_request}" | jq -r '.intentEvidence.evidenceDigest')"
-
-# Um novo rascunho coerente substitui a tentativa anterior e pode ser assinado.
-make_opinion resolved "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
+printf '%s\n' "${alternative_wizard_output}" | grep -F 'Escolhas e aprovação explícita gravadas. Selando contrato'
 jq -e '
   .schema == "aegis.issue_contract.v14"
   and .implementationAuthorized == false
   and .intent == "Definir transformador de registros com saída ainda a escolher"
   and .specification.schema == "aegis.semantic_draft.v9"
   and (.specification.requirements[0].acceptanceCases | length) == 2
-  and .specification.requirements[0].basis == [{source:"USER_DECISION",reference:"Q-0001"}]
-  and .approval == null
+  and (.specification.requirements[0].basis | any(.source == "USER_DECISION" and .reference == "Q-0001"))
+  and .approval.method == "INTERACTIVE_WIZARD"
+  and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and .humanResolutions[0].questionId == "Q-0001"
   and .humanResolutions[0].question == "Qual formato público deve ser usado?"
   and .humanResolutions[0].kind == "ANSWER"
@@ -868,28 +850,16 @@ jq -e '
   and .humanResolutions[0].rationale == "Expõe metadados adicionais."
   and .humanResolutions[0].contractEffect == "Um resultado com metadados adicionais deve ser retornado."
   and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
-  and .humanResolutions[0].attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
+  and .humanResolutions[0].attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and (.humanResolutions[0].sourceContractDigest | test("^[a-f0-9]{64}$"))
   and (has("proofObligations") | not)
   and (.. | objects | has("entrypoint") | not)
 ' .harness/runtime/contract.json >/dev/null
-
-approve_output="$(bash ./aegis --approve)"
-printf '%s\n' "${approve_output}" | jq -e '
-  .schema == "aegis.preflight_finalization.v14"
-  and .status == "FINALIZED"
-  and .contractIntegrity == "VALID"
-  and .workspaceFreshness == "MATCHES_BASELINE"
-  and .implementationCompliance == "NOT_EVALUATED"
-  and .approvalMethod == "DIRECT_COMMAND"
-  and .humanDecisionCount == 1
-  and .implementationAuthorized == false
-' >/dev/null
 [[ -s .harness/state/semantic-state.json ]]
 jq -e '
   .schema == "aegis.semantic_state.v14"
   and .contract.schema == "aegis.issue_contract.v14"
-  and .contract.approval.method == "DIRECT_COMMAND"
+  and .contract.approval.method == "INTERACTIVE_WIZARD"
   and .contract.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
   and (.contract.approval.contractDraftDigest | test("^[a-f0-9]{64}$"))
 ' .harness/state/semantic-state.json >/dev/null

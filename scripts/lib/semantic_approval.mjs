@@ -29,6 +29,97 @@ function decisionMap(contract) {
     .map((decision) => [decision.questionId, decision]));
 }
 
+function appendUserDecisionBasis(basis, questionId) {
+  if (basis.some(({ source, reference }) => (
+    source === 'USER_DECISION' && reference === questionId
+  ))) return basis;
+  return [...basis, { source: 'USER_DECISION', reference: questionId }];
+}
+
+function materializeSpecification(specification, resolution) {
+  const materialized = globalThis.structuredClone(specification);
+  const decisions = new Map(materialized.decisions
+    .map((decision) => [decision.questionId, decision]));
+  const selections = new Map();
+  for (const answer of resolution.answers) {
+    if ('correction' in answer) throw new Error('semantic_recompilation_required');
+    const decision = decisions.get(answer.questionId);
+    const selected = decision?.answers.find(({ id }) => id === answer.answerId);
+    if (selected?.closure.mode !== 'MATERIALIZE') {
+      throw new Error('semantic_recompilation_required');
+    }
+    selections.set(answer.questionId, { decision, selected });
+  }
+
+  for (const requirement of materialized.requirements) {
+    const originalCases = requirement.acceptanceCases;
+    requirement.acceptanceCases = originalCases.flatMap((acceptanceCase) => {
+      const questionId = acceptanceCase.decisionBinding?.questionId;
+      if (questionId === undefined) return [acceptanceCase];
+      const selection = selections.get(questionId);
+      if (selection === undefined
+        || !selection.selected.closure.acceptanceCaseIds.includes(acceptanceCase.id)) return [];
+      return [{ ...acceptanceCase, decisionBinding: null }];
+    });
+    const decisionOwners = [...selections.entries()]
+      .filter(([, { decision }]) => (
+        decision.requirementIds.includes(requirement.id)
+          || originalCases.some(({ decisionBinding }) => (
+            decisionBinding?.questionId === decision.questionId
+          ))
+      ))
+      .map(([questionId]) => questionId);
+    for (const questionId of decisionOwners) {
+      requirement.basis = appendUserDecisionBasis(requirement.basis, questionId);
+    }
+  }
+
+  materialized.determinismReview.dimensions = materialized.determinismReview.dimensions
+    .map((dimension) => {
+      if (dimension.status !== 'DECISION_REQUIRED') return dimension;
+      const questionId = dimension.targetIds.find((id) => selections.has(id));
+      if (questionId === undefined) return dimension;
+      const { selected } = selections.get(questionId);
+      const closure = selected.closure.determinismResolutions.find((candidate) => (
+        candidate.kind === dimension.kind && candidate.subjectId === dimension.subjectId
+      ));
+      if (closure === undefined) {
+        throw new Error(`missing_materialized_determinism_resolution:${questionId}:${dimension.kind}:${dimension.subjectId}`);
+      }
+      return {
+        ...dimension,
+        status: 'SPECIFIED',
+        rationale: closure.rationale,
+        targetIds: dimension.targetIds.filter((id) => id !== questionId),
+        basis: appendUserDecisionBasis(dimension.basis, questionId),
+        closureAuthority: 'HUMAN_DECISION',
+        proofObligation: closure.proofObligation,
+        inapplicabilityProof: null,
+        acceptanceCaseId: closure.acceptanceCaseId,
+      };
+    });
+  materialized.determinismReview.status = materialized.determinismReview.dimensions.length === 0
+    ? 'NOT_APPLICABLE'
+    : materialized.determinismReview.dimensions.some(({ status }) => (
+      status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
+    )) ? 'GAPS_FOUND' : 'SEMANTICALLY_CLOSED';
+
+  materialized.unknowns = materialized.unknowns
+    .filter(({ decisionId }) => !selections.has(decisionId));
+  materialized.adversarialReview.findings = materialized.adversarialReview.findings
+    .map((finding) => ({
+      ...finding,
+      targetIds: [...new Set(finding.targetIds.flatMap((targetId) => (
+        selections.has(targetId)
+          ? selections.get(targetId).decision.requirementIds
+          : [targetId]
+      )))],
+    }));
+  materialized.decisions = materialized.decisions
+    .filter(({ questionId }) => !selections.has(questionId));
+  return materialized;
+}
+
 export function buildHumanResolutionRecords(contract, resolution) {
   const decisions = decisionMap(contract);
   return resolution.answers.map((answer) => {
@@ -100,6 +191,25 @@ export function assertContractApprovalEvidence(contract, { required = false } = 
       throw new Error(`human_resolution_evidence_mismatch:${decision.questionId}`);
     }
   }
+  const materializedResolutions = contract.humanResolutions.filter(({ sourceContractDigest }) => (
+    sourceContractDigest === contract.approval.contractDraftDigest
+  ));
+  if (contract.approval.method === 'INTERACTIVE_WIZARD'
+    && decisions.size === 0
+    && materializedResolutions.length > 0) {
+    if (materializedResolutions.some((resolution) => (
+      resolution.kind !== 'ANSWER'
+        || resolution.method !== contract.approval.method
+        || resolution.attestation !== contract.approval.attestation
+    ))) {
+      throw new Error('materialized_human_resolution_evidence_mismatch');
+    }
+    if (contract.approval.executionId
+      !== `draft-${contract.approval.contractDraftDigest.slice(0, 16)}`) {
+      throw new Error('human_approval_draft_mismatch');
+    }
+    return;
+  }
   const pendingIds = new Set(decisions.keys());
   const retainedResolutions = contract.humanResolutions
     .filter(({ questionId }) => !pendingIds.has(questionId));
@@ -164,7 +274,14 @@ export function buildConfirmationRequest(contract) {
             id, kind, level, statement, mitigation,
           })),
       },
-      answers: decision.answers,
+      answers: decision.answers.map((answer) => ({
+        id: answer.id,
+        label: answer.label,
+        rationale: answer.rationale,
+        contractEffect: answer.contractEffect,
+        recommended: answer.recommended,
+        requiresSemanticRevision: answer.closure.mode === 'REOPEN_PREFLIGHT',
+      })),
     };
   });
   const request = {
@@ -251,7 +368,7 @@ export function assertConfirmationRequest(contract, request) {
 }
 
 
-export function resolutionRequiresRecompilation({ contract, request, resolution }) {
+export function resolutionRequiresSemanticRevision({ contract, request, resolution }) {
   assertConfirmationRequest(contract, request);
   assertSchema('aegis.semantic_resolution.v2', resolution);
   if (request.executionId !== resolution.executionId
@@ -272,15 +389,17 @@ export function resolutionRequiresRecompilation({ contract, request, resolution 
     const decision = decisions.get(answer.questionId);
     if (decision === undefined) throw new Error(`unknown_resolution_question:${answer.questionId}`);
     if ('correction' in answer) continue;
-    if (!decision.answers.some(({ id }) => id === answer.answerId)) {
+    const selected = decision.answers.find(({ id }) => id === answer.answerId);
+    if (selected === undefined) {
       throw new Error(`unknown_resolution_answer:${answer.questionId}`);
     }
+    if (selected.closure.mode === 'REOPEN_PREFLIGHT') return true;
   }
-  return decisions.size > 0;
+  return resolution.answers.some((answer) => 'correction' in answer);
 }
 
 export function finalizeContractApproval({ contract, request, resolution }) {
-  if (resolutionRequiresRecompilation({ contract, request, resolution })) {
+  if (resolutionRequiresSemanticRevision({ contract, request, resolution })) {
     throw new Error('semantic_recompilation_required');
   }
   if (resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED') {
@@ -290,10 +409,12 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     ...contract.humanResolutions,
     ...buildHumanResolutionRecords(contract, resolution),
   ];
+  const specification = materializeSpecification(contract.specification, resolution);
   const finalContract = {
     ...contract,
+    specification,
     effectiveDeterminismStatus: effectiveDeterminismStatus(
-      contract.specification,
+      specification,
       humanResolutions,
     ),
     humanResolutions,

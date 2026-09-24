@@ -16,6 +16,6 @@ export {
   buildHumanResolutionRecords,
   buildSemanticRevision,
   finalizeContractApproval,
-  resolutionRequiresRecompilation,
+  resolutionRequiresSemanticRevision,
 } from './semantic_approval.mjs';
 export { renderSemanticContractMarkdown } from './semantic_contract_markdown.mjs';

@@ -118,13 +118,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "rationale", "contractEffect", "recommended"],
+        "required": ["id", "label", "rationale", "contractEffect", "recommended", "requiresSemanticRevision"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "label": { "type": "string", "minLength": 1 },
           "rationale": { "type": "string", "minLength": 1 },
           "contractEffect": { "type": "string", "minLength": 1 },
-          "recommended": { "type": "boolean" }
+          "recommended": { "type": "boolean" },
+          "requiresSemanticRevision": { "type": "boolean" }
         }
       }
     }

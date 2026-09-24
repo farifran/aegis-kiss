@@ -381,6 +381,33 @@ export function compileSemanticOpinion(opinion, request) {
         rationale: answer.rationale,
         contractEffect: answer.contractEffect,
         recommended: answerIndex === item.recommendedAnswerIndex,
+        closure: answer.closure.mode === 'REOPEN_PREFLIGHT'
+          ? answer.closure
+          : {
+            mode: 'MATERIALIZE',
+            acceptanceCaseIds: answer.closure.acceptanceCases
+              .map(compileAcceptanceReference),
+            determinismResolutions: answer.closure.determinismResolutions.map((resolution) => {
+              const dimension = indexedValue(
+                dimensions,
+                resolution.dimensionIndex,
+                'decision_closure_dimension',
+              );
+              const witness = counterexampleForDimension(dimension.kind);
+              return {
+                kind: dimension.kind,
+                subjectId: dimension.subject === null
+                  ? 'PUBLIC_CONTRACT'
+                  : compileTargets([dimension.subject])[0],
+                acceptanceCaseId: compileAcceptanceReference(resolution.acceptanceCase),
+                rationale: resolution.rationale,
+                proofObligation: {
+                  ...resolution.proofObligation,
+                  witnessId: witness.id,
+                },
+              };
+            }),
+          },
       })),
     })),
   };

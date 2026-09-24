@@ -103,7 +103,9 @@ async function choose(question, position, total, bulkAction) {
   if (proceed === undefined) return undefined;
   const choices = question.answers.map((answer) => ({
     label: answer.label,
-    description: answer.recommended ? 'Recomendado' : undefined,
+    description: answer.requiresSemanticRevision
+      ? 'Exige nova análise'
+      : answer.recommended ? 'Recomendado' : undefined,
     detail: `${answer.rationale} Efeito: ${answer.contractEffect}`,
     answer,
   }));
@@ -143,7 +145,7 @@ async function writeResolution(root, request, answers) {
   } finally {
     await fs.promises.rm(temporary, { force: true });
   }
-  return result.recompilationRequired;
+  return result.semanticRevisionRequired;
 }
 
 function resume(root) {
@@ -235,10 +237,10 @@ async function presentPending(force = false) {
       lastCancelledId = reqId;
       return;
     }
-    const recompilationRequired = await writeResolution(root, request, answers);
-    if (recompilationRequired) {
+    const semanticRevisionRequired = await writeResolution(root, request, answers);
+    if (semanticRevisionRequired) {
       await vscode.window.showInformationMessage(
-        'Aegis registrou suas decisões. O supervisor deve recompilar o contrato antes da assinatura.',
+        'Aegis registrou suas decisões. O supervisor precisa fazer uma nova análise semântica antes da assinatura.',
       );
       lastCancelledId = null;
       return;

@@ -122,7 +122,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
     {
       buildHumanResolutionRecords,
       buildSemanticRevision,
-      resolutionRequiresRecompilation,
+      resolutionRequiresSemanticRevision,
     },
     contract,
     request,
@@ -149,7 +149,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
     constitutionDigest: constitution.digest,
     workspaceObservation,
   });
-  if (!resolutionRequiresRecompilation({ contract, request, resolution })) return null;
+  if (!resolutionRequiresSemanticRevision({ contract, request, resolution })) return null;
   return {
     resolution,
     request: buildSemanticRevision(contract, resolution),
@@ -679,7 +679,7 @@ async function handleApprove() {
     {
       assertConfirmationRequest,
       finalizeContractApproval,
-      resolutionRequiresRecompilation,
+      resolutionRequiresSemanticRevision,
     },
     { assertContractDocument },
     { renderSemanticContractMarkdown },
@@ -718,7 +718,7 @@ async function handleApprove() {
   let resolution;
   if (existsSync(resolutionPath)) {
     resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
-    if (resolutionRequiresRecompilation({ contract: draftContract, request, resolution })) {
+    if (resolutionRequiresSemanticRevision({ contract: draftContract, request, resolution })) {
       throw rejection('SEMANTIC_RECOMPILATION_REQUIRED');
     }
   } else if (draftContract.specification.decisions.length > 0) {

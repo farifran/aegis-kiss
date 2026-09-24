@@ -86,12 +86,9 @@ resolve_preflight_wizard() {
   local count index question answer_count choice correction answer_id answers='[]'
   local recommended_index recommended_label recommended_effect remaining_answers
   local selected_label final_confirmation attestation
-  local requires_recompilation=0 bulk_selected=0
+  local requires_semantic_revision=0 bulk_selected=0
   count="$(jq '.questionCount' <<< "${result}")"
   [[ "${count}" == "$(jq '.questions | length' <<< "${result}")" ]] || fatal 'INVALID_WIZARD_QUESTION_COUNT'
-  if (( count > 0 )); then
-    requires_recompilation=1
-  fi
   printf '\n══════════════════════════════════════════════════════════════\n' >&2
   printf ' AEGIS — Deliberação e Aprovação Humana\n' >&2
   printf '══════════════════════════════════════════════════════════════\n' >&2
@@ -135,7 +132,7 @@ resolve_preflight_wizard() {
     jq -r '.traceability.acceptanceCases[] | "  - Prova \(.id): dado \(.given) quando \(.when), deve ocorrer: \(.then) [\(.outcomeKind)]"' <<< "${question}" >&2
     jq -r '.traceability.invariants[] | "  - Invariante \(.id): \(.statement) Falha se: \(.falsification)"' <<< "${question}" >&2
     jq -r '.traceability.risks[] | "  - Risco \(.id) [\(.level)/\(.kind)]: \(.statement) Mitigação: \(.mitigation)"' <<< "${question}" >&2
-    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"' <<< "${question}" >&2
+    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + (if .value.requiresSemanticRevision then " [EXIGE NOVA ANÁLISE]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"' <<< "${question}" >&2
     printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
     printf '  ── Ação rápida ──\n' >&2
     printf '  A) %s\n     %s\n' \
@@ -147,8 +144,8 @@ resolve_preflight_wizard() {
       if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
         answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
         answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '. + [{questionId:$questionId, answerId:$answerId}]' <<< "${answers}")"
-        if [[ "${answer_id}" != "$(jq -r '.recommendedAnswerId' <<< "${question}")" ]]; then
-          requires_recompilation=1
+        if [[ "$(jq -r --arg answerId "${answer_id}" '.answers[] | select(.id == $answerId) | .requiresSemanticRevision' <<< "${question}")" == "true" ]]; then
+          requires_semantic_revision=1
         fi
         break
       fi
@@ -156,7 +153,7 @@ resolve_preflight_wizard() {
         read -r -p 'Sua interpretação: ' correction
         [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
         answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '. + [{questionId:$questionId, correction:$correction}]' <<< "${answers}")"
-        requires_recompilation=1
+        requires_semantic_revision=1
         break
       fi
       if [[ "${choice}" =~ ^[aA]$ ]]; then
@@ -189,8 +186,8 @@ resolve_preflight_wizard() {
     done
   fi
 
-  if (( requires_recompilation == 1 )); then
-    read -r -p 'Confirmar escolhas e enviar o contrato para recompilação? [s/N]: ' final_confirmation
+  if (( requires_semantic_revision == 1 )); then
+    read -r -p 'Confirmar escolhas e enviar o contrato para nova análise semântica? [s/N]: ' final_confirmation
     attestation='DECISIONS_REVIEWED_AND_CONFIRMED'
   else
     read -r -p 'Revisei o contrato e confirmo que ele pode ser selado? [s/N]: ' final_confirmation
@@ -213,8 +210,8 @@ resolve_preflight_wizard() {
     '{schema:"aegis.semantic_resolution.v2",executionId:$executionId,contractDraftDigest:$contractDraftDigest,method:"INTERACTIVE_WIZARD",attestation:$attestation,answers:$answers}' \
     > "${resolution_staging}"
   mv "${resolution_staging}" "${resolution_file}"
-  if (( requires_recompilation == 1 )); then
-    printf '[AEGIS] Escolhas gravadas e vinculadas ao rascunho. Recompilação semântica necessária antes da assinatura.\n' >&2
+  if (( requires_semantic_revision == 1 )); then
+    printf '[AEGIS] Escolhas gravadas e vinculadas ao rascunho. Nova análise semântica necessária antes da assinatura.\n' >&2
     return
   fi
   echo '[AEGIS][IDE] Escolhas e aprovação explícita gravadas. Selando contrato...' >&2

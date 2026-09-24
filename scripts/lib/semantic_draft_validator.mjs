@@ -296,13 +296,109 @@ function validateDecisions(draft, context) {
     assertKnownReferences(decision.requirementIds, context.requirementIds, `decision:${decision.questionId}`);
     assertKnownReferences(decision.invariantIds, context.invariantIds, `decision:${decision.questionId}`);
     assertKnownReferences(decision.riskIds, context.riskIds, `decision:${decision.questionId}`);
-    const proofCases = acceptanceCases.filter(({ decisionBinding }) => (
-      decisionBinding?.questionId === decision.questionId
-        && decisionBinding.answerId === decision.recommendedAnswerId
+    if (recommended[0].closure.mode !== 'MATERIALIZE') {
+      throw new Error(`recommended_decision_branch_reopens_preflight:${decision.questionId}`);
+    }
+
+    const affectedDimensions = draft.determinismReview.dimensions.filter((dimension) => (
+      dimension.status === 'DECISION_REQUIRED'
+        && dimension.targetIds.includes(decision.questionId)
     ));
-    if (!proofCases.some(({ then }) => (
-      then.normalize('NFC') === recommended[0].contractEffect.normalize('NFC')
-    ))) throw new Error(`decision_effect_not_proven:${decision.questionId}`);
+    for (const answer of decision.answers) {
+      if (answer.closure.mode === 'REOPEN_PREFLIGHT') continue;
+      if (draft.boundaryRules.some(({ decisionId }) => decisionId === decision.questionId)
+        || draft.policyAssessments.some(({ decisionId }) => decisionId === decision.questionId)) {
+        throw new Error(`decision_closure_requires_structural_revision:${decision.questionId}:${answer.id}`);
+      }
+      const boundCaseIds = acceptanceCases
+        .filter(({ decisionBinding }) => (
+          decisionBinding?.questionId === decision.questionId
+            && decisionBinding.answerId === answer.id
+        ))
+        .map(({ id }) => id);
+      const selectedCaseIds = new Set(answer.closure.acceptanceCaseIds);
+      if (selectedCaseIds.size !== boundCaseIds.length
+        || boundCaseIds.some((id) => !selectedCaseIds.has(id))) {
+        throw new Error(`decision_closure_cases_incomplete:${decision.questionId}:${answer.id}`);
+      }
+      if (!boundCaseIds.some((id) => (
+        context.acceptanceCasesById.get(id)?.acceptanceCase.then.normalize('NFC')
+          === answer.contractEffect.normalize('NFC')
+      ))) {
+        throw new Error(`decision_effect_not_proven:${decision.questionId}:${answer.id}`);
+      }
+
+      const resolutions = new Map();
+      for (const resolution of answer.closure.determinismResolutions) {
+        const key = `${resolution.kind}:${resolution.subjectId}`;
+        if (resolutions.has(key)) {
+          throw new Error(`duplicate_decision_closure_resolution:${decision.questionId}:${answer.id}:${key}`);
+        }
+        resolutions.set(key, resolution);
+      }
+      const expectedKeys = new Set(affectedDimensions
+        .map(({ kind, subjectId }) => `${kind}:${subjectId}`));
+      if (resolutions.size !== expectedKeys.size
+        || [...expectedKeys].some((key) => !resolutions.has(key))) {
+        throw new Error(`decision_closure_dimensions_incomplete:${decision.questionId}:${answer.id}`);
+      }
+      for (const dimension of affectedDimensions) {
+        const key = `${dimension.kind}:${dimension.subjectId}`;
+        const resolution = resolutions.get(key);
+        if (!selectedCaseIds.has(resolution.acceptanceCaseId)) {
+          throw new Error(`decision_closure_proof_outside_branch:${decision.questionId}:${answer.id}:${key}`);
+        }
+        const proof = resolution.proofObligation;
+        if (proof.witnessId !== dimension.counterexampleWitness.id) {
+          throw new Error(`decision_closure_witness_mismatch:${decision.questionId}:${answer.id}:${key}`);
+        }
+        if (!resolutionAllowedForDimension(dimension.kind, proof.resolutionKind)) {
+          throw new Error(`decision_closure_resolution_kind_mismatch:${decision.questionId}:${answer.id}:${key}`);
+        }
+        if (proof.relation !== expectedRelationForResolution(proof.resolutionKind)) {
+          throw new Error(`decision_closure_relation_mismatch:${decision.questionId}:${answer.id}:${key}`);
+        }
+        const proofCase = context.acceptanceCasesById.get(resolution.acceptanceCaseId);
+        if (dimension.subjectId.startsWith('REQ-')
+          && proofCase?.requirementId !== dimension.subjectId) {
+          throw new Error(`decision_closure_proof_not_owned_by_subject:${decision.questionId}:${answer.id}:${key}`);
+        }
+        if (dimension.subjectId.startsWith('BOUND-')
+          && !context.boundaryRulesById.get(dimension.subjectId)
+            ?.acceptanceCaseIds.includes(resolution.acceptanceCaseId)) {
+          throw new Error(`decision_closure_proof_not_owned_by_subject:${decision.questionId}:${answer.id}:${key}`);
+        }
+        if (proofCase?.acceptanceCase.then.normalize('NFC')
+          !== canonicalProofOutcome(proof).normalize('NFC')) {
+          throw new Error(`decision_closure_proof_outcome_mismatch:${decision.questionId}:${answer.id}:${key}`);
+        }
+        const expectsRejection = proof.relation === 'EXPLICIT_REJECTION';
+        if ((proofCase?.acceptanceCase.outcomeKind === 'REJECTION') !== expectsRejection) {
+          throw new Error(`decision_closure_proof_outcome_kind_mismatch:${decision.questionId}:${answer.id}:${key}`);
+        }
+      }
+    }
+  }
+  for (const requirement of draft.requirements) {
+    const unboundCount = requirement.acceptanceCases
+      .filter(({ decisionBinding }) => decisionBinding === null).length;
+    const questionIds = [...new Set(requirement.acceptanceCases
+      .map(({ decisionBinding }) => decisionBinding?.questionId)
+      .filter((questionId) => questionId !== undefined))];
+    const guaranteedSelectedCases = questionIds.reduce((total, questionId) => {
+      const decision = context.decisionsById.get(questionId);
+      const materializable = decision.answers
+        .filter(({ closure }) => closure.mode === 'MATERIALIZE');
+      const minimum = Math.min(...materializable.map(({ closure }) => (
+        closure.acceptanceCaseIds.filter((caseId) => (
+          context.acceptanceCasesById.get(caseId)?.requirementId === requirement.id
+        )).length
+      )));
+      return total + minimum;
+    }, 0);
+    if (unboundCount + guaranteedSelectedCases < 2) {
+      throw new Error(`decision_materialization_without_dual_acceptance:${requirement.id}`);
+    }
   }
 }
 

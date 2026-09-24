@@ -263,7 +263,7 @@ export function renderSemanticContractMarkdown(contract, {
   const incorporatedResolutions = contract.humanResolutions
     .filter(({ questionId }) => !currentDecisionIds.has(questionId));
   if (incorporatedResolutions.length > 0) {
-    lines.push('', '### Decisões humanas incorporadas por recompilação');
+    lines.push('', '### Decisões humanas incorporadas ao contrato');
     for (const resolution of incorporatedResolutions) {
       if (resolution.kind === 'ANSWER') {
         lines.push(`- **${resolution.questionId}: ${resolution.question}** → ${resolution.label}. ${resolution.rationale}`);

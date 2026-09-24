@@ -35,7 +35,7 @@ import {
   finalizeContractApproval,
   loadSemanticConstitution,
   renderSemanticContractMarkdown,
-  resolutionRequiresRecompilation,
+  resolutionRequiresSemanticRevision,
 } from './scripts/lib/semantic_contract.mjs';
 import {
   buildPreflightHandoff,
@@ -330,6 +330,16 @@ const draft = {
         decisionBinding: null,
         boundaryBinding: null,
       },
+      {
+        id: 'AC-RESULT-DETAIL',
+        kind: 'HAPPY_PATH',
+        given: 'Uma operação válida concluída com a forma detalhada escolhida.',
+        when: 'O resultado público for observado.',
+        then: 'Um resultado detalhado com metadados deve ser observado.',
+        outcomeKind: 'RETURN_VALUE',
+        decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-DETAIL' },
+        boundaryBinding: null,
+      },
     ],
   }],
   invariants: [{
@@ -405,6 +415,11 @@ const draft = {
         rationale: 'Menor superfície pública.',
         contractEffect: 'Um resultado explícito deve ser observado.',
         recommended: true,
+        closure: {
+          mode: 'MATERIALIZE',
+          acceptanceCaseIds: ['AC-RESULT-HAPPY'],
+          determinismResolutions: [],
+        },
       },
       {
         id: 'ANS-DETAIL',
@@ -412,6 +427,11 @@ const draft = {
         rationale: 'Expõe mais dados.',
         contractEffect: 'Um resultado detalhado com metadados deve ser observado.',
         recommended: false,
+        closure: {
+          mode: 'MATERIALIZE',
+          acceptanceCaseIds: ['AC-RESULT-DETAIL'],
+          determinismResolutions: [],
+        },
       },
     ],
   }],
@@ -599,7 +619,7 @@ expectDeterminismFailure(
 );
 expectDeterminismFailure(
   (_dimension, invalid) => {
-    invalid.requirements[0].acceptanceCases[2].then = 'Texto apenas relacionado ao tema.';
+    invalid.requirements[0].acceptanceCases[3].then = 'Texto apenas relacionado ao tema.';
   },
   'determinism_proof_outcome_mismatch:',
 );
@@ -656,17 +676,170 @@ const resolution = {
   executionId: confirmation.executionId,
   contractDraftDigest: confirmation.contractDraftDigest,
   method: 'INTERACTIVE_WIZARD',
-  attestation: 'DECISIONS_REVIEWED_AND_CONFIRMED',
+  attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
   answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
 };
-if (!resolutionRequiresRecompilation({ contract, request: confirmation, resolution })) {
-  throw new Error('recommended_decision_bypassed_semantic_recompilation');
+if (resolutionRequiresSemanticRevision({ contract, request: confirmation, resolution })) {
+  throw new Error('materializable_decision_requested_semantic_recompilation');
 }
-try {
-  finalizeContractApproval({ contract, request: confirmation, resolution });
-  throw new Error('contract_with_active_decision_was_approved');
-} catch (error) {
-  if (error.message !== 'semantic_recompilation_required') throw error;
+const approved = finalizeContractApproval({ contract, request: confirmation, resolution });
+if (approved.approval?.method !== 'INTERACTIVE_WIZARD'
+  || approved.specification.decisions.length !== 0
+  || approved.humanResolutions[0]?.answerId !== 'ANS-SIMPLE'
+  || approved.specification.requirements[0].acceptanceCases.some(({ decisionBinding }) => (
+    decisionBinding !== null
+  ))) {
+  throw new Error('decision_was_not_materialized_mechanically');
+}
+
+const decisionDimensionDraft = structuredClone(draft);
+const orderingWitness = counterexampleForDimension('ORDERING');
+const simpleOrderingProof = {
+  witnessId: orderingWitness.id,
+  relation: 'DEFINED_RESULT',
+  resolutionKind: 'INPUT_ORDER_PRESERVED',
+  resolutionParameter: null,
+  baselineOutcome: 'sequência [A,B]',
+  variationOutcome: 'sequência [B,A]',
+  observables: ['sequência pública'],
+};
+const detailedOrderingProof = {
+  witnessId: orderingWitness.id,
+  relation: 'OUTPUTS_EQUAL',
+  resolutionKind: 'CANONICAL_ORDER',
+  resolutionParameter: null,
+  baselineOutcome: 'saída canônica',
+  variationOutcome: 'saída canônica',
+  observables: ['resultado público'],
+};
+decisionDimensionDraft.requirements[0].acceptanceCases.push(
+  {
+    id: 'AC-ORDER-SIMPLE',
+    kind: 'BOUNDARY',
+    given: orderingWitness.baseline,
+    when: 'A forma simples for escolhida.',
+    then: 'Base: sequência [A,B]; Variação: sequência [B,A]; Resolução: INPUT_ORDER_PRESERVED.',
+    outcomeKind: 'RETURN_VALUE',
+    decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' },
+    boundaryBinding: null,
+  },
+  {
+    id: 'AC-ORDER-DETAIL',
+    kind: 'BOUNDARY',
+    given: orderingWitness.variation,
+    when: 'A forma detalhada for escolhida.',
+    then: 'Base: saída canônica; Variação: saída canônica; Resolução: CANONICAL_ORDER.',
+    outcomeKind: 'RETURN_VALUE',
+    decisionBinding: { questionId: 'Q-FORMAT', answerId: 'ANS-DETAIL' },
+    boundaryBinding: null,
+  },
+);
+decisionDimensionDraft.decisions[0].answers[0].closure = {
+  mode: 'MATERIALIZE',
+  acceptanceCaseIds: ['AC-RESULT-HAPPY', 'AC-ORDER-SIMPLE'],
+  determinismResolutions: [{
+    kind: 'ORDERING',
+    subjectId: 'REQ-RESULT',
+    acceptanceCaseId: 'AC-ORDER-SIMPLE',
+    rationale: 'A escolha humana preserva a ordem fornecida.',
+    proofObligation: simpleOrderingProof,
+  }],
+};
+decisionDimensionDraft.decisions[0].answers[1].closure = {
+  mode: 'MATERIALIZE',
+  acceptanceCaseIds: ['AC-RESULT-DETAIL', 'AC-ORDER-DETAIL'],
+  determinismResolutions: [{
+    kind: 'ORDERING',
+    subjectId: 'REQ-RESULT',
+    acceptanceCaseId: 'AC-ORDER-DETAIL',
+    rationale: 'A escolha humana determina ordenação canônica.',
+    proofObligation: detailedOrderingProof,
+  }],
+};
+decisionDimensionDraft.determinismReview = {
+  status: 'GAPS_FOUND',
+  rationale: 'A ordem depende da decisão de formato.',
+  sourceFragmentIds: ['FRAG-0001'],
+  dimensions: [{
+    kind: 'ORDERING',
+    subjectId: 'REQ-RESULT',
+    status: 'DECISION_REQUIRED',
+    rationale: 'As alternativas produzem políticas de ordem diferentes.',
+    targetIds: ['REQ-RESULT', 'Q-FORMAT'],
+    basis: modelBasis,
+    acceptanceCaseId: null,
+    proofObligation: null,
+    inapplicabilityProof: null,
+    closureAuthority: 'MODEL_ARGUMENT',
+    counterexampleWitness: orderingWitness,
+  }],
+};
+assertSemanticDraft(decisionDimensionDraft, loadedPolicy.policy, validationContext);
+const dimensionContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: decisionDimensionDraft,
+  preflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+  semanticRequest,
+});
+const dimensionRequest = buildConfirmationRequest(dimensionContract);
+const dimensionResolution = {
+  schema: 'aegis.semantic_resolution.v2',
+  executionId: dimensionRequest.executionId,
+  contractDraftDigest: dimensionRequest.contractDraftDigest,
+  method: 'INTERACTIVE_WIZARD',
+  attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
+  answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
+};
+const dimensionApproved = finalizeContractApproval({
+  contract: dimensionContract,
+  request: dimensionRequest,
+  resolution: dimensionResolution,
+});
+const closedOrdering = dimensionApproved.specification.determinismReview.dimensions[0];
+if (closedOrdering.status !== 'SPECIFIED'
+  || closedOrdering.closureAuthority !== 'HUMAN_DECISION'
+  || closedOrdering.acceptanceCaseId !== 'AC-ORDER-SIMPLE'
+  || closedOrdering.targetIds.includes('Q-FORMAT')) {
+  throw new Error('decision_dimension_was_not_materialized');
+}
+
+const reopenDraft = structuredClone(draft);
+reopenDraft.decisions[0].answers[1].closure = {
+  mode: 'REOPEN_PREFLIGHT',
+  reason: 'A alternativa altera a estrutura contratual e precisa de nova deliberação.',
+};
+const reopenContract = compileSemanticContract({
+  repositoryRoot: process.cwd(),
+  draft: reopenDraft,
+  preflight,
+  policy: loadedPolicy.policy,
+  policyDigest: loadedPolicy.policyDigest,
+  constitution,
+  constitutionDigest: constitution.digest,
+  semanticRequest,
+});
+const reopenConfirmation = buildConfirmationRequest(reopenContract);
+if (!reopenConfirmation.questions[0].answers[1].requiresSemanticRevision) {
+  throw new Error('wizard_did_not_expose_reopened_branch');
+}
+const reopenResolution = {
+  schema: 'aegis.semantic_resolution.v2',
+  executionId: reopenConfirmation.executionId,
+  contractDraftDigest: reopenConfirmation.contractDraftDigest,
+  method: 'INTERACTIVE_WIZARD',
+  attestation: 'DECISIONS_REVIEWED_AND_CONFIRMED',
+  answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-DETAIL' }],
+};
+if (!resolutionRequiresSemanticRevision({
+  contract: reopenContract,
+  request: reopenConfirmation,
+  resolution: reopenResolution,
+})) {
+  throw new Error('reopened_branch_bypassed_semantic_revision');
 }
 
 const blocked = structuredClone(draft);
@@ -675,6 +848,8 @@ blocked.intentClaims = blocked.intentClaims.filter(({ disposition }) => disposit
 blocked.fragmentDispositions[0].claimIds = ['CLAIM-RESULT'];
 blocked.unknowns[0].decisionId = null;
 blocked.requirements[0].acceptanceCases[0].decisionBinding = null;
+blocked.requirements[0].acceptanceCases = blocked.requirements[0].acceptanceCases
+  .filter(({ id }) => id !== 'AC-RESULT-DETAIL');
 const blockedContract = compileSemanticContract({
   repositoryRoot: process.cwd(),
   draft: blocked,
