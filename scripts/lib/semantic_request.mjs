@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { buildIntentEvidence } from './intent_evidence.mjs';
-import { assertSchema, schemaDocument } from './schema_validator.mjs';
+import { assertSchema, standaloneSchemaDocument } from './schema_validator.mjs';
 import {
   mechanicalPolicySignals,
   policySignalSemantics,
@@ -58,8 +58,8 @@ function compactOutputSchema(value) {
   if (Array.isArray(value)) return value.map(compactOutputSchema);
   if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => key !== 'description' && key !== 'title')
-    .map(([key, item]) => [key, compactOutputSchema(item)]));
+    .filter(([key]) => !['description', 'title', 'if', 'then', 'else', 'allOf'].includes(key))
+    .map(([key, item]) => [key === 'oneOf' ? 'anyOf' : key, compactOutputSchema(item)]));
 }
 
 function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
@@ -213,7 +213,9 @@ export function buildSemanticRequest({
     revision,
   };
   const contextDigest = canonicalDigest(context);
-  const outputSchemaDocument = compactOutputSchema(schemaDocument('aegis.semantic_opinion.v3'));
+  const outputSchemaDocument = compactOutputSchema(
+    standaloneSchemaDocument('aegis.semantic_opinion.v3'),
+  );
   outputSchemaDocument.properties.sourceEvidenceDigest = { const: intentEvidence.evidenceDigest };
   const requestWithoutDigest = {
     schema: 'aegis.semantic_request.v10',

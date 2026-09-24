@@ -20,6 +20,11 @@ import {
   assertJevAdvisory,
   compileJevAdvisory,
 } from './scripts/lib/jev_advisory.mjs';
+import { compileJevComparison } from './scripts/lib/jev_comparison.mjs';
+import {
+  buildSemanticGatewayPayload,
+  requestSemanticOpinion,
+} from './scripts/lib/semantic_gateway.mjs';
 import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
@@ -47,11 +52,13 @@ const currentSchemas = [
   'issue-contract.v14.schema.json',
   'jev-advisory.v2.schema.json',
   'jev-assessment.v1.schema.json',
+  'jev-comparison.v1.schema.json',
   'jev-decision-batch.v2.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
   'semantic-draft.v9.schema.json',
+  'semantic-execution.v1.schema.json',
   'semantic-opinion.v3.schema.json',
   'semantic-request.v10.schema.json',
   'semantic-resolution.v2.schema.json',
@@ -85,6 +92,10 @@ if (requestDigest !== canonicalDigest(requestPayload)
     semanticRequest.outputSchema.document.properties,
     'worksheetDigest',
   )
+  || JSON.stringify(semanticRequest.outputSchema.document).includes('"$ref"')
+  || JSON.stringify(semanticRequest.outputSchema.document).includes('"oneOf"')
+  || JSON.stringify(semanticRequest.outputSchema.document).includes('"allOf"')
+  || JSON.stringify(semanticRequest.outputSchema.document).includes('"if"')
   || semanticRequest.intentEvidence.fragments.length !== 1
   || semanticRequest.intentEvidence.literalFacts.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
@@ -110,6 +121,7 @@ if (jevBatch.schema !== 'aegis.jev_decision_batch.v2'
   || jevBatch.projection.questionCount !== Object.keys(jevBatch.questions).length
   || jevBatch.projection.questionCount !== jevSemanticRequest.intentEvidence.fragments.length
   || !Object.values(jevBatch.bindings).every(({ allowedUse }) => allowedUse === 'SHADOW_METRIC_ONLY')
+  || Object.hasOwn(jevBatch.state, 'intent')
   || Object.hasOwn(jevBatch.state, 'sourceEvidence')
   || Object.hasOwn(jevBatch.state, 'outputSchema')) {
   throw new Error('jev_projection_is_not_compact_or_advisory');
@@ -148,6 +160,23 @@ const compiledJevAssessment = compileJevAssessment(jevBatch, {
 });
 if (compiledJevAssessment.assessmentDigest !== jevAssessment.assessmentDigest) {
   throw new Error('jev_gateway_response_was_not_compiled_deterministically');
+}
+const roundedAnswers = structuredClone(jevAnswers);
+for (const answer of Object.values(roundedAnswers)) {
+  const optionIds = Object.keys(answer.probabilities);
+  answer.probabilities = Object.fromEntries(optionIds.map((optionId, index) => [
+    optionId,
+    index < 2 ? 0.499 : 0,
+  ]));
+}
+const normalizedAssessment = compileJevAssessment(jevBatch, {
+  model: 'jev-test-pinned',
+  answers: roundedAnswers,
+  usage: { input_tokens: 10, output_tokens: 0 },
+});
+for (const answer of Object.values(normalizedAssessment.answers)) {
+  const total = Object.values(answer.probabilities).reduce((sum, probability) => sum + probability, 0);
+  if (Math.abs(total - 1) > 1e-9) throw new Error('jev_probabilities_were_not_normalized');
 }
 const jevAdvisory = compileJevAdvisory(jevSemanticRequest, jevBatch, jevAssessment);
 assertJevAdvisory(jevAdvisory, jevSemanticRequest, jevBatch);
@@ -386,6 +415,69 @@ const validationContext = {
   workspaceEvidence: semanticRequest.workspace.sourceEvidence,
 };
 assertSemanticDraft(draft, loadedPolicy.policy, validationContext);
+
+const semanticBatch = buildJevDecisionBatch(semanticRequest);
+const semanticAnswers = Object.fromEntries(Object.entries(semanticBatch.questions).map(([id, question]) => {
+  const optionIds = Object.keys(question.criteria);
+  return [id, {
+    type: 'choice',
+    choice: 'NORMATIVE',
+    probabilities: Object.fromEntries(optionIds.map((optionId) => [
+      optionId,
+      optionId === 'NORMATIVE' ? 1 : 0,
+    ])),
+    confidence: 1,
+  }];
+}));
+const semanticAssessment = compileJevAssessment(semanticBatch, {
+  model: 'jev-test-pinned',
+  answers: semanticAnswers,
+  usage: { input_tokens: 1, output_tokens: 1 },
+});
+const semanticAdvisory = compileJevAdvisory(semanticRequest, semanticBatch, semanticAssessment);
+const jevComparison = compileJevComparison(semanticRequest, draft, semanticAdvisory);
+if (jevComparison.authority !== 'EVALUATION_ONLY'
+  || jevComparison.totals.fragments !== semanticRequest.intentEvidence.fragments.length
+  || jevComparison.totals.disagreements !== 1) {
+  throw new Error('jev_shadow_comparison_is_not_mechanical');
+}
+
+const gatewayRole = {
+  channel: 'API',
+  adapter: 'ai-gateway',
+  model: 'openai/test-model',
+  credentialEnv: 'TEST_GATEWAY_KEY',
+};
+const gatewayPayload = buildSemanticGatewayPayload(semanticRequest, gatewayRole);
+const gatewayUserContext = JSON.parse(gatewayPayload.messages[1].content);
+if (gatewayPayload.messages.length !== 2
+  || gatewayPayload.response_format.json_schema.schema !== semanticRequest.outputSchema.document
+  || Object.hasOwn(gatewayUserContext, 'outputSchema')
+  || Object.hasOwn(gatewayUserContext, 'constitution')) {
+  throw new Error('semantic_gateway_payload_duplicates_or_omits_context');
+}
+let semanticCalls = 0;
+const gatewayResult = await requestSemanticOpinion(semanticRequest, gatewayRole, {
+  environment: { TEST_GATEWAY_KEY: 'secret' },
+  fetchImplementation: async () => {
+    semanticCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          model: 'openai/test-model',
+          choices: [{ message: { content: '{}' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2 },
+        });
+      },
+    };
+  },
+});
+if (semanticCalls !== 1 || JSON.stringify(gatewayResult.opinion) !== '{}'
+  || gatewayResult.execution.usage.inputTokens !== 3) {
+  throw new Error('semantic_gateway_did_not_make_exactly_one_call');
+}
 
 function expectDraftFailure(mutator, expectedPrefix) {
   const invalid = structuredClone(draft);

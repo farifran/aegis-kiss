@@ -60,8 +60,8 @@ async function configureRole(terminal, label, defaults) {
   const compatibleDefaults = defaults?.channel === channel ? defaults : null;
   const adapter = assertAdapter(await askRequired(
     terminal,
-    'Adaptador (ex.: openai-compatible, codex, cursor): ',
-    compatibleDefaults?.adapter ?? (channel === 'API' ? 'openai-compatible' : 'codex'),
+    `Adaptador (ex.: ${channel === 'API' ? 'ai-gateway' : 'codex, cursor'}): `,
+    compatibleDefaults?.adapter ?? (channel === 'API' ? 'ai-gateway' : 'codex'),
   ));
   const modelAnswer = trimAnswer(await terminal.question(
     `Modelo${channel === 'API' ? '' : ' (opcional)'}${compatibleDefaults?.model ? ` [${compatibleDefaults.model}]` : ''}: `,
@@ -74,8 +74,8 @@ async function configureRole(terminal, label, defaults) {
   process.stderr.write('Informe somente o NOME da variável de ambiente. A chave nunca é digitada nem gravada pelo Aegis.\n');
   const credentialEnv = assertEnvironmentVariable(await askRequired(
     terminal,
-    `Variável da chave${compatibleDefaults?.credentialEnv ? ` [${compatibleDefaults.credentialEnv}]` : ' [AEGIS_SUPERVISOR_API_KEY]'}: `,
-    compatibleDefaults?.credentialEnv ?? 'AEGIS_SUPERVISOR_API_KEY',
+    `Variável da chave${compatibleDefaults?.credentialEnv ? ` [${compatibleDefaults.credentialEnv}]` : ' [AI_GATEWAY_API_KEY]'}: `,
+    compatibleDefaults?.credentialEnv ?? 'AI_GATEWAY_API_KEY',
   ));
   return { channel, adapter, model, credentialEnv };
 }

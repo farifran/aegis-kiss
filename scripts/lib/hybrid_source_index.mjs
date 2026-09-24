@@ -340,6 +340,7 @@ export function searchHybridSourceIndex(index, intent) {
     if (sourceTerm === undefined) continue;
     const document = bestDocument(index, sourceTerm);
     if (document === null) continue;
+    if (document.sourceRegion === 'COMMENT' && !query.codeLike && !query.technicalName) continue;
     matches.push({
       term: query.term,
       sourceToken: document.sourceToken,

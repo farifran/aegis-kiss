@@ -31,6 +31,16 @@ function gatewayFailure(error) {
 
 export function compileJevAssessment(batch, response) {
   assertJevDecisionBatch(batch);
+  const answers = Object.fromEntries(Object.entries(response.answers).map(([questionId, answer]) => {
+    const entries = Object.entries(answer.probabilities);
+    const total = entries.reduce((sum, [, probability]) => sum + probability, 0);
+    if (!Number.isFinite(total) || total < 0.95 || total > 1.05
+      || entries.some(([, probability]) => !Number.isFinite(probability) || probability < 0)) {
+      throw new Error(`jev_gateway_invalid_probabilities:${questionId}`);
+    }
+    const probabilities = Object.fromEntries(entries.map(([id, probability]) => [id, probability / total]));
+    return [questionId, { ...answer, probabilities }];
+  }));
   const payload = {
     schema: 'aegis.jev_assessment.v1',
     sourceBatchDigest: batch.batchDigest,
@@ -38,7 +48,7 @@ export function compileJevAssessment(batch, response) {
     provider: 'TYPESAFE_JEV',
     transport: 'VERCEL_AI_GATEWAY',
     model: response.model,
-    answers: response.answers,
+    answers,
     usage: {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -64,7 +74,7 @@ export async function requestJevAssessment(batch, options = {}) {
     defaultModel: 'jev-latest',
     logLevel: 'off',
     timeout: options.timeoutMs ?? 10_000,
-    retry: { maxRetries: options.maxRetries ?? 2 },
+    retry: { maxRetries: options.maxRetries ?? 0 },
   });
   let response;
   try {

@@ -18,6 +18,8 @@ const contractMdPath = resolve(runtimeDir, 'contract.md');
 const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
 const sourceIndexPath = resolve(runtimeDir, 'source-index.json');
 const jevAdvisoryPath = resolve(runtimeDir, 'jev-advisory.json');
+const jevComparisonPath = resolve(runtimeDir, 'jev-comparison.json');
+const semanticExecutionPath = resolve(runtimeDir, 'semantic-execution.json');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 const semanticOpinionByteLimit = 262_144;
@@ -412,7 +414,7 @@ async function handleJevRequest() {
   process.stdout.write(`${canonicalJson(buildJevDecisionBatch(request))}\n`);
 }
 
-async function handleJevRun() {
+async function createJevAdvisory(request) {
   const [
     { canonicalJson },
     { requestJevAssessment },
@@ -424,18 +426,62 @@ async function handleJevRun() {
     import('./lib/jev_advisory.mjs'),
     import('./lib/jev_projection.mjs'),
   ]);
-  const { request } = await buildCurrentSemanticRequest();
   const batch = buildJevDecisionBatch(request);
   const assessment = await requestJevAssessment(batch);
   const advisory = compileJevAdvisory(request, batch, assessment);
   await writeFileAtomic(jevAdvisoryPath, `${canonicalJson(advisory)}\n`);
+  return { assessment, advisory };
+}
+
+async function handleJevRun() {
+  const { canonicalJson } = await import('./lib/canonical_json.mjs');
+  const { request } = await buildCurrentSemanticRequest();
+  const { assessment } = await createJevAdvisory(request);
   process.stdout.write(`${canonicalJson(assessment)}\n`);
 }
 
-async function handleSemanticCompile(args) {
-  if (args.length !== 0) throw rejection('INVALID_SEMANTIC_COMPILE_ARITY');
+async function ensureJevAdvisory(request) {
+  if (existsSync(jevAdvisoryPath)) {
+    try {
+      const [{ assertJevAdvisory }, advisory] = await Promise.all([
+        import('./lib/jev_advisory.mjs'),
+        readFile(jevAdvisoryPath, 'utf8').then(JSON.parse),
+      ]);
+      assertJevAdvisory(advisory, request);
+      return 'REUSED';
+    } catch {
+      // A avaliação é auxiliar; uma versão obsoleta será substituída ou ignorada.
+    }
+  }
+  try {
+    await createJevAdvisory(request);
+    return 'EXECUTED';
+  } catch {
+    await Promise.all([
+      rm(jevAdvisoryPath, { force: true }),
+      rm(jevComparisonPath, { force: true }),
+    ]);
+    return 'UNAVAILABLE';
+  }
+}
+
+async function optionalJevComparison(request, draft) {
+  if (!existsSync(jevAdvisoryPath)) return null;
+  try {
+    const [{ compileJevComparison }, advisory] = await Promise.all([
+      import('./lib/jev_comparison.mjs'),
+      readFile(jevAdvisoryPath, 'utf8').then(JSON.parse),
+    ]);
+    return compileJevComparison(request, draft, advisory);
+  } catch {
+    await rm(jevComparisonPath, { force: true });
+    return null;
+  }
+}
+
+async function compileAndPersistSemanticOpinion(opinion, context, execution = null) {
   const [
-    { canonicalJson },
+    { canonicalDigest, canonicalJson },
     {
       assertRevisionApplied,
       buildConfirmationRequest,
@@ -447,26 +493,13 @@ async function handleSemanticCompile(args) {
     import('./lib/canonical_json.mjs'),
     import('./lib/semantic_contract.mjs'),
   ]);
-  let opinion;
-  try {
-    let serializedDraft = '';
-    let receivedBytes = 0;
-    for await (const chunk of process.stdin) {
-      receivedBytes += Buffer.byteLength(chunk);
-      if (receivedBytes > semanticOpinionByteLimit) throw new Error('semantic_opinion_too_large');
-      serializedDraft += chunk;
-    }
-    opinion = JSON.parse(serializedDraft);
-  } catch (error) {
-    throw rejection('INVALID_SEMANTIC_OPINION', error.message);
-  }
   const {
     request,
     preflight,
     loadedPolicy,
     constitution,
     revision,
-  } = await buildCurrentSemanticRequest();
+  } = context;
   let draft;
   try {
     draft = compileSemanticOpinion(opinion, request);
@@ -490,17 +523,78 @@ async function handleSemanticCompile(args) {
     semanticRequest: request,
   });
   const confirmation = buildConfirmationRequest(contract);
+  const comparison = await optionalJevComparison(request, draft);
 
   await mkdir(runtimeDir, { recursive: true });
-  await Promise.all([
+  const writes = [
     writeFileAtomic(contractJsonPath, `${canonicalJson(contract)}\n`),
     writeFileAtomic(contractMdPath, `${renderSemanticContractMarkdown(contract, {
       policyRules: loadedPolicy.policy.rules,
     })}\n`),
     rm(resolutionPath, { force: true }),
-  ]);
+    comparison === null
+      ? rm(jevComparisonPath, { force: true })
+      : writeFileAtomic(jevComparisonPath, `${canonicalJson(comparison)}\n`),
+  ];
+  if (execution !== null) {
+    const { assertSchema } = await import('./lib/schema_validator.mjs');
+    const receiptPayload = {
+      schema: 'aegis.semantic_execution.v1',
+      sourceSemanticRequestDigest: request.requestDigest,
+      provider: execution.provider,
+      model: execution.model,
+      calls: 1,
+      jevEvaluation: execution.jevEvaluation,
+      usage: execution.usage,
+      opinionDigest: canonicalDigest(opinion),
+    };
+    const receipt = {
+      ...receiptPayload,
+      executionDigest: canonicalDigest(receiptPayload),
+    };
+    assertSchema('aegis.semantic_execution.v1', receipt);
+    writes.push(writeFileAtomic(semanticExecutionPath, `${canonicalJson(receipt)}\n`));
+  } else {
+    writes.push(rm(semanticExecutionPath, { force: true }));
+  }
+  await Promise.all(writes);
   await writeFileAtomic(userConfirmationPath, `${canonicalJson(confirmation)}\n`);
   process.stdout.write(`${canonicalJson(confirmation)}\n`);
+}
+
+async function handleSemanticCompile(args) {
+  if (args.length !== 0) throw rejection('INVALID_SEMANTIC_COMPILE_ARITY');
+  let opinion;
+  try {
+    let serializedDraft = '';
+    let receivedBytes = 0;
+    for await (const chunk of process.stdin) {
+      receivedBytes += Buffer.byteLength(chunk);
+      if (receivedBytes > semanticOpinionByteLimit) throw new Error('semantic_opinion_too_large');
+      serializedDraft += chunk;
+    }
+    opinion = JSON.parse(serializedDraft);
+  } catch (error) {
+    throw rejection('INVALID_SEMANTIC_OPINION', error.message);
+  }
+  await compileAndPersistSemanticOpinion(opinion, await buildCurrentSemanticRequest());
+}
+
+async function handleSemanticRun(args) {
+  if (args.length !== 0) throw rejection('INVALID_SEMANTIC_RUN_ARITY');
+  const [{ loadRoleAssignment }, { assertSemanticSupervisorReady, requestSemanticOpinion }] = await Promise.all([
+    import('./lib/role_assignment.mjs'),
+    import('./lib/semantic_gateway.mjs'),
+  ]);
+  const assignment = await loadRoleAssignment(root);
+  if (assignment === null) throw rejection('ROLE_ASSIGNMENT_NOT_CONFIGURED');
+  const role = assignment.roles.contractSupervisor;
+  if (role.channel !== 'API') throw rejection('SEMANTIC_SUPERVISOR_EXTERNAL_IDE');
+  assertSemanticSupervisorReady(role);
+  const context = await buildCurrentSemanticRequest();
+  const jevEvaluation = await ensureJevAdvisory(context.request);
+  const { opinion, execution } = await requestSemanticOpinion(context.request, role);
+  await compileAndPersistSemanticOpinion(opinion, context, { ...execution, jevEvaluation });
 }
 
 async function handleApprove() {
@@ -656,6 +750,7 @@ try {
   else if (command === 'semantic-request') await handleSemanticRequest();
   else if (command === 'jev-request') await handleJevRequest();
   else if (command === 'jev-run') await handleJevRun();
+  else if (command === 'semantic-run') await handleSemanticRun(remainingArgs);
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();
   else if (command === 'verify') await handleVerify();
@@ -668,6 +763,7 @@ try {
   const phase = command === 'draft' || command === 'validate-preflight'
     ? 'PREFLIGHT'
     : command === 'semantic-request' || command === 'jev-request' || command === 'jev-run'
+      || command === 'semantic-run'
       || command === 'semantic-compile' || command === 'validate-contract'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';

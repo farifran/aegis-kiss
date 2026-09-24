@@ -15,6 +15,25 @@ function structuralKind(text) {
   return 'TEXT';
 }
 
+function sentenceRanges(text, absoluteStart) {
+  const ranges = [];
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (!'.!?'.includes(text[index])) continue;
+    let next = index + 1;
+    while (next < text.length && '.!?'.includes(text[next])) next += 1;
+    if (next < text.length && !/\s/u.test(text[next])) continue;
+    while (next < text.length && /\s/u.test(text[next])) next += 1;
+    ranges.push({ startOffset: absoluteStart + start, endOffset: absoluteStart + index + 1 });
+    start = next;
+    index = next - 1;
+  }
+  if (start < text.length) {
+    ranges.push({ startOffset: absoluteStart + start, endOffset: absoluteStart + text.length });
+  }
+  return ranges;
+}
+
 function fragmentsFrom(intent) {
   const fragments = [];
   for (const match of intent.matchAll(/[^\r\n]+/gu)) {
@@ -23,14 +42,20 @@ function fragmentsFrom(intent) {
     const startOffset = match.index + leading;
     const endOffset = match.index + match[0].length - trailing;
     if (endOffset <= startOffset) continue;
-    const text = intent.slice(startOffset, endOffset);
-    fragments.push({
-      id: `FRAG-${String(fragments.length + 1).padStart(4, '0')}`,
-      startOffset,
-      endOffset,
-      structuralKind: structuralKind(text),
-      anchor: text.length <= anchorLimit ? text : `${text.slice(0, anchorLimit - 1)}…`,
-    });
+    const lineText = intent.slice(startOffset, endOffset);
+    const kind = structuralKind(lineText);
+    const ranges = kind === 'TEXT'
+      ? sentenceRanges(lineText, startOffset)
+      : [{ startOffset, endOffset }];
+    for (const range of ranges) {
+      const text = intent.slice(range.startOffset, range.endOffset);
+      fragments.push({
+        id: `FRAG-${String(fragments.length + 1).padStart(4, '0')}`,
+        ...range,
+        structuralKind: kind,
+        anchor: text.length <= anchorLimit ? text : `${text.slice(0, anchorLimit - 1)}…`,
+      });
+    }
   }
   if (fragments.length === 0) throw new Error('intent_evidence_without_fragments');
   if (fragments.length > fragmentLimit) throw new Error('intent_fragment_limit_exceeded');
@@ -173,7 +198,7 @@ export function buildIntentEvidence(intent) {
   const facts = literalFacts(intent, fragments);
   const payload = {
     schema: 'aegis.intent_evidence.v1',
-    method: 'LOSSLESS_NEUTRAL_LINES_V1',
+    method: 'LOSSLESS_NEUTRAL_SENTENCES_V2',
     offsetUnit: 'UTF16_CODE_UNIT',
     intentDigest: canonicalDigest(intent),
     fragments,

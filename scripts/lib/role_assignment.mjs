@@ -42,6 +42,6 @@ export function publicRoleAssignmentSummary(document) {
       contractSupervisor: publicRoleSummary(document.roles.contractSupervisor),
       codingAgent: publicRoleSummary(document.roles.codingAgent),
     },
-    executionBoundary: 'EXTERNAL_CONFIGURATION_ONLY',
+    executionBoundary: 'SUPERVISOR_API_OR_EXTERNAL_IDE',
   };
 }

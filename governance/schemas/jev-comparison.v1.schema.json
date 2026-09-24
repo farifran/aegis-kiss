@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.jev_comparison.v1",
+  "title": "Aegis JEV Shadow Comparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "comparisonDigest", "sourceSemanticRequestDigest", "sourceEvidenceDigest", "advisoryDigest", "semanticDraftDigest", "authority", "totals", "items"],
+  "properties": {
+    "schema": { "const": "aegis.jev_comparison.v1" },
+    "comparisonDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "advisoryDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "semanticDraftDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "authority": { "const": "EVALUATION_ONLY" },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fragments", "comparable", "agreements", "disagreements", "unclassified", "agreementRate"],
+      "properties": {
+        "fragments": { "type": "integer", "minimum": 1 },
+        "comparable": { "type": "integer", "minimum": 0 },
+        "agreements": { "type": "integer", "minimum": 0 },
+        "disagreements": { "type": "integer", "minimum": 0 },
+        "unclassified": { "type": "integer", "minimum": 0 },
+        "agreementRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fragmentId", "jevChoice", "semanticChoice", "outcome"],
+        "properties": {
+          "fragmentId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+          "jevChoice": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "semanticChoice": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "outcome": { "enum": ["AGREEMENT", "DISAGREEMENT", "NOT_COMPARABLE"] }
+        }
+      }
+    }
+  }
+}

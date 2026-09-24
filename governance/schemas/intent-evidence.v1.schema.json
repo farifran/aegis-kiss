@@ -8,7 +8,7 @@
   "properties": {
     "schema": { "const": "aegis.intent_evidence.v1" },
     "evidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "method": { "const": "LOSSLESS_NEUTRAL_LINES_V1" },
+    "method": { "const": "LOSSLESS_NEUTRAL_SENTENCES_V2" },
     "offsetUnit": { "const": "UTF16_CODE_UNIT" },
     "intentDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "fragments": {

@@ -25,10 +25,22 @@
     "state": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["intent", "fragments"],
+      "required": ["fragments"],
       "properties": {
-        "intent": { "type": "string", "minLength": 1 },
-        "fragments": { "$ref": "aegis.intent_evidence.v1#/properties/fragments" }
+        "fragments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 255,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+              "text": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
       }
     },
     "questions": {
@@ -64,7 +76,7 @@
         "properties": {
           "family": { "const": "INTENT_FRAGMENT" },
           "subjectId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
-          "semanticTarget": { "const": "CLAIM_KIND_CANDIDATE" },
+          "semanticTarget": { "const": "CONTRACT_ROLE_CANDIDATE" },
           "allowedUse": { "const": "SHADOW_METRIC_ONLY" }
         }
       }

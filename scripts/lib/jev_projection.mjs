@@ -2,14 +2,11 @@ import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
 
 const fragmentCriteria = {
-  OBLIGATION: 'O fragmento contém exigência que pode originar obrigação normativa.',
-  PROHIBITION: 'O fragmento contém comportamento explicitamente proibido.',
-  GOAL: 'O fragmento contém objetivo qualitativo que não é obrigação falsificável por si só.',
-  OPTION: 'O fragmento contém sugestão ou possibilidade não obrigatória.',
-  EXAMPLE: 'O fragmento contém ilustração que não limita sozinha a solução.',
-  AMBIGUITY: 'O fragmento contém ausência ou conflito que pode alterar comportamento observável.',
-  CONTEXT_ONLY: 'O fragmento fornece contexto sem claim contratual próprio.',
-  MIXED_OR_UNCLEAR: 'O fragmento mistura papéis ou não permite classificação primária segura.',
+  NORMATIVE: 'Obrigação ou proibição.',
+  NON_NORMATIVE: 'Meta, opção ou exemplo.',
+  AMBIGUITY: 'Lacuna ou conflito material.',
+  CONTEXT_ONLY: 'Contexto sem claim próprio.',
+  MIXED_OR_UNCLEAR: 'Papéis mistos ou incertos.',
 };
 
 function withoutDigest(value, digestField) {
@@ -39,9 +36,14 @@ export function assertJevDecisionBatch(batch, semanticRequest = null) {
       throw new Error('jev_batch_source_mismatch');
     }
     for (const fragment of batch.state.fragments) {
-      const source = semanticRequest.intent.slice(fragment.startOffset, fragment.endOffset);
-      const expected = source.length <= 240 ? source : `${source.slice(0, 239)}…`;
-      if (fragment.anchor !== expected) throw new Error(`jev_fragment_binding_mismatch:${fragment.id}`);
+      const sourceFragment = semanticRequest.intentEvidence.fragments
+        .find(({ id }) => id === fragment.id);
+      if (sourceFragment === undefined) throw new Error(`jev_fragment_binding_mismatch:${fragment.id}`);
+      const expected = semanticRequest.intent.slice(
+        sourceFragment.startOffset,
+        sourceFragment.endOffset,
+      );
+      if (fragment.text !== expected) throw new Error(`jev_fragment_binding_mismatch:${fragment.id}`);
     }
   }
 }
@@ -58,13 +60,13 @@ export function buildJevDecisionBatch(semanticRequest) {
     const questionId = `fragment.${fragment.id}`;
     questions[questionId] = {
       type: 'choice',
-      instructions: `Classifique o papel semântico primário de ${fragment.id}. Use MIXED_OR_UNCLEAR quando houver mais de um claim ou contexto insuficiente.`,
+      instructions: `Classifique ${fragment.id}; use MIXED_OR_UNCLEAR para papéis mistos ou incerteza.`,
       criteria: fragmentCriteria,
     };
     bindings[questionId] = {
       family: 'INTENT_FRAGMENT',
       subjectId: fragment.id,
-      semanticTarget: 'CLAIM_KIND_CANDIDATE',
+      semanticTarget: 'CONTRACT_ROLE_CANDIDATE',
       allowedUse: 'SHADOW_METRIC_ONLY',
     };
   }
@@ -80,8 +82,10 @@ export function buildJevDecisionBatch(semanticRequest) {
       purpose: 'SHADOW_EVALUATION',
     },
     state: {
-      intent: semanticRequest.intent,
-      fragments: semanticRequest.intentEvidence.fragments,
+      fragments: semanticRequest.intentEvidence.fragments.map((fragment) => ({
+        id: fragment.id,
+        text: semanticRequest.intent.slice(fragment.startOffset, fragment.endOffset),
+      })),
     },
     questions,
     bindings,

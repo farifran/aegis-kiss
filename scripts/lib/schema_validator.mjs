@@ -33,6 +33,46 @@ export function schemaDocument(schemaId) {
   return JSON.parse(readFileSync(resolve(schemaDirectory, file), 'utf8'));
 }
 
+function pointerValue(document, pointer) {
+  if (pointer === '') return document;
+  if (!pointer.startsWith('/')) throw new Error(`unsupported_schema_pointer:${pointer}`);
+  return pointer.slice(1).split('/').reduce((value, segment) => {
+    const key = segment.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) {
+      throw new Error(`unresolved_schema_pointer:${pointer}`);
+    }
+    return value[key];
+  }, document);
+}
+
+function expandSchema(value, currentSchemaId, stack) {
+  if (Array.isArray(value)) return value.map((item) => expandSchema(item, currentSchemaId, stack));
+  if (value === null || typeof value !== 'object') return value;
+  if (typeof value.$ref === 'string') {
+    if (Object.keys(value).length !== 1) throw new Error(`schema_ref_with_siblings:${value.$ref}`);
+    const [referencedId, pointer = ''] = value.$ref.startsWith('#')
+      ? [currentSchemaId, value.$ref.slice(1)]
+      : value.$ref.split('#');
+    const absoluteReference = `${referencedId}#${pointer}`;
+    if (stack.has(absoluteReference)) throw new Error(`recursive_schema_ref:${absoluteReference}`);
+    const nextStack = new Set(stack);
+    nextStack.add(absoluteReference);
+    return expandSchema(
+      pointerValue(schemaDocument(referencedId), pointer),
+      referencedId,
+      nextStack,
+    );
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== '$defs')
+    .map(([key, item]) => [key, expandSchema(item, currentSchemaId, stack)]));
+}
+
+/** Produz o schema autocontido usado fora do processo local, sem refs dependentes do catálogo. */
+export function standaloneSchemaDocument(schemaId) {
+  return expandSchema(schemaDocument(schemaId), schemaId, new Set());
+}
+
 export function schemaErrors(schemaId, value) {
   const validate = loadValidator(schemaId);
   if (validate(value)) return [];

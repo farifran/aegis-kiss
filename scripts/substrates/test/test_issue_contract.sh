@@ -44,7 +44,7 @@ printf '%s\n' "${role_assignment}" | jq -e '
   and .roles.contractSupervisor.credentialAvailable == false
   and .roles.codingAgent.channel == "IDE"
   and .roles.codingAgent.credentialEnv == null
-  and .executionBoundary == "EXTERNAL_CONFIGURATION_ONLY"
+  and .executionBoundary == "SUPERVISOR_API_OR_EXTERNAL_IDE"
 ' >/dev/null
 set +e
 setup_arity_output="$(bash ./aegis --setup invalid 2>&1)"
@@ -236,7 +236,7 @@ if (JSON.stringify(policySignals.map(({ reference }) => reference))
 const completeIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bit 1: ciclo; Bits 2–31: dados.';
 const complete = buildIntentEvidence(completeIntent);
 const completeRanges = complete.literalFacts.filter(({ kind }) => kind === 'BIT_RANGE');
-if (complete.method !== 'LOSSLESS_NEUTRAL_LINES_V1'
+if (complete.method !== 'LOSSLESS_NEUTRAL_SENTENCES_V2'
   || complete.fragments.length !== 1
   || completeRanges.length !== 3
   || completeRanges[0].attributes.start !== 0
@@ -345,7 +345,7 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and .outputSchema.document."$id" == "aegis.semantic_opinion.v3"
   and .outputSchema.document.properties.sourceEvidenceDigest.const == .intentEvidence.evidenceDigest
   and .intentEvidence.schema == "aegis.intent_evidence.v1"
-  and .intentEvidence.method == "LOSSLESS_NEUTRAL_LINES_V1"
+  and .intentEvidence.method == "LOSSLESS_NEUTRAL_SENTENCES_V2"
   and (.intentEvidence.fragments | length) == 1
   and .intentEvidence.literalFacts == []
   and (has("worksheet") | not)

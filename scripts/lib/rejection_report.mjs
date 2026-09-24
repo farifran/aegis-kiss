@@ -59,6 +59,42 @@ const diagnostics = new Map([
     remediation: 'Solicite um novo parecer usando o semantic request atual, sem reutilizar respostas anteriores.',
     ruleId: 'CONST-EVIDENCE',
   }],
+  ['SEMANTIC_SUPERVISOR_CREDENTIAL_MISSING', {
+    message: 'A chave do supervisor semântico não está disponível no ambiente.',
+    remediation: 'Exporte a variável indicada em detail ou execute ./aegis --setup para escolher outra integração.',
+  }],
+  ['SEMANTIC_SUPERVISOR_EXTERNAL_IDE', {
+    message: 'O supervisor configurado é uma IDE externa e não pode ser iniciado pelo CLI.',
+    remediation: 'Use ./aegis --semantic-request na IDE ou configure um supervisor API com ./aegis --setup.',
+  }],
+  ['SEMANTIC_SUPERVISOR_MODEL_INVALID', {
+    message: 'O modelo do AI Gateway não usa um identificador provider/model válido.',
+    remediation: 'Execute ./aegis --setup e informe o identificador exato publicado pelo AI Gateway.',
+  }],
+  ['SEMANTIC_SUPERVISOR_ADAPTER_UNSUPPORTED', {
+    message: 'O adaptador configurado não possui executor semântico no Aegis.',
+    remediation: 'Use ai-gateway ou openai-compatible, ou entregue a ficha por ./aegis --semantic-request.',
+  }],
+  ['SEMANTIC_SUPERVISOR_BASE_URL_MISSING', {
+    message: 'O adaptador openai-compatible não possui endereço de API configurado.',
+    remediation: 'Exporte AEGIS_SUPERVISOR_BASE_URL ou configure ai-gateway em ./aegis --setup.',
+  }],
+  ['SEMANTIC_GATEWAY_AUTHENTICATION_FAILED', {
+    message: 'A API recusou a credencial do supervisor semântico.',
+    remediation: 'Revogue credenciais expostas, gere uma nova chave e atualize somente a variável de ambiente configurada.',
+  }],
+  ['SEMANTIC_GATEWAY_UNAVAILABLE', {
+    message: 'A API do supervisor semântico não respondeu corretamente.',
+    remediation: 'Tente novamente ou use ./aegis --semantic-request com um supervisor externo.',
+  }],
+  ['SEMANTIC_GATEWAY_REQUEST_REJECTED', {
+    message: 'A API rejeitou o modelo, o contexto ou o schema da deliberação semântica.',
+    remediation: 'Confira o modelo configurado e sua compatibilidade com saída JSON estruturada.',
+  }],
+  ['SEMANTIC_GATEWAY_RATE_LIMITED', {
+    message: 'A API limitou temporariamente a chamada do supervisor semântico.',
+    remediation: 'Aguarde o limite ser liberado e execute novamente; o Aegis não fez uma segunda chamada automática.',
+  }],
   ['SEMANTIC_RECOMPILATION_REQUIRED', {
     message: 'A decisão humana altera o comportamento recomendado no rascunho atual.',
     remediation: 'Reenvie a ficha com a decisão ao supervisor e compile um novo contrato antes de assinar.',

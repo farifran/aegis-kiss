@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_execution.v1",
+  "title": "Aegis Semantic Supervisor Execution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "executionDigest", "sourceSemanticRequestDigest", "provider", "model", "calls", "jevEvaluation", "usage", "opinionDigest"],
+  "properties": {
+    "schema": { "const": "aegis.semantic_execution.v1" },
+    "executionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "provider": { "type": "string", "minLength": 1 },
+    "model": { "type": "string", "minLength": 1 },
+    "calls": { "const": 1 },
+    "jevEvaluation": { "enum": ["REUSED", "EXECUTED", "UNAVAILABLE"] },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputTokens", "outputTokens"],
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "opinionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

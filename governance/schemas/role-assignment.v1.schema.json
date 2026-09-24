@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "aegis.role_assignment.v1",
-  "description": "Configuração declarativa para integrações externas. O Harness não executa API nem IDE a partir deste documento.",
+  "description": "Configuração local de integrações. O supervisor API pode ser executado explicitamente pelo Harness; IDEs permanecem externas.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "roles"],
@@ -45,6 +45,7 @@
           "if": { "properties": { "channel": { "const": "API" } } },
           "then": {
             "properties": {
+              "adapter": { "enum": ["ai-gateway", "openai-compatible"] },
               "model": { "type": "string", "minLength": 1, "maxLength": 120 },
               "credentialEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
             }
@@ -53,6 +54,20 @@
         {
           "if": { "properties": { "channel": { "const": "IDE" } } },
           "then": { "properties": { "credentialEnv": { "const": null } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "channel": { "const": "API" },
+              "adapter": { "const": "ai-gateway" }
+            },
+            "required": ["channel", "adapter"]
+          },
+          "then": {
+            "properties": {
+              "model": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" }
+            }
+          }
         }
       ]
     }
