@@ -150,7 +150,10 @@
         }
       }
     },
-    "decisions": { "$ref": "aegis.semantic_draft.v8#/properties/decisions" }
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "aegis.semantic_draft_decision.v1" }
+    }
   },
   "$defs": {
     "sourceFragmentIds": {

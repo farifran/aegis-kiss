@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.semantic_draft_decision.v1",
+  "title": "Aegis Compiled Semantic Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "questionId",
+    "question",
+    "presentation",
+    "recommendedAnswerId",
+    "requirementIds",
+    "invariantIds",
+    "riskIds",
+    "distinguishingCase",
+    "answers"
+  ],
+  "properties": {
+    "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+    "question": { "type": "string", "minLength": 1 },
+    "presentation": { "$ref": "aegis.decision_presentation.v1" },
+    "recommendedAnswerId": { "type": "string", "minLength": 1 },
+    "requirementIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "invariantIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "riskIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "distinguishingCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["given", "when", "outcomes"],
+      "properties": {
+        "given": { "type": "string", "minLength": 1 },
+        "when": { "type": "string", "minLength": 1 },
+        "outcomes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["answerId", "then"],
+            "properties": {
+              "answerId": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+              "then": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "answers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "rationale", "contractEffect", "recommended"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+          "label": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "contractEffect": { "type": "string", "minLength": 1 },
+          "recommended": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

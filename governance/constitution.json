@@ -3,7 +3,7 @@
   "constitutionVersion": 17,
   "origin": {
     "sourcePath": "AGENTS.md",
-    "sourceDigest": "f4341752f97128ce54ec6e134407833a0eee2c688187777ce224ccae5b0133a9"
+    "sourceDigest": "edf0e43209bc133a21b5246c96d355a24ed9b22a93e85097ce17d208404cfe48"
   },
   "rules": [
     {
@@ -16,7 +16,7 @@
     },
     {
       "id": "CONST-DECISIONS",
-      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas compatíveis com a intenção, a constituição e a arquitetura, e marque exatamente uma solução pragmática como recomendada. Recomendação nunca equivale a consentimento: o Wizard exige escolha e confirmação humanas explícitas, e o contrato selado preserva a pergunta, a resposta, seu efeito e o digest do rascunho aprovado. Cada alternativa declara efeito contratual distinto e a decisão apresenta um mesmo cenário que produza resultados observáveis diferentes para as opções; efeitos equivalentes não formam decisão. Diferenças apenas de localização interna, como receber o mesmo valor por configuração ou argumento, não constituem decisão semântica. Uma alternativa incompatível com restrições aceitas reabre o preflight em vez de aparecer como resposta normal. O efeito recomendado aparece literalmente em prova vinculada, mas permanece provisório até escolha humana. Uma escolha alternativa só pode ser assinada depois que a recompilação materializar seu efeito. Não crie perguntas sobre obviedades, resultados já determinados pelas fontes, detalhes internos livres, números propostos pelo modelo, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
+      "statement": "Antecipe somente decisões materiais, ofereça de duas a quatro alternativas compatíveis com a intenção, a constituição e a arquitetura, e marque exatamente uma solução pragmática como recomendada. Recomendação nunca equivale a consentimento: o Wizard exige escolha e confirmação humanas explícitas, e o contrato selado preserva a pergunta, a resposta, seu efeito e o digest do rascunho aprovado. Cada alternativa declara efeito contratual distinto e a decisão apresenta um mesmo cenário que produza resultados observáveis diferentes para as opções; efeitos equivalentes não formam decisão. Diferenças apenas de localização interna, como receber o mesmo valor por configuração ou argumento, não constituem decisão semântica. Uma alternativa incompatível com restrições aceitas reabre o preflight em vez de aparecer como resposta normal. O efeito recomendado aparece literalmente em prova vinculada, mas permanece provisório até escolha humana. Qualquer escolha, inclusive a recomendada, só pode ser assinada depois que uma recompilação materializar seu efeito na especificação normativa, remover a decisão ativa e fechar como SPECIFIED todas as dimensões que dependiam dela. Não crie perguntas sobre obviedades, resultados já determinados pelas fontes, detalhes internos livres, números propostos pelo modelo, violações constitucionais ou regras hard; esses conflitos são corrigidos explicitamente. Complexidade apenas sugerida é podada sem pergunta."
     },
     {
       "id": "CONST-OBSERVABLE",

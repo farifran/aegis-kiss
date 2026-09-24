@@ -195,7 +195,10 @@
         }
       }
     },
-    "decisions": { "$ref": "aegis.semantic_opinion.v2#/properties/decisions" }
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "aegis.semantic_opinion_decision.v1" }
+    }
   },
   "$defs": {
     "fragmentIndexes": {

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.confirmation_request.v5",
+  "title": "Aegis Human Confirmation Request v5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "executionId",
+    "contractDraftDigest",
+    "title",
+    "recommendationPolicy",
+    "requiredAttestation",
+    "questionCount",
+    "bulkRecommendationAction",
+    "questions",
+    "artifactPath"
+  ],
+  "properties": {
+    "schema": { "const": "aegis.confirmation_request.v5" },
+    "status": { "const": "USER_CONFIRMATION_REQUIRED" },
+    "executionId": { "type": "string", "pattern": "^draft-[a-f0-9]{16}$" },
+    "contractDraftDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "recommendationPolicy": { "const": "RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS" },
+    "requiredAttestation": { "const": "CONTRACT_REVIEWED_AND_APPROVED" },
+    "questionCount": { "type": "integer", "minimum": 0 },
+    "bulkRecommendationAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "description"],
+      "properties": {
+        "id": { "const": "ACCEPT_RECOMMENDED_REMAINING" },
+        "label": { "const": "Aceitar esta recomendação e todas as restantes" },
+        "description": {
+          "const": "Preserva escolhas anteriores e seleciona a opção recomendada desta pergunta e de todas as perguntas seguintes."
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": { "$ref": "aegis.wizard_question.v1" }
+    },
+    "artifactPath": { "const": ".harness/runtime/contract.md" }
+  }
+}

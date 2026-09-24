@@ -1,7 +1,9 @@
 export const schemaFiles = new Map([
   ['aegis.architecture_policy.v3', 'architecture-policy.v3.schema.json'],
   ['aegis.confirmation_request.v4', 'confirmation-request.v4.schema.json'],
+  ['aegis.confirmation_request.v5', 'confirmation-request.v5.schema.json'],
   ['aegis.constitution.v1', 'constitution.v1.schema.json'],
+  ['aegis.decision_presentation.v1', 'decision-presentation.v1.schema.json'],
   ['aegis.intent_evidence.v1', 'intent-evidence.v1.schema.json'],
   ['aegis.issue_contract.v3', 'issue-contract.v3.schema.json'],
   ['aegis.issue_contract.v4', 'issue-contract.v4.schema.json'],
@@ -30,9 +32,11 @@ export const schemaFiles = new Map([
   ['aegis.semantic_draft.v7', 'semantic-draft.v7.schema.json'],
   ['aegis.semantic_draft.v8', 'semantic-draft.v8.schema.json'],
   ['aegis.semantic_draft.v9', 'semantic-draft.v9.schema.json'],
+  ['aegis.semantic_draft_decision.v1', 'semantic-draft-decision.v1.schema.json'],
   ['aegis.semantic_execution.v1', 'semantic-execution.v1.schema.json'],
   ['aegis.semantic_opinion.v2', 'semantic-opinion.v2.schema.json'],
   ['aegis.semantic_opinion.v3', 'semantic-opinion.v3.schema.json'],
+  ['aegis.semantic_opinion_decision.v1', 'semantic-opinion-decision.v1.schema.json'],
   ['aegis.semantic_request.v6', 'semantic-request.v6.schema.json'],
   ['aegis.semantic_request.v7', 'semantic-request.v7.schema.json'],
   ['aegis.semantic_request.v8', 'semantic-request.v8.schema.json'],
@@ -40,13 +44,14 @@ export const schemaFiles = new Map([
   ['aegis.semantic_request.v10', 'semantic-request.v10.schema.json'],
   ['aegis.semantic_worksheet.v1', 'semantic-worksheet.v1.schema.json'],
   ['aegis.semantic_resolution.v2', 'semantic-resolution.v2.schema.json'],
+  ['aegis.wizard_question.v1', 'wizard-question.v1.schema.json'],
   ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],
   ['aegis.jev_advisory.v2', 'jev-advisory.v2.schema.json'],
 ]);
 
 export const validatorSchemaIds = [
   'aegis.architecture_policy.v3',
-  'aegis.confirmation_request.v4',
+  'aegis.confirmation_request.v5',
   'aegis.constitution.v1',
   'aegis.intent_evidence.v1',
   'aegis.issue_contract.v3',
@@ -76,6 +81,7 @@ export const validatorSchemaIds = [
   'aegis.semantic_request.v10',
   'aegis.semantic_worksheet.v1',
   'aegis.semantic_resolution.v2',
+  'aegis.wizard_question.v1',
   'aegis.role_assignment.v1',
   'aegis.jev_advisory.v2',
 ];

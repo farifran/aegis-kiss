@@ -21,6 +21,13 @@ function normalized(text) {
   return text.normalize('NFC').toLocaleLowerCase('pt-BR').replace(/\s+/gu, ' ').trim();
 }
 
+function sameWitnessBody(left, right) {
+  return left.dimension === right.dimension
+    && left.inputClass === right.inputClass
+    && left.baseline === right.baseline
+    && left.variation === right.variation;
+}
+
 function assertKnownReferences(items, knownIds, label) {
   for (const item of items) {
     if (!knownIds.has(item)) throw new Error(`${label}_references_unknown_target:${item}`);
@@ -256,6 +263,16 @@ function validateDecisions(draft, context) {
     if (!ambiguityTargets.has(decision.questionId) && !unknownTargets.has(decision.questionId)) {
       throw new Error(`decision_without_material_unknown:${decision.questionId}`);
     }
+    const presentationTexts = [
+      decision.presentation.context,
+      decision.presentation.whyHumanDecision,
+      decision.presentation.observableImpact,
+      decision.presentation.recommendationReasoning,
+      ...decision.presentation.glossary.flatMap(({ term, meaning }) => [term, meaning]),
+    ];
+    if (presentationTexts.some(hasIncompleteMarker)) {
+      throw new Error(`decision_presentation_incomplete:${decision.questionId}`);
+    }
     assertUniqueIds(decision.answers, 'id', `answer_${decision.questionId}`);
     const recommended = decision.answers.filter(({ recommended }) => recommended);
     if (recommended.length !== 1 || recommended[0].id !== decision.recommendedAnswerId) {
@@ -298,7 +315,7 @@ function validateDeterminism(draft, context) {
     const expectedWitness = counterexampleForDimension(dimension.kind);
     const { id: actualWitnessId, ...actualWitnessBody } = dimension.counterexampleWitness;
     const { id: expectedWitnessId, ...expectedWitnessBody } = expectedWitness;
-    if (JSON.stringify(actualWitnessBody) !== JSON.stringify(expectedWitnessBody)
+    if (!sameWitnessBody(actualWitnessBody, expectedWitnessBody)
       || (actualWitnessId !== expectedWitnessId
         && !actualWitnessId.startsWith(`${expectedWitnessId}-`))) {
       throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);

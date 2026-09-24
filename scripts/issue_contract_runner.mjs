@@ -160,6 +160,44 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
   };
 }
 
+async function readGovernedLegacyRevision(preflight) {
+  if (!existsSync(semanticStateJsonPath)) return null;
+  const [{ canonicalDigest }, { parseSemanticState }, statePayload] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/semantic_state.mjs'),
+    readFile(semanticStateJsonPath, 'utf8').then(JSON.parse),
+  ]);
+  const state = parseSemanticState(statePayload);
+  const contract = state.contract;
+  if (contract.intent !== preflight.intent
+    || contract.sourcePreflightDigest !== preflight.preflightDigest
+    || contract.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest
+    || contract.approval === null
+    || contract.specification.decisions.length === 0) return null;
+  const resolutions = new Map(contract.humanResolutions
+    .filter(({ kind }) => kind === 'ANSWER')
+    .map((resolution) => [resolution.questionId, resolution]));
+  if (contract.specification.decisions.some(({ questionId }) => !resolutions.has(questionId))) {
+    return null;
+  }
+  return {
+    request: {
+      sourceContractDigest: canonicalDigest(contract),
+      answers: contract.specification.decisions.map(({ questionId }) => {
+        const resolution = resolutions.get(questionId);
+        return {
+          questionId,
+          answerId: resolution.answerId,
+          label: resolution.label,
+          rationale: resolution.rationale,
+          contractEffect: resolution.contractEffect,
+        };
+      }),
+    },
+    humanResolutions: contract.humanResolutions,
+  };
+}
+
 async function handleDraft(args) {
   const [
     { canonicalJson },
@@ -226,6 +264,21 @@ async function handleValidateContract() {
   await validateContract(contract, preflight);
 }
 
+async function handleConfirmationRequest() {
+  const [contract, preflight] = await Promise.all([
+    readFile(contractJsonPath, 'utf8').then(JSON.parse),
+    readPreflight(),
+  ]);
+  await validateContract(contract, preflight);
+  const [{ canonicalJson }, { buildConfirmationRequest }] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/semantic_approval.mjs'),
+  ]);
+  const request = buildConfirmationRequest(contract);
+  await writeFileAtomic(userConfirmationPath, `${canonicalJson(request)}\n`);
+  process.stdout.write(`${canonicalJson(request)}\n`);
+}
+
 async function readGovernedState(statePath) {
   const { parseSemanticState } = await import('./lib/semantic_state.mjs');
   return parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
@@ -270,10 +323,18 @@ async function writeGovernedStatus(statePath, runtimeContract = null) {
       return;
     }
     const freshness = await inspectWorkspaceFreshness(state.contract);
+    const requiresSemanticRevision = state.contract.approval !== null && (
+      state.contract.specification.decisions.length > 0
+      || state.contract.specification.determinismReview.dimensions.some(({ status }) => (
+        status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
+      ))
+    );
     writeStatus({
-      status: 'GOVERNED',
+      status: requiresSemanticRevision ? 'GOVERNED_REVISION_REQUIRED' : 'GOVERNED',
       contractDigest: state.contractDigest,
       contractIntegrity: 'VALID',
+      governanceFreshness: requiresSemanticRevision ? 'REVISION_REQUIRED' : 'CURRENT',
+      ...(requiresSemanticRevision ? { reason: 'SEMANTIC_DECISIONS_NOT_MATERIALIZED' } : {}),
       ...freshness,
       implementationCompliance: 'NOT_EVALUATED',
       semanticState: statePath,
@@ -375,12 +436,13 @@ async function buildCurrentSemanticRequest() {
     readConstitution(),
   ]);
   const workspaceObservation = await assertDiscoveryUnchanged(preflight);
-  const revision = await readPendingRevision(
+  const pendingRevision = await readPendingRevision(
     preflight,
     loadedPolicy,
     constitution,
     workspaceObservation,
   );
+  const revision = pendingRevision ?? await readGovernedLegacyRevision(preflight);
   const request = buildSemanticRequest({
     repositoryRoot: root,
     preflight,
@@ -755,6 +817,7 @@ try {
   if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'validate-preflight') await handleValidatePreflight();
   else if (command === 'validate-contract') await handleValidateContract();
+  else if (command === 'confirmation-request') await handleConfirmationRequest();
   else if (command === 'status') await handleStatus();
   else if (command === 'semantic-request') await handleSemanticRequest();
   else if (command === 'jev-request') await handleJevRequest();

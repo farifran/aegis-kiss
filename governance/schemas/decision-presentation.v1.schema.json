@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.decision_presentation.v1",
+  "title": "Aegis Human Decision Presentation v1",
+  "description": "Explicação semântica, não normativa, necessária para que uma pessoa decida com conhecimento de causa.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "context",
+    "whyHumanDecision",
+    "observableImpact",
+    "recommendationReasoning",
+    "glossary"
+  ],
+  "properties": {
+    "context": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Explica em linguagem simples onde a dúvida aparece na demanda e no domínio."
+    },
+    "whyHumanDecision": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Explica qual informação confiável falta e por que o sistema não pode decidir sozinho."
+    },
+    "observableImpact": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Explica o que muda de forma observável conforme a resposta escolhida."
+    },
+    "recommendationReasoning": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Justifica a opção recomendada à luz da demanda, da Constituição e do KISS, sem tratá-la como consentimento."
+    },
+    "glossary": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["term", "meaning"],
+        "properties": {
+          "term": { "type": "string", "minLength": 1 },
+          "meaning": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

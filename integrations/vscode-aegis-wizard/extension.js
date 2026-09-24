@@ -6,7 +6,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const process = require('node:process');
 
-const { buildResolution, validRequest, validResolutionForRequest } = require('./protocol.js');
+const {
+  buildResolution,
+  recommendedAnswersFrom,
+  validRequest,
+  validResolutionForRequest,
+} = require('./protocol.js');
 
 const requestRelPath = '.harness/runtime/user_confirmation_request.json';
 const resolutionRelPath = '.harness/runtime/preflight_resolution.json';
@@ -51,20 +56,71 @@ function isAlreadyResolved(root, request) {
   }
 }
 
-async function choose(question) {
+async function choose(question, position, total, bulkAction) {
+  const recommended = question.answers
+    .find((answer) => answer.id === question.recommendedAnswerId);
+  const outcomes = question.distinguishingCase.outcomes.map((outcome) => {
+    const answer = question.answers.find(({ id }) => id === outcome.answerId);
+    return `• ${answer?.label ?? outcome.answerId}: ${outcome.then}`;
+  }).join('\n');
+  const impacts = [
+    ...question.traceability.requirements.map((item) => `• Requisito ${item.id}: ${item.statement}`),
+    ...question.traceability.acceptanceCases.map((item) => `• Prova ${item.id}: ${item.then}`),
+    ...question.traceability.invariants.map((item) => `• Invariante ${item.id}: ${item.statement}`),
+    ...question.traceability.risks.map((item) => `• Risco ${item.id} [${item.level}]: ${item.statement} Mitigação: ${item.mitigation}`),
+  ].join('\n');
+  const explanation = [
+    'Contexto:',
+    question.presentation.context,
+    '',
+    'Por que você precisa decidir:',
+    question.presentation.whyHumanDecision,
+    '',
+    'O que muda na prática:',
+    question.presentation.observableImpact,
+    '',
+    `Exemplo — Dado: ${question.distinguishingCase.given}`,
+    `Quando: ${question.distinguishingCase.when}`,
+    outcomes,
+    '',
+    `Recomendação: ${recommended?.label ?? question.recommendedAnswerId}`,
+    `Motivo: ${question.presentation.recommendationReasoning}`,
+    `Efeito: ${recommended?.contractEffect ?? ''}`,
+    ...(question.presentation.glossary.length === 0 ? [] : [
+      '',
+      'Termos usados:',
+      ...question.presentation.glossary.map(({ term, meaning }) => `• ${term}: ${meaning}`),
+    ]),
+    '',
+    'O que esta decisão altera no contrato:',
+    impacts,
+  ].join('\n');
+  const proceed = await vscode.window.showInformationMessage(
+    `${position}/${total} — ${question.question}`,
+    { modal: true, detail: explanation },
+    'Ver opções',
+  );
+  if (proceed === undefined) return undefined;
   const choices = question.answers.map((answer) => ({
     label: answer.label,
     description: answer.recommended ? 'Recomendado' : undefined,
-    detail: answer.rationale,
+    detail: `${answer.rationale} Efeito: ${answer.contractEffect}`,
     answer,
   }));
   choices.push({ label: 'Outra interpretação…', detail: 'Devolve o contrato à revisão semântica.', other: true });
+  choices.push({ kind: vscode.QuickPickItemKind.Separator, label: 'Ação rápida' });
+  choices.push({
+    label: bulkAction.label,
+    detail: bulkAction.description,
+    bulkRecommendations: true,
+  });
   const selected = await vscode.window.showQuickPick(choices, {
-    title: `Aegis — ${question.id}`,
+    title: `Aegis — ${position}/${total} — ${question.id}`,
     placeHolder: question.question,
     ignoreFocusOut: true,
   });
   if (selected === undefined) return undefined;
+  if (selected.bulkRecommendations) return { bulkRecommendations: true };
   if (!selected.other) return { questionId: question.id, answerId: selected.answer.id };
   const correction = await vscode.window.showInputBox({
     title: `Aegis — ${question.id}`,
@@ -146,13 +202,38 @@ async function presentPending(force = false) {
     }
 
     const answers = [];
-    for (const question of request.questions) {
-      const answer = await choose(question);
+    for (let index = 0; index < request.questions.length; index += 1) {
+      const question = request.questions[index];
+      const answer = await choose(
+        question,
+        index + 1,
+        request.questionCount,
+        request.bulkRecommendationAction,
+      );
       if (answer === undefined) {
         lastCancelledId = reqId;
         return;
       }
+      if (answer.bulkRecommendations) {
+        answers.push(...recommendedAnswersFrom(request, index));
+        break;
+      }
       answers.push(answer);
+    }
+    const summary = answers.map((answer) => {
+      const question = request.questions.find(({ id }) => id === answer.questionId);
+      if ('correction' in answer) return `• ${question?.question ?? answer.questionId}: interpretação própria`;
+      const selected = question?.answers.find(({ id }) => id === answer.answerId);
+      return `• ${question?.question ?? answer.questionId}: ${selected?.label ?? answer.answerId}`;
+    }).join('\n');
+    const confirmed = await vscode.window.showInformationMessage(
+      'Confirmar escolhas do contrato?',
+      { modal: true, detail: summary },
+      'Confirmar e continuar',
+    );
+    if (confirmed === undefined) {
+      lastCancelledId = reqId;
+      return;
     }
     const recompilationRequired = await writeResolution(root, request, answers);
     if (recompilationRequired) {

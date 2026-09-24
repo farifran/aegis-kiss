@@ -1,6 +1,6 @@
 /* global module */
 
-const confirmationSchema = 'aegis.confirmation_request.v4';
+const confirmationSchema = 'aegis.confirmation_request.v5';
 const resolutionSchema = 'aegis.semantic_resolution.v2';
 
 function validRequest(value) {
@@ -9,7 +9,32 @@ function validRequest(value) {
     && /^draft-[a-f0-9]{16}$/u.test(value.executionId ?? '')
     && /^[a-f0-9]{64}$/u.test(value.contractDraftDigest ?? '')
     && value.requiredAttestation === 'CONTRACT_REVIEWED_AND_APPROVED'
-    && Array.isArray(value.questions);
+    && Array.isArray(value.questions)
+    && value.questionCount === value.questions.length
+    && value.bulkRecommendationAction?.id === 'ACCEPT_RECOMMENDED_REMAINING'
+    && typeof value.bulkRecommendationAction.label === 'string'
+    && typeof value.bulkRecommendationAction.description === 'string'
+    && value.questions.every((question) => (
+      typeof question.presentation?.context === 'string'
+      && question.presentation.context.length > 0
+      && typeof question.presentation.whyHumanDecision === 'string'
+      && question.presentation.whyHumanDecision.length > 0
+      && typeof question.presentation.observableImpact === 'string'
+      && question.presentation.observableImpact.length > 0
+      && typeof question.presentation.recommendationReasoning === 'string'
+      && question.presentation.recommendationReasoning.length > 0
+      && Array.isArray(question.presentation.glossary)
+      && Array.isArray(question.answers)
+      && Array.isArray(question.distinguishingCase?.outcomes)
+      && typeof question.traceability === 'object'
+    ));
+}
+
+function recommendedAnswersFrom(request, startIndex) {
+  return request.questions.slice(startIndex).map((question) => ({
+    questionId: question.id,
+    answerId: question.recommendedAnswerId,
+  }));
 }
 
 function validResolutionForRequest(value, request) {
@@ -24,10 +49,13 @@ function validResolutionForRequest(value, request) {
 
 function requiresRecompilation(request, answers) {
   const questions = new Map(request.questions.map((question) => [question.id, question]));
-  return answers.some((answer) => (
-    'correction' in answer
-      || questions.get(answer.questionId)?.recommendedAnswerId !== answer.answerId
-  ));
+  for (const answer of answers) {
+    const question = questions.get(answer.questionId);
+    if (question === undefined) return true;
+    if (!('correction' in answer)
+      && !question.answers.some(({ id }) => id === answer.answerId)) return true;
+  }
+  return questions.size > 0;
 }
 
 function buildResolution(request, answers) {
@@ -47,4 +75,9 @@ function buildResolution(request, answers) {
   };
 }
 
-module.exports = { buildResolution, validRequest, validResolutionForRequest };
+module.exports = {
+  buildResolution,
+  recommendedAnswersFrom,
+  validRequest,
+  validResolutionForRequest,
+};

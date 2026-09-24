@@ -57,24 +57,57 @@ printf '%s\n' "${setup_arity_output}" | jq -e '.phase == "COMMAND" and .reason =
 node <<'NODE'
 const {
   buildResolution,
+  recommendedAnswersFrom,
   validRequest,
   validResolutionForRequest,
 } = require('./integrations/vscode-aegis-wizard/protocol.js');
 const request = {
-  schema: 'aegis.confirmation_request.v4',
+  schema: 'aegis.confirmation_request.v5',
   status: 'USER_CONFIRMATION_REQUIRED',
   executionId: 'draft-0123456789abcdef',
   contractDraftDigest: 'a'.repeat(64),
   requiredAttestation: 'CONTRACT_REVIEWED_AND_APPROVED',
-  questions: [{ id: 'Q-0001', recommendedAnswerId: 'ANS-0001-01' }],
+  questionCount: 1,
+  bulkRecommendationAction: {
+    id: 'ACCEPT_RECOMMENDED_REMAINING',
+    label: 'Aceitar esta recomendação e todas as restantes',
+    description: 'Preserva escolhas anteriores e seleciona a opção recomendada desta pergunta e de todas as perguntas seguintes.',
+  },
+  questions: [{
+    id: 'Q-0001',
+    recommendedAnswerId: 'ANS-0001-01',
+    presentation: {
+      context: 'O resultado pode ser exposto de forma simples ou acompanhado de metadados públicos adicionais.',
+      whyHumanDecision: 'A demanda não escolhe entre essas duas superfícies e ambas alteram o resultado observado pelo consumidor.',
+      observableImpact: 'A escolha determina se o consumidor recebe apenas o valor essencial ou também os metadados associados.',
+      recommendationReasoning: 'A forma simples reduz a superfície pública e atende ao princípio KISS sem perder o resultado solicitado.',
+      glossary: [],
+    },
+    answers: [],
+    distinguishingCase: { outcomes: [] },
+    traceability: { requirements: [], acceptanceCases: [], invariants: [], risks: [] },
+  }],
 };
 if (!validRequest(request) || validRequest({ ...request, schema: 'aegis.confirmation_request.v1' })) {
   throw new Error('wizard_confirmation_protocol_mismatch');
 }
+if (validRequest({ ...request, questionCount: 2 })) {
+  throw new Error('wizard_question_count_mismatch_was_accepted');
+}
+const bulk = recommendedAnswersFrom({
+  ...request,
+  questions: [
+    request.questions[0],
+    { ...request.questions[0], id: 'Q-0002', recommendedAnswerId: 'ANS-0002-01' },
+  ],
+}, 1);
+if (JSON.stringify(bulk) !== JSON.stringify([{ questionId: 'Q-0002', answerId: 'ANS-0002-01' }])) {
+  throw new Error('wizard_bulk_recommendation_selection_mismatch');
+}
 const recommended = buildResolution(request, [{ questionId: 'Q-0001', answerId: 'ANS-0001-01' }]);
-if (recommended.recompilationRequired
+if (!recommended.recompilationRequired
   || recommended.resolution.schema !== 'aegis.semantic_resolution.v2'
-  || recommended.resolution.attestation !== 'CONTRACT_REVIEWED_AND_APPROVED'
+  || recommended.resolution.attestation !== 'DECISIONS_REVIEWED_AND_CONFIRMED'
   || !validResolutionForRequest(recommended.resolution, request)
   || validResolutionForRequest({ ...recommended.resolution, schema: 'aegis.semantic_resolution.v1' }, request)) {
   throw new Error('wizard_recommended_resolution_mismatch');
@@ -444,14 +477,22 @@ import { readFileSync } from 'node:fs';
 const mode = process.argv[2];
 const sourceEvidenceDigest = process.argv[3];
 const withDecision = mode === 'yes';
+const isResolved = mode.startsWith('resolved');
 const selectedEffect = mode === 'resolved'
   ? 'Um resultado com metadados adicionais deve ser retornado.'
   : 'O resultado esperado deve ser retornado.';
-const requirementBasis = mode === 'resolved'
+const requirementBasis = isResolved
   ? [{ source: 'USER_DECISION', resolutionIndex: 0 }]
   : [{ source: 'USER_INTENT', reference: 'Definir transformador de registros com saída ainda a escolher' }];
 const decisions = withDecision ? [{
   question: 'Qual formato público deve ser usado?',
+  presentation: {
+    context: 'A demanda permite que o resultado público seja apenas o valor calculado ou inclua metadados adicionais.',
+    whyHumanDecision: 'As duas formas são compatíveis com a demanda, mas expõem contratos públicos diferentes e a fonte não escolhe uma delas.',
+    observableImpact: 'A resposta altera os campos entregues ao consumidor e a superfície que futuras implementações deverão preservar.',
+    recommendationReasoning: 'O resultado simples é recomendado porque satisfaz a necessidade expressa com a menor superfície pública possível.',
+    glossary: [{ term: 'superfície pública', meaning: 'Dados que um consumidor externo pode observar e usar.' }],
+  },
   recommendedAnswerIndex: 0,
   requirementIndexes: [0],
   invariantIndexes: [0],
@@ -700,6 +741,8 @@ jq -e '
 
 # Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
 make_opinion yes "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
+draft_status="$(bash ./aegis --status)"
+printf '%s\n' "${draft_status}" | jq -e '.status == "DRAFT_PENDING_CONFIRMATION"' >/dev/null
 grep -F 'PROVISÓRIO — depende de Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null
 cp .harness/runtime/user_confirmation_request.json .harness/runtime/user_confirmation_request.saved.json
 rm .harness/runtime/user_confirmation_request.json
@@ -717,44 +760,47 @@ set -e
 [[ "${missing_decisions_code}" -ne 0 ]]
 printf '%s\n' "${missing_decisions_output}" | jq -e '.reason == "HUMAN_DECISIONS_REQUIRED"' >/dev/null
 
-# Enter aceita a recomendação como ação humana explícita; uma confirmação final
-# grava pergunta, resposta e digest no contrato selado.
+# Toda decisão, inclusive a recomendada, precisa ser recompilada antes de uma
+# confirmação final do contrato já sem decisões ativas.
 cancelled_wizard_output="$(printf '\nn\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${cancelled_wizard_output}" | grep -F 'Nenhuma nova decisão ou aprovação foi gravada'
 [[ ! -e .harness/runtime/preflight_resolution.json ]]
 jq -e '.approval == null and .humanResolutions == []' .harness/runtime/contract.json >/dev/null
 
-wizard_output="$(printf '\ns\n' | bash ./aegis --wizard 2>&1)"
+wizard_output="$(printf 'a\ns\n' | bash ./aegis --wizard 2>&1)"
 printf '%s\n' "${wizard_output}" | grep -F 'Uma recomendação é apenas uma proposta'
+printf '%s\n' "${wizard_output}" | grep -F '[1/1] [Q-0001]'
+printf '%s\n' "${wizard_output}" | grep -F 'Aceitar esta recomendação e todas as restantes'
+printf '%s\n' "${wizard_output}" | grep -F 'A confirmação final continua obrigatória'
+printf '%s\n' "${wizard_output}" | grep -F 'Recompilação semântica necessária antes da assinatura'
 jq -e '
-  .schema == "aegis.issue_contract.v14"
-  and (.sourceSemanticRequestDigest | test("^[a-f0-9]{64}$"))
-  and .semanticRevision == null
-  and .approval.method == "INTERACTIVE_WIZARD"
-  and .approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"
-  and .humanResolutions[0].questionId == "Q-0001"
-  and .humanResolutions[0].question == "Qual formato público deve ser usado?"
-  and .humanResolutions[0].kind == "ANSWER"
-  and .humanResolutions[0].answerId == "ANS-0001-01"
-  and .humanResolutions[0].label == "Resultado simples"
-  and .humanResolutions[0].rationale == "Menor superfície pública."
-  and .humanResolutions[0].contractEffect == "O resultado esperado deve ser retornado."
-  and .humanResolutions[0].method == "INTERACTIVE_WIZARD"
-  and .humanResolutions[0].attestation == "CONTRACT_REVIEWED_AND_APPROVED"
-  and .humanResolutions[0].sourceContractDigest == .approval.contractDraftDigest
-  and .specification.intentClaims[0].id == "CLAIM-0001"
-  and .specification.requirements[0].id == "REQ-0001"
-  and .specification.requirements[0].acceptanceCases[0].id == "AC-0001-01"
-  and .specification.invariants[0].id == "INV-0001"
-  and .specification.decisions[0].distinguishingCase.outcomes[0].answerId == "ANS-0001-01"
-  and .specification.decisions[0].distinguishingCase.outcomes[1].answerId == "ANS-0001-02"
-  and .specification.riskReview.status == "NONE"
-  and .specification.adversarialReview.status == "CHALLENGES_INTEGRATED"
-  and .specification.determinismReview.status == "NOT_APPLICABLE"
+  .schema == "aegis.semantic_resolution.v2"
+  and .attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
+  and .answers == [{questionId:"Q-0001",answerId:"ANS-0001-01"}]
+' .harness/runtime/preflight_resolution.json >/dev/null
+recommended_revision_request="$(bash ./aegis --semantic-request)"
+printf '%s\n' "${recommended_revision_request}" | jq -e '
+  .revision.answers == [{
+    questionId:"Q-0001",
+    answerId:"ANS-0001-01",
+    label:"Resultado simples",
+    rationale:"Menor superfície pública.",
+    contractEffect:"O resultado esperado deve ser retornado."
+  }]
+' >/dev/null
+semantic_evidence_digest="$(printf '%s\n' "${recommended_revision_request}" | jq -r '.intentEvidence.evidenceDigest')"
+make_opinion resolved-simple "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
+jq -e '
+  .approval == null
   and .effectiveDeterminismStatus == "NOT_APPLICABLE"
+  and (.specification.decisions | length) == 0
+  and (.specification.determinismReview.dimensions | all(.status != "DECISION_REQUIRED"))
+  and .humanResolutions[0].answerId == "ANS-0001-01"
+  and .humanResolutions[0].attestation == "DECISIONS_REVIEWED_AND_CONFIRMED"
 ' .harness/runtime/contract.json >/dev/null
-grep -F '[ESCOLHA HUMANA]' .harness/runtime/contract.md >/dev/null
-grep -F 'ESCOLHA HUMANA SELADA — Q-0001/ANS-0001-01' .harness/runtime/contract.md >/dev/null
+recommended_approval_output="$(bash ./aegis --approve)"
+printf '%s\n' "${recommended_approval_output}" | jq -e '.status == "FINALIZED" and .implementationAuthorized == false' >/dev/null
+grep -F 'Decisões humanas incorporadas por recompilação' .harness/runtime/contract.md >/dev/null
 previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-state.json)"
 
 # Uma demanda diferente não torna o contrato anterior historicamente inválido,

@@ -9,6 +9,11 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
   if (specification.determinismReview.dimensions.some(({ status }) => status === 'GAP_FOUND')) {
     return 'BLOCKED_BY_GAP';
   }
+  if (specification.determinismReview.dimensions.some(({ status }) => (
+    status === 'DECISION_REQUIRED'
+  )) || specification.decisions.length > 0) {
+    return 'PENDING_HUMAN_DECISIONS';
+  }
   const resolvedDecisionIds = new Set(humanResolutions.map(({ questionId }) => questionId));
   const pendingDecisionIds = specification.decisions
     .map(({ questionId }) => questionId)
@@ -129,33 +134,57 @@ export function buildConfirmationRequest(contract) {
     throw new Error(`unresolved_semantic_gap:${unresolvedGaps.join(',')}`);
   }
   const contractDraftDigest = canonicalDigest(contract);
+  const questions = contract.specification.decisions.map((decision) => {
+    const gaps = contract.specification.unknowns
+      .filter(({ decisionId }) => decisionId === decision.questionId)
+      .map(({ statement }) => statement);
+    return {
+      id: decision.questionId,
+      question: decision.question,
+      presentation: decision.presentation,
+      recommendedAnswerId: decision.recommendedAnswerId,
+      gaps,
+      distinguishingCase: decision.distinguishingCase,
+      traceability: {
+        requirements: contract.specification.requirements
+          .filter(({ id }) => decision.requirementIds.includes(id))
+          .map(({ id, statement }) => ({ id, statement })),
+        acceptanceCases: contract.specification.requirements
+          .flatMap(({ acceptanceCases }) => acceptanceCases)
+          .filter(({ decisionBinding }) => decisionBinding?.questionId === decision.questionId)
+          .map(({ id, given, when, then, outcomeKind }) => ({
+            id, given, when, then, outcomeKind,
+          })),
+        invariants: contract.specification.invariants
+          .filter(({ id }) => decision.invariantIds.includes(id))
+          .map(({ id, statement, falsification }) => ({ id, statement, falsification })),
+        risks: contract.specification.risks
+          .filter(({ id }) => decision.riskIds.includes(id))
+          .map(({ id, kind, level, statement, mitigation }) => ({
+            id, kind, level, statement, mitigation,
+          })),
+      },
+      answers: decision.answers,
+    };
+  });
   const request = {
-    schema: 'aegis.confirmation_request.v4',
+    schema: 'aegis.confirmation_request.v5',
     status: 'USER_CONFIRMATION_REQUIRED',
     executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
     contractDraftDigest,
     title: contract.specification.title,
     recommendationPolicy: 'RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS',
     requiredAttestation: 'CONTRACT_REVIEWED_AND_APPROVED',
-    questions: contract.specification.decisions.map((decision) => ({
-      id: decision.questionId,
-      question: decision.question,
-      recommendedAnswerId: decision.recommendedAnswerId,
-      gaps: contract.specification.unknowns
-        .filter(({ decisionId }) => decisionId === decision.questionId)
-        .map(({ statement }) => statement),
-      requirementIds: decision.requirementIds,
-      acceptanceCaseIds: contract.specification.requirements
-        .flatMap(({ acceptanceCases }) => acceptanceCases)
-        .filter(({ decisionBinding }) => decisionBinding?.questionId === decision.questionId)
-        .map(({ id }) => id),
-      invariantIds: decision.invariantIds,
-      riskIds: decision.riskIds,
-      answers: decision.answers,
-    })),
+    questionCount: questions.length,
+    bulkRecommendationAction: {
+      id: 'ACCEPT_RECOMMENDED_REMAINING',
+      label: 'Aceitar esta recomendação e todas as restantes',
+      description: 'Preserva escolhas anteriores e seleciona a opção recomendada desta pergunta e de todas as perguntas seguintes.',
+    },
+    questions,
     artifactPath: '.harness/runtime/contract.md',
   };
-  assertSchema('aegis.confirmation_request.v4', request);
+  assertSchema('aegis.confirmation_request.v5', request);
   return request;
 }
 
@@ -202,8 +231,8 @@ export function assertRevisionApplied(draft, resolution) {
     if ('correction' in answer) {
       if (revisedDecision !== undefined) throw new Error(`unresolved_correction:${answer.questionId}`);
     } else {
-      if (revisedDecision !== undefined && revisedDecision.recommendedAnswerId !== answer.answerId) {
-        throw new Error(`revision_ignored_selected_answer:${answer.questionId}`);
+      if (revisedDecision !== undefined) {
+        throw new Error(`revision_retains_resolved_decision:${answer.questionId}`);
       }
       if (!normativeText.some((text) => (
         text.normalize('NFC') === answer.contractEffect.normalize('NFC')
@@ -215,7 +244,7 @@ export function assertRevisionApplied(draft, resolution) {
 }
 
 export function assertConfirmationRequest(contract, request) {
-  assertSchema('aegis.confirmation_request.v4', request);
+  assertSchema('aegis.confirmation_request.v5', request);
   if (canonicalDigest(request) !== canonicalDigest(buildConfirmationRequest(contract))) {
     throw new Error('stale_confirmation_request');
   }
@@ -242,13 +271,12 @@ export function resolutionRequiresRecompilation({ contract, request, resolution 
   for (const answer of resolution.answers) {
     const decision = decisions.get(answer.questionId);
     if (decision === undefined) throw new Error(`unknown_resolution_question:${answer.questionId}`);
-    if ('correction' in answer) return true;
+    if ('correction' in answer) continue;
     if (!decision.answers.some(({ id }) => id === answer.answerId)) {
       throw new Error(`unknown_resolution_answer:${answer.questionId}`);
     }
-    if (answer.answerId !== decision.recommendedAnswerId) return true;
   }
-  return false;
+  return decisions.size > 0;
 }
 
 export function finalizeContractApproval({ contract, request, resolution }) {

@@ -358,6 +358,7 @@ export function compileSemanticOpinion(opinion, request) {
     decisions: opinion.decisions.map((item, decisionIndex) => ({
       questionId: decisionIds[decisionIndex],
       question: item.question,
+      presentation: item.presentation,
       recommendedAnswerId: indexedValue(
         answerIds[decisionIndex],
         item.recommendedAnswerIndex,

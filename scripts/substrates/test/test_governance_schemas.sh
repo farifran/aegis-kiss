@@ -35,6 +35,7 @@ import {
   finalizeContractApproval,
   loadSemanticConstitution,
   renderSemanticContractMarkdown,
+  resolutionRequiresRecompilation,
 } from './scripts/lib/semantic_contract.mjs';
 import {
   buildPreflightHandoff,
@@ -46,7 +47,7 @@ import { parseSemanticState } from './scripts/lib/semantic_state.mjs';
 
 const currentSchemas = [
   'architecture-policy.v3.schema.json',
-  'confirmation-request.v4.schema.json',
+  'confirmation-request.v5.schema.json',
   'constitution.v1.schema.json',
   'intent-evidence.v1.schema.json',
   'issue-contract.v14.schema.json',
@@ -62,6 +63,7 @@ const currentSchemas = [
   'semantic-opinion.v3.schema.json',
   'semantic-request.v10.schema.json',
   'semantic-resolution.v2.schema.json',
+  'wizard-question.v1.schema.json',
 ];
 for (const file of currentSchemas) {
   const schema = JSON.parse(readFileSync(`governance/schemas/${file}`, 'utf8'));
@@ -377,6 +379,13 @@ const draft = {
   decisions: [{
     questionId: 'Q-FORMAT',
     question: 'Qual formato público deve ser usado?',
+    presentation: {
+      context: 'A demanda deixa abertas duas formas de apresentar o resultado público da mesma operação concluída.',
+      whyHumanDecision: 'Nenhuma fonte confiável escolhe entre um resultado mínimo e um resultado acrescido de metadados observáveis.',
+      observableImpact: 'A escolha muda os dados devolvidos ao consumidor e a superfície pública protegida pelo contrato.',
+      recommendationReasoning: 'A forma simples é recomendada porque entrega o valor solicitado e evita ampliar a API sem necessidade demonstrada.',
+      glossary: [{ term: 'superfície pública', meaning: 'Parte do comportamento que consumidores externos conseguem observar.' }],
+    },
     recommendedAnswerId: 'ANS-SIMPLE',
     requirementIds: ['REQ-RESULT'],
     invariantIds: ['INV-EXPLICIT'],
@@ -627,23 +636,38 @@ if (!renderSemanticContractMarkdown(contract).includes('Q-FORMAT')) {
 }
 
 const confirmation = buildConfirmationRequest(contract);
+if (confirmation.schema !== 'aegis.confirmation_request.v5'
+  || confirmation.questionCount !== confirmation.questions.length
+  || confirmation.bulkRecommendationAction.id !== 'ACCEPT_RECOMMENDED_REMAINING'
+  || !confirmation.questions[0].presentation.context.includes('duas formas')
+  || !confirmation.questions[0].presentation.whyHumanDecision.includes('Nenhuma fonte confiável')
+  || !confirmation.questions[0].presentation.observableImpact.includes('dados devolvidos')
+  || !confirmation.questions[0].presentation.recommendationReasoning.includes('forma simples')
+  || confirmation.questions[0].distinguishingCase.outcomes.length !== 2
+  || confirmation.questions[0].traceability.requirements[0].id !== 'REQ-RESULT'
+  || confirmation.questions[0].traceability.requirements[0].statement.length === 0
+  || confirmation.questions[0].traceability.acceptanceCases[0].id !== 'AC-RESULT-HAPPY'
+  || confirmation.questions[0].traceability.invariants[0].id !== 'INV-EXPLICIT'
+  || confirmation.questions[0].traceability.risks[0].id !== 'RISK-SILENCE') {
+  throw new Error('wizard_question_omits_human_decision_context');
+}
 const resolution = {
   schema: 'aegis.semantic_resolution.v2',
   executionId: confirmation.executionId,
   contractDraftDigest: confirmation.contractDraftDigest,
   method: 'INTERACTIVE_WIZARD',
-  attestation: 'CONTRACT_REVIEWED_AND_APPROVED',
+  attestation: 'DECISIONS_REVIEWED_AND_CONFIRMED',
   answers: [{ questionId: 'Q-FORMAT', answerId: 'ANS-SIMPLE' }],
 };
-const approved = finalizeContractApproval({ contract, request: confirmation, resolution });
-if (approved.approval === null || approved.effectiveDeterminismStatus !== 'NOT_APPLICABLE') {
-  throw new Error('approved_contract_has_invalid_state');
+if (!resolutionRequiresRecompilation({ contract, request: confirmation, resolution })) {
+  throw new Error('recommended_decision_bypassed_semantic_recompilation');
 }
-parseSemanticState({
-  schema: 'aegis.semantic_state.v14',
-  contractDigest: canonicalDigest(approved),
-  contract: approved,
-});
+try {
+  finalizeContractApproval({ contract, request: confirmation, resolution });
+  throw new Error('contract_with_active_decision_was_approved');
+} catch (error) {
+  if (error.message !== 'semantic_recompilation_required') throw error;
+}
 
 const blocked = structuredClone(draft);
 blocked.decisions = [];

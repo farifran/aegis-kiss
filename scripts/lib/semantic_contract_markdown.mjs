@@ -213,6 +213,18 @@ export function renderSemanticContractMarkdown(contract, {
   } else {
     for (const decision of specification.decisions) {
       lines.push('', `### ${decision.questionId}: ${decision.question}`);
+      lines.push(
+        `**Contexto:** ${decision.presentation.context}`,
+        `**Por que exige decisão humana:** ${decision.presentation.whyHumanDecision}`,
+        `**Impacto observável:** ${decision.presentation.observableImpact}`,
+        `**Justificativa da recomendação:** ${decision.presentation.recommendationReasoning}`,
+      );
+      if (decision.presentation.glossary.length > 0) {
+        lines.push('**Glossário:**');
+        for (const { term, meaning } of decision.presentation.glossary) {
+          lines.push(`- **${term}:** ${meaning}`);
+        }
+      }
       for (const unknown of unknownsByDecision.get(decision.questionId) ?? []) {
         lines.push(`**${governed ? 'Lacuna resolvida' : 'Lacuna'}:** ${unknown.statement}`);
       }

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.wizard_question.v1",
+  "title": "Aegis Complete Human Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "question",
+    "presentation",
+    "gaps",
+    "recommendedAnswerId",
+    "distinguishingCase",
+    "traceability",
+    "answers"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "presentation": { "$ref": "aegis.decision_presentation.v1" },
+    "gaps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "recommendedAnswerId": { "type": "string", "minLength": 1 },
+    "distinguishingCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["given", "when", "outcomes"],
+      "properties": {
+        "given": { "type": "string", "minLength": 1 },
+        "when": { "type": "string", "minLength": 1 },
+        "outcomes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["answerId", "then"],
+            "properties": {
+              "answerId": { "type": "string", "minLength": 1 },
+              "then": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "traceability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirements", "acceptanceCases", "invariants", "risks"],
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "statement"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "statement": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "acceptanceCases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "given", "when", "then", "outcomeKind"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "given": { "type": "string", "minLength": 1 },
+              "when": { "type": "string", "minLength": 1 },
+              "then": { "type": "string", "minLength": 1 },
+              "outcomeKind": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "invariants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "statement", "falsification"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "statement": { "type": "string", "minLength": 1 },
+              "falsification": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "level", "statement", "mitigation"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "minLength": 1 },
+              "level": { "type": "string", "minLength": 1 },
+              "statement": { "type": "string", "minLength": 1 },
+              "mitigation": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "answers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "rationale", "contractEffect", "recommended"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "contractEffect": { "type": "string", "minLength": 1 },
+          "recommended": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
