@@ -381,8 +381,9 @@ printf '%s\n' "${semantic_request}" | jq -e '
     | select((.required? // []) | index("then"))
     | select(.properties | has("then"))] | length) > 0
   and .outputSchema.document.properties.determinismReview.properties.dimensions.items.properties.activationId.type == "null"
-  and .outputSchema.document.properties.fragmentDispositions.minItems == (.intentEvidence.fragments | length)
-  and .outputSchema.document.properties.fragmentDispositions.maxItems == (.intentEvidence.fragments | length)
+  and .outputSchema.document.properties.policyAssessments.items.properties.amendmentIndex.type == "null"
+  and (.outputSchema.document.required | index("fragmentDispositions") == null)
+  and (.outputSchema.document.properties | has("fragmentDispositions") | not)
   and .outputSchema.document.properties.sourceEvidenceDigest.const == .intentEvidence.evidenceDigest
   and .intentEvidence.schema == "aegis.intent_evidence.v1"
   and .intentEvidence.method == "LOSSLESS_NEUTRAL_SENTENCES_V2"
@@ -539,12 +540,6 @@ process.stdout.write(JSON.stringify({
     inScope: ['Definir o comportamento público do transformador.'],
     outOfScope: ['Interface gráfica do transformador.'],
   },
-  fragmentDispositions: [{
-    fragmentIndex: 0,
-    status: 'CLAIMS_EXTRACTED',
-    claimIndexes: [0, 1],
-    rationale: 'As obrigações e a ambiguidade do fragmento foram classificadas.',
-  }],
   intentClaims: [
     {
       quote: 'Definir transformador de registros',

@@ -64,7 +64,6 @@ export function semanticSupervisorInstructions(request) {
     'Em requirements: FUNCTIONAL exige measurement=null; QUALITY exige measurement completo e só é válido quando método, métrica, alvo, condições e procedência possuem autoridade.',
     'Em determinismReview.coverage: DIMENSIONS_DECLARED exige ao menos um dimensionIndex; NO_DIMENSION_APPLICABLE exige dimensionIndexes vazio.',
     'Cada intentClaims.quote deve ser uma substring literal exata de ao menos um dos fragmentIndexes referenciados; não parafraseie quotes.',
-    `fragmentDispositions deve conter exatamente uma entrada para cada fragmentIndex de 0 a ${request.intentEvidence.fragments.length - 1}.`,
     'Todos os índices são base zero e apontam somente para o array nomeado pelo campo ou kind; audite cada índice contra o tamanho do array correspondente antes de responder.',
     'Nunca reutilize um fragmentIndex como requirementIndex, path reference, decision, risk, invariant ou outro índice de coleção.',
     'Toda basis USER_INTENT e todo target de medição USER_INTENT devem copiar uma substring literal exata da intenção.',

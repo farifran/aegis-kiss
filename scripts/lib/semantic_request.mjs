@@ -235,27 +235,10 @@ export function buildSemanticRequest({
   );
   outputSchemaDocument.properties.determinismReview
     .properties.dimensions.items.properties.activationId = { type: 'null' };
-  outputSchemaDocument.properties.fragmentDispositions.minItems = intentEvidence.fragments.length;
-  outputSchemaDocument.properties.fragmentDispositions.maxItems = intentEvidence.fragments.length;
-  const fragmentDisposition = outputSchemaDocument.properties.fragmentDispositions.items;
-  const dispositionVariant = (status, claimIndexes) => ({
-    ...fragmentDisposition,
-    properties: {
-      ...fragmentDisposition.properties,
-      status: { type: 'string', const: status },
-      claimIndexes: {
-        ...fragmentDisposition.properties.claimIndexes,
-        ...claimIndexes,
-      },
-    },
-  });
-  outputSchemaDocument.properties.fragmentDispositions.items = {
-    anyOf: [
-      dispositionVariant('CLAIMS_EXTRACTED', { minItems: 1 }),
-      dispositionVariant('CONTEXT_ONLY', { maxItems: 0 }),
-      dispositionVariant('UNCLEAR', {}),
-    ],
-  };
+  if (policy.amendments.length === 0) {
+    outputSchemaDocument.properties.policyAssessments
+      .items.properties.amendmentIndex = { type: 'null' };
+  }
   outputSchemaDocument.properties.sourceEvidenceDigest = {
     type: 'string',
     const: intentEvidence.evidenceDigest,

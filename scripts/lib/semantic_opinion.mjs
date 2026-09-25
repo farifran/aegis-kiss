@@ -29,34 +29,8 @@ function assertEvidenceCoverage(opinion, request) {
   if (opinion.sourceEvidenceDigest !== request.intentEvidence.evidenceDigest) {
     throw new Error('semantic_opinion_evidence_mismatch');
   }
-  const fragmentCount = request.intentEvidence.fragments.length;
-  const seenFragments = new Set();
-  const claimCoverage = new Set();
-  for (const disposition of opinion.fragmentDispositions) {
-    if (disposition.fragmentIndex >= fragmentCount) {
-      throw new Error(`semantic_opinion_fragment_out_of_range:${disposition.fragmentIndex}`);
-    }
-    if (seenFragments.has(disposition.fragmentIndex)) {
-      throw new Error(`semantic_opinion_duplicate_fragment:${disposition.fragmentIndex}`);
-    }
-    seenFragments.add(disposition.fragmentIndex);
-    if (disposition.status === 'CLAIMS_EXTRACTED' && disposition.claimIndexes.length === 0) {
-      throw new Error(`semantic_opinion_fragment_without_claim:${disposition.fragmentIndex}`);
-    }
-    if (disposition.status === 'CONTEXT_ONLY' && disposition.claimIndexes.length > 0) {
-      throw new Error(`semantic_opinion_context_with_claim:${disposition.fragmentIndex}`);
-    }
-    for (const claimIndex of disposition.claimIndexes) {
-      if (opinion.intentClaims[claimIndex] === undefined) {
-        throw new Error(`semantic_opinion_claim_out_of_range:${claimIndex}`);
-      }
-      claimCoverage.add(claimIndex);
-    }
-  }
-  if (seenFragments.size !== fragmentCount) throw new Error('semantic_opinion_incomplete_fragment_coverage');
   for (let index = 0; index < opinion.intentClaims.length; index += 1) {
     const claim = opinion.intentClaims[index];
-    if (!claimCoverage.has(index)) throw new Error(`semantic_opinion_unassigned_claim:${index}`);
     let literalQuoteFound = false;
     for (const fragmentIndex of claim.fragmentIndexes) {
       const fragment = request.intentEvidence.fragments[fragmentIndex];
@@ -174,16 +148,19 @@ export function compileSemanticOpinion(opinion, request) {
     interpretation: opinion.interpretation,
     changeKind: opinion.changeKind,
     scope: opinion.scope,
-    fragmentDispositions: opinion.fragmentDispositions.map((item) => ({
-      fragmentId: indexedValue(fragmentIds, item.fragmentIndex, 'fragment'),
-      status: item.status,
-      claimIds: compileIndexes(
-        item.claimIndexes,
-        opinion.intentClaims.map((_, index) => generatedId('CLAIM', index)),
-        'claim',
-      ),
-      rationale: item.rationale,
-    })),
+    fragmentDispositions: fragmentIds.map((fragmentId, fragmentIndex) => {
+      const claimIds = opinion.intentClaims.flatMap((claim, claimIndex) => (
+        claim.fragmentIndexes.includes(fragmentIndex) ? [generatedId('CLAIM', claimIndex)] : []
+      ));
+      return {
+        fragmentId,
+        status: claimIds.length > 0 ? 'CLAIMS_EXTRACTED' : 'CONTEXT_ONLY',
+        claimIds,
+        rationale: claimIds.length > 0
+          ? 'Derivado mecanicamente das claims que referenciam o fragmento.'
+          : 'Nenhuma claim semântica referencia este fragmento.',
+      };
+    }),
     intentClaims: opinion.intentClaims.map((claim, index) => ({
       id: generatedId('CLAIM', index),
       quote: claim.quote,

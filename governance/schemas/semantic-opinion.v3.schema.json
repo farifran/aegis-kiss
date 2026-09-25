@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": [
     "schema", "sourceEvidenceDigest", "title", "interpretation", "changeKind", "scope",
-    "fragmentDispositions", "intentClaims", "nonNormativeItems", "pathReferences",
+    "intentClaims", "nonNormativeItems", "pathReferences",
     "architectureContexts", "policyAssessments", "complexityReview", "requirements",
     "invariants", "riskReview", "risks", "adversarialReview", "determinismReview",
     "boundaryRules", "unknowns", "decisions"
@@ -19,25 +19,6 @@
     "interpretation": { "$ref": "aegis.semantic_opinion.v2#/properties/interpretation" },
     "changeKind": { "$ref": "aegis.semantic_opinion.v2#/properties/changeKind" },
     "scope": { "$ref": "aegis.semantic_opinion.v2#/properties/scope" },
-    "fragmentDispositions": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["fragmentIndex", "status", "claimIndexes", "rationale"],
-        "properties": {
-          "fragmentIndex": { "type": "integer", "minimum": 0 },
-          "status": { "enum": ["CLAIMS_EXTRACTED", "CONTEXT_ONLY", "UNCLEAR"] },
-          "claimIndexes": {
-            "type": "array",
-            "items": { "type": "integer", "minimum": 0 },
-            "uniqueItems": true
-          },
-          "rationale": { "type": "string", "minLength": 1 }
-        }
-      }
-    },
     "intentClaims": {
       "type": "array",
       "minItems": 1,
