@@ -283,7 +283,17 @@ main() {
       ;;
     *)
       # A demand runs the governed flow through the contract draft.
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" run "$@"
+      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" run "$@"
+      run_code=$?
+      if [[ ${run_code} -ne 0 ]]; then
+        exit ${run_code}
+      fi
+      if [[ -t 0 && -t 1 && -f "${RUNTIME_DIR}/user_confirmation_request.json" ]]; then
+        q_count="$(jq -r '.questionCount // 0' "${RUNTIME_DIR}/user_confirmation_request.json" 2>/dev/null || echo 0)"
+        if (( q_count > 0 )); then
+          resolve_preflight_wizard
+        fi
+      fi
       ;;
   esac
 }

@@ -68,6 +68,7 @@ export function semanticSupervisorInstructions(request) {
     'Nunca reutilize um fragmentIndex como requirementIndex, path reference, decision, risk, invariant ou outro índice de coleção.',
     'Toda basis USER_INTENT e todo target de medição USER_INTENT devem copiar uma substring literal exata da intenção.',
     'Prefira o menor conjunto suficiente de claims, requisitos e decisões; não fragmente a mesma obrigação sem necessidade observável.',
+    'Quando a demanda sugerir sobre-engenharia (classes abstratas, injeção de dependências, factories) ou falta de disciplina (tipos "any", try/catch vazio), ou contiver ambiguidades/omissões de negócio e determinismo (cardinalidade ímpar, resíduos BigInt, desempates), NÃO suprima silenciosamente: formule decisões estruturadas em decisions para o Wizard, marcando a opção pragmática KISS (funções puras, dados imutáveis, tipagem rígida, falhas explícitas) com recommended: true e justificativa falsificável.',
     `Constituição confiável: ${canonicalJson(request.constitution)}`,
   ].join('\n');
 }

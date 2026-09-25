@@ -62,7 +62,13 @@ async function executeCodex({ executable, args, input, cwd, timeoutMs }) {
     };
     child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk); });
     child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk); });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      if (error && error.code === 'ENOENT') {
+        reject(new Error(`semantic_codex_failed:executable_not_found:${executable}`));
+        return;
+      }
+      reject(error);
+    });
     child.on('close', (code, signal) => {
       if (code !== 0) {
         reject(new Error(`semantic_codex_failed:${failureDetail(stdout, stderr, code, signal)}`));
