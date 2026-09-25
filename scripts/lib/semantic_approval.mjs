@@ -209,7 +209,10 @@ export function buildSemanticRevision(contract, resolution) {
   };
 }
 
-export function assertRevisionApplied(draft, resolution) {
+export function assertRevisionApplied(draft, resolution, previousSpecification) {
+  if (previousSpecification === undefined) {
+    throw new Error('revision_without_source_specification');
+  }
   const resolvedQuestionIds = new Set(resolution.answers.map(({ questionId }) => questionId));
   if (!draft.requirements.some(({ basis }) => basis.some(({ source, reference }) => (
     source === 'USER_DECISION' && resolvedQuestionIds.has(reference)
@@ -239,6 +242,25 @@ export function assertRevisionApplied(draft, resolution) {
       ))) {
         throw new Error(`revision_effect_not_materialized:${answer.questionId}`);
       }
+    }
+  }
+
+  const revisedDimensions = new Map(draft.determinismReview.dimensions.map((dimension) => [
+    `${dimension.kind}:${dimension.subjectId}`,
+    dimension,
+  ]));
+  for (const previous of previousSpecification.determinismReview.dimensions) {
+    const key = `${previous.kind}:${previous.subjectId}`;
+    const revised = revisedDimensions.get(key);
+    if (revised === undefined) throw new Error(`semantic_coverage_regression:${key}`);
+    const resolvedByHuman = previous.status === 'DECISION_REQUIRED'
+      && previous.targetIds.some((targetId) => resolvedQuestionIds.has(targetId));
+    if (resolvedByHuman) {
+      if (revised.status === 'DECISION_REQUIRED' || revised.status === 'GAP_FOUND') {
+        throw new Error(`resolved_dimension_remains_open:${key}`);
+      }
+    } else if (revised.status !== previous.status) {
+      throw new Error(`semantic_dimension_status_regression:${key}:${previous.status}:${revised.status}`);
     }
   }
 }

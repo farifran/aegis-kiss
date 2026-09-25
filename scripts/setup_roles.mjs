@@ -63,11 +63,14 @@ async function configureRole(terminal, label, defaults) {
     `Adaptador (ex.: ${channel === 'API' ? 'ai-gateway' : 'codex, cursor'}): `,
     compatibleDefaults?.adapter ?? (channel === 'API' ? 'ai-gateway' : 'codex'),
   ));
+  const modelRequired = channel === 'API' || (channel === 'IDE' && adapter === 'codex');
   const modelAnswer = trimAnswer(await terminal.question(
-    `Modelo${channel === 'API' ? '' : ' (opcional)'}${compatibleDefaults?.model ? ` [${compatibleDefaults.model}]` : ''}: `,
+    `Modelo${modelRequired ? '' : ' (opcional)'}${compatibleDefaults?.model ? ` [${compatibleDefaults.model}]` : ''}: `,
   ));
   const model = modelAnswer || compatibleDefaults?.model || null;
-  if (channel === 'API' && model === null) throw rejection('API_MODEL_REQUIRED');
+  if (modelRequired && model === null) throw rejection(
+    channel === 'API' ? 'API_MODEL_REQUIRED' : 'IDE_MODEL_REQUIRED',
+  );
   if (model !== null && model.length > 120) throw rejection('INVALID_MODEL_IDENTIFIER');
   if (channel === 'IDE') return { channel, adapter, model, credentialEnv: null };
 

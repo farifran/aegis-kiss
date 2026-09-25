@@ -33,6 +33,21 @@ const diagnostics = new Map([
     remediation: 'Corrija o campo indicado em detail e gere novamente somente o parecer semântico.',
     ruleId: 'CONST-EVIDENCE',
   }],
+  ['INCOMPLETE_DETERMINISM_CLAIM_COVERAGE', {
+    message: 'Uma afirmação material não recebeu revisão explícita de determinismo.',
+    remediation: 'Declare as dimensões ativadas pela claim ou justifique explicitamente por que nenhuma dimensão se aplica.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['ORPHAN_DETERMINISM_DIMENSION', {
+    message: 'Uma dimensão de determinismo foi declarada sem vínculo com uma afirmação material.',
+    remediation: 'Vincule a dimensão à claim correspondente ou remova a dimensão sem sujeito contratual.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['SEMANTIC_COVERAGE_REGRESSION', {
+    message: 'A recompilação eliminou uma dimensão semântica já identificada no contrato anterior.',
+    remediation: 'Preserve a dimensão e materialize a decisão humana sem reduzir a cobertura anterior.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
   ['JEV_GATEWAY_AUTHENTICATION_FAILED', {
     message: 'O Vercel AI Gateway recusou a credencial configurada para o JEV.',
     remediation: 'Revogue a chave exposta, gere uma nova chave e exporte-a como AI_GATEWAY_API_KEY.',
@@ -58,6 +73,23 @@ const diagnostics = new Map([
     message: 'O parecer foi produzido para uma ficha determinística diferente da ficha atual.',
     remediation: 'Solicite um novo parecer usando o semantic request atual, sem reutilizar respostas anteriores.',
     ruleId: 'CONST-EVIDENCE',
+  }],
+  ['SEMANTIC_CODEX_FAILED', {
+    message: 'O supervisor Codex não concluiu a deliberação semântica.',
+    remediation: 'Confira a autenticação do Codex e execute novamente; o preflight atual pode ser reutilizado com ./aegis --semantic-run.',
+  }],
+  ['SEMANTIC_CODEX_INVALID_OPINION', {
+    message: 'O supervisor Codex não devolveu um parecer JSON utilizável.',
+    remediation: 'Execute novamente a deliberação; o Harness manterá o contrato bloqueado até receber uma saída válida.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['SEMANTIC_CODEX_MODEL_REQUIRED', {
+    message: 'O supervisor Codex precisa de um modelo explícito para execução automática.',
+    remediation: 'Execute ./aegis --setup e informe um modelo disponível na sua conta Codex.',
+  }],
+  ['SEMANTIC_IDE_ADAPTER_UNSUPPORTED', {
+    message: 'O supervisor IDE configurado não oferece execução automática no Aegis.',
+    remediation: 'Use o adaptador codex para fluxo automático ou uma API configurada em ./aegis --setup.',
   }],
   ['SEMANTIC_SUPERVISOR_CREDENTIAL_MISSING', {
     message: 'A chave do supervisor semântico não está disponível no ambiente.',
@@ -130,7 +162,7 @@ function diagnosticFamily(reason) {
       ruleId: 'CONST-DECISIONS',
     };
   }
-  if (/^(?:ACCEPTANCE|BOUNDARY|DETERMINISM|INAPPLICABLE_DETERMINISM|INVARIANT|QUALITY_CONSTRAINT|REQUIREMENT|SPECIFIED_DETERMINISM)/u.test(reason)) {
+  if (/^(?:ACCEPTANCE|BOUNDARY|DETERMINISM|INAPPLICABLE_DETERMINISM|INCOMPLETE_DETERMINISM|INVALID_REPRESENTATION|INVARIANT|ORPHAN_DETERMINISM|QUALITY_CONSTRAINT|REQUIREMENT|RESOLVED_DIMENSION|SPECIFIED_DETERMINISM)/u.test(reason)) {
     return {
       message: 'A especificação não fecha uma fronteira observável com prova falsificável suficiente.',
       remediation: 'Defina um único comportamento de sucesso, falha ou limite e vincule-o ao requisito correspondente.',

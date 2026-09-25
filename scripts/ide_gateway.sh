@@ -20,11 +20,11 @@ require_command_arity() {
 usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
-  ./aegis "<demanda>" Captura a demanda e executa o Discovery mecânico
+  ./aegis "<demanda>" Executa captura, Discovery, JEV e supervisão até o contrato
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
-  ./aegis --semantic-run  API delibera; supervisor IDE recebe a ficha para responder
+  ./aegis --semantic-run  Executa o supervisor configurado e compila o contrato
   ./aegis --semantic-compile  Recebe o parecer JSON da IDE pelo stdin e compila o contrato
   ./aegis --jev-request  Exibe o lote de avaliação paralela preparado para o JEV
   ./aegis --jev-run      Executa o JEV em modo sombra via Vercel AI Gateway
@@ -282,8 +282,8 @@ main() {
       fatal 'UNKNOWN_COMMAND'
       ;;
     *)
-      # Any demand prompt string triggers the symbiotic draft runner
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft "$@"
+      # A demand runs the governed flow through the contract draft.
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" run "$@"
       ;;
   esac
 }

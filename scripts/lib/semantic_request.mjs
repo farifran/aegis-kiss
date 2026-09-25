@@ -54,12 +54,29 @@ function decodeUtf8Prefix(bytes, byteLimit) {
   return '';
 }
 
-function compactOutputSchema(value) {
-  if (Array.isArray(value)) return value.map(compactOutputSchema);
+function compactOutputSchema(value, propertyMap = false) {
+  if (Array.isArray(value)) return value.map((item) => compactOutputSchema(item));
   if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !['description', 'title', 'if', 'then', 'else', 'allOf'].includes(key))
-    .map(([key, item]) => [key === 'oneOf' ? 'anyOf' : key, compactOutputSchema(item)]));
+  if (propertyMap) {
+    return Object.fromEntries(Object.entries(value)
+      .map(([key, item]) => [key, compactOutputSchema(item)]));
+  }
+  const compact = Object.fromEntries(Object.entries(value)
+    .filter(([key]) => ![
+      'description', 'title', 'if', 'then', 'else', 'allOf', 'uniqueItems', 'pattern',
+    ].includes(key))
+    .map(([key, item]) => [
+      key === 'oneOf' ? 'anyOf' : key,
+      compactOutputSchema(item, key === 'properties'),
+    ]));
+  if (!Object.hasOwn(compact, 'type') && Object.hasOwn(compact, 'const')) {
+    compact.type = compact.const === null ? 'null' : typeof compact.const;
+  }
+  if (!Object.hasOwn(compact, 'type') && Array.isArray(compact.enum) && compact.enum.length > 0) {
+    const types = new Set(compact.enum.map((item) => (item === null ? 'null' : typeof item)));
+    if (types.size === 1) [compact.type] = types;
+  }
+  return compact;
 }
 
 function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
@@ -216,7 +233,33 @@ export function buildSemanticRequest({
   const outputSchemaDocument = compactOutputSchema(
     standaloneSchemaDocument('aegis.semantic_opinion.v3'),
   );
-  outputSchemaDocument.properties.sourceEvidenceDigest = { const: intentEvidence.evidenceDigest };
+  outputSchemaDocument.properties.determinismReview
+    .properties.dimensions.items.properties.activationId = { type: 'null' };
+  outputSchemaDocument.properties.fragmentDispositions.minItems = intentEvidence.fragments.length;
+  outputSchemaDocument.properties.fragmentDispositions.maxItems = intentEvidence.fragments.length;
+  const fragmentDisposition = outputSchemaDocument.properties.fragmentDispositions.items;
+  const dispositionVariant = (status, claimIndexes) => ({
+    ...fragmentDisposition,
+    properties: {
+      ...fragmentDisposition.properties,
+      status: { type: 'string', const: status },
+      claimIndexes: {
+        ...fragmentDisposition.properties.claimIndexes,
+        ...claimIndexes,
+      },
+    },
+  });
+  outputSchemaDocument.properties.fragmentDispositions.items = {
+    anyOf: [
+      dispositionVariant('CLAIMS_EXTRACTED', { minItems: 1 }),
+      dispositionVariant('CONTEXT_ONLY', { maxItems: 0 }),
+      dispositionVariant('UNCLEAR', {}),
+    ],
+  };
+  outputSchemaDocument.properties.sourceEvidenceDigest = {
+    type: 'string',
+    const: intentEvidence.evidenceDigest,
+  };
   const requestWithoutDigest = {
     schema: 'aegis.semantic_request.v10',
     contextDigest,

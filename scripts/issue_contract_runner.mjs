@@ -153,6 +153,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
   return {
     resolution,
     request: buildSemanticRevision(contract, resolution),
+    sourceSpecification: contract.specification,
     humanResolutions: [
       ...contract.humanResolutions,
       ...buildHumanResolutionRecords(contract, resolution),
@@ -194,11 +195,12 @@ async function readGovernedLegacyRevision(preflight) {
         };
       }),
     },
+    sourceSpecification: contract.specification,
     humanResolutions: contract.humanResolutions,
   };
 }
 
-async function handleDraft(args) {
+async function handleDraft(args, { emitHandoff = true } = {}) {
   const [
     { canonicalJson },
     { buildPreflightHandoff, captureDemand, observeWorkspace },
@@ -223,14 +225,16 @@ async function handleDraft(args) {
     writeFileAtomic(sourceIndexPath, `${canonicalJson(sourceIndex)}\n`),
   ]);
 
-  process.stdout.write(`${JSON.stringify({
-    schema: preflight.schema,
-    status: preflight.status,
-    phase: preflight.phase,
-    preflightDigest: preflight.preflightDigest,
-    sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
-    dataPath: '.harness/runtime/preflight.json',
-  })}\n`);
+  if (emitHandoff) {
+    process.stdout.write(`${JSON.stringify({
+      schema: preflight.schema,
+      status: preflight.status,
+      phase: preflight.phase,
+      preflightDigest: preflight.preflightDigest,
+      sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
+      dataPath: '.harness/runtime/preflight.json',
+    })}\n`);
+  }
 }
 
 async function handleValidatePreflight() {
@@ -575,7 +579,9 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     }
     throw rejection('INVALID_SEMANTIC_OPINION', error.message);
   }
-  if (revision !== null) assertRevisionApplied(draft, revision.request);
+  if (revision !== null) {
+    assertRevisionApplied(draft, revision.request, revision.sourceSpecification);
+  }
   const contract = compileSemanticContract({
     repositoryRoot: root,
     draft,
@@ -657,8 +663,11 @@ async function handleSemanticRun(args) {
   const role = assignment.roles.contractSupervisor;
   if (role.channel === 'IDE') {
     const context = await buildCurrentSemanticRequest();
-    await ensureJevAdvisory(context.request);
-    await writeSemanticRequest(context.request);
+    const jevEvaluation = await ensureJevAdvisory(context.request);
+    if (role.adapter !== 'codex') throw rejection('SEMANTIC_IDE_ADAPTER_UNSUPPORTED', role.adapter);
+    const { requestCodexSemanticOpinion } = await import('./lib/semantic_codex.mjs');
+    const { opinion, execution } = await requestCodexSemanticOpinion(context.request, role);
+    await compileAndPersistSemanticOpinion(opinion, context, { ...execution, jevEvaluation });
     return;
   }
   assertSemanticSupervisorReady(role);
@@ -666,6 +675,11 @@ async function handleSemanticRun(args) {
   const jevEvaluation = await ensureJevAdvisory(context.request);
   const { opinion, execution } = await requestSemanticOpinion(context.request, role);
   await compileAndPersistSemanticOpinion(opinion, context, { ...execution, jevEvaluation });
+}
+
+async function handleDemand(args) {
+  await handleDraft(args, { emitHandoff: false });
+  await handleSemanticRun([]);
 }
 
 async function handleApprove() {
@@ -814,7 +828,8 @@ const command = process.argv[2];
 const remainingArgs = process.argv.slice(3);
 
 try {
-  if (command === 'draft') await handleDraft(remainingArgs);
+  if (command === 'run') await handleDemand(remainingArgs);
+  else if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'validate-preflight') await handleValidatePreflight();
   else if (command === 'validate-contract') await handleValidateContract();
   else if (command === 'confirmation-request') await handleConfirmationRequest();
@@ -834,7 +849,7 @@ try {
   const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
   const phase = command === 'draft' || command === 'validate-preflight'
     ? 'PREFLIGHT'
-    : command === 'semantic-request' || command === 'jev-request' || command === 'jev-run'
+    : command === 'run' || command === 'semantic-request' || command === 'jev-request' || command === 'jev-run'
       || command === 'semantic-run'
       || command === 'semantic-compile' || command === 'validate-contract'
       ? 'SEMANTIC'

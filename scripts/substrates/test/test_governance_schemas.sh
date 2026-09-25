@@ -28,6 +28,7 @@ import {
 import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
+  assertRevisionApplied,
   assertSemanticDraft,
   buildConfirmationRequest,
   buildSemanticRequest,
@@ -364,7 +365,21 @@ const draft = {
   determinismReview: {
     status: 'NOT_APPLICABLE',
     rationale: 'Nenhuma dimensão material de determinismo foi identificada.',
-    sourceFragmentIds: [],
+    sourceFragmentIds: ['FRAG-0001'],
+    coverage: [
+      {
+        claimId: 'CLAIM-RESULT',
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensions: [],
+        rationale: 'O resultado simples não ativa uma dimensão material desta taxonomia.',
+      },
+      {
+        claimId: 'CLAIM-FORMAT',
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensions: [],
+        rationale: 'A escolha de formato altera a superfície, não uma dimensão de determinismo.',
+      },
+    ],
     dimensions: [],
   },
   boundaryRules: [],
@@ -561,6 +576,20 @@ deterministicDraft.determinismReview = {
   status: 'SEMANTICALLY_CLOSED',
   rationale: 'A ordem não altera o resultado público.',
   sourceFragmentIds: ['FRAG-0001'],
+  coverage: [
+    {
+      claimId: 'CLAIM-RESULT',
+      disposition: 'DIMENSIONS_DECLARED',
+      dimensions: [{ kind: 'ORDERING', subjectId: 'REQ-RESULT' }],
+      rationale: 'A claim normativa define o resultado cuja invariância de ordem foi especificada.',
+    },
+    {
+      claimId: 'CLAIM-FORMAT',
+      disposition: 'NO_DIMENSION_APPLICABLE',
+      dimensions: [],
+      rationale: 'A escolha de formato altera a superfície, não a ordem do resultado.',
+    },
+  ],
   dimensions: [{
     kind: 'ORDERING',
     subjectId: 'REQ-RESULT',
@@ -576,6 +605,11 @@ deterministicDraft.determinismReview = {
   }],
 };
 assertSemanticDraft(deterministicDraft, loadedPolicy.policy, validationContext);
+
+expectDraftFailure(
+  (invalid) => { invalid.determinismReview.coverage.pop(); },
+  'incomplete_determinism_claim_coverage',
+);
 
 function expectDeterminismFailure(mutator, expectedPrefix) {
   const invalid = structuredClone(deterministicDraft);
@@ -607,6 +641,75 @@ expectDeterminismFailure(
   (dimension) => { dimension.targetIds = []; },
   'determinism_dimension_does_not_target_subject:',
 );
+expectDeterminismFailure(
+  (_dimension, invalid) => {
+    invalid.determinismReview.coverage[0] = {
+      claimId: 'CLAIM-RESULT',
+      disposition: 'NO_DIMENSION_APPLICABLE',
+      dimensions: [],
+      rationale: 'A dimensão foi omitida.',
+    };
+  },
+  'orphan_determinism_dimension',
+);
+
+const invalidWidthDraft = structuredClone(draft);
+invalidWidthDraft.intentClaims[0].targetIds.push('BOUND-WIDTH');
+invalidWidthDraft.requirements[0].acceptanceCases.push({
+  id: 'AC-WIDTH',
+  kind: 'BOUNDARY',
+  given: 'Uma representação declarada com 16 bits.',
+  when: 'Sua largura for verificada.',
+  then: 'A largura deve ser exatamente 16 bits.',
+  outcomeKind: 'RETURN_VALUE',
+  decisionBinding: null,
+  boundaryBinding: {
+    ruleId: 'BOUND-WIDTH',
+    side: 'EXACT_WIDTH',
+    expectedBehavior: 'NOT_APPLICABLE',
+    expectedValue: '16',
+  },
+});
+invalidWidthDraft.boundaryRules = [{
+  id: 'BOUND-WIDTH',
+  subject: 'largura da representação',
+  representationKind: 'REPRESENTATION_WIDTH',
+  lowerBound: '0',
+  upperBound: '16',
+  underflowBehavior: 'NOT_APPLICABLE',
+  overflowBehavior: 'NOT_APPLICABLE',
+  decisionId: null,
+  requirementIds: ['REQ-RESULT'],
+  acceptanceCaseIds: ['AC-WIDTH'],
+  sourceFragmentIds: ['FRAG-0001'],
+  basis: userBasis,
+}];
+try {
+  assertSemanticDraft(invalidWidthDraft, loadedPolicy.policy, validationContext);
+  throw new Error('invalid_representation_width_was_not_rejected');
+} catch (error) {
+  if (error.message !== 'invalid_representation_width_interval:BOUND-WIDTH') throw error;
+}
+
+const regressedRevision = structuredClone(deterministicDraft);
+regressedRevision.requirements[0].basis.push({
+  source: 'USER_DECISION',
+  reference: 'Q-FORMAT',
+});
+regressedRevision.decisions = [];
+regressedRevision.determinismReview.dimensions = [];
+try {
+  assertRevisionApplied(regressedRevision, {
+    answers: [{
+      questionId: 'Q-FORMAT',
+      answerId: 'ANS-SIMPLE',
+      contractEffect: 'Um resultado explícito deve ser observado.',
+    }],
+  }, deterministicDraft);
+  throw new Error('semantic_coverage_regression_was_not_rejected');
+} catch (error) {
+  if (!error.message.startsWith('semantic_coverage_regression:ORDERING:REQ-RESULT')) throw error;
+}
 
 const contract = compileSemanticContract({
   repositoryRoot: process.cwd(),
@@ -673,6 +776,8 @@ const blocked = structuredClone(draft);
 blocked.decisions = [];
 blocked.intentClaims = blocked.intentClaims.filter(({ disposition }) => disposition !== 'DECISION');
 blocked.fragmentDispositions[0].claimIds = ['CLAIM-RESULT'];
+blocked.determinismReview.coverage = blocked.determinismReview.coverage
+  .filter(({ claimId }) => claimId === 'CLAIM-RESULT');
 blocked.unknowns[0].decisionId = null;
 blocked.requirements[0].acceptanceCases[0].decisionBinding = null;
 const blockedContract = compileSemanticContract({

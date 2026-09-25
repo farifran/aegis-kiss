@@ -150,6 +150,12 @@ export function renderSemanticContractMarkdown(contract, {
 
   lines.push('', '### Revisão de determinismo');
   lines.push(`- **${specification.determinismReview.status}:** ${specification.determinismReview.rationale}`);
+  for (const coverage of specification.determinismReview.coverage) {
+    const dimensions = coverage.dimensions.length === 0
+      ? 'nenhuma dimensão aplicável'
+      : coverage.dimensions.map(({ kind, subjectId }) => `${kind}/${subjectId}`).join(', ');
+    lines.push(`- **Cobertura ${coverage.claimId}/${coverage.disposition}:** ${dimensions}. ${coverage.rationale}`);
+  }
   for (const dimension of specification.determinismReview.dimensions) {
     lines.push(`- **${dimension.kind}/${dimension.subjectId}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);

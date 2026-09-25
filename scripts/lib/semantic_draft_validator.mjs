@@ -231,6 +231,11 @@ function validateRequirements(draft, context) {
       && !boundary.basis.some(({ source }) => source === 'USER_INTENT' || source === 'USER_DECISION')) {
       throw new Error(`silent_wrap_forbidden:${boundary.id}`);
     }
+    if (boundary.representationKind === 'REPRESENTATION_WIDTH'
+      && (!/^[1-9][0-9]*$/u.test(boundary.lowerBound)
+        || boundary.lowerBound !== boundary.upperBound)) {
+      throw new Error(`invalid_representation_width_interval:${boundary.id}`);
+    }
   }
   for (const acceptanceCase of acceptanceCases) {
     if (acceptanceCase.decisionBinding !== null) {
@@ -407,6 +412,68 @@ function validateDeterminism(draft, context) {
     )) ? 'GAPS_FOUND' : 'SEMANTICALLY_CLOSED';
   if (draft.determinismReview.status !== expectedStatus) {
     throw new Error('determinism_review_status_mismatch');
+  }
+}
+
+function validateDeterminismCoverage(draft) {
+  const materialClaims = draft.intentClaims.filter(({ disposition }) => (
+    disposition === 'NORMATIVE' || disposition === 'DECISION'
+  ));
+  const materialClaimIds = new Set(materialClaims.map(({ id }) => id));
+  const coveredClaimIds = new Set();
+  const dimensionsByKey = new Map(draft.determinismReview.dimensions.map((dimension) => [
+    `${dimension.kind}:${dimension.subjectId}`,
+    dimension,
+  ]));
+  const coveredDimensions = new Set();
+
+  for (const coverage of draft.determinismReview.coverage) {
+    if (!materialClaimIds.has(coverage.claimId)) {
+      throw new Error(`determinism_coverage_non_material_claim:${coverage.claimId}`);
+    }
+    if (coveredClaimIds.has(coverage.claimId)) {
+      throw new Error(`duplicate_determinism_coverage:${coverage.claimId}`);
+    }
+    coveredClaimIds.add(coverage.claimId);
+    const claim = materialClaims.find(({ id }) => id === coverage.claimId);
+    const dimensionKeys = coverage.dimensions.map(({ kind, subjectId }) => `${kind}:${subjectId}`);
+    if (new Set(dimensionKeys).size !== dimensionKeys.length) {
+      throw new Error(`duplicate_determinism_coverage_dimension:${coverage.claimId}`);
+    }
+    if (coverage.disposition === 'DIMENSIONS_DECLARED' && dimensionKeys.length === 0) {
+      throw new Error(`determinism_coverage_without_dimension:${coverage.claimId}`);
+    }
+    if (coverage.disposition === 'NO_DIMENSION_APPLICABLE' && dimensionKeys.length > 0) {
+      throw new Error(`inapplicable_determinism_coverage_with_dimension:${coverage.claimId}`);
+    }
+    for (const key of dimensionKeys) {
+      const dimension = dimensionsByKey.get(key);
+      if (dimension === undefined) {
+        throw new Error(`determinism_coverage_unknown_dimension:${coverage.claimId}:${key}`);
+      }
+      if (dimension.subjectId !== 'PUBLIC_CONTRACT'
+        && !dimension.targetIds.some((targetId) => claim.targetIds.includes(targetId))) {
+        throw new Error(`determinism_coverage_unrelated_dimension:${coverage.claimId}:${key}`);
+      }
+      coveredDimensions.add(key);
+    }
+  }
+
+  if (coveredClaimIds.size !== materialClaimIds.size
+    || [...materialClaimIds].some((claimId) => !coveredClaimIds.has(claimId))) {
+    throw new Error('incomplete_determinism_claim_coverage');
+  }
+  if (coveredDimensions.size !== dimensionsByKey.size
+    || [...dimensionsByKey.keys()].some((key) => !coveredDimensions.has(key))) {
+    throw new Error('orphan_determinism_dimension');
+  }
+  const expectedFragments = new Set(materialClaims.flatMap(({ sourceFragmentIds }) => (
+    sourceFragmentIds
+  )));
+  const actualFragments = new Set(draft.determinismReview.sourceFragmentIds);
+  if (actualFragments.size !== expectedFragments.size
+    || [...expectedFragments].some((fragmentId) => !actualFragments.has(fragmentId))) {
+    throw new Error('determinism_review_fragment_coverage_mismatch');
   }
 }
 
@@ -631,6 +698,7 @@ export function assertSemanticDraft(draft, policy, {
   validateRequirements(draft, context);
   validateDecisions(draft, context);
   validateDeterminism(draft, context);
+  validateDeterminismCoverage(draft);
   validateFragmentCoverage(draft, context);
   validateReviews(draft, context);
 }

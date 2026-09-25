@@ -57,12 +57,14 @@ function assertEvidenceCoverage(opinion, request) {
   for (let index = 0; index < opinion.intentClaims.length; index += 1) {
     const claim = opinion.intentClaims[index];
     if (!claimCoverage.has(index)) throw new Error(`semantic_opinion_unassigned_claim:${index}`);
+    let literalQuoteFound = false;
     for (const fragmentIndex of claim.fragmentIndexes) {
       const fragment = request.intentEvidence.fragments[fragmentIndex];
       if (fragment === undefined) throw new Error(`semantic_opinion_fragment_out_of_range:${fragmentIndex}`);
       const source = request.intent.slice(fragment.startOffset, fragment.endOffset);
-      if (!source.includes(claim.quote)) throw new Error(`semantic_opinion_claim_quote_outside_fragment:${index}`);
+      if (source.includes(claim.quote)) literalQuoteFound = true;
     }
+    if (!literalQuoteFound) throw new Error(`semantic_opinion_claim_quote_outside_fragment:${index}`);
   }
   for (const dimension of opinion.determinismReview.dimensions) {
     if (dimension.activationId !== null) {
@@ -154,6 +156,15 @@ export function compileSemanticOpinion(opinion, request) {
   const dimensions = opinion.determinismReview.dimensions;
   const fragmentIds = request.intentEvidence.fragments.map(({ id }) => id);
   const compileFragmentIndexes = (indexes) => compileIndexes(indexes, fragmentIds, 'fragment');
+  const dimensionIdentity = (dimensionIndex) => {
+    const dimension = indexedValue(dimensions, dimensionIndex, 'determinism_coverage_dimension');
+    return {
+      kind: dimension.kind,
+      subjectId: dimension.subject === null
+        ? 'PUBLIC_CONTRACT'
+        : compileTargets([dimension.subject])[0],
+    };
+  };
 
   return {
     schema: 'aegis.semantic_draft.v9',
@@ -298,6 +309,16 @@ export function compileSemanticOpinion(opinion, request) {
           : 'SEMANTICALLY_CLOSED',
       rationale: opinion.determinismReview.rationale,
       sourceFragmentIds: compileFragmentIndexes(opinion.determinismReview.fragmentIndexes),
+      coverage: opinion.determinismReview.coverage.map((item) => ({
+        claimId: indexedValue(
+          opinion.intentClaims.map((_, index) => generatedId('CLAIM', index)),
+          item.claimIndex,
+          'determinism_coverage_claim',
+        ),
+        disposition: item.disposition,
+        dimensions: item.dimensionIndexes.map(dimensionIdentity),
+        rationale: item.rationale,
+      })),
       dimensions: dimensions.map((item) => {
         const basis = compileOpinionBasis(item.basis, request);
         const witness = counterexampleForDimension(item.kind);

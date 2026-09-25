@@ -142,13 +142,39 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rationale", "fragmentIndexes", "dimensions"],
+      "required": ["rationale", "fragmentIndexes", "coverage", "dimensions"],
       "properties": {
         "rationale": { "type": "string", "minLength": 1 },
         "fragmentIndexes": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
           "uniqueItems": true
+        },
+        "coverage": {
+          "type": "array",
+          "description": "Uma entrada para cada claim NORMATIVE ou DECISION. A IA declara explicitamente se a claim ativa dimensões de determinismo; o Harness valida cobertura, vínculos e ausência de dimensões órfãs.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["claimIndex", "disposition", "dimensionIndexes", "rationale"],
+            "properties": {
+              "claimIndex": { "type": "integer", "minimum": 0 },
+              "disposition": { "enum": ["DIMENSIONS_DECLARED", "NO_DIMENSION_APPLICABLE"] },
+              "dimensionIndexes": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 0 },
+                "uniqueItems": true
+              },
+              "rationale": { "type": "string", "minLength": 1 }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "disposition": { "const": "DIMENSIONS_DECLARED" } } },
+                "then": { "properties": { "dimensionIndexes": { "type": "array", "minItems": 1 } } },
+                "else": { "properties": { "dimensionIndexes": { "type": "array", "maxItems": 0 } } }
+              }
+            ]
+          }
         },
         "dimensions": { "$ref": "aegis.semantic_opinion.v2#/properties/determinismReview/properties/dimensions" }
       }

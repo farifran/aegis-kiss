@@ -326,9 +326,9 @@ NODE
 
 # Conteúdo e comandos permanecem separados.
 source_before="$(shasum src/index.ts)"
-printf '%s\n' "$(bash ./aegis 'clean')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
+printf '%s\n' "$(node scripts/issue_contract_runner.mjs draft 'clean')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
-printf '%s\n' "$(bash ./aegis 'approve')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
+printf '%s\n' "$(node scripts/issue_contract_runner.mjs draft 'approve')" | jq -e '.status == "SEMANTIC_DELIBERATION_REQUIRED"' >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
 set +e
@@ -341,7 +341,7 @@ printf '%s\n' "${arity_output}" | jq -e '.reason == "INVALID_DEMAND_ARITY"' >/de
 # Uma nova demanda substitui integralmente o runtime, mas nunca altera src/.
 printf '{}\n' > .harness/runtime/contract.json
 printf '{}\n' > .harness/runtime/stale.json
-draft_output="$(bash ./aegis 'Definir transformador de registros com saída ainda a escolher')"
+draft_output="$(node scripts/issue_contract_runner.mjs draft 'Definir transformador de registros com saída ainda a escolher')"
 printf '%s\n' "${draft_output}" | jq -e '
   .schema == "aegis.preflight_handoff.v2"
   and .status == "SEMANTIC_DELIBERATION_REQUIRED"
@@ -376,6 +376,13 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and .outputSchema.strict == true
   and (.outputSchema.digest | test("^[a-f0-9]{64}$"))
   and .outputSchema.document."$id" == "aegis.semantic_opinion.v3"
+  and ([.outputSchema.document | .. | objects | select(has("uniqueItems"))] | length) == 0
+  and ([.outputSchema.document | .. | objects
+    | select((.required? // []) | index("then"))
+    | select(.properties | has("then"))] | length) > 0
+  and .outputSchema.document.properties.determinismReview.properties.dimensions.items.properties.activationId.type == "null"
+  and .outputSchema.document.properties.fragmentDispositions.minItems == (.intentEvidence.fragments | length)
+  and .outputSchema.document.properties.fragmentDispositions.maxItems == (.intentEvidence.fragments | length)
   and .outputSchema.document.properties.sourceEvidenceDigest.const == .intentEvidence.evidenceDigest
   and .intentEvidence.schema == "aegis.intent_evidence.v1"
   and .intentEvidence.method == "LOSSLESS_NEUTRAL_SENTENCES_V2"
@@ -434,19 +441,24 @@ printf '%s\n' "${jev_request}" | jq -e \
 ' >/dev/null
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 
-# Com supervisor IDE, --semantic-run entrega a mesma ficha em vez de tentar uma API.
+# Um adaptador IDE sem executor automático falha explicitamente; a ficha continua
+# disponível pelo comando de inspeção --semantic-request.
 node --input-type=module <<'NODE'
 import { writeFileSync } from 'node:fs';
 writeFileSync('.harness/config/roles.json', `${JSON.stringify({
   schema: 'aegis.role_assignment.v1',
   roles: {
-    contractSupervisor: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
+    contractSupervisor: { channel: 'IDE', adapter: 'cursor', model: null, credentialEnv: null },
     codingAgent: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
   },
 })}\n`);
 NODE
-ide_handoff="$(bash ./aegis --semantic-run)"
-[[ "$(printf '%s\n' "${ide_handoff}" | jq -r '.requestDigest')" == "$(printf '%s\n' "${semantic_request}" | jq -r '.requestDigest')" ]]
+set +e
+unsupported_ide="$(bash ./aegis --semantic-run 2>&1)"
+unsupported_ide_code=$?
+set -e
+[[ "${unsupported_ide_code}" -ne 0 ]]
+printf '%s\n' "${unsupported_ide}" | jq -e '.reason == "SEMANTIC_IDE_ADAPTER_UNSUPPORTED"' >/dev/null
 node --input-type=module <<'NODE'
 import { writeFileSync } from 'node:fs';
 writeFileSync('.harness/config/roles.json', `${JSON.stringify({
@@ -611,7 +623,21 @@ process.stdout.write(JSON.stringify({
   },
   determinismReview: {
     rationale: 'A demanda não promete determinismo.',
-    fragmentIndexes: [],
+    fragmentIndexes: [0],
+    coverage: [
+      {
+        claimIndex: 0,
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensionIndexes: [],
+        rationale: 'O resultado explícito não ativa uma dimensão material da taxonomia.',
+      },
+      {
+        claimIndex: 1,
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensionIndexes: [],
+        rationale: 'A escolha de formato altera a superfície pública, não o determinismo.',
+      },
+    ],
     dimensions: [],
   },
   boundaryRules: [],
@@ -697,6 +723,20 @@ deterministic_opinion="$(make_opinion yes "${semantic_evidence_digest}" | jq '
   | .determinismReview = {
     rationale:"A ordem não altera o resultado público.",
     fragmentIndexes:[0],
+    coverage:[
+      {
+        claimIndex:0,
+        disposition:"DIMENSIONS_DECLARED",
+        dimensionIndexes:[0],
+        rationale:"A claim normativa é coberta pela dimensão de ordenação."
+      },
+      {
+        claimIndex:1,
+        disposition:"NO_DIMENSION_APPLICABLE",
+        dimensionIndexes:[],
+        rationale:"A escolha de formato não ativa outra dimensão."
+      }
+    ],
     dimensions:[{
       activationId:null,
       kind:"ORDERING",
@@ -805,7 +845,7 @@ previous_contract_digest="$(jq -r '.contractDigest' .harness/state/semantic-stat
 
 # Uma demanda diferente não torna o contrato anterior historicamente inválido,
 # mas o verify informa que ele não pertence ao preflight ativo.
-bash ./aegis 'Criar contrato diferente' >/dev/null
+node scripts/issue_contract_runner.mjs draft 'Criar contrato diferente' >/dev/null
 stale_verification_output="$(bash ./aegis --verify 2>&1)"
 printf '%s\n' "${stale_verification_output}" | jq -e '
   .schema == "aegis.contract_verification.v2"
@@ -817,7 +857,7 @@ printf '%s\n' "${stale_verification_output}" | jq -e '
 ' >/dev/null
 
 # Reabre a demanda original para exercitar uma alternativa que exige recompilação.
-bash ./aegis 'Definir transformador de registros com saída ainda a escolher' >/dev/null
+node scripts/issue_contract_runner.mjs draft 'Definir transformador de registros com saída ainda a escolher' >/dev/null
 revisionless_request="$(bash ./aegis --semantic-request)"
 semantic_evidence_digest="$(printf '%s\n' "${revisionless_request}" | jq -r '.intentEvidence.evidenceDigest')"
 make_opinion yes "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
@@ -964,7 +1004,7 @@ printf '%s\n' "${policy_output}" | jq -e '
 ' >/dev/null
 
 # M0 não antecipa o parecer semântico; JEV observa os mesmos fragmentos apenas em shadow mode.
-bash ./aegis 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
+node scripts/issue_contract_runner.mjs draft 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
 deterministic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${deterministic_request}" | jq -e '
   .intentEvidence.bitLayouts[0].declaredWidth == 8
@@ -982,5 +1022,47 @@ printf '%s\n' "${deterministic_jev_request}" | jq -e '
   and ([.bindings[].allowedUse] | all(. == "SHADOW_METRIC_ONLY"))
 ' >/dev/null
 [[ "$(printf '%s\n' "${deterministic_jev_request}" | jq -r '.batchDigest')" == "$(bash ./aegis --jev-request | jq -r '.batchDigest')" ]]
+
+# O comando público percorre captura e supervisão em uma única execução. O
+# supervisor permanece isolado e o contrato continua sem autorizar implementação.
+automatic_intent='Definir transformador de registros com saída ainda a escolher'
+node scripts/issue_contract_runner.mjs draft "${automatic_intent}" >/dev/null
+automatic_request="$(bash ./aegis --semantic-request)"
+automatic_evidence_digest="$(printf '%s\n' "${automatic_request}" | jq -r '.intentEvidence.evidenceDigest')"
+make_opinion yes "${automatic_evidence_digest}" > "${WORK_DIR}/fake-codex-opinion.json"
+chmod +x scripts/substrates/test/fake_codex.mjs
+node --input-type=module <<'NODE'
+import { writeFileSync } from 'node:fs';
+writeFileSync('.harness/config/roles.json', `${JSON.stringify({
+  schema: 'aegis.role_assignment.v1',
+  roles: {
+    contractSupervisor: { channel: 'IDE', adapter: 'codex', model: 'test-model', credentialEnv: null },
+    codingAgent: { channel: 'IDE', adapter: 'codex', model: null, credentialEnv: null },
+  },
+})}\n`);
+NODE
+automatic_output="$(
+  AEGIS_CODEX_EXECUTABLE="${WORK_DIR}/scripts/substrates/test/fake_codex.mjs" \
+  AEGIS_FAKE_CODEX_OPINION="${WORK_DIR}/fake-codex-opinion.json" \
+  AEGIS_FAKE_CODEX_LOG="${WORK_DIR}/fake-codex.log" \
+  bash ./aegis "${automatic_intent}"
+)"
+printf '%s\n' "${automatic_output}" | jq -e '
+  .schema == "aegis.confirmation_request.v5"
+  and .status == "USER_CONFIRMATION_REQUIRED"
+' >/dev/null
+[[ "$(wc -l < "${WORK_DIR}/fake-codex.log" | tr -d ' ')" == "1" ]]
+jq -e '
+  .schema == "aegis.issue_contract.v14"
+  and .intent == "Definir transformador de registros com saída ainda a escolher"
+  and .implementationAuthorized == false
+  and .approval == null
+' .harness/runtime/contract.json >/dev/null
+jq -e '
+  .schema == "aegis.semantic_execution.v1"
+  and .provider == "codex-cli"
+  and .calls == 1
+' .harness/runtime/semantic-execution.json >/dev/null
+[[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
 printf '[AEGIS][TEST] capture, discovery and semantic contract flow: PASS\n'

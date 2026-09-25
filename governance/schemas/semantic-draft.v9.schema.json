@@ -104,11 +104,36 @@
     "determinismReview": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "rationale", "sourceFragmentIds", "dimensions"],
+      "required": ["status", "rationale", "sourceFragmentIds", "coverage", "dimensions"],
       "properties": {
         "status": { "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/status" },
         "rationale": { "type": "string", "minLength": 1 },
         "sourceFragmentIds": { "type": "array", "items": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" }, "uniqueItems": true },
+        "coverage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["claimId", "disposition", "dimensions", "rationale"],
+            "properties": {
+              "claimId": { "type": "string", "pattern": "^CLAIM-[A-Z0-9][A-Z0-9-]+$" },
+              "disposition": { "enum": ["DIMENSIONS_DECLARED", "NO_DIMENSION_APPLICABLE"] },
+              "dimensions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "subjectId"],
+                  "properties": {
+                    "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
+                    "subjectId": { "type": "string", "pattern": "^(PUBLIC_CONTRACT|REQ-[A-Z0-9][A-Z0-9-]+|BOUND-[A-Z0-9][A-Z0-9-]+)$" }
+                  }
+                }
+              },
+              "rationale": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "dimensions": { "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/dimensions" }
       }
     },
