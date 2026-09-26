@@ -83,6 +83,13 @@ resolve_preflight_wizard() {
     return
   fi
 
+  if [[ ! -t 0 ]] && [[ "${AEGIS_TEST_AUTOMATION:-0}" != "1" ]]; then
+    printf '\n[AEGIS] O Wizard interativo exige um terminal TTY para deliberação humana.\n' >&2
+    printf '[AEGIS] Simulações automatizadas de stdin via pipe são proibidas para assegurar o consentimento humano real.\n' >&2
+    printf '[AEGIS] No chat da IDE, responda diretamente pelo modal interativo; no terminal, execute "./aegis --wizard" de forma interativa.\n' >&2
+    return 1
+  fi
+
   local count index question answer_count choice correction answer_id answers='[]'
   local recommended_index recommended_label recommended_effect remaining_answers
   local selected_label final_confirmation attestation
