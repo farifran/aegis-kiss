@@ -152,6 +152,24 @@ chamadas de observação não alteram o comportamento de uma operação posterio
 
 Aplica-se à compilação e à promoção de todo contrato semântico.
 
+### ARCH-STATE-TRANSITION-TOTALITY — hard
+
+Operações que leem ou alteram estado devem definir a transição total: precedência determinística de guards (curto-circuito sem efeitos posteriores), valor inicial no primeiro uso, gatilhos de mutação e condições de reset. Nenhuma implementação pode escolher a ordem de verificação de erros ou inferir valores iniciais não contratados.
+
+Aplica-se a operações que alteram estado.
+
+### ARCH-TEMPORAL-INVARIANCE — hard
+
+Comportamento que acumula grandezas com base em tempo decorrido deve preservar frações residuais de tempo (carry/remainder). O resultado de N chamadas com intervalos menores deve ser algebricamente equivalente a uma única chamada com o intervalo acumulado, vedando perda de precisão ou descarte dependente da taxa de amostragem.
+
+Aplica-se a operações que dependem de tempo ou relógio.
+
+### ARCH-CANONICAL-DIGEST-REPRESENTATION — hard
+
+Todo cálculo de hash, digest ou fingerprint de integridade sobre estruturas de memória deve definir o payload canônico exato: campos incluídos, ordem, encoding binário/length-prefixed e o valor canônico do estado vazio (respeitando o offset basis da primitiva ou sentinela contratado). Duas ordens ou serializações diferentes não podem ser permitidas.
+
+Aplica-se a requisitos de hash ou integridade pública.
+
 ## Evolução da política
 
 O Contract IR calcula localmente quais regras são aplicáveis e exige avaliação

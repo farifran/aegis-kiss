@@ -1,9 +1,9 @@
 {
   "schema": "aegis.architecture_policy.v3",
-  "policyVersion": 12,
+  "policyVersion": 13,
   "origin": {
     "sourcePath": "ARCHITECTURE.md",
-    "sourceDigest": "e62fa302be304e0bf8a864b3eb8dc6c18e8d31dd8b0c46847fd40c1a7ec2df7b"
+    "sourceDigest": "16e0e0f5085e585ff79c11e362c84b143d7b7d71728cacde1c4af7f1ef528bad"
   },
   "contexts": [
     { "tag": "product-demand", "description": "A demanda define comportamento ou fronteira pública do produto." },
@@ -145,6 +145,36 @@
       "reviewReferences": [],
       "forbiddenReferences": [],
       "sourceRanges": [{ "startByte": 6115, "endByte": 6988 }]
+    },
+    {
+      "id": "ARCH-STATE-TRANSITION-TOTALITY",
+      "level": "hard",
+      "statement": "Operações que leem ou alteram estado devem definir a transição total: precedência determinística de guards (curto-circuito sem efeitos posteriores), valor inicial no primeiro uso, gatilhos de mutação e condições de reset. Nenhuma implementação pode escolher a ordem de verificação de erros ou inferir valores iniciais não contratados.",
+      "appliesWhen": ["stateful-operation"],
+      "appliesMode": "any",
+      "reviewReferences": ["guards", "precedência", "reset", "estado inicial"],
+      "forbiddenReferences": [],
+      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+    },
+    {
+      "id": "ARCH-TEMPORAL-INVARIANCE",
+      "level": "hard",
+      "statement": "Comportamento que acumula grandezas com base em tempo decorrido deve preservar frações residuais de tempo (carry/remainder). O resultado de N chamadas com intervalos menores deve ser algebricamente equivalente a uma única chamada com o intervalo acumulado, vedando perda de precisão ou descarte dependente da taxa de amostragem.",
+      "appliesWhen": ["time-dependent"],
+      "appliesMode": "any",
+      "reviewReferences": ["carry", "remainder", "frequência", "amostragem"],
+      "forbiddenReferences": [],
+      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+    },
+    {
+      "id": "ARCH-CANONICAL-DIGEST-REPRESENTATION",
+      "level": "hard",
+      "statement": "Todo cálculo de hash, digest ou fingerprint de integridade sobre estruturas de memória deve definir o payload canônico exato: campos incluídos, ordem, encoding binário/length-prefixed e o valor canônico do estado vazio (respeitando o offset basis da primitiva ou sentinela contratado). Duas ordens ou serializações diferentes não podem ser permitidas.",
+      "appliesWhen": ["integrity-hash"],
+      "appliesMode": "any",
+      "reviewReferences": ["payload", "encoding", "offset basis", "vazio"],
+      "forbiddenReferences": [],
+      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
     }
   ],
   "amendments": []
