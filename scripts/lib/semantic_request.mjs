@@ -128,7 +128,7 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
   const smallWorkspace = textFiles.reduce((total, { bytes }) => total + bytes, 0)
     <= sourceEvidenceByteLimit;
   const entrypoints = textFiles.map(({ path }) => path)
-    .filter((path) => /(?:^|\/)(?:index|main|mod)\.[^/]+$/iu.test(path));
+    .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
   const selections = smallWorkspace
     ? textFiles.map(({ path }) => ({ path, line: null }))
     : [

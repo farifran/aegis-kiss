@@ -4,7 +4,38 @@ const tokenPattern = /[\p{L}\p{N}_$-]{3,}/gu;
 const minimumPlainTermLength = 5;
 const queryTermLimit = 64;
 const indexSchema = 'aegis.hybrid_source_index.v2';
-const codeExtensions = new Set(['.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx']);
+const slashCommentExtensions = new Set([
+  '.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx',
+  '.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.m', '.mm',
+  '.go', '.rs', '.zig', '.swift', '.d',
+  '.java', '.kt', '.kts', '.scala', '.groovy', '.cs',
+  '.php', '.dart',
+  '.proto', '.thrift', '.graphql', '.gql',
+  '.css', '.scss', '.less', '.jsonc',
+]);
+
+const hashCommentExtensions = new Set([
+  '.sh', '.bash', '.zsh', '.ksh', '.csh', '.tcsh', '.fish',
+  '.py', '.pyi', '.pyx',
+  '.rb', '.cr',
+  '.pl', '.pm', '.r', '.ex', '.exs', '.jl', '.nim',
+  '.yml', '.yaml', '.toml', '.env', '.conf', '.properties',
+  '.dockerfile', '.awk', '.sed',
+]);
+
+const dashCommentExtensions = new Set([
+  '.sql', '.lua', '.hs', '.elm', '.ada', '.adb', '.ads', '.vhd', '.vhdl',
+]);
+
+const semicolonCommentExtensions = new Set([
+  '.clj', '.cljs', '.cljc', '.edn', '.lisp', '.lsp', '.scm',
+  '.asm', '.s', '.ini',
+]);
+
+const knownHashFilenames = new Set([
+  'dockerfile', 'containerfile', 'makefile', 'gnumakefile', 'rakefile', 'gemfile', 'vagrantfile',
+]);
+
 const sourceRegionRank = { COMMENT: 0, UNKNOWN: 1, CODE: 2 };
 
 function compareText(left, right) {
@@ -37,22 +68,53 @@ function isCompoundIdentifier(term, parts) {
 
 function sourceLineRegions(path, text) {
   const extension = /\.[^./]+$/u.exec(path)?.[0]?.toLowerCase();
+  const basename = path.split('/').pop()?.toLowerCase() ?? '';
   const lines = text.split('\n');
-  if (!codeExtensions.has(extension)) return lines.map(() => 'UNKNOWN');
-  let blockComment = false;
-  return lines.map((line) => {
-    const trimmed = line.trimStart();
-    if (blockComment) {
-      if (trimmed.includes('*/')) blockComment = false;
-      return 'COMMENT';
-    }
-    if (trimmed.startsWith('//')) return 'COMMENT';
-    if (trimmed.startsWith('/*')) {
-      blockComment = !trimmed.includes('*/');
-      return 'COMMENT';
-    }
-    return 'CODE';
-  });
+  const firstLine = lines[0]?.trimStart() ?? '';
+  const hasShebang = firstLine.startsWith('#!');
+
+  if (slashCommentExtensions.has(extension)) {
+    let blockComment = false;
+    return lines.map((line) => {
+      const trimmed = line.trimStart();
+      if (blockComment) {
+        if (trimmed.includes('*/')) blockComment = false;
+        return 'COMMENT';
+      }
+      if (trimmed.startsWith('//')) return 'COMMENT';
+      if (trimmed.startsWith('/*')) {
+        blockComment = !trimmed.includes('*/');
+        return 'COMMENT';
+      }
+      return 'CODE';
+    });
+  }
+
+  if (hashCommentExtensions.has(extension) || hasShebang || knownHashFilenames.has(basename)) {
+    return lines.map((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('#')) return 'COMMENT';
+      return 'CODE';
+    });
+  }
+
+  if (dashCommentExtensions.has(extension)) {
+    return lines.map((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('--')) return 'COMMENT';
+      return 'CODE';
+    });
+  }
+
+  if (semicolonCommentExtensions.has(extension)) {
+    return lines.map((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith(';')) return 'COMMENT';
+      return 'CODE';
+    });
+  }
+
+  return lines.map(() => 'UNKNOWN');
 }
 
 /** Constrói uma representação compacta e serializável uma única vez por snapshot. */

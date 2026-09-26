@@ -244,6 +244,22 @@ try {
   if (!discovery.ignoredEntries.some(({ reason }) => reason === 'SYMLINK')) {
     throw new Error('symlink_was_not_reported');
   }
+
+  writeFileSync(join(root, 'src/script.sh'), '#!/usr/bin/env bash\n# ComentarioBash\nEXECUTAR_OPERACAO=1\n');
+  writeFileSync(join(root, 'src/modulo.py'), '# ComentarioPy\ndef operacao_python():\n    return True\n');
+  const multiLangDiscovery = discoverWorkspace(root, 'EXECUTAR_OPERACAO operacao_python ComentarioBash');
+  const bashCodeMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/script.sh' && m.sourceToken === 'EXECUTAR_OPERACAO');
+  const bashCommentMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/script.sh' && m.sourceToken === 'ComentarioBash');
+  const pyCodeMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/modulo.py' && m.sourceToken === 'operacao_python');
+  if (!bashCodeMatch || bashCodeMatch.sourceRegion !== 'CODE') {
+    throw new Error('bash_code_not_classified_as_code');
+  }
+  if (!bashCommentMatch || bashCommentMatch.sourceRegion !== 'COMMENT') {
+    throw new Error('bash_comment_not_classified_as_comment');
+  }
+  if (!pyCodeMatch || pyCodeMatch.sourceRegion !== 'CODE') {
+    throw new Error('python_code_not_classified_as_code');
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
   rmSync(outside, { recursive: true, force: true });

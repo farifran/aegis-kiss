@@ -32,7 +32,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --setup     Configura o supervisor do contrato e o agente de codificação
   ./aegis --setup --show  Exibe a configuração externa sem expor chaves
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
-  ./aegis --clean     Remove artefatos transientes e redefine src/index.ts
+  ./aegis --clean     Remove artefatos transientes e limpa src/
   ./aegis --help      Exibe esta mensagem de ajuda
 EOF
 }
@@ -43,7 +43,6 @@ clean_command() {
   rm -rf "${ROOT_DIR}/.harness/state"
   [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'INVALID_SOURCE_DIRECTORY'
   find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  printf '// Ponto de entrada canônico para a próxima demanda.\nexport {};\n' > "${ROOT_DIR}/src/index.ts"
   echo '[AEGIS][IDE] clean=PASS source_reset=1 contracts_reset=1 resolutions_reset=1'
 }
 
