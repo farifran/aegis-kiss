@@ -161,49 +161,6 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
   };
 }
 
-async function readGovernedLegacyRevision(preflight) {
-  if (!existsSync(semanticStateJsonPath)) return null;
-  const [{ canonicalDigest }, { parseSemanticState }, statePayload] = await Promise.all([
-    import('./lib/canonical_json.mjs'),
-    import('./lib/semantic_state.mjs'),
-    readFile(semanticStateJsonPath, 'utf8').then(JSON.parse),
-  ]);
-  const state = parseSemanticState(statePayload);
-  const contract = state.contract;
-  if (contract.intent !== preflight.intent
-    || contract.sourcePreflightDigest !== preflight.preflightDigest
-    || contract.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest
-    || contract.approval === null
-    || contract.specification.decisions.length === 0) return null;
-  const architecturalQuestionIds = new Set(['Q-0005', 'Q-0006']);
-  const rawResolutions = contract.humanResolutions
-    .filter(({ kind }) => kind === 'ANSWER')
-    .filter(({ questionId }) => !architecturalQuestionIds.has(questionId));
-  const resolutions = new Map(rawResolutions.map((resolution) => [resolution.questionId, resolution]));
-  const decisionItems = contract.specification.decisions
-    .filter(({ questionId }) => !architecturalQuestionIds.has(questionId));
-  if (decisionItems.some(({ questionId }) => !resolutions.has(questionId))) {
-    return null;
-  }
-  return {
-    request: {
-      sourceContractDigest: canonicalDigest(contract),
-      answers: decisionItems.map(({ questionId }) => {
-        const resolution = resolutions.get(questionId);
-        return {
-          questionId,
-          answerId: resolution.answerId,
-          label: resolution.label ?? '',
-          rationale: resolution.rationale ?? '',
-          contractEffect: resolution.contractEffect ?? '',
-        };
-      }),
-    },
-    sourceSpecification: contract.specification,
-    humanResolutions: rawResolutions,
-  };
-}
-
 async function handleDraft(args, { emitHandoff = true } = {}) {
   const [
     { canonicalJson },
@@ -444,13 +401,12 @@ async function buildCurrentSemanticRequest() {
     readConstitution(),
   ]);
   const workspaceObservation = await assertDiscoveryUnchanged(preflight);
-  const pendingRevision = await readPendingRevision(
+  const revision = await readPendingRevision(
     preflight,
     loadedPolicy,
     constitution,
     workspaceObservation,
   );
-  const revision = pendingRevision ?? await readGovernedLegacyRevision(preflight);
   const request = buildSemanticRequest({
     repositoryRoot: root,
     preflight,
