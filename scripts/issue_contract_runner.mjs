@@ -175,28 +175,32 @@ async function readGovernedLegacyRevision(preflight) {
     || contract.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest
     || contract.approval === null
     || contract.specification.decisions.length === 0) return null;
-  const resolutions = new Map(contract.humanResolutions
+  const architecturalQuestionIds = new Set(['Q-0005', 'Q-0006']);
+  const rawResolutions = contract.humanResolutions
     .filter(({ kind }) => kind === 'ANSWER')
-    .map((resolution) => [resolution.questionId, resolution]));
-  if (contract.specification.decisions.some(({ questionId }) => !resolutions.has(questionId))) {
+    .filter(({ questionId }) => !architecturalQuestionIds.has(questionId));
+  const resolutions = new Map(rawResolutions.map((resolution) => [resolution.questionId, resolution]));
+  const decisionItems = contract.specification.decisions
+    .filter(({ questionId }) => !architecturalQuestionIds.has(questionId));
+  if (decisionItems.some(({ questionId }) => !resolutions.has(questionId))) {
     return null;
   }
   return {
     request: {
       sourceContractDigest: canonicalDigest(contract),
-      answers: contract.specification.decisions.map(({ questionId }) => {
+      answers: decisionItems.map(({ questionId }) => {
         const resolution = resolutions.get(questionId);
         return {
           questionId,
           answerId: resolution.answerId,
-          label: resolution.label,
-          rationale: resolution.rationale,
-          contractEffect: resolution.contractEffect,
+          label: resolution.label ?? '',
+          rationale: resolution.rationale ?? '',
+          contractEffect: resolution.contractEffect ?? '',
         };
       }),
     },
     sourceSpecification: contract.specification,
-    humanResolutions: contract.humanResolutions,
+    humanResolutions: rawResolutions,
   };
 }
 
