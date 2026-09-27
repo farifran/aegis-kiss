@@ -9,6 +9,10 @@ export {
   compileSemanticContract,
 } from './semantic_contract_lifecycle.mjs';
 export {
+  generateClosureCertificate,
+  validateFieldLifecycle,
+} from './semantic_closure.mjs';
+export {
   assertConfirmationRequest,
   assertContractApprovalEvidence,
   assertRevisionApplied,

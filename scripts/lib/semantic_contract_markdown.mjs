@@ -17,6 +17,9 @@ export function renderSemanticContractMarkdown(contract, {
     `> **Status:** ${governed ? 'Selado & Governado' : 'Rascunho aguardando confirmação'}`,
     `> **Modo:** ${specification.changeKind}`,
     `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
+    ...(specification.closureCertificate ? [
+      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions})`,
+    ] : []),
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     ...(governed ? [

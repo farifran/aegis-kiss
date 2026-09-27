@@ -205,6 +205,111 @@
     "decisions": {
       "type": "array",
       "items": { "$ref": "aegis.semantic_opinion_decision.v1" }
+    },
+    "stateModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities", "operations", "observables"],
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "fields"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "description": { "type": "string" },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "type", "initialization", "mutations", "reset", "preservation", "readBy"],
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "type": { "enum": ["INTEGER", "BOOLEAN", "TIMESTAMP", "STRING", "MAP", "SET", "COLLECTION"] },
+                    "isCounter": { "type": "boolean" },
+                    "initialization": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["kind", "value", "rationale"],
+                      "properties": {
+                        "kind": { "enum": ["EXPLICIT_VALUE", "CONFIGURED", "DERIVED", "UNRESOLVED"] },
+                        "value": { "type": ["string", "null"] },
+                        "rationale": { "type": "string", "minLength": 1 }
+                      }
+                    },
+                    "mutations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["operation", "condition", "effect", "targetValue"],
+                        "properties": {
+                          "operation": { "type": "string", "minLength": 1 },
+                          "condition": { "type": "string", "minLength": 1 },
+                          "effect": { "enum": ["INCREMENT", "DECREMENT", "SET_VALUE", "MUTATE_COLLECTION", "CUSTOM"] },
+                          "targetValue": { "type": ["string", "null"] }
+                        }
+                      }
+                    },
+                    "reset": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["allowed", "trigger", "resetValue"],
+                      "properties": {
+                        "allowed": { "type": "boolean" },
+                        "trigger": { "type": ["string", "null"] },
+                        "resetValue": { "type": ["string", "null"] }
+                      }
+                    },
+                    "preservation": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1 }
+                    },
+                    "readBy": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "guardPrecedence"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "description": { "type": "string" },
+              "guardPrecedence": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        "observables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "derivedFrom"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "derivedFrom": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

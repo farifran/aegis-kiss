@@ -1,6 +1,7 @@
 import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_collections.mjs';
 import { assertIntentEvidence } from './intent_evidence.mjs';
+import { validateFieldLifecycle } from './semantic_closure.mjs';
 import {
   canonicalProofOutcome,
   counterexampleForDimension,
@@ -701,4 +702,13 @@ export function assertSemanticDraft(draft, policy, {
   validateDeterminismCoverage(draft);
   validateFragmentCoverage(draft, context);
   validateReviews(draft, context);
+
+  const lifecycle = validateFieldLifecycle({
+    stateModel: draft.stateModel,
+    architectureContexts: draft.architectureContexts,
+  });
+  if (!lifecycle.valid) {
+    const first = lifecycle.issues[0];
+    throw new Error(`state_lifecycle_validation_failed:${first.kind}:${first.slotId}`);
+  }
 }

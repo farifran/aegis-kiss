@@ -1,24 +1,16 @@
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_collections.mjs';
+import { generateClosureCertificate } from './semantic_closure.mjs';
 
 function effectiveDeterminismStatus(specification, humanResolutions) {
-  if (specification.unknowns.some(({ material, decisionId }) => (
-    material && decisionId === null
-  ))) return 'BLOCKED_BY_GAP';
-  if (specification.determinismReview.dimensions.some(({ status }) => status === 'GAP_FOUND')) {
+  const certificate = generateClosureCertificate({ specification, humanResolutions });
+  if (certificate.status !== 'CERTIFIED_CLOSED') {
+    if (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0) {
+      return 'PENDING_HUMAN_DECISIONS';
+    }
     return 'BLOCKED_BY_GAP';
   }
-  if (specification.determinismReview.dimensions.some(({ status }) => (
-    status === 'DECISION_REQUIRED'
-  )) || specification.decisions.length > 0) {
-    return 'PENDING_HUMAN_DECISIONS';
-  }
-  const resolvedDecisionIds = new Set(humanResolutions.map(({ questionId }) => questionId));
-  const pendingDecisionIds = specification.decisions
-    .map(({ questionId }) => questionId)
-    .filter((questionId) => !resolvedDecisionIds.has(questionId));
-  if (pendingDecisionIds.length > 0) return 'PENDING_HUMAN_DECISIONS';
   return specification.determinismReview.status === 'NOT_APPLICABLE'
     ? 'NOT_APPLICABLE'
     : 'SEMANTICALLY_CLOSED';
@@ -335,4 +327,4 @@ export function finalizeContractApproval({ contract, request, resolution }) {
   return finalContract;
 }
 
-export { effectiveDeterminismStatus };
+export { effectiveDeterminismStatus, generateClosureCertificate };

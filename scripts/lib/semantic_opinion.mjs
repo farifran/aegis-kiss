@@ -1,5 +1,6 @@
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
+import { generateClosureCertificate } from './semantic_closure.mjs';
 import {
   closureAuthorityForDimension,
   counterexampleForDimension,
@@ -381,5 +382,43 @@ export function compileSemanticOpinion(opinion, request) {
         recommended: answerIndex === item.recommendedAnswerIndex,
       })),
     })),
+    stateModel: opinion.stateModel ?? {
+      entities: [],
+      operations: [],
+      observables: [],
+    },
+    closureCertificate: generateClosureCertificate({
+      specification: {
+        stateModel: opinion.stateModel ?? {
+          entities: [],
+          operations: [],
+          observables: [],
+        },
+        architectureContexts: opinion.architectureContexts.map((item) => ({
+          tag: indexedValue(request.policy.contexts, item.contextIndex, 'architecture_context').tag,
+          rationale: item.rationale,
+          basis: compileOpinionBasis(item.basis, request),
+        })),
+        unknowns: opinion.unknowns.map((item, index) => ({
+          id: generatedId('UNKNOWN', index),
+          statement: item.statement,
+          material: item.material,
+          decisionId: item.decisionIndex === null ? null : indexedValue(decisionIds, item.decisionIndex, 'unknown_decision'),
+        })),
+        determinismReview: {
+          dimensions: dimensions.map((item) => ({
+            kind: item.kind,
+            subjectId: item.subject === null ? 'PUBLIC_CONTRACT' : compileTargets([item.subject])[0],
+            status: item.status,
+            rationale: item.rationale,
+          })),
+        },
+        decisions: opinion.decisions.map((item, index) => ({
+          questionId: decisionIds[index],
+          question: item.question,
+        })),
+      },
+      humanResolutions: [],
+    }),
   };
 }
