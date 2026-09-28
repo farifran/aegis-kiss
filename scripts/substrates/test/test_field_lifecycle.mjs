@@ -65,6 +65,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'UNRESOLVED', value: null, rationale: 'Não decidido' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -73,7 +74,7 @@ function createFixture({
         }],
       }],
       operations: [{ name: 'evaluateRequest', guardPrecedence: ['LOCK', 'BALANCE'] }],
-      observables: [{ name: 'observabilityBitmask', derivedFrom: ['Badge.tokens'] }],
+      observables: [{ name: 'observabilityBitmask', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -102,6 +103,7 @@ function createFixture({
           name: 'insufficientStreak',
           type: 'INTEGER',
           isCounter: true,
+          bounds: { lowerBound: '0', upperBound: '31', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Começa em zero' },
           mutations: [{ operation: 'evaluateRequest', condition: 'REJECT', effect: 'INCREMENT', targetValue: null }],
           reset: { allowed: true, trigger: null, resetValue: null }, // GATILHO AUSENTE
@@ -110,7 +112,7 @@ function createFixture({
         }],
       }],
       operations: [{ name: 'evaluateRequest', guardPrecedence: ['LOCK'] }],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.insufficientStreak'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.insufficientStreak'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -137,6 +139,7 @@ function createFixture({
         fields: [{
           name: 'fractionalRemainder',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999', boundaryBehavior: 'ROLLOVER_MODULO' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Sem carry residual inicial' },
           mutations: [{ operation: 'evaluateRequest', condition: 'TICK', effect: 'CUSTOM', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -148,7 +151,7 @@ function createFixture({
         { name: 'evaluateRequest', guardPrecedence: ['LOCK'] },
         { name: 'unquarantine', guardPrecedence: ['ADMIN'] },
       ],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.fractionalRemainder'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.fractionalRemainder'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -175,6 +178,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -183,7 +187,7 @@ function createFixture({
         }],
       }],
       operations: [{ name: 'evaluateRequest', guardPrecedence: [] }], // PRECEDÊNCIA VAZIA
-      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -210,6 +214,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -218,7 +223,7 @@ function createFixture({
         }],
       }],
       operations: [{ name: 'evaluateRequest', guardPrecedence: ['LOCK'] }],
-      observables: [{ name: 'bitmask', derivedFrom: ['Badge.ghostField'] }], // CAMPO FANTASMA
+      observables: [{ name: 'bitmask', derivedFrom: ['Badge.ghostField'], representation: 'SCALAR', emptyBehavior: '0' }], // CAMPO FANTASMA
     },
   });
 
@@ -246,6 +251,7 @@ function createFixture({
           {
             name: 'tokens',
             type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
             initialization: { kind: 'EXPLICIT_VALUE', value: 'capacity', rationale: 'Inicia cheio no teto máximo' },
             mutations: [
               { operation: 'evaluateRequest', condition: 'SUFFICIENT_FUNDS', effect: 'DECREMENT', targetValue: null },
@@ -259,6 +265,7 @@ function createFixture({
             name: 'insufficientStreak',
             type: 'INTEGER',
             isCounter: true,
+            bounds: { lowerBound: '0', upperBound: '31', boundaryBehavior: 'SATURATE' },
             initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Inicia em zero recusas' },
             mutations: [
               { operation: 'evaluateRequest', condition: 'INSUFFICIENT_FUNDS', effect: 'INCREMENT', targetValue: null },
@@ -274,7 +281,16 @@ function createFixture({
         { name: 'unquarantine', guardPrecedence: ['ADMIN_AUTH'] },
       ],
       observables: [
-        { name: 'observabilityBitmask', derivedFrom: ['Badge.tokens', 'Badge.insufficientStreak'] },
+        {
+          name: 'observabilityBitmask',
+          derivedFrom: ['Badge.tokens', 'Badge.insufficientStreak'],
+          representation: 'UINT32_BITMASK',
+          emptyBehavior: '0',
+          bitAllocation: [
+            { slice: '0..15', field: 'Badge.tokens', bitWidth: 16 },
+            { slice: '16..31', field: 'Badge.insufficientStreak', bitWidth: 16 },
+          ],
+        },
       ],
     },
   });
@@ -326,6 +342,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -342,7 +359,7 @@ function createFixture({
           { branchId: 'SUCCESS_AUTHORIZED', outcomeKind: 'RETURN_VALUE', statusOrError: 'AUTHORIZED', defaultPreservation: true },
         ],
       }],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -372,6 +389,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -393,7 +411,7 @@ function createFixture({
           { branchId: 'SUCCESS_AUTHORIZED', outcomeKind: 'RETURN_VALUE', statusOrError: 'AUTHORIZED', defaultPreservation: true },
         ],
       }],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -421,6 +439,7 @@ function createFixture({
           {
             name: 'tokens',
             type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
             initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
             mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
             reset: { allowed: false, trigger: null, resetValue: null },
@@ -452,7 +471,7 @@ function createFixture({
           },
         ],
       }],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens', 'Badge.quarantined'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens', 'Badge.quarantined'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -479,6 +498,7 @@ function createFixture({
         fields: [{
           name: 'tokens',
           type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
           initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
           mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
           reset: { allowed: false, trigger: null, resetValue: null },
@@ -494,7 +514,7 @@ function createFixture({
           { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
         ],
       }],
-      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'] }],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
 
@@ -612,6 +632,7 @@ function createFixture({
           {
             name: 'tokens',
             type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
             initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Inicia cheio' },
             mutations: [
               { operation: 'evaluateRequest', condition: 'SUFFICIENT_FUNDS', effect: 'DECREMENT', targetValue: null },
@@ -624,6 +645,7 @@ function createFixture({
             name: 'insufficientStreak',
             type: 'INTEGER',
             isCounter: true,
+            bounds: { lowerBound: '0', upperBound: '31', boundaryBehavior: 'SATURATE' },
             initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Zero inicial' },
             mutations: [
               { operation: 'evaluateRequest', condition: 'INSUFFICIENT_FUNDS', effect: 'INCREMENT', targetValue: null },
@@ -670,7 +692,16 @@ function createFixture({
         },
       ],
       observables: [
-        { name: 'observabilityBitmask', derivedFrom: ['Badge.tokens', 'Badge.insufficientStreak'] },
+        {
+          name: 'observabilityBitmask',
+          derivedFrom: ['Badge.tokens', 'Badge.insufficientStreak'],
+          representation: 'UINT32_BITMASK',
+          emptyBehavior: '0',
+          bitAllocation: [
+            { slice: '0..15', field: 'Badge.tokens', bitWidth: 16 },
+            { slice: '16..31', field: 'Badge.insufficientStreak', bitWidth: 16 },
+          ],
+        },
       ],
     },
   });
@@ -699,4 +730,332 @@ function createFixture({
   log('  PASS: TEST-16 Fully closed state model with branches certifies SEMANTICALLY_CLOSED');
 }
 
-log('[CTDD TEST] All 16 Field Lifecycle & Closure Certificate traps passed successfully!');
+// TEST-17: Integer field without bounds MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          // bounds AUSENTE!
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Configurado' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-17: field without bounds must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_FIELD_BOUNDS'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedStateFields >= 1, true);
+  log('  PASS: TEST-17 Integer field without bounds is blocked');
+}
+
+// TEST-18: Dynamic collection without admissionPolicy MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        isCollection: true,
+        // admissionPolicy AUSENTE!
+        capacityPolicy: { maxEntries: '1000', overflowPolicy: 'REJECT_NEW' },
+        fields: [{
+          name: 'id',
+          type: 'STRING',
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'badge-1', rationale: 'ID' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.id'], representation: 'SCALAR', emptyBehavior: 'null' }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-18: collection without admissionPolicy must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_COLLECTION_ADMISSION'), true);
+  log('  PASS: TEST-18 Dynamic collection without admissionPolicy is blocked');
+}
+
+// TEST-19: Dynamic collection without capacityPolicy MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        isCollection: true,
+        admissionPolicy: 'ON_FIRST_REQUEST',
+        // capacityPolicy AUSENTE!
+        fields: [{
+          name: 'id',
+          type: 'STRING',
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'badge-1', rationale: 'ID' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.id'], representation: 'SCALAR', emptyBehavior: 'null' }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-19: collection without capacityPolicy must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_COLLECTION_CAPACITY'), true);
+  log('  PASS: TEST-19 Dynamic collection without capacityPolicy is blocked');
+}
+
+// TEST-20: Observable without representation MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'active',
+          type: 'BOOLEAN',
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'true', rationale: 'Ativo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['obs'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{
+        name: 'obs',
+        derivedFrom: ['Badge.active'],
+        // representation AUSENTE!
+        emptyBehavior: 'false',
+      }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-20: observable without representation must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_OBSERVABLE_REPRESENTATION'), true);
+  log('  PASS: TEST-20 Observable without representation is blocked');
+}
+
+// TEST-21: Observable without emptyBehavior MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'active',
+          type: 'BOOLEAN',
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'true', rationale: 'Ativo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['obs'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{
+        name: 'obs',
+        derivedFrom: ['Badge.active'],
+        representation: 'BOOLEAN',
+        // emptyBehavior AUSENTE!
+      }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-21: observable without emptyBehavior must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_OBSERVABLE_EMPTY_BEHAVIOR'), true);
+  log('  PASS: TEST-21 Observable without emptyBehavior is blocked');
+}
+
+// TEST-22: Bitmask observable with overlapping bitAllocation MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [
+          {
+            name: 'lock',
+            type: 'BOOLEAN',
+            initialization: { kind: 'EXPLICIT_VALUE', value: 'false', rationale: 'Livre' },
+            mutations: [],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['bitmask'],
+          },
+          {
+            name: 'quarantine',
+            type: 'BOOLEAN',
+            initialization: { kind: 'EXPLICIT_VALUE', value: 'false', rationale: 'Livre' },
+            mutations: [],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['bitmask'],
+          },
+        ],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{
+        name: 'bitmask',
+        derivedFrom: ['Badge.lock', 'Badge.quarantine'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [
+          { slice: '0..1', field: 'Badge.lock', bitWidth: 2 },
+          { slice: '1..2', field: 'Badge.quarantine', bitWidth: 2 }, // SOBREPOSIÇÃO NO BIT 1!
+        ],
+      }],
+    },
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-22: overlapping bit allocation must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'INVALID_BITMASK_ALLOCATION'), true);
+  log('  PASS: TEST-22 Bitmask observable with overlapping bitAllocation is blocked');
+}
+
+// TEST-23: Integrity hash requirement without canonicalSerializations MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['obs'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+      // canonicalSerializations AUSENTE sob integrity-hash!
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'integrity-hash' });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-23: integrity-hash without canonicalSerializations must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNRESOLVED_CANONICAL_SERIALIZATION'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedTransitions >= 1, true);
+  log('  PASS: TEST-23 Integrity hash requirement without canonicalSerializations is blocked');
+}
+
+// TEST-24: Full contract with collection capacity, bounds, bit allocation, and canonical serialization certifies SEMANTICALLY_CLOSED
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        isCollection: true,
+        admissionPolicy: 'ON_FIRST_REQUEST',
+        capacityPolicy: { maxEntries: '1000', overflowPolicy: 'REJECT_NEW' },
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['bitmask'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{
+        name: 'bitmask',
+        derivedFrom: ['Badge.tokens'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [
+          { slice: '0..15', field: 'Badge.tokens', bitWidth: 16 },
+          { slice: '16..31', field: 'RESERVED', bitWidth: 16 },
+        ],
+      }],
+      canonicalSerializations: [
+        {
+          target: 'FNV1A_64_BALANCES',
+          includedFields: ['Badge.tokens'],
+          fieldEncodings: [{ field: 'Badge.tokens', encoding: 'UINT64_BE' }],
+          recordOrderingKey: 'Badge.id ASC',
+          emptyStateDigest: '0xcbf29ce484222325',
+        },
+      ],
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'integrity-hash' });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, true, 'TEST-24: full state model with all structural properties must be valid');
+  assert.equal(result.issues.length, 0);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedStateFields, 0);
+  assert.equal(cert.unresolvedObservables, 0);
+  assert.equal(cert.unresolvedTransitions, 0);
+
+  const status = effectiveDeterminismStatus(fixture, []);
+  assert.equal(status, 'SEMANTICALLY_CLOSED');
+  log('  PASS: TEST-24 Full contract with all structural properties certifies SEMANTICALLY_CLOSED');
+}
+
+log('[CTDD TEST] All 24 Field Lifecycle & Closure Certificate traps passed successfully!');

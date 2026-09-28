@@ -111,10 +111,47 @@ export function validateFieldLifecycle({
           reason: `O campo '${fieldKey}' não declara leitores (operações ou observáveis).`,
         });
       }
+
+      // 5. BOUNDS & BOUNDARY_BEHAVIOR: Obrigatório para inteiros e contadores
+      if (field.type === 'INTEGER' || field.isCounter === true) {
+        if (!field.bounds
+          || field.bounds.lowerBound === undefined
+          || field.bounds.lowerBound === null
+          || field.bounds.upperBound === undefined
+          || field.bounds.upperBound === null
+          || !field.bounds.boundaryBehavior) {
+          issues.push({
+            slotId: `state/${fieldKey}/bounds`,
+            kind: 'UNRESOLVED_FIELD_BOUNDS',
+            reason: `O campo numérico '${fieldKey}' não define bounds com lowerBound, upperBound e boundaryBehavior determinísticos.`,
+          });
+        }
+      }
+    }
+
+    // 6. COLLECTION CAPACITY & ADMISSION: Obrigatório se isCollection === true
+    if (entity.isCollection === true) {
+      if (!entity.admissionPolicy) {
+        issues.push({
+          slotId: `entity/${entity.name}/admissionPolicy`,
+          kind: 'UNRESOLVED_COLLECTION_ADMISSION',
+          reason: `A entidade de coleção dinâmica '${entity.name}' não define admissionPolicy (ex: ON_FIRST_REQUEST, PRE_REGISTERED).`,
+        });
+      }
+      if (!entity.capacityPolicy
+        || entity.capacityPolicy.maxEntries === undefined
+        || entity.capacityPolicy.maxEntries === null
+        || !entity.capacityPolicy.overflowPolicy) {
+        issues.push({
+          slotId: `entity/${entity.name}/capacityPolicy`,
+          kind: 'UNRESOLVED_COLLECTION_CAPACITY',
+          reason: `A entidade de coleção dinâmica '${entity.name}' não define capacityPolicy com maxEntries e overflowPolicy determinísticos.`,
+        });
+      }
     }
   }
 
-  // 5. GUARD PRECEDENCE: Toda operação deve declarar ordem linear de guards
+  // 7. GUARD PRECEDENCE: Toda operação deve declarar ordem linear de guards
   for (const op of operations) {
     if (!Array.isArray(op.guardPrecedence) || op.guardPrecedence.length === 0) {
       issues.push({
@@ -125,7 +162,7 @@ export function validateFieldLifecycle({
     }
   }
 
-  // 6. OBSERVABLES: Todo observável deve declarar campos de origem válidos
+  // 8. OBSERVABLES: Todo observável deve declarar origem, representação e comportamento em estado vazio
   for (const obs of observables) {
     const derivedFrom = Array.isArray(obs.derivedFrom) ? obs.derivedFrom : [];
     if (derivedFrom.length === 0) {
@@ -145,9 +182,136 @@ export function validateFieldLifecycle({
         }
       }
     }
+
+    if (!obs.representation) {
+      issues.push({
+        slotId: `observable/${obs.name}/representation`,
+        kind: 'UNRESOLVED_OBSERVABLE_REPRESENTATION',
+        reason: `O observável '${obs.name}' não define representation (ex: UINT32_BITMASK, ENUM, SCALAR, RECORD).`,
+      });
+    }
+
+    if (obs.emptyBehavior === undefined || obs.emptyBehavior === null) {
+      issues.push({
+        slotId: `observable/${obs.name}/emptyBehavior`,
+        kind: 'UNRESOLVED_OBSERVABLE_EMPTY_BEHAVIOR',
+        reason: `O observável '${obs.name}' não define emptyBehavior para estado vazio ou registro inexistente.`,
+      });
+    }
+
+    if (obs.representation === 'UINT32_BITMASK') {
+      const bitAllocation = Array.isArray(obs.bitAllocation) ? obs.bitAllocation : [];
+      if (bitAllocation.length === 0) {
+        issues.push({
+          slotId: `observable/${obs.name}/bitAllocation`,
+          kind: 'INVALID_BITMASK_ALLOCATION',
+          reason: `O observável em bitmask de 32 bits '${obs.name}' não define alocação explícita de fatias (bitAllocation).`,
+        });
+      } else {
+        const allocatedBits = new Set();
+        for (const item of bitAllocation) {
+          const match = /^(\d+)(?:\.\.(\d+))?$/u.exec(item.slice.trim());
+          if (!match) {
+            issues.push({
+              slotId: `observable/${obs.name}/bitAllocation/${item.slice}`,
+              kind: 'INVALID_BITMASK_ALLOCATION',
+              reason: `Fatia '${item.slice}' do observável '${obs.name}' possui formato inválido. Use 'start..end' ou 'bit'.`,
+            });
+            continue;
+          }
+          const start = Number.parseInt(match[1], 10);
+          const end = match[2] ? Number.parseInt(match[2], 10) : start;
+          const expectedWidth = (end - start) + 1;
+          if (item.bitWidth !== expectedWidth) {
+            issues.push({
+              slotId: `observable/${obs.name}/bitAllocation/${item.slice}/width`,
+              kind: 'INVALID_BITMASK_ALLOCATION',
+              reason: `Fatia '${item.slice}' declara bitWidth ${item.bitWidth}, mas o intervalo representa ${expectedWidth} bit(s).`,
+            });
+          }
+          for (let b = start; b <= end; b += 1) {
+            if (allocatedBits.has(b)) {
+              issues.push({
+                slotId: `observable/${obs.name}/bitAllocation/overlap/${b}`,
+                kind: 'INVALID_BITMASK_ALLOCATION',
+                reason: `O bit ${b} do observável '${obs.name}' foi alocado em mais de uma fatia (sobreposição detectada).`,
+              });
+            }
+            allocatedBits.add(b);
+          }
+          if (item.field !== 'RESERVED' && !entityFieldKeys.has(item.field) && item.field !== '*') {
+            issues.push({
+              slotId: `observable/${obs.name}/bitAllocation/${item.slice}/field`,
+              kind: 'UNRESOLVED_OBSERVABLE_DEPENDENCY',
+              reason: `A fatia '${item.slice}' referencia o campo desconhecido '${item.field}'.`,
+            });
+          }
+        }
+      }
+    }
   }
 
-  // 7. OPERATION TOTALITY: Totalidade de branches e guards
+  // 9. CANONICAL SERIALIZATION: Se o contexto demandar integridade de hash/digest
+  const isIntegrityHash = architectureContexts.some((ctx) => (
+    (typeof ctx === 'string' ? ctx : ctx.tag) === 'integrity-hash'
+  ));
+  if (isIntegrityHash) {
+    const serializations = Array.isArray(stateModel.canonicalSerializations)
+      ? stateModel.canonicalSerializations
+      : [];
+    if (serializations.length === 0) {
+      issues.push({
+        slotId: 'stateModel/canonicalSerializations',
+        kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+        reason: 'A demanda envolve integridade de hash/digest (integrity-hash), mas o stateModel não define canonicalSerializations com a quádrupla canônica.',
+      });
+    } else {
+      for (const item of serializations) {
+        if (!item.target || item.target.trim() === '') {
+          issues.push({
+            slotId: 'stateModel/canonicalSerializations/target',
+            kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+            reason: 'Item de serialização canônica não define target.',
+          });
+        }
+        const fields = Array.isArray(item.includedFields) ? item.includedFields : [];
+        if (fields.length === 0) {
+          issues.push({
+            slotId: `canonicalSerialization/${item.target}/includedFields`,
+            kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+            reason: `A serialização canônica '${item.target}' não declara a lista nominal de campos incluídos.`,
+          });
+        }
+        const encodings = Array.isArray(item.fieldEncodings) ? item.fieldEncodings : [];
+        const encodedFields = new Set(encodings.map((e) => e.field));
+        for (const f of fields) {
+          if (!encodedFields.has(f)) {
+            issues.push({
+              slotId: `canonicalSerialization/${item.target}/encoding/${f}`,
+              kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+              reason: `O campo '${f}' na serialização canônica '${item.target}' não possui formato de encoding declarado em fieldEncodings.`,
+            });
+          }
+        }
+        if (!item.recordOrderingKey) {
+          issues.push({
+            slotId: `canonicalSerialization/${item.target}/recordOrderingKey`,
+            kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+            reason: `A serialização canônica '${item.target}' não define recordOrderingKey para ordenação canônica dos registros.`,
+          });
+        }
+        if (!item.emptyStateDigest) {
+          issues.push({
+            slotId: `canonicalSerialization/${item.target}/emptyStateDigest`,
+            kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+            reason: `A serialização canônica '${item.target}' não define o valor canônico emptyStateDigest para o estado vazio da primitiva.`,
+          });
+        }
+      }
+    }
+  }
+
+  // 10. OPERATION TOTALITY: Totalidade de branches e guards
   const totalityResult = validateOperationTotality({ stateModel, architectureContexts });
   issues.push(...totalityResult.issues);
 
@@ -398,6 +562,43 @@ export function runSemanticMutationTests({
     }
   }
 
+  // 5. MUTATION_OVERFLOW_EQUIVOCATION
+  for (const entity of stateModel.entities) {
+    for (const field of entity.fields ?? []) {
+      const fieldKey = `${entity.name}.${field.name}`;
+      if (field.type === 'INTEGER' || field.isCounter === true) {
+        if (!field.bounds?.boundaryBehavior) {
+          divergences.push({
+            mutationId: 'MUTATION_OVERFLOW_EQUIVOCATION',
+            slotId: `state/${fieldKey}/boundaryBehavior`,
+            interpretationA: 'SATURATE: Campo satura no valor máximo sem estourar nem gerar exceção.',
+            interpretationB: 'ROLLOVER_MODULO: Campo sofre wrap aritmético silencioso ou lança exceção em tempo de execução.',
+            divergenceReason: `O campo numérico '${fieldKey}' não define boundaryBehavior explícito em bounds.`,
+          });
+        }
+      }
+    }
+  }
+
+  // 6. MUTATION_DIGEST_ENCODING_EQUIVOCATION
+  const serializations = Array.isArray(stateModel.canonicalSerializations) ? stateModel.canonicalSerializations : [];
+  for (const cs of serializations) {
+    const included = Array.isArray(cs.includedFields) ? cs.includedFields : [];
+    const encodings = Array.isArray(cs.fieldEncodings) ? cs.fieldEncodings : [];
+    const encodedMap = new Set(encodings.map((e) => e.field));
+    for (const field of included) {
+      if (!encodedMap.has(field)) {
+        divergences.push({
+          mutationId: 'MUTATION_DIGEST_ENCODING_EQUIVOCATION',
+          slotId: `canonicalSerialization/${cs.target}/encoding/${field}`,
+          interpretationA: 'BIG_ENDIAN_LENGTH_PREFIXED: Serialização uniforme com tamanho prefixado e inteiros em Big Endian.',
+          interpretationB: 'RAW_STRING_OR_LITTLE_ENDIAN: Serialização em formato nativo de plataforma ou Little Endian.',
+          divergenceReason: `O campo '${field}' na serialização '${cs.target}' não possui codificação binária/textual explícita.`,
+        });
+      }
+    }
+  }
+
   return {
     passed: divergences.length === 0,
     divergences,
@@ -429,6 +630,9 @@ export function generateClosureCertificate({
     || i.kind === 'UNRESOLVED_INITIALIZATION'
     || i.kind === 'UNRESOLVED_RESET'
     || i.kind === 'ORPHAN_STATE_FIELD'
+    || i.kind === 'UNRESOLVED_FIELD_BOUNDS'
+    || i.kind === 'UNRESOLVED_COLLECTION_ADMISSION'
+    || i.kind === 'UNRESOLVED_COLLECTION_CAPACITY'
   ));
 
   const transitionIssues = stateLifecycle.issues.filter((i) => (
@@ -437,10 +641,14 @@ export function generateClosureCertificate({
     || i.kind === 'MISSING_GUARD_REJECTION_BRANCH'
     || i.kind === 'UNDETERMINED_BRANCH_NEXT_STATE'
     || i.kind === 'MISSING_SUCCESS_BRANCH'
+    || i.kind === 'UNRESOLVED_CANONICAL_SERIALIZATION'
   ));
 
   const observableIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'UNRESOLVED_OBSERVABLE_DEPENDENCY'
+    || i.kind === 'UNRESOLVED_OBSERVABLE_REPRESENTATION'
+    || i.kind === 'UNRESOLVED_OBSERVABLE_EMPTY_BEHAVIOR'
+    || i.kind === 'INVALID_BITMASK_ALLOCATION'
   ));
 
   const sideEffectIssues = stateLifecycle.issues.filter((i) => (
