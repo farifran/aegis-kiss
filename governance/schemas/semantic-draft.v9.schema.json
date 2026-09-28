@@ -404,6 +404,27 @@
         "orphanHumanDecisions": { "type": "integer", "minimum": 0 },
         "regressedSemanticDimensions": { "type": "integer", "minimum": 0 },
         "status": { "enum": ["CERTIFIED_CLOSED", "BLOCKED_BY_UNRESOLVED_SLOTS"] },
+        "inventoryAudit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "normativeClaimsCount": { "type": "integer", "minimum": 0 },
+            "expectedStateEntities": { "type": "integer", "minimum": 0 },
+            "materializedStateEntities": { "type": "integer", "minimum": 0 },
+            "expectedFields": { "type": "integer", "minimum": 0 },
+            "materializedFields": { "type": "integer", "minimum": 0 },
+            "closedFields": { "type": "integer", "minimum": 0 },
+            "expectedOperations": { "type": "integer", "minimum": 0 },
+            "materializedOperations": { "type": "integer", "minimum": 0 },
+            "totalizedOperations": { "type": "integer", "minimum": 0 },
+            "expectedObservables": { "type": "integer", "minimum": 0 },
+            "materializedObservables": { "type": "integer", "minimum": 0 },
+            "closedObservables": { "type": "integer", "minimum": 0 },
+            "canonicalProfilesRequired": { "type": "integer", "minimum": 0 },
+            "canonicalProfilesClosed": { "type": "integer", "minimum": 0 },
+            "divergenceWitnessesSurviving": { "type": "integer", "minimum": 0 }
+          }
+        },
         "unresolvedSlots": {
           "type": "array",
           "items": {

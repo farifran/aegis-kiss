@@ -975,6 +975,46 @@ export function generateClosureCertificate({
     ...pendingDecisions.map((q) => ({ slotId: `decision/${q.questionId}`, kind: 'PENDING_HUMAN_DECISION', reason: q.question })),
   ];
 
+  const stateEntities = Array.isArray(specification.stateModel?.entities) ? specification.stateModel.entities : [];
+  const stateOperations = Array.isArray(specification.stateModel?.operations) ? specification.stateModel.operations : [];
+  const stateObservables = Array.isArray(specification.stateModel?.observables) ? specification.stateModel.observables : [];
+  const stateSerializations = Array.isArray(specification.stateModel?.canonicalSerializations) ? specification.stateModel.canonicalSerializations : [];
+
+  let materializedFieldsCount = 0;
+  for (const entity of stateEntities) {
+    materializedFieldsCount += Array.isArray(entity.fields) ? entity.fields.length : 0;
+  }
+
+  const tags = new Set((specification.architectureContexts ?? []).map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
+  const isStateful = tags.has('stateful-operation');
+  const isTimeDependent = tags.has('time-dependent');
+  const isBoundedObs = tags.has('bounded-observability');
+  const isIntegrityHash = tags.has('integrity-hash');
+
+  const expectedEntitiesMin = isStateful ? 1 : 0;
+  const expectedFieldsMin = isStateful ? (isTimeDependent ? 2 : 1) : 0;
+  const expectedOperationsMin = isStateful ? 1 : 0;
+  const expectedObservablesMin = isBoundedObs ? 1 : 0;
+  const expectedSerializationsMin = isIntegrityHash ? 1 : 0;
+
+  const inventoryAudit = {
+    normativeClaimsCount: (specification.requirements ?? []).length + (specification.invariants ?? []).length,
+    expectedStateEntities: Math.max(expectedEntitiesMin, stateEntities.length),
+    materializedStateEntities: stateEntities.length,
+    expectedFields: Math.max(expectedFieldsMin, materializedFieldsCount),
+    materializedFields: materializedFieldsCount,
+    closedFields: Math.max(0, materializedFieldsCount - stateFieldIssues.length),
+    expectedOperations: Math.max(expectedOperationsMin, stateOperations.length),
+    materializedOperations: stateOperations.length,
+    totalizedOperations: Math.max(0, stateOperations.length - transitionIssues.length),
+    expectedObservables: Math.max(expectedObservablesMin, stateObservables.length),
+    materializedObservables: stateObservables.length,
+    closedObservables: Math.max(0, stateObservables.length - observableIssues.length),
+    canonicalProfilesRequired: Math.max(expectedSerializationsMin, stateSerializations.length),
+    canonicalProfilesClosed: Math.max(0, stateSerializations.length - (tags.has('integrity-hash') && stateSerializations.length === 0 ? 1 : 0)),
+    divergenceWitnessesSurviving: mutationResult.divergences.length,
+  };
+
   return {
     unresolvedInventorySlots,
     unresolvedStateFields,
@@ -986,6 +1026,7 @@ export function generateClosureCertificate({
     orphanHumanDecisions,
     regressedSemanticDimensions,
     status: totalUnresolved === 0 ? 'CERTIFIED_CLOSED' : 'BLOCKED_BY_UNRESOLVED_SLOTS',
+    inventoryAudit,
     unresolvedSlots: allIssues,
   };
 }

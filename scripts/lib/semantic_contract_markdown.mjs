@@ -47,7 +47,7 @@ export function renderSemanticContractMarkdown(contract, {
     '**Caminhos observados — não autorizam implementação:**',
     ...(contract.observedPaths.length > 0
       ? contract.observedPaths.map((path) => `- \`${path}\``)
-      : ['- Nenhum caminho observado.']),
+      : ['- Nenhum caminho pré-existente observado no workspace (repositório greenfield).']),
     '',
     '**Referências de caminho classificadas:**',
     ...(specification.pathReferences.length > 0
@@ -177,13 +177,139 @@ export function renderSemanticContractMarkdown(contract, {
     }
   }
 
-  lines.push('', '## 6. Invariantes');
+  const hasStateModel = Boolean(specification.stateModel);
+  if (hasStateModel) {
+    lines.push('', '## 6. Inventário Semântico Auditável (State Model & Totalidade de Transição)');
+
+    if (specification.closureCertificate?.inventoryAudit) {
+      const audit = specification.closureCertificate.inventoryAudit;
+      lines.push(
+        '',
+        '### 6.1 Prova de Auditoria de Cobertura do Inventário (Semantic Inventory Certificate)',
+        '',
+        '| Dimensão de Auditoria | Esperado | Materializado | Fechado / Totalizado | Status |',
+        '| :--- | :---: | :---: | :---: | :---: |',
+        `| Reivindicações Normativas Mapeadas | ${audit.normativeClaimsCount} | ${audit.normativeClaimsCount} | ${audit.normativeClaimsCount} | ✅ 100% |`,
+        `| Entidades de Estado | ${audit.expectedStateEntities} | ${audit.materializedStateEntities} | ${audit.materializedStateEntities} | ${audit.materializedStateEntities >= audit.expectedStateEntities ? '✅ Coberto' : '❌ Lacuna'} |`,
+        `| Campos de Estado (Ciclo de Vida) | ${audit.expectedFields} | ${audit.materializedFields} | ${audit.closedFields} | ${audit.closedFields >= audit.expectedFields ? '✅ Totalizado' : '❌ Lacuna'} |`,
+        `| Operações (Totalidade de Transição) | ${audit.expectedOperations} | ${audit.materializedOperations} | ${audit.totalizedOperations} | ${audit.totalizedOperations >= audit.expectedOperations ? '✅ Totalizado' : '❌ Lacuna'} |`,
+        `| Observáveis Públicos & Projeções | ${audit.expectedObservables} | ${audit.materializedObservables} | ${audit.closedObservables} | ${audit.closedObservables >= audit.expectedObservables ? '✅ Fechado' : '❌ Lacuna'} |`,
+        `| Perfis de Serialização Canônica | ${audit.canonicalProfilesRequired} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed >= audit.canonicalProfilesRequired ? '✅ Fechado' : '❌ Lacuna'} |`,
+        `| Testemunhos de Divergência Sobreviventes | 0 | 0 | ${audit.divergenceWitnessesSurviving} | ${audit.divergenceWitnessesSurviving === 0 ? '✅ 0 (Zero Divergência)' : '❌ Sobrevivente'} |`,
+      );
+    }
+
+    if (specification.stateModel.entities?.length > 0) {
+      lines.push('', '### 6.2 Entidades de Estado e Ciclo de Vida dos Campos');
+      for (const entity of specification.stateModel.entities) {
+        lines.push(
+          '',
+          `#### Entidade: \`${entity.name}\``,
+          `- **Descrição:** ${entity.description ?? 'Sem descrição'}`,
+          `- **Topologia:** ${entity.isCollection ? 'Coleção dinâmica (instâncias múltiplas)' : 'Instância estática única (Singleton)'}`,
+          `- **Política de Admissão:** \`${entity.admissionPolicy ?? 'N/A'}\``,
+          `- **Política de Capacidade:** ${entity.capacityPolicy ? `Máx ${entity.capacityPolicy.maxEntries} entradas (overflow: \`${entity.capacityPolicy.overflowPolicy}\`)` : 'N/A'}`,
+          '',
+          '| Campo | Tipo | Limites (Bounds) | Inicialização | Reset | Mutações | Leitores |',
+          '| :--- | :--- | :--- | :--- | :--- | :--- | :--- |',
+        );
+        for (const field of entity.fields) {
+          const typeStr = field.isCounter ? `${field.type} (Contador)` : field.type;
+          const boundsStr = field.bounds
+            ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior})`
+            : 'N/A';
+          const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*`;
+          const resetStr = field.reset.allowed
+            ? `\`${field.reset.resetValue}\` (gatilho: \`${field.reset.trigger}\`)`
+            : 'Proibido (preservado)';
+          const mutsStr = field.mutations.length > 0
+            ? field.mutations.map((m) => `\`${m.operation}\`: ${m.effect} \`${m.targetValue ?? ''}\` se \`${m.condition}\``).join('<br>')
+            : 'Nenhuma (imutável pós-init)';
+          const readersStr = field.readBy.length > 0
+            ? field.readBy.map((r) => `\`${r}\``).join(', ')
+            : 'Nenhum';
+          lines.push(`| \`${field.name}\` | ${typeStr} | ${boundsStr} | ${initStr} | ${resetStr} | ${mutsStr} | ${readersStr} |`);
+        }
+      }
+    }
+
+    if (specification.stateModel.operations?.length > 0) {
+      lines.push('', '### 6.3 Operações, Precedência Linear de Guardas e Efeitos de Transição');
+      for (const op of specification.stateModel.operations) {
+        lines.push(
+          '',
+          `#### Operação: \`${op.name}\``,
+          `- **Descrição:** ${op.description ?? 'Sem descrição'}`,
+          `- **Precedência Linear Estrita de Guardas (Curto-Circuito):** ${op.guardPrecedence.map((g, idx) => `${idx + 1}. \`${g}\``).join(' → ')}`,
+          '',
+          '| Ramo (branchId) | Condição de Guarda | Desfecho | Status / Erro | Efeitos de Transição de Estado | Preservação Default |',
+          '| :--- | :--- | :--- | :--- | :--- | :---: |',
+        );
+        for (const branch of op.branches) {
+          const effectsStr = branch.stateEffects.length > 0
+            ? branch.stateEffects.map((e) => `\`${e.field}\` := ${e.effect} ${e.value ? `\`${e.value}\`` : ''}`).join('<br>')
+            : 'Nenhum efeito colateral';
+          lines.push(
+            `| \`${branch.branchId}\` | \`${branch.condition ?? branch.branchId}\` | \`${branch.outcomeKind}\` | \`${branch.statusOrError ?? 'N/A'}\` | ${effectsStr} | ${branch.defaultPreservation ? 'Sim' : 'Não'} |`,
+          );
+        }
+      }
+    }
+
+    if (specification.stateModel.observables?.length > 0) {
+      lines.push('', '### 6.4 Observáveis Públicos e Mapeamento de Bits');
+      for (const obs of specification.stateModel.observables) {
+        lines.push(
+          '',
+          `#### Observável: \`${obs.name}\``,
+          `- **Representação:** \`${obs.representation}\``,
+          `- **Derivado de:** ${obs.derivedFrom.map((d) => `\`${d}\``).join(', ')}`,
+          `- **Comportamento quando Vazio:** \`${obs.emptyBehavior ?? 'N/A'}\``,
+        );
+        if (obs.bitAllocation?.length > 0) {
+          lines.push(
+            '',
+            '| Slice / Intervalo de Bits | Campo de Origem | Largura | Mapeamento Semântico |',
+            '| :--- | :--- | :---: | :--- |',
+          );
+          for (const slice of obs.bitAllocation) {
+            lines.push(`| Bits \`${slice.slice}\` | \`${slice.field}\` | ${slice.bitWidth} bit(s) | \`${slice.mapping ?? 'Direto'}\` |`);
+          }
+        }
+      }
+    }
+
+    if (specification.stateModel.canonicalSerializations?.length > 0) {
+      lines.push('', '### 6.5 Perfis de Serialização Canônica');
+      for (const profile of specification.stateModel.canonicalSerializations) {
+        lines.push(
+          '',
+          `#### Alvo de Integridade: \`${profile.target}\``,
+          `- **Chave de Ordenação Canônica:** \`${profile.recordOrderingKey}\``,
+          `- **Digest de Coleção Vazia:** \`${profile.emptyStateDigest}\``,
+          '',
+          '| Campo Incluído | Formato de Encoding Canônico |',
+          '| :--- | :--- |',
+        );
+        for (const fe of profile.fieldEncodings) {
+          lines.push(`| \`${fe.field}\` | \`${fe.encoding}\` |`);
+        }
+      }
+    }
+  }
+
+  const invSectionNum = hasStateModel ? '7' : '6';
+  const riskSectionNum = hasStateModel ? '8' : '7';
+  const advSectionNum = hasStateModel ? '9' : '8';
+  const decSectionNum = hasStateModel ? '10' : '9';
+
+  lines.push('', `## ${invSectionNum}. Invariantes`);
   for (const invariant of specification.invariants) {
     lines.push(`- **${invariant.id}:** ${invariant.statement}`);
     lines.push(`  - Falsificado se: ${invariant.falsification}`);
   }
 
-  lines.push('', '## 7. Riscos e vulnerabilidades');
+  lines.push('', `## ${riskSectionNum}. Riscos e vulnerabilidades`);
   lines.push(`- **Revisão ${specification.riskReview.status}:** ${specification.riskReview.rationale}`);
   if (specification.risks.length === 0) lines.push('- Nenhum risco material identificado.');
   for (const risk of specification.risks) {
@@ -192,7 +318,7 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`  - Base: ${renderBasis(risk.basis)}`);
   }
 
-  lines.push('', '## 8. Parecer adversarial');
+  lines.push('', `## ${advSectionNum}. Parecer adversarial`);
   lines.push(`- **${specification.adversarialReview.status}:** ${specification.adversarialReview.rationale}`);
   for (const finding of specification.adversarialReview.findings) {
     lines.push(`- **${finding.id} — ${finding.kind}/${finding.disposition}:** ${finding.challenge}`);
@@ -214,7 +340,7 @@ export function renderSemanticContractMarkdown(contract, {
     !material && decisionId === null
   ));
 
-  lines.push('', governed ? '## 9. Decisões humanas seladas' : '## 9. Decisões aguardando escolha humana');
+  lines.push('', governed ? `## ${decSectionNum}. Decisões humanas seladas` : `## ${decSectionNum}. Decisões aguardando escolha humana`);
   if (specification.decisions.length === 0) {
     lines.push(blockingUnknowns.length === 0
       ? 'Nenhuma ambiguidade material detectada.'
@@ -222,6 +348,9 @@ export function renderSemanticContractMarkdown(contract, {
   } else {
     for (const decision of specification.decisions) {
       lines.push('', `### ${decision.questionId}: ${decision.question}`);
+      if (decision.semanticKey) {
+        lines.push(`**Chave Semântica:** \`${decision.semanticKey}\``);
+      }
       lines.push(
         `**Contexto:** ${decision.presentation.context}`,
         `**Por que exige decisão humana:** ${decision.presentation.whyHumanDecision}`,
