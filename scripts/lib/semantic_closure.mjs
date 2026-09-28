@@ -147,9 +147,260 @@ export function validateFieldLifecycle({
     }
   }
 
+  // 7. OPERATION TOTALITY: Totalidade de branches e guards
+  const totalityResult = validateOperationTotality({ stateModel, architectureContexts });
+  issues.push(...totalityResult.issues);
+
   return {
     valid: issues.length === 0,
     issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Totalidade de Operações e Branches (validateOperationTotality).
+ * 
+ * Verifica que cada operação:
+ * 1. Cada guarda em guardPrecedence possui branch de rejeição correspondente (se branches definidos).
+ * 2. Branches de rejeição de guarda não executam mutações de estado indevidas em saldo/tempo.
+ * 3. Cada branch cobre todos os campos de entidade (via stateEffects explícito ou defaultPreservation: true).
+ * 4. Existe ao menos um branch de execução bem-sucedida (não-rejeição).
+ */
+export function validateOperationTotality({
+  stateModel = null,
+} = {}) {
+  const issues = [];
+
+  if (!stateModel || !Array.isArray(stateModel.operations)) {
+    return {
+      valid: true,
+      issues: [],
+    };
+  }
+
+  const allEntityFields = new Set();
+  if (Array.isArray(stateModel.entities)) {
+    for (const entity of stateModel.entities) {
+      const fields = Array.isArray(entity.fields) ? entity.fields : [];
+      for (const field of fields) {
+        allEntityFields.add(`${entity.name}.${field.name}`);
+      }
+    }
+  }
+
+  for (const op of stateModel.operations) {
+    const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+
+    if (Array.isArray(op.branches) && op.branches.length > 0) {
+      // 1. Cada guarda em guardPrecedence deve ter branch de rejeição correspondente
+      for (const guard of guardPrecedence) {
+        const guardNorm = guard.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const hasRejectionBranch = op.branches.some((branch) => {
+          if (branch.outcomeKind !== 'REJECTION') return false;
+          const branchIdNorm = (branch.branchId ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const statusNorm = (branch.statusOrError ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const condNorm = (branch.condition ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return branchIdNorm.includes(guardNorm)
+            || statusNorm.includes(guardNorm)
+            || condNorm.includes(guardNorm);
+        });
+
+        if (!hasRejectionBranch) {
+          issues.push({
+            slotId: `operation/${op.name}/guard/${guard}/rejection`,
+            kind: 'MISSING_GUARD_REJECTION_BRANCH',
+            reason: `A operação '${op.name}' define o guard '${guard}' em guardPrecedence, mas não possui branch de rejeição correspondente.`,
+          });
+        }
+      }
+
+      // 2. Curto-circuito: branches de rejeição de guarda não podem ter efeitos colaterais indevidos
+      for (const branch of op.branches) {
+        if (branch.outcomeKind === 'REJECTION') {
+          const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+          for (const eff of effects) {
+            const isBalanceOrTime = eff.field.toLowerCase().includes('token')
+              || eff.field.toLowerCase().includes('balance')
+              || eff.field.toLowerCase().includes('credit')
+              || eff.field.toLowerCase().includes('timestamp');
+            if (isBalanceOrTime && (eff.effect === 'DECREMENT' || eff.effect === 'SET' || eff.effect === 'MUTATE_COLLECTION')) {
+              issues.push({
+                slotId: `operation/${op.name}/branch/${branch.branchId}/sideEffect/${eff.field}`,
+                kind: 'GUARD_REJECTION_SIDE_EFFECT',
+                reason: `O branch de rejeição '${branch.branchId}' da operação '${op.name}' executa mutação indevida no campo '${eff.field}'. Rejeições de guarda devem curto-circuitar sem efeitos colaterais em saldo/tempo.`,
+              });
+            }
+          }
+        }
+      }
+
+      // 3. Totality de next-state por branch
+      for (const branch of op.branches) {
+        if (branch.defaultPreservation !== true) {
+          const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+          const coveredFields = new Set(effects.map((e) => e.field));
+
+          for (const fieldKey of allEntityFields) {
+            if (!coveredFields.has(fieldKey)) {
+              issues.push({
+                slotId: `operation/${op.name}/branch/${branch.branchId}/missingField/${fieldKey}`,
+                kind: 'UNDETERMINED_BRANCH_NEXT_STATE',
+                reason: `O branch '${branch.branchId}' da operação '${op.name}' não determina o próximo estado para o campo '${fieldKey}' (ausente em stateEffects sem defaultPreservation: true).`,
+              });
+            }
+          }
+        }
+      }
+
+      // 4. Ao menos um branch de execução bem-sucedida
+      const hasSuccessBranch = op.branches.some((branch) => branch.outcomeKind !== 'REJECTION');
+      if (!hasSuccessBranch) {
+        issues.push({
+          slotId: `operation/${op.name}/successBranch`,
+          kind: 'MISSING_SUCCESS_BRANCH',
+          reason: `A operação '${op.name}' define apenas branches de rejeição, sem nenhum branch de avanço normal de fluxo ou sucesso.`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Testes de Mutação Semântica (Two Conforming Interpretations Gate).
+ * 
+ * Testa o contrato contra interpretações concorrentes plausíveis:
+ * 1. ZERO vs CAPACITY: Campo de saldo/créditos sem valor explícito de inicialização.
+ * 2. TRAILING vs MAXIMUM: Contador de recusas/erros sem gatilho determinístico de reset.
+ * 3. FREEZE vs ACCRUE: Interação temporal entre reposição e quarentena/trava sem precedência ou com efeitos colaterais.
+ */
+export function runSemanticMutationTests({
+  stateModel = null,
+  specification = null,
+} = {}) {
+  const divergences = [];
+
+  if (!stateModel || !Array.isArray(stateModel.entities)) {
+    return {
+      passed: true,
+      divergences: [],
+    };
+  }
+
+  // 1. MUTATION_ZERO_VS_CAPACITY
+  for (const entity of stateModel.entities) {
+    for (const field of entity.fields ?? []) {
+      const fieldKey = `${entity.name}.${field.name}`;
+      const isBalanceOrTokens = field.name.toLowerCase().includes('token')
+        || field.name.toLowerCase().includes('balance')
+        || field.name.toLowerCase().includes('credit')
+        || field.name.toLowerCase().includes('quota');
+
+      if (isBalanceOrTokens) {
+        if (!field.initialization
+          || field.initialization.kind === 'UNRESOLVED'
+          || field.initialization.value === null
+          || field.initialization.value === undefined) {
+          divergences.push({
+            mutationId: 'MUTATION_ZERO_VS_CAPACITY',
+            slotId: `state/${fieldKey}/init`,
+            interpretationA: 'ZERO: Crachá inicia com saldo zerado (0 créditos/tokens), exigindo recarga prévia.',
+            interpretationB: 'CAPACITY: Crachá inicia com saldo cheio (capacidade máxima de créditos/tokens), disponível imediatamente.',
+            divergenceReason: `O campo '${fieldKey}' não possui valor de inicialização determinado, autorizando duas interpretações conformes divergentes.`,
+          });
+        }
+      }
+    }
+  }
+
+  // 2. MUTATION_TRAILING_VS_MAXIMUM
+  for (const entity of stateModel.entities) {
+    for (const field of entity.fields ?? []) {
+      const fieldKey = `${entity.name}.${field.name}`;
+      const isStreakOrRejection = field.isCounter === true
+        && (field.name.toLowerCase().includes('streak')
+          || field.name.toLowerCase().includes('reject')
+          || field.name.toLowerCase().includes('failure')
+          || field.name.toLowerCase().includes('error'));
+
+      if (isStreakOrRejection) {
+        if (field.reset?.allowed !== true
+          || !field.reset?.trigger
+          || field.reset?.resetValue === null
+          || field.reset?.resetValue === undefined) {
+          divergences.push({
+            mutationId: 'MUTATION_TRAILING_VS_MAXIMUM',
+            slotId: `state/${fieldKey}/reset`,
+            interpretationA: 'TRAILING: Contador representa recusas consecutivas imediatas e reseta para zero na próxima autorização com sucesso.',
+            interpretationB: 'MAXIMUM: Contador acumula o pico histórico total de recusas sem resetar em sucessos subsequentes.',
+            divergenceReason: `O campo de streak '${fieldKey}' não define reset permitido com gatilho e valor explícitos, permitindo interpretação de streak consecutivo vs acumulador vitalício.`,
+          });
+        }
+      }
+    }
+  }
+
+  // 3. MUTATION_FREEZE_VS_ACCRUE
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  for (const op of operations) {
+    const guards = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+    const hasQuarantineOrLock = guards.some((g) => g.toLowerCase().includes('quarantine') || g.toLowerCase().includes('lock'));
+    const hasRefill = guards.some((g) => g.toLowerCase().includes('refill') || g.toLowerCase().includes('time'));
+
+    if (hasQuarantineOrLock && hasRefill) {
+      const quarantineIdx = guards.findIndex((g) => g.toLowerCase().includes('quarantine') || g.toLowerCase().includes('lock'));
+      const refillIdx = guards.findIndex((g) => g.toLowerCase().includes('refill') || g.toLowerCase().includes('time'));
+
+      if (Array.isArray(op.branches)) {
+        const quarantineBranch = op.branches.find((b) => (
+          b.outcomeKind === 'REJECTION' && (b.branchId?.toLowerCase().includes('quarantine') || b.statusOrError?.toLowerCase().includes('quarantine'))
+        ));
+
+        if (quarantineBranch) {
+          const effects = Array.isArray(quarantineBranch.stateEffects) ? quarantineBranch.stateEffects : [];
+          const touchesRefill = effects.some((e) => e.field.toLowerCase().includes('token') || e.field.toLowerCase().includes('timestamp'));
+          if (touchesRefill && quarantineIdx < refillIdx) {
+            divergences.push({
+              mutationId: 'MUTATION_FREEZE_VS_ACCRUE',
+              slotId: `operation/${op.name}/branch/${quarantineBranch.branchId}/temporalOrder`,
+              interpretationA: 'FREEZE: Quarentena curto-circuita antes do refill; o tempo em quarentena não gera créditos.',
+              interpretationB: 'ACCRUE: O branch de quarentena muta estado temporal/créditos, acumulando créditos mesmo sob quarentena ativa.',
+              divergenceReason: `A guarda de quarentena precede o refill na precedência, mas o branch de quarentena muta saldo ou carimbo temporal.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 4. MUTATION_REMAINDER_LEAK
+  if (specification && Array.isArray(specification.determinismReview?.dimensions)) {
+    const hasTemporalRemainder = stateModel.entities.some((entity) => (
+      (entity.fields ?? []).some((f) => f.name.toLowerCase().includes('remainder'))
+    ));
+    if (hasTemporalRemainder) {
+      const remainderDim = specification.determinismReview.dimensions.find((d) => (
+        d.kind === 'REMAINDER_DISTRIBUTION' || d.kind === 'ROUNDING'
+      ));
+      if (!remainderDim || remainderDim.status !== 'SPECIFIED') {
+        divergences.push({
+          mutationId: 'MUTATION_REMAINDER_LEAK',
+          slotId: 'determinism/REMAINDER_DISTRIBUTION/temporalRemainder',
+          interpretationA: 'TRUNCATE: Descarta frações temporais residuais em cada avaliação, causando perda cumulativa de créditos sob alta frequência.',
+          interpretationB: 'CONSERVE: Conserva resíduos temporais fracionários no acumulador para o próximo tick sob ARCH-TEMPORAL-INVARIANCE.',
+          divergenceReason: 'A dimensão REMAINDER_DISTRIBUTION não está SPECIFIED para o campo de resíduo temporal fracionário.',
+        });
+      }
+    }
+  }
+
+  return {
+    passed: divergences.length === 0,
+    divergences,
   };
 }
 
@@ -168,6 +419,11 @@ export function generateClosureCertificate({
     architectureContexts: specification.architectureContexts ?? [],
   });
 
+  const mutationResult = runSemanticMutationTests({
+    stateModel: specification.stateModel,
+    specification,
+  });
+
   const stateFieldIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'UNRESOLVED_STATE_MODEL'
     || i.kind === 'UNRESOLVED_INITIALIZATION'
@@ -178,10 +434,17 @@ export function generateClosureCertificate({
   const transitionIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'UNRESOLVED_TRANSITION'
     || i.kind === 'UNRESOLVED_GUARD_PRECEDENCE'
+    || i.kind === 'MISSING_GUARD_REJECTION_BRANCH'
+    || i.kind === 'UNDETERMINED_BRANCH_NEXT_STATE'
+    || i.kind === 'MISSING_SUCCESS_BRANCH'
   ));
 
   const observableIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'UNRESOLVED_OBSERVABLE_DEPENDENCY'
+  ));
+
+  const sideEffectIssues = stateLifecycle.issues.filter((i) => (
+    i.kind === 'GUARD_REJECTION_SIDE_EFFECT'
   ));
 
   // Gaps materiais sem decisão vinculada
@@ -211,7 +474,7 @@ export function generateClosureCertificate({
   const unresolvedStateFields = stateFieldIssues.length;
   const unresolvedTransitions = transitionIssues.length;
   const unresolvedObservables = observableIssues.length;
-  const contradictoryRules = 0;
+  const contradictoryRules = sideEffectIssues.length + mutationResult.divergences.length;
   const regressedSemanticDimensions = 0;
 
   const totalUnresolved = unresolvedStateFields
@@ -223,8 +486,15 @@ export function generateClosureCertificate({
     + orphanHumanDecisions
     + regressedSemanticDimensions;
 
+  const mutationIssues = mutationResult.divergences.map((d) => ({
+    slotId: d.slotId,
+    kind: 'DIVERGENT_INTERPRETATION',
+    reason: `${d.mutationId}: ${d.divergenceReason}`,
+  }));
+
   const allIssues = [
     ...stateLifecycle.issues,
+    ...mutationIssues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
     ...determinismGaps.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'DETERMINISM_GAP', reason: d.rationale })),
     ...pendingDecisions.map((q) => ({ slotId: `decision/${q.questionId}`, kind: 'PENDING_HUMAN_DECISION', reason: q.question })),

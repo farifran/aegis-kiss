@@ -290,6 +290,34 @@
               "guardPrecedence": {
                 "type": "array",
                 "items": { "type": "string", "minLength": 1 }
+              },
+              "branches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["branchId", "outcomeKind"],
+                  "properties": {
+                    "branchId": { "type": "string", "minLength": 1 },
+                    "condition": { "type": "string" },
+                    "outcomeKind": { "enum": ["RETURN_VALUE", "REJECTION", "NO_OP", "STATE_CHANGE", "OBSERVABLE_EFFECT"] },
+                    "statusOrError": { "type": "string" },
+                    "defaultPreservation": { "type": "boolean" },
+                    "stateEffects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["field", "effect"],
+                        "properties": {
+                          "field": { "type": "string", "minLength": 1 },
+                          "effect": { "enum": ["SET", "INCREMENT", "DECREMENT", "PRESERVE", "MUTATE_COLLECTION", "CUSTOM"] },
+                          "value": { "type": ["string", "null"] }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

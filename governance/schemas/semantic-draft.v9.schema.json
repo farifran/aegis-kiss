@@ -47,7 +47,7 @@
           "kind": { "enum": ["OBLIGATION", "PROHIBITION", "GOAL", "OPTION", "EXAMPLE", "AMBIGUITY"] },
           "disposition": { "enum": ["NORMATIVE", "DECISION", "POLICY_CORRECTION", "NON_NORMATIVE"] },
           "contractEffect": { "type": ["string", "null"], "minLength": 1 },
-          "targetIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^(REQ|Q|NOTE|PATH|ARCH|BOUND)-[A-Z0-9][A-Z0-9-]+$" }, "uniqueItems": true },
+          "targetIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^(?:(REQ|Q|NOTE|PATH|ARCH|BOUND)-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$" }, "uniqueItems": true },
           "rationale": { "type": "string", "minLength": 1 }
         }
       }
@@ -151,7 +151,7 @@
           "upperBound": { "type": "string", "minLength": 1 },
           "underflowBehavior": { "$ref": "aegis.semantic_draft.v8#/$defs/rangeBehavior" },
           "overflowBehavior": { "$ref": "aegis.semantic_draft.v8#/$defs/rangeBehavior" },
-          "decisionId": { "type": ["string", "null"], "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+          "decisionId": { "type": ["string", "null"], "pattern": "^(?:Q-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$" },
           "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
           "acceptanceCaseIds": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
           "sourceFragmentIds": { "$ref": "#/$defs/sourceFragmentIds" },
@@ -263,6 +263,34 @@
               "guardPrecedence": {
                 "type": "array",
                 "items": { "type": "string", "minLength": 1 }
+              },
+              "branches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["branchId", "outcomeKind"],
+                  "properties": {
+                    "branchId": { "type": "string", "minLength": 1 },
+                    "condition": { "type": "string" },
+                    "outcomeKind": { "enum": ["RETURN_VALUE", "REJECTION", "NO_OP", "STATE_CHANGE", "OBSERVABLE_EFFECT"] },
+                    "statusOrError": { "type": "string" },
+                    "defaultPreservation": { "type": "boolean" },
+                    "stateEffects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["field", "effect"],
+                        "properties": {
+                          "field": { "type": "string", "minLength": 1 },
+                          "effect": { "enum": ["SET", "INCREMENT", "DECREMENT", "PRESERVE", "MUTATE_COLLECTION", "CUSTOM"] },
+                          "value": { "type": ["string", "null"] }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

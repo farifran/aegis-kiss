@@ -16,7 +16,7 @@
     "answers"
   ],
   "properties": {
-    "questionId": { "type": "string", "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$" },
+    "questionId": { "type": "string", "pattern": "^(?:Q-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$" },
     "question": { "type": "string", "minLength": 1 },
     "presentation": { "$ref": "aegis.decision_presentation.v1" },
     "recommendedAnswerId": { "type": "string", "minLength": 1 },
@@ -52,7 +52,7 @@
             "additionalProperties": false,
             "required": ["answerId", "then"],
             "properties": {
-              "answerId": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+              "answerId": { "type": "string", "pattern": "^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$" },
               "then": { "type": "string", "minLength": 1 }
             }
           }
@@ -68,7 +68,7 @@
         "additionalProperties": false,
         "required": ["id", "label", "rationale", "contractEffect", "recommended"],
         "properties": {
-          "id": { "type": "string", "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$" },
+          "id": { "type": "string", "pattern": "^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$" },
           "label": { "type": "string", "minLength": 1 },
           "rationale": { "type": "string", "minLength": 1 },
           "contractEffect": { "type": "string", "minLength": 1 },
