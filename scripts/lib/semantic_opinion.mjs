@@ -355,6 +355,7 @@ export function compileSemanticOpinion(opinion, request) {
       basis: compileOpinionBasis(item.basis, request),
     })),
     decisions: opinion.decisions.map((item, decisionIndex) => ({
+      ...(item.semanticKey ? { semanticKey: item.semanticKey } : {}),
       questionId: decisionIds[decisionIndex],
       question: item.question,
       presentation: item.presentation,
@@ -399,6 +400,21 @@ export function compileSemanticOpinion(opinion, request) {
           rationale: item.rationale,
           basis: compileOpinionBasis(item.basis, request),
         })),
+        boundaryRules: opinion.boundaryRules.map((item, index) => ({
+          id: generatedId('BOUND', index),
+          subject: item.subject,
+          lowerBound: item.lowerBound,
+          upperBound: item.upperBound,
+          overflowBehavior: item.overflowBehavior,
+          underflowBehavior: item.underflowBehavior,
+          representationKind: item.representationKind,
+        })),
+        requirements: opinion.requirements.map((item, index) => ({
+          id: generatedId('REQ', index),
+          statement: item.statement,
+        })),
+        literalFacts: request.intentEvidence?.literalFacts ?? [],
+        intentEvidence: request.intentEvidence,
         unknowns: opinion.unknowns.map((item, index) => ({
           id: generatedId('UNKNOWN', index),
           statement: item.statement,
@@ -414,8 +430,12 @@ export function compileSemanticOpinion(opinion, request) {
           })),
         },
         decisions: opinion.decisions.map((item, index) => ({
+          ...(item.semanticKey ? { semanticKey: item.semanticKey } : {}),
           questionId: decisionIds[index],
           question: item.question,
+          presentation: item.presentation,
+          answers: item.answers,
+          distinguishingCase: item.distinguishingCase,
         })),
       },
       humanResolutions: [],

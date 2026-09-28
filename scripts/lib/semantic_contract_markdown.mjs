@@ -18,7 +18,7 @@ export function renderSemanticContractMarkdown(contract, {
     `> **Modo:** ${specification.changeKind}`,
     `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
     ...(specification.closureCertificate ? [
-      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions})`,
+      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions})`,
     ] : []),
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),

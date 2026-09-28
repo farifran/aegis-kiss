@@ -11,8 +11,10 @@ export {
 export {
   generateClosureCertificate,
   runSemanticMutationTests,
+  validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,
+  validateSemanticInventoryCoverage,
 } from './semantic_closure.mjs';
 export {
   assertConfirmationRequest,

@@ -3,8 +3,10 @@ import process from 'node:process';
 import {
   generateClosureCertificate,
   runSemanticMutationTests,
+  validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,
+  validateSemanticInventoryCoverage,
 } from '../../lib/semantic_closure.mjs';
 import { effectiveDeterminismStatus } from '../../lib/semantic_approval.mjs';
 
@@ -21,6 +23,9 @@ function createFixture({
   dimensions = [{ kind: 'ORDERING', subjectId: 'PUBLIC_CONTRACT', status: 'SPECIFIED' }],
   unknowns = [],
   decisions = [],
+  boundaryRules = [],
+  literalFacts = [],
+  requirements = [],
 } = {}) {
   return {
     architectureContexts: isStateful
@@ -29,12 +34,16 @@ function createFixture({
     stateModel,
     unknowns,
     decisions,
+    boundaryRules,
+    literalFacts,
+    requirements,
     determinismReview: {
       status: 'SEMANTICALLY_CLOSED',
       dimensions,
     },
   };
 }
+
 
 // TEST-01: Stateful demand without stateModel MUST be blocked
 {
@@ -1058,4 +1067,454 @@ function createFixture({
   log('  PASS: TEST-24 Full contract with all structural properties certifies SEMANTICALLY_CLOSED');
 }
 
-log('[CTDD TEST] All 24 Field Lifecycle & Closure Certificate traps passed successfully!');
+// TEST-25: Time-dependent demand without temporal field in inventory MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'time-dependent' });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-25: missing temporal field in inventory must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'MISSING_TEMPORAL_FIELD_INVENTORY'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-25 Time-dependent demand without temporal field is blocked');
+}
+
+// TEST-26: Time-dependent demand without temporal guard in inventory MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [
+          {
+            name: 'tokens',
+            type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+            initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+            mutations: [],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['eval'],
+          },
+          {
+            name: 'lastRefillTimestamp',
+            type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '9223372036854775807', boundaryBehavior: 'SATURATE' },
+            initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Epoch' },
+            mutations: [],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['eval'],
+          },
+        ],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK', 'BALANCE'] }],
+      observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'time-dependent' });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-26: missing temporal guard in inventory must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'MISSING_TEMPORAL_GUARD_INVENTORY'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-26 Time-dependent demand without temporal guard is blocked');
+}
+
+// TEST-27: Bounded-observability demand without bitmask observable in inventory MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'bounded-observability' });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-27: missing bitmask observable in inventory must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-27 Bounded-observability demand without bitmask observable is blocked');
+}
+
+// TEST-28: Literal BIT_RANGE fact without bitmask allocation MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    literalFacts: [
+      { kind: 'BIT_RANGE', reference: 'Status bitmask flags', attributes: { start: 24, end: 31 } },
+    ],
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['bitmask'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{
+        name: 'bitmask',
+        derivedFrom: ['Badge.tokens'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [
+          { slice: '0..15', field: 'Badge.tokens', bitWidth: 16 },
+        ],
+      }],
+    },
+  });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+    literalFacts: fixture.literalFacts,
+  });
+  assert.equal(result.valid, false, 'TEST-28: unmapped literal bit range must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNMAPPED_LITERAL_BIT_RANGE'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-28 Literal BIT_RANGE fact without bitmask allocation is blocked');
+}
+
+// TEST-29: Boundary rule not mapped to any entity field or observable MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    boundaryRules: [
+      { id: 'BR-REFILL-INTERVAL', subject: 'refillIntervalMs' },
+    ],
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+  });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+    boundaryRules: fixture.boundaryRules,
+  });
+  assert.equal(result.valid, false, 'TEST-29: unmapped boundary rule must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'UNMAPPED_BOUNDARY_RULE'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-29 Boundary rule unmapped in inventory is blocked');
+}
+
+// TEST-30: Integrity-hash demand without canonicalSerializations in inventory MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+      canonicalSerializations: [],
+    },
+  });
+  fixture.architectureContexts.push({ tag: 'integrity-hash' });
+
+  const result = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-30: missing canonicalSerializations in inventory must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'MISSING_CANONICAL_SERIALIZATION_INVENTORY'), true);
+  log('  PASS: TEST-30 Integrity-hash demand without canonicalSerializations is blocked');
+}
+
+// TEST-31: Decision without distinguishing witness or non-divergent outcomes MUST be blocked
+{
+  const nonDivergentDecision = {
+    questionId: 'DEC-01',
+    answers: [{ id: 'OPT_A' }, { id: 'OPT_B' }],
+    distinguishingCase: {
+      given: 'Saldo zerado',
+      when: 'evaluateRequest chamado',
+      outcomes: [
+        { answerId: 'OPT_A', then: 'rejeita com ZERO_BALANCE' },
+        { answerId: 'OPT_B', then: 'rejeita com ZERO_BALANCE' },
+      ],
+    },
+  };
+
+  const result = validateDecisionsWitness({
+    decisions: [nonDivergentDecision],
+  });
+  assert.equal(result.valid, false, 'TEST-31: non-divergent outcomes must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'NON_DISTINGUISHING_DECISION_WITNESS'), true);
+
+  const fixture = createFixture({
+    isStateful: false,
+    decisions: [nonDivergentDecision],
+  });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-31 Decision with non-divergent witness outcomes is blocked');
+}
+
+// TEST-32: Decision with incomplete witness coverage or invalid semanticKey MUST be blocked
+{
+  const incompleteDecision = {
+    questionId: 'DEC-02',
+    semanticKey: 'invalid_key_no_dot',
+    answers: [{ id: 'OPT_A' }, { id: 'OPT_B' }],
+    distinguishingCase: {
+      given: 'Saldo zerado',
+      when: 'evaluateRequest chamado',
+      outcomes: [
+        { answerId: 'OPT_A', then: 'rejeita com ZERO_BALANCE' },
+      ],
+    },
+  };
+
+  const result = validateDecisionsWitness({
+    decisions: [incompleteDecision],
+  });
+  assert.equal(result.valid, false, 'TEST-32: incomplete coverage and invalid semanticKey must be invalid');
+  assert.equal(result.issues.some((i) => i.kind === 'INCOMPLETE_WITNESS_OUTCOMES'), true);
+  assert.equal(result.issues.some((i) => i.kind === 'INVALID_SEMANTIC_KEY'), true);
+  log('  PASS: TEST-32 Decision with incomplete witness coverage or invalid semanticKey is blocked');
+}
+
+// TEST-33: Full contract with complete inventory coverage and valid decision witness certifies SEMANTICALLY_CLOSED
+{
+  const fixture = createFixture({
+    isStateful: true,
+    boundaryRules: [
+      { id: 'BR-TOKENS', subject: 'Badge.tokens' },
+      { id: 'BR-TIME', subject: 'Badge.lastRefillTimestamp' },
+    ],
+    literalFacts: [
+      { kind: 'BIT_RANGE', reference: 'Status bitmask', attributes: { start: 0, end: 15 } },
+    ],
+    decisions: [
+      {
+        questionId: 'DEC-REFILL',
+        semanticKey: 'rate_limit.refill_policy',
+        answers: [{ id: 'PROPORTIONAL' }, { id: 'DISCRETE' }],
+        distinguishingCase: {
+          given: 'Tempo decorrido dt=150ms com taxa 1 token a cada 100ms',
+          when: 'evaluateRequest chamado',
+          outcomes: [
+            { answerId: 'PROPORTIONAL', then: 'concede 1 token e preserva resto 50ms' },
+            { answerId: 'DISCRETE', then: 'descarta resto fracionário de 50ms' },
+          ],
+        },
+      },
+    ],
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        isCollection: true,
+        admissionPolicy: 'ON_FIRST_REQUEST',
+        capacityPolicy: { maxEntries: '1000', overflowPolicy: 'REJECT_NEW' },
+        fields: [
+          {
+            name: 'tokens',
+            type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+            initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo inicial' },
+            mutations: [{ operation: 'evaluateRequest', condition: 'SUCCESS', effect: 'DECREMENT', targetValue: null }],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['evaluateRequest', 'bitmask'],
+          },
+          {
+            name: 'lastRefillTimestamp',
+            type: 'INTEGER',
+            bounds: { lowerBound: '0', upperBound: '9223372036854775807', boundaryBehavior: 'SATURATE' },
+            initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Epoch de admissão' },
+            mutations: [{ operation: 'evaluateRequest', condition: 'SUCCESS', effect: 'UPDATE', targetValue: 'now' }],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['evaluateRequest', 'bitmask'],
+          },
+        ],
+      }],
+      operations: [{
+        name: 'evaluateRequest',
+        guardPrecedence: ['CLOCK_REGRESSION', 'LOCK', 'BALANCE'],
+        branches: [
+          {
+            branchId: 'GUARD_CLOCK_REGRESSION',
+            outcomeKind: 'REJECTION',
+            statusOrError: 'REJECT_CLOCK_REGRESSION',
+            defaultPreservation: true,
+          },
+          {
+            branchId: 'GUARD_LOCK',
+            outcomeKind: 'REJECTION',
+            statusOrError: 'REJECT_LOCKED',
+            defaultPreservation: true,
+          },
+          {
+            branchId: 'GUARD_BALANCE',
+            outcomeKind: 'REJECTION',
+            statusOrError: 'REJECT_NO_CREDIT',
+            defaultPreservation: true,
+          },
+          {
+            branchId: 'SUCCESS_AUTHORIZED',
+            outcomeKind: 'RETURN_VALUE',
+            statusOrError: 'ALLOW',
+            defaultPreservation: false,
+            stateEffects: [
+              { field: 'Badge.tokens', effect: 'DECREMENT', value: '1' },
+              { field: 'Badge.lastRefillTimestamp', effect: 'SET', value: 'now' },
+            ],
+          },
+        ],
+      }],
+      observables: [{
+        name: 'bitmask',
+        derivedFrom: ['Badge.tokens', 'Badge.lastRefillTimestamp'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [
+          { slice: '0..15', field: 'Badge.tokens', bitWidth: 16 },
+          { slice: '16..31', field: 'RESERVED', bitWidth: 16 },
+        ],
+      }],
+      canonicalSerializations: [
+        {
+          target: 'FNV1A_64_BALANCES',
+          includedFields: ['Badge.tokens'],
+          fieldEncodings: [{ field: 'Badge.tokens', encoding: 'UINT64_BE' }],
+          recordOrderingKey: 'Badge.id ASC',
+          emptyStateDigest: '0xcbf29ce484222325',
+        },
+      ],
+    },
+  });
+  fixture.architectureContexts.push(
+    { tag: 'time-dependent' },
+    { tag: 'bounded-observability' },
+    { tag: 'integrity-hash' },
+  );
+
+  const inventoryResult = validateSemanticInventoryCoverage({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+    boundaryRules: fixture.boundaryRules,
+    literalFacts: fixture.literalFacts,
+    requirements: fixture.requirements,
+  });
+  assert.equal(inventoryResult.valid, true, `TEST-33: inventory must be valid, got: ${JSON.stringify(inventoryResult.issues)}`);
+
+  const decisionsResult = validateDecisionsWitness({
+    decisions: fixture.decisions,
+  });
+  assert.equal(decisionsResult.valid, true, `TEST-33: decisions must be valid, got: ${JSON.stringify(decisionsResult.issues)}`);
+
+  const lifecycleResult = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(lifecycleResult.valid, true, `TEST-33: lifecycle must be valid, got: ${JSON.stringify(lifecycleResult.issues)}`);
+
+  const humanResolutions = [{ questionId: 'DEC-REFILL', answerId: 'PROPORTIONAL' }];
+  const cert = generateClosureCertificate({ specification: fixture, humanResolutions });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedInventorySlots, 0);
+  assert.equal(cert.unresolvedStateFields, 0);
+  assert.equal(cert.unresolvedObservables, 0);
+  assert.equal(cert.unresolvedTransitions, 0);
+
+  const status = effectiveDeterminismStatus(fixture, humanResolutions);
+  assert.equal(status, 'SEMANTICALLY_CLOSED');
+  log('  PASS: TEST-33 Full contract with complete inventory coverage and valid decision witness certifies SEMANTICALLY_CLOSED');
+}
+
+log('[CTDD TEST] All 33 Field Lifecycle & Closure Certificate traps passed successfully!');
+

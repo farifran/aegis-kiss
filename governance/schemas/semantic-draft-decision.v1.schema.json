@@ -16,6 +16,7 @@
     "answers"
   ],
   "properties": {
+    "semanticKey": { "type": "string", "pattern": "^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$" },
     "questionId": { "type": "string", "pattern": "^(?:Q-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$" },
     "question": { "type": "string", "minLength": 1 },
     "presentation": { "$ref": "aegis.decision_presentation.v1" },

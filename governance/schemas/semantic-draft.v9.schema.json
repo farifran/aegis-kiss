@@ -382,6 +382,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "unresolvedInventorySlots",
         "unresolvedStateFields",
         "unresolvedObservables",
         "unresolvedTransitions",
@@ -393,6 +394,7 @@
         "status"
       ],
       "properties": {
+        "unresolvedInventorySlots": { "type": "integer", "minimum": 0 },
         "unresolvedStateFields": { "type": "integer", "minimum": 0 },
         "unresolvedObservables": { "type": "integer", "minimum": 0 },
         "unresolvedTransitions": { "type": "integer", "minimum": 0 },

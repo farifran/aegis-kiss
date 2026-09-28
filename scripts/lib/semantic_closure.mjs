@@ -1,5 +1,255 @@
 
 /**
+ * Validador Mecânico de Cobertura de Inventário Semântico (validateSemanticInventoryCoverage).
+ * 
+ * Executado ANTES de validateFieldLifecycle:
+ * Impede que entidades, campos, observáveis ou fatias de fronteira semanticamente necessários
+ * sejam simplesmente omitidos do IR pelo gerador (evitando falsos positivos de fechamento).
+ */
+export function validateSemanticInventoryCoverage({
+  stateModel = null,
+  architectureContexts = [],
+  boundaryRules = [],
+  literalFacts = [],
+  requirements = [],
+} = {}) {
+  const issues = [];
+  const tags = new Set(architectureContexts.map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
+
+  const entities = Array.isArray(stateModel?.entities) ? stateModel.entities : [];
+  const operations = Array.isArray(stateModel?.operations) ? stateModel.operations : [];
+  const observables = Array.isArray(stateModel?.observables) ? stateModel.observables : [];
+  const serializations = Array.isArray(stateModel?.canonicalSerializations) ? stateModel.canonicalSerializations : [];
+
+  const allFieldKeys = new Set();
+  const allFieldNames = new Set();
+  for (const entity of entities) {
+    for (const field of (entity.fields ?? [])) {
+      allFieldKeys.add(`${entity.name}.${field.name}`);
+      allFieldNames.add(field.name);
+    }
+  }
+
+  const allAllocatedSlices = [];
+  for (const obs of observables) {
+    if (Array.isArray(obs.bitAllocation)) {
+      for (const alloc of obs.bitAllocation) {
+        if (typeof alloc.slice === 'string') {
+          const match = alloc.slice.match(/^(\d+)(?:\.\.(\d+))?$/u);
+          if (match) {
+            const start = parseInt(match[1], 10);
+            const end = match[2] ? parseInt(match[2], 10) : start;
+            allAllocatedSlices.push({
+              sliceStr: alloc.slice,
+              start,
+              end,
+              field: alloc.field,
+              mapping: alloc.mapping,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 1. Contextos Mandatórios
+  if (tags.has('stateful-operation') && entities.length === 0) {
+    issues.push({
+      slotId: 'inventory/entities',
+      kind: 'MISSING_STATEFUL_ENTITY_INVENTORY',
+      reason: 'O contexto arquitetural stateful-operation exige ao menos uma entidade de estado no inventário.',
+    });
+  }
+
+  if (tags.has('time-dependent')) {
+    const hasTemporalField = Array.from(allFieldNames).some((name) => (
+      /time|timestamp|clock/iu.test(name)
+    ));
+    if (!hasTemporalField) {
+      issues.push({
+        slotId: 'inventory/fields/temporal',
+        kind: 'MISSING_TEMPORAL_FIELD_INVENTORY',
+        reason: 'O contexto arquitetural time-dependent exige ao menos um campo temporal (ex: timestamp) nas entidades de estado.',
+      });
+    }
+
+    const hasTemporalGuard = operations.some((op) => (
+      (op.guardPrecedence ?? []).some((g) => /time.*regression|monotonic|clock/iu.test(g))
+      || (op.branches ?? []).some((b) => /time.*regression|clock/iu.test(b.branchId) || /time.*regression|clock/iu.test(b.statusOrError ?? ''))
+    ));
+    if (!hasTemporalGuard) {
+      issues.push({
+        slotId: 'inventory/operations/temporal_guard',
+        kind: 'MISSING_TEMPORAL_GUARD_INVENTORY',
+        reason: 'O contexto arquitetural time-dependent exige ao menos uma operação com verificação ou guard contra regressão de relógio.',
+      });
+    }
+  }
+
+  if (tags.has('bounded-observability')) {
+    const hasBitmask = observables.some((obs) => obs.representation === 'UINT32_BITMASK' || (obs.bitAllocation?.length ?? 0) > 0);
+    if (!hasBitmask) {
+      issues.push({
+        slotId: 'inventory/observables/bitmask',
+        kind: 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY',
+        reason: 'O contexto arquitetural bounded-observability exige observable com representação de bitmask finita (UINT32_BITMASK).',
+      });
+    }
+  }
+
+  if (tags.has('integrity-hash')) {
+    if (serializations.length === 0) {
+      issues.push({
+        slotId: 'inventory/canonicalSerializations',
+        kind: 'MISSING_CANONICAL_SERIALIZATION_INVENTORY',
+        reason: 'O contexto arquitetural integrity-hash exige ao menos uma especificação em canonicalSerializations.',
+      });
+    }
+  }
+
+  // 2. Fatos Literais de Bits (BIT_RANGE)
+  const bitRangeFacts = (literalFacts ?? []).filter((f) => f.kind === 'BIT_RANGE' && f.attributes?.start !== undefined);
+  if (bitRangeFacts.length > 0) {
+    const bitmaskObs = observables.find((obs) => obs.representation === 'UINT32_BITMASK');
+    if (!bitmaskObs || !Array.isArray(bitmaskObs.bitAllocation) || bitmaskObs.bitAllocation.length === 0) {
+      issues.push({
+        slotId: 'inventory/observables/bitmask_allocation',
+        kind: 'MISSING_BITMASK_INVENTORY',
+        reason: 'A demanda contém fatos literais definindo fatias de bits, mas nenhum observable UINT32_BITMASK com bitAllocation foi fornecido.',
+      });
+    } else {
+      for (const fact of bitRangeFacts) {
+        const fStart = fact.attributes.start;
+        const fEnd = fact.attributes.end !== undefined ? fact.attributes.end : fStart;
+        const isCovered = allAllocatedSlices.some((slice) => (
+          slice.start <= fStart && slice.end >= fEnd
+        ));
+        if (!isCovered) {
+          issues.push({
+            slotId: `inventory/bitmask/slice/${fStart}..${fEnd}`,
+            kind: 'UNMAPPED_LITERAL_BIT_RANGE',
+            reason: `O fato literal '${fact.reference}' define intervalo de bits [${fStart}..${fEnd}], mas nenhuma fatia correspondente foi mapeada em bitAllocation.`,
+          });
+        }
+      }
+    }
+  }
+
+  // 3. Cobertura de Boundary Rules
+  for (const rule of (boundaryRules ?? [])) {
+    const subject = rule.subject ?? '';
+    const matchesField = Array.from(allFieldKeys).some((key) => subject.includes(key))
+      || Array.from(allFieldNames).some((name) => subject.includes(name));
+    const matchesObservable = observables.some((obs) => subject.includes(obs.name))
+      || allAllocatedSlices.some((slice) => (
+        subject.includes(slice.sliceStr)
+        || (slice.mapping && subject.includes(slice.mapping))
+        || new RegExp(`(?:bits?\\s+)?${slice.start}\\s*(?:a|\\.\\.|-|to)\\s*${slice.end}\\b`, 'iu').test(subject)
+      ));
+
+    if (!matchesField && !matchesObservable) {
+      issues.push({
+        slotId: `inventory/boundary/${rule.id}`,
+        kind: 'UNMAPPED_BOUNDARY_RULE',
+        reason: `A regra de fronteira '${rule.id}' (${subject}) não possui entidade, campo de estado ou fatia de observable mapeada no inventário semântico.`,
+      });
+    }
+  }
+
+  // 4. Cobertura de Requisitos com Subject explícito
+  for (const req of (requirements ?? [])) {
+    if (req.subject && typeof req.subject === 'string') {
+      const subject = req.subject;
+      const matchesField = Array.from(allFieldKeys).some((key) => subject.includes(key))
+        || Array.from(allFieldNames).some((name) => subject.includes(name));
+      const matchesObservable = observables.some((obs) => subject.includes(obs.name));
+      if (!matchesField && !matchesObservable) {
+        issues.push({
+          slotId: `inventory/requirement/${req.id}`,
+          kind: 'UNMAPPED_REQUIREMENT_SUBJECT',
+          reason: `O requisito '${req.id}' referencia o subject '${subject}', ausente nas entidades ou observáveis do inventário semântico.`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Distinguishing Witness em Decisões (validateDecisionsWitness).
+ */
+export function validateDecisionsWitness({
+  decisions = [],
+} = {}) {
+  const issues = [];
+
+  for (const decision of decisions) {
+    const qId = decision.questionId ?? decision.question;
+    const dc = decision.distinguishingCase;
+
+    if (decision.semanticKey !== undefined && decision.semanticKey !== null) {
+      if (typeof decision.semanticKey !== 'string' || !/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/u.test(decision.semanticKey)) {
+        issues.push({
+          slotId: `decision/${qId}/semanticKey`,
+          kind: 'INVALID_SEMANTIC_KEY',
+          reason: `A decisão '${qId}' possui semanticKey inválida ('${decision.semanticKey}'). Exige formato 'namespace.nome_politica'.`,
+        });
+      }
+    }
+
+    if (!dc || typeof dc.given !== 'string' || typeof dc.when !== 'string' || !Array.isArray(dc.outcomes)) {
+      issues.push({
+        slotId: `decision/${qId}/distinguishingCase`,
+        kind: 'MISSING_DISTINGUISHING_CASE',
+        reason: `A decisão '${qId}' não define distinguishingCase estruturado com given, when e outcomes.`,
+      });
+      continue;
+    }
+
+    if (dc.outcomes.length < 2) {
+      issues.push({
+        slotId: `decision/${qId}/distinguishingCase/outcomes`,
+        kind: 'INSUFFICIENT_WITNESS_OUTCOMES',
+        reason: `A decisão '${qId}' define menos de 2 desfechos em distinguishingCase.outcomes.`,
+      });
+    } else {
+      const distinctOutcomes = new Set(dc.outcomes.map((o) => (typeof o.then === 'string' ? o.then.trim().toLowerCase() : '')));
+      if (distinctOutcomes.size < 2) {
+        issues.push({
+          slotId: `decision/${qId}/distinguishingCase/divergence`,
+          kind: 'NON_DISTINGUISHING_DECISION_WITNESS',
+          reason: `A decisão '${qId}' não apresenta desfechos observáveis divergentes entre suas alternativas (todas produzem o mesmo resultado). Viola o princípio KISS.`,
+        });
+      }
+    }
+
+    const answers = Array.isArray(decision.answers) ? decision.answers : [];
+    if (answers.length > 0) {
+      const outcomeAnswerRefs = new Set(dc.outcomes.map((o) => (o.answerId ?? o.answerIndex)));
+      const hasCoverage = answers.every((a, idx) => (
+        outcomeAnswerRefs.has(a.id) || outcomeAnswerRefs.has(idx)
+      ));
+      if (!hasCoverage) {
+        issues.push({
+          slotId: `decision/${qId}/distinguishingCase/coverage`,
+          kind: 'INCOMPLETE_WITNESS_OUTCOMES',
+          reason: `A decisão '${qId}' possui alternativas declaradas em answers que não possuem desfecho correspondente em distinguishingCase.outcomes.`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
  * Validador Mecânico de Ciclo de Vida de Campos de Estado (validateFieldLifecycle).
  * 
  * Implementa a verificação de totalidade de transição de estado sobre o IR:
@@ -615,6 +865,18 @@ export function generateClosureCertificate({
   specification,
   humanResolutions = [],
 } = {}) {
+  const inventoryResult = validateSemanticInventoryCoverage({
+    stateModel: specification.stateModel,
+    architectureContexts: specification.architectureContexts ?? [],
+    boundaryRules: specification.boundaryRules ?? [],
+    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
+    requirements: specification.requirements ?? [],
+  });
+
+  const witnessResult = validateDecisionsWitness({
+    decisions: specification.decisions ?? [],
+  });
+
   const stateLifecycle = validateFieldLifecycle({
     stateModel: specification.stateModel,
     architectureContexts: specification.architectureContexts ?? [],
@@ -624,6 +886,9 @@ export function generateClosureCertificate({
     stateModel: specification.stateModel,
     specification,
   });
+
+  const inventoryIssues = [...inventoryResult.issues, ...witnessResult.issues];
+  const unresolvedInventorySlots = inventoryIssues.length;
 
   const stateFieldIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'UNRESOLVED_STATE_MODEL'
@@ -685,7 +950,8 @@ export function generateClosureCertificate({
   const contradictoryRules = sideEffectIssues.length + mutationResult.divergences.length;
   const regressedSemanticDimensions = 0;
 
-  const totalUnresolved = unresolvedStateFields
+  const totalUnresolved = unresolvedInventorySlots
+    + unresolvedStateFields
     + unresolvedObservables
     + unresolvedTransitions
     + unresolvedAuthorities
@@ -701,6 +967,7 @@ export function generateClosureCertificate({
   }));
 
   const allIssues = [
+    ...inventoryIssues,
     ...stateLifecycle.issues,
     ...mutationIssues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
@@ -709,6 +976,7 @@ export function generateClosureCertificate({
   ];
 
   return {
+    unresolvedInventorySlots,
     unresolvedStateFields,
     unresolvedObservables,
     unresolvedTransitions,

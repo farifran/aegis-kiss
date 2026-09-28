@@ -15,6 +15,7 @@
     "distinguishingCase"
   ],
   "properties": {
+    "semanticKey": { "type": "string", "pattern": "^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$" },
     "question": { "type": "string", "minLength": 1 },
     "presentation": { "$ref": "aegis.decision_presentation.v1" },
     "answers": {
