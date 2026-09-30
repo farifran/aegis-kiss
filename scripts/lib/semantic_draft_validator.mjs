@@ -6,7 +6,6 @@ import {
   canonicalProofOutcome,
   counterexampleForDimension,
   expectedRelationForResolution,
-  literalReferenceAppears,
   resolutionAllowedForDimension,
 } from './semantic_authority.mjs';
 
@@ -51,16 +50,11 @@ function workspaceReferenceAvailable(reference, workspaceEvidence) {
   ));
 }
 
-function applicablePolicyRuleIds(policy, architectureTags, intent) {
+function applicablePolicyRuleIds(policy, architectureTags) {
   return new Set(policy.rules
-    .filter((rule) => {
-      const byContext = rule.appliesMode === 'all'
-        ? rule.appliesWhen.every((tag) => architectureTags.has(tag))
-        : rule.appliesWhen.some((tag) => architectureTags.has(tag));
-      const byText = [...rule.reviewReferences, ...rule.forbiddenReferences]
-        .some((reference) => literalReferenceAppears(intent, reference));
-      return byContext || byText;
-    })
+    .filter((rule) => (rule.appliesMode === 'all'
+      ? rule.appliesWhen.every((tag) => architectureTags.has(tag))
+      : rule.appliesWhen.some((tag) => architectureTags.has(tag))))
     .map(({ id }) => id));
 }
 
@@ -85,7 +79,8 @@ function validateBasis(basis, context, owner) {
       if (rule?.level !== 'default') {
         throw new Error(`mechanical_default_references_non_default_rule:${owner}:${item.reference}`);
       }
-      if (!context.applicablePolicyRuleIds.has(item.reference)) {
+      if (!context.applicablePolicyRuleIds.has(item.reference)
+        && !context.assessedPolicyRuleIds?.has(item.reference)) {
         throw new Error(`mechanical_default_references_inapplicable_rule:${owner}:${item.reference}`);
       }
     }
@@ -579,12 +574,11 @@ function validateReviews(draft, context) {
 
   const applicableRuleIds = context.applicablePolicyRuleIds;
   const assessedRuleIds = assertUniqueIds(draft.policyAssessments, 'ruleId', 'policy_assessment');
-  if (assessedRuleIds.size !== applicableRuleIds.size
-    || [...applicableRuleIds].some((id) => !assessedRuleIds.has(id))) {
+  if ([...applicableRuleIds].some((id) => !assessedRuleIds.has(id))) {
     throw new Error('incomplete_policy_assessment');
   }
   for (const assessment of draft.policyAssessments) {
-    if (!applicableRuleIds.has(assessment.ruleId)) {
+    if (!context.policyRulesById.has(assessment.ruleId)) {
       throw new Error(`unexpected_policy_assessment:${assessment.ruleId}`);
     }
     if (assessment.decisionId !== null && !context.decisionIds.has(assessment.decisionId)) {
@@ -650,7 +644,7 @@ export function assertSemanticDraft(draft, policy, {
     assertKnownReferences(rule.appliesWhen, knownPolicyTags, `policy_rule:${rule.id}`);
   }
   const fragmentIds = new Set(intentEvidence.fragments.map(({ id }) => id));
-  const applicableRuleIds = applicablePolicyRuleIds(policy, architectureTags, intent);
+  const applicableRuleIds = applicablePolicyRuleIds(policy, architectureTags);
   const context = {
     policy,
     intent,
@@ -673,6 +667,7 @@ export function assertSemanticDraft(draft, policy, {
     policyReferenceIds: new Set([...policyRulesById.keys(), ...policyAmendmentIds]),
     policyRulesById,
     applicablePolicyRuleIds: applicableRuleIds,
+    assessedPolicyRuleIds: new Set(draft.policyAssessments.map((a) => a.ruleId)),
     policyAmendmentIds,
     claimTargetIds: new Set([
       ...requirementIds,

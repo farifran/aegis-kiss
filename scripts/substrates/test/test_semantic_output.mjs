@@ -38,15 +38,13 @@ function expand(value, root) {
     .map(([key, item]) => [key, expand(item, root)]));
 }
 
-// Active formats must not depend on historical documents, even indirectly.
-for (const [id, file] of schemaFiles) {
-  if (file.startsWith('legacy/')) continue;
+// Formatos canônicos resolvem todas as referências internas.
+for (const [id] of schemaFiles) {
   const checkRefs = (value) => {
     if (value === null || typeof value !== 'object') return;
     if (typeof value.$ref === 'string' && !value.$ref.startsWith('#')) {
       const target = schemaFiles.get(value.$ref.split('#')[0]);
       assert.ok(target, `Unknown reference in ${id}`);
-      assert.equal(target.startsWith('legacy/'), false, `Historical dependency in ${id}`);
     }
     Object.values(value).forEach(checkRefs);
   };

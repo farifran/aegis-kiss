@@ -1,13 +1,8 @@
-# Schemas: fluxo atual e compatibilidade
+# Schemas: fluxo canônico de governança
 
-Os arquivos na raiz descrevem o fluxo atual. `contract-components.v1.schema.json`
-contém definições reutilizadas; formatos atuais não dependem de versões históricas.
-Os testes verificam essa fronteira e a resolução das referências.
-
-`legacy/` preserva os documentos históricos sem modificar seu conteúdo ou `$id`.
-Eles continuam registrados para leitura e validação de contratos anteriores.
-Isso não promove um contrato antigo para a versão atual nem reaproveita consentimento.
-Não altere documentos históricos para implementar novas regras.
+Os arquivos nesta pasta descrevem o fluxo governado do Aegis. `contract-components.v1.schema.json`
+contém definições reutilizadas; todos os formatos ativos são canônicos, autocontidos e livres
+de versões legadas. Os testes verificam a consistência e a resolução estrita das referências.
 
 Opinião da IA e rascunho compilado continuam distintos: índices e juízos pertencem
 ao parecer; identificadores e estados compilados pertencem ao Harness. Compartilhe
@@ -27,5 +22,4 @@ referências e contradições representadas. Uma justificativa preenchida não �
 prova matemática de ausência. As demais exigências de limites e estado não foram
 relaxadas por esta mudança.
 
-Após editar schemas atuais, execute `npm run aegis:generate-schemas` e `npm test`.
-Os validadores históricos continuam gerados para preservar a compatibilidade.
+Após editar schemas, execute `npm run aegis:generate-schemas` e `npm test`.

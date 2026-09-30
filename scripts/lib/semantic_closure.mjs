@@ -530,11 +530,14 @@ export function validateProvenanceEnforcement({
   stateModel = null,
   architecturePolicy = null,
   literalFacts = [],
+  fragments = [],
+  intent = '',
+  resolvedDecisions = [],
 } = {}) {
   const issues = [];
   if (!stateModel) return { valid: true, issues: [] };
 
-  const hasProvenanceContext = literalFacts.length > 0 || (
+  const hasProvenanceContext = literalFacts.length > 0 || fragments.length > 0 || (
     stateModel.entities?.some((e) => (
       Boolean(e.capacityPolicy?.provenance)
       || e.fields?.some((f) => Boolean(f.bounds?.provenance))
@@ -553,21 +556,24 @@ export function validateProvenanceEnforcement({
     'ARCH-STATE-TRANSITION-TOTALITY', 'ARCH-TEMPORAL-INVARIANCE',
   ]);
 
-  const validFactNumbers = new Set(
-    literalFacts
-      .filter((f) => f.kind === 'NUMBER_LITERAL' || f.kind === 'BIT_RANGE' || f.kind === 'BIT_WIDTH')
-      .flatMap((f) => {
-        const nums = [];
-        if (f.attributes?.value !== undefined) nums.push(String(f.attributes.value));
-        if (f.attributes?.start !== undefined) nums.push(String(f.attributes.start));
-        if (f.attributes?.end !== undefined) nums.push(String(f.attributes.end));
-        if (f.attributes?.width !== undefined) nums.push(String(f.attributes.width));
-        return nums;
-      })
-  );
+  const factsById = new Map(literalFacts.map((f) => [f.id, f]));
+  const fragmentsById = new Map(fragments.map((f) => [f.id, f]));
 
-  validFactNumbers.add('0');
-  validFactNumbers.add('1');
+  const factSupportsValue = (fact, valStr) => {
+    if (valStr === '0' || valStr === '1') return true;
+    if (fact.attributes?.value !== undefined && String(fact.attributes.value) === valStr) return true;
+    if (fact.attributes?.width !== undefined) {
+      const w = fact.attributes.width;
+      if (String(w) === valStr || String((2 ** w) - 1) === valStr || String(Math.pow(2, w - 1) - 1) === valStr) return true;
+    }
+    if (fact.attributes?.bitWidth !== undefined) {
+      const w = fact.attributes.bitWidth;
+      if (String(w) === valStr || String((2 ** w) - 1) === valStr || String(Math.pow(2, w - 1) - 1) === valStr) return true;
+    }
+    if (fact.attributes?.start !== undefined && String(fact.attributes.start) === valStr) return true;
+    if (fact.attributes?.end !== undefined && String(fact.attributes.end) === valStr) return true;
+    return false;
+  };
 
   if (Array.isArray(stateModel.entities)) {
     for (const entity of stateModel.entities) {
@@ -582,13 +588,38 @@ export function validateProvenanceEnforcement({
           });
         } else {
           for (const p of prov) {
-            if (p.source === 'USER_INTENT' && !validFactNumbers.has(maxVal)) {
-              issues.push({
-                slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
-                kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                reason: `O valor de capacidade '${maxVal}' cita USER_INTENT mas não corresponde a nenhum fato literal fornecido na demanda.`,
-              });
-            } else if (p.source === 'ARCHITECTURE_POLICY' && !validPolicyRuleIds.has(p.reference)) {
+            if (p.source === 'USER_INTENT') {
+              if (typeof p.reference === 'string' && p.reference.startsWith('FACT-')) {
+                const fact = factsById.get(p.reference);
+                if (!fact) {
+                  issues.push({
+                    slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                    reason: `O valor de capacidade '${maxVal}' cita o fato literal '${p.reference}' que não existe na evidência da demanda.`,
+                  });
+                } else if (!factSupportsValue(fact, maxVal)) {
+                  issues.push({
+                    slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                    reason: `O valor de capacidade '${maxVal}' cita o fato '${p.reference}', mas os atributos do fato não autorizam esse valor.`,
+                  });
+                }
+              } else if (typeof p.reference === 'string' && p.reference.startsWith('FRAG-')) {
+                if (fragmentsById.size > 0 && !fragmentsById.has(p.reference)) {
+                  issues.push({
+                    slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                    reason: `O valor de capacidade '${maxVal}' cita o fragmento '${p.reference}' que não existe na evidência da demanda.`,
+                  });
+                }
+              } else if (intent && intent.length > 0 && typeof p.reference === 'string' && !intent.includes(p.reference)) {
+                issues.push({
+                  slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                  kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                  reason: `A referência '${p.reference}' citada em USER_INTENT para a capacidade máxima '${maxVal}' não aparece no texto da demanda.`,
+                });
+              }
+            } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
               issues.push({
                 slotId: `entity/${entity.name}/capacityPolicy/unauthorizedPolicy`,
                 kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
@@ -614,13 +645,38 @@ export function validateProvenanceEnforcement({
               });
             } else {
               for (const p of provenance) {
-                if (p.source === 'USER_INTENT' && !validFactNumbers.has(valStr)) {
-                  issues.push({
-                    slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                    reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita USER_INTENT mas não corresponde a nenhum fato literal fornecido.`,
-                  });
-                } else if (p.source === 'ARCHITECTURE_POLICY' && !validPolicyRuleIds.has(p.reference)) {
+                if (p.source === 'USER_INTENT') {
+                  if (typeof p.reference === 'string' && p.reference.startsWith('FACT-')) {
+                    const fact = factsById.get(p.reference);
+                    if (!fact) {
+                      issues.push({
+                        slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                        reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita o fato '${p.reference}' que não existe na evidência da demanda.`,
+                      });
+                    } else if (!factSupportsValue(fact, valStr)) {
+                      issues.push({
+                        slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                        reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita o fato '${p.reference}', mas os atributos do fato não autorizam esse valor.`,
+                      });
+                    }
+                  } else if (typeof p.reference === 'string' && p.reference.startsWith('FRAG-')) {
+                    if (fragmentsById.size > 0 && !fragmentsById.has(p.reference)) {
+                      issues.push({
+                        slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                        reason: `O limite ${boundKind} '${valStr}' cita o fragmento '${p.reference}' que não existe na evidência da demanda.`,
+                      });
+                    }
+                  } else if (intent && intent.length > 0 && typeof p.reference === 'string' && !intent.includes(p.reference)) {
+                    issues.push({
+                      slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                      kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                      reason: `A referência '${p.reference}' citada em USER_INTENT para o limite '${valStr}' não aparece no texto da demanda.`,
+                    });
+                  }
+                } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
                   issues.push({
                     slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedPolicy`,
                     kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
@@ -737,6 +793,9 @@ export function generateClosureCertificate({
     stateModel: specification.stateModel,
     architecturePolicy: specification.policy,
     literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
+    fragments: specification.intentEvidence?.fragments ?? specification.fragments ?? [],
+    intent: specification.intent ?? '',
+    resolvedDecisions: humanResolutions ?? specification.resolvedDecisionIds ?? [],
   });
 
   const aggregationResult = validateAggregationAndBoundaries({

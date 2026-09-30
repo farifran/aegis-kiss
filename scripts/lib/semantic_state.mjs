@@ -19,17 +19,6 @@ export function parseSemanticState(value) {
     throw new Error('invalid_semantic_state');
   }
   const contractSchemaByState = new Map([
-    ['aegis.semantic_state.v3', 'aegis.issue_contract.v3'],
-    ['aegis.semantic_state.v4', 'aegis.issue_contract.v4'],
-    ['aegis.semantic_state.v5', 'aegis.issue_contract.v5'],
-    ['aegis.semantic_state.v6', 'aegis.issue_contract.v6'],
-    ['aegis.semantic_state.v7', 'aegis.issue_contract.v7'],
-    ['aegis.semantic_state.v8', 'aegis.issue_contract.v8'],
-    ['aegis.semantic_state.v9', 'aegis.issue_contract.v9'],
-    ['aegis.semantic_state.v10', 'aegis.issue_contract.v10'],
-    ['aegis.semantic_state.v11', 'aegis.issue_contract.v11'],
-    ['aegis.semantic_state.v12', 'aegis.issue_contract.v12'],
-    ['aegis.semantic_state.v13', 'aegis.issue_contract.v13'],
     ['aegis.semantic_state.v14', 'aegis.issue_contract.v14'],
   ]);
   const contractSchema = contractSchemaByState.get(state.schema);
@@ -37,16 +26,7 @@ export function parseSemanticState(value) {
     throw new Error('invalid_semantic_state');
   }
   assertSchema(contractSchema, state.contract);
-  if (state.schema === 'aegis.semantic_state.v7'
-    || state.schema === 'aegis.semantic_state.v8'
-    || state.schema === 'aegis.semantic_state.v9'
-    || state.schema === 'aegis.semantic_state.v10'
-    || state.schema === 'aegis.semantic_state.v11'
-    || state.schema === 'aegis.semantic_state.v12'
-    || state.schema === 'aegis.semantic_state.v13'
-    || state.schema === 'aegis.semantic_state.v14') {
-    assertContractApprovalEvidence(state.contract, { required: true });
-  }
+  assertContractApprovalEvidence(state.contract, { required: true });
   if (state.contractDigest !== canonicalDigest(state.contract)) {
     throw new Error('semantic_state_digest_mismatch');
   }
