@@ -290,7 +290,16 @@ export function validateFieldLifecycle({
 
   const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
   const observables = Array.isArray(stateModel.observables) ? stateModel.observables : [];
+  const aggregations = Array.isArray(stateModel.aggregations) ? stateModel.aggregations : [];
+  const boundaries = Array.isArray(stateModel.producerConsumerBoundaries) ? stateModel.producerConsumerBoundaries : [];
   const entityFieldKeys = new Set();
+
+  for (const agg of aggregations) {
+    if (agg.name) entityFieldKeys.add(agg.name);
+  }
+  for (const b of boundaries) {
+    if (b.signalName) entityFieldKeys.add(b.signalName);
+  }
 
   for (const entity of stateModel.entities) {
     const fields = Array.isArray(entity.fields) ? entity.fields : [];
@@ -856,6 +865,291 @@ export function runSemanticMutationTests({
 }
 
 /**
+ * Validador Mecânico de Consistência Cruzada (validateSemanticCrossConsistency).
+ * 
+ * Executa cross-check automático entre Requirement/AC ↔ Inventory ↔ Transition Table ↔ Observable Mapping:
+ * 1. Mapeamento de Observáveis de Conjunto: Impede que fatias que representam contagens de conjunto
+ *    (ex: crachás distintos em quarentena) sejam mapeadas para contadores locais de um único crachá (ex: insufficientStreak).
+ * 2. Transições em Limiares de Regra: Se um requisito/AC exige transição de estado em limiar de streak
+ *    (ex: 3 falhas consecutivas colocam em quarentena), impede que a matriz de transições declare
+ *    PRESERVE incondicional na guarda sem tratar o evento de disparo.
+ */
+export function validateSemanticCrossConsistency({
+  stateModel = null,
+  requirements = [],
+  literalFacts = [],
+} = {}) {
+  const issues = [];
+  if (!stateModel) return { valid: true, issues: [] };
+
+  const observables = Array.isArray(stateModel.observables) ? stateModel.observables : [];
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+
+  // 1. Cross-check: Observable bit allocation vs Aggregation / Entity Field
+  for (const obs of observables) {
+    if (Array.isArray(obs.bitAllocation)) {
+      for (const item of obs.bitAllocation) {
+        const isDistinctCount = (typeof item.mapping === 'string' && /distinct|unique|diferentes|identidades/iu.test(item.mapping))
+          || (literalFacts.some((f) => f.kind === 'BIT_RANGE'
+            && (item.slice === `${f.attributes?.start}..${f.attributes?.end}` || item.slice === `${f.attributes?.start}`)
+            && /crachás diferentes|distintos/iu.test(f.reference)));
+
+        if (isDistinctCount) {
+          if (item.field.toLowerCase().includes('streak') || item.field.toLowerCase().includes('local')) {
+            issues.push({
+              slotId: `observable/${obs.name}/slice/${item.slice}/inconsistentMapping`,
+              kind: 'CROSS_INCONSISTENT_OBSERVABLE_MAPPING',
+              reason: `A fatia '${item.slice}' do observável '${obs.name}' representa contagem de conjunto/distintos, mas foi mapeada para o contador de entidade local '${item.field}'. Deve referenciar uma agregação de conjunto em aggregations.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Cross-check: Requisito de Limiar de Streak vs Matriz de Transições
+  const hasStreakTriggerRequirement = requirements.some((req) => (
+    /3\s*(?:foras|recusas|falhas)|quarentena/iu.test(req.statement)
+    || req.acceptanceCases?.some((ac) => /3\s*(?:foras|recusas|falhas)|terceira recusa/iu.test(`${ac.given} ${ac.then}`))
+  ));
+
+  if (hasStreakTriggerRequirement) {
+    for (const op of operations) {
+      if (Array.isArray(op.branches)) {
+        for (const branch of op.branches) {
+          if (branch.outcomeKind === 'REJECTION') {
+            const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+            const streakEffect = effects.find((e) => /streak/iu.test(e.field) && e.effect === 'INCREMENT');
+            const quarantineEffect = effects.find((e) => /quarantin/iu.test(e.field));
+
+            if (streakEffect) {
+              if (quarantineEffect && quarantineEffect.effect === 'PRESERVE' && !branch.branchId.includes('THRESHOLD_NOT_MET') && !branch.condition?.includes('<')) {
+                const hasThresholdBranch = op.branches.some((b) => (
+                  b.branchId !== branch.branchId
+                  && /quarantine.*trigger|threshold|reaches_3|quarantine_active/iu.test(`${b.branchId} ${b.condition ?? ''}`)
+                ));
+                if (!hasThresholdBranch) {
+                  issues.push({
+                    slotId: `operation/${op.name}/branch/${branch.branchId}/unhandledStreakTrigger`,
+                    kind: 'CROSS_INCONSISTENT_TRANSITION_TRIGGER',
+                    reason: `O branch '${branch.branchId}' da operação '${op.name}' incrementa contador de recusas consecutivas mas preserva 'quarantined' incondicionalmente, sem tratar a transição de estado da 3ª recusa exigida no requisito.`,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Provenance Obrigatório (validateProvenanceEnforcement).
+ * 
+ * Proíbe literais numéricos arbitrários (100000, 2^31-1, 999, etc.) em bounds, capacities e limites.
+ * Todo número especificado deve possuir procedência tipada autorizada.
+ */
+export function validateProvenanceEnforcement({
+  stateModel = null,
+  architecturePolicy = null,
+  literalFacts = [],
+} = {}) {
+  const issues = [];
+  if (!stateModel) return { valid: true, issues: [] };
+
+  const hasProvenanceContext = literalFacts.length > 0 || (
+    stateModel.entities?.some((e) => (
+      Boolean(e.capacityPolicy?.provenance)
+      || e.fields?.some((f) => Boolean(f.bounds?.provenance))
+    ))
+  );
+
+  if (!hasProvenanceContext) {
+    return { valid: true, issues: [] };
+  }
+
+  const validPolicyRuleIds = new Set(architecturePolicy?.rules?.map((r) => r.id) ?? [
+    'ARCH-PARSIMONY', 'ARCH-PRODUCT-BOUNDARY', 'ARCH-STRICT-EXPLICIT-MODULES',
+    'ARCH-FAILURE-EXPLICIT', 'ARCH-DETERMINISTIC-TIME', 'ARCH-OBSERVABILITY-COUNTERS',
+    'ARCH-HASH-SECURITY-LABEL', 'ARCH-CANONICAL-DIGEST-REPRESENTATION', 'ARCH-BIGINT-ARITHMETIC',
+    'ARCH-LOCAL-DETERMINISTIC-CORE', 'ARCH-PUBLIC-INTERFACE', 'ARCH-CONTRACT-CONSISTENCY',
+    'ARCH-STATE-TRANSITION-TOTALITY', 'ARCH-TEMPORAL-INVARIANCE',
+  ]);
+
+  const validFactNumbers = new Set(
+    literalFacts
+      .filter((f) => f.kind === 'NUMBER_LITERAL' || f.kind === 'BIT_RANGE' || f.kind === 'BIT_WIDTH')
+      .flatMap((f) => {
+        const nums = [];
+        if (f.attributes?.value !== undefined) nums.push(String(f.attributes.value));
+        if (f.attributes?.start !== undefined) nums.push(String(f.attributes.start));
+        if (f.attributes?.end !== undefined) nums.push(String(f.attributes.end));
+        if (f.attributes?.width !== undefined) nums.push(String(f.attributes.width));
+        return nums;
+      })
+  );
+
+  validFactNumbers.add('0');
+  validFactNumbers.add('1');
+
+  if (Array.isArray(stateModel.entities)) {
+    for (const entity of stateModel.entities) {
+      if (entity.isCollection && entity.capacityPolicy?.maxEntries !== null && entity.capacityPolicy?.maxEntries !== undefined) {
+        const maxVal = String(entity.capacityPolicy.maxEntries);
+        const prov = entity.capacityPolicy.provenance;
+        if (!prov || !Array.isArray(prov) || prov.length === 0) {
+          issues.push({
+            slotId: `entity/${entity.name}/capacityPolicy/provenance`,
+            kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+            reason: `A capacidade máxima '${maxVal}' da entidade '${entity.name}' não possui declaração de provenance autorizada.`,
+          });
+        } else {
+          for (const p of prov) {
+            if (p.source === 'USER_INTENT' && !validFactNumbers.has(maxVal)) {
+              issues.push({
+                slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                reason: `O valor de capacidade '${maxVal}' cita USER_INTENT mas não corresponde a nenhum fato literal fornecido na demanda.`,
+              });
+            } else if (p.source === 'ARCHITECTURE_POLICY' && !validPolicyRuleIds.has(p.reference)) {
+              issues.push({
+                slotId: `entity/${entity.name}/capacityPolicy/unauthorizedPolicy`,
+                kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                reason: `A regra de política '${p.reference}' citada para capacidade '${maxVal}' não existe na governança.`,
+              });
+            }
+          }
+        }
+      }
+
+      for (const field of entity.fields ?? []) {
+        if (field.bounds) {
+          const { lowerBound, upperBound, provenance } = field.bounds;
+          const checkBound = (val, boundKind) => {
+            if (val === null || val === undefined) return;
+            const valStr = String(val);
+            if (valStr === 'capacity' || valStr === 'defaultCapacity' || valStr === '0') return;
+
+            if (!provenance || !Array.isArray(provenance) || provenance.length === 0) {
+              issues.push({
+                slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/provenance`,
+                kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' não possui provenance autorizada.`,
+              });
+            } else {
+              for (const p of provenance) {
+                if (p.source === 'USER_INTENT' && !validFactNumbers.has(valStr)) {
+                  issues.push({
+                    slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                    reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita USER_INTENT mas não corresponde a nenhum fato literal fornecido.`,
+                  });
+                } else if (p.source === 'ARCHITECTURE_POLICY' && !validPolicyRuleIds.has(p.reference)) {
+                  issues.push({
+                    slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedPolicy`,
+                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                    reason: `A regra de política '${p.reference}' citada para o limite '${valStr}' não existe na governança.`,
+                  });
+                }
+              }
+            }
+          };
+
+          checkBound(lowerBound, 'lowerBound');
+          checkBound(upperBound, 'upperBound');
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Agregações e Fronteiras Producer/Consumer (validateAggregationAndBoundaries).
+ */
+export function validateAggregationAndBoundaries({
+  stateModel = null,
+  architectureContexts = [],
+} = {}) {
+  const issues = [];
+  if (!stateModel) return { valid: true, issues: [] };
+
+  const tags = new Set(architectureContexts.map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
+  const entities = Array.isArray(stateModel.entities) ? stateModel.entities : [];
+  const collectionEntityNames = new Set(entities.filter((e) => e.isCollection).map((e) => e.name));
+
+  const aggregations = Array.isArray(stateModel.aggregations) ? stateModel.aggregations : [];
+  const boundaries = Array.isArray(stateModel.producerConsumerBoundaries) ? stateModel.producerConsumerBoundaries : [];
+
+  for (const agg of aggregations) {
+    if (!collectionEntityNames.has(agg.sourceCollection)) {
+      issues.push({
+        slotId: `aggregation/${agg.name}/sourceCollection`,
+        kind: 'INVALID_AGGREGATION_SOURCE',
+        reason: `A agregação '${agg.name}' referencia a fonte '${agg.sourceCollection}', que não é uma entidade de coleção válida.`,
+      });
+    }
+    if (!agg.filterPredicate || agg.filterPredicate.trim() === '') {
+      issues.push({
+        slotId: `aggregation/${agg.name}/filterPredicate`,
+        kind: 'MISSING_AGGREGATION_PREDICATE',
+        reason: `A agregação '${agg.name}' não define filterPredicate determinístico.`,
+      });
+    }
+    if (!agg.provenance || !Array.isArray(agg.provenance) || agg.provenance.length === 0) {
+      issues.push({
+        slotId: `aggregation/${agg.name}/provenance`,
+        kind: 'MISSING_AGGREGATION_PROVENANCE',
+        reason: `A agregação '${agg.name}' não possui declaração de provenance.`,
+      });
+    }
+  }
+
+  for (const b of boundaries) {
+    if (!b.signalName || !b.producer || !b.consumer || !b.ownership) {
+      issues.push({
+        slotId: `boundary/${b.signalName ?? 'unknown'}`,
+        kind: 'INCOMPLETE_PRODUCER_CONSUMER_BOUNDARY',
+        reason: `A fronteira '${b.signalName}' deve declarar signalName, producer, consumer e ownership.`,
+      });
+    }
+    if (!b.provenance || !Array.isArray(b.provenance) || b.provenance.length === 0) {
+      issues.push({
+        slotId: `boundary/${b.signalName}/provenance`,
+        kind: 'MISSING_BOUNDARY_PROVENANCE',
+        reason: `A fronteira '${b.signalName}' não possui declaração de provenance.`,
+      });
+    }
+  }
+
+  if (tags.has('bounded-observability')) {
+    const hasGlobalLockBoundary = boundaries.some((b) => /lock/iu.test(b.signalName));
+    if (!hasGlobalLockBoundary) {
+      issues.push({
+        slotId: 'stateModel/producerConsumerBoundaries/globalLock',
+        kind: 'MISSING_PRODUCER_CONSUMER_BOUNDARY',
+        reason: 'O sinal globalLock projetado no Bit 0 e utilizado em guard de trava geral exige declaração explícita de Producer/Consumer Boundary.',
+      });
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
  * Closure Certificate mecânico.
  * 
  * Compila a totalidade do contrato semântico em métricas estritas:
@@ -887,7 +1181,28 @@ export function generateClosureCertificate({
     specification,
   });
 
-  const inventoryIssues = [...inventoryResult.issues, ...witnessResult.issues];
+  const crossConsistency = validateSemanticCrossConsistency({
+    stateModel: specification.stateModel,
+    requirements: specification.requirements ?? [],
+    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
+  });
+
+  const provenanceResult = validateProvenanceEnforcement({
+    stateModel: specification.stateModel,
+    architecturePolicy: specification.policy,
+    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
+  });
+
+  const aggregationResult = validateAggregationAndBoundaries({
+    stateModel: specification.stateModel,
+    architectureContexts: specification.architectureContexts ?? [],
+  });
+
+  const inventoryIssues = [
+    ...inventoryResult.issues,
+    ...witnessResult.issues,
+    ...aggregationResult.issues,
+  ];
   const unresolvedInventorySlots = inventoryIssues.length;
 
   const stateFieldIssues = stateLifecycle.issues.filter((i) => (
@@ -941,13 +1256,20 @@ export function generateClosureCertificate({
     !resolvedDecisionIds.has(questionId)
   ));
 
-  const unresolvedAuthorities = materialUnknownGaps.length;
+  const authorityIssues = [
+    ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
+    ...provenanceResult.issues,
+  ];
+
+  const unresolvedAuthorities = authorityIssues.length;
   const unresolvedDeterminismDimensions = determinismGaps.length + determinismDecisions.length;
   const orphanHumanDecisions = pendingDecisions.length;
   const unresolvedStateFields = stateFieldIssues.length;
   const unresolvedTransitions = transitionIssues.length;
   const unresolvedObservables = observableIssues.length;
-  const contradictoryRules = sideEffectIssues.length + mutationResult.divergences.length;
+  const contradictoryRules = sideEffectIssues.length
+    + mutationResult.divergences.length
+    + crossConsistency.issues.length;
   const regressedSemanticDimensions = 0;
 
   const totalUnresolved = unresolvedInventorySlots
@@ -969,6 +1291,8 @@ export function generateClosureCertificate({
   const allIssues = [
     ...inventoryIssues,
     ...stateLifecycle.issues,
+    ...crossConsistency.issues,
+    ...provenanceResult.issues,
     ...mutationIssues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
     ...determinismGaps.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'DETERMINISM_GAP', reason: d.rationale })),
@@ -997,6 +1321,9 @@ export function generateClosureCertificate({
   const expectedObservablesMin = isBoundedObs ? 1 : 0;
   const expectedSerializationsMin = isIntegrityHash ? 1 : 0;
 
+  const aggregationsClosed = specification.stateModel?.aggregations?.length ?? 0;
+  const boundariesClosed = specification.stateModel?.producerConsumerBoundaries?.length ?? 0;
+
   const inventoryAudit = {
     normativeClaimsCount: (specification.requirements ?? []).length + (specification.invariants ?? []).length,
     expectedStateEntities: Math.max(expectedEntitiesMin, stateEntities.length),
@@ -1012,8 +1339,12 @@ export function generateClosureCertificate({
     closedObservables: Math.max(0, stateObservables.length - observableIssues.length),
     canonicalProfilesRequired: Math.max(expectedSerializationsMin, stateSerializations.length),
     canonicalProfilesClosed: Math.max(0, stateSerializations.length - (tags.has('integrity-hash') && stateSerializations.length === 0 ? 1 : 0)),
+    aggregationsClosed,
+    boundariesClosed,
     divergenceWitnessesSurviving: mutationResult.divergences.length,
   };
+
+  const gapLedger = allIssues.map((issue, idx) => classifyGapIssue(issue, idx));
 
   return {
     unresolvedInventorySlots,
@@ -1027,6 +1358,196 @@ export function generateClosureCertificate({
     regressedSemanticDimensions,
     status: totalUnresolved === 0 ? 'CERTIFIED_CLOSED' : 'BLOCKED_BY_UNRESOLVED_SLOTS',
     inventoryAudit,
+    gapLedger,
     unresolvedSlots: allIssues,
   };
+}
+
+export function classifyGapIssue(issue, index) {
+  const gapId = `GAP-${String(index + 1).padStart(4, '0')}`;
+  let layer = 'COVERAGE_ACCOUNTING';
+  let requiredAuthority = 'ARCHITECTURE_POLICY';
+  let witness = issue.reason || issue.statement || issue.slotId || 'Lacuna de fechamento de inventário identificada.';
+
+  switch (issue.kind) {
+    // 1. TRANSITION_CONSISTENCY
+    case 'UNRESOLVED_TRANSITION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || `Operação '${issue.operation || issue.slotId}' não define transição para todas as condições.`;
+      break;
+    case 'UNRESOLVED_GUARD_PRECEDENCE':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || `Operação '${issue.operation || issue.slotId}' possui múltiplos guards sem precedência linear estrita.`;
+      break;
+    case 'MISSING_GUARD_REJECTION_BRANCH':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Guard de rejeição sem ramo correspondente em branches.';
+      break;
+    case 'UNDETERMINED_BRANCH_NEXT_STATE':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || 'Ramo de operação possui próximo estado não determinado.';
+      break;
+    case 'MISSING_SUCCESS_BRANCH':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Operação sem ramo explícito de autorização/sucesso.';
+      break;
+    case 'GUARD_REJECTION_SIDE_EFFECT':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Ramo de rejeição causa mutação indevida de estado subsequente.';
+      break;
+    case 'UNHANDLED_TRIGGER_TRANSITION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason;
+      break;
+    case 'DIVERGENT_INTERPRETATION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason;
+      break;
+    case 'NON_DIVERGENT_WITNESS':
+    case 'INCOMPLETE_WITNESS_COVERAGE':
+    case 'INVALID_SEMANTIC_KEY':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason;
+      break;
+
+    // 2. OBSERVABLE_DEPENDENCY_CLOSURE
+    case 'UNRESOLVED_OBSERVABLE_DEPENDENCY':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Observável depende de campo inexistente no modelo de estado.';
+      break;
+    case 'UNRESOLVED_OBSERVABLE_REPRESENTATION':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Observável sem representação finita explícita.';
+      break;
+    case 'UNRESOLVED_OBSERVABLE_EMPTY_BEHAVIOR':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Observável sem comportamento definido para coleção vazia.';
+      break;
+    case 'INVALID_BITMASK_ALLOCATION':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Alocação de bits sobreposta ou fora dos limites do tipo.';
+      break;
+    case 'INCONSISTENT_OBSERVABLE_MAPPING':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason;
+      break;
+    case 'UNRESOLVED_CANONICAL_SERIALIZATION':
+    case 'MISSING_CANONICAL_SERIALIZATION_INVENTORY':
+      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || 'Perfil de serialização canônica ausente para demanda de integridade.';
+      break;
+
+    // 3. AUTHORITY_PROVENANCE
+    case 'UNBACKED_FIELD_BOUNDS':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Limites numéricos de campo sem proveniência autorizada.';
+      break;
+    case 'UNBACKED_COLLECTION_CAPACITY':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Capacidade máxima de coleção sem proveniência autorizada.';
+      break;
+    case 'UNBACKED_AGGREGATION_SATURATION':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Limite de saturação de agregação sem proveniência autorizada.';
+      break;
+    case 'UNBACKED_NUMERIC_LITERAL':
+    case 'UNAUTHORIZED_NUMERIC_LITERAL':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason;
+      break;
+    case 'UNAUTHORIZED_PROVENANCE_SOURCE':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason;
+      break;
+    case 'MATERIAL_UNKNOWN_GAP':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || 'Lacuna material sem proveniência resolvida e sem decisão vinculada.';
+      break;
+    case 'DETERMINISM_GAP':
+      layer = 'AUTHORITY_PROVENANCE';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || 'Dimensão de determinismo com GAP_FOUND.';
+      break;
+
+    // 4. COVERAGE_ACCOUNTING
+    case 'MISSING_STATEFUL_ENTITY_INVENTORY':
+    case 'MISSING_TEMPORAL_FIELD_INVENTORY':
+    case 'MISSING_TEMPORAL_GUARD_INVENTORY':
+    case 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY':
+    case 'MISSING_AGGREGATION_MODEL':
+    case 'MISSING_PRODUCER_CONSUMER_BOUNDARY_MODEL':
+    case 'UNRESOLVED_STATE_MODEL':
+    case 'UNRESOLVED_FIELD_BOUNDS':
+    case 'UNRESOLVED_COLLECTION_CAPACITY':
+      layer = 'COVERAGE_ACCOUNTING';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason;
+      break;
+
+    case 'UNRESOLVED_INITIALIZATION':
+    case 'UNRESOLVED_RESET':
+    case 'UNRESOLVED_COLLECTION_ADMISSION':
+    case 'PENDING_HUMAN_DECISION':
+      layer = 'COVERAGE_ACCOUNTING';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason;
+      break;
+
+    case 'UNKNOWN_AGGREGATION_SOURCE':
+    case 'ORPHAN_STATE_FIELD':
+    case 'UNALLOCATED_LITERAL_BIT_RANGE':
+    case 'UNMAPPED_BOUNDARY_RULE':
+      layer = 'COVERAGE_ACCOUNTING';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason;
+      break;
+
+    case 'UNKNOWN_BOUNDARY_PRODUCER':
+    case 'UNKNOWN_BOUNDARY_CONSUMER':
+      layer = 'COVERAGE_ACCOUNTING';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason;
+      break;
+
+    default:
+      layer = 'COVERAGE_ACCOUNTING';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || issue.slotId || 'Lacuna de fechamento de inventário não classificada.';
+      break;
+  }
+
+  const gapEntry = {
+    gapId,
+    layer,
+    witness,
+    requiredAuthority,
+  };
+  if (typeof issue.slotId === 'string' && issue.slotId.length > 0) {
+    gapEntry.slotId = issue.slotId;
+  }
+  if (typeof issue.reason === 'string' && issue.reason.length > 0 && issue.reason !== witness) {
+    gapEntry.details = issue.reason;
+  }
+  return gapEntry;
 }

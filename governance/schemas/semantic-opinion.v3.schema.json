@@ -228,7 +228,8 @@
                 "required": ["maxEntries", "overflowPolicy"],
                 "properties": {
                   "maxEntries": { "type": ["string", "null"] },
-                  "overflowPolicy": { "enum": ["REJECT_NEW", "LRU_EVICTION", "FIFO_EVICTION", "FAIL_OPERATION", "STATIC_SINGLETON"] }
+                  "overflowPolicy": { "enum": ["REJECT_NEW", "LRU_EVICTION", "FIFO_EVICTION", "FAIL_OPERATION", "STATIC_SINGLETON"] },
+                  "provenance": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
                 }
               },
               "fields": {
@@ -248,7 +249,8 @@
                       "properties": {
                         "lowerBound": { "type": ["string", "null"] },
                         "upperBound": { "type": ["string", "null"] },
-                        "boundaryBehavior": { "enum": ["SATURATE", "REJECT", "ROLLOVER_MODULO", "PRESERVE", "UNBOUNDED_ERROR"] }
+                        "boundaryBehavior": { "enum": ["SATURATE", "REJECT", "ROLLOVER_MODULO", "PRESERVE", "UNBOUNDED_ERROR"] },
+                        "provenance": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
                       }
                     },
                     "initialization": {
@@ -400,6 +402,38 @@
               },
               "recordOrderingKey": { "type": "string", "minLength": 1 },
               "emptyStateDigest": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "aggregations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "sourceCollection", "aggregationKind", "filterPredicate"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "sourceCollection": { "type": "string", "minLength": 1 },
+              "aggregationKind": { "enum": ["COUNT_DISTINCT", "COUNT", "SUM", "TRAILING_STREAK", "MAX_STREAK", "EXISTS"] },
+              "filterPredicate": { "type": "string", "minLength": 1 },
+              "saturationLimit": { "type": ["string", "null"] },
+              "provenance": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
+            }
+          }
+        },
+        "producerConsumerBoundaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["signalName", "producer", "consumer", "ownership"],
+            "properties": {
+              "signalName": { "type": "string", "minLength": 1 },
+              "producer": { "type": "string", "minLength": 1 },
+              "consumer": { "type": "string", "minLength": 1 },
+              "ownership": { "enum": ["SYSTEM_CONFIGURATION", "REQUEST_INGRESS", "ENTITY_LOCAL", "COMPILATION_OUTPUT"] },
+              "recomputableByConsumer": { "type": "boolean" },
+              "provenance": { "$ref": "aegis.semantic_opinion.v2#/$defs/basis" }
             }
           }
         }

@@ -27,6 +27,7 @@
         "additionalProperties": false,
         "required": ["label", "rationale", "contractEffect"],
         "properties": {
+          "preparedEffect": { "anyOf": [{ "type": "null" }, { "$ref": "aegis.prepared_opinion_effect.v1" }] },
           "label": { "type": "string", "minLength": 1 },
           "rationale": { "type": "string", "minLength": 1 },
           "contractEffect": { "type": "string", "minLength": 1 }

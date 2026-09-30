@@ -367,6 +367,15 @@ async function handleStatus() {
       writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' });
       return;
     }
+    if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
+      writeStatus({
+        status: 'BLOCKED_BY_GAP',
+        draftPath: contractJsonPath,
+        gapCount: contract.specification.closureCertificate?.gapLedger?.length ?? 0,
+        gapLedger: contract.specification.closureCertificate?.gapLedger ?? [],
+      });
+      return;
+    }
     writeStatus({ status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath });
     return;
   }
@@ -509,7 +518,7 @@ async function optionalJevComparison(request, draft) {
   }
 }
 
-async function compileAndPersistSemanticOpinion(opinion, context, execution = null) {
+async function compileAndPersistSemanticOpinion(opinion, context, execution = null, preparedDraft = null) {
   const [
     { canonicalDigest, canonicalJson },
     {
@@ -532,7 +541,7 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
   } = context;
   let draft;
   try {
-    draft = compileSemanticOpinion(opinion, request);
+    draft = preparedDraft ?? compileSemanticOpinion(opinion, request);
   } catch (error) {
     if (error.message === 'semantic_opinion_evidence_mismatch') {
       throw rejection('SEMANTIC_CONTEXT_MISMATCH');
@@ -609,11 +618,24 @@ async function handleSemanticCompile(args) {
   } catch (error) {
     throw rejection('INVALID_SEMANTIC_OPINION', error.message);
   }
-  await compileAndPersistSemanticOpinion(opinion, await buildCurrentSemanticRequest());
+  const context = await buildCurrentSemanticRequest();
+  // Integrated transports bind their own response. External submissions must
+  // carry custody evidence supplied by their caller, never inferred from text.
+  if (opinion.sourceSemanticRequestDigest !== undefined) {
+    if (opinion.sourceSemanticRequestDigest !== context.request.requestDigest) {
+      throw rejection('SEMANTIC_CONTEXT_MISMATCH');
+    }
+    opinion = opinion.opinion;
+  } else if (opinion.sourceEvidenceDigest === undefined) {
+    throw rejection('SEMANTIC_CONTEXT_MISMATCH', 'external_opinion_requires_request_binding');
+  }
+  await compileAndPersistSemanticOpinion(opinion, context);
 }
 
 async function handleSemanticRun(args) {
   if (args.length !== 0) throw rejection('INVALID_SEMANTIC_RUN_ARITY');
+  const context = await buildCurrentSemanticRequest();
+  if (await compilePreparedRevision(context)) return;
   const [{ loadRoleAssignment }, { assertSemanticSupervisorReady, requestSemanticOpinion }] = await Promise.all([
     import('./lib/role_assignment.mjs'),
     import('./lib/semantic_gateway.mjs'),
@@ -622,7 +644,6 @@ async function handleSemanticRun(args) {
   if (assignment === null) throw rejection('ROLE_ASSIGNMENT_NOT_CONFIGURED');
   const role = assignment.roles.contractSupervisor;
   if (role.channel === 'IDE') {
-    const context = await buildCurrentSemanticRequest();
     const jevEvaluation = await ensureJevAdvisory(context.request);
     if (role.adapter !== 'codex') throw rejection('SEMANTIC_IDE_ADAPTER_UNSUPPORTED', role.adapter);
     const { requestCodexSemanticOpinion } = await import('./lib/semantic_codex.mjs');
@@ -631,10 +652,21 @@ async function handleSemanticRun(args) {
     return;
   }
   assertSemanticSupervisorReady(role);
-  const context = await buildCurrentSemanticRequest();
   const jevEvaluation = await ensureJevAdvisory(context.request);
   const { opinion, execution } = await requestSemanticOpinion(context.request, role);
   await compileAndPersistSemanticOpinion(opinion, context, { ...execution, jevEvaluation });
+}
+
+async function compilePreparedRevision(context) {
+  if (context.revision === null) return false;
+  const { hasPreparedAnswers, applyPreparedAnswers } = await import('./lib/prepared_effects.mjs');
+  const { sourceSpecification, resolution, humanResolutions } = context.revision;
+  if (!hasPreparedAnswers(sourceSpecification, resolution.answers)) return false;
+  const draft = applyPreparedAnswers(sourceSpecification, resolution.answers, humanResolutions, context.request.intentEvidence);
+  draft.sourceContextDigest = context.request.contextDigest;
+  draft.sourceEvidenceDigest = context.request.intentEvidence.evidenceDigest;
+  await compileAndPersistSemanticOpinion(null, context, null, draft);
+  return true;
 }
 
 async function handleDemand(args) {
@@ -693,6 +725,7 @@ async function handleApprove() {
   if (existsSync(resolutionPath)) {
     resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
     if (resolutionRequiresRecompilation({ contract: draftContract, request, resolution })) {
+      if (await compilePreparedRevision(await buildCurrentSemanticRequest())) return;
       throw rejection('SEMANTIC_RECOMPILATION_REQUIRED');
     }
   } else if (draftContract.specification.decisions.length > 0) {

@@ -1,6 +1,8 @@
 import { canonicalDigest } from './canonical_json.mjs';
-import { assertSchema } from './schema_validator.mjs';
+import { assertSchema, standaloneSchemaDocument } from './schema_validator.mjs';
+import { omitOptionalNulls } from './semantic_output_schema.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
+import { effectCollections, effectCollection, replacePreparedEntries } from './prepared_effects.mjs';
 import {
   closureAuthorityForDimension,
   counterexampleForDimension,
@@ -48,11 +50,34 @@ function assertEvidenceCoverage(opinion, request) {
   }
 }
 
-export function compileSemanticOpinion(opinion, request) {
+export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
   assertSchema('aegis.semantic_request.v10', request);
   const { requestDigest, ...requestPayload } = request;
   if (requestDigest !== canonicalDigest(requestPayload)) {
     throw new Error('semantic_request_digest_mismatch');
+  }
+  // The transport binds the response to this request; the model need not echo custody fields.
+  opinion = {
+    ...opinion,
+    schema: opinion.schema === undefined ? 'aegis.semantic_opinion.v3' : opinion.schema,
+    sourceEvidenceDigest: opinion.sourceEvidenceDigest === undefined
+      ? request.intentEvidence.evidenceDigest : opinion.sourceEvidenceDigest,
+  };
+  opinion = globalThis.structuredClone(opinion);
+  omitOptionalNulls(opinion, standaloneSchemaDocument('aegis.semantic_opinion.v3'));
+  for (const coverage of opinion.determinismReview.coverage) {
+    if (coverage.disposition === undefined) {
+      coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
+    }
+  }
+  for (const dimension of opinion.determinismReview.dimensions) dimension.activationId ??= null;
+  if (request.policy.amendments.length === 0) {
+    for (const assessment of opinion.policyAssessments) assessment.amendmentIndex ??= null;
+  }
+  for (const decision of opinion.decisions) {
+    for (const answer of decision.answers) {
+      for (const { value } of answer.preparedEffect?.dimensions ?? []) value.activationId ??= null;
+    }
   }
   assertSchema('aegis.semantic_opinion.v3', opinion);
   assertEvidenceCoverage(opinion, request);
@@ -141,7 +166,7 @@ export function compileSemanticOpinion(opinion, request) {
     };
   };
 
-  return {
+  const draft = {
     schema: 'aegis.semantic_draft.v9',
     sourceContextDigest: request.contextDigest,
     sourceEvidenceDigest: request.intentEvidence.evidenceDigest,
@@ -441,4 +466,23 @@ export function compileSemanticOpinion(opinion, request) {
       humanResolutions: [],
     }),
   };
+  if (compilePrepared) {
+    for (const [decisionIndex, decision] of opinion.decisions.entries()) {
+      for (const [answerIndex, answer] of decision.answers.entries()) {
+        if (answer.preparedEffect == null) continue;
+        const variant = globalThis.structuredClone(opinion);
+        for (const item of variant.decisions) {
+          for (const option of item.answers) delete option.preparedEffect;
+        }
+        replacePreparedEntries(variant, answer.preparedEffect);
+        const compiled = compileSemanticOpinion(variant, request, false);
+        draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = Object.fromEntries(
+          effectCollections.map((key) => [key, answer.preparedEffect[key].map(({ index }) => ({
+            index, value: effectCollection(compiled, key)[index],
+          }))]),
+        );
+      }
+    }
+  }
+  return draft;
 }

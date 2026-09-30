@@ -11,9 +11,12 @@ export {
 export {
   generateClosureCertificate,
   runSemanticMutationTests,
+  validateAggregationAndBoundaries,
   validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,
+  validateProvenanceEnforcement,
+  validateSemanticCrossConsistency,
   validateSemanticInventoryCoverage,
 } from './semantic_closure.mjs';
 export {

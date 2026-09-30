@@ -3,8 +3,17 @@ import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_collections.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 
-function effectiveDeterminismStatus(specification, humanResolutions) {
-  const certificate = generateClosureCertificate({ specification, humanResolutions });
+function effectiveDeterminismStatus(specification, humanResolutions, {
+  intentEvidence = null,
+  literalFacts = [],
+} = {}) {
+  const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
+  const specWithEvidence = (effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts)
+    ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
+    : specification;
+  const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
+  effectiveDeterminismStatus.lastGapLedger = certificate.gapLedger ?? [];
+  effectiveDeterminismStatus.lastCertificate = certificate;
   if (certificate.status !== 'CERTIFIED_CLOSED') {
     if (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0) {
       return 'PENDING_HUMAN_DECISIONS';
@@ -14,6 +23,18 @@ function effectiveDeterminismStatus(specification, humanResolutions) {
   return specification.determinismReview.status === 'NOT_APPLICABLE'
     ? 'NOT_APPLICABLE'
     : 'SEMANTICALLY_CLOSED';
+}
+
+export function getEffectiveGapLedger(specification, humanResolutions = [], {
+  intentEvidence = null,
+  literalFacts = [],
+} = {}) {
+  const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
+  const specWithEvidence = (effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts)
+    ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
+    : specification;
+  const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
+  return certificate.gapLedger ?? [];
 }
 
 function decisionMap(contract) {
@@ -100,6 +121,7 @@ export function assertContractApprovalEvidence(contract, { required = false } = 
     effectiveDeterminismStatus: effectiveDeterminismStatus(
       contract.specification,
       retainedResolutions,
+      { intentEvidence: contract.intentEvidence },
     ),
     humanResolutions: retainedResolutions,
     approval: null,
@@ -116,14 +138,18 @@ export function buildConfirmationRequest(contract) {
   if (contract.approval !== null) throw new Error('contract_already_approved');
   const unresolvedGaps = [
     ...contract.specification.determinismReview.dimensions
-    .filter(({ status }) => status === 'GAP_FOUND')
+      .filter(({ status }) => status === 'GAP_FOUND')
       .map(({ kind, subjectId }) => `${kind}:${subjectId}`),
     ...contract.specification.unknowns
       .filter(({ material, decisionId }) => material && decisionId === null)
       .map(({ id }) => id),
   ];
-  if (unresolvedGaps.length > 0) {
-    throw new Error(`unresolved_semantic_gap:${unresolvedGaps.join(',')}`);
+  if (unresolvedGaps.length > 0 || contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
+    const gaps = contract.specification.closureCertificate?.gapLedger ?? [];
+    const formatted = gaps.length > 0
+      ? gaps.map((g) => `${g.gapId}[${g.layer}]: ${g.witness} (requires: ${g.requiredAuthority})`).join('; ')
+      : unresolvedGaps.join(',');
+    throw new Error(`unresolved_semantic_gap:${formatted}`);
   }
   const contractDraftDigest = canonicalDigest(contract);
   const questions = contract.specification.decisions.map((decision) => {
@@ -156,7 +182,10 @@ export function buildConfirmationRequest(contract) {
             id, kind, level, statement, mitigation,
           })),
       },
-      answers: decision.answers,
+      answers: decision.answers.map(({ preparedEffect, ...answer }) => ({
+        ...answer,
+        applicationMode: preparedEffect == null ? 'SEMANTIC_REVIEW_REQUIRED' : 'PREPARED_EFFECT',
+      })),
     };
   });
   const request = {
@@ -309,6 +338,7 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     effectiveDeterminismStatus: effectiveDeterminismStatus(
       contract.specification,
       humanResolutions,
+      { intentEvidence: contract.intentEvidence },
     ),
     humanResolutions,
     approval: {

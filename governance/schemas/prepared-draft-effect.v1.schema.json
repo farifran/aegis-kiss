@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis.prepared_draft_effect.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requirements",
+    "invariants",
+    "risks",
+    "boundaryRules",
+    "dimensions"
+  ],
+  "properties": {
+    "requirements": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "value"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "aegis.semantic_draft.v9#/properties/requirements/items"
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "value"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "aegis.semantic_draft.v8#/properties/invariants/items"
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "value"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "aegis.semantic_draft.v8#/properties/risks/items"
+          }
+        }
+      }
+    },
+    "boundaryRules": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "value"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "aegis.semantic_draft.v9#/properties/boundaryRules/items"
+          }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "value"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/dimensions/items"
+          }
+        }
+      }
+    }
+  }
+}

@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, sha256 } from './canonical_json.mjs';
 import { buildIntentEvidence } from './intent_evidence.mjs';
-import { assertSchema, standaloneSchemaDocument } from './schema_validator.mjs';
+import { assertSchema } from './schema_validator.mjs';
+import { buildSemanticOutputSchema } from './semantic_output_schema.mjs';
 import {
   mechanicalPolicySignals,
   policySignalSemantics,
@@ -54,30 +55,6 @@ function decodeUtf8Prefix(bytes, byteLimit) {
   return '';
 }
 
-function compactOutputSchema(value, propertyMap = false) {
-  if (Array.isArray(value)) return value.map((item) => compactOutputSchema(item));
-  if (value === null || typeof value !== 'object') return value;
-  if (propertyMap) {
-    return Object.fromEntries(Object.entries(value)
-      .map(([key, item]) => [key, compactOutputSchema(item)]));
-  }
-  const compact = Object.fromEntries(Object.entries(value)
-    .filter(([key]) => ![
-      'description', 'title', 'if', 'then', 'else', 'allOf', 'uniqueItems', 'pattern',
-    ].includes(key))
-    .map(([key, item]) => [
-      key === 'oneOf' ? 'anyOf' : key,
-      compactOutputSchema(item, key === 'properties'),
-    ]));
-  if (!Object.hasOwn(compact, 'type') && Object.hasOwn(compact, 'const')) {
-    compact.type = compact.const === null ? 'null' : typeof compact.const;
-  }
-  if (!Object.hasOwn(compact, 'type') && Array.isArray(compact.enum) && compact.enum.length > 0) {
-    const types = new Set(compact.enum.map((item) => (item === null ? 'null' : typeof item)));
-    if (types.size === 1) [compact.type] = types;
-  }
-  return compact;
-}
 
 function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
   const observedBytes = workspaceObservation?.sourceBytesByPath?.get(manifestEntry.path);
@@ -230,19 +207,7 @@ export function buildSemanticRequest({
     revision,
   };
   const contextDigest = canonicalDigest(context);
-  const outputSchemaDocument = compactOutputSchema(
-    standaloneSchemaDocument('aegis.semantic_opinion.v3'),
-  );
-  outputSchemaDocument.properties.determinismReview
-    .properties.dimensions.items.properties.activationId = { type: 'null' };
-  if (policy.amendments.length === 0) {
-    outputSchemaDocument.properties.policyAssessments
-      .items.properties.amendmentIndex = { type: 'null' };
-  }
-  outputSchemaDocument.properties.sourceEvidenceDigest = {
-    type: 'string',
-    const: intentEvidence.evidenceDigest,
-  };
+  const outputSchemaDocument = buildSemanticOutputSchema({ hasAmendments: policy.amendments.length > 0 });
   const requestWithoutDigest = {
     schema: 'aegis.semantic_request.v10',
     contextDigest,

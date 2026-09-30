@@ -377,6 +377,12 @@ jq -e '
 # A IA recebe diretamente a intenção, a evidência mecânica neutra e o schema estrito.
 semantic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${semantic_request}" | jq -e '
+  def expand($root):
+    if type == "object" then
+      if has("$ref") then ."$ref" | ltrimstr("#/") | split("/") as $path | $root | getpath($path) | expand($root)
+      else with_entries(select(.key != "$defs") | .value |= expand($root)) end
+    elif type == "array" then map(expand($root)) else . end;
+  .outputSchema.document as $schema | .outputSchema.document |= expand($schema) |
   .schema == "aegis.semantic_request.v10"
   and .constitution.schema == "aegis.constitution.v1"
   and .constitution.authority == "TRUSTED_CONSTITUTION"
@@ -397,11 +403,15 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and ([.outputSchema.document | .. | objects
     | select((.required? // []) | index("then"))
     | select(.properties | has("then"))] | length) > 0
-  and .outputSchema.document.properties.determinismReview.properties.dimensions.items.properties.activationId.type == "null"
-  and .outputSchema.document.properties.policyAssessments.items.properties.amendmentIndex.type == "null"
+  and (.outputSchema.document.properties.determinismReview.properties.dimensions.items.properties | has("activationId") | not)
+  and (.outputSchema.document.properties.policyAssessments.items.properties | has("amendmentIndex") | not)
   and (.outputSchema.document.required | index("fragmentDispositions") == null)
   and (.outputSchema.document.properties | has("fragmentDispositions") | not)
-  and .outputSchema.document.properties.sourceEvidenceDigest.const == .intentEvidence.evidenceDigest
+  and (.outputSchema.document.properties | has("sourceEvidenceDigest") | not)
+  and (.outputSchema.document.properties | has("schema") | not)
+  and (.outputSchema.document.properties.determinismReview.properties.coverage.items.properties | has("disposition") | not)
+  and (.outputSchema.document.required | index("sourceEvidenceDigest") == null)
+  and (.outputSchema.document.properties.decisions.items.properties.answers.items.required | index("preparedEffect") != null)
   and .intentEvidence.schema == "aegis.intent_evidence.v1"
   and .intentEvidence.method == "LOSSLESS_NEUTRAL_SENTENCES_V2"
   and (.intentEvidence.fragments | length) == 1
@@ -670,6 +680,14 @@ printf '%s\n' "${context_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH
 [[ ! -e .harness/runtime/contract.json ]]
 
 # Saída semanticamente incompleta é rejeitada antes de criar contrato.
+# A supplied null digest is invalid evidence, never an invitation to bind current state.
+set +e
+null_digest_output="$(make_opinion yes "${semantic_evidence_digest}" | jq '.sourceEvidenceDigest = null' | bash ./aegis --semantic-compile 2>&1)"
+null_digest_code=$?
+set -e
+[[ "${null_digest_code}" -ne 0 ]]
+printf '%s' "${null_digest_output}" | jq -e '.reason == "INVALID_SEMANTIC_OPINION"' >/dev/null
+
 invalid_draft="$(make_opinion yes "${semantic_evidence_digest}" | jq '.requirements[0].acceptanceCases[1].kind = "HAPPY_PATH"')"
 set +e
 invalid_output="$(printf '%s' "${invalid_draft}" | bash ./aegis --semantic-compile 2>&1)"
@@ -1048,7 +1066,13 @@ automatic_intent='Definir transformador de registros com saída ainda a escolher
 node scripts/issue_contract_runner.mjs draft "${automatic_intent}" >/dev/null
 automatic_request="$(bash ./aegis --semantic-request)"
 automatic_evidence_digest="$(printf '%s\n' "${automatic_request}" | jq -r '.intentEvidence.evidenceDigest')"
-make_opinion yes "${automatic_evidence_digest}" > "${WORK_DIR}/fake-codex-opinion.json"
+make_opinion yes "${automatic_evidence_digest}" | jq '
+  del(.schema, .sourceEvidenceDigest)
+  | .policyAssessments |= map(del(.amendmentIndex))
+  | .determinismReview.coverage |= map(del(.disposition))
+  | .stateModel = null
+  | .decisions |= map(.semanticKey = null | .answers |= map(.preparedEffect = null))
+' > "${WORK_DIR}/fake-codex-opinion.json"
 chmod +x scripts/substrates/test/fake_codex.mjs
 node --input-type=module <<'NODE'
 import { writeFileSync } from 'node:fs';
@@ -1083,5 +1107,102 @@ jq -e '
   and .calls == 1
 ' .harness/runtime/semantic-execution.json >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
+
+# Prepared choices are compiled and checked before the Wizard; selecting either
+# alternative needs no second model call. All writes stay in this test workspace.
+# Build from the fixture without changing its collection topology.
+prepared_opinion="$(make_opinion yes "${automatic_evidence_digest}" | jq '
+  .policyAssessments |= map(del(.amendmentIndex))
+  | .requirements[0] as $requirement
+  | .decisions[0].answers |= (to_entries | map(
+      .key as $index | .value as $answer | .value + {
+        preparedEffect: {
+          requirements: [{index: 0, value: ($requirement
+            | .acceptanceCases[0].then = $answer.contractEffect
+            | .acceptanceCases[0].decisionBinding.answerIndex = $index)}],
+          invariants: [], risks: [], boundaryRules: [], dimensions: []
+        }
+      }))
+')"
+binding_digest="$(bash ./aegis --semantic-request | jq -r '.requestDigest')"
+set +e
+unbound_output="$(printf '%s' "${prepared_opinion}" | jq 'del(.sourceEvidenceDigest)' | bash ./aegis --semantic-compile 2>&1)"
+unbound_code=$?
+stale_binding_output="$(printf '%s' "${prepared_opinion}" | jq '{sourceSemanticRequestDigest:"stale",opinion:del(.sourceEvidenceDigest)}' | bash ./aegis --semantic-compile 2>&1)"
+stale_binding_code=$?
+set -e
+[[ "${unbound_code}" -ne 0 && "${stale_binding_code}" -ne 0 ]]
+printf '%s' "${unbound_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH"' >/dev/null
+printf '%s' "${stale_binding_output}" | jq -e '.reason == "SEMANTIC_CONTEXT_MISMATCH"' >/dev/null
+printf '%s' "${prepared_opinion}" | jq --arg digest "${binding_digest}" '{sourceSemanticRequestDigest:$digest,opinion:del(.sourceEvidenceDigest)}' | bash ./aegis --semantic-compile >/dev/null
+prepared_digest_before="$(shasum .harness/runtime/contract.json)"
+bad_prepared="$(printf '%s' "${prepared_opinion}" | jq '.decisions[0].answers[1].preparedEffect.requirements[0].value.acceptanceCases[0].then = "Efeito diferente do apresentado ao humano."')"
+set +e
+bad_prepared_output="$(printf '%s' "${bad_prepared}" | bash ./aegis --semantic-compile 2>&1)"
+bad_prepared_code=$?
+set -e
+[[ "${bad_prepared_code}" -ne 0 ]]
+printf '%s' "${bad_prepared_output}" | jq -e '.reason == "REVISION_EFFECT_NOT_MATERIALIZED"' >/dev/null
+[[ "${prepared_digest_before}" == "$(shasum .harness/runtime/contract.json)" ]]
+
+for selection in 1 2; do
+  node scripts/issue_contract_runner.mjs draft "${automatic_intent}" >/dev/null
+  printf '%s' "${prepared_opinion}" | bash ./aegis --semantic-compile >/dev/null
+  jq -e '.approval == null and .humanResolutions == [] and (.specification.decisions | length) == 1' .harness/runtime/contract.json >/dev/null
+  jq -e '[.questions[].answers[].applicationMode] | all(. == "PREPARED_EFFECT")' .harness/runtime/user_confirmation_request.json >/dev/null
+  # Confirm choices, then decline final signature: applying a plan is not approval.
+  prepared_wizard_output="$(printf '%s\ns\nn\n' "${selection}" | bash ./aegis --wizard 2>&1)"
+  [[ "${prepared_wizard_output}" == *'sem nova consulta à IA'* ]]
+  jq -e --arg answer "ANS-0001-0${selection}" '
+    .approval == null and .implementationAuthorized == false
+    and .specification.decisions == [] and .specification.unknowns == []
+    and .humanResolutions[-1].answerId == $answer
+    and .specification.requirements[0].acceptanceCases[0].decisionBinding == null
+    and .specification.requirements[0].acceptanceCases[0].then == .humanResolutions[-1].contractEffect
+  ' .harness/runtime/contract.json >/dev/null
+  bash ./aegis --status >/dev/null
+  # A separate explicit final confirmation is still required.
+  printf 's\n' | bash ./aegis --wizard >/dev/null 2>&1
+  bash ./aegis --status | jq -e '.status == "GOVERNED"' >/dev/null
+done
+[[ "$(wc -l < "${WORK_DIR}/fake-codex.log" | tr -d ' ')" == "1" ]]
+# An open dimension needs its prepared proof; choosing an answer alone cannot close it.
+dimension_plan="$(printf '%s' "${prepared_opinion}" | jq --argjson original "${deterministic_opinion}" '
+  .determinismReview = $original.determinismReview
+  | .determinismReview.dimensions[0].status = "DECISION_REQUIRED"
+  | .determinismReview.dimensions[0].targets += [{kind:"DECISION",index:0}]
+  | .determinismReview.dimensions[0].acceptanceCase = null
+  | .determinismReview.dimensions[0].proofObligation = null
+  | .requirements[0].acceptanceCases += [$original.requirements[0].acceptanceCases[2]]
+  | .decisions[0].answers |= map(
+      .preparedEffect.requirements[0].value.acceptanceCases += [$original.requirements[0].acceptanceCases[2]]
+      | .preparedEffect.dimensions = [{index:0,value:($original.determinismReview.dimensions[0] | del(.activationId))}])
+')"
+node scripts/issue_contract_runner.mjs draft "${automatic_intent}" >/dev/null
+set +e
+missing_closure_output="$(printf '%s' "${dimension_plan}" | jq '.decisions[0].answers[1].preparedEffect.dimensions = []' | bash ./aegis --semantic-compile 2>&1)"
+missing_closure_code=$?
+set -e
+[[ "${missing_closure_code}" -ne 0 ]]
+printf '%s' "${missing_closure_output}" | jq -e '.reason == "RESOLVED_DIMENSION_REMAINS_OPEN"' >/dev/null
+printf '%s' "${dimension_plan}" | bash ./aegis --semantic-compile >/dev/null
+printf '2\ns\nn\n' | bash ./aegis --wizard >/dev/null 2>&1
+jq -e '
+  .specification.determinismReview.dimensions[0].status == "SPECIFIED"
+  and .specification.determinismReview.dimensions[0].closureAuthority == "HUMAN_DECISION"
+  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING"
+  and .specification.decisions == [] and .approval == null
+' .harness/runtime/contract.json >/dev/null
+[[ "${source_before}" == "$(shasum src/index.ts)" ]]
+node --input-type=module <<'NODE'
+import assert from 'node:assert/strict';
+import { replacePreparedEntries } from './scripts/lib/prepared_effects.mjs';
+const fixture = {requirements: [{statement: 'original'}], invariants: [], risks: [], boundaryRules: [], determinismReview: {dimensions: []}};
+const plan = {requirements: [{index: 0, value: {statement: 'primeira'}}], invariants: [], risks: [], boundaryRules: [], dimensions: []};
+const touched = new Map();
+replacePreparedEntries(fixture, plan, touched);
+assert.throws(() => replacePreparedEntries(fixture, {...plan, requirements: [{index: 0, value: {statement: 'segunda'}}]}, touched), /prepared_effect_conflict/);
+assert.throws(() => replacePreparedEntries(fixture, {...plan, requirements: [{index: 9, value: {}}]}), /index_out_of_range/);
+NODE
 
 printf '[AEGIS][TEST] capture, discovery and semantic contract flow: PASS\n'

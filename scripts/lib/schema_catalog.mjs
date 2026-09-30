@@ -1,4 +1,6 @@
 export const schemaFiles = new Map([
+  ['aegis.prepared_opinion_effect.v1', 'prepared-opinion-effect.v1.schema.json'],
+  ['aegis.prepared_draft_effect.v1', 'prepared-draft-effect.v1.schema.json'],
   ['aegis.architecture_policy.v3', 'architecture-policy.v3.schema.json'],
   ['aegis.confirmation_request.v4', 'confirmation-request.v4.schema.json'],
   ['aegis.confirmation_request.v5', 'confirmation-request.v5.schema.json'],

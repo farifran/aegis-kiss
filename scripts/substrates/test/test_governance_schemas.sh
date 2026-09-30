@@ -95,7 +95,7 @@ if (requestDigest !== canonicalDigest(requestPayload)
     semanticRequest.outputSchema.document.properties,
     'worksheetDigest',
   )
-  || JSON.stringify(semanticRequest.outputSchema.document).includes('"$ref"')
+  || !semanticRequest.outputSchema.document.$defs
   || JSON.stringify(semanticRequest.outputSchema.document).includes('"oneOf"')
   || JSON.stringify(semanticRequest.outputSchema.document).includes('"allOf"')
   || JSON.stringify(semanticRequest.outputSchema.document).includes('"if"')

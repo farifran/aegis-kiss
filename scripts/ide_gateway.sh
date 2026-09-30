@@ -143,6 +143,7 @@ resolve_preflight_wizard() {
     jq -r '.traceability.risks[] | "  - Risco \(.id) [\(.level)/\(.kind)]: \(.statement) Mitigação: \(.mitigation)"' <<< "${question}" >&2
     jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"' <<< "${question}" >&2
     printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
+    jq -r '.answers[] | select(.applicationMode == "SEMANTIC_REVIEW_REQUIRED") | "  Aviso: “\(.label)” exige nova análise antes de fechar o contrato."' <<< "${question}" >&2
     printf '  ── Ação rápida ──\n' >&2
     printf '  A) %s\n     %s\n' \
       "$(jq -r '.bulkRecommendationAction.label' <<< "${result}")" \
@@ -220,6 +221,17 @@ resolve_preflight_wizard() {
     > "${resolution_staging}"
   mv "${resolution_staging}" "${resolution_file}"
   if (( requires_recompilation == 1 )); then
+    if jq -e --argjson choices "${answers}" '
+      . as $request | all($choices[];
+        . as $choice | (has("correction") | not) and
+        any($request.questions[]; .id == $choice.questionId and
+          any(.answers[]; .id == $choice.answerId and .applicationMode == "PREPARED_EFFECT")))
+    ' <<< "${result}" >/dev/null; then
+      printf '[AEGIS] Aplicando as opções preparadas e validando o contrato, sem nova consulta à IA.\n' >&2
+      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve >/dev/null || return $?
+      resolve_preflight_wizard
+      return
+    fi
     printf '[AEGIS] Escolhas gravadas e vinculadas ao rascunho. Recompilação semântica necessária antes da assinatura.\n' >&2
     return
   fi

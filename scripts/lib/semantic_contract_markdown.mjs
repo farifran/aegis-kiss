@@ -18,7 +18,7 @@ export function renderSemanticContractMarkdown(contract, {
     `> **Modo:** ${specification.changeKind}`,
     `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
     ...(specification.closureCertificate ? [
-      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions})`,
+      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions}, lacunas ativas: ${specification.closureCertificate.gapLedger?.length ?? 0})`,
     ] : []),
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
@@ -195,6 +195,8 @@ export function renderSemanticContractMarkdown(contract, {
         `| Operações (Totalidade de Transição) | ${audit.expectedOperations} | ${audit.materializedOperations} | ${audit.totalizedOperations} | ${audit.totalizedOperations >= audit.expectedOperations ? '✅ Totalizado' : '❌ Lacuna'} |`,
         `| Observáveis Públicos & Projeções | ${audit.expectedObservables} | ${audit.materializedObservables} | ${audit.closedObservables} | ${audit.closedObservables >= audit.expectedObservables ? '✅ Fechado' : '❌ Lacuna'} |`,
         `| Perfis de Serialização Canônica | ${audit.canonicalProfilesRequired} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed >= audit.canonicalProfilesRequired ? '✅ Fechado' : '❌ Lacuna'} |`,
+        `| Agregações de Coleção | ${audit.aggregationsClosed ?? 0} | ${audit.aggregationsClosed ?? 0} | ${audit.aggregationsClosed ?? 0} | ✅ Fechado |`,
+        `| Fronteiras Producer/Consumer | ${audit.boundariesClosed ?? 0} | ${audit.boundariesClosed ?? 0} | ${audit.boundariesClosed ?? 0} | ✅ Fechado |`,
         `| Testemunhos de Divergência Sobreviventes | 0 | 0 | ${audit.divergenceWitnessesSurviving} | ${audit.divergenceWitnessesSurviving === 0 ? '✅ 0 (Zero Divergência)' : '❌ Sobrevivente'} |`,
       );
     }
@@ -208,7 +210,7 @@ export function renderSemanticContractMarkdown(contract, {
           `- **Descrição:** ${entity.description ?? 'Sem descrição'}`,
           `- **Topologia:** ${entity.isCollection ? 'Coleção dinâmica (instâncias múltiplas)' : 'Instância estática única (Singleton)'}`,
           `- **Política de Admissão:** \`${entity.admissionPolicy ?? 'N/A'}\``,
-          `- **Política de Capacidade:** ${entity.capacityPolicy ? `Máx ${entity.capacityPolicy.maxEntries} entradas (overflow: \`${entity.capacityPolicy.overflowPolicy}\`)` : 'N/A'}`,
+          `- **Política de Capacidade:** ${entity.capacityPolicy ? `Máx ${entity.capacityPolicy.maxEntries} entradas (overflow: \`${entity.capacityPolicy.overflowPolicy}\`${entity.capacityPolicy.provenance ? ` [Base: ${renderBasis(entity.capacityPolicy.provenance)}]` : ''})` : 'N/A'}`,
           '',
           '| Campo | Tipo | Limites (Bounds) | Inicialização | Reset | Mutações | Leitores |',
           '| :--- | :--- | :--- | :--- | :--- | :--- | :--- |',
@@ -216,7 +218,7 @@ export function renderSemanticContractMarkdown(contract, {
         for (const field of entity.fields) {
           const typeStr = field.isCounter ? `${field.type} (Contador)` : field.type;
           const boundsStr = field.bounds
-            ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior})`
+            ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior}${field.bounds.provenance ? `; ${renderBasis(field.bounds.provenance)}` : ''})`
             : 'N/A';
           const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*`;
           const resetStr = field.reset.allowed
@@ -294,6 +296,47 @@ export function renderSemanticContractMarkdown(contract, {
         for (const fe of profile.fieldEncodings) {
           lines.push(`| \`${fe.field}\` | \`${fe.encoding}\` |`);
         }
+      }
+    }
+
+    if (specification.stateModel.aggregations?.length > 0) {
+      lines.push('', '### 6.6 Agregações de Coleção e Visões Derivadas');
+      lines.push(
+        '',
+        '| Nome da Agregação | Coleção de Origem | Tipo de Agregação | Predicado de Filtro | Limite de Saturação | Proveniência |',
+        '| :--- | :--- | :---: | :--- | :---: | :--- |',
+      );
+      for (const agg of specification.stateModel.aggregations) {
+        lines.push(
+          `| \`${agg.name}\` | \`${agg.sourceCollection}\` | \`${agg.aggregationKind}\` | \`${agg.filterPredicate}\` | \`${agg.saturationLimit ?? 'Sem saturação'}\` | ${agg.provenance ? renderBasis(agg.provenance) : 'N/A'} |`,
+        );
+      }
+    }
+
+    if (specification.stateModel.producerConsumerBoundaries?.length > 0) {
+      lines.push('', '### 6.7 Fronteiras Producer / Consumer e Ownership de Sinais');
+      lines.push(
+        '',
+        '| Sinal | Produtor (Origem) | Consumidor (Destino) | Ownership | Recomputável pelo Consumidor | Proveniência |',
+        '| :--- | :--- | :--- | :---: | :---: | :--- |',
+      );
+      for (const bnd of specification.stateModel.producerConsumerBoundaries) {
+        lines.push(
+          `| \`${bnd.signalName}\` | \`${bnd.producer}\` | \`${bnd.consumer}\` | \`${bnd.ownership}\` | ${bnd.recomputableByConsumer ? 'Sim' : 'Não'} | ${bnd.provenance ? renderBasis(bnd.provenance) : 'N/A'} |`,
+        );
+      }
+    }
+
+    if (specification.closureCertificate?.gapLedger?.length > 0) {
+      lines.push(
+        '',
+        '### 6.8 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
+        '',
+        '| GAP-ID | Camada | Testemunho / Witness Falsificável | Autoridade Necessária |',
+        '| :--- | :--- | :--- | :---: |',
+      );
+      for (const gap of specification.closureCertificate.gapLedger) {
+        lines.push(`| \`${gap.gapId}\` | **${gap.layer}** | ${gap.witness} | \`${gap.requiredAuthority}\` |`);
       }
     }
   }

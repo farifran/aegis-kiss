@@ -45,8 +45,8 @@ function pointerValue(document, pointer) {
   }, document);
 }
 
-function expandSchema(value, currentSchemaId, stack) {
-  if (Array.isArray(value)) return value.map((item) => expandSchema(item, currentSchemaId, stack));
+function expandSchema(value, currentSchemaId, stack, documents) {
+  if (Array.isArray(value)) return value.map((item) => expandSchema(item, currentSchemaId, stack, documents));
   if (value === null || typeof value !== 'object') return value;
   if (typeof value.$ref === 'string') {
     if (Object.keys(value).length !== 1) throw new Error(`schema_ref_with_siblings:${value.$ref}`);
@@ -57,20 +57,23 @@ function expandSchema(value, currentSchemaId, stack) {
     if (stack.has(absoluteReference)) throw new Error(`recursive_schema_ref:${absoluteReference}`);
     const nextStack = new Set(stack);
     nextStack.add(absoluteReference);
+    if (!documents.has(referencedId)) documents.set(referencedId, schemaDocument(referencedId));
     return expandSchema(
-      pointerValue(schemaDocument(referencedId), pointer),
+      pointerValue(documents.get(referencedId), pointer),
       referencedId,
       nextStack,
+      documents,
     );
   }
   return Object.fromEntries(Object.entries(value)
     .filter(([key]) => key !== '$defs')
-    .map(([key, item]) => [key, expandSchema(item, currentSchemaId, stack)]));
+    .map(([key, item]) => [key, expandSchema(item, currentSchemaId, stack, documents)]));
 }
 
 /** Produz o schema autocontido usado fora do processo local, sem refs dependentes do catálogo. */
 export function standaloneSchemaDocument(schemaId) {
-  return expandSchema(schemaDocument(schemaId), schemaId, new Set());
+  const document = schemaDocument(schemaId);
+  return expandSchema(document, schemaId, new Set(), new Map([[schemaId, document]]));
 }
 
 export function schemaErrors(schemaId, value) {

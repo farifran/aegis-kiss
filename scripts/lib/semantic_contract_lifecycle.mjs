@@ -3,7 +3,9 @@ import { assertSchema } from './schema_validator.mjs';
 import {
   assertContractApprovalEvidence,
   effectiveDeterminismStatus,
+  assertRevisionApplied,
 } from './semantic_approval.mjs';
+import { applyPreparedAnswers } from './prepared_effects.mjs';
 import { assertSemanticDraft } from './semantic_draft_validator.mjs';
 import { buildSemanticRequest } from './semantic_request.mjs';
 
@@ -35,14 +37,28 @@ export function compileSemanticContract({
     revision: semanticRevision,
     workspaceObservation,
   });
-  assertSemanticDraft(draft, policy, {
+  const validationContext = {
     constitutionRules: constitution?.rules,
     intent: preflight.intent,
     intentEvidence: effectiveSemanticRequest.intentEvidence,
     resolvedDecisionIds: humanResolutions.map(({ questionId }) => questionId),
     humanResolutions,
     workspaceEvidence: effectiveSemanticRequest.workspace.sourceEvidence,
-  });
+  };
+  assertSemanticDraft(draft, policy, validationContext);
+  // Preview every prepared branch before exposing it to a human. This creates no consent.
+  for (const decision of draft.decisions) {
+    for (const answer of decision.answers) {
+      if (answer.preparedEffect == null) continue;
+      const choices = [{ questionId: decision.questionId, answerId: answer.id, contractEffect: answer.contractEffect }];
+      const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence);
+      assertRevisionApplied(preview, { answers: choices }, draft);
+      assertSemanticDraft(preview, policy, {
+        ...validationContext,
+        resolvedDecisionIds: [...validationContext.resolvedDecisionIds, decision.questionId],
+      });
+    }
+  }
   if (draft.sourceContextDigest !== effectiveSemanticRequest.contextDigest) {
     throw new Error('semantic_context_mismatch');
   }
@@ -60,7 +76,11 @@ export function compileSemanticContract({
     intentEvidence: effectiveSemanticRequest.intentEvidence,
     policySignals: effectiveSemanticRequest.policy.signals,
     specification: draft,
-    effectiveDeterminismStatus: effectiveDeterminismStatus(draft, humanResolutions),
+    effectiveDeterminismStatus: effectiveDeterminismStatus(
+      draft,
+      humanResolutions,
+      { intentEvidence: effectiveSemanticRequest.intentEvidence },
+    ),
     humanResolutions,
     approval: null,
   };
@@ -109,7 +129,11 @@ export function assertContractDocument({
   if (contract.policyDigest !== policyDigest) throw new Error('contract_policy_mismatch');
   if (contract.constitutionDigest !== constitutionDigest) throw new Error('contract_constitution_mismatch');
   if (contract.effectiveDeterminismStatus
-    !== effectiveDeterminismStatus(contract.specification, contract.humanResolutions)) {
+    !== effectiveDeterminismStatus(
+      contract.specification,
+      contract.humanResolutions,
+      { intentEvidence: contract.intentEvidence },
+    )) {
     throw new Error('contract_effective_determinism_status_mismatch');
   }
   if (contract.intent !== preflight.intent) throw new Error('contract_intent_mismatch');

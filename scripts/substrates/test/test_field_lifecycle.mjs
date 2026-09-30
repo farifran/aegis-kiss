@@ -3,12 +3,15 @@ import process from 'node:process';
 import {
   generateClosureCertificate,
   runSemanticMutationTests,
+  validateAggregationAndBoundaries,
   validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,
+  validateProvenanceEnforcement,
+  validateSemanticCrossConsistency,
   validateSemanticInventoryCoverage,
 } from '../../lib/semantic_closure.mjs';
-import { effectiveDeterminismStatus } from '../../lib/semantic_approval.mjs';
+import { effectiveDeterminismStatus, getEffectiveGapLedger } from '../../lib/semantic_approval.mjs';
 
 function log(msg) {
   process.stdout.write(`${msg}\n`);
@@ -1398,12 +1401,21 @@ function createFixture({
         name: 'Badge',
         isCollection: true,
         admissionPolicy: 'ON_FIRST_REQUEST',
-        capacityPolicy: { maxEntries: '1000', overflowPolicy: 'REJECT_NEW' },
+        capacityPolicy: {
+          maxEntries: '1000',
+          overflowPolicy: 'REJECT_NEW',
+          provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-LOCAL-DETERMINISTIC-CORE' }],
+        },
         fields: [
           {
             name: 'tokens',
             type: 'INTEGER',
-            bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+            bounds: {
+              lowerBound: '0',
+              upperBound: '100',
+              boundaryBehavior: 'SATURATE',
+              provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-LOCAL-DETERMINISTIC-CORE' }],
+            },
             initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Saldo inicial' },
             mutations: [{ operation: 'evaluateRequest', condition: 'SUCCESS', effect: 'DECREMENT', targetValue: null }],
             reset: { allowed: false, trigger: null, resetValue: null },
@@ -1413,7 +1425,12 @@ function createFixture({
           {
             name: 'lastRefillTimestamp',
             type: 'INTEGER',
-            bounds: { lowerBound: '0', upperBound: '9223372036854775807', boundaryBehavior: 'SATURATE' },
+            bounds: {
+              lowerBound: '0',
+              upperBound: '9223372036854775807',
+              boundaryBehavior: 'SATURATE',
+              provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-DETERMINISTIC-TIME' }],
+            },
             initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Epoch de admissão' },
             mutations: [{ operation: 'evaluateRequest', condition: 'SUCCESS', effect: 'UPDATE', targetValue: 'now' }],
             reset: { allowed: false, trigger: null, resetValue: null },
@@ -1475,6 +1492,16 @@ function createFixture({
           emptyStateDigest: '0xcbf29ce484222325',
         },
       ],
+      producerConsumerBoundaries: [
+        {
+          signalName: 'globalLock',
+          producer: 'SYSTEM_ADMINISTRATION',
+          consumer: 'evaluateRequest',
+          ownership: 'SYSTEM_CONFIGURATION',
+          recomputableByConsumer: false,
+          provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-PRODUCT-BOUNDARY' }],
+        },
+      ],
     },
   });
   fixture.architectureContexts.push(
@@ -1516,5 +1543,460 @@ function createFixture({
   log('  PASS: TEST-33 Full contract with complete inventory coverage and valid decision witness certifies SEMANTICALLY_CLOSED');
 }
 
-log('[CTDD TEST] All 33 Field Lifecycle & Closure Certificate traps passed successfully!');
+// TEST-34: Inconsistent observable mapping (distinct count mapped to local streak) MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'insufficientStreak',
+          type: 'INTEGER',
+          isCounter: true,
+          bounds: { lowerBound: '0', upperBound: '3', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Zero' },
+          mutations: [{ operation: 'eval', condition: 'REJECT', effect: 'INCREMENT', targetValue: null }],
+          reset: { allowed: true, trigger: 'ALLOW', resetValue: '0' },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['BALANCE'],
+        branches: [
+          { branchId: 'REJECT', outcomeKind: 'REJECTION', statusOrError: 'ERR', defaultPreservation: false, stateEffects: [{ field: 'Badge.insufficientStreak', effect: 'INCREMENT', value: '1' }] },
+          { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+        ],
+      }],
+      observables: [{
+        name: 'bitmask',
+        derivedFrom: ['Badge.insufficientStreak'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [
+          { slice: '3..7', field: 'Badge.insufficientStreak', bitWidth: 5, mapping: 'Contagem de crachás distintos em quarentena' },
+        ],
+      }],
+    },
+    literalFacts: [
+      { id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 3 } },
+      { id: 'FACT-002', kind: 'BIT_RANGE', attributes: { start: 3, end: 7 }, reference: 'Contagem de crachás diferentes em quarentena' },
+    ],
+  });
+
+  const crossResult = validateSemanticCrossConsistency({
+    stateModel: fixture.stateModel,
+    requirements: fixture.requirements,
+    literalFacts: fixture.literalFacts,
+  });
+  assert.equal(crossResult.valid, false, 'TEST-34: distinct count mapped to local streak must be invalid');
+  assert.equal(crossResult.issues.some((i) => i.kind === 'CROSS_INCONSISTENT_OBSERVABLE_MAPPING'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.contradictoryRules >= 1, true);
+  log('  PASS: TEST-34 Distinct count mapped to local streak is blocked');
+}
+
+// TEST-35: Transition matrix ignoring 3rd rejection threshold trigger MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [
+          {
+            name: 'insufficientStreak',
+            type: 'INTEGER',
+            isCounter: true,
+            bounds: { lowerBound: '0', upperBound: '3', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+            initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Zero' },
+            mutations: [{ operation: 'eval', condition: 'REJECT', effect: 'INCREMENT', targetValue: null }],
+            reset: { allowed: true, trigger: 'ALLOW', resetValue: '0' },
+            preservation: ['*'],
+            readBy: ['eval'],
+          },
+          {
+            name: 'quarantined',
+            type: 'BOOLEAN',
+            bounds: null,
+            initialization: { kind: 'DEFAULT', value: 'false', rationale: 'Inicia limpo' },
+            mutations: [{ operation: 'eval', condition: '3 falhas', effect: 'SET', targetValue: 'true' }],
+            reset: { allowed: false, trigger: null, resetValue: null },
+            preservation: ['*'],
+            readBy: ['eval'],
+          },
+        ],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['BALANCE'],
+        branches: [
+          {
+            branchId: 'REJECT_INSUFFICIENT',
+            outcomeKind: 'REJECTION',
+            statusOrError: 'ERR_INSUFFICIENT',
+            defaultPreservation: false,
+            stateEffects: [
+              { field: 'Badge.insufficientStreak', effect: 'INCREMENT', value: '1' },
+              { field: 'Badge.quarantined', effect: 'PRESERVE', value: null },
+            ],
+          },
+          { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+        ],
+      }],
+      observables: [{
+        name: 'obs',
+        derivedFrom: ['Badge.insufficientStreak'],
+        representation: 'SCALAR',
+        emptyBehavior: '0',
+      }],
+    },
+    requirements: [
+      { id: 'REQ-01', statement: '3 foras seguidos colocam o crachá em quarentena imediata' },
+    ],
+    literalFacts: [
+      { id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 3 } },
+    ],
+  });
+
+  const crossResult = validateSemanticCrossConsistency({
+    stateModel: fixture.stateModel,
+    requirements: fixture.requirements,
+    literalFacts: fixture.literalFacts,
+  });
+  assert.equal(crossResult.valid, false, 'TEST-35: unhandled streak trigger must be invalid');
+  assert.equal(crossResult.issues.some((i) => i.kind === 'CROSS_INCONSISTENT_TRANSITION_TRIGGER'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.contradictoryRules >= 1, true);
+  log('  PASS: TEST-35 Transition matrix ignoring 3rd rejection trigger is blocked');
+}
+
+// TEST-36: Numeric literals without authorized provenance MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        isCollection: true,
+        capacityPolicy: {
+          maxEntries: 100000,
+          overflowPolicy: 'REJECT_NEW',
+          provenance: [{ source: 'USER_INTENT', reference: 'FACT-INVENTED' }],
+        },
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: {
+            lowerBound: '0',
+            upperBound: '999',
+            boundaryBehavior: 'SATURATE',
+            provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }],
+          },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '10', rationale: 'Config' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['GUARD'],
+        branches: [
+          { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+        ],
+      }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    },
+    literalFacts: [
+      { id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 10 } },
+    ],
+  });
+
+  const provResult = validateProvenanceEnforcement({
+    stateModel: fixture.stateModel,
+    literalFacts: fixture.literalFacts,
+  });
+  assert.equal(provResult.valid, false, 'TEST-36: unbacked numeric literal must be invalid');
+  assert.equal(provResult.issues.some((i) => i.kind === 'UNAUTHORIZED_NUMERIC_LITERAL'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedAuthorities >= 1, true);
+  log('  PASS: TEST-36 Numeric literals without authorized provenance are blocked');
+}
+
+// TEST-37: Missing producer/consumer boundary in bounded observability MUST be blocked
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '10', rationale: 'Config' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['GUARD'],
+        branches: [
+          { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+        ],
+      }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+      aggregations: [],
+      producerConsumerBoundaries: [],
+    },
+    literalFacts: [{ id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 10 } }],
+  });
+  fixture.architectureContexts.push({ tag: 'bounded-observability' });
+
+  const aggResult = validateAggregationAndBoundaries({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(aggResult.valid, false, 'TEST-37: missing boundary must be invalid');
+  assert.equal(aggResult.issues.some((i) => i.kind === 'MISSING_PRODUCER_CONSUMER_BOUNDARY'), true);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(cert.unresolvedInventorySlots >= 1, true);
+  log('  PASS: TEST-37 Missing producer/consumer boundary is blocked');
+}
+
+// TEST-38: BLOCKED_BY_GAP must emit structured Gap Ledger across all 4 layers
+{
+  // 1. Coverage accounting gap
+  const covFixture = createFixture({ isStateful: true, stateModel: null });
+  const covCert = generateClosureCertificate({ specification: covFixture });
+  assert.equal(covCert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(effectiveDeterminismStatus(covFixture, []), 'BLOCKED_BY_GAP');
+  assert.ok(covCert.gapLedger.length > 0, 'TEST-38: gapLedger must be non-empty');
+  const covGap = covCert.gapLedger.find((g) => g.layer === 'COVERAGE_ACCOUNTING');
+  assert.ok(covGap, 'TEST-38: COVERAGE_ACCOUNTING gap must exist');
+  assert.match(covGap.gapId, /^GAP-[0-9]{4}$/);
+  assert.ok(covGap.witness.length > 0);
+  assert.equal(covGap.requiredAuthority, 'ARCHITECTURE_POLICY');
+
+  // 2. Transition consistency gap
+  const transFixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'fractionalRemainder',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999', boundaryBehavior: 'ROLLOVER_MODULO', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0', rationale: 'Sem carry residual inicial' },
+          mutations: [{ operation: 'evaluateRequest', condition: 'TICK', effect: 'CUSTOM', targetValue: null }],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['lockSystem'], // missing 'unquarantine' coverage
+          readBy: ['evaluateRequest'],
+        }],
+      }],
+      operations: [
+        { name: 'evaluateRequest', guardPrecedence: ['LOCK'] },
+        { name: 'unquarantine', guardPrecedence: ['ADMIN'] },
+      ],
+      observables: [{ name: 'decision', derivedFrom: ['Badge.fractionalRemainder'], representation: 'SCALAR', emptyBehavior: '0' }],
+      aggregations: [],
+      producerConsumerBoundaries: [],
+    },
+    literalFacts: [{ id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 999 } }],
+  });
+  const transCert = generateClosureCertificate({ specification: transFixture });
+  assert.equal(transCert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(effectiveDeterminismStatus(transFixture, []), 'BLOCKED_BY_GAP');
+  const transGap = transCert.gapLedger.find((g) => g.layer === 'TRANSITION_CONSISTENCY');
+  assert.ok(transGap, 'TEST-38: TRANSITION_CONSISTENCY gap must exist');
+  assert.match(transGap.gapId, /^GAP-[0-9]{4}$/);
+  assert.ok(transGap.witness.length > 0);
+  assert.ok(['USER_INTENT', 'USER_DECISION'].includes(transGap.requiredAuthority));
+
+  // 3. Observable dependency closure gap
+  const obsFixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '10', rationale: 'Config' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['GUARD'],
+        branches: [{ branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true }],
+      }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.nonexistent'], representation: 'SCALAR', emptyBehavior: '0' }],
+      aggregations: [],
+      producerConsumerBoundaries: [],
+    },
+    literalFacts: [{ id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 10 } }],
+  });
+  const obsCert = generateClosureCertificate({ specification: obsFixture });
+  assert.equal(obsCert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(effectiveDeterminismStatus(obsFixture, []), 'BLOCKED_BY_GAP');
+  const obsGap = obsCert.gapLedger.find((g) => g.layer === 'OBSERVABLE_DEPENDENCY_CLOSURE');
+  assert.ok(obsGap, 'TEST-38: OBSERVABLE_DEPENDENCY_CLOSURE gap must exist');
+  assert.match(obsGap.gapId, /^GAP-[0-9]{4}$/);
+  assert.ok(obsGap.witness.length > 0);
+  assert.equal(obsGap.requiredAuthority, 'USER_INTENT');
+
+  // 4. Authority provenance gap
+  const provFixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '10', rationale: 'Config' },
+          mutations: [],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['eval'],
+        }],
+      }],
+      operations: [{
+        name: 'eval',
+        guardPrecedence: ['GUARD'],
+        branches: [{ branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true }],
+      }],
+      observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+      aggregations: [],
+      producerConsumerBoundaries: [],
+    },
+    literalFacts: [{ id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 10 } }], // 999999 is missing!
+  });
+  const provCert = generateClosureCertificate({ specification: provFixture });
+  assert.equal(provCert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.equal(effectiveDeterminismStatus(provFixture, []), 'BLOCKED_BY_GAP');
+  const provGap = provCert.gapLedger.find((g) => g.layer === 'AUTHORITY_PROVENANCE');
+  assert.ok(provGap, 'TEST-38: AUTHORITY_PROVENANCE gap must exist');
+  assert.match(provGap.gapId, /^GAP-[0-9]{4}$/);
+  assert.ok(provGap.witness.length > 0);
+  assert.equal(provGap.requiredAuthority, 'USER_INTENT');
+
+  log('  PASS: TEST-38 BLOCKED_BY_GAP emits compliant Gap Ledger across all 4 layers');
+}
+
+// TEST-39: CERTIFIED_CLOSED specification must have empty gapLedger
+{
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: {
+      entities: [{
+        name: 'Badge',
+        description: 'Conta individual',
+        isCollection: true,
+        admissionPolicy: 'ON_FIRST_REQUEST',
+        capacityPolicy: { maxEntries: 100, overflowPolicy: 'REJECT_NEW', provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-LOCAL' }] },
+        fields: [{
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE', provenance: [{ source: 'USER_INTENT', reference: 'FACT-001' }] },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100', rationale: 'Config' },
+          mutations: [{ operation: 'evaluateRequest', condition: 'ALLOW', effect: 'DECREMENT', targetValue: null }],
+          reset: { allowed: false, trigger: null, resetValue: null },
+          preservation: ['*'],
+          readBy: ['evaluateRequest', 'observabilityBitmask'],
+        }],
+      }],
+      operations: [{
+        name: 'evaluateRequest',
+        guardPrecedence: ['GUARD_BALANCE'],
+        branches: [
+          { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+          { branchId: 'GUARD_BALANCE', outcomeKind: 'REJECTION', statusOrError: 'ERR_INSUFFICIENT_CREDITS', defaultPreservation: true },
+        ],
+      }],
+      observables: [{
+        name: 'observabilityBitmask',
+        derivedFrom: ['Badge.tokens'],
+        representation: 'UINT32_BITMASK',
+        emptyBehavior: '0',
+        bitAllocation: [{ slice: '0..7', field: 'Badge.tokens', bitWidth: 8, mapping: 'IDENTITY' }],
+      }],
+      aggregations: [],
+      producerConsumerBoundaries: [],
+    },
+    boundaryRules: [{
+      id: 'BOUND-0001',
+      subject: 'Badge.tokens',
+      lowerBound: '0',
+      upperBound: '100',
+      overflowBehavior: 'SATURATE',
+      underflowBehavior: 'SATURATE',
+      representationKind: 'BOUNDED_INTEGER',
+    }],
+    literalFacts: [
+      { id: 'FACT-001', kind: 'NUMBER_LITERAL', attributes: { value: 100 } },
+      { id: 'FACT-002', kind: 'BIT_RANGE', attributes: { slice: '0..7', bitWidth: 8 } },
+    ],
+    requirements: [{
+      id: 'REQ-0001',
+      statement: 'Controle de saldo',
+      basis: [{ source: 'USER_INTENT', reference: 'demanda' }],
+      acceptanceCases: [{
+        id: 'AC-0001-01',
+        kind: 'HAPPY_PATH',
+        outcomeKind: 'RETURN_VALUE',
+        given: 'Um saldo válido',
+        when: 'Requisitar',
+        then: 'Autoriza',
+        decisionBinding: null,
+      }],
+    }],
+  });
+  fixture.policy = { rules: [{ id: 'ARCH-LOCAL' }] };
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.gapLedger.length, 0, 'TEST-39: closed contract gapLedger must be empty');
+  assert.equal(Array.isArray(cert.gapLedger), true);
+  log('  PASS: TEST-39 CERTIFIED_CLOSED contract emits empty gapLedger');
+}
+
+// TEST-40: getEffectiveGapLedger utility returns compliant Gap Ledger
+{
+  const fixture = createFixture({ isStateful: true, stateModel: null });
+  const gaps = getEffectiveGapLedger(fixture);
+  assert.ok(gaps.length > 0, 'TEST-40: getEffectiveGapLedger must return gaps');
+  assert.equal(effectiveDeterminismStatus.lastGapLedger.length, gaps.length);
+  for (const gap of gaps) {
+    assert.match(gap.gapId, /^GAP-[0-9]{4}$/);
+    assert.ok(['TRANSITION_CONSISTENCY', 'OBSERVABLE_DEPENDENCY_CLOSURE', 'AUTHORITY_PROVENANCE', 'COVERAGE_ACCOUNTING'].includes(gap.layer));
+    assert.ok(gap.witness && gap.witness.length > 0);
+    assert.ok(['USER_INTENT', 'ARCHITECTURE_POLICY', 'USER_DECISION'].includes(gap.requiredAuthority));
+  }
+  log('  PASS: TEST-40 getEffectiveGapLedger returns compliant Gap Ledger');
+}
+
+log('[CTDD TEST] All 40 Field Lifecycle, Closure Certificate & Gap Ledger traps passed successfully!');
 

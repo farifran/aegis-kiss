@@ -17,7 +17,7 @@
     "aegis:test:governance-schemas": "bash scripts/substrates/test/test_governance_schemas.sh",
     "aegis:test:field-lifecycle": "node scripts/substrates/test/test_field_lifecycle.mjs",
     "aegis:test:issue-contract": "bash scripts/substrates/test/test_issue_contract.sh",
-    "aegis:test": "npm run aegis:check-generated-schemas && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:issue-contract"
+    "aegis:test": "npm run aegis:check-generated-schemas && node scripts/substrates/test/test_semantic_output.mjs && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:issue-contract"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",
