@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import process from 'node:process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath, URL } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { loadSemanticConstitution } from '../../lib/semantic_request.mjs';
 import { buildSemanticOutputSchema, omitOptionalNulls, shareSchemaDefinitions } from '../../lib/semantic_output_schema.mjs';
+
+// The human and runtime constitutions must carry exactly the same rules.
+const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const constitution = loadSemanticConstitution(repositoryRoot);
+const constitutionText = readFileSync(new URL('../../../AGENTS.md', import.meta.url), 'utf8');
+const sections = constitutionText.trim().split(/^## /mu).slice(1);
+assert.equal(sections.length, constitution.rules.length);
+for (const [index, rule] of constitution.rules.entries()) {
+  const [heading, ...body] = sections[index].split('\n');
+  assert.ok(heading.endsWith(`(${rule.id})`));
+  assert.equal(body.join('\n').trim(), rule.statement);
+}
 
 function expand(value, root) {
   if (Array.isArray(value)) return value.map((item) => expand(item, root));
