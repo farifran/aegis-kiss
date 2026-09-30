@@ -48,7 +48,7 @@
             "minimum": 0
           },
           "value": {
-            "$ref": "aegis.semantic_draft.v8#/properties/invariants/items"
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
           }
         }
       }
@@ -69,7 +69,7 @@
             "minimum": 0
           },
           "value": {
-            "$ref": "aegis.semantic_draft.v8#/properties/risks/items"
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
           }
         }
       }
@@ -111,7 +111,7 @@
             "minimum": 0
           },
           "value": {
-            "$ref": "aegis.semantic_draft.v8#/properties/determinismReview/properties/dimensions/items"
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
           }
         }
       }

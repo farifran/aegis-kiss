@@ -20,12 +20,12 @@
     "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "constitutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "intent": { "type": "string", "minLength": 1 },
-    "observedPaths": { "$ref": "aegis.issue_contract.v13#/properties/observedPaths" },
+    "observedPaths": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_observedPaths" },
     "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
-    "policySignals": { "$ref": "aegis.issue_contract.v13#/properties/policySignals" },
+    "policySignals": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_policySignals" },
     "specification": { "$ref": "aegis.semantic_draft.v9" },
-    "effectiveDeterminismStatus": { "$ref": "aegis.issue_contract.v13#/properties/effectiveDeterminismStatus" },
-    "humanResolutions": { "$ref": "aegis.issue_contract.v13#/properties/humanResolutions" },
-    "approval": { "$ref": "aegis.issue_contract.v13#/properties/approval" }
+    "effectiveDeterminismStatus": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_effectiveDeterminismStatus" },
+    "humanResolutions": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_humanResolutions" },
+    "approval": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_approval" }
   }
 }

@@ -1,182 +1,22 @@
-
 /**
- * Validador Mecânico de Cobertura de Inventário Semântico (validateSemanticInventoryCoverage).
- * 
- * Executado ANTES de validateFieldLifecycle:
- * Impede que entidades, campos, observáveis ou fatias de fronteira semanticamente necessários
- * sejam simplesmente omitidos do IR pelo gerador (evitando falsos positivos de fechamento).
+ * Checks inventory obligations activated explicitly by semantic context tags.
+ * It does not infer applicability from names, prose or unclassified literal facts.
  */
-export function validateSemanticInventoryCoverage({
-  stateModel = null,
-  architectureContexts = [],
-  boundaryRules = [],
-  literalFacts = [],
-  requirements = [],
-} = {}) {
+export function validateSemanticInventoryCoverage({ stateModel = null, architectureContexts = [] } = {}) {
   const issues = [];
-  const tags = new Set(architectureContexts.map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
-
-  const entities = Array.isArray(stateModel?.entities) ? stateModel.entities : [];
-  const operations = Array.isArray(stateModel?.operations) ? stateModel.operations : [];
-  const observables = Array.isArray(stateModel?.observables) ? stateModel.observables : [];
-  const serializations = Array.isArray(stateModel?.canonicalSerializations) ? stateModel.canonicalSerializations : [];
-
-  const allFieldKeys = new Set();
-  const allFieldNames = new Set();
-  for (const entity of entities) {
-    for (const field of (entity.fields ?? [])) {
-      allFieldKeys.add(`${entity.name}.${field.name}`);
-      allFieldNames.add(field.name);
+  const tags = new Set(architectureContexts.map(ctx => typeof ctx === 'string' ? ctx : ctx.tag));
+  const obligations = [
+    ['stateful-operation', 'entities', 'MISSING_STATEFUL_ENTITY_INVENTORY'],
+    ['bounded-observability', 'observables', 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY'],
+    ['integrity-hash', 'canonicalSerializations', 'MISSING_CANONICAL_SERIALIZATION_INVENTORY'],
+  ];
+  for (const [tag, collection, kind] of obligations) {
+    if (tags.has(tag) && !(stateModel?.[collection]?.length > 0)) {
+      issues.push({ slotId: `inventory/${collection}`, kind,
+        reason: `O contexto declarado '${tag}' exige entradas em '${collection}'.` });
     }
   }
-
-  const allAllocatedSlices = [];
-  for (const obs of observables) {
-    if (Array.isArray(obs.bitAllocation)) {
-      for (const alloc of obs.bitAllocation) {
-        if (typeof alloc.slice === 'string') {
-          const match = alloc.slice.match(/^(\d+)(?:\.\.(\d+))?$/u);
-          if (match) {
-            const start = parseInt(match[1], 10);
-            const end = match[2] ? parseInt(match[2], 10) : start;
-            allAllocatedSlices.push({
-              sliceStr: alloc.slice,
-              start,
-              end,
-              field: alloc.field,
-              mapping: alloc.mapping,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // 1. Contextos Mandatórios
-  if (tags.has('stateful-operation') && entities.length === 0) {
-    issues.push({
-      slotId: 'inventory/entities',
-      kind: 'MISSING_STATEFUL_ENTITY_INVENTORY',
-      reason: 'O contexto arquitetural stateful-operation exige ao menos uma entidade de estado no inventário.',
-    });
-  }
-
-  if (tags.has('time-dependent')) {
-    const hasTemporalField = Array.from(allFieldNames).some((name) => (
-      /time|timestamp|clock/iu.test(name)
-    ));
-    if (!hasTemporalField) {
-      issues.push({
-        slotId: 'inventory/fields/temporal',
-        kind: 'MISSING_TEMPORAL_FIELD_INVENTORY',
-        reason: 'O contexto arquitetural time-dependent exige ao menos um campo temporal (ex: timestamp) nas entidades de estado.',
-      });
-    }
-
-    const hasTemporalGuard = operations.some((op) => (
-      (op.guardPrecedence ?? []).some((g) => /time.*regression|monotonic|clock/iu.test(g))
-      || (op.branches ?? []).some((b) => /time.*regression|clock/iu.test(b.branchId) || /time.*regression|clock/iu.test(b.statusOrError ?? ''))
-    ));
-    if (!hasTemporalGuard) {
-      issues.push({
-        slotId: 'inventory/operations/temporal_guard',
-        kind: 'MISSING_TEMPORAL_GUARD_INVENTORY',
-        reason: 'O contexto arquitetural time-dependent exige ao menos uma operação com verificação ou guard contra regressão de relógio.',
-      });
-    }
-  }
-
-  if (tags.has('bounded-observability')) {
-    const hasBitmask = observables.some((obs) => obs.representation === 'UINT32_BITMASK' || (obs.bitAllocation?.length ?? 0) > 0);
-    if (!hasBitmask) {
-      issues.push({
-        slotId: 'inventory/observables/bitmask',
-        kind: 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY',
-        reason: 'O contexto arquitetural bounded-observability exige observable com representação de bitmask finita (UINT32_BITMASK).',
-      });
-    }
-  }
-
-  if (tags.has('integrity-hash')) {
-    if (serializations.length === 0) {
-      issues.push({
-        slotId: 'inventory/canonicalSerializations',
-        kind: 'MISSING_CANONICAL_SERIALIZATION_INVENTORY',
-        reason: 'O contexto arquitetural integrity-hash exige ao menos uma especificação em canonicalSerializations.',
-      });
-    }
-  }
-
-  // 2. Fatos Literais de Bits (BIT_RANGE)
-  const bitRangeFacts = (literalFacts ?? []).filter((f) => f.kind === 'BIT_RANGE' && f.attributes?.start !== undefined);
-  if (bitRangeFacts.length > 0) {
-    const bitmaskObs = observables.find((obs) => obs.representation === 'UINT32_BITMASK');
-    if (!bitmaskObs || !Array.isArray(bitmaskObs.bitAllocation) || bitmaskObs.bitAllocation.length === 0) {
-      issues.push({
-        slotId: 'inventory/observables/bitmask_allocation',
-        kind: 'MISSING_BITMASK_INVENTORY',
-        reason: 'A demanda contém fatos literais definindo fatias de bits, mas nenhum observable UINT32_BITMASK com bitAllocation foi fornecido.',
-      });
-    } else {
-      for (const fact of bitRangeFacts) {
-        const fStart = fact.attributes.start;
-        const fEnd = fact.attributes.end !== undefined ? fact.attributes.end : fStart;
-        const isCovered = allAllocatedSlices.some((slice) => (
-          slice.start <= fStart && slice.end >= fEnd
-        ));
-        if (!isCovered) {
-          issues.push({
-            slotId: `inventory/bitmask/slice/${fStart}..${fEnd}`,
-            kind: 'UNMAPPED_LITERAL_BIT_RANGE',
-            reason: `O fato literal '${fact.reference}' define intervalo de bits [${fStart}..${fEnd}], mas nenhuma fatia correspondente foi mapeada em bitAllocation.`,
-          });
-        }
-      }
-    }
-  }
-
-  // 3. Cobertura de Boundary Rules
-  for (const rule of (boundaryRules ?? [])) {
-    const subject = rule.subject ?? '';
-    const matchesField = Array.from(allFieldKeys).some((key) => subject.includes(key))
-      || Array.from(allFieldNames).some((name) => subject.includes(name));
-    const matchesObservable = observables.some((obs) => subject.includes(obs.name))
-      || allAllocatedSlices.some((slice) => (
-        subject.includes(slice.sliceStr)
-        || (slice.mapping && subject.includes(slice.mapping))
-        || new RegExp(`(?:bits?\\s+)?${slice.start}\\s*(?:a|\\.\\.|-|to)\\s*${slice.end}\\b`, 'iu').test(subject)
-      ));
-
-    if (!matchesField && !matchesObservable) {
-      issues.push({
-        slotId: `inventory/boundary/${rule.id}`,
-        kind: 'UNMAPPED_BOUNDARY_RULE',
-        reason: `A regra de fronteira '${rule.id}' (${subject}) não possui entidade, campo de estado ou fatia de observable mapeada no inventário semântico.`,
-      });
-    }
-  }
-
-  // 4. Cobertura de Requisitos com Subject explícito
-  for (const req of (requirements ?? [])) {
-    if (req.subject && typeof req.subject === 'string') {
-      const subject = req.subject;
-      const matchesField = Array.from(allFieldKeys).some((key) => subject.includes(key))
-        || Array.from(allFieldNames).some((name) => subject.includes(name));
-      const matchesObservable = observables.some((obs) => subject.includes(obs.name));
-      if (!matchesField && !matchesObservable) {
-        issues.push({
-          slotId: `inventory/requirement/${req.id}`,
-          kind: 'UNMAPPED_REQUIREMENT_SUBJECT',
-          reason: `O requisito '${req.id}' referencia o subject '${subject}', ausente nas entidades ou observáveis do inventário semântico.`,
-        });
-      }
-    }
-  }
-
-  return {
-    valid: issues.length === 0,
-    issues,
-  };
+  return { valid: issues.length === 0, issues };
 }
 
 /**
@@ -319,17 +159,6 @@ export function validateFieldLifecycle({
         });
       }
 
-      // 2. RESET: Contadores de janela/streak exigem reset; se allowed === true, exige trigger e resetValue
-      const isStreakOrWindow = (field.type === 'INTEGER' && field.name.toLocaleLowerCase().includes('streak'))
-        || field.name.toLocaleLowerCase().includes('batch');
-      if (isStreakOrWindow && field.reset?.allowed === false) {
-        issues.push({
-          slotId: `state/${fieldKey}/reset`,
-          kind: 'UNRESOLVED_RESET',
-          reason: `O campo de contagem de janela/streak '${fieldKey}' não pode ser monotônico perpétuo; requer gatilho e valor de reset determinísticos.`,
-        });
-      }
-
       if (field.reset?.allowed === true) {
         if (!field.reset.trigger
           || field.reset.resetValue === undefined
@@ -397,22 +226,34 @@ export function validateFieldLifecycle({
           reason: `A entidade de coleção dinâmica '${entity.name}' não define admissionPolicy (ex: ON_FIRST_REQUEST, PRE_REGISTERED).`,
         });
       }
-      if (!entity.capacityPolicy
+      const noContractLimit = entity.capacityPolicy?.overflowPolicy === 'NO_CONTRACT_LIMIT'
+        && entity.capacityPolicy.maxEntries === null
+        && typeof entity.capacityPolicy.unboundedRationale === 'string'
+        && entity.capacityPolicy.unboundedRationale.trim().length > 0;
+      if (!noContractLimit && (!entity.capacityPolicy
         || entity.capacityPolicy.maxEntries === undefined
         || entity.capacityPolicy.maxEntries === null
-        || !entity.capacityPolicy.overflowPolicy) {
+        || !entity.capacityPolicy.overflowPolicy
+        || entity.capacityPolicy.overflowPolicy === 'NO_CONTRACT_LIMIT')) {
         issues.push({
           slotId: `entity/${entity.name}/capacityPolicy`,
           kind: 'UNRESOLVED_COLLECTION_CAPACITY',
-          reason: `A entidade de coleção dinâmica '${entity.name}' não define capacityPolicy com maxEntries e overflowPolicy determinísticos.`,
+          reason: `A coleção '${entity.name}' precisa de capacidade e overflow explícitos ou ausência justificada de limite contratual.`,
         });
       }
     }
   }
 
-  // 7. GUARD PRECEDENCE: Toda operação deve declarar ordem linear de guards
+  // 7. Empty guards require explicit justification, never an inferred exemption.
   for (const op of operations) {
-    if (!Array.isArray(op.guardPrecedence) || op.guardPrecedence.length === 0) {
+    const noGuards = Array.isArray(op.guardPrecedence) && op.guardPrecedence.length === 0
+      && typeof op.noGuardsRationale === 'string' && op.noGuardsRationale.trim().length > 0
+      && Array.isArray(op.branches) && op.branches.length > 0
+      && !op.branches.some((branch) => branch.outcomeKind === 'REJECTION');
+    const contradictoryExemption = typeof op.noGuardsRationale === 'string'
+      && op.noGuardsRationale.trim().length > 0 && !noGuards;
+    if (contradictoryExemption || !Array.isArray(op.guardPrecedence)
+      || (op.guardPrecedence.length === 0 && !noGuards)) {
       issues.push({
         slotId: `operation/${op.name}/guardPrecedence`,
         kind: 'UNRESOLVED_GUARD_PRECEDENCE',
@@ -585,7 +426,6 @@ export function validateFieldLifecycle({
  * 
  * Verifica que cada operação:
  * 1. Cada guarda em guardPrecedence possui branch de rejeição correspondente (se branches definidos).
- * 2. Branches de rejeição de guarda não executam mutações de estado indevidas em saldo/tempo.
  * 3. Cada branch cobre todos os campos de entidade (via stateEffects explícito ou defaultPreservation: true).
  * 4. Existe ao menos um branch de execução bem-sucedida (não-rejeição).
  */
@@ -613,20 +453,18 @@ export function validateOperationTotality({
 
   for (const op of stateModel.operations) {
     const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+    const branchIds = (op.branches ?? []).map(branch => branch.branchId);
+    if (new Set(branchIds).size !== branchIds.length
+      || new Set(guardPrecedence).size !== guardPrecedence.length) {
+      issues.push({ slotId: `operation/${op.name}/identities`, kind: 'CONFLICTING_STATE_DECLARATIONS',
+        reason: `A operação '${op.name}' repete identificadores de branches ou guardas.` });
+    }
 
     if (Array.isArray(op.branches) && op.branches.length > 0) {
       // 1. Cada guarda em guardPrecedence deve ter branch de rejeição correspondente
       for (const guard of guardPrecedence) {
-        const guardNorm = guard.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const hasRejectionBranch = op.branches.some((branch) => {
-          if (branch.outcomeKind !== 'REJECTION') return false;
-          const branchIdNorm = (branch.branchId ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          const statusNorm = (branch.statusOrError ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          const condNorm = (branch.condition ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          return branchIdNorm.includes(guardNorm)
-            || statusNorm.includes(guardNorm)
-            || condNorm.includes(guardNorm);
-        });
+        const hasRejectionBranch = op.branches.some(branch =>
+          branch.outcomeKind === 'REJECTION' && branch.branchId === guard);
 
         if (!hasRejectionBranch) {
           issues.push({
@@ -637,28 +475,17 @@ export function validateOperationTotality({
         }
       }
 
-      // 2. Curto-circuito: branches de rejeição de guarda não podem ter efeitos colaterais indevidos
-      for (const branch of op.branches) {
-        if (branch.outcomeKind === 'REJECTION') {
-          const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
-          for (const eff of effects) {
-            const isBalanceOrTime = eff.field.toLowerCase().includes('token')
-              || eff.field.toLowerCase().includes('balance')
-              || eff.field.toLowerCase().includes('credit')
-              || eff.field.toLowerCase().includes('timestamp');
-            if (isBalanceOrTime && (eff.effect === 'DECREMENT' || eff.effect === 'SET' || eff.effect === 'MUTATE_COLLECTION')) {
-              issues.push({
-                slotId: `operation/${op.name}/branch/${branch.branchId}/sideEffect/${eff.field}`,
-                kind: 'GUARD_REJECTION_SIDE_EFFECT',
-                reason: `O branch de rejeição '${branch.branchId}' da operação '${op.name}' executa mutação indevida no campo '${eff.field}'. Rejeições de guarda devem curto-circuitar sem efeitos colaterais em saldo/tempo.`,
-              });
-            }
-          }
-        }
-      }
-
       // 3. Totality de next-state por branch
       for (const branch of op.branches) {
+        const explicitFields = new Set();
+        for (const effect of branch.stateEffects ?? []) {
+          if (!allEntityFields.has(effect.field) || explicitFields.has(effect.field)) {
+            issues.push({ slotId: `operation/${op.name}/branch/${branch.branchId}/effect/${effect.field}`,
+              kind: 'CONFLICTING_STATE_DECLARATIONS',
+              reason: `O efeito referencia campo inexistente ou repetido: '${effect.field}'.` });
+          }
+          explicitFields.add(effect.field);
+        }
         if (branch.defaultPreservation !== true) {
           const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
           const coveredFields = new Set(effects.map((e) => e.field));
@@ -683,262 +510,6 @@ export function validateOperationTotality({
           kind: 'MISSING_SUCCESS_BRANCH',
           reason: `A operação '${op.name}' define apenas branches de rejeição, sem nenhum branch de avanço normal de fluxo ou sucesso.`,
         });
-      }
-    }
-  }
-
-  return {
-    valid: issues.length === 0,
-    issues,
-  };
-}
-
-/**
- * Testes de Mutação Semântica (Two Conforming Interpretations Gate).
- * 
- * Testa o contrato contra interpretações concorrentes plausíveis:
- * 1. ZERO vs CAPACITY: Campo de saldo/créditos sem valor explícito de inicialização.
- * 2. TRAILING vs MAXIMUM: Contador de recusas/erros sem gatilho determinístico de reset.
- * 3. FREEZE vs ACCRUE: Interação temporal entre reposição e quarentena/trava sem precedência ou com efeitos colaterais.
- */
-export function runSemanticMutationTests({
-  stateModel = null,
-  specification = null,
-} = {}) {
-  const divergences = [];
-
-  if (!stateModel || !Array.isArray(stateModel.entities)) {
-    return {
-      passed: true,
-      divergences: [],
-    };
-  }
-
-  // 1. MUTATION_ZERO_VS_CAPACITY
-  for (const entity of stateModel.entities) {
-    for (const field of entity.fields ?? []) {
-      const fieldKey = `${entity.name}.${field.name}`;
-      const isBalanceOrTokens = field.name.toLowerCase().includes('token')
-        || field.name.toLowerCase().includes('balance')
-        || field.name.toLowerCase().includes('credit')
-        || field.name.toLowerCase().includes('quota');
-
-      if (isBalanceOrTokens) {
-        if (!field.initialization
-          || field.initialization.kind === 'UNRESOLVED'
-          || field.initialization.value === null
-          || field.initialization.value === undefined) {
-          divergences.push({
-            mutationId: 'MUTATION_ZERO_VS_CAPACITY',
-            slotId: `state/${fieldKey}/init`,
-            interpretationA: 'ZERO: Crachá inicia com saldo zerado (0 créditos/tokens), exigindo recarga prévia.',
-            interpretationB: 'CAPACITY: Crachá inicia com saldo cheio (capacidade máxima de créditos/tokens), disponível imediatamente.',
-            divergenceReason: `O campo '${fieldKey}' não possui valor de inicialização determinado, autorizando duas interpretações conformes divergentes.`,
-          });
-        }
-      }
-    }
-  }
-
-  // 2. MUTATION_TRAILING_VS_MAXIMUM
-  for (const entity of stateModel.entities) {
-    for (const field of entity.fields ?? []) {
-      const fieldKey = `${entity.name}.${field.name}`;
-      const isStreakOrRejection = field.isCounter === true
-        && (field.name.toLowerCase().includes('streak')
-          || field.name.toLowerCase().includes('reject')
-          || field.name.toLowerCase().includes('failure')
-          || field.name.toLowerCase().includes('error'));
-
-      if (isStreakOrRejection) {
-        if (field.reset?.allowed !== true
-          || !field.reset?.trigger
-          || field.reset?.resetValue === null
-          || field.reset?.resetValue === undefined) {
-          divergences.push({
-            mutationId: 'MUTATION_TRAILING_VS_MAXIMUM',
-            slotId: `state/${fieldKey}/reset`,
-            interpretationA: 'TRAILING: Contador representa recusas consecutivas imediatas e reseta para zero na próxima autorização com sucesso.',
-            interpretationB: 'MAXIMUM: Contador acumula o pico histórico total de recusas sem resetar em sucessos subsequentes.',
-            divergenceReason: `O campo de streak '${fieldKey}' não define reset permitido com gatilho e valor explícitos, permitindo interpretação de streak consecutivo vs acumulador vitalício.`,
-          });
-        }
-      }
-    }
-  }
-
-  // 3. MUTATION_FREEZE_VS_ACCRUE
-  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
-  for (const op of operations) {
-    const guards = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
-    const hasQuarantineOrLock = guards.some((g) => g.toLowerCase().includes('quarantine') || g.toLowerCase().includes('lock'));
-    const hasRefill = guards.some((g) => g.toLowerCase().includes('refill') || g.toLowerCase().includes('time'));
-
-    if (hasQuarantineOrLock && hasRefill) {
-      const quarantineIdx = guards.findIndex((g) => g.toLowerCase().includes('quarantine') || g.toLowerCase().includes('lock'));
-      const refillIdx = guards.findIndex((g) => g.toLowerCase().includes('refill') || g.toLowerCase().includes('time'));
-
-      if (Array.isArray(op.branches)) {
-        const quarantineBranch = op.branches.find((b) => (
-          b.outcomeKind === 'REJECTION' && (b.branchId?.toLowerCase().includes('quarantine') || b.statusOrError?.toLowerCase().includes('quarantine'))
-        ));
-
-        if (quarantineBranch) {
-          const effects = Array.isArray(quarantineBranch.stateEffects) ? quarantineBranch.stateEffects : [];
-          const touchesRefill = effects.some((e) => e.field.toLowerCase().includes('token') || e.field.toLowerCase().includes('timestamp'));
-          if (touchesRefill && quarantineIdx < refillIdx) {
-            divergences.push({
-              mutationId: 'MUTATION_FREEZE_VS_ACCRUE',
-              slotId: `operation/${op.name}/branch/${quarantineBranch.branchId}/temporalOrder`,
-              interpretationA: 'FREEZE: Quarentena curto-circuita antes do refill; o tempo em quarentena não gera créditos.',
-              interpretationB: 'ACCRUE: O branch de quarentena muta estado temporal/créditos, acumulando créditos mesmo sob quarentena ativa.',
-              divergenceReason: `A guarda de quarentena precede o refill na precedência, mas o branch de quarentena muta saldo ou carimbo temporal.`,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // 4. MUTATION_REMAINDER_LEAK
-  if (specification && Array.isArray(specification.determinismReview?.dimensions)) {
-    const hasTemporalRemainder = stateModel.entities.some((entity) => (
-      (entity.fields ?? []).some((f) => f.name.toLowerCase().includes('remainder'))
-    ));
-    if (hasTemporalRemainder) {
-      const remainderDim = specification.determinismReview.dimensions.find((d) => (
-        d.kind === 'REMAINDER_DISTRIBUTION' || d.kind === 'ROUNDING'
-      ));
-      if (!remainderDim || remainderDim.status !== 'SPECIFIED') {
-        divergences.push({
-          mutationId: 'MUTATION_REMAINDER_LEAK',
-          slotId: 'determinism/REMAINDER_DISTRIBUTION/temporalRemainder',
-          interpretationA: 'TRUNCATE: Descarta frações temporais residuais em cada avaliação, causando perda cumulativa de créditos sob alta frequência.',
-          interpretationB: 'CONSERVE: Conserva resíduos temporais fracionários no acumulador para o próximo tick sob ARCH-TEMPORAL-INVARIANCE.',
-          divergenceReason: 'A dimensão REMAINDER_DISTRIBUTION não está SPECIFIED para o campo de resíduo temporal fracionário.',
-        });
-      }
-    }
-  }
-
-  // 5. MUTATION_OVERFLOW_EQUIVOCATION
-  for (const entity of stateModel.entities) {
-    for (const field of entity.fields ?? []) {
-      const fieldKey = `${entity.name}.${field.name}`;
-      if (field.type === 'INTEGER' || field.isCounter === true) {
-        if (!field.bounds?.boundaryBehavior) {
-          divergences.push({
-            mutationId: 'MUTATION_OVERFLOW_EQUIVOCATION',
-            slotId: `state/${fieldKey}/boundaryBehavior`,
-            interpretationA: 'SATURATE: Campo satura no valor máximo sem estourar nem gerar exceção.',
-            interpretationB: 'ROLLOVER_MODULO: Campo sofre wrap aritmético silencioso ou lança exceção em tempo de execução.',
-            divergenceReason: `O campo numérico '${fieldKey}' não define boundaryBehavior explícito em bounds.`,
-          });
-        }
-      }
-    }
-  }
-
-  // 6. MUTATION_DIGEST_ENCODING_EQUIVOCATION
-  const serializations = Array.isArray(stateModel.canonicalSerializations) ? stateModel.canonicalSerializations : [];
-  for (const cs of serializations) {
-    const included = Array.isArray(cs.includedFields) ? cs.includedFields : [];
-    const encodings = Array.isArray(cs.fieldEncodings) ? cs.fieldEncodings : [];
-    const encodedMap = new Set(encodings.map((e) => e.field));
-    for (const field of included) {
-      if (!encodedMap.has(field)) {
-        divergences.push({
-          mutationId: 'MUTATION_DIGEST_ENCODING_EQUIVOCATION',
-          slotId: `canonicalSerialization/${cs.target}/encoding/${field}`,
-          interpretationA: 'BIG_ENDIAN_LENGTH_PREFIXED: Serialização uniforme com tamanho prefixado e inteiros em Big Endian.',
-          interpretationB: 'RAW_STRING_OR_LITTLE_ENDIAN: Serialização em formato nativo de plataforma ou Little Endian.',
-          divergenceReason: `O campo '${field}' na serialização '${cs.target}' não possui codificação binária/textual explícita.`,
-        });
-      }
-    }
-  }
-
-  return {
-    passed: divergences.length === 0,
-    divergences,
-  };
-}
-
-/**
- * Validador Mecânico de Consistência Cruzada (validateSemanticCrossConsistency).
- * 
- * Executa cross-check automático entre Requirement/AC ↔ Inventory ↔ Transition Table ↔ Observable Mapping:
- * 1. Mapeamento de Observáveis de Conjunto: Impede que fatias que representam contagens de conjunto
- *    (ex: crachás distintos em quarentena) sejam mapeadas para contadores locais de um único crachá (ex: insufficientStreak).
- * 2. Transições em Limiares de Regra: Se um requisito/AC exige transição de estado em limiar de streak
- *    (ex: 3 falhas consecutivas colocam em quarentena), impede que a matriz de transições declare
- *    PRESERVE incondicional na guarda sem tratar o evento de disparo.
- */
-export function validateSemanticCrossConsistency({
-  stateModel = null,
-  requirements = [],
-  literalFacts = [],
-} = {}) {
-  const issues = [];
-  if (!stateModel) return { valid: true, issues: [] };
-
-  const observables = Array.isArray(stateModel.observables) ? stateModel.observables : [];
-  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
-
-  // 1. Cross-check: Observable bit allocation vs Aggregation / Entity Field
-  for (const obs of observables) {
-    if (Array.isArray(obs.bitAllocation)) {
-      for (const item of obs.bitAllocation) {
-        const isDistinctCount = (typeof item.mapping === 'string' && /distinct|unique|diferentes|identidades/iu.test(item.mapping))
-          || (literalFacts.some((f) => f.kind === 'BIT_RANGE'
-            && (item.slice === `${f.attributes?.start}..${f.attributes?.end}` || item.slice === `${f.attributes?.start}`)
-            && /crachás diferentes|distintos/iu.test(f.reference)));
-
-        if (isDistinctCount) {
-          if (item.field.toLowerCase().includes('streak') || item.field.toLowerCase().includes('local')) {
-            issues.push({
-              slotId: `observable/${obs.name}/slice/${item.slice}/inconsistentMapping`,
-              kind: 'CROSS_INCONSISTENT_OBSERVABLE_MAPPING',
-              reason: `A fatia '${item.slice}' do observável '${obs.name}' representa contagem de conjunto/distintos, mas foi mapeada para o contador de entidade local '${item.field}'. Deve referenciar uma agregação de conjunto em aggregations.`,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // 2. Cross-check: Requisito de Limiar de Streak vs Matriz de Transições
-  const hasStreakTriggerRequirement = requirements.some((req) => (
-    /3\s*(?:foras|recusas|falhas)|quarentena/iu.test(req.statement)
-    || req.acceptanceCases?.some((ac) => /3\s*(?:foras|recusas|falhas)|terceira recusa/iu.test(`${ac.given} ${ac.then}`))
-  ));
-
-  if (hasStreakTriggerRequirement) {
-    for (const op of operations) {
-      if (Array.isArray(op.branches)) {
-        for (const branch of op.branches) {
-          if (branch.outcomeKind === 'REJECTION') {
-            const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
-            const streakEffect = effects.find((e) => /streak/iu.test(e.field) && e.effect === 'INCREMENT');
-            const quarantineEffect = effects.find((e) => /quarantin/iu.test(e.field));
-
-            if (streakEffect) {
-              if (quarantineEffect && quarantineEffect.effect === 'PRESERVE' && !branch.branchId.includes('THRESHOLD_NOT_MET') && !branch.condition?.includes('<')) {
-                const hasThresholdBranch = op.branches.some((b) => (
-                  b.branchId !== branch.branchId
-                  && /quarantine.*trigger|threshold|reaches_3|quarantine_active/iu.test(`${b.branchId} ${b.condition ?? ''}`)
-                ));
-                if (!hasThresholdBranch) {
-                  issues.push({
-                    slotId: `operation/${op.name}/branch/${branch.branchId}/unhandledStreakTrigger`,
-                    kind: 'CROSS_INCONSISTENT_TRANSITION_TRIGGER',
-                    reason: `O branch '${branch.branchId}' da operação '${op.name}' incrementa contador de recusas consecutivas mas preserva 'quarantined' incondicionalmente, sem tratar a transição de estado da 3ª recusa exigida no requisito.`,
-                  });
-                }
-              }
-            }
-          }
-        }
       }
     }
   }
@@ -1034,7 +605,6 @@ export function validateProvenanceEnforcement({
           const checkBound = (val, boundKind) => {
             if (val === null || val === undefined) return;
             const valStr = String(val);
-            if (valStr === 'capacity' || valStr === 'defaultCapacity' || valStr === '0') return;
 
             if (!provenance || !Array.isArray(provenance) || provenance.length === 0) {
               issues.push({
@@ -1079,12 +649,10 @@ export function validateProvenanceEnforcement({
  */
 export function validateAggregationAndBoundaries({
   stateModel = null,
-  architectureContexts = [],
 } = {}) {
   const issues = [];
   if (!stateModel) return { valid: true, issues: [] };
 
-  const tags = new Set(architectureContexts.map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
   const entities = Array.isArray(stateModel.entities) ? stateModel.entities : [];
   const collectionEntityNames = new Set(entities.filter((e) => e.isCollection).map((e) => e.name));
 
@@ -1132,17 +700,6 @@ export function validateAggregationAndBoundaries({
     }
   }
 
-  if (tags.has('bounded-observability')) {
-    const hasGlobalLockBoundary = boundaries.some((b) => /lock/iu.test(b.signalName));
-    if (!hasGlobalLockBoundary) {
-      issues.push({
-        slotId: 'stateModel/producerConsumerBoundaries/globalLock',
-        kind: 'MISSING_PRODUCER_CONSUMER_BOUNDARY',
-        reason: 'O sinal globalLock projetado no Bit 0 e utilizado em guard de trava geral exige declaração explícita de Producer/Consumer Boundary.',
-      });
-    }
-  }
-
   return {
     valid: issues.length === 0,
     issues,
@@ -1152,7 +709,7 @@ export function validateAggregationAndBoundaries({
 /**
  * Closure Certificate mecânico.
  * 
- * Compila a totalidade do contrato semântico em métricas estritas:
+ * Compila pendências declaradas e verificações estruturais; não prova correção semântica.
  * Qualquer valor > 0 proíbe SEMANTICALLY_CLOSED.
  */
 export function generateClosureCertificate({
@@ -1174,17 +731,6 @@ export function generateClosureCertificate({
   const stateLifecycle = validateFieldLifecycle({
     stateModel: specification.stateModel,
     architectureContexts: specification.architectureContexts ?? [],
-  });
-
-  const mutationResult = runSemanticMutationTests({
-    stateModel: specification.stateModel,
-    specification,
-  });
-
-  const crossConsistency = validateSemanticCrossConsistency({
-    stateModel: specification.stateModel,
-    requirements: specification.requirements ?? [],
-    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
   });
 
   const provenanceResult = validateProvenanceEnforcement({
@@ -1231,8 +777,8 @@ export function generateClosureCertificate({
     || i.kind === 'INVALID_BITMASK_ALLOCATION'
   ));
 
-  const sideEffectIssues = stateLifecycle.issues.filter((i) => (
-    i.kind === 'GUARD_REJECTION_SIDE_EFFECT'
+  const declarationConflicts = stateLifecycle.issues.filter((i) => (
+    i.kind === 'CONFLICTING_STATE_DECLARATIONS'
   ));
 
   // Gaps materiais sem decisão vinculada
@@ -1267,9 +813,7 @@ export function generateClosureCertificate({
   const unresolvedStateFields = stateFieldIssues.length;
   const unresolvedTransitions = transitionIssues.length;
   const unresolvedObservables = observableIssues.length;
-  const contradictoryRules = sideEffectIssues.length
-    + mutationResult.divergences.length
-    + crossConsistency.issues.length;
+  const contradictoryRules = declarationConflicts.length;
   const regressedSemanticDimensions = 0;
 
   const totalUnresolved = unresolvedInventorySlots
@@ -1282,18 +826,10 @@ export function generateClosureCertificate({
     + orphanHumanDecisions
     + regressedSemanticDimensions;
 
-  const mutationIssues = mutationResult.divergences.map((d) => ({
-    slotId: d.slotId,
-    kind: 'DIVERGENT_INTERPRETATION',
-    reason: `${d.mutationId}: ${d.divergenceReason}`,
-  }));
-
   const allIssues = [
     ...inventoryIssues,
     ...stateLifecycle.issues,
-    ...crossConsistency.issues,
     ...provenanceResult.issues,
-    ...mutationIssues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
     ...determinismGaps.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'DETERMINISM_GAP', reason: d.rationale })),
     ...pendingDecisions.map((q) => ({ slotId: `decision/${q.questionId}`, kind: 'PENDING_HUMAN_DECISION', reason: q.question })),
@@ -1311,12 +847,11 @@ export function generateClosureCertificate({
 
   const tags = new Set((specification.architectureContexts ?? []).map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
   const isStateful = tags.has('stateful-operation');
-  const isTimeDependent = tags.has('time-dependent');
   const isBoundedObs = tags.has('bounded-observability');
   const isIntegrityHash = tags.has('integrity-hash');
 
   const expectedEntitiesMin = isStateful ? 1 : 0;
-  const expectedFieldsMin = isStateful ? (isTimeDependent ? 2 : 1) : 0;
+  const expectedFieldsMin = isStateful ? 1 : 0;
   const expectedOperationsMin = isStateful ? 1 : 0;
   const expectedObservablesMin = isBoundedObs ? 1 : 0;
   const expectedSerializationsMin = isIntegrityHash ? 1 : 0;
@@ -1341,7 +876,8 @@ export function generateClosureCertificate({
     canonicalProfilesClosed: Math.max(0, stateSerializations.length - (tags.has('integrity-hash') && stateSerializations.length === 0 ? 1 : 0)),
     aggregationsClosed,
     boundariesClosed,
-    divergenceWitnessesSurviving: mutationResult.divergences.length,
+    // Count reported open dimensions; never pretend to have executed semantic mutations.
+    divergenceWitnessesSurviving: determinismGaps.length + determinismDecisions.length,
   };
 
   const gapLedger = allIssues.map((issue, idx) => classifyGapIssue(issue, idx));
@@ -1396,10 +932,10 @@ export function classifyGapIssue(issue, index) {
       requiredAuthority = 'USER_INTENT';
       witness = issue.reason || 'Operação sem ramo explícito de autorização/sucesso.';
       break;
-    case 'GUARD_REJECTION_SIDE_EFFECT':
+    case 'CONFLICTING_STATE_DECLARATIONS':
       layer = 'TRANSITION_CONSISTENCY';
-      requiredAuthority = 'ARCHITECTURE_POLICY';
-      witness = issue.reason || 'Ramo de rejeição causa mutação indevida de estado subsequente.';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason;
       break;
     case 'UNHANDLED_TRIGGER_TRANSITION':
       layer = 'TRANSITION_CONSISTENCY';
@@ -1492,8 +1028,6 @@ export function classifyGapIssue(issue, index) {
 
     // 4. COVERAGE_ACCOUNTING
     case 'MISSING_STATEFUL_ENTITY_INVENTORY':
-    case 'MISSING_TEMPORAL_FIELD_INVENTORY':
-    case 'MISSING_TEMPORAL_GUARD_INVENTORY':
     case 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY':
     case 'MISSING_AGGREGATION_MODEL':
     case 'MISSING_PRODUCER_CONSUMER_BOUNDARY_MODEL':

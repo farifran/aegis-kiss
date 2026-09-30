@@ -23,12 +23,12 @@
         "outputSchema": { "const": "STRICT_STRUCTURED_OUTPUT" }
       }
     },
-    "constitution": { "$ref": "aegis.semantic_request.v9#/properties/constitution" },
+    "constitution": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_constitution" },
     "intent": { "type": "string", "minLength": 1 },
     "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
-    "workspace": { "$ref": "aegis.semantic_request.v9#/properties/workspace" },
-    "policy": { "$ref": "aegis.semantic_request.v9#/properties/policy" },
-    "revision": { "$ref": "aegis.semantic_request.v9#/properties/revision" },
+    "workspace": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_workspace" },
+    "policy": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_policy" },
+    "revision": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_revision" },
     "outputSchema": {
       "type": "object",
       "additionalProperties": false,

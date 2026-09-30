@@ -10,13 +10,11 @@ export {
 } from './semantic_contract_lifecycle.mjs';
 export {
   generateClosureCertificate,
-  runSemanticMutationTests,
   validateAggregationAndBoundaries,
   validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,
   validateProvenanceEnforcement,
-  validateSemanticCrossConsistency,
   validateSemanticInventoryCoverage,
 } from './semantic_closure.mjs';
 export {
