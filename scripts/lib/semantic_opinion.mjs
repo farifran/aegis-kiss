@@ -5,7 +5,7 @@ import { generateClosureCertificate } from './semantic_closure.mjs';
 import { effectCollections, effectCollection, replacePreparedEntries } from './prepared_effects.mjs';
 import {
   closureAuthorityForDimension,
-  counterexampleForDimension,
+  compileCounterexampleWitness,
 } from './semantic_authority.mjs';
 
 function generatedId(prefix, index) {
@@ -43,11 +43,6 @@ function assertEvidenceCoverage(opinion, request) {
     }
     if (!literalQuoteFound) throw new Error(`semantic_opinion_claim_quote_outside_fragment:${index}`);
   }
-  for (const dimension of opinion.determinismReview.dimensions) {
-    if (dimension.activationId !== null) {
-      throw new Error(`semantic_opinion_mechanical_activation_forbidden:${dimension.activationId}`);
-    }
-  }
 }
 
 export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
@@ -70,14 +65,8 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
     }
   }
-  for (const dimension of opinion.determinismReview.dimensions) dimension.activationId ??= null;
   if (request.policy.amendments.length === 0) {
     for (const assessment of opinion.policyAssessments) assessment.amendmentIndex ??= null;
-  }
-  for (const decision of opinion.decisions) {
-    for (const answer of decision.answers) {
-      for (const { value } of answer.preparedEffect?.dimensions ?? []) value.activationId ??= null;
-    }
   }
   assertSchema('aegis.semantic_opinion.v3', opinion);
   assertEvidenceCoverage(opinion, request);
@@ -324,10 +313,10 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       })),
       dimensions: dimensions.map((item) => {
         const basis = compileOpinionBasis(item.basis, request);
-        const witness = counterexampleForDimension(item.kind);
         const subjectId = item.subject === null
           ? 'PUBLIC_CONTRACT'
           : compileTargets([item.subject])[0];
+        const witness = compileCounterexampleWitness(item.kind, subjectId, item.counterexampleWitness);
         return {
           kind: item.kind,
           subjectId,

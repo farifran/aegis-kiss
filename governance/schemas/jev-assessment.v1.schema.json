@@ -17,7 +17,7 @@
     "answers": {
       "type": "object",
       "minProperties": 1,
-      "maxProperties": 255,
+      "maxProperties": 510,
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

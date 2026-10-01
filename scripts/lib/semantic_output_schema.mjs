@@ -65,7 +65,7 @@ export function buildSemanticOutputSchema({ hasAmendments = false, shared = true
   const prepare = (value) => {
     if (value === null || typeof value !== 'object') return;
     if (value.properties !== undefined) {
-      for (const name of ['activationId', ...(!hasAmendments ? ['amendmentIndex'] : [])]) {
+      for (const name of (!hasAmendments ? ['amendmentIndex'] : [])) {
         delete value.properties[name];
       }
       const required = new Set(value.required ?? []);

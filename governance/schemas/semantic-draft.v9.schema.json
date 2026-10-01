@@ -125,7 +125,7 @@
                   "additionalProperties": false,
                   "required": ["kind", "subjectId"],
                   "properties": {
-                    "kind": { "enum": ["ORDERING", "CANONICALIZATION", "DUPLICATES", "EMPTY_INPUT", "ODD_CARDINALITY", "ROUNDING", "REMAINDER_DISTRIBUTION", "ZERO_DIVISOR", "TIE_BREAKING", "COUNTING_IDENTITY", "BOUNDED_ARITHMETIC"] },
+                    "kind": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,79}$" },
                     "subjectId": { "type": "string", "pattern": "^(PUBLIC_CONTRACT|REQ-[A-Z0-9][A-Z0-9-]+|BOUND-[A-Z0-9][A-Z0-9-]+)$" }
                   }
                 }
@@ -563,8 +563,8 @@
         "unresolvedDeterminismDimensions",
         "contradictoryRules",
         "orphanHumanDecisions",
-        "regressedSemanticDimensions",
-        "status"
+        "status",
+        "gapLedger"
       ],
       "properties": {
         "unresolvedInventorySlots": { "type": "integer", "minimum": 0 },
@@ -575,31 +575,7 @@
         "unresolvedDeterminismDimensions": { "type": "integer", "minimum": 0 },
         "contradictoryRules": { "type": "integer", "minimum": 0 },
         "orphanHumanDecisions": { "type": "integer", "minimum": 0 },
-        "regressedSemanticDimensions": { "type": "integer", "minimum": 0 },
         "status": { "enum": ["CERTIFIED_CLOSED", "BLOCKED_BY_UNRESOLVED_SLOTS"] },
-        "inventoryAudit": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "normativeClaimsCount": { "type": "integer", "minimum": 0 },
-            "expectedStateEntities": { "type": "integer", "minimum": 0 },
-            "materializedStateEntities": { "type": "integer", "minimum": 0 },
-            "expectedFields": { "type": "integer", "minimum": 0 },
-            "materializedFields": { "type": "integer", "minimum": 0 },
-            "closedFields": { "type": "integer", "minimum": 0 },
-            "expectedOperations": { "type": "integer", "minimum": 0 },
-            "materializedOperations": { "type": "integer", "minimum": 0 },
-            "totalizedOperations": { "type": "integer", "minimum": 0 },
-            "expectedObservables": { "type": "integer", "minimum": 0 },
-            "materializedObservables": { "type": "integer", "minimum": 0 },
-            "closedObservables": { "type": "integer", "minimum": 0 },
-            "canonicalProfilesRequired": { "type": "integer", "minimum": 0 },
-            "canonicalProfilesClosed": { "type": "integer", "minimum": 0 },
-            "aggregationsClosed": { "type": "integer", "minimum": 0 },
-            "boundariesClosed": { "type": "integer", "minimum": 0 },
-            "divergenceWitnessesSurviving": { "type": "integer", "minimum": 0 }
-          }
-        },
         "gapLedger": {
           "type": "array",
           "items": {
@@ -622,19 +598,6 @@
               },
               "slotId": { "type": "string" },
               "details": { "type": "string" }
-            }
-          }
-        },
-        "unresolvedSlots": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["slotId", "kind", "reason"],
-            "properties": {
-              "slotId": { "type": "string" },
-              "kind": { "type": "string" },
-              "reason": { "type": "string" }
             }
           }
         }

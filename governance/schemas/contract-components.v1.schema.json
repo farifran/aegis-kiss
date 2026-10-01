@@ -141,7 +141,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "activationId",
         "kind",
         "subject",
         "status",
@@ -150,35 +149,13 @@
         "basis",
         "acceptanceCase",
         "proofObligation",
-        "inapplicabilityProof"
+        "inapplicabilityProof",
+        "counterexampleWitness"
       ],
       "properties": {
-        "activationId": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string",
-              "pattern": "^DET-ACT-[0-9]{4}$"
-            }
-          ],
-          "description": "Identificador da ativação mecânica respondida. null é permitido somente para revisão adicional descoberta semanticamente pela IA."
-        },
         "kind": {
-          "enum": [
-            "ORDERING",
-            "CANONICALIZATION",
-            "DUPLICATES",
-            "EMPTY_INPUT",
-            "ODD_CARDINALITY",
-            "ROUNDING",
-            "REMAINDER_DISTRIBUTION",
-            "ZERO_DIVISOR",
-            "TIE_BREAKING",
-            "COUNTING_IDENTITY",
-            "BOUNDED_ARITHMETIC"
-          ]
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
         "subject": {
           "oneOf": [
@@ -242,6 +219,9 @@
               "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_inapplicabilityProof"
             }
           ]
+        },
+        "counterexampleWitness": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_counterexampleWitness"
         }
       }
     },
@@ -295,7 +275,7 @@
     "semantic_opinion_determinismProofObligation": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Resolução semântica do witness. O Harness acrescenta witnessId, valida se resolutionKind pertence à dimensão, se relation é compatível e se o AC contém exatamente os dois resultados. O campo then do AC deve ser: Base: <baselineOutcome>; Variação: <variationOutcome>; Resolução: <resolutionKind>. Quando houver parâmetro: Resolução: <resolutionKind> (<resolutionParameter>).",
+      "description": "Resolução proposta pela IA para a propriedade observável. O Harness vincula witnessId e confere referências e resultados literais no AC; pertinência da resolução e da relação é responsabilidade semântica, não uma prova mecânica. O campo then do AC deve ser: Base: <baselineOutcome>; Variação: <variationOutcome>; Resolução: <resolutionKind>. Quando houver parâmetro: Resolução: <resolutionKind> (<resolutionParameter>).",
       "required": [
         "relation",
         "resolutionKind",
@@ -313,38 +293,8 @@
           ]
         },
         "resolutionKind": {
-          "enum": [
-            "INPUT_ORDER_PRESERVED",
-            "CANONICAL_ORDER",
-            "PERMUTATION_INVARIANT",
-            "CANONICAL_REPRESENTATION",
-            "DUPLICATES_PRESERVED",
-            "DUPLICATES_MERGED",
-            "DUPLICATES_REJECTED",
-            "EMPTY_RETURNS_IDENTITY",
-            "EMPTY_REJECTED",
-            "ODD_DUPLICATE_LAST",
-            "ODD_PROMOTE_LAST",
-            "ODD_REJECTED",
-            "ROUND_TRUNCATE_TOWARD_ZERO",
-            "ROUND_FLOOR",
-            "ROUND_CEILING",
-            "ROUND_EXACT_ONLY",
-            "REMAINDER_RETAINED",
-            "REMAINDER_DISTRIBUTED_BY_RULE",
-            "REMAINDER_REJECTED",
-            "ZERO_DIVISOR_REJECTED",
-            "ZERO_DIVISOR_RETURNS_ZERO",
-            "ZERO_DIVISOR_RETURNS_SENTINEL",
-            "TIE_BREAK_BY_KEY",
-            "TIE_PRESERVE_INPUT_ORDER",
-            "COUNT_UNIQUE_IDENTITIES",
-            "COUNT_OCCURRENCES",
-            "OVERFLOW_REJECT",
-            "OVERFLOW_SATURATE",
-            "OVERFLOW_WRAP",
-            "OVERFLOW_MODULO"
-          ]
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
         "resolutionParameter": {
           "type": [
@@ -548,19 +498,8 @@
       ],
       "properties": {
         "kind": {
-          "enum": [
-            "ORDERING",
-            "CANONICALIZATION",
-            "DUPLICATES",
-            "EMPTY_INPUT",
-            "ODD_CARDINALITY",
-            "ROUNDING",
-            "REMAINDER_DISTRIBUTION",
-            "ZERO_DIVISOR",
-            "TIE_BREAKING",
-            "COUNTING_IDENTITY",
-            "BOUNDED_ARITHMETIC"
-          ]
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
         "subjectId": {
           "oneOf": [
@@ -662,38 +601,8 @@
           ]
         },
         "resolutionKind": {
-          "enum": [
-            "INPUT_ORDER_PRESERVED",
-            "CANONICAL_ORDER",
-            "PERMUTATION_INVARIANT",
-            "CANONICAL_REPRESENTATION",
-            "DUPLICATES_PRESERVED",
-            "DUPLICATES_MERGED",
-            "DUPLICATES_REJECTED",
-            "EMPTY_RETURNS_IDENTITY",
-            "EMPTY_REJECTED",
-            "ODD_DUPLICATE_LAST",
-            "ODD_PROMOTE_LAST",
-            "ODD_REJECTED",
-            "ROUND_TRUNCATE_TOWARD_ZERO",
-            "ROUND_FLOOR",
-            "ROUND_CEILING",
-            "ROUND_EXACT_ONLY",
-            "REMAINDER_RETAINED",
-            "REMAINDER_DISTRIBUTED_BY_RULE",
-            "REMAINDER_REJECTED",
-            "ZERO_DIVISOR_REJECTED",
-            "ZERO_DIVISOR_RETURNS_ZERO",
-            "ZERO_DIVISOR_RETURNS_SENTINEL",
-            "TIE_BREAK_BY_KEY",
-            "TIE_PRESERVE_INPUT_ORDER",
-            "COUNT_UNIQUE_IDENTITIES",
-            "COUNT_OCCURRENCES",
-            "OVERFLOW_REJECT",
-            "OVERFLOW_SATURATE",
-            "OVERFLOW_WRAP",
-            "OVERFLOW_MODULO"
-          ]
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
         "resolutionParameter": {
           "type": [
@@ -742,34 +651,13 @@
           "pattern": "^WITNESS-[A-Z0-9_-]+$"
         },
         "dimension": {
-          "enum": [
-            "ORDERING",
-            "CANONICALIZATION",
-            "DUPLICATES",
-            "EMPTY_INPUT",
-            "ODD_CARDINALITY",
-            "ROUNDING",
-            "REMAINDER_DISTRIBUTION",
-            "ZERO_DIVISOR",
-            "TIE_BREAKING",
-            "COUNTING_IDENTITY",
-            "BOUNDED_ARITHMETIC"
-          ]
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
         "inputClass": {
-          "enum": [
-            "PERMUTED_EQUIVALENT_INPUTS",
-            "EQUIVALENT_REPRESENTATIONS",
-            "DUPLICATED_ELEMENT",
-            "EMPTY_COLLECTION",
-            "THREE_ELEMENTS",
-            "NON_EXACT_DIVISION",
-            "MULTIPLE_RECIPIENTS_WITH_REMAINDER",
-            "ZERO_DENOMINATOR",
-            "EQUAL_PRIORITY_CANDIDATES",
-            "DUPLICATED_IDENTITY_OCCURRENCES",
-            "OUTSIDE_REPRESENTABLE_RANGE"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
         },
         "baseline": {
           "type": "string",
@@ -1673,19 +1561,8 @@
         ],
         "properties": {
           "kind": {
-            "enum": [
-              "ORDERING",
-              "CANONICALIZATION",
-              "DUPLICATES",
-              "EMPTY_INPUT",
-              "ODD_CARDINALITY",
-              "ROUNDING",
-              "REMAINDER_DISTRIBUTION",
-              "ZERO_DIVISOR",
-              "TIE_BREAKING",
-              "COUNTING_IDENTITY",
-              "BOUNDED_ARITHMETIC"
-            ]
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
           },
           "subjectId": {
             "oneOf": [
@@ -2322,12 +2199,11 @@
     },
     "semantic_opinion_determinismReview_properties_dimensions": {
       "type": "array",
-      "description": "Cada item declara uma dimensão e seu subject. Uma dimensão pode repetir-se para subjects diferentes. Toda ativação mecânica deve ser respondida exatamente uma vez pelo activationId correspondente. SPECIFIED exige regra única e obrigação de prova vinculada ao witness; NOT_APPLICABLE exige ausência estrutural autorizada; DECISION_REQUIRED exige uma única decisão sobre o mesmo subject, cobrindo literalmente os dois lados do witness e resolvendo a própria dimensão em cada alternativa; GAP_FOUND preserva lacuna sem alternativas maduras.",
+      "description": "Somente propriedades pertinentes aos observáveis da demanda, sem catálogo obrigatório. kind é identificador aberto; subject delimita o resultado afetado. A IA propõe cenário-base e variação, regra e origem. SPECIFIED exige autoridade e caso de aceitação vinculado; DECISION_REQUIRED exige decisão material; GAP_FOUND preserva lacuna. Não preencher uma lista de NOT_APPLICABLE. Relações estruturais não certificam verdade semântica.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "activationId",
           "kind",
           "subject",
           "status",
@@ -2336,35 +2212,13 @@
           "basis",
           "acceptanceCase",
           "proofObligation",
-          "inapplicabilityProof"
+          "inapplicabilityProof",
+          "counterexampleWitness"
         ],
         "properties": {
-          "activationId": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string",
-                "pattern": "^DET-ACT-[0-9]{4}$"
-              }
-            ],
-            "description": "Identificador da ativação mecânica respondida. null é permitido somente para revisão adicional descoberta semanticamente pela IA."
-          },
           "kind": {
-            "enum": [
-              "ORDERING",
-              "CANONICALIZATION",
-              "DUPLICATES",
-              "EMPTY_INPUT",
-              "ODD_CARDINALITY",
-              "ROUNDING",
-              "REMAINDER_DISTRIBUTION",
-              "ZERO_DIVISOR",
-              "TIE_BREAKING",
-              "COUNTING_IDENTITY",
-              "BOUNDED_ARITHMETIC"
-            ]
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
           },
           "subject": {
             "oneOf": [
@@ -2428,6 +2282,9 @@
                 "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_inapplicabilityProof"
               }
             ]
+          },
+          "counterexampleWitness": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_counterexampleWitness"
           }
         }
       }
@@ -3108,6 +2965,30 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      }
+    },
+    "semantic_opinion_counterexampleWitness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputClass",
+        "baseline",
+        "variation"
+      ],
+      "properties": {
+        "inputClass": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "baseline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variation": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

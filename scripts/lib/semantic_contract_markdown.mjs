@@ -163,9 +163,9 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`- **${dimension.kind}/${dimension.subjectId}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
     lines.push(`  - Autoridade de fechamento: ${dimension.closureAuthority}.`);
-    lines.push(`  - Contraexemplo obrigatório: ${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}.`);
-    lines.push(`    - Base mecânica: ${dimension.counterexampleWitness.baseline}`);
-    lines.push(`    - Variação mecânica: ${dimension.counterexampleWitness.variation}`);
+    lines.push(`  - Cenário de revisão semântica: ${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}.`);
+    lines.push(`    - Base proposta: ${dimension.counterexampleWitness.baseline}`);
+    lines.push(`    - Variação proposta: ${dimension.counterexampleWitness.variation}`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
     if (dimension.proofObligation !== null) {
       lines.push(`  - Obrigação de prova: ${dimension.proofObligation.relation} sobre ${dimension.proofObligation.observables.join(', ')}.`);
@@ -180,26 +180,6 @@ export function renderSemanticContractMarkdown(contract, {
   const hasStateModel = Boolean(specification.stateModel);
   if (hasStateModel) {
     lines.push('', '## 6. Inventário Semântico Auditável (State Model & Totalidade de Transição)');
-
-    if (specification.closureCertificate?.inventoryAudit) {
-      const audit = specification.closureCertificate.inventoryAudit;
-      lines.push(
-        '',
-        '### 6.1 Prova de Auditoria de Cobertura do Inventário (Semantic Inventory Certificate)',
-        '',
-        '| Dimensão de Auditoria | Esperado | Materializado | Fechado / Totalizado | Status |',
-        '| :--- | :---: | :---: | :---: | :---: |',
-        `| Reivindicações Normativas Mapeadas | ${audit.normativeClaimsCount} | ${audit.normativeClaimsCount} | ${audit.normativeClaimsCount} | ✅ 100% |`,
-        `| Entidades de Estado | ${audit.expectedStateEntities} | ${audit.materializedStateEntities} | ${audit.materializedStateEntities} | ${audit.materializedStateEntities >= audit.expectedStateEntities ? '✅ Coberto' : '❌ Lacuna'} |`,
-        `| Campos de Estado (Ciclo de Vida) | ${audit.expectedFields} | ${audit.materializedFields} | ${audit.closedFields} | ${audit.closedFields >= audit.expectedFields ? '✅ Totalizado' : '❌ Lacuna'} |`,
-        `| Operações (Totalidade de Transição) | ${audit.expectedOperations} | ${audit.materializedOperations} | ${audit.totalizedOperations} | ${audit.totalizedOperations >= audit.expectedOperations ? '✅ Totalizado' : '❌ Lacuna'} |`,
-        `| Observáveis Públicos & Projeções | ${audit.expectedObservables} | ${audit.materializedObservables} | ${audit.closedObservables} | ${audit.closedObservables >= audit.expectedObservables ? '✅ Fechado' : '❌ Lacuna'} |`,
-        `| Perfis de Serialização Canônica | ${audit.canonicalProfilesRequired} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed} | ${audit.canonicalProfilesClosed >= audit.canonicalProfilesRequired ? '✅ Fechado' : '❌ Lacuna'} |`,
-        `| Agregações de Coleção | ${audit.aggregationsClosed ?? 0} | ${audit.aggregationsClosed ?? 0} | ${audit.aggregationsClosed ?? 0} | ✅ Fechado |`,
-        `| Fronteiras Producer/Consumer | ${audit.boundariesClosed ?? 0} | ${audit.boundariesClosed ?? 0} | ${audit.boundariesClosed ?? 0} | ✅ Fechado |`,
-        `| Testemunhos de Divergência Sobreviventes | 0 | 0 | ${audit.divergenceWitnessesSurviving} | ${audit.divergenceWitnessesSurviving === 0 ? '✅ 0 (Zero Divergência)' : '❌ Sobrevivente'} |`,
-      );
-    }
 
     if (specification.stateModel.entities?.length > 0) {
       lines.push('', '### 6.2 Entidades de Estado e Ciclo de Vida dos Campos');

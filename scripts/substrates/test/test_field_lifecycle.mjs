@@ -1544,7 +1544,20 @@ function createFixture({
   const cert = generateClosureCertificate({ specification: fixture });
   assert.equal(cert.status, 'CERTIFIED_CLOSED');
   assert.equal(cert.gapLedger.length, 0, 'TEST-39: closed contract gapLedger must be empty');
+  for (const removed of ['inventoryAudit', 'unresolvedSlots', 'regressedSemanticDimensions']) {
+    assert.equal(Object.hasOwn(cert, removed), false, `Certificate must not emit ${removed}`);
+  }
   assert.equal(Array.isArray(cert.gapLedger), true);
+  const pending = generateClosureCertificate({ specification: {
+    ...fixture,
+    determinismReview: { ...fixture.determinismReview, dimensions: [{
+      kind: 'ORDERING', subjectId: 'SUBJECT-1', status: 'DECISION_REQUIRED',
+      rationale: 'Uma decisão humana ainda deve fixar a ordem observável.',
+    }] },
+  } });
+  assert.equal(pending.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(pending.gapLedger.some(({ slotId }) => slotId === 'determinism/ORDERING/SUBJECT-1'),
+    'Canonical ledger must include pending dimensions even without a decision record');
   log('  PASS: TEST-39 CERTIFIED_CLOSED contract emits empty gapLedger');
 }
 

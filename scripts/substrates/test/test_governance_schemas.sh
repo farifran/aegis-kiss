@@ -25,7 +25,7 @@ import {
   buildSemanticGatewayPayload,
   requestSemanticOpinion,
 } from './scripts/lib/semantic_gateway.mjs';
-import { counterexampleForDimension } from './scripts/lib/semantic_authority.mjs';
+import { compileCounterexampleWitness } from './scripts/lib/semantic_authority.mjs';
 import {
   assertContractDocument,
   assertRevisionApplied,
@@ -122,7 +122,7 @@ if (jevBatch.schema !== 'aegis.jev_decision_batch.v2'
   || jevBatch.protocol.authority !== 'ADVISORY_ONLY'
   || jevBatch.protocol.purpose !== 'SHADOW_EVALUATION'
   || jevBatch.projection.questionCount !== Object.keys(jevBatch.questions).length
-  || jevBatch.projection.questionCount !== jevSemanticRequest.intentEvidence.fragments.length
+  || jevBatch.projection.questionCount !== 2 * jevSemanticRequest.intentEvidence.fragments.length
   || !Object.values(jevBatch.bindings).every(({ allowedUse }) => allowedUse === 'SHADOW_METRIC_ONLY')
   || Object.hasOwn(jevBatch.state, 'intent')
   || Object.hasOwn(jevBatch.state, 'sourceEvidence')
@@ -445,10 +445,10 @@ const semanticAnswers = Object.fromEntries(Object.entries(semanticBatch.question
   const optionIds = Object.keys(question.criteria);
   return [id, {
     type: 'choice',
-    choice: 'NORMATIVE',
+    choice: optionIds[0],
     probabilities: Object.fromEntries(optionIds.map((optionId) => [
       optionId,
-      optionId === 'NORMATIVE' ? 1 : 0,
+      optionId === optionIds[0] ? 1 : 0,
     ])),
     confidence: 1,
   }];
@@ -554,7 +554,7 @@ expectDraftFailure(
 
 const deterministicDraft = structuredClone(draft);
 const proof = {
-  witnessId: 'WITNESS-ORDERING',
+  witnessId: 'WITNESS-ORDERING-REQ-RESULT',
   relation: 'OUTPUTS_EQUAL',
   resolutionKind: 'PERMUTATION_INVARIANT',
   resolutionParameter: null,
@@ -601,10 +601,33 @@ deterministicDraft.determinismReview = {
     proofObligation: proof,
     inapplicabilityProof: null,
     closureAuthority: 'AUTHORITATIVE_RULE',
-    counterexampleWitness: counterexampleForDimension('ORDERING'),
+    counterexampleWitness: compileCounterexampleWitness('ORDERING', 'REQ-RESULT', {
+      inputClass: 'Permutação de registros', baseline: '[A, B]', variation: '[B, A]',
+    }),
   }],
 };
 assertSemanticDraft(deterministicDraft, loadedPolicy.policy, validationContext);
+
+// Properties outside the old taxonomy need no runtime registration.
+// These are structural fixtures, not evidence of semantic entailment.
+for (const [kind, baseline, variation] of [
+  ['LOCALE_INDEPENDENCE', 'Locale pt-BR com dados fixos.', 'Locale en-US com os mesmos dados.'],
+  ['CONTROLLED_RANDOMNESS', 'Seed 42 e estado inicial S.', 'Seed 42 em outra execução com estado S.'],
+  ['RETRY_IDEMPOTENCE', 'Uma requisição com chave K.', 'Repetição da requisição com chave K.'],
+]) {
+  const custom = structuredClone(deterministicDraft);
+  const dimension = custom.determinismReview.dimensions[0];
+  dimension.kind = kind;
+  dimension.counterexampleWitness = compileCounterexampleWitness(kind, dimension.subjectId, {
+    inputClass: 'Condições contratadas', baseline, variation,
+  });
+  dimension.proofObligation.witnessId = dimension.counterexampleWitness.id;
+  dimension.proofObligation.resolutionKind = 'CONTRACT_DEFINED_RULE';
+  custom.determinismReview.coverage[0].dimensions[0].kind = kind;
+  custom.requirements[0].acceptanceCases[2].then =
+    'Base: resultado estável; Variação: resultado estável; Resolução: CONTRACT_DEFINED_RULE.';
+  assertSemanticDraft(custom, loadedPolicy.policy, validationContext);
+}
 
 expectDraftFailure(
   (invalid) => { invalid.determinismReview.coverage.pop(); },
@@ -624,12 +647,16 @@ function expectDeterminismFailure(mutator, expectedPrefix) {
 }
 
 expectDeterminismFailure(
-  (dimension) => { dimension.proofObligation.resolutionKind = 'OVERFLOW_SATURATE'; },
-  'determinism_resolution_kind_mismatch:',
+  (dimension) => { dimension.counterexampleWitness.dimension = 'UNRELATED_PROPERTY'; },
+  'determinism_dimension_witness_mismatch:',
 );
 expectDeterminismFailure(
-  (dimension) => { dimension.proofObligation.relation = 'DEFINED_RESULT'; },
-  'determinism_resolution_relation_mismatch:',
+  (dimension) => { dimension.counterexampleWitness.variation = dimension.counterexampleWitness.baseline; },
+  'determinism_witness_without_variation:',
+);
+expectDeterminismFailure(
+  (dimension) => { dimension.proofObligation.relation = 'EXPLICIT_REJECTION'; },
+  'determinism_proof_outcome_kind_mismatch:',
 );
 expectDeterminismFailure(
   (_dimension, invalid) => {

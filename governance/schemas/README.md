@@ -23,3 +23,9 @@ prova matemática de ausência. As demais exigências de limites e estado não f
 relaxadas por esta mudança.
 
 Após editar schemas, execute `npm run aegis:generate-schemas` e `npm test`.
+
+O mapa de produtores, consumidores e reduções está em
+`../schema-responsibilities.md`. O certificado aceita somente o formato atual:
+`gapLedger` é obrigatório e os campos retirados não possuem aliases ou migração
+automática. Artefatos antigos permanecem em disco, mas podem não passar na
+validação atual; não reaproveite uma assinatura para conteúdo recompilado.

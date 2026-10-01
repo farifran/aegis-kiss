@@ -39,6 +39,24 @@ function expand(value, root) {
 }
 
 // Formatos canônicos resolvem todas as referências internas.
+// Only the current certificate shape is accepted; retired fields are not aliases.
+{
+  const certificateSchema = schemaDocument('aegis.semantic_draft.v9').properties.closureCertificate;
+  const validate = new Ajv2020({ strict: false }).compile(certificateSchema);
+  const certificate = Object.fromEntries(certificateSchema.required.map((key) => [key,
+    key === 'status' ? 'CERTIFIED_CLOSED' : 0]));
+  certificate.gapLedger = [];
+  assert.equal(validate(certificate), true);
+  for (const [key, value] of Object.entries({ inventoryAudit: { expectedFields: 1 },
+    unresolvedSlots: [], regressedSemanticDimensions: 0 })) {
+    assert.equal(validate({ ...certificate, [key]: value }), false, `Reject retired field ${key}`);
+  }
+  const withoutLedger = { ...certificate };
+  delete withoutLedger.gapLedger;
+  assert.equal(validate(withoutLedger), false, 'Canonical diagnostics are required');
+  assert.equal(validate({ ...certificate, orphanHumanDecisions: -1 }), false);
+}
+
 for (const [id] of schemaFiles) {
   const checkRefs = (value) => {
     if (value === null || typeof value !== 'object') return;

@@ -32,9 +32,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fragmentId", "jevChoice", "semanticChoice", "outcome"],
+        "required": ["fragmentId", "axis", "jevChoice", "semanticChoice", "outcome"],
         "properties": {
           "fragmentId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+          "axis": { "enum": ["role", "review"] },
           "jevChoice": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
           "semanticChoice": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]*$" },
           "outcome": { "enum": ["AGREEMENT", "DISAGREEMENT", "NOT_COMPARABLE"] }

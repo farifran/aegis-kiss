@@ -12,7 +12,7 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
     ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
     : specification;
   const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
-  effectiveDeterminismStatus.lastGapLedger = certificate.gapLedger ?? [];
+  effectiveDeterminismStatus.lastGapLedger = certificate.gapLedger;
   effectiveDeterminismStatus.lastCertificate = certificate;
   if (certificate.status !== 'CERTIFIED_CLOSED') {
     if (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0) {
@@ -34,7 +34,7 @@ export function getEffectiveGapLedger(specification, humanResolutions = [], {
     ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
     : specification;
   const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
-  return certificate.gapLedger ?? [];
+  return certificate.gapLedger;
 }
 
 function decisionMap(contract) {

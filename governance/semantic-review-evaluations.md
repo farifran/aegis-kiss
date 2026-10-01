@@ -13,11 +13,31 @@ Um rascunho anterior com referências aproximadas precisa de correção explíci
 o Harness não renomeia nem reaproveita uma aprovação silenciosamente.
 
 `CERTIFIED_CLOSED` registra ausência de pendências estruturais e semânticas
-declaradas; não significa prova independente da verdade do parecer. O campo
-histórico `divergenceWitnessesSurviving` conta dimensões declaradas abertas,
-não resultados de testes de mutação executados. Nenhum produto foi executado.
+declaradas; não significa prova independente da verdade do parecer. `gapLedger`
+é a lista canônica de diagnósticos. Não se emitem mais contadores sintéticos de
+cobertura nem supostos resultados de testes de mutação. Nenhum produto foi executado.
 
 ## Casos para avaliar o supervisor
+
+`determinismReview.dimensions` não possui catálogo fechado. Cada item usa `kind`
+como chave estável de uma propriedade pertinente a `subject`, com rationale,
+origem e cenário-base/variação propostos semanticamente. O Harness gera o ID do
+witness com a propriedade e o subject e confere referências, cobertura e os
+resultados literais vinculados ao caso de aceitação. Não escolhe exemplos nem
+resoluções a partir de tabelas de palavras. `resolutionKind` também é aberto.
+Os três tipos de relação são formatos de resultado, não classes de domínio.
+
+Uma demanda não precisa preencher onze categorias nem listar ausências para
+cada categoria imaginável. Novas propriedades, como locale, timezone, retries
+ou concorrência, não exigem alteração no runtime. A revisão semântica precisa
+delimitar observáveis determinísticos e fontes de variabilidade controladas;
+tempo e aleatoriedade não são automaticamente proibidos. Uma lista vazia ainda
+exige a cobertura justificada das claims materiais.
+
+Os testes de propriedades novas verificam o protocolo e seus vínculos, não a
+qualidade semântica do parecer. Não há nova chamada de revisão. Rascunhos com
+`activationId` ou witnesses do catálogo anterior não recebem conversão implícita.
+O schema `semantic-worksheet` sem uso foi removido; é recuperável no Git.
 
 Estes casos substituem heurísticas específicas de produção. São uma rubrica de
 avaliação, não resultados já medidos nem conteúdo injetado em demandas reais.

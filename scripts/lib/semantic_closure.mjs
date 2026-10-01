@@ -532,7 +532,6 @@ export function validateProvenanceEnforcement({
   literalFacts = [],
   fragments = [],
   intent = '',
-  resolvedDecisions = [],
 } = {}) {
   const issues = [];
   if (!stateModel) return { valid: true, issues: [] };
@@ -785,9 +784,6 @@ export function generateClosureCertificate({
   const inventoryResult = validateSemanticInventoryCoverage({
     stateModel: specification.stateModel,
     architectureContexts: specification.architectureContexts ?? [],
-    boundaryRules: specification.boundaryRules ?? [],
-    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
-    requirements: specification.requirements ?? [],
   });
 
   const witnessResult = validateDecisionsWitness({
@@ -805,13 +801,9 @@ export function generateClosureCertificate({
     literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
     fragments: specification.intentEvidence?.fragments ?? specification.fragments ?? [],
     intent: specification.intent ?? '',
-    resolvedDecisions: humanResolutions ?? specification.resolvedDecisionIds ?? [],
   });
 
-  const aggregationResult = validateAggregationAndBoundaries({
-    stateModel: specification.stateModel,
-    architectureContexts: specification.architectureContexts ?? [],
-  });
+  const aggregationResult = validateAggregationAndBoundaries({ stateModel: specification.stateModel });
 
   const inventoryIssues = [
     ...inventoryResult.issues,
@@ -883,7 +875,6 @@ export function generateClosureCertificate({
   const unresolvedTransitions = transitionIssues.length;
   const unresolvedObservables = observableIssues.length;
   const contradictoryRules = declarationConflicts.length;
-  const regressedSemanticDimensions = 0;
 
   const totalUnresolved = unresolvedInventorySlots
     + unresolvedStateFields
@@ -892,8 +883,7 @@ export function generateClosureCertificate({
     + unresolvedAuthorities
     + unresolvedDeterminismDimensions
     + contradictoryRules
-    + orphanHumanDecisions
-    + regressedSemanticDimensions;
+    + orphanHumanDecisions;
 
   const allIssues = [
     ...inventoryIssues,
@@ -901,53 +891,9 @@ export function generateClosureCertificate({
     ...provenanceResult.issues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
     ...determinismGaps.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'DETERMINISM_GAP', reason: d.rationale })),
+    ...determinismDecisions.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'PENDING_HUMAN_DECISION', reason: d.rationale })),
     ...pendingDecisions.map((q) => ({ slotId: `decision/${q.questionId}`, kind: 'PENDING_HUMAN_DECISION', reason: q.question })),
   ];
-
-  const stateEntities = Array.isArray(specification.stateModel?.entities) ? specification.stateModel.entities : [];
-  const stateOperations = Array.isArray(specification.stateModel?.operations) ? specification.stateModel.operations : [];
-  const stateObservables = Array.isArray(specification.stateModel?.observables) ? specification.stateModel.observables : [];
-  const stateSerializations = Array.isArray(specification.stateModel?.canonicalSerializations) ? specification.stateModel.canonicalSerializations : [];
-
-  let materializedFieldsCount = 0;
-  for (const entity of stateEntities) {
-    materializedFieldsCount += Array.isArray(entity.fields) ? entity.fields.length : 0;
-  }
-
-  const tags = new Set((specification.architectureContexts ?? []).map((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag)));
-  const isStateful = tags.has('stateful-operation');
-  const isBoundedObs = tags.has('bounded-observability');
-  const isIntegrityHash = tags.has('integrity-hash');
-
-  const expectedEntitiesMin = isStateful ? 1 : 0;
-  const expectedFieldsMin = isStateful ? 1 : 0;
-  const expectedOperationsMin = isStateful ? 1 : 0;
-  const expectedObservablesMin = isBoundedObs ? 1 : 0;
-  const expectedSerializationsMin = isIntegrityHash ? 1 : 0;
-
-  const aggregationsClosed = specification.stateModel?.aggregations?.length ?? 0;
-  const boundariesClosed = specification.stateModel?.producerConsumerBoundaries?.length ?? 0;
-
-  const inventoryAudit = {
-    normativeClaimsCount: (specification.requirements ?? []).length + (specification.invariants ?? []).length,
-    expectedStateEntities: Math.max(expectedEntitiesMin, stateEntities.length),
-    materializedStateEntities: stateEntities.length,
-    expectedFields: Math.max(expectedFieldsMin, materializedFieldsCount),
-    materializedFields: materializedFieldsCount,
-    closedFields: Math.max(0, materializedFieldsCount - stateFieldIssues.length),
-    expectedOperations: Math.max(expectedOperationsMin, stateOperations.length),
-    materializedOperations: stateOperations.length,
-    totalizedOperations: Math.max(0, stateOperations.length - transitionIssues.length),
-    expectedObservables: Math.max(expectedObservablesMin, stateObservables.length),
-    materializedObservables: stateObservables.length,
-    closedObservables: Math.max(0, stateObservables.length - observableIssues.length),
-    canonicalProfilesRequired: Math.max(expectedSerializationsMin, stateSerializations.length),
-    canonicalProfilesClosed: Math.max(0, stateSerializations.length - (tags.has('integrity-hash') && stateSerializations.length === 0 ? 1 : 0)),
-    aggregationsClosed,
-    boundariesClosed,
-    // Count reported open dimensions; never pretend to have executed semantic mutations.
-    divergenceWitnessesSurviving: determinismGaps.length + determinismDecisions.length,
-  };
 
   const gapLedger = allIssues.map((issue, idx) => classifyGapIssue(issue, idx));
 
@@ -960,15 +906,12 @@ export function generateClosureCertificate({
     unresolvedDeterminismDimensions,
     contradictoryRules,
     orphanHumanDecisions,
-    regressedSemanticDimensions,
     status: totalUnresolved === 0 ? 'CERTIFIED_CLOSED' : 'BLOCKED_BY_UNRESOLVED_SLOTS',
-    inventoryAudit,
     gapLedger,
-    unresolvedSlots: allIssues,
   };
 }
 
-export function classifyGapIssue(issue, index) {
+function classifyGapIssue(issue, index) {
   const gapId = `GAP-${String(index + 1).padStart(4, '0')}`;
   let layer = 'COVERAGE_ACCOUNTING';
   let requiredAuthority = 'ARCHITECTURE_POLICY';
@@ -1006,18 +949,6 @@ export function classifyGapIssue(issue, index) {
       requiredAuthority = 'USER_INTENT';
       witness = issue.reason;
       break;
-    case 'UNHANDLED_TRIGGER_TRANSITION':
-      layer = 'TRANSITION_CONSISTENCY';
-      requiredAuthority = 'USER_INTENT';
-      witness = issue.reason;
-      break;
-    case 'DIVERGENT_INTERPRETATION':
-      layer = 'TRANSITION_CONSISTENCY';
-      requiredAuthority = 'USER_DECISION';
-      witness = issue.reason;
-      break;
-    case 'NON_DIVERGENT_WITNESS':
-    case 'INCOMPLETE_WITNESS_COVERAGE':
     case 'INVALID_SEMANTIC_KEY':
       layer = 'TRANSITION_CONSISTENCY';
       requiredAuthority = 'USER_DECISION';
@@ -1045,11 +976,6 @@ export function classifyGapIssue(issue, index) {
       requiredAuthority = 'ARCHITECTURE_POLICY';
       witness = issue.reason || 'Alocação de bits sobreposta ou fora dos limites do tipo.';
       break;
-    case 'INCONSISTENT_OBSERVABLE_MAPPING':
-      layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
-      requiredAuthority = 'USER_INTENT';
-      witness = issue.reason;
-      break;
     case 'UNRESOLVED_CANONICAL_SERIALIZATION':
     case 'MISSING_CANONICAL_SERIALIZATION_INVENTORY':
       layer = 'OBSERVABLE_DEPENDENCY_CLOSURE';
@@ -1058,30 +984,9 @@ export function classifyGapIssue(issue, index) {
       break;
 
     // 3. AUTHORITY_PROVENANCE
-    case 'UNBACKED_FIELD_BOUNDS':
-      layer = 'AUTHORITY_PROVENANCE';
-      requiredAuthority = 'USER_INTENT';
-      witness = issue.reason || 'Limites numéricos de campo sem proveniência autorizada.';
-      break;
-    case 'UNBACKED_COLLECTION_CAPACITY':
-      layer = 'AUTHORITY_PROVENANCE';
-      requiredAuthority = 'ARCHITECTURE_POLICY';
-      witness = issue.reason || 'Capacidade máxima de coleção sem proveniência autorizada.';
-      break;
-    case 'UNBACKED_AGGREGATION_SATURATION':
-      layer = 'AUTHORITY_PROVENANCE';
-      requiredAuthority = 'USER_INTENT';
-      witness = issue.reason || 'Limite de saturação de agregação sem proveniência autorizada.';
-      break;
-    case 'UNBACKED_NUMERIC_LITERAL':
     case 'UNAUTHORIZED_NUMERIC_LITERAL':
       layer = 'AUTHORITY_PROVENANCE';
       requiredAuthority = 'USER_INTENT';
-      witness = issue.reason;
-      break;
-    case 'UNAUTHORIZED_PROVENANCE_SOURCE':
-      layer = 'AUTHORITY_PROVENANCE';
-      requiredAuthority = 'ARCHITECTURE_POLICY';
       witness = issue.reason;
       break;
     case 'MATERIAL_UNKNOWN_GAP':
@@ -1098,8 +1003,6 @@ export function classifyGapIssue(issue, index) {
     // 4. COVERAGE_ACCOUNTING
     case 'MISSING_STATEFUL_ENTITY_INVENTORY':
     case 'MISSING_BOUNDED_OBSERVABILITY_INVENTORY':
-    case 'MISSING_AGGREGATION_MODEL':
-    case 'MISSING_PRODUCER_CONSUMER_BOUNDARY_MODEL':
     case 'UNRESOLVED_STATE_MODEL':
     case 'UNRESOLVED_FIELD_BOUNDS':
     case 'UNRESOLVED_COLLECTION_CAPACITY':
@@ -1117,21 +1020,12 @@ export function classifyGapIssue(issue, index) {
       witness = issue.reason;
       break;
 
-    case 'UNKNOWN_AGGREGATION_SOURCE':
     case 'ORPHAN_STATE_FIELD':
-    case 'UNALLOCATED_LITERAL_BIT_RANGE':
-    case 'UNMAPPED_BOUNDARY_RULE':
       layer = 'COVERAGE_ACCOUNTING';
       requiredAuthority = 'USER_INTENT';
       witness = issue.reason;
       break;
 
-    case 'UNKNOWN_BOUNDARY_PRODUCER':
-    case 'UNKNOWN_BOUNDARY_CONSUMER':
-      layer = 'COVERAGE_ACCOUNTING';
-      requiredAuthority = 'ARCHITECTURE_POLICY';
-      witness = issue.reason;
-      break;
 
     default:
       layer = 'COVERAGE_ACCOUNTING';

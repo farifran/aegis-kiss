@@ -46,8 +46,8 @@
     "questions": {
       "type": "object",
       "minProperties": 1,
-      "maxProperties": 255,
-      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}$" },
+      "maxProperties": 510,
+      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}\\.(role|review)$" },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
@@ -67,15 +67,16 @@
     "bindings": {
       "type": "object",
       "minProperties": 1,
-      "maxProperties": 255,
-      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}$" },
+      "maxProperties": 510,
+      "propertyNames": { "pattern": "^fragment\\.FRAG-[0-9]{4}\\.(role|review)$" },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["family", "subjectId", "semanticTarget", "allowedUse"],
+        "required": ["family", "subjectId", "axis", "semanticTarget", "allowedUse"],
         "properties": {
           "family": { "const": "INTENT_FRAGMENT" },
           "subjectId": { "type": "string", "pattern": "^FRAG-[0-9]{4}$" },
+          "axis": { "enum": ["role", "review"] },
           "semanticTarget": { "const": "CONTRACT_ROLE_CANDIDATE" },
           "allowedUse": { "const": "SHADOW_METRIC_ONLY" }
         }
@@ -86,7 +87,7 @@
       "additionalProperties": false,
       "required": ["questionCount", "fragmentCount", "omittedSections"],
       "properties": {
-        "questionCount": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "questionCount": { "type": "integer", "minimum": 2, "maximum": 510 },
         "fragmentCount": { "type": "integer", "minimum": 1, "maximum": 255 },
         "omittedSections": {
           "const": ["CONSTITUTION_TEXT", "SOURCE_EVIDENCE", "OUTPUT_SCHEMA", "COMPILER_OWNED_FIELDS"]

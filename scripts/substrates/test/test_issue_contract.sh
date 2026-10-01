@@ -431,7 +431,7 @@ printf '%s\n' "${jev_request}" | jq -e \
   and .protocol.purpose == "SHADOW_EVALUATION"
   and .projection.questionCount == (.questions | length)
   and .projection.questionCount == (.bindings | length)
-  and .projection.questionCount == 1
+  and .projection.questionCount == 2
   and ([.bindings[].family] | all(. == "INTENT_FRAGMENT"))
   and ([.bindings[].allowedUse] | all(. == "SHADOW_METRIC_ONLY"))
   and (.state | has("sourceEvidence") | not)
@@ -738,7 +738,7 @@ deterministic_opinion="$(make_opinion yes "${semantic_evidence_digest}" | jq '
       }
     ],
     dimensions:[{
-      activationId:null,
+      counterexampleWitness:{inputClass:"Permutação de registros",baseline:"[A, B]",variation:"[B, A]"},
       kind:"ORDERING",
       subject:{kind:"REQUIREMENT",index:0},
       status:"SPECIFIED",
@@ -774,12 +774,25 @@ printf '%s\n' "${forged_witness_output}" | jq -e '
 printf '%s' "${deterministic_opinion}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
   .specification.determinismReview.status == "SEMANTICALLY_CLOSED"
-  and .specification.determinismReview.dimensions[0].counterexampleWitness.id == "WITNESS-ORDERING"
-  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING"
+  and .specification.determinismReview.dimensions[0].counterexampleWitness.id == "WITNESS-ORDERING-REQ-0001"
+  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING-REQ-0001"
   and .specification.determinismReview.dimensions[0].closureAuthority == "AUTHORITATIVE_RULE"
 ' .harness/runtime/contract.json >/dev/null
 
 # Uma decisão alternativa não remenda o contrato antigo: exige recompilação.
+custom_property_opinion="$(printf '%s' "${deterministic_opinion}" | jq '
+  .determinismReview.dimensions[0].kind = "LOCALE_INDEPENDENCE"
+  | .determinismReview.dimensions[0].counterexampleWitness = {
+      inputClass:"Locale sob entradas fixas", baseline:"Locale pt-BR", variation:"Locale en-US"
+    }
+')"
+printf '%s' "${custom_property_opinion}" | bash ./aegis --semantic-compile >/dev/null
+jq -e '
+  .specification.determinismReview.dimensions[0].kind == "LOCALE_INDEPENDENCE"
+  and .specification.determinismReview.dimensions[0].counterexampleWitness.id == "WITNESS-LOCALE_INDEPENDENCE-REQ-0001"
+  and .specification.determinismReview.coverage[0].dimensions[0].kind == "LOCALE_INDEPENDENCE"
+' .harness/runtime/contract.json >/dev/null
+
 make_opinion yes "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
 draft_status="$(bash ./aegis --status)"
 printf '%s\n' "${draft_status}" | jq -e '.status == "DRAFT_PENDING_CONFIRMATION"' >/dev/null
@@ -1023,8 +1036,8 @@ printf '%s\n' "${deterministic_request}" | jq -e '
 deterministic_jev_request="$(bash ./aegis --jev-request)"
 printf '%s\n' "${deterministic_jev_request}" | jq -e '
   .schema == "aegis.jev_decision_batch.v2"
-  and .projection.questionCount == .projection.fragmentCount
-  and .projection.questionCount == (.state.fragments | length)
+  and .projection.questionCount == (2 * .projection.fragmentCount)
+  and .projection.questionCount == (2 * (.state.fragments | length))
   and ([.bindings[].family] | all(. == "INTENT_FRAGMENT"))
   and ([.bindings[].allowedUse] | all(. == "SHADOW_METRIC_ONLY"))
 ' >/dev/null
@@ -1146,7 +1159,7 @@ dimension_plan="$(printf '%s' "${prepared_opinion}" | jq --argjson original "${d
   | .requirements[0].acceptanceCases += [$original.requirements[0].acceptanceCases[2]]
   | .decisions[0].answers |= map(
       .preparedEffect.requirements[0].value.acceptanceCases += [$original.requirements[0].acceptanceCases[2]]
-      | .preparedEffect.dimensions = [{index:0,value:($original.determinismReview.dimensions[0] | del(.activationId))}])
+      | .preparedEffect.dimensions = [{index:0,value:$original.determinismReview.dimensions[0]}])
 ')"
 node scripts/issue_contract_runner.mjs draft "${automatic_intent}" >/dev/null
 set +e
@@ -1160,7 +1173,7 @@ printf '2\ns\nn\n' | bash ./aegis --wizard >/dev/null 2>&1
 jq -e '
   .specification.determinismReview.dimensions[0].status == "SPECIFIED"
   and .specification.determinismReview.dimensions[0].closureAuthority == "HUMAN_DECISION"
-  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING"
+  and .specification.determinismReview.dimensions[0].proofObligation.witnessId == "WITNESS-ORDERING-REQ-0001"
   and .specification.decisions == [] and .approval == null
 ' .harness/runtime/contract.json >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]

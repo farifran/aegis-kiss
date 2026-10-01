@@ -19,7 +19,6 @@ export const schemaFiles = new Map([
   ['aegis.semantic_opinion.v3', 'semantic-opinion.v3.schema.json'],
   ['aegis.semantic_opinion_decision.v1', 'semantic-opinion-decision.v1.schema.json'],
   ['aegis.semantic_request.v10', 'semantic-request.v10.schema.json'],
-  ['aegis.semantic_worksheet.v1', 'semantic-worksheet.v1.schema.json'],
   ['aegis.semantic_resolution.v2', 'semantic-resolution.v2.schema.json'],
   ['aegis.wizard_question.v1', 'wizard-question.v1.schema.json'],
   ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],

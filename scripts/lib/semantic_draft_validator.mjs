@@ -4,9 +4,7 @@ import { assertIntentEvidence } from './intent_evidence.mjs';
 import { validateFieldLifecycle } from './semantic_closure.mjs';
 import {
   canonicalProofOutcome,
-  counterexampleForDimension,
-  expectedRelationForResolution,
-  resolutionAllowedForDimension,
+  compileCounterexampleWitness,
 } from './semantic_authority.mjs';
 
 const authoritativeSources = new Set([
@@ -19,13 +17,6 @@ const authoritativeSources = new Set([
 
 function normalized(text) {
   return text.normalize('NFC').toLocaleLowerCase('pt-BR').replace(/\s+/gu, ' ').trim();
-}
-
-function sameWitnessBody(left, right) {
-  return left.dimension === right.dimension
-    && left.inputClass === right.inputClass
-    && left.baseline === right.baseline
-    && left.variation === right.variation;
 }
 
 function assertKnownReferences(items, knownIds, label) {
@@ -313,13 +304,14 @@ function validateDeterminism(draft, context) {
     const key = `${dimension.kind}:${dimension.subjectId}`;
     if (seen.has(key)) throw new Error(`duplicate_determinism_dimension_subject:${key}`);
     seen.add(key);
-    const expectedWitness = counterexampleForDimension(dimension.kind);
-    const { id: actualWitnessId, ...actualWitnessBody } = dimension.counterexampleWitness;
-    const { id: expectedWitnessId, ...expectedWitnessBody } = expectedWitness;
-    if (!sameWitnessBody(actualWitnessBody, expectedWitnessBody)
-      || (actualWitnessId !== expectedWitnessId
-        && !actualWitnessId.startsWith(`${expectedWitnessId}-`))) {
+    const witness = dimension.counterexampleWitness;
+    const expectedWitness = compileCounterexampleWitness(dimension.kind, dimension.subjectId, witness);
+    if (witness.id !== expectedWitness.id || witness.dimension !== dimension.kind) {
       throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
+    }
+    if (!normalized(witness.baseline) || !normalized(witness.variation)
+      || normalized(witness.baseline) === normalized(witness.variation)) {
+      throw new Error(`determinism_witness_without_variation:${key}`);
     }
     validateBasis(dimension.basis, context, key);
     assertKnownReferences(dimension.targetIds, context.semanticTargetIds, `determinism:${key}`);
@@ -353,12 +345,6 @@ function validateDeterminism(draft, context) {
       const proof = dimension.proofObligation;
       if (proof.witnessId !== dimension.counterexampleWitness.id) {
         throw new Error(`determinism_proof_witness_mismatch:${key}`);
-      }
-      if (!resolutionAllowedForDimension(dimension.kind, proof.resolutionKind)) {
-        throw new Error(`determinism_resolution_kind_mismatch:${key}:${proof.resolutionKind}`);
-      }
-      if (proof.relation !== expectedRelationForResolution(proof.resolutionKind)) {
-        throw new Error(`determinism_resolution_relation_mismatch:${key}:${proof.resolutionKind}`);
       }
       const proofCase = context.acceptanceCasesById.get(dimension.acceptanceCaseId);
       if (dimension.subjectId.startsWith('REQ-')
