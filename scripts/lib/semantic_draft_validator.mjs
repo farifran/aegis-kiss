@@ -687,6 +687,8 @@ export function assertSemanticDraft(draft, policy, {
   const lifecycle = validateFieldLifecycle({
     stateModel: draft.stateModel,
     architectureContexts: draft.architectureContexts,
+    invariants: draft.invariants ?? [],
+    requirements: draft.requirements ?? [],
   });
   if (!lifecycle.valid) {
     const first = lifecycle.issues[0];

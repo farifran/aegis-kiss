@@ -200,7 +200,7 @@ export function renderSemanticContractMarkdown(contract, {
           const boundsStr = field.bounds
             ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior}${field.bounds.provenance ? `; ${renderBasis(field.bounds.provenance)}` : ''})`
             : 'N/A';
-          const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*`;
+          const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*${field.derivation ? `<br>**Fórmula Total:** \`${field.derivation.formula}\`` : ''}`;
           const resetStr = field.reset.allowed
             ? `\`${field.reset.resetValue}\` (gatilho: \`${field.reset.trigger}\`)`
             : 'Proibido (preservado)';
@@ -223,6 +223,31 @@ export function renderSemanticContractMarkdown(contract, {
           `#### Operação: \`${op.name}\``,
           `- **Descrição:** ${op.description ?? 'Sem descrição'}`,
           `- **Precedência Linear Estrita de Guardas (Curto-Circuito):** ${op.guardPrecedence.map((g, idx) => `${idx + 1}. \`${g}\``).join(' → ')}`,
+        );
+        if (op.executionPipeline?.length > 0) {
+          lines.push(`- **Pipeline Determinístico de Execução:** ${op.executionPipeline.map((p, idx) => `${idx + 1}. [${p.stage}] \`${p.id}\``).join(' → ')}`);
+        }
+        if (op.parameters?.length > 0) {
+          lines.push(
+            '',
+            '##### Contrato Público de Entrada (Public Input Contract):',
+            '',
+            '| Parâmetro | Tipo | Domínio | Limites (Bounds) | Nulabilidade | Produtor | Tratamento Inválido (onInvalid) |',
+            '| :--- | :--- | :--- | :--- | :---: | :--- | :--- |',
+          );
+          for (const p of op.parameters) {
+            const pBoundsStr = p.bounds
+              ? `[${p.bounds.lowerBound ?? '-∞'}, ${p.bounds.upperBound ?? '+∞'}] (${p.bounds.boundaryBehavior})`
+              : 'N/A';
+            const onInvalidStr = p.onInvalid
+              ? `${p.onInvalid.outcomeKind} (\`${p.onInvalid.error}\`)`
+              : 'N/A';
+            lines.push(
+              `| \`${p.name}\` | \`${p.type}\` | \`${p.domain ?? 'N/A'}\` | ${pBoundsStr} | \`${p.nullability ?? 'NOT_NULL'}\` | \`${p.producer ?? 'N/A'}\` | ${onInvalidStr} |`,
+            );
+          }
+        }
+        lines.push(
           '',
           '| Ramo (branchId) | Condição de Guarda | Desfecho | Status / Erro | Efeitos de Transição de Estado | Preservação Default |',
           '| :--- | :--- | :--- | :--- | :--- | :---: |',
@@ -307,10 +332,24 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
+    if (specification.stateModel.categories?.length > 0) {
+      lines.push('', '### 6.8 Categorias Abstratas e Taxonomia Fechada de Conjuntos');
+      lines.push(
+        '',
+        '| Categoria | Descrição | Membros Pertencentes (Set Membership) | Proveniência |',
+        '| :--- | :--- | :--- | :--- |',
+      );
+      for (const cat of specification.stateModel.categories) {
+        lines.push(
+          `| \`${cat.name}\` | ${cat.description} | ${cat.members.map((m) => `\`${m}\``).join(', ')} | ${cat.provenance ? renderBasis(cat.provenance) : 'N/A'} |`,
+        );
+      }
+    }
+
     if (specification.closureCertificate?.gapLedger?.length > 0) {
       lines.push(
         '',
-        '### 6.8 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
+        '### 6.9 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
         '',
         '| GAP-ID | Camada | Testemunho / Witness Falsificável | Autoridade Necessária |',
         '| :--- | :--- | :--- | :---: |',

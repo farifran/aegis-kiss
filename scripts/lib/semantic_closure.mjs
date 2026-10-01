@@ -102,6 +102,8 @@ export function validateDecisionsWitness({
 export function validateFieldLifecycle({
   stateModel = null,
   architectureContexts = [],
+  invariants = [],
+  requirements = [],
 } = {}) {
   const isStateful = architectureContexts.some((ctx) => (
     (typeof ctx === 'string' ? ctx : ctx.tag) === 'stateful-operation'
@@ -415,6 +417,34 @@ export function validateFieldLifecycle({
   const totalityResult = validateOperationTotality({ stateModel, architectureContexts });
   issues.push(...totalityResult.issues);
 
+  // 11. PIPELINE CROSS-CHECK: Conectividade linear entre etapas e guards
+  const pipelineResult = validatePipelineCrossCheck({ stateModel });
+  issues.push(...pipelineResult.issues);
+
+  // 12. INPUT DOMAIN CLOSURE: Totalidade de domínio e rejeição determinística de parâmetros
+  const inputDomainResult = validateInputDomainClosure({ stateModel });
+  issues.push(...inputDomainResult.issues);
+
+  // 13. STATE MUTATION OWNERSHIP: Causalidade e donos declarados de mutação/reset
+  const mutationOwnershipResult = validateStateMutationOwnership({ stateModel });
+  issues.push(...mutationOwnershipResult.issues);
+
+  // 14. CONTRADICTION DETECTION: Detecção ativa de contradições estruturais
+  const contradictionResult = validateContradictionDetection({
+    stateModel,
+    invariants,
+    requirements,
+  });
+  issues.push(...contradictionResult.issues);
+
+  // 15. DERIVED FIELD DERIVATIONS: Totalidade de funções de derivação para campos derivados/carry-over
+  const derivationResult = validateDerivedFieldDerivations({ stateModel });
+  issues.push(...derivationResult.issues);
+
+  // 16. CATEGORY SET MEMBERSHIP: Fechamento de conjuntos e membros para categorias abstratas
+  const categoryResult = validateCategorySetMembership({ stateModel });
+  issues.push(...categoryResult.issues);
+
   return {
     valid: issues.length === 0,
     issues,
@@ -518,6 +548,570 @@ export function validateOperationTotality({
     valid: issues.length === 0,
     issues,
   };
+}
+
+/**
+ * Validador Mecânico de Conferência Cruzada de Pipeline Linear (validatePipelineCrossCheck).
+ * 
+ * Verifica que a ordem de execução do pipeline e a precedência de guards são mutuamente consistentes:
+ * 1. Todos os guards de guardPrecedence devem constar nas etapas GUARD de executionPipeline.
+ * 2. Todas as etapas GUARD de executionPipeline devem constar em guardPrecedence.
+ * 3. A ordem linear relativa de guards deve coincidir estritamente.
+ * 4. Nenhuma etapa GUARD pode ocorrer após etapas de mutação de estado.
+ */
+export function validatePipelineCrossCheck({ stateModel = null } = {}) {
+  const issues = [];
+  if (!stateModel || !Array.isArray(stateModel.operations)) {
+    return { valid: true, issues: [] };
+  }
+
+  for (const op of stateModel.operations) {
+    const pipeline = Array.isArray(op.executionPipeline) ? op.executionPipeline : [];
+    if (pipeline.length === 0) continue;
+
+    const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+    const guardStages = pipeline.filter((stage) => stage.stage === 'GUARD');
+
+    if (guardStages.length > 0 || guardPrecedence.length > 0) {
+      const pipelineGuardIds = guardStages.map((s) => s.id);
+
+      for (const gp of guardPrecedence) {
+        if (!pipelineGuardIds.includes(gp)) {
+          issues.push({
+            slotId: `operation/${op.name}/executionPipeline/${gp}`,
+            kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+            reason: `A operação '${op.name}' define o guard '${gp}' em guardPrecedence, mas ele não consta nas etapas GUARD de executionPipeline.`,
+          });
+        }
+      }
+
+      for (const pg of pipelineGuardIds) {
+        if (!guardPrecedence.includes(pg)) {
+          issues.push({
+            slotId: `operation/${op.name}/executionPipeline/${pg}`,
+            kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+            reason: `A etapa GUARD '${pg}' em executionPipeline da operação '${op.name}' não consta em guardPrecedence.`,
+          });
+        }
+      }
+
+      if (issues.length === 0 && guardPrecedence.length > 1 && pipelineGuardIds.length === guardPrecedence.length) {
+        for (let i = 0; i < guardPrecedence.length; i++) {
+          if (guardPrecedence[i] !== pipelineGuardIds[i]) {
+            issues.push({
+              slotId: `operation/${op.name}/executionPipeline/order`,
+              kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+              reason: `Ordem de precedência contraditória na operação '${op.name}': guardPrecedence define '${guardPrecedence.join(' -> ')}', mas executionPipeline define '${pipelineGuardIds.join(' -> ')}'.`,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    let seenMutation = false;
+    let mutationStageId = null;
+    for (const step of pipeline) {
+      if (step.stage === 'MUTATION') {
+        seenMutation = true;
+        mutationStageId = step.id;
+      } else if (step.stage === 'GUARD' && seenMutation) {
+        issues.push({
+          slotId: `operation/${op.name}/executionPipeline/${step.id}/afterMutation`,
+          kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+          reason: `A etapa GUARD '${step.id}' da operação '${op.name}' é executada após a mutação '${mutationStageId}', violando a ordem determinística de guarda prévia.`,
+        });
+      }
+    }
+
+    // Conferência de precedência determinística de reposição temporal (REFILL) antes da verificação de saldo
+    const hasRefillContext = Array.isArray(stateModel.entities) && stateModel.entities.some((e) => (
+      Array.isArray(e.fields) && e.fields.some((f) => f.name === 'refillRate' || f.name === 'fractionalRemainder')
+    ));
+    const evaluatesBalance = op.parameters?.some((p) => /credit|token|ficha|amount/iu.test(p.name))
+      || op.branches?.some((b) => /credit|token|saldo|balance/iu.test(b.branchId || '') || /credit|token|saldo|balance/iu.test(b.condition || ''));
+
+    if (hasRefillContext && evaluatesBalance) {
+      const refillIndex = pipeline.findIndex((step) => /refill|reposic/iu.test(step.id) || /refill|reposic/iu.test(step.description || ''));
+      const firstBalanceGuardIndex = pipeline.findIndex((step) => step.stage === 'GUARD' && (/balance|saldo|credit|insufficient/iu.test(step.id) || /balance|saldo|credit|insufficient/iu.test(step.description || '')));
+
+      if (refillIndex === -1) {
+        issues.push({
+          slotId: `operation/${op.name}/executionPipeline/missingRefill`,
+          kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+          reason: `A operação '${op.name}' avalia saldo de créditos mas omite a etapa de reposição (REFILL) em executionPipeline antes da verificação de saldo.`,
+        });
+      } else if (firstBalanceGuardIndex !== -1 && refillIndex > firstBalanceGuardIndex) {
+        issues.push({
+          slotId: `operation/${op.name}/executionPipeline/refillPrecedence`,
+          kind: 'PIPELINE_PRECEDENCE_CONTRADICTION',
+          reason: `A etapa de reposição (REFILL: '${pipeline[refillIndex].id}') na operação '${op.name}' está posicionada após a verificação de saldo ('${pipeline[firstBalanceGuardIndex].id}'), violando a ordem determinística de reposição prévia.`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Totalidade das Entradas (validateInputDomainClosure).
+ * 
+ * Garante que parâmetros numéricos possuam limites e regras determinísticas de rejeição:
+ * 1. Parâmetros INTEGER, NUMBER ou BIGINT exigem bounds determinísticos.
+ * 2. Se bounds.boundaryBehavior for REJECT ou ERROR, exige onInvalid com outcomeKind e error.
+ * 3. Parâmetros de débito/crédito exigem limite inferior estritamente positivo (lowerBound >= 1).
+ */
+export function validateInputDomainClosure({ stateModel = null } = {}) {
+  const issues = [];
+  if (!stateModel || !Array.isArray(stateModel.operations)) {
+    return { valid: true, issues: [] };
+  }
+
+  for (const op of stateModel.operations) {
+    const params = Array.isArray(op.parameters) ? op.parameters : [];
+    for (const param of params) {
+      const isNumeric = param.type === 'INTEGER' || param.type === 'NUMBER' || param.type === 'BIGINT';
+      if (isNumeric) {
+        if (!param.bounds
+          || param.bounds.lowerBound === undefined
+          || param.bounds.lowerBound === null
+          || param.bounds.upperBound === undefined
+          || param.bounds.upperBound === null
+          || !param.bounds.boundaryBehavior) {
+          issues.push({
+            slotId: `operation/${op.name}/parameter/${param.name}/bounds`,
+            kind: 'UNRESOLVED_PARAMETER_DOMAIN',
+            reason: `O parâmetro numérico '${param.name}' da operação '${op.name}' não define limites (bounds) determinísticos com lowerBound, upperBound e boundaryBehavior.`,
+          });
+          continue;
+        }
+
+        if (param.bounds.boundaryBehavior === 'REJECT' || param.bounds.boundaryBehavior === 'ERROR') {
+          if (!param.onInvalid
+            || !param.onInvalid.outcomeKind
+            || !param.onInvalid.error
+            || param.onInvalid.error.trim().length === 0) {
+            issues.push({
+              slotId: `operation/${op.name}/parameter/${param.name}/onInvalid`,
+              kind: 'UNRESOLVED_PARAMETER_DOMAIN',
+              reason: `O parâmetro '${param.name}' da operação '${op.name}' possui boundaryBehavior '${param.bounds.boundaryBehavior}' mas não define onInvalid com outcomeKind e error explícitos.`,
+            });
+          }
+        }
+
+        if (/credit|token|ficha|amount/iu.test(param.name)) {
+          const lowerVal = Number(param.bounds.lowerBound);
+          if (Number.isNaN(lowerVal) || lowerVal < 1) {
+            issues.push({
+              slotId: `operation/${op.name}/parameter/${param.name}/domain`,
+              kind: 'UNRESOLVED_PARAMETER_DOMAIN',
+              reason: `O parâmetro de débito '${param.name}' permite valores menores que 1 (lowerBound: ${param.bounds.lowerBound}), o que causaria acréscimo indevido de créditos na subtração de saldo.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+function hasDeclaredTriggerOwner(trigger, knownSymbols) {
+  if (!trigger || typeof trigger !== 'string') return false;
+  const cleanTrigger = trigger.trim();
+  if (cleanTrigger.length === 0) return false;
+
+  const lowerTrigger = cleanTrigger.toLowerCase();
+  for (const sym of knownSymbols) {
+    if (sym && sym.toLowerCase() === lowerTrigger) return true;
+  }
+
+  const tokens = lowerTrigger.split(/[\s_\-/]+/u).filter((t) => t.length > 1 && t !== 'or' && t !== 'and');
+  for (const token of tokens) {
+    for (const sym of knownSymbols) {
+      if (sym && sym.toLowerCase().includes(token)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validador Mecânico de Causalidade e Dono de Estado (validateStateMutationOwnership).
+ * 
+ * Assegura que todo gatilho de reset, mutação declarada e sinal de fronteira possua dono conhecido:
+ * 1. Gatilhos de reset devem corresponder a operações, branches, guardas, sinais ou agregações.
+ * 2. Mutações nominais devem referenciar operações existentes no modelo.
+ */
+export function validateStateMutationOwnership({ stateModel = null } = {}) {
+  const issues = [];
+  if (!stateModel || !Array.isArray(stateModel.entities)) {
+    return { valid: true, issues: [] };
+  }
+
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  const boundaries = Array.isArray(stateModel.producerConsumerBoundaries) ? stateModel.producerConsumerBoundaries : [];
+  const aggregations = Array.isArray(stateModel.aggregations) ? stateModel.aggregations : [];
+
+  const knownSymbols = new Set();
+  for (const op of operations) {
+    if (op.name) knownSymbols.add(op.name);
+    if (Array.isArray(op.guardPrecedence)) {
+      for (const gp of op.guardPrecedence) knownSymbols.add(gp);
+    }
+    if (Array.isArray(op.branches)) {
+      for (const b of op.branches) {
+        if (b.branchId) knownSymbols.add(b.branchId);
+        if (b.statusOrError) knownSymbols.add(b.statusOrError);
+      }
+    }
+    if (Array.isArray(op.executionPipeline)) {
+      for (const step of op.executionPipeline) {
+        if (step.id) knownSymbols.add(step.id);
+      }
+    }
+  }
+  for (const b of boundaries) {
+    if (b.signalName) knownSymbols.add(b.signalName);
+    if (b.producer) knownSymbols.add(b.producer);
+    if (b.consumer) knownSymbols.add(b.consumer);
+  }
+  for (const a of aggregations) {
+    if (a.name) knownSymbols.add(a.name);
+  }
+
+  for (const entity of stateModel.entities) {
+    const fields = Array.isArray(entity.fields) ? entity.fields : [];
+    for (const field of fields) {
+      const fieldKey = `${entity.name}.${field.name}`;
+
+      if (field.reset?.allowed === true && field.reset.trigger) {
+        if (!hasDeclaredTriggerOwner(field.reset.trigger, knownSymbols)) {
+          issues.push({
+            slotId: `state/${fieldKey}/reset/trigger/${field.reset.trigger}`,
+            kind: 'ORPHAN_STATE_MUTATION_OWNER',
+            reason: `O gatilho de reset '${field.reset.trigger}' do campo '${fieldKey}' não possui dono declarado no modelo (não corresponde a nenhuma operação, branch, sinal de fronteira ou agregação).`,
+          });
+        }
+      }
+
+      const mutations = Array.isArray(field.mutations) ? field.mutations : [];
+      for (const m of mutations) {
+        if (m.operation && !operations.some((op) => op.name === m.operation)) {
+          issues.push({
+            slotId: `state/${fieldKey}/mutation/${m.operation}`,
+            kind: 'ORPHAN_STATE_MUTATION_OWNER',
+            reason: `A mutação declarada no campo '${fieldKey}' referencia a operação inexistente '${m.operation}'.`,
+          });
+        }
+      }
+    }
+  }
+
+  for (const b of boundaries) {
+    if (b.consumer && operations.length > 0) {
+      const consumerOp = operations.find((op) => op.name === b.consumer);
+      if (consumerOp) {
+        const matchesSignal = (sym) => {
+          if (!sym || typeof sym !== 'string') return false;
+          const sLower = b.signalName.toLowerCase();
+          const symLower = sym.toLowerCase();
+          if (sLower === symLower || symLower.includes(sLower) || sLower.includes(symLower)) return true;
+          const tokens = b.signalName.replace(/([a-z])([A-Z])/gu, '$1_$2').toLowerCase().split(/[\s_\-]+/u).filter((t) => t.length > 2);
+          return tokens.some((t) => symLower.includes(t));
+        };
+
+        const hasParam = consumerOp.parameters?.some((p) => matchesSignal(p.name));
+        const hasBranch = consumerOp.branches?.some((br) => (
+          matchesSignal(br.branchId) || matchesSignal(br.condition) || matchesSignal(br.statusOrError)
+        ));
+        const hasGuard = consumerOp.guardPrecedence?.some((gp) => matchesSignal(gp));
+
+        if (!hasParam && !hasBranch && !hasGuard) {
+          issues.push({
+            slotId: `operation/${consumerOp.name}/boundary/${b.signalName}`,
+            kind: 'UNRESOLVED_BOUNDARY_CONSUMPTION',
+            reason: `A fronteira declara o sinal '${b.signalName}' consumido pela operação '${consumerOp.name}', mas a operação não modela o sinal em parâmetros, guardas ou ramos de execução.`,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Detecção Ativa de Contradições (validateContradictionDetection).
+ * 
+ * Cruza invariantes, requisitos e modelo de operações antes de certificar fechamento:
+ * 1. Operação não pode executar DECREMENT sem guards sobre campo protegido por invariante ou limite inferior.
+ * 2. Critérios de aceitação que exigem REJECTION exigem ramos de rejeição nas operações.
+ */
+export function validateContradictionDetection({
+  specification = null,
+  stateModel = specification?.stateModel ?? null,
+  invariants = specification?.invariants ?? [],
+  requirements = specification?.requirements ?? [],
+} = {}) {
+  const issues = [];
+  if (!stateModel) {
+    return { valid: true, issues: [] };
+  }
+
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  const entities = Array.isArray(stateModel.entities) ? stateModel.entities : [];
+
+  for (const entity of entities) {
+    for (const field of entity.fields ?? []) {
+      const fieldKey = `${entity.name}.${field.name}`;
+
+      const protectingInvariants = (invariants ?? []).filter((inv) => {
+        const text = `${inv.statement ?? ''} ${inv.falsification ?? ''}`.toLowerCase();
+        const fieldNameLower = field.name.toLowerCase();
+        const entityNameLower = entity.name.toLowerCase();
+        return (
+          text.includes(fieldNameLower) ||
+          text.includes(`${entityNameLower}.${fieldNameLower}`) ||
+          (field.isCounter && (text.includes('negativo') || text.includes('underflow')))
+        );
+      });
+
+      if (protectingInvariants.length > 0) {
+        for (const op of operations) {
+          const branches = Array.isArray(op.branches) ? op.branches : [];
+          for (const branch of branches) {
+            const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+            const hasDecrement = effects.some((e) => e.field === fieldKey && e.effect === 'DECREMENT');
+
+            if (hasDecrement) {
+              const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+              if (guardPrecedence.length === 0) {
+                const invIds = protectingInvariants.map((inv) => inv.id).join(', ');
+                issues.push({
+                  slotId: `operation/${op.name}/contradiction/${fieldKey}`,
+                  kind: 'CONTRADICTORY_RULE_DETECTED',
+                  reason: `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' sem nenhum guard de verificação de saldo/limite, contradizendo o invariante (${invIds}).`,
+                });
+              } else {
+                const rejectionBranches = branches.filter((b) => b.outcomeKind === 'REJECTION');
+                if (rejectionBranches.length === 0) {
+                  const invIds = protectingInvariants.map((inv) => inv.id).join(', ');
+                  issues.push({
+                    slotId: `operation/${op.name}/contradiction/${fieldKey}`,
+                    kind: 'CONTRADICTORY_RULE_DETECTED',
+                    reason: `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' mas não define nenhum branch de rejeição para impedir violação do invariante (${invIds}).`,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const hasRejectionAC = (requirements ?? []).some((r) =>
+    (r.acceptanceCases ?? []).some((ac) => ac.outcomeKind === 'REJECTION')
+  );
+  if (hasRejectionAC && operations.length > 0) {
+    const hasAnyRejectionBranch = operations.some((op) =>
+      (op.branches ?? []).some((b) => b.outcomeKind === 'REJECTION')
+    );
+    if (!hasAnyRejectionBranch) {
+      issues.push({
+        slotId: 'operations/rejectionContradiction',
+        kind: 'CONTRADICTORY_RULE_DETECTED',
+        reason: 'Os critérios de aceitação (acceptanceCases) exigem desfecho de rejeição (REJECTION), mas nenhuma operação declara ramos de rejeição.',
+      });
+    }
+  }
+
+  // 3. Contradição de Admissão vs Comportamento de Observáveis / Guardas
+  for (const entity of entities) {
+    if (entity.isCollection && entity.admissionPolicy === 'ON_FIRST_REQUEST') {
+      for (const obs of stateModel.observables ?? []) {
+        if (typeof obs.emptyBehavior === 'string' && /reject.*(?:unregistered|empty|unknown)/iu.test(obs.emptyBehavior)) {
+          issues.push({
+            slotId: `observable/${obs.name}/admissionContradiction`,
+            kind: 'CONTRADICTORY_RULE_DETECTED',
+            reason: `A entidade '${entity.name}' possui admissionPolicy 'ON_FIRST_REQUEST' (criação automática), mas o observável '${obs.name}' declara emptyBehavior de rejeição ('${obs.emptyBehavior}'). Essa contradição interna impede fechamento determinístico.`,
+          });
+        }
+      }
+      for (const op of operations) {
+        for (const guard of op.guardPrecedence ?? []) {
+          if (/unregistered|unknown_badge|inexistent/iu.test(guard)) {
+            issues.push({
+              slotId: `operation/${op.name}/guard/${guard}/admissionContradiction`,
+              kind: 'CONTRADICTORY_RULE_DETECTED',
+              reason: `A entidade '${entity.name}' possui admissionPolicy 'ON_FIRST_REQUEST', mas a operação '${op.name}' define o guard '${guard}' de rejeição de crachá inexistente.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Contradição de Bitmask vazia com Digest canônico ou Sinais Globais Independentes
+  const serializations = Array.isArray(stateModel.canonicalSerializations) ? stateModel.canonicalSerializations : [];
+  const boundaries = Array.isArray(stateModel.producerConsumerBoundaries) ? stateModel.producerConsumerBoundaries : [];
+  for (const obs of stateModel.observables ?? []) {
+    if (obs.representation === 'UINT32_BITMASK') {
+      const emptyVal = String(obs.emptyBehavior ?? '').trim();
+      if (emptyVal === '0' || emptyVal === '0x0') {
+        const bitAllocation = Array.isArray(obs.bitAllocation) ? obs.bitAllocation : [];
+
+        for (const item of bitAllocation) {
+          const canon = serializations.find((cs) => cs.target === item.field || (typeof item.mapping === 'string' && item.mapping.includes(cs.target)));
+          if (canon && canon.emptyStateDigest && canon.emptyStateDigest !== '0' && canon.emptyStateDigest !== '0x0') {
+            issues.push({
+              slotId: `observable/${obs.name}/bitmaskEmptyDigestContradiction`,
+              kind: 'CONTRADICTORY_RULE_DETECTED',
+              reason: `O observável bitmask '${obs.name}' declara emptyBehavior = '0', mas a fatia '${item.slice}' codifica digest canônico com emptyStateDigest '${canon.emptyStateDigest}' (não-nulo). Declarar zero na coleção vazia contradiz a quádrupla canônica.`,
+            });
+          }
+
+          const isGlobalSignal = boundaries.some((b) => b.signalName === item.field && b.ownership === 'SYSTEM_CONFIGURATION');
+          if (isGlobalSignal) {
+            issues.push({
+              slotId: `observable/${obs.name}/bitmaskEmptySignalContradiction`,
+              kind: 'CONTRADICTORY_RULE_DETECTED',
+              reason: `O observável bitmask '${obs.name}' declara emptyBehavior = '0', mas a fatia '${item.slice}' codifica o sinal global '${item.field}', que opera independentemente do estado da coleção.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validador Mecânico de Funções de Derivação Total (validateDerivedFieldDerivations).
+ * 
+ * Garante que campos derivados ou carry-over fracionário possuam função de derivação total.
+ */
+export function validateDerivedFieldDerivations({ stateModel = null } = {}) {
+  const issues = [];
+  if (!stateModel || !Array.isArray(stateModel.entities)) return { valid: true, issues: [] };
+
+  for (const entity of stateModel.entities) {
+    for (const field of entity.fields ?? []) {
+      const isDerived = field.initialization?.kind === 'DERIVED';
+
+      if (isDerived) {
+        const hasDerivation = field.derivation && typeof field.derivation.formula === 'string' && field.derivation.total === true;
+        const hasDerivationFunc = typeof field.initialization?.derivationFunction === 'string' && field.initialization.derivationFunction.trim().length > 0;
+        const hasFormulaInMutation = field.mutations?.some((m) => (
+          typeof m.targetValue === 'string' && (/[\/*%]/u.test(m.targetValue) || /floor|mod|min|max/iu.test(m.targetValue))
+        ));
+
+        if (!hasDerivation && !hasDerivationFunc && !hasFormulaInMutation) {
+          issues.push({
+            slotId: `state/${entity.name}.${field.name}/derivation`,
+            kind: 'UNRESOLVED_DERIVATION_FUNCTION',
+            reason: `O campo derivado '${entity.name}.${field.name}' não define função de derivação total (derivation com formula, inputs e total: true).`,
+          });
+        }
+      }
+    }
+  }
+
+  return { valid: issues.length === 0, issues };
+}
+
+/**
+ * Validador Mecânico de Fechamento de Categorias Abstratas (validateCategorySetMembership).
+ * 
+ * Exige enumeração formal de membros para categorias citadas em triggers, mutações ou métricas.
+ */
+export function validateCategorySetMembership({ stateModel = null } = {}) {
+  const issues = [];
+  if (!stateModel) return { valid: true, issues: [] };
+
+  const categories = Array.isArray(stateModel.categories) ? stateModel.categories : [];
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  const knownStatuses = new Set();
+
+  for (const op of operations) {
+    if (Array.isArray(op.branches)) {
+      for (const b of op.branches) {
+        if (b.branchId) knownStatuses.add(b.branchId);
+        if (b.statusOrError) knownStatuses.add(b.statusOrError);
+      }
+    }
+    if (Array.isArray(op.guardPrecedence)) {
+      for (const gp of op.guardPrecedence) knownStatuses.add(gp);
+    }
+  }
+
+  const categoryNames = new Set(categories.map((c) => c.name));
+
+  for (const cat of categories) {
+    if (!Array.isArray(cat.members) || cat.members.length === 0) {
+      issues.push({
+        slotId: `stateModel/categories/${cat.name}/members`,
+        kind: 'UNRESOLVED_CATEGORY_MEMBERSHIP',
+        reason: `A categoria '${cat.name}' não enumera os membros pertencentes ao conjunto.`,
+      });
+    } else {
+      for (const member of cat.members) {
+        if (!knownStatuses.has(member)) {
+          issues.push({
+            slotId: `stateModel/categories/${cat.name}/unknownMember/${member}`,
+            kind: 'UNRESOLVED_CATEGORY_MEMBERSHIP',
+            reason: `O membro '${member}' da categoria '${cat.name}' não corresponde a nenhum branch statusOrError ou outcome de operação conhecido.`,
+          });
+        }
+      }
+    }
+  }
+
+  const checkCategoryUsage = (str, usageLocation) => {
+    if (!str || typeof str !== 'string') return;
+    const tokens = str.split(/(?:\s+(?:OR|AND)\s+|_(?:OR|AND)_|[\s/,()|]+)/u).filter((t) => /^[A-Z][A-Z0-9_]{2,}$/u.test(t));
+    for (const tok of tokens) {
+      if (tok.includes('REJECTION') || tok.includes('ERROR') || tok.includes('FAILURE')) {
+        if (!categoryNames.has(tok) && !knownStatuses.has(tok)) {
+          issues.push({
+            slotId: `stateModel/categories/${tok}`,
+            kind: 'UNRESOLVED_CATEGORY_MEMBERSHIP',
+            reason: `A categoria abstrata '${tok}' citada em ${usageLocation} não possui enumeração de membros em stateModel.categories.`,
+          });
+        }
+      }
+    }
+  };
+
+  if (Array.isArray(stateModel.entities)) {
+    for (const entity of stateModel.entities) {
+      for (const field of entity.fields ?? []) {
+        if (field.reset?.allowed && field.reset.trigger) {
+          checkCategoryUsage(field.reset.trigger, `reset.trigger do campo '${entity.name}.${field.name}'`);
+        }
+        for (const m of field.mutations ?? []) {
+          checkCategoryUsage(m.condition, `mutations.condition do campo '${entity.name}.${field.name}'`);
+        }
+      }
+    }
+  }
+
+  return { valid: issues.length === 0, issues };
 }
 
 /**
@@ -793,6 +1387,8 @@ export function generateClosureCertificate({
   const stateLifecycle = validateFieldLifecycle({
     stateModel: specification.stateModel,
     architectureContexts: specification.architectureContexts ?? [],
+    invariants: specification.invariants ?? [],
+    requirements: specification.requirements ?? [],
   });
 
   const provenanceResult = validateProvenanceEnforcement({
@@ -829,6 +1425,12 @@ export function generateClosureCertificate({
     || i.kind === 'UNDETERMINED_BRANCH_NEXT_STATE'
     || i.kind === 'MISSING_SUCCESS_BRANCH'
     || i.kind === 'UNRESOLVED_CANONICAL_SERIALIZATION'
+    || i.kind === 'PIPELINE_PRECEDENCE_CONTRADICTION'
+    || i.kind === 'UNRESOLVED_PARAMETER_DOMAIN'
+    || i.kind === 'ORPHAN_STATE_MUTATION_OWNER'
+    || i.kind === 'UNRESOLVED_DERIVATION_FUNCTION'
+    || i.kind === 'UNRESOLVED_BOUNDARY_CONSUMPTION'
+    || i.kind === 'UNRESOLVED_CATEGORY_MEMBERSHIP'
   ));
 
   const observableIssues = stateLifecycle.issues.filter((i) => (
@@ -840,6 +1442,7 @@ export function generateClosureCertificate({
 
   const declarationConflicts = stateLifecycle.issues.filter((i) => (
     i.kind === 'CONFLICTING_STATE_DECLARATIONS'
+    || i.kind === 'CONTRADICTORY_RULE_DETECTED'
   ));
 
   // Gaps materiais sem decisão vinculada
@@ -948,6 +1551,41 @@ function classifyGapIssue(issue, index) {
       layer = 'TRANSITION_CONSISTENCY';
       requiredAuthority = 'USER_INTENT';
       witness = issue.reason;
+      break;
+    case 'PIPELINE_PRECEDENCE_CONTRADICTION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Etapas de pipeline de execução contradizem a precedência de guardas.';
+      break;
+    case 'UNRESOLVED_PARAMETER_DOMAIN':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Parâmetro de operação sem limites ou rejeição determinísticos.';
+      break;
+    case 'ORPHAN_STATE_MUTATION_OWNER':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Mutação ou gatilho de reset sem dono declarado no modelo.';
+      break;
+    case 'CONTRADICTORY_RULE_DETECTED':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Contradição ativa detectada entre invariantes, requisitos e operações.';
+      break;
+    case 'UNRESOLVED_DERIVATION_FUNCTION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Campo derivado sem função de derivação total determinística.';
+      break;
+    case 'UNRESOLVED_BOUNDARY_CONSUMPTION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Sinal de fronteira sem modelagem na operação consumidora.';
+      break;
+    case 'UNRESOLVED_CATEGORY_MEMBERSHIP':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Categoria abstrata sem membros enumerados no modelo de estado.';
       break;
     case 'INVALID_SEMANTIC_KEY':
       layer = 'TRANSITION_CONSISTENCY';

@@ -3,11 +3,15 @@ import process from 'node:process';
 import {
   generateClosureCertificate,
   validateAggregationAndBoundaries,
+  validateContradictionDetection,
   validateDecisionsWitness,
   validateFieldLifecycle,
+  validateInputDomainClosure,
   validateOperationTotality,
+  validatePipelineCrossCheck,
   validateProvenanceEnforcement,
   validateSemanticInventoryCoverage,
+  validateStateMutationOwnership,
 } from '../../lib/semantic_closure.mjs';
 import { effectiveDeterminismStatus, getEffectiveGapLedger } from '../../lib/semantic_approval.mjs';
 
@@ -94,6 +98,7 @@ function createFixture({
   boundaryRules = [],
   literalFacts = [],
   requirements = [],
+  invariants = [],
 } = {}) {
   return {
     architectureContexts: isStateful
@@ -105,6 +110,7 @@ function createFixture({
     boundaryRules,
     literalFacts,
     requirements,
+    invariants,
     determinismReview: {
       status: 'SEMANTICALLY_CLOSED',
       dimensions,
@@ -1574,6 +1580,542 @@ function createFixture({
     assert.ok(['USER_INTENT', 'ARCHITECTURE_POLICY', 'USER_DECISION'].includes(gap.requiredAuthority));
   }
   log('  PASS: TEST-40 getEffectiveGapLedger returns compliant Gap Ledger');
+}
+
+// TEST-41: Rejects executionPipeline that inverts guardPrecedence or omits declared guards (PIPELINE_PRECEDENCE_CONTRADICTION)
+{
+  const baseModel = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        reset: { allowed: false },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['evaluateRequest'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_LOCK', 'GUARD_BALANCE'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'GUARD_BALANCE', outcomeKind: 'REJECTION', statusOrError: 'ERR_BALANCE', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+      executionPipeline: [
+        { stage: 'GUARD', id: 'GUARD_BALANCE' }, // INVERTED: BALANCE before LOCK!
+        { stage: 'GUARD', id: 'GUARD_LOCK' },
+      ],
+    }],
+    observables: [{ name: 'result', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const invertedResult = validatePipelineCrossCheck({ stateModel: baseModel });
+  assert.equal(invertedResult.valid, false, 'TEST-41: inverted executionPipeline must be invalid');
+  assert.ok(invertedResult.issues.some((i) => i.kind === 'PIPELINE_PRECEDENCE_CONTRADICTION'));
+
+  const omittedModel = globalThis.structuredClone(baseModel);
+  omittedModel.operations[0].executionPipeline = [
+    { stage: 'GUARD', id: 'GUARD_LOCK' }, // GUARD_BALANCE omitted
+  ];
+  const omittedResult = validatePipelineCrossCheck({ stateModel: omittedModel });
+  assert.equal(omittedResult.valid, false, 'TEST-41: omitted guard in executionPipeline must be invalid');
+  assert.ok(omittedResult.issues.some((i) => i.kind === 'PIPELINE_PRECEDENCE_CONTRADICTION'));
+
+  const fixture = createFixture({ isStateful: true, stateModel: baseModel });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  assert.ok(cert.gapLedger.some((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.slotId?.includes('executionPipeline')));
+  log('  PASS: TEST-41 Inverted or omitted guards in executionPipeline blocked with PIPELINE_PRECEDENCE_CONTRADICTION');
+}
+
+// TEST-42: Rejects numeric operation parameter missing bounds or missing onInvalid on REJECT (UNRESOLVED_PARAMETER_DOMAIN)
+{
+  const missingBoundsModel = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        reset: { allowed: false },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['requestCredits'],
+      }],
+    }],
+    operations: [{
+      name: 'requestCredits',
+      guardPrecedence: ['GUARD_AUTH'],
+      branches: [
+        { branchId: 'GUARD_AUTH', outcomeKind: 'REJECTION', statusOrError: 'ERR_AUTH', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+      parameters: [{
+        name: 'amount',
+        type: 'INTEGER',
+        // Missing bounds!
+      }],
+    }],
+    observables: [{ name: 'result', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const missingResult = validateInputDomainClosure({ stateModel: missingBoundsModel });
+  assert.equal(missingResult.valid, false, 'TEST-42: numeric parameter missing bounds must be invalid');
+  assert.ok(missingResult.issues.some((i) => i.kind === 'UNRESOLVED_PARAMETER_DOMAIN' && i.slotId?.includes('bounds')));
+
+  const missingOnInvalidModel = globalThis.structuredClone(missingBoundsModel);
+  missingOnInvalidModel.operations[0].parameters[0].bounds = {
+    lowerBound: '1',
+    upperBound: '100',
+    boundaryBehavior: 'REJECT',
+  };
+  // Missing onInvalid!
+  const missingOnInvalidResult = validateInputDomainClosure({ stateModel: missingOnInvalidModel });
+  assert.equal(missingOnInvalidResult.valid, false, 'TEST-42: REJECT boundaryBehavior without onInvalid must be invalid');
+  assert.ok(missingOnInvalidResult.issues.some((i) => i.kind === 'UNRESOLVED_PARAMETER_DOMAIN' && i.slotId?.includes('onInvalid')));
+
+  const fixture = createFixture({ isStateful: true, stateModel: missingOnInvalidModel });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  assert.ok(cert.gapLedger.some((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.slotId?.includes('parameter')));
+  log('  PASS: TEST-42 Parameter missing bounds or onInvalid blocked with UNRESOLVED_PARAMETER_DOMAIN');
+}
+
+// TEST-43: Rejects field reset trigger without matching operation/branch/boundary (ORPHAN_STATE_MUTATION_OWNER)
+{
+  const orphanResetModel = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'streak',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        reset: { allowed: true, trigger: 'COMPLETELY_ORPHAN_TRIGGER_XYZ', resetValue: '0' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['evaluateRequest'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'result', derivedFrom: ['Badge.streak'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const orphanResult = validateStateMutationOwnership({ stateModel: orphanResetModel });
+  assert.equal(orphanResult.valid, false, 'TEST-43: orphan reset trigger must be invalid');
+  assert.ok(orphanResult.issues.some((i) => i.kind === 'ORPHAN_STATE_MUTATION_OWNER'));
+
+  const fixture = createFixture({ isStateful: true, stateModel: orphanResetModel });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  assert.ok(cert.gapLedger.some((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.slotId?.includes('reset/trigger')));
+  log('  PASS: TEST-43 Orphan reset trigger blocked with ORPHAN_STATE_MUTATION_OWNER');
+}
+
+// TEST-44: Rejects operation performing unguarded decrement on field protected by invariant (CONTRADICTORY_RULE_DETECTED)
+{
+  const contradictoryModel = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '10' },
+        reset: { allowed: false },
+        mutations: [{ operation: 'consume', effect: 'DECREMENT' }],
+        preservation: [],
+        readBy: ['consume'],
+      }],
+    }],
+    operations: [{
+      name: 'consume',
+      guardPrecedence: [], // Unguarded!
+      noGuardsRationale: 'Executa decremento sem conferir guards',
+      branches: [
+        {
+          branchId: 'DO_CONSUME',
+          outcomeKind: 'RETURN_VALUE',
+          defaultPreservation: true,
+          stateEffects: [{ field: 'Badge.tokens', effect: 'DECREMENT', value: '1' }],
+        },
+      ],
+    }],
+    observables: [{ name: 'result', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const invariants = [{
+    id: 'INV-0001',
+    statement: 'O saldo de tokens do Badge nunca fica negativo',
+    falsification: 'Badge.tokens < 0',
+    requirementIds: ['REQ-0001'],
+  }];
+
+  const contradictionResult = validateContradictionDetection({
+    stateModel: contradictoryModel,
+    invariants,
+  });
+  assert.equal(contradictionResult.valid, false, 'TEST-44: unguarded decrement on invariant-protected field must be invalid');
+  assert.ok(contradictionResult.issues.some((i) => i.kind === 'CONTRADICTORY_RULE_DETECTED'));
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: contradictoryModel,
+    invariants,
+  });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.contradictoryRules >= 1);
+  assert.ok(cert.gapLedger.some((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.witness?.includes('DECREMENT')));
+  log('  PASS: TEST-44 Unguarded decrement on invariant-protected field blocked with CONTRADICTORY_RULE_DETECTED');
+}
+
+// TEST-45: Admission Policy ON_FIRST_REQUEST with observable emptyBehavior of rejection blocked with CONTRADICTORY_RULE_DETECTED
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      isCollection: true,
+      admissionPolicy: 'ON_FIRST_REQUEST',
+      capacityPolicy: { maxEntries: null, overflowPolicy: 'NO_CONTRACT_LIMIT', unboundedRationale: 'Sem limite contratual' },
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['decision'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{
+      name: 'decision',
+      derivedFrom: ['Badge.tokens'],
+      representation: 'ENUM',
+      emptyBehavior: 'REJECT_UNREGISTERED_OR_EMPTY', // Contradiz ON_FIRST_REQUEST!
+    }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-45: admission policy vs observable rejection contradiction must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'CONTRADICTORY_RULE_DETECTED' && i.slotId?.includes('admissionContradiction')));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.contradictoryRules >= 1);
+  log('  PASS: TEST-45 Admission Policy ON_FIRST_REQUEST vs observable rejection blocked with CONTRADICTORY_RULE_DETECTED');
+}
+
+// TEST-46: Bitmask declaring emptyBehavior: '0' with non-zero canonical emptyStateDigest blocked with CONTRADICTORY_RULE_DETECTED
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      isCollection: true,
+      admissionPolicy: 'ON_FIRST_REQUEST',
+      capacityPolicy: { maxEntries: null, overflowPolicy: 'NO_CONTRACT_LIMIT', unboundedRationale: 'Sem limite contratual' },
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['observabilityBitmask'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{
+      name: 'observabilityBitmask',
+      derivedFrom: ['Badge.tokens'],
+      representation: 'UINT32_BITMASK',
+      emptyBehavior: '0', // Contradiz emptyStateDigest 0xcbf29ce484222325!
+      bitAllocation: [
+        { slice: '16..31', field: 'Badge.tokens', bitWidth: 16, mapping: 'FNV1A_64_BALANCES_HIGH_16' },
+      ],
+    }],
+    canonicalSerializations: [{
+      target: 'FNV1A_64_BALANCES',
+      includedFields: ['Badge.tokens'],
+      fieldEncodings: [{ field: 'Badge.tokens', encoding: 'UINT64_BE' }],
+      recordOrderingKey: 'Badge.badgeId ASC',
+      emptyStateDigest: '0xcbf29ce484222325',
+    }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-46: bitmask emptyBehavior = 0 contradiction with non-zero digest must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'CONTRADICTORY_RULE_DETECTED' && i.slotId?.includes('bitmaskEmptyDigestContradiction')));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.contradictoryRules >= 1);
+  log('  PASS: TEST-46 Bitmask emptyBehavior = 0 with non-zero canonical digest blocked with CONTRADICTORY_RULE_DETECTED');
+}
+
+// TEST-47: Operation with refill context omitting REFILL stage before balance check blocked with PIPELINE_PRECEDENCE_CONTRADICTION
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      fields: [
+        {
+          name: 'tokens',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+          mutations: [],
+          preservation: ['*'],
+          readBy: ['evaluateRequest'],
+        },
+        {
+          name: 'refillRate',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '10' },
+          mutations: [],
+          preservation: ['*'],
+          readBy: ['evaluateRequest'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_BALANCE'],
+      executionPipeline: [
+        // Omite STAGE_REFILL antes de GUARD_BALANCE!
+        { stage: 'GUARD', id: 'GUARD_BALANCE', description: 'Verifica saldo' },
+        { stage: 'MUTATION', id: 'STAGE_DEDUCT', description: 'Deduz saldo' },
+      ],
+      parameters: [{
+        name: 'requestedCredits',
+        type: 'INTEGER',
+        bounds: { lowerBound: '1', upperBound: '100', boundaryBehavior: 'REJECT' },
+        onInvalid: { outcomeKind: 'REJECTION', error: 'ERR_INVALID_CREDITS' },
+      }],
+      branches: [
+        { branchId: 'GUARD_BALANCE', outcomeKind: 'REJECTION', statusOrError: 'ERR_INSUFFICIENT', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-47: omitted refill stage in pipeline must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'PIPELINE_PRECEDENCE_CONTRADICTION' && i.slotId?.includes('missingRefill')));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  log('  PASS: TEST-47 Omitted REFILL stage before balance evaluation blocked with PIPELINE_PRECEDENCE_CONTRADICTION');
+}
+
+// TEST-48: Operation decrementing balance with parameter lowerBound < 1 blocked with UNRESOLVED_PARAMETER_DOMAIN
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['evaluateRequest'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_BALANCE'],
+      parameters: [{
+        name: 'requestedCredits',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'REJECT' }, // <= 0 allows negative credits!
+        onInvalid: { outcomeKind: 'REJECTION', error: 'ERR_INVALID_CREDITS' },
+      }],
+      branches: [
+        { branchId: 'GUARD_BALANCE', outcomeKind: 'REJECTION', statusOrError: 'ERR_INSUFFICIENT', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [{ field: 'Badge.tokens', effect: 'DECREMENT', value: 'tokens - requestedCredits' }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-48: debit parameter with lowerBound < 1 must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_PARAMETER_DOMAIN' && i.slotId?.includes('domain')));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  log('  PASS: TEST-48 Debit parameter with lowerBound < 1 blocked with UNRESOLVED_PARAMETER_DOMAIN');
+}
+
+// TEST-49: Boundary signal with consumer operation that does not model the signal blocked with UNRESOLVED_BOUNDARY_CONSUMPTION
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'tokens',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '100' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['evaluateRequest'],
+      }],
+    }],
+    operations: [{
+      name: 'evaluateRequest',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
+    producerConsumerBoundaries: [{
+      signalName: 'batchBoundary',
+      producer: 'BATCH_INGRESS',
+      consumer: 'evaluateRequest',
+      ownership: 'SYSTEM_CONFIGURATION',
+      recomputableByConsumer: false,
+      provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-PRODUCT-BOUNDARY' }],
+    }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-49: boundary signal not modeled by consumer must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_BOUNDARY_CONSUMPTION'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  log('  PASS: TEST-49 Boundary signal unmodeled in consumer operation blocked with UNRESOLVED_BOUNDARY_CONSUMPTION');
+}
+
+// TEST-50: Derived field without total derivation function blocked with UNRESOLVED_DERIVATION_FUNCTION
+{
+  const model = {
+    entities: [{
+      name: 'Badge',
+      fields: [{
+        name: 'accruedCarry',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '999', boundaryBehavior: 'ROLLOVER_MODULO' },
+        initialization: { kind: 'DERIVED', value: '0', rationale: 'Valor derivado sem função total' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['eval'],
+      }],
+    }],
+    operations: [{
+      name: 'eval',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Badge.accruedCarry'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-50: derived field without total derivation function must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_DERIVATION_FUNCTION'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  log('  PASS: TEST-50 Derived field without total derivation function blocked with UNRESOLVED_DERIVATION_FUNCTION');
+}
+
+// TEST-51: Abstract category without closed membership definition in stateModel.categories blocked with UNRESOLVED_CATEGORY_MEMBERSHIP
+{
+  const model = {
+    entities: [{
+      name: 'Metrics',
+      fields: [{
+        name: 'rejectStreak',
+        type: 'INTEGER',
+        isCounter: true,
+        bounds: { lowerBound: '0', upperBound: '255', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [
+          { operation: 'eval', condition: 'BATCH_REJECTION', effect: 'INCREMENT', targetValue: 'rejectStreak + 1' },
+        ],
+        reset: { allowed: false },
+        preservation: [],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'eval',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Metrics.rejectStreak'], representation: 'SCALAR', emptyBehavior: '0' }],
+    // categories AUSENTE! BATCH_REJECTION é categoria abstrata sem enumeração
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-51: category without membership definition must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_CATEGORY_MEMBERSHIP'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  log('  PASS: TEST-51 Abstract category without closed membership definition blocked with UNRESOLVED_CATEGORY_MEMBERSHIP');
 }
 
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
