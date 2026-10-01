@@ -269,19 +269,6 @@ NODE
 # M0 preserva a intenção e extrai somente estrutura literal, sem emitir vereditos semânticos.
 node --input-type=module <<'NODE'
 import { buildIntentEvidence } from './scripts/lib/intent_evidence.mjs';
-import { mechanicalPolicySignals } from './scripts/lib/semantic_authority.mjs';
-
-const policySignals = mechanicalPolicySignals({
-  rules: [{
-    id: 'ARCH-PARSIMONY',
-    reviewReferences: ['injeção de dependências', 'decorador', 'decoradores'],
-    forbiddenReferences: [],
-  }],
-}, 'Usar injeção dinâmica de dependências e decoradores; decoradorX não é uma referência.');
-if (JSON.stringify(policySignals.map(({ reference }) => reference))
-  !== JSON.stringify(['injeção de dependências', 'decoradores'])) {
-  throw new Error('policy_matching_was_not_structural_and_bounded');
-}
 
 const completeIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bit 1: ciclo; Bits 2–31: dados.';
 const complete = buildIntentEvidence(completeIntent);
@@ -291,25 +278,8 @@ if (complete.method !== 'LOSSLESS_NEUTRAL_SENTENCES_V2'
   || completeRanges.length !== 3
   || completeRanges[0].attributes.start !== 0
   || completeRanges[0].attributes.end !== 0
-  || complete.bitLayouts.length !== 1
-  || complete.bitLayouts[0].status !== 'COMPLETE'
-  || complete.bitLayouts[0].coveredWidth !== 32) {
-  throw new Error('complete_bit_layout_was_not_measured');
-}
-
-const gapIntent = 'Expor bitmask de 32 bits: Bit 0: trava; Bits 2–31: dados.';
-const gap = buildIntentEvidence(gapIntent);
-if (gap.bitLayouts[0].status !== 'INCOMPLETE'
-  || gap.bitLayouts[0].gaps[0]?.startBit !== 1
-  || gap.bitLayouts[0].gaps[0]?.endBit !== 1) {
-  throw new Error('bit_layout_gap_was_not_reported');
-}
-
-const overlapIntent = 'Expor máscara de 32 bits: Bits 0–4: a; Bits 4–31: b.';
-const overlap = buildIntentEvidence(overlapIntent);
-if (overlap.bitLayouts[0].overlaps[0]?.startBit !== 4
-  || overlap.bitLayouts[0].overlaps[0]?.endBit !== 4) {
-  throw new Error('bit_layout_overlap_was_not_reported');
+  || complete.bitLayouts.length !== 0) {
+  throw new Error('complete_intent_evidence_was_not_extracted');
 }
 
 const arithmeticGap = buildIntentEvidence('Calcular a fração pela fórmula ().');
@@ -323,8 +293,8 @@ const individualBits = Array.from({ length: 32 }, (_, bit) => `Bit ${bit}: campo
 const fullyEnumeratedIntent = `Expor bitmask de 32 bits: ${individualBits}.`;
 const fullyEnumerated = buildIntentEvidence(fullyEnumeratedIntent);
 if (fullyEnumerated.literalFacts.filter(({ kind }) => kind === 'BIT_RANGE').length !== 32
-  || fullyEnumerated.bitLayouts[0].status !== 'COMPLETE') {
-  throw new Error('fully_enumerated_32_bit_layout_was_rejected');
+  || fullyEnumerated.bitLayouts.length !== 0) {
+  throw new Error('fully_enumerated_intent_evidence_was_rejected');
 }
 
 const neutral = buildIntentEvidence([
@@ -1044,8 +1014,8 @@ printf '%s\n' "${policy_output}" | jq -e '
 node scripts/issue_contract_runner.mjs draft 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
 deterministic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${deterministic_request}" | jq -e '
-  .intentEvidence.bitLayouts[0].declaredWidth == 8
-  and .intentEvidence.bitLayouts[0].status == "COMPLETE"
+  .intentEvidence.bitLayouts == []
+  and .policy.signals == []
   and (.intentEvidence.literalFacts | map(select(.kind == "BIT_RANGE")) | length) == 2
   and (.intentEvidence | has("determinismActivations") | not)
   and (.intentEvidence | has("proofObligations") | not)

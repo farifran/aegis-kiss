@@ -7,7 +7,6 @@ import { buildIntentEvidence } from './intent_evidence.mjs';
 import { assertSchema } from './schema_validator.mjs';
 import { buildSemanticOutputSchema } from './semantic_output_schema.mjs';
 import {
-  mechanicalPolicySignals,
   policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
@@ -201,7 +200,7 @@ export function buildSemanticRequest({
         reviewReferences: rule.reviewReferences,
         forbiddenReferences: rule.forbiddenReferences,
       })),
-      signals: mechanicalPolicySignals(policy, preflight.intent),
+      signals: [],
       amendments: (policy.amendments ?? []).map(({ id, ruleId, reason }) => ({ id, ruleId, reason })),
     },
     revision,

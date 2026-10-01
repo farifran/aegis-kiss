@@ -79,6 +79,8 @@ export function semanticSupervisorInstructions(request) {
     'Toda basis USER_INTENT e todo target de medição USER_INTENT devem copiar uma substring literal exata da intenção.',
     'Prefira o menor conjunto suficiente de claims, requisitos e decisões; não fragmente a mesma obrigação sem necessidade observável.',
     'Registre correções exigidas pela constituição e arquitetura. Só formule decisions quando restarem alternativas autorizadas com resultados públicos distintos; indique recommendedAnswerIndex e justifique. Uma violação de regra hard não é uma alternativa válida.',
+    'Em policyAssessments, avalie cada regra de arquitetura de forma estritamente semântica e contextual; a conformidade decorre do significado da demanda e do sistema, e não de contagem ou ausência de termos em policy.signals (que são puramente informativos).',
+    'Em stateModel.observables, defina formalmente a modelagem de observáveis e fatias de bitmask (bitAllocation) pelo entendimento da demanda. O Harness verificará apenas as propriedades matemáticas e relacionais formais.',
     `Constituição confiável: ${canonicalJson(request.constitution)}`,
   ].join('\n');
 }

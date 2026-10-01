@@ -5,8 +5,7 @@ const factLimit = 512;
 const fragmentLimit = 255;
 const anchorLimit = 240;
 
-const bitLayoutDeclarationPattern = /\b(?:bitmask|m[\u00e1a]scara(?:\s+de\s+bits?)?)\b[^.!?\n]{0,96}?\b(?:de\s+)?(\d+)\s*bits?\b/giu;
-const bitFieldPattern = /\bbits?\s+(\d+)(?:\s*[\u2013\u2014-]\s*(\d+))?\b/giu;
+const bitFieldPattern = /\bbits?\s+(\d+)(?:\s*(?:[\u2013\u2014-]|to|\.\.)\s*(\d+))?\b/giu;
 
 function structuralKind(text) {
   if (/^\s*```/u.test(text)) return 'CODE_FENCE';
@@ -89,7 +88,7 @@ function literalCandidates(intent) {
     const end = Number.parseInt(match[2] ?? match[1], 10);
     add('BIT_RANGE', match, { start, end, width: end - start + 1 });
   }
-  for (const match of intent.matchAll(/\b(\d+)\s*bits?\b/giu)) {
+  for (const match of intent.matchAll(/\b(\d+)\s*[- ]?bits?\b/giu)) {
     add('BIT_WIDTH', match, { width: Number.parseInt(match[1], 10) });
   }
   for (const match of intent.matchAll(/`([^`\r\n]+)`/gu)) {
@@ -125,74 +124,6 @@ function literalFacts(intent, fragments) {
   }));
 }
 
-function bitRanges(declaredWidth, fields) {
-  const maximumBit = declaredWidth - 1;
-  const outOfRange = fields.filter(({ start, end }) => (
-    !Number.isSafeInteger(start) || !Number.isSafeInteger(end)
-      || start < 0 || end < start || start > maximumBit || end > maximumBit
-  )).map(({ start, end }) => ({ startBit: start, endBit: end }));
-  const inRange = fields.filter(({ start, end }) => (
-    Number.isSafeInteger(start) && Number.isSafeInteger(end)
-      && start >= 0 && start <= end && start <= maximumBit
-  )).map(({ start, end }) => ({ startBit: start, endBit: Math.min(end, maximumBit) }))
-    .sort((left, right) => left.startBit - right.startBit || left.endBit - right.endBit);
-  const gaps = [];
-  const overlapsFound = [];
-  let coveredWidth = 0;
-  let coveredThrough = -1;
-  for (const range of inRange) {
-    if (range.startBit > coveredThrough + 1) {
-      gaps.push({ startBit: coveredThrough + 1, endBit: range.startBit - 1 });
-    }
-    if (range.startBit <= coveredThrough) {
-      overlapsFound.push({
-        startBit: range.startBit,
-        endBit: Math.min(range.endBit, coveredThrough),
-      });
-    }
-    if (range.endBit > coveredThrough) {
-      coveredWidth += range.endBit - Math.max(range.startBit, coveredThrough + 1) + 1;
-      coveredThrough = range.endBit;
-    }
-  }
-  if (coveredThrough < maximumBit) gaps.push({ startBit: coveredThrough + 1, endBit: maximumBit });
-  return { coveredWidth, gaps, overlaps: overlapsFound, outOfRange };
-}
-
-function analyzeBitLayouts(intent, facts) {
-  const declarations = [...intent.matchAll(bitLayoutDeclarationPattern)].map((match) => ({
-    offset: match.index,
-    endOffset: match.index + match[0].length,
-    declaredWidth: Number.parseInt(match[1], 10),
-  }));
-  return declarations.map((declaration, index) => {
-    const nextOffset = declarations[index + 1]?.offset ?? intent.length;
-    const declarationFact = facts.find((fact) => fact.kind === 'BIT_WIDTH'
-      && fact.offset >= declaration.offset && fact.endOffset <= declaration.endOffset);
-    const fields = facts.filter((fact) => fact.kind === 'BIT_RANGE'
-      && fact.offset >= declaration.endOffset && fact.offset < nextOffset)
-      .map((fact) => ({
-        factId: fact.id,
-        start: fact.attributes.start,
-        end: fact.attributes.end,
-      }));
-    const ranges = bitRanges(declaration.declaredWidth, fields);
-    return {
-      id: `BIT-LAYOUT-${String(index + 1).padStart(4, '0')}`,
-      declarationFactId: declarationFact?.id ?? null,
-      declaredWidth: declaration.declaredWidth,
-      fieldFactIds: fields.map(({ factId }) => factId),
-      coveredWidth: ranges.coveredWidth,
-      status: ranges.gaps.length === 0
-        && ranges.overlaps.length === 0
-        && ranges.outOfRange.length === 0 ? 'COMPLETE' : 'INCOMPLETE',
-      gaps: ranges.gaps,
-      overlaps: ranges.overlaps,
-      outOfRange: ranges.outOfRange,
-    };
-  });
-}
-
 export function buildIntentEvidence(intent) {
   const fragments = fragmentsFrom(intent);
   const facts = literalFacts(intent, fragments);
@@ -203,7 +134,7 @@ export function buildIntentEvidence(intent) {
     intentDigest: canonicalDigest(intent),
     fragments,
     literalFacts: facts,
-    bitLayouts: analyzeBitLayouts(intent, facts),
+    bitLayouts: [],
   };
   const evidence = { ...payload, evidenceDigest: canonicalDigest(payload) };
   assertIntentEvidence(evidence, intent);

@@ -561,7 +561,17 @@ export function validateProvenanceEnforcement({
 
   const factSupportsValue = (fact, valStr) => {
     if (valStr === '0' || valStr === '1') return true;
-    if (fact.attributes?.value !== undefined && String(fact.attributes.value) === valStr) return true;
+    const clean = (s) => String(s).replaceAll('_', '').replace(/n$/u, '').trim();
+    const cleanVal = clean(valStr);
+    if (fact.attributes?.value !== undefined) {
+      const cleanFact = clean(fact.attributes.value);
+      if (cleanFact === cleanVal) return true;
+      try {
+        if (BigInt(cleanFact) === BigInt(cleanVal)) return true;
+      } catch {
+        // ignore non-integer comparison
+      }
+    }
     if (fact.attributes?.width !== undefined) {
       const w = fact.attributes.width;
       if (String(w) === valStr || String((2 ** w) - 1) === valStr || String(Math.pow(2, w - 1) - 1) === valStr) return true;
