@@ -1391,6 +1391,10 @@ export function validateAggregationAndBoundaries({
  * Rejeita qualquer dependência sem proveniência ou nó em aberto com OPEN_COMPUTATIONAL_DEPENDENCY.
  * Detecta ciclos causais com COMPUTATIONAL_DEPENDENCY_CYCLE.
  */
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function validateComputabilityGraphClosure({
   stateModel = null,
   decisions = [],
@@ -1693,6 +1697,180 @@ export function validateComputabilityGraphClosure({
         });
       }
     }
+
+    // =========================================================================
+    // AEGIS SEMANTIC CIRCUIT V2: GATES DE FECHAMENTO ONTO-SEMÂNTICO
+    // =========================================================================
+
+    // GATE A: ANÁLISE DIMENSIONAL NOMINAL (validateDimensionalUnits)
+    if (node.unit || deps.some((d) => nodeMap.get(d)?.unit)) {
+      const depNodesWithUnit = deps.map((d) => nodeMap.get(d)).filter((d) => Boolean(d?.unit));
+
+      if (formula && typeof formula === 'string' && formula.trim().length > 0) {
+        const formulaStr = formula.trim();
+
+        // 1. Verificação de pares de grandezas em operações aditivas (+ / -) e multiplicativas (* / /)
+        for (let i = 0; i < depNodesWithUnit.length; i++) {
+          for (let j = i + 1; j < depNodesWithUnit.length; j++) {
+            const d1 = depNodesWithUnit[i];
+            const d2 = depNodesWithUnit[j];
+            const s1 = d1.symbol ?? d1.nodeId;
+            const s2 = d2.symbol ?? d2.nodeId;
+            const t1 = d1.groundedIn ?? d1.target ?? s1;
+            const t2 = d2.groundedIn ?? d2.target ?? s2;
+
+            const a1s = [s1, t1, t1.split('.').pop()].filter(Boolean);
+            const a2s = [s2, t2, t2.split('.').pop()].filter(Boolean);
+
+            const isAdditive = a1s.some((a1) => a2s.some((a2) => {
+              const p = new RegExp(`(?:\\b${escapeRegex(a1)}\\b\\s*[+-]\\s*\\b${escapeRegex(a2)}\\b)|(?:\\b${escapeRegex(a2)}\\b\\s*[+-]\\s*\\b${escapeRegex(a1)}\\b)`, 'i');
+              return p.test(formulaStr);
+            }));
+
+            if (isAdditive) {
+              if (d1.unit.family !== d2.unit.family) {
+                recordNodeIssue(id, {
+                  slotId: `${slotId}/unit`,
+                  kind: 'DIMENSIONAL_UNIT_MISMATCH',
+                  reason: `Incompatibilidade dimensional aditiva no nó '${id}': a fórmula ('${formulaStr}') soma/subtrai grandezas de famílias distintas ('${s1}' [${d1.unit.family}] e '${s2}' [${d2.unit.family}]).`,
+                });
+              } else if (d1.unit.label !== d2.unit.label && !node.unit?.conversion && !d1.unit?.conversion && !d2.unit?.conversion) {
+                recordNodeIssue(id, {
+                  slotId: `${slotId}/unit`,
+                  kind: 'DIMENSIONAL_UNIT_MISMATCH',
+                  reason: `Incompatibilidade dimensional aditiva no nó '${id}': grandezas com rótulos distintos ('${s1}' [${d1.unit.label}] e '${s2}' [${d2.unit.label}]) somadas sem fator de conversão.`,
+                });
+              }
+            }
+
+            const isMultiplicative = a1s.some((a1) => a2s.some((a2) => {
+              const p = new RegExp(`(?:\\b${escapeRegex(a1)}\\b\\s*[*]\\s*\\b${escapeRegex(a2)}\\b)|(?:\\b${escapeRegex(a2)}\\b\\s*[*]\\s*\\b${escapeRegex(a1)}\\b)`, 'i');
+              return p.test(formulaStr);
+            }));
+
+            if (isMultiplicative) {
+              if (d1.unit.family !== d2.unit.family) {
+                const isRatio1 = d1.unit.family === 'RATIO';
+                const isRatio2 = d2.unit.family === 'RATIO';
+                const hasConversion = Boolean(node.unit?.conversion) || Boolean(d1.unit?.conversion) || Boolean(d2.unit?.conversion);
+                if (!isRatio1 && !isRatio2 && !hasConversion) {
+                  recordNodeIssue(id, {
+                    slotId: `${slotId}/unit`,
+                    kind: 'DIMENSIONAL_UNIT_MISMATCH',
+                    reason: `Incompatibilidade dimensional multiplicativa no nó '${id}': a fórmula ('${formulaStr}') combina grandezas heterogêneas ('${s1}' [${d1.unit.family}:${d1.unit.label}] e '${s2}' [${d2.unit.family}:${d2.unit.label}]) sem fator de conversão declarado.`,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // 2. Coerência entre a unidade declarada de saída do nó e suas dependências
+        if (node.unit && depNodesWithUnit.length > 0) {
+          const firstDepUnit = depNodesWithUnit[0].unit;
+          const isPureAddition = (formulaStr.includes('+') || formulaStr.includes('-')) && !formulaStr.includes('*');
+          if (isPureAddition && depNodesWithUnit.every((d) => d.unit.family === firstDepUnit.family)) {
+            if (node.unit.family !== firstDepUnit.family && !node.unit.conversion) {
+              recordNodeIssue(id, {
+                slotId: `${slotId}/unit`,
+                kind: 'DIMENSIONAL_UNIT_MISMATCH',
+                reason: `Incompatibilidade de unidade de saída no nó '${id}': o nó declara família '${node.unit.family}', mas seus operandos pertencem à família '${firstDepUnit.family}' sem conversão declarada.`,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // GATE B: CARDINALIDADE SEMÂNTICA (validateCardinalitySemantics)
+    const isComputedOrDerived = node.category === 'COMPUTED_VARIABLE'
+      || node.category === 'DERIVED_VALUE'
+      || node.category === 'MATHEMATICAL_RULE';
+    const isMemberApportionment = isComputedOrDerived && (
+      node.cardinality === 'COLLECTION'
+      || (node.cardinality !== 'SCALAR' && (
+        /(?:apportionment|rateio|allocation_per_member|allocate_items|distribute_to_orders)/i.test(id)
+        || /(?:apportionment|rateio|allocation_per_member|allocate_items|distribute_to_orders)/i.test(target)
+      ))
+    );
+
+    if (isMemberApportionment) {
+      const hasCollectionDep = deps.some((depId) => {
+        const depNode = nodeMap.get(depId);
+        return depNode?.cardinality === 'COLLECTION' || depNode?.semanticType === 'COLLECTION';
+      });
+
+      if (!hasCollectionDep) {
+        recordNodeIssue(id, {
+          slotId: `${slotId}/cardinality`,
+          kind: 'COLLECTION_MEMBERS_MISSING',
+          reason: `Nó '${id}' declara cardinalidade COLLECTION ou alocação por membro, mas todas as suas dependências são escalares ou agregadas (${deps.join(', ')}), sem acesso aos membros individuais da coleção.`,
+        });
+      }
+    }
+
+    // GATE C: PRESERVAÇÃO DE IDENTIDADE (validateIdentityPreservation)
+    const isSelectiveAction = /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(id)
+      || /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(target);
+
+    if (isSelectiveAction) {
+      const hasIdentityScope = Boolean(node.identityScope?.entity && node.identityScope?.isPreservedSet !== false);
+      const isIdentitySemanticType = node.semanticType === 'IDENTITY' || (node.semanticType === 'COLLECTION' && Boolean(node.identityScope?.entity));
+
+      let isStateFieldBoolean = false;
+      if (Array.isArray(stateModel.entities)) {
+        for (const ent of stateModel.entities) {
+          for (const f of ent.fields ?? []) {
+            if (`${ent.name}.${f.name}` === target || f.name === target) {
+              if (f.type === 'BOOLEAN' || f.type === 'BOOL') {
+                isStateFieldBoolean = true;
+              }
+            }
+          }
+        }
+      }
+
+      const isAnonymousBoolean = isStateFieldBoolean && !hasIdentityScope && !isIdentitySemanticType;
+      const isScalarWithoutIdentity = (node.cardinality === 'SCALAR' || !node.cardinality) && !hasIdentityScope && !isIdentitySemanticType && !node.semanticType;
+
+      if (isAnonymousBoolean || isScalarWithoutIdentity) {
+        recordNodeIssue(id, {
+          slotId: `${slotId}/identityPreservation`,
+          kind: 'IDENTITY_PRESERVATION_MISSING',
+          reason: `O nó '${id}' modela ação seletiva, penalidade ou isolamento de entidade, mas utiliza flag escalar booleano sem preservação de identidade (exige SET<IDENTITY> ou identityScope com entity e identifierField).`,
+        });
+      }
+    }
+
+    // GATE D: FECHAMENTO TRANSACIONAL E ROLLBACK ATÔMICO (validateTransactionalClosure)
+    const isExecutionCandidate = node.category !== 'HUMAN_DECISION' && node.category !== 'EXTERNAL_INPUT';
+    const isMultiLegTransaction = isExecutionCandidate && (
+      node.semanticType === 'TRANSACTION'
+      || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(id)
+      || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(target)
+    ) && (
+      /(?:triangulat|atomic_rollback|multilateral|reversao_atomica|multi_leg)/i.test(id)
+      || /(?:triangulat|atomic_rollback|multilateral|reversao_atomica|multi_leg)/i.test(target)
+    );
+
+    if (isMultiLegTransaction) {
+      const tx = node.transaction;
+      if (!tx || typeof tx !== 'object') {
+        recordNodeIssue(id, {
+          slotId: `${slotId}/transaction`,
+          kind: 'TRANSACTION_BOUNDARY_UNCLOSED',
+          reason: `O nó '${id}' representa operação com reversão atômica multi-etapas, mas não define fronteira canônica de transação (transaction: scope, candidateFields, commitGuard, onCommit, onRollback).`,
+        });
+      } else {
+        if (!tx.scope || !tx.commitGuard || !Array.isArray(tx.candidateFields) || tx.candidateFields.length < 2) {
+          recordNodeIssue(id, {
+            slotId: `${slotId}/transaction`,
+            kind: 'TRANSACTION_BOUNDARY_UNCLOSED',
+            reason: `A fronteira de transação no nó '${id}' é inválida: exige scope, commitGuard e candidateFields com no mínimo 2 pernas/campos mutáveis.`,
+          });
+        }
+      }
+    }
   }
 
   // 2. Detecção de Ciclos no Grafo Causal
@@ -1975,6 +2153,10 @@ export function generateClosureCertificate({
     || i.kind === 'UNRESOLVED_ZERO_DIVISOR'
     || i.kind === 'UNCONFIRMED_FEEDBACK_LOOP'
     || i.kind === 'NON_COMPUTABLE_PRECURSOR'
+    || i.kind === 'DIMENSIONAL_UNIT_MISMATCH'
+    || i.kind === 'COLLECTION_MEMBERS_MISSING'
+    || i.kind === 'IDENTITY_PRESERVATION_MISSING'
+    || i.kind === 'TRANSACTION_BOUNDARY_UNCLOSED'
   ));
   const unresolvedDependencies = computabilityIssues.length;
   const unresolvedDeterminismDimensions = determinismGaps.length + determinismDecisions.length;
@@ -2212,6 +2394,26 @@ function classifyGapIssue(issue, index) {
       layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
       requiredAuthority = 'ARCHITECTURE_POLICY';
       witness = issue.reason || 'Corrente causal interrompida porque o precursor do nó não é computável.';
+      break;
+    case 'DIMENSIONAL_UNIT_MISMATCH':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Incompatibilidade dimensional em nó de computabilidade.';
+      break;
+    case 'COLLECTION_MEMBERS_MISSING':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Rateio ou operação em coleção sem membros individuais disponíveis.';
+      break;
+    case 'IDENTITY_PRESERVATION_MISSING':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Ação seletiva sobre entidade sem preservação de identidade.';
+      break;
+    case 'TRANSACTION_BOUNDARY_UNCLOSED':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Operação com reversão atômica sem fronteira canônica de transação.';
       break;
 
 

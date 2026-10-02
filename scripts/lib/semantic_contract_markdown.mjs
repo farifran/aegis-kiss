@@ -362,6 +362,11 @@ export function renderSemanticContractMarkdown(contract, {
           : '*Terminal (Grounded)*';
 
         const edgeCases = [];
+        if (node.semanticType) edgeCases.push(`Tipo: \`${node.semanticType}\``);
+        if (node.unit) edgeCases.push(`Unidade: \`${node.unit.family}:${node.unit.label}\``);
+        if (node.cardinality) edgeCases.push(`Card: \`${node.cardinality}\``);
+        if (node.identityScope?.entity) edgeCases.push(`Identidade: \`${node.identityScope.entity}\``);
+        if (node.transaction?.scope) edgeCases.push(`Transação: \`${node.transaction.scope}\``);
         if (node.edgeCaseRules?.tieBreaking) edgeCases.push(`Desempate: \`${node.edgeCaseRules.tieBreaking}\``);
         if (node.edgeCaseRules?.zeroDivisor) edgeCases.push(`Divisor Zero: \`${node.edgeCaseRules.zeroDivisor}\``);
         if (node.edgeCaseRules?.unfilledBuffer) edgeCases.push(`Warmup: \`${node.edgeCaseRules.unfilledBuffer}\``);

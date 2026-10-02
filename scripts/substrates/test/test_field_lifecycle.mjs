@@ -2933,4 +2933,408 @@ function createFixture({
   log('  PASS: TEST-63 Complete Level 3 circuit with edge cases and feedback loop certifies CERTIFIED_CLOSED');
 }
 
+// TEST-64: Dimensional mismatch between distinct unit families blocked with DIMENSIONAL_UNIT_MISMATCH
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'volume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.volume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'VOLUME_FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'dockVolume',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'RATE_FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'feePerPallet',
+        unit: { family: 'CURRENCY', label: 'CENTS' },
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'INVALID_SUM',
+        category: 'COMPUTED_VARIABLE',
+        target: 'invalidSum',
+        formula: 'dockVolume + feePerPallet',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        dependencies: ['VOLUME_FEED', 'RATE_FEED'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-64: dimensional mismatch must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'DIMENSIONAL_UNIT_MISMATCH'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('INVALID_SUM'));
+  assert.ok(gap, 'TEST-64: gapLedger must register DIMENSIONAL_UNIT_MISMATCH witness');
+  log('  PASS: TEST-64 Dimensional mismatch between distinct unit families blocked with DIMENSIONAL_UNIT_MISMATCH');
+}
+
+// TEST-65: Member-level allocation with only aggregate inputs blocked with COLLECTION_MEMBERS_MISSING
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'capacity',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '10000' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.capacity'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'AVAILABLE_CAPACITY',
+        category: 'EXTERNAL_INPUT',
+        target: 'availableCapacity',
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'TOTAL_DEMAND',
+        category: 'EXTERNAL_INPUT',
+        target: 'totalDemand',
+        cardinality: 'AGGREGATE',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ORDER_APPORTIONMENT',
+        category: 'COMPUTED_VARIABLE',
+        target: 'orderApportionment',
+        cardinality: 'COLLECTION',
+        formula: '(availableCapacity * 10000n) / totalDemand',
+        dependencies: ['AVAILABLE_CAPACITY', 'TOTAL_DEMAND'],
+        edgeCaseRules: { zeroDivisor: 'REJECT_ALL' },
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-65: member allocation with aggregate inputs must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'COLLECTION_MEMBERS_MISSING'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('ORDER_APPORTIONMENT'));
+  assert.ok(gap, 'TEST-65: gapLedger must register COLLECTION_MEMBERS_MISSING witness');
+  log('  PASS: TEST-65 Member-level allocation with only aggregate inputs blocked with COLLECTION_MEMBERS_MISSING');
+}
+
+// TEST-66: Selective entity penalty using anonymous boolean flag blocked with IDENTITY_PRESERVATION_MISSING
+{
+  const model = {
+    entities: [{
+      name: 'CarrierRegistry',
+      fields: [{
+        name: 'carrierIsPenalized',
+        type: 'BOOLEAN',
+        bounds: null,
+        initialization: { kind: 'EXPLICIT_VALUE', value: 'false' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['CarrierRegistry.carrierIsPenalized'], representation: 'SCALAR', emptyBehavior: 'false' }],
+    computabilityGraph: [
+      {
+        nodeId: 'INFRACTION_FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'infractionDetected',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PENALIZE_CARRIER',
+        category: 'COMPUTED_VARIABLE',
+        target: 'CarrierRegistry.carrierIsPenalized',
+        formula: 'infractionDetected == true',
+        cardinality: 'SCALAR',
+        dependencies: ['INFRACTION_FEED'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-66: selective action with boolean flag must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'IDENTITY_PRESERVATION_MISSING'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('PENALIZE_CARRIER'));
+  assert.ok(gap, 'TEST-66: gapLedger must register IDENTITY_PRESERVATION_MISSING witness');
+  log('  PASS: TEST-66 Selective entity penalty using anonymous boolean flag blocked with IDENTITY_PRESERVATION_MISSING');
+}
+
+// TEST-67: Multi-leg triangulation without canonical transaction block blocked with TRANSACTION_BOUNDARY_UNCLOSED
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'heldVolume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.heldVolume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'VOLUME_AB',
+        category: 'EXTERNAL_INPUT',
+        target: 'volumeAB',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'EXECUTE_TRIANGULATION',
+        category: 'COMPUTED_VARIABLE',
+        target: 'executeTriangulation',
+        formula: 'volumeAB > 0',
+        dependencies: ['VOLUME_AB'],
+        status: 'GROUNDED',
+        // transaction AUSENTE!
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-67: multi-leg triangulation without transaction must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'TRANSACTION_BOUNDARY_UNCLOSED'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('EXECUTE_TRIANGULATION'));
+  assert.ok(gap, 'TEST-67: gapLedger must register TRANSACTION_BOUNDARY_UNCLOSED witness');
+  log('  PASS: TEST-67 Multi-leg triangulation without canonical transaction block blocked with TRANSACTION_BOUNDARY_UNCLOSED');
+}
+
+// TEST-68: Full Aegis Semantic Circuit v2 with dimensional units, collections, identity preservation & transaction certifies CERTIFIED_CLOSED
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [
+        {
+          name: 'dockA_volume',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'OK', effect: 'SET_VALUE', targetValue: 'volumeA' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'dockB_volume',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'OK', effect: 'SET_VALUE', targetValue: 'volumeB' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'penalizedCarrierSet',
+          type: 'STRING',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: "'EMPTY_SET'" },
+          mutations: [{ operation: 'step', condition: 'OK', effect: 'SET_VALUE', targetValue: 'carrierPenalty' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'step',
+      parameters: [{ name: 'volumeA' }, { name: 'volumeB' }, { name: 'orderQueue' }],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [
+            { field: 'Yard.dockA_volume', effect: 'SET', value: 'volumeA' },
+            { field: 'Yard.dockB_volume', effect: 'SET', value: 'volumeB' },
+            { field: 'Yard.penalizedCarrierSet', effect: 'SET', value: 'carrierPenalty' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.dockA_volume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'VOLUME_A',
+        category: 'EXTERNAL_INPUT',
+        target: 'volumeA',
+        semanticType: 'VALUE',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'VOLUME_B',
+        category: 'EXTERNAL_INPUT',
+        target: 'volumeB',
+        semanticType: 'VALUE',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ORDER_QUEUE',
+        category: 'EXTERNAL_INPUT',
+        target: 'orderQueue',
+        semanticType: 'COLLECTION',
+        cardinality: 'COLLECTION',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'COMBINED_VOLUME',
+        category: 'COMPUTED_VARIABLE',
+        target: 'combinedVolume',
+        semanticType: 'VALUE',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        cardinality: 'SCALAR',
+        formula: 'volumeA + volumeB',
+        dependencies: ['VOLUME_A', 'VOLUME_B'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ORDER_APPORTIONMENT',
+        category: 'COMPUTED_VARIABLE',
+        target: 'orderApportionment',
+        semanticType: 'COLLECTION',
+        cardinality: 'COLLECTION',
+        formula: 'allocateOrders(combinedVolume, orderQueue)',
+        dependencies: ['COMBINED_VOLUME', 'ORDER_QUEUE'],
+        feedbackConfirmation: {
+          executionMode: 'LOCAL_SYNCHRONOUS_FILL',
+        },
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'CARRIER_PENALTY',
+        category: 'COMPUTED_VARIABLE',
+        target: 'carrierPenalty',
+        semanticType: 'IDENTITY',
+        cardinality: 'COLLECTION',
+        identityScope: { entity: 'Carrier', identifierField: 'carrierId', isPreservedSet: true },
+        formula: 'extractOffendingCarriers(ORDER_QUEUE)',
+        dependencies: ['ORDER_QUEUE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'EXECUTE_TRIANGULATION',
+        category: 'COMPUTED_VARIABLE',
+        target: 'executeTriangulation',
+        semanticType: 'TRANSACTION',
+        formula: 'commitTriangulation(volumeA, volumeB)',
+        dependencies: ['VOLUME_A', 'VOLUME_B'],
+        transaction: {
+          scope: 'TRIANGULATION_CLOSURE',
+          candidateFields: ['Yard.dockA_volume', 'Yard.dockB_volume'],
+          commitGuard: 'ALL_LEGS_CONFIRMED',
+          onCommit: 'COMMIT_VOLUMES',
+          onRollback: 'ROLLBACK_VOLUMES',
+        },
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, true, `TEST-68 must be valid, got issues: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-68 Full Aegis Semantic Circuit v2 with dimensional units, collections, identity preservation & transaction certifies CERTIFIED_CLOSED');
+}
+
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
