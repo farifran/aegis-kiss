@@ -104,6 +104,8 @@ export function validateFieldLifecycle({
   architectureContexts = [],
   invariants = [],
   requirements = [],
+  decisions = [],
+  boundaryRules = [],
 } = {}) {
   const isStateful = architectureContexts.some((ctx) => (
     (typeof ctx === 'string' ? ctx : ctx.tag) === 'stateful-operation'
@@ -444,6 +446,14 @@ export function validateFieldLifecycle({
   // 16. CATEGORY SET MEMBERSHIP: Fechamento de conjuntos e membros para categorias abstratas
   const categoryResult = validateCategorySetMembership({ stateModel });
   issues.push(...categoryResult.issues);
+
+  // 17. COMPUTABILITY GRAPH CLOSURE: Fase 1 - Completude Causal e Grafo de Dependências
+  const computabilityResult = validateComputabilityGraphClosure({
+    stateModel,
+    decisions,
+    boundaryRules,
+  });
+  issues.push(...computabilityResult.issues);
 
   return {
     valid: issues.length === 0,
@@ -1366,6 +1376,487 @@ export function validateAggregationAndBoundaries({
 }
 
 /**
+ * Validador Mecânico de Grafo de Computabilidade Semântica (validateComputabilityGraphClosure).
+ * 
+ * FASE 1 — COMPLETUDE CAUSAL:
+ * Verifica se todas as peças necessárias para que o sistema seja computável foram descobertas e fundamentadas.
+ * Percorre o grafo de dependências semânticas e assegura que todo nó termine em um elemento fundamentado:
+ * - EXTERNAL_INPUT: Parâmetro de operação ou sinal de fronteira de ingress
+ * - STATE_FIELD: Campo pertencente ao inventário de entidades de estado
+ * - SYSTEM_CONFIGURATION: Regra de fronteira ou constante de política autorizada
+ * - HUMAN_DECISION: Decisão humana vinculada e resolvida
+ * - MATHEMATICAL_RULE: Regra com fórmula determinística e dependências fechadas
+ * - DERIVED_VALUE: Valor derivado com precursores declarados
+ * 
+ * Rejeita qualquer dependência sem proveniência ou nó em aberto com OPEN_COMPUTATIONAL_DEPENDENCY.
+ * Detecta ciclos causais com COMPUTATIONAL_DEPENDENCY_CYCLE.
+ */
+export function validateComputabilityGraphClosure({
+  stateModel = null,
+  decisions = [],
+  boundaryRules = [],
+} = {}) {
+  const issues = [];
+  if (!stateModel) {
+    return { valid: true, issues: [] };
+  }
+
+  const computabilityGraph = Array.isArray(stateModel.computabilityGraph)
+    ? stateModel.computabilityGraph
+    : [];
+
+  const entityFields = new Set();
+  const rawFieldNames = new Set();
+  if (Array.isArray(stateModel.entities)) {
+    for (const entity of stateModel.entities) {
+      const fields = Array.isArray(entity.fields) ? entity.fields : [];
+      for (const field of fields) {
+        entityFields.add(`${entity.name}.${field.name}`);
+        rawFieldNames.add(field.name);
+      }
+    }
+  }
+
+  const operationParams = new Set();
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  for (const op of operations) {
+    const params = Array.isArray(op.parameters) ? op.parameters : [];
+    for (const p of params) {
+      operationParams.add(p.name);
+    }
+  }
+
+  const boundarySignals = new Set();
+  const boundaries = Array.isArray(stateModel.producerConsumerBoundaries)
+    ? stateModel.producerConsumerBoundaries
+    : [];
+  for (const b of boundaries) {
+    if (b.signalName) boundarySignals.add(b.signalName);
+    if (b.source) boundarySignals.add(b.source);
+    if (b.eventType) boundarySignals.add(b.eventType);
+    if (b.targetOperation) boundarySignals.add(b.targetOperation);
+  }
+
+  const configKeys = new Set();
+  for (const rule of boundaryRules) {
+    if (rule.ruleId) configKeys.add(rule.ruleId);
+    if (rule.source) configKeys.add(rule.source);
+  }
+
+  const decisionIds = new Set();
+  for (const d of decisions) {
+    if (d.questionId) decisionIds.add(d.questionId);
+    if (d.semanticKey) decisionIds.add(d.semanticKey);
+    if (d.id) decisionIds.add(d.id);
+  }
+
+  const observableNames = new Set();
+  const observables = Array.isArray(stateModel.observables) ? stateModel.observables : [];
+  for (const obs of observables) {
+    if (obs.name) observableNames.add(obs.name);
+  }
+
+  const nodeMap = new Map();
+  for (const node of computabilityGraph) {
+    const id = node.symbol ?? node.nodeId;
+    if (!id) continue;
+    if (nodeMap.has(id)) {
+      issues.push({
+        slotId: `computabilityGraph/${id}`,
+        kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+        reason: `Nó duplicado '${id}' no grafo de computabilidade.`,
+      });
+    }
+    nodeMap.set(id, node);
+  }
+
+  const nodeLocalIssues = new Map();
+  function recordNodeIssue(nodeId, issue) {
+    issues.push(issue);
+    if (!nodeLocalIssues.has(nodeId)) {
+      nodeLocalIssues.set(nodeId, []);
+    }
+    nodeLocalIssues.get(nodeId).push(issue);
+  }
+
+  const reservedFormulaKeywords = new Set([
+    'if', 'then', 'else', 'true', 'false', 'null', 'undefined', 'none', 'empty',
+    'max', 'min', 'abs', 'sum', 'avg', 'sqrt', 'floor', 'ceil', 'round', 'clamp',
+    'return', 'and', 'or', 'not', 'n', 'bps', 'bigint', 'scaled', 'case', 'when',
+    'end', 'is', 'in', 'strict', 'local', 'extremum', 'peak', 'trough',
+  ]);
+
+  // 1. Verificação Causal e de Regras Locais (As 6 Perguntas para cada nó)
+  for (const node of computabilityGraph) {
+    const id = node.symbol ?? node.nodeId;
+    const slotId = `computabilityGraph/${id}`;
+
+    if (node.status === 'OPEN_DEPENDENCY' || node.computabilityStatus === 'OPEN_DEPENDENCY') {
+      recordNodeIssue(id, {
+        slotId,
+        kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+        reason: `Dependência computacional em aberto declarada no nó '${id}': ${node.groundedIn || node.target || id} não possui proveniência resolvida.`,
+      });
+      continue;
+    }
+
+    const target = node.groundedIn || node.target || id;
+    const formula = node.derivationRule || node.formula;
+    const deps = Array.isArray(node.dependencies) ? node.dependencies : [];
+
+    // Pergunta 1: Sei exatamente de onde vem? (Aterramento de Terminais vs Derivados)
+    switch (node.category) {
+      case 'STATE_FIELD': {
+        const isPresent = entityFields.has(target) || rawFieldNames.has(target);
+        if (!isPresent) {
+          recordNodeIssue(id, {
+            slotId,
+            kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+            reason: `O nó de computabilidade '${id}' exige o campo de estado '${target}', mas este campo não existe em nenhuma entidade do inventário.`,
+          });
+        }
+        break;
+      }
+      case 'EXTERNAL_INPUT': {
+        const isPresent = operationParams.has(target)
+          || boundarySignals.has(target)
+          || rawFieldNames.has(target)
+          || target.includes('.');
+        if (!isPresent) {
+          recordNodeIssue(id, {
+            slotId,
+            kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+            reason: `O nó de computabilidade '${id}' declara entrada externa '${target}', mas nenhum parâmetro de operação ou sinal de fronteira a fornece.`,
+          });
+        }
+        break;
+      }
+      case 'HUMAN_DECISION': {
+        const isPresent = decisionIds.has(target)
+          || (node.resolutionAuthority && decisionIds.has(node.resolutionAuthority))
+          || decisions.length === 0;
+        if (!isPresent) {
+          recordNodeIssue(id, {
+            slotId,
+            kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+            reason: `O nó de computabilidade '${id}' requer decisão humana '${target}', mas não há decisão vinculada correspondente.`,
+          });
+        }
+        break;
+      }
+      case 'SYSTEM_CONFIGURATION':
+        break;
+      case 'COMPUTED_VARIABLE':
+      case 'DERIVED_VALUE':
+      case 'MATHEMATICAL_RULE': {
+        // Pergunta 2: Sei exatamente como é calculada?
+        if (!formula || typeof formula !== 'string' || formula.trim().length === 0) {
+          recordNodeIssue(id, {
+            slotId: `${slotId}/derivationRule`,
+            kind: 'MISSING_DERIVATION_RULE',
+            reason: `O nó computado '${id}' não possui regra de cálculo ou fórmula determinística definida (derivationRule ausente).`,
+          });
+        }
+
+        // Deve possuir dependências
+        if (deps.length === 0 && !target) {
+          recordNodeIssue(id, {
+            slotId,
+            kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+            reason: `O nó de valor derivado '${id}' não declara precursores ou dependências causais de onde é calculado.`,
+          });
+        }
+        break;
+      }
+      default:
+        recordNodeIssue(id, {
+          slotId,
+          kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+          reason: `O nó de computabilidade '${id}' possui categoria desconhecida ou inválida: '${node.category}'.`,
+        });
+        break;
+    }
+
+    // Validação de precursores declarados
+    for (const depId of deps) {
+      if (!nodeMap.has(depId)) {
+        recordNodeIssue(id, {
+          slotId: `${slotId}/dependency/${depId}`,
+          kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+          reason: `O nó '${id}' depende do precursor '${depId}', que não está definido no grafo de computabilidade.`,
+        });
+      }
+    }
+
+    // Se possui fórmula / derivationRule:
+    if (formula && typeof formula === 'string' && formula.trim().length > 0) {
+      const formulaStr = formula.trim();
+
+      // Extrair nomes de funções invocadas (ex: fn(...)) para não confundi-las com operandos de dados
+      const functionCalls = new Set();
+      for (const m of formulaStr.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)) {
+        functionCalls.add(m[1]);
+      }
+
+      // Pergunta 3: Tenho todos os dados que a fórmula usa? (Totality of Operands / Fios soltos)
+      const formulaTokens = formulaStr
+        .replace(/['"][^'"]*['"]/g, ' ')
+        .split(/[^a-zA-Z0-9_.]+/)
+        .filter((t) => t.length > 0 && isNaN(Number(t)));
+
+      const depNodes = deps.map((d) => nodeMap.get(d)).filter(Boolean);
+      const depTargets = new Set();
+      const depSymbols = new Set(deps);
+      for (const d of depNodes) {
+        if (d.symbol) depSymbols.add(d.symbol);
+        if (d.nodeId) depSymbols.add(d.nodeId);
+        if (d.target) depTargets.add(d.target);
+        if (d.groundedIn) depTargets.add(d.groundedIn);
+      }
+
+      for (const token of formulaTokens) {
+        if (reservedFormulaKeywords.has(token.toLowerCase())
+          || functionCalls.has(token)
+          || /^\d+n$/i.test(token)) {
+          continue;
+        }
+        const baseToken = token.includes('.') ? token.split('.')[0] : token;
+        const isConnected = depSymbols.has(token)
+          || depSymbols.has(baseToken)
+          || depTargets.has(token)
+          || depTargets.has(baseToken)
+          || token === id
+          || token === target
+          || baseToken === target
+          || [...depTargets].some((t) => t.endsWith(`.${token}`) || t.endsWith(`.${baseToken}`))
+          || [...depSymbols].some((s) => s.toLowerCase() === token.toLowerCase());
+
+        if (!isConnected) {
+          recordNodeIssue(id, {
+            slotId: `${slotId}/operand/${token}`,
+            kind: 'DISCONNECTED_CIRCUIT_OPERAND',
+            reason: `A regra de cálculo de '${id}' ('${formulaStr}') utiliza o operando '${token}', mas este fio não está conectado nas dependências do nó.`,
+          });
+        }
+      }
+
+      // Pergunta 5 (Casos Limites - Divisão por zero):
+      if (formulaStr.includes('/')) {
+        const divMatch = formulaStr.match(/\/\s*([a-zA-Z0-9_.]+)/);
+        if (divMatch) {
+          const divisorToken = divMatch[1];
+          const isConstantNonZero = /^[1-9]\d*n?$/.test(divisorToken);
+          if (!isConstantNonZero) {
+            const hasZeroDivRule = Boolean(node.edgeCaseRules?.zeroDivisor)
+              || /(?:loss\s*==\s*0|divisor\s*==\s*0|denominator\s*==\s*0|zero\s*divisor|sentinel|fallback|safe_?div)/i.test(formulaStr);
+            if (!hasZeroDivRule) {
+              recordNodeIssue(id, {
+                slotId: `${slotId}/edgeCase/zeroDivisor`,
+                kind: 'UNRESOLVED_ZERO_DIVISOR',
+                reason: `A fórmula de '${id}' realiza divisão contendo variáveis ('/${divisorToken}'), mas não define política determinística para divisor zero (ex: edgeCaseRules.zeroDivisor).`,
+              });
+            }
+          }
+        }
+      }
+
+      // Pergunta 5 (Casos Limites - Desempate de Pivôs / Extremos):
+      const isPivotExtremum = /(?:pivot|pivo|peak|trough|extrema|local_max|local_min)/i.test(id)
+        || /(?:pivot|pivo|peak|trough|extrema|local_max|local_min)/i.test(target)
+        || /(?:localPeak|localTrough|findPeaks|findExtrema)/i.test(formulaStr);
+
+      if (isPivotExtremum) {
+        const hasTieRule = Boolean(node.edgeCaseRules?.tieBreaking)
+          || /(?:STRICT_LOCAL_EXTREMUM|FIRST_OCCURRENCE|LAST_OCCURRENCE|REJECT_PLATEAU|TIE_BREAK|DESEMPATE|STRICT)/i.test(formulaStr);
+        if (!hasTieRule) {
+          recordNodeIssue(id, {
+            slotId: `${slotId}/edgeCase/tieBreaking`,
+            kind: 'PIVOT_TIE_POLICY_UNRESOLVED',
+            reason: `O nó '${id}' detecta pivôs/extremos locais ou divergências sem definir política determinística de desempate para valores consecutivos iguais (ex: edgeCaseRules.tieBreaking para sequências como [10, 15, 15, 12]).`,
+          });
+        }
+      }
+    }
+
+    // Pergunta 5 (Loop Fechado de Execução / Confirmação de Ordem):
+    const isExecutionNode = /(?:order|trade|dispatch|execution|proceeds|fill|execucao|ordem)/i.test(id)
+      || /(?:order|trade|dispatch|execution|proceeds|fill|execucao|ordem)/i.test(target);
+    if (isExecutionNode && (node.category === 'COMPUTED_VARIABLE' || node.category === 'DERIVED_VALUE' || node.category === 'STATE_FIELD')) {
+      const hasFeedbackConfirmation = Boolean(node.feedbackConfirmation?.executionMode)
+        || Boolean(node.feedbackConfirmation?.confirmedBy)
+        || boundaries.some((b) => /(?:router|fill|exec)/i.test(b.signalName || '') || /(?:router|fill|exec)/i.test(b.source || ''));
+      if (!hasFeedbackConfirmation) {
+        recordNodeIssue(id, {
+          slotId: `${slotId}/feedbackConfirmation`,
+          kind: 'UNCONFIRMED_FEEDBACK_LOOP',
+          reason: `O nó de execução '${id}' despacha ordens ou processa efeitos de negociação sem definir confirmação de execução de loop fechado (feedbackConfirmation: confirmedBy, onRejection ou premissa LOCAL_SYNCHRONOUS_FILL).`,
+        });
+      }
+    }
+  }
+
+  // 2. Detecção de Ciclos no Grafo Causal
+  const visited = new Set();
+  const recursionStack = new Set();
+  const cyclicNodes = new Set();
+
+  function checkCycle(currId, path = []) {
+    visited.add(currId);
+    recursionStack.add(currId);
+    const currNode = nodeMap.get(currId);
+    const deps = currNode && Array.isArray(currNode.dependencies) ? currNode.dependencies : [];
+    for (const depId of deps) {
+      if (!nodeMap.has(depId)) continue;
+      if (!visited.has(depId)) {
+        if (checkCycle(depId, [...path, currId])) return true;
+      } else if (recursionStack.has(depId)) {
+        cyclicNodes.add(currId);
+        cyclicNodes.add(depId);
+        issues.push({
+          slotId: `computabilityGraph/cycle/${currId}`,
+          kind: 'COMPUTATIONAL_DEPENDENCY_CYCLE',
+          reason: `Ciclo causal detectado no grafo de computabilidade: ${[...path, currId, depId].join(' -> ')}.`,
+        });
+        return true;
+      }
+    }
+    recursionStack.delete(currId);
+    return false;
+  }
+
+  for (const nodeId of nodeMap.keys()) {
+    if (!visited.has(nodeId)) {
+      checkCycle(nodeId);
+    }
+  }
+
+  // 3. Propagação Indutiva de Corrente Causal (isNodeComputable)
+  const computabilityCache = new Map();
+  const evaluatingStack = new Set();
+
+  function evaluateComputability(nodeId) {
+    if (computabilityCache.has(nodeId)) {
+      return computabilityCache.get(nodeId);
+    }
+    if (evaluatingStack.has(nodeId) || cyclicNodes.has(nodeId)) {
+      computabilityCache.set(nodeId, false);
+      return false;
+    }
+    evaluatingStack.add(nodeId);
+
+    const node = nodeMap.get(nodeId);
+    if (!node) {
+      evaluatingStack.delete(nodeId);
+      computabilityCache.set(nodeId, false);
+      return false;
+    }
+
+    // Se o nó possui falhas locais, não é computável
+    if (nodeLocalIssues.has(nodeId) && nodeLocalIssues.get(nodeId).length > 0) {
+      evaluatingStack.delete(nodeId);
+      computabilityCache.set(nodeId, false);
+      return false;
+    }
+
+    // Se é terminal e passou na validação local, é computável
+    if (node.category === 'EXTERNAL_INPUT'
+      || node.category === 'STATE_FIELD'
+      || node.category === 'SYSTEM_CONFIGURATION'
+      || node.category === 'HUMAN_DECISION') {
+      evaluatingStack.delete(nodeId);
+      computabilityCache.set(nodeId, true);
+      return true;
+    }
+
+    // Se é nó derivado, todas as dependências precisam ser computáveis
+    const deps = Array.isArray(node.dependencies) ? node.dependencies : [];
+    if (deps.length === 0) {
+      evaluatingStack.delete(nodeId);
+      computabilityCache.set(nodeId, false);
+      return false;
+    }
+
+    let allDepsComputable = true;
+    for (const depId of deps) {
+      const depComputable = evaluateComputability(depId);
+      if (!depComputable) {
+        allDepsComputable = false;
+        recordNodeIssue(nodeId, {
+          slotId: `computabilityGraph/${nodeId}/precursor/${depId}`,
+          kind: 'NON_COMPUTABLE_PRECURSOR',
+          reason: `Corrente causal interrompida em '${nodeId}': o precursor '${depId}' não é computável.`,
+        });
+      }
+    }
+
+    evaluatingStack.delete(nodeId);
+    computabilityCache.set(nodeId, allDepsComputable);
+    return allDepsComputable;
+  }
+
+  // Avaliar todos os nós
+  for (const nodeId of nodeMap.keys()) {
+    const isComp = evaluateComputability(nodeId);
+    const n = nodeMap.get(nodeId);
+    if (n) {
+      n.computabilityStatus = isComp ? 'COMPUTABLE' : 'NOT_COMPUTABLE';
+    }
+  }
+
+  // 4. Verificação Reversa a partir de Efeitos de Estado de Operações
+  if (computabilityGraph.length > 0) {
+    const ignoredTokens = new Set(['null', 'undefined', 'true', 'false', 'none', 'empty', 'n']);
+    for (const op of operations) {
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      const opParams = new Set((op.parameters ?? []).map((p) => p.name));
+      for (const branch of branches) {
+        const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+        for (const eff of effects) {
+          if (eff.effect === 'SET' && typeof eff.value === 'string') {
+            const val = eff.value.trim();
+            if (/^-?\d+(?:n|\.\d+)?$/i.test(val) || val === 'true' || val === 'false' || val.startsWith("'") || val.startsWith('"')) {
+              continue;
+            }
+            const tokens = val.split(/[^a-zA-Z0-9_.]+/).filter((t) => t.length > 0 && isNaN(Number(t)));
+            for (const token of tokens) {
+              if (ignoredTokens.has(token.toLowerCase()) || /^\d+n$/i.test(token)) {
+                continue;
+              }
+              const isKnown = opParams.has(token)
+                || rawFieldNames.has(token)
+                || entityFields.has(token)
+                || (nodeMap.has(token) && computabilityCache.get(token) !== false)
+                || computabilityGraph.some((n) => (
+                  (n.groundedIn === token
+                  || n.target === token
+                  || n.symbol === token
+                  || n.nodeId === token
+                  || (n.groundedIn && n.groundedIn.endsWith(`.${token}`))
+                  || (n.target && n.target.endsWith(`.${token}`)))
+                  && computabilityCache.get(n.symbol ?? n.nodeId) !== false
+                ))
+                || observableNames.has(token);
+              if (!isKnown) {
+                issues.push({
+                  slotId: `operation/${op.name}/branch/${branch.branchId}/stateEffect/${eff.field}`,
+                  kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+                  reason: `O efeito no campo '${eff.field}' na operação '${op.name}' utiliza o termo '${token}', que não é parâmetro, campo de estado, nem possui nó computável fundamentado no grafo.`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
  * Closure Certificate mecânico.
  * 
  * Compila pendências declaradas e verificações estruturais; não prova correção semântica.
@@ -1389,6 +1880,8 @@ export function generateClosureCertificate({
     architectureContexts: specification.architectureContexts ?? [],
     invariants: specification.invariants ?? [],
     requirements: specification.requirements ?? [],
+    decisions: specification.decisions ?? [],
+    boundaryRules: specification.boundaries?.boundaryRules ?? specification.boundaryRules ?? [],
   });
 
   const provenanceResult = validateProvenanceEnforcement({
@@ -1472,6 +1965,18 @@ export function generateClosureCertificate({
   ];
 
   const unresolvedAuthorities = authorityIssues.length;
+  const computabilityIssues = stateLifecycle.issues.filter((i) => (
+    i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'
+    || i.kind === 'UNRESOLVED_COMPUTATIONAL_DEPENDENCY'
+    || i.kind === 'COMPUTATIONAL_DEPENDENCY_CYCLE'
+    || i.kind === 'MISSING_DERIVATION_RULE'
+    || i.kind === 'DISCONNECTED_CIRCUIT_OPERAND'
+    || i.kind === 'PIVOT_TIE_POLICY_UNRESOLVED'
+    || i.kind === 'UNRESOLVED_ZERO_DIVISOR'
+    || i.kind === 'UNCONFIRMED_FEEDBACK_LOOP'
+    || i.kind === 'NON_COMPUTABLE_PRECURSOR'
+  ));
+  const unresolvedDependencies = computabilityIssues.length;
   const unresolvedDeterminismDimensions = determinismGaps.length + determinismDecisions.length;
   const orphanHumanDecisions = pendingDecisions.length;
   const unresolvedStateFields = stateFieldIssues.length;
@@ -1480,6 +1985,7 @@ export function generateClosureCertificate({
   const contradictoryRules = declarationConflicts.length;
 
   const totalUnresolved = unresolvedInventorySlots
+    + unresolvedDependencies
     + unresolvedStateFields
     + unresolvedObservables
     + unresolvedTransitions
@@ -1502,6 +2008,7 @@ export function generateClosureCertificate({
 
   return {
     unresolvedInventorySlots,
+    unresolvedDependencies,
     unresolvedStateFields,
     unresolvedObservables,
     unresolvedTransitions,
@@ -1662,6 +2169,49 @@ function classifyGapIssue(issue, index) {
       layer = 'COVERAGE_ACCOUNTING';
       requiredAuthority = 'USER_INTENT';
       witness = issue.reason;
+      break;
+
+    // 5. COMPUTABILITY_DEPENDENCY_CLOSURE (Fase 1: Completude Semântica Causal)
+    case 'OPEN_COMPUTATIONAL_DEPENDENCY':
+    case 'UNRESOLVED_COMPUTATIONAL_DEPENDENCY':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Dependência semântica necessária para computabilidade não foi encontrada ou fundamentada.';
+      break;
+    case 'COMPUTATIONAL_DEPENDENCY_CYCLE':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Ciclo de dependência causal detectado no grafo de computabilidade.';
+      break;
+    case 'MISSING_DERIVATION_RULE':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Nó computado sem regra de derivação ou fórmula determinística definida.';
+      break;
+    case 'DISCONNECTED_CIRCUIT_OPERAND':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Regra de cálculo utiliza operando não conectado nas dependências do nó.';
+      break;
+    case 'PIVOT_TIE_POLICY_UNRESOLVED':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_DECISION';
+      witness = issue.reason || 'Detecção de pivôs/extremos sem política determinística para empates de valores consecutivos.';
+      break;
+    case 'UNRESOLVED_ZERO_DIVISOR':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Fórmula com divisão contendo variáveis sem tratamento determinístico para divisor zero.';
+      break;
+    case 'UNCONFIRMED_FEEDBACK_LOOP':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Despacho de ordens ou mutação de saldo sem confirmação de execução de loop fechado.';
+      break;
+    case 'NON_COMPUTABLE_PRECURSOR':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Corrente causal interrompida porque o precursor do nó não é computável.';
       break;
 
 

@@ -18,7 +18,7 @@ export function renderSemanticContractMarkdown(contract, {
     `> **Modo:** ${specification.changeKind}`,
     `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
     ...(specification.closureCertificate ? [
-      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions}, lacunas ativas: ${specification.closureCertificate.gapLedger?.length ?? 0})`,
+      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, dependências abertas: ${specification.closureCertificate.unresolvedDependencies ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions}, lacunas ativas: ${specification.closureCertificate.gapLedger?.length ?? 0})`,
     ] : []),
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
@@ -346,10 +346,47 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
+    if (specification.stateModel.computabilityGraph?.length > 0) {
+      lines.push('', '### 6.9 Grafo de Computabilidade Semântica (Fase 1: Circuito e Corrente Causal)');
+      lines.push(
+        '',
+        '| Nó Causal (Símbolo) | Categoria | Origem / Alvo | Regra de Cálculo / Derivação | Precursores / Dependências | Casos Limites / Confirmação | Corrente Causal (Status) |',
+        '| :--- | :--- | :--- | :--- | :--- | :--- | :---: |',
+      );
+      for (const node of specification.stateModel.computabilityGraph) {
+        const id = node.symbol ?? node.nodeId;
+        const target = node.groundedIn ?? node.target ?? id;
+        const rule = node.derivationRule ?? node.formula;
+        const depsStr = (node.dependencies?.length > 0)
+          ? node.dependencies.map((d) => `\`${d}\``).join(', ')
+          : '*Terminal (Grounded)*';
+
+        const edgeCases = [];
+        if (node.edgeCaseRules?.tieBreaking) edgeCases.push(`Desempate: \`${node.edgeCaseRules.tieBreaking}\``);
+        if (node.edgeCaseRules?.zeroDivisor) edgeCases.push(`Divisor Zero: \`${node.edgeCaseRules.zeroDivisor}\``);
+        if (node.edgeCaseRules?.unfilledBuffer) edgeCases.push(`Warmup: \`${node.edgeCaseRules.unfilledBuffer}\``);
+        if (node.feedbackConfirmation?.executionMode) edgeCases.push(`Execução: \`${node.feedbackConfirmation.executionMode}\``);
+        const edgeCaseStr = edgeCases.length > 0 ? edgeCases.join('; ') : 'N/A';
+
+        let statusStr = '`COMPUTABLE ✓`';
+        if (node.computabilityStatus === 'NOT_COMPUTABLE' || node.status === 'OPEN_DEPENDENCY') {
+          statusStr = '`NOT_COMPUTABLE ❌`';
+        } else if (node.computabilityStatus === 'OPEN_DEPENDENCY') {
+          statusStr = '`OPEN_DEPENDENCY ⚠️`';
+        } else if (node.computabilityStatus === 'COMPUTABLE' || node.status === 'GROUNDED') {
+          statusStr = '`COMPUTABLE ✓`';
+        }
+
+        lines.push(
+          `| \`${id}\` | \`${node.category}\` | \`${target}\` | ${rule ? `\`${rule}\`` : 'N/A'} | ${depsStr} | ${edgeCaseStr} | ${statusStr} |`,
+        );
+      }
+    }
+
     if (specification.closureCertificate?.gapLedger?.length > 0) {
       lines.push(
         '',
-        '### 6.9 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
+        '### 6.10 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
         '',
         '| GAP-ID | Camada | Testemunho / Witness Falsificável | Autoridade Necessária |',
         '| :--- | :--- | :--- | :---: |',

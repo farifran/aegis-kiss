@@ -689,6 +689,8 @@ export function assertSemanticDraft(draft, policy, {
     architectureContexts: draft.architectureContexts,
     invariants: draft.invariants ?? [],
     requirements: draft.requirements ?? [],
+    decisions: draft.decisions ?? [],
+    boundaryRules: draft.boundaryRules ?? draft.boundaries?.boundaryRules ?? [],
   });
   if (!lifecycle.valid) {
     const first = lifecycle.issues[0];

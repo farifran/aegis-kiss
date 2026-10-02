@@ -607,6 +607,70 @@
               }
             }
           }
+        },
+        "computabilityGraph": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "category", "dependencies"],
+            "properties": {
+              "symbol": { "type": "string", "minLength": 1 },
+              "category": {
+                "enum": [
+                  "EXTERNAL_INPUT",
+                  "STATE_FIELD",
+                  "COMPUTED_VARIABLE",
+                  "DERIVED_VALUE",
+                  "MATHEMATICAL_RULE",
+                  "SYSTEM_CONFIGURATION",
+                  "HUMAN_DECISION"
+                ]
+              },
+              "dependencies": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "derivationRule": { "type": "string" },
+              "groundedIn": { "type": "string" },
+              "edgeCaseRules": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tieBreaking": { "type": "string", "minLength": 1 },
+                  "zeroDivisor": { "type": "string", "minLength": 1 },
+                  "unfilledBuffer": { "type": "string", "minLength": 1 }
+                }
+              },
+              "feedbackConfirmation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["executionMode"],
+                "properties": {
+                  "signal": { "type": "string", "minLength": 1 },
+                  "confirmedBy": { "type": "string", "minLength": 1 },
+                  "executionMode": {
+                    "enum": [
+                      "LOCAL_SYNCHRONOUS_FILL",
+                      "EXTERNAL_ASYNCHRONOUS_REPORT",
+                      "NO_FEEDBACK_REQUIRED"
+                    ]
+                  },
+                  "onRejection": { "type": "string", "minLength": 1 }
+                }
+              },
+              "computabilityStatus": {
+                "enum": [
+                  "COMPUTABLE",
+                  "NOT_COMPUTABLE",
+                  "OPEN_DEPENDENCY"
+                ]
+              },
+              "provenance": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+              }
+            }
+          }
         }
       }
     },
@@ -622,6 +686,7 @@
         "unresolvedDeterminismDimensions",
         "contradictoryRules",
         "orphanHumanDecisions",
+        "unresolvedDependencies",
         "status",
         "gapLedger"
       ],
@@ -634,6 +699,7 @@
         "unresolvedDeterminismDimensions": { "type": "integer", "minimum": 0 },
         "contradictoryRules": { "type": "integer", "minimum": 0 },
         "orphanHumanDecisions": { "type": "integer", "minimum": 0 },
+        "unresolvedDependencies": { "type": "integer", "minimum": 0 },
         "status": { "enum": ["CERTIFIED_CLOSED", "BLOCKED_BY_UNRESOLVED_SLOTS"] },
         "gapLedger": {
           "type": "array",
@@ -645,6 +711,7 @@
               "gapId": { "type": "string", "pattern": "^GAP-[0-9]{4}$" },
               "layer": {
                 "enum": [
+                  "COMPUTABILITY_DEPENDENCY_CLOSURE",
                   "TRANSITION_CONSISTENCY",
                   "OBSERVABLE_DEPENDENCY_CLOSURE",
                   "AUTHORITY_PROVENANCE",

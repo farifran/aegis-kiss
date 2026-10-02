@@ -2118,4 +2118,819 @@ function createFixture({
   log('  PASS: TEST-51 Abstract category without closed membership definition blocked with UNRESOLVED_CATEGORY_MEMBERSHIP');
 }
 
+// TEST-52: Operation state effect assigning ungrounded term blocked with OPEN_COMPUTATIONAL_DEPENDENCY
+{
+  const model = {
+    entities: [{
+      name: 'Portfolio',
+      fields: [{
+        name: 'balance',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'REJECT' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '1000' },
+        mutations: [
+          { operation: 'trade', condition: 'ORDER_FILLED', effect: 'SET_VALUE', targetValue: 'balance + positionProceeds' },
+        ],
+        reset: { allowed: false },
+        preservation: [],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'trade',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [
+            { field: 'Portfolio.balance', effect: 'SET', value: 'balance + positionProceeds' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Portfolio.balance'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'PORTFOLIO_BALANCE',
+        category: 'STATE_FIELD',
+        target: 'Portfolio.balance',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-52: ungrounded term positionProceeds must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('positionProceeds'));
+  assert.ok(gap, 'TEST-52: gapLedger must register positionProceeds witness');
+  assert.equal(gap.layer, 'COMPUTABILITY_DEPENDENCY_CLOSURE');
+  log('  PASS: TEST-52 Operation state effect with ungrounded term blocked with OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
+// TEST-53: Computability node referencing STATE_FIELD absent from entity inventory blocked with OPEN_COMPUTATIONAL_DEPENDENCY
+{
+  const model = {
+    entities: [{
+      name: 'RsiEngine',
+      fields: [
+        {
+          name: 'position',
+          type: 'STRING',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'NONE' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'eval',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['RsiEngine.position'], representation: 'SCALAR', emptyBehavior: 'NONE' }],
+    computabilityGraph: [
+      {
+        nodeId: 'SMOOTHED_AVG_GAIN',
+        category: 'STATE_FIELD',
+        target: 'smoothedAvgGain', // Absent from RsiEngine.fields!
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-53: missing state field in inventory must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('smoothedAvgGain'));
+  assert.ok(gap, 'TEST-53: gapLedger must register missing smoothedAvgGain in inventory');
+  assert.equal(gap.layer, 'COMPUTABILITY_DEPENDENCY_CLOSURE');
+  log('  PASS: TEST-53 Computability node referencing state field absent from inventory blocked with OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
+// TEST-54: Computability node with explicit OPEN_DEPENDENCY status blocked
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'state',
+        type: 'STRING',
+        bounds: null,
+        initialization: { kind: 'EXPLICIT_VALUE', value: 'INIT' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.state'], representation: 'SCALAR', emptyBehavior: 'NONE' }],
+    computabilityGraph: [
+      {
+        nodeId: 'LIQUIDITY_FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'liquidity',
+        dependencies: [],
+        status: 'OPEN_DEPENDENCY', // Explicit open dependency!
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-54: explicit open dependency must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  log('  PASS: TEST-54 Computability node with status OPEN_DEPENDENCY blocked with OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
+// TEST-55: Circular dependency in computability graph blocked with COMPUTATIONAL_DEPENDENCY_CYCLE
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'state',
+        type: 'STRING',
+        bounds: null,
+        initialization: { kind: 'EXPLICIT_VALUE', value: 'INIT' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.state'], representation: 'SCALAR', emptyBehavior: 'NONE' }],
+    computabilityGraph: [
+      {
+        nodeId: 'NODE_A',
+        category: 'DERIVED_VALUE',
+        target: 'termA',
+        dependencies: ['NODE_B'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'NODE_B',
+        category: 'DERIVED_VALUE',
+        target: 'termB',
+        dependencies: ['NODE_A'], // Cycle A -> B -> A!
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-55: cyclic dependency must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'COMPUTATIONAL_DEPENDENCY_CYCLE'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  log('  PASS: TEST-55 Circular dependency in computability graph blocked with COMPUTATIONAL_DEPENDENCY_CYCLE');
+}
+
+// TEST-56: Fully closed computability graph with all terminal nodes grounded certifies CERTIFIED_CLOSED
+{
+  const model = {
+    entities: [{
+      name: 'Oscillator',
+      fields: [
+        {
+          name: 'previousClose',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'REJECT' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'STEP_OK', effect: 'SET_VALUE', targetValue: 'candleClose' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'smoothedGain',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'STEP_OK', effect: 'SET_VALUE', targetValue: 'newGain' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      parameters: [
+        {
+          name: 'candleClose',
+          type: 'INTEGER',
+          domain: 'POSITIVE_INTEGERS',
+          nullability: 'NOT_NULL',
+          bounds: { lowerBound: '1', upperBound: '999999', boundaryBehavior: 'REJECT' },
+          onInvalid: { outcomeKind: 'REJECTION', error: 'ERR_PRICE' },
+        },
+      ],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [
+            { field: 'Oscillator.previousClose', effect: 'SET', value: 'candleClose' },
+            { field: 'Oscillator.smoothedGain', effect: 'SET', value: 'newGain' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Oscillator.previousClose', 'Oscillator.smoothedGain'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'CANDLE_CLOSE',
+        category: 'EXTERNAL_INPUT',
+        target: 'candleClose',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PREVIOUS_CLOSE',
+        category: 'STATE_FIELD',
+        target: 'Oscillator.previousClose',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PRICE_GAIN',
+        category: 'DERIVED_VALUE',
+        target: 'priceGain',
+        formula: 'max(0, candleClose - previousClose)',
+        dependencies: ['CANDLE_CLOSE', 'PREVIOUS_CLOSE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'SMOOTHED_GAIN',
+        category: 'STATE_FIELD',
+        target: 'Oscillator.smoothedGain',
+        dependencies: ['PRICE_GAIN'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'NEW_GAIN',
+        category: 'DERIVED_VALUE',
+        target: 'newGain',
+        formula: '((smoothedGain * 13) + priceGain) / 14',
+        dependencies: ['SMOOTHED_GAIN', 'PRICE_GAIN'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, true, `TEST-56: must be valid, got: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-56 Fully closed computability graph with all terminal nodes grounded certifies CERTIFIED_CLOSED');
+}
+
+// TEST-57: Computed variable missing derivation rule blocked with MISSING_DERIVATION_RULE
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'BASE_INPUT',
+        category: 'EXTERNAL_INPUT',
+        target: 'baseInput',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'AVG_GAIN',
+        category: 'COMPUTED_VARIABLE',
+        target: 'avgGain',
+        // derivationRule AUSENTE!
+        dependencies: ['BASE_INPUT'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-57: missing derivationRule must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'MISSING_DERIVATION_RULE'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('AVG_GAIN'));
+  assert.ok(gap, 'TEST-57: gapLedger must register MISSING_DERIVATION_RULE witness');
+  log('  PASS: TEST-57 Computed variable missing derivation rule blocked with MISSING_DERIVATION_RULE');
+}
+
+// TEST-58: Formula using operand missing from dependencies (fio solto) blocked with DISCONNECTED_CIRCUIT_OPERAND
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'PRICE_INPUT',
+        category: 'EXTERNAL_INPUT',
+        target: 'priceInput',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'AVG_GAIN',
+        category: 'COMPUTED_VARIABLE',
+        target: 'avgGain',
+        formula: '((previousGain * 13) + currentGain) / 14', // previousGain e currentGain NÃO ESTÃO NAS DEPENDÊNCIAS!
+        dependencies: ['PRICE_INPUT'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-58: disconnected operand must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'DISCONNECTED_CIRCUIT_OPERAND'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('previousGain') || g.witness?.includes('currentGain'));
+  assert.ok(gap, 'TEST-58: gapLedger must register DISCONNECTED_CIRCUIT_OPERAND witness');
+  log('  PASS: TEST-58 Formula using operand missing from dependencies blocked with DISCONNECTED_CIRCUIT_OPERAND');
+}
+
+// TEST-59: Pivot/extrema node without tie-breaking policy for identical consecutive values blocked with PIVOT_TIE_POLICY_UNRESOLVED
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'PRICE_SERIES',
+        category: 'EXTERNAL_INPUT',
+        target: 'priceSeries',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PIVOT_HIGHS', // Contém PIVOT!
+        category: 'COMPUTED_VARIABLE',
+        target: 'pivotHighs',
+        formula: 'findPeaks(priceSeries)',
+        dependencies: ['PRICE_SERIES'],
+        // edgeCaseRules.tieBreaking ausente!
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-59: missing tieBreaking for pivot must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'PIVOT_TIE_POLICY_UNRESOLVED'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('PIVOT_HIGHS') || g.witness?.includes('desempate'));
+  assert.ok(gap, 'TEST-59: gapLedger must register PIVOT_TIE_POLICY_UNRESOLVED witness');
+  log('  PASS: TEST-59 Pivot node without tie-breaking policy blocked with PIVOT_TIE_POLICY_UNRESOLVED');
+}
+
+// TEST-60: Division by variable without zero-divisor rule blocked with UNRESOLVED_ZERO_DIVISOR
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'GAIN',
+        category: 'EXTERNAL_INPUT',
+        target: 'gain',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'LOSS',
+        category: 'EXTERNAL_INPUT',
+        target: 'loss',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'RS_RATIO',
+        category: 'COMPUTED_VARIABLE',
+        target: 'rsRatio',
+        formula: 'gain / loss', // Divisão por 'loss' variável sem edgeCaseRules.zeroDivisor!
+        dependencies: ['GAIN', 'LOSS'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-60: variable division without zeroDivisor rule must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_ZERO_DIVISOR'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('divisor zero') || g.witness?.includes('RS_RATIO'));
+  assert.ok(gap, 'TEST-60: gapLedger must register UNRESOLVED_ZERO_DIVISOR witness');
+  log('  PASS: TEST-60 Division by variable without zero-divisor rule blocked with UNRESOLVED_ZERO_DIVISOR');
+}
+
+// TEST-61: Execution/order node without feedbackConfirmation blocked with UNCONFIRMED_FEEDBACK_LOOP
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'SIGNAL',
+        category: 'EXTERNAL_INPUT',
+        target: 'signal',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ORDER_DISPATCH', // Execution node!
+        category: 'COMPUTED_VARIABLE',
+        target: 'orderDispatch',
+        formula: 'dispatchOrder(signal)',
+        dependencies: ['SIGNAL'],
+        // feedbackConfirmation AUSENTE!
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-61: order dispatch without feedbackConfirmation must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'UNCONFIRMED_FEEDBACK_LOOP'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('ORDER_DISPATCH') || g.witness?.includes('feedbackConfirmation'));
+  assert.ok(gap, 'TEST-61: gapLedger must register UNCONFIRMED_FEEDBACK_LOOP witness');
+  log('  PASS: TEST-61 Execution node without feedback confirmation blocked with UNCONFIRMED_FEEDBACK_LOOP');
+}
+
+// TEST-62: Broken causal circuit blocks downstream nodes with NON_COMPUTABLE_PRECURSOR
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'feed',
+        dependencies: [],
+        status: 'OPEN_DEPENDENCY', // Fio quebrado na origem!
+      },
+      {
+        nodeId: 'STEP_1',
+        category: 'COMPUTED_VARIABLE',
+        target: 'step1',
+        formula: 'feed * 2',
+        dependencies: ['FEED'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'STEP_FINAL',
+        category: 'COMPUTED_VARIABLE',
+        target: 'stepFinal',
+        formula: 'step1 + 10',
+        dependencies: ['STEP_1'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-62: broken precursor must propagate NOT_COMPUTABLE');
+  assert.ok(result.issues.some((i) => i.kind === 'NON_COMPUTABLE_PRECURSOR'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.witness?.includes('Corrente causal interrompida'));
+  assert.ok(gap, 'TEST-62: gapLedger must register broken causal current witness');
+  log('  PASS: TEST-62 Broken causal circuit blocks downstream nodes with NON_COMPUTABLE_PRECURSOR');
+}
+
+// TEST-63: Complete Level 3 circuit with edge cases, tie breaking and feedback loop certifies CERTIFIED_CLOSED
+{
+  const model = {
+    entities: [{
+      name: 'RsiEngine',
+      fields: [
+        {
+          name: 'position',
+          type: 'STRING',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'NONE' },
+          mutations: [{ operation: 'step', condition: 'DIV_OK', effect: 'SET_VALUE', targetValue: "'BUY'" }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'previousClose',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'DIV_OK', effect: 'SET_VALUE', targetValue: 'candle.close' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'previousAvgGain',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'step', condition: 'DIV_OK', effect: 'SET_VALUE', targetValue: 'avgGain' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [
+            { field: 'RsiEngine.position', effect: 'SET', value: "'BUY'" },
+            { field: 'RsiEngine.previousClose', effect: 'SET', value: 'candle.close' },
+            { field: 'RsiEngine.previousAvgGain', effect: 'SET', value: 'avgGain' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['RsiEngine.position'], representation: 'SCALAR', emptyBehavior: 'NONE' }],
+    computabilityGraph: [
+      {
+        nodeId: 'CANDLE_FEED',
+        category: 'EXTERNAL_INPUT',
+        target: 'candle.close',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PREVIOUS_CLOSE',
+        category: 'STATE_FIELD',
+        target: 'RsiEngine.previousClose',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'CURRENT_GAIN',
+        category: 'COMPUTED_VARIABLE',
+        target: 'currentGain',
+        formula: 'max(0, candle.close - previousClose)',
+        dependencies: ['CANDLE_FEED', 'PREVIOUS_CLOSE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PREVIOUS_AVG_GAIN',
+        category: 'STATE_FIELD',
+        target: 'RsiEngine.previousAvgGain',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'AVG_GAIN',
+        category: 'COMPUTED_VARIABLE',
+        target: 'avgGain',
+        formula: '((previousAvgGain * 13) + currentGain) / 14',
+        dependencies: ['PREVIOUS_AVG_GAIN', 'CURRENT_GAIN'],
+        edgeCaseRules: {
+          unfilledBuffer: 'ACCUMULATE_RAW_SUM',
+        },
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PIVOT_HIGHS',
+        category: 'COMPUTED_VARIABLE',
+        target: 'pivotHighs',
+        formula: 'localPeak(candle.close, 14)',
+        dependencies: ['CANDLE_FEED'],
+        edgeCaseRules: {
+          tieBreaking: 'STRICT_LOCAL_EXTREMUM',
+        },
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ORDER_DISPATCH',
+        category: 'COMPUTED_VARIABLE',
+        target: 'orderDispatch',
+        formula: 'emitOrder(PIVOT_HIGHS, AVG_GAIN)',
+        dependencies: ['PIVOT_HIGHS', 'AVG_GAIN'],
+        feedbackConfirmation: {
+          executionMode: 'LOCAL_SYNCHRONOUS_FILL',
+          confirmedBy: 'ORDER_ROUTER',
+        },
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, true, `TEST-63 must be valid, got issues: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-63 Complete Level 3 circuit with edge cases and feedback loop certifies CERTIFIED_CLOSED');
+}
+
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
