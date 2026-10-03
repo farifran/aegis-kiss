@@ -106,6 +106,7 @@ export function validateFieldLifecycle({
   requirements = [],
   decisions = [],
   boundaryRules = [],
+  pathReferences = [],
 } = {}) {
   const isStateful = architectureContexts.some((ctx) => (
     (typeof ctx === 'string' ? ctx : ctx.tag) === 'stateful-operation'
@@ -452,6 +453,10 @@ export function validateFieldLifecycle({
     stateModel,
     decisions,
     boundaryRules,
+    pathReferences,
+    architectureContexts,
+    requirements,
+    invariants,
   });
   issues.push(...computabilityResult.issues);
 
@@ -1399,6 +1404,10 @@ export function validateComputabilityGraphClosure({
   stateModel = null,
   decisions = [],
   boundaryRules = [],
+  pathReferences = [],
+  architectureContexts = [],
+  requirements = [],
+  invariants = [],
 } = {}) {
   const issues = [];
   if (!stateModel) {
@@ -1533,6 +1542,22 @@ export function validateComputabilityGraphClosure({
             reason: `O nó de computabilidade '${id}' declara entrada externa '${target}', mas nenhum parâmetro de operação ou sinal de fronteira a fornece.`,
           });
         }
+
+        // Gate 1: Derivation Provenance (Não aceitar atalhos falsos)
+        // Quantidades agregadas, derivadas de arquivos ou cálculos internos não podem ser classificadas como EXTERNAL_INPUT.
+        const derivedPattern = /(?:accumulated|calc_|calculated|computed|total_|delta|divergence|parsed|extracted|declared_in_footer|row_count|batch_sum|running_total)/i;
+        if (derivedPattern.test(id) || derivedPattern.test(target)) {
+          const hasIngressBoundary = boundaries.some((b) => (
+            b.ownership === 'REQUEST_INGRESS' && (b.signalName === target || b.signalName === id)
+          ));
+          if (!hasIngressBoundary) {
+            recordNodeIssue(id, {
+              slotId: `${slotId}/derivationProvenance`,
+              kind: 'DERIVATION_PROVENANCE_MISSING',
+              reason: `O nó '${id}' ('${target}') foi classificado como EXTERNAL_INPUT, mas representa uma quantidade calculada ou derivada internamente (atalho falso). Sob Derivation Provenance, deve ser modelado como COMPUTED_VARIABLE ou DERIVED_VALUE com fórmula explícita e proveniência causal a partir das entradas brutas.`,
+            });
+          }
+        }
         break;
       }
       case 'HUMAN_DECISION': {
@@ -1645,8 +1670,9 @@ export function validateComputabilityGraphClosure({
       }
 
       // Pergunta 5 (Casos Limites - Divisão por zero):
-      if (formulaStr.includes('/')) {
-        const divMatch = formulaStr.match(/\/\s*([a-zA-Z0-9_.]+)/);
+      const codeWithoutStrings = formulaStr.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, '');
+      if (codeWithoutStrings.includes('/')) {
+        const divMatch = codeWithoutStrings.match(/\/\s*([a-zA-Z0-9_.]+)/);
         if (divMatch) {
           const divisorToken = divMatch[1];
           const isConstantNonZero = /^[1-9]\d*n?$/.test(divisorToken);
@@ -1753,7 +1779,47 @@ export function validateComputabilityGraphClosure({
                 const isRatio1 = d1.unit.family === 'RATIO';
                 const isRatio2 = d2.unit.family === 'RATIO';
                 const hasConversion = Boolean(node.unit?.conversion) || Boolean(d1.unit?.conversion) || Boolean(d2.unit?.conversion);
-                if (!isRatio1 && !isRatio2 && !hasConversion) {
+
+                // Helper para extrair denominador de uma unidade do tipo RATIO
+                const getRatioDenom = (u) => {
+                  if (u.denominator?.family) return u.denominator;
+                  if (u.per?.family) return u.per;
+                  const label = (u.label || '').toUpperCase();
+                  const m = label.match(/(?:_PER_|\/|_POR_)([A-Z0-9_]+)$/);
+                  if (m) {
+                    const raw = m[1];
+                    if (raw.includes('PALLET') || raw.includes('PALETE') || raw.includes('ITEM') || raw.includes('UNIT') || raw.includes('COUNT')) {
+                      return { family: 'DISCRETE_COUNT', label: raw };
+                    }
+                    if (raw.includes('M3') || raw.includes('VOLUME')) {
+                      return { family: 'PHYSICAL_VOLUME', label: raw };
+                    }
+                    if (raw.includes('KG') || raw.includes('WEIGHT') || raw.includes('PESO')) {
+                      return { family: 'PHYSICAL_WEIGHT', label: raw };
+                    }
+                  }
+                  return null;
+                };
+
+                if (isRatio2 && !hasConversion) {
+                  const denom = getRatioDenom(d2.unit);
+                  if (denom && d1.unit.family !== denom.family) {
+                    recordNodeIssue(id, {
+                      slotId: `${slotId}/unit`,
+                      kind: 'DIMENSIONAL_CANCELLATION_FAILURE',
+                      reason: `Falha de cancelamento dimensional na multiplicação no nó '${id}': a grandeza multiplicadora '${s1}' [${d1.unit.family}:${d1.unit.label}] não cancela o denominador [${denom.family}:${denom.label}] da taxa unitária '${s2}' sem fator de conversão declarado (álgebra dimensional violada: impossível multiplicar ${d1.unit.label} por ${d2.unit.label} diretamente).`,
+                    });
+                  }
+                } else if (isRatio1 && !hasConversion) {
+                  const denom = getRatioDenom(d1.unit);
+                  if (denom && d2.unit.family !== denom.family) {
+                    recordNodeIssue(id, {
+                      slotId: `${slotId}/unit`,
+                      kind: 'DIMENSIONAL_CANCELLATION_FAILURE',
+                      reason: `Falha de cancelamento dimensional na multiplicação no nó '${id}': a grandeza multiplicadora '${s2}' [${d2.unit.family}:${d2.unit.label}] não cancela o denominador [${denom.family}:${denom.label}] da taxa unitária '${s1}' sem fator de conversão declarado (álgebra dimensional violada: impossível multiplicar ${d2.unit.label} por ${d1.unit.label} diretamente).`,
+                    });
+                  }
+                } else if (!isRatio1 && !isRatio2 && !hasConversion) {
                   recordNodeIssue(id, {
                     slotId: `${slotId}/unit`,
                     kind: 'DIMENSIONAL_UNIT_MISMATCH',
@@ -1809,26 +1875,42 @@ export function validateComputabilityGraphClosure({
       }
     }
 
-    // GATE C: PRESERVAÇÃO DE IDENTIDADE (validateIdentityPreservation)
+    // GATE C: PRESERVAÇÃO DE IDENTIDADE & VERIFICAÇÃO FÍSICA DE SUBSTRATO (validateIdentityPreservation)
     const isSelectiveAction = /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(id)
       || /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(target);
 
-    if (isSelectiveAction) {
-      const hasIdentityScope = Boolean(node.identityScope?.entity && node.identityScope?.isPreservedSet !== false);
-      const isIdentitySemanticType = node.semanticType === 'IDENTITY' || (node.semanticType === 'COLLECTION' && Boolean(node.identityScope?.entity));
-
-      let isStateFieldBoolean = false;
-      if (Array.isArray(stateModel.entities)) {
-        for (const ent of stateModel.entities) {
-          for (const f of ent.fields ?? []) {
-            if (`${ent.name}.${f.name}` === target || f.name === target) {
-              if (f.type === 'BOOLEAN' || f.type === 'BOOL') {
-                isStateFieldBoolean = true;
-              }
+    let isStateFieldBoolean = false;
+    let targetFieldObj = null;
+    if (Array.isArray(stateModel.entities)) {
+      for (const ent of stateModel.entities) {
+        for (const f of ent.fields ?? []) {
+          if (`${ent.name}.${f.name}` === target || f.name === target) {
+            targetFieldObj = f;
+            if (f.type === 'BOOLEAN' || f.type === 'BOOL') {
+              isStateFieldBoolean = true;
             }
           }
         }
       }
+    }
+
+    // Verificação física de substrato contra mentira estrutural de tipo
+    const claimsCollection = node.cardinality === 'COLLECTION'
+      || node.semanticType === 'COLLECTION'
+      || node.semanticType === 'IDENTITY'
+      || Boolean(node.identityScope?.entity);
+
+    if (isStateFieldBoolean && claimsCollection) {
+      recordNodeIssue(id, {
+        slotId: `${slotId}/target`,
+        kind: 'STRUCTURAL_SUBSTRATE_MISMATCH',
+        reason: `O nó de computabilidade '${id}' declara tipo semântico COLLECTION ou escopo de identidade sobre '${target}', mas o campo físico correspondente no inventário de entidades possui tipo primitivo 'BOOLEAN' (incompatibilidade estrutural: um booleano não pode comportar uma coleção ou lista nominal de identidades).`,
+      });
+    }
+
+    if (isSelectiveAction) {
+      const hasIdentityScope = Boolean(node.identityScope?.entity && node.identityScope?.isPreservedSet !== false);
+      const isIdentitySemanticType = node.semanticType === 'IDENTITY' || (node.semanticType === 'COLLECTION' && Boolean(node.identityScope?.entity));
 
       const isAnonymousBoolean = isStateFieldBoolean && !hasIdentityScope && !isIdentitySemanticType;
       const isScalarWithoutIdentity = (node.cardinality === 'SCALAR' || !node.cardinality) && !hasIdentityScope && !isIdentitySemanticType && !node.semanticType;
@@ -1842,15 +1924,17 @@ export function validateComputabilityGraphClosure({
       }
     }
 
-    // GATE D: FECHAMENTO TRANSACIONAL E ROLLBACK ATÔMICO (validateTransactionalClosure)
+    // GATE D: FECHAMENTO TRANSACIONAL, ROLLBACK E SNAPSHOT FÍSICO (validateTransactionalClosure)
     const isExecutionCandidate = node.category !== 'HUMAN_DECISION' && node.category !== 'EXTERNAL_INPUT';
     const isMultiLegTransaction = isExecutionCandidate && (
       node.semanticType === 'TRANSACTION'
-      || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(id)
-      || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(target)
-    ) && (
-      /(?:triangulat|atomic_rollback|multilateral|reversao_atomica|multi_leg)/i.test(id)
-      || /(?:triangulat|atomic_rollback|multilateral|reversao_atomica|multi_leg)/i.test(target)
+      || Boolean(node.transaction)
+      || (
+        (/(?:execute|execucao|commit|rollback|revert|compensat)/i.test(id)
+        || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(target))
+        && (/(?:triangulat|atomic_rollback|rollback|multilateral|reversao_atomica|multi_leg)/i.test(id)
+        || /(?:triangulat|atomic_rollback|rollback|multilateral|reversao_atomica|multi_leg)/i.test(target))
+      )
     );
 
     if (isMultiLegTransaction) {
@@ -1868,6 +1952,50 @@ export function validateComputabilityGraphClosure({
             kind: 'TRANSACTION_BOUNDARY_UNCLOSED',
             reason: `A fronteira de transação no nó '${id}' é inválida: exige scope, commitGuard e candidateFields com no mínimo 2 pernas/campos mutáveis.`,
           });
+        }
+
+        // Verificação física de substrato de rollback e snapshot
+        const promisesStateRollback = /(?:restore|revers|rollback_to_previous|previous_state|estado_anterior|previous_round)/i.test(tx.onRollback || '')
+          || /(?:rollback|restore|revers)/i.test(id)
+          || /(?:rollback|restore|revers)/i.test(target);
+
+        if (promisesStateRollback) {
+          const hasSnapshotField = Boolean(tx.snapshotField && entityFields.has(tx.snapshotField))
+            || Boolean(tx.rollbackTarget && entityFields.has(tx.rollbackTarget))
+            || [...entityFields].some((f) => /(?:previous|snapshot|last_committed|lastCommitted|baseline|estado_anterior|backup)/i.test(f));
+
+          const opsWithRollbackOrRejection = operations.filter((op) => {
+            return (op.branches || []).some((b) => {
+              const bId = (b.branchId || '').toUpperCase();
+              const bStatus = (b.statusOrError || '').toUpperCase();
+              return (bId.includes('CONSERVATION') || bId.includes('DIVERGENCE') || bId.includes('ROLLBACK') || bStatus.includes('DIVERGENCE'))
+                && b.outcomeKind === 'REJECTION';
+            });
+          });
+
+          let hasPhysicalRestorationEffect = false;
+          for (const op of opsWithRollbackOrRejection) {
+            for (const b of op.branches || []) {
+              if (b.outcomeKind === 'REJECTION') {
+                const effects = b.stateEffects || [];
+                const nonFlagEffects = effects.filter((e) => {
+                  const fName = (e.field || '').toLowerCase();
+                  return !fName.includes('alert') && !fName.includes('interdict') && !fName.includes('quarantin');
+                });
+                if (nonFlagEffects.length > 0) {
+                  hasPhysicalRestorationEffect = true;
+                }
+              }
+            }
+          }
+
+          if (!hasSnapshotField || (opsWithRollbackOrRejection.length > 0 && !hasPhysicalRestorationEffect)) {
+            recordNodeIssue(id, {
+              slotId: `${slotId}/transaction/rollback`,
+              kind: 'ROLLBACK_TARGET_MISSING',
+              reason: `Operação/transação '${id}' promete rollback/restauração ao estado anterior da rodada, mas o inventário não possui campo de snapshot/backup prévio e nenhum ramo de rejeição executa restauração física dos saldos mutáveis (rollback fantasma).`,
+            });
+          }
         }
       }
     }
@@ -1981,6 +2109,39 @@ export function validateComputabilityGraphClosure({
     }
   }
 
+  // 3. Validação de operações que declaram rateio entre pedidos da fila (Arity Conservation Theorem)
+  for (const op of operations) {
+    const isApportionmentOp = /(?:apportion|rateio|allocate_orders|distribute_queue|fracionamento)/i.test(op.name)
+      || /(?:apportion|rateio|ratear|pedidos da fila|fracionamento)/i.test(op.description || '');
+
+    if (isApportionmentOp) {
+      const params = Array.isArray(op.parameters) ? op.parameters : [];
+      const hasCollectionParam = params.some((p) => {
+        const pName = (p.name || '').toLowerCase();
+        const pType = (p.type || '').toLowerCase();
+        const pDomain = (p.domain || '').toLowerCase();
+        return p.cardinality === 'COLLECTION'
+          || pType.includes('array')
+          || pType.includes('collection')
+          || pType.includes('list')
+          || pType.includes('set')
+          || /(?:orders|queue|requests|pedidos|items|fila)/i.test(pName)
+          || /(?:pedidos|lista|colecao|itens|fila)/i.test(pDomain);
+      });
+
+      const hasCollectionEntity = Array.isArray(stateModel.entities)
+        && stateModel.entities.some((e) => /(?:queue|orders|pedidos|fila|requests)/i.test(e.name));
+
+      if (!hasCollectionParam && !hasCollectionEntity) {
+        issues.push({
+          slotId: `operations/${op.name}/parameters`,
+          kind: 'COLLECTION_INPUT_ABSENT',
+          reason: `A operação '${op.name}' alega ratear capacidade proporcionalmente entre pedidos da fila, mas sua assinatura de parâmetros recebe apenas escalares agregados (${params.map((p) => p.name).join(', ')}), sem acesso à coleção de pedidos individuais (teorema da conservação de granularidade violado).`,
+        });
+      }
+    }
+  }
+
   // 4. Verificação Reversa a partir de Efeitos de Estado de Operações
   if (computabilityGraph.length > 0) {
     const ignoredTokens = new Set(['null', 'undefined', 'true', 'false', 'none', 'empty', 'n']);
@@ -2028,6 +2189,325 @@ export function validateComputabilityGraphClosure({
     }
   }
 
+  // Gate 2: External Effect Coverage & Gate 3: Transaction / Rollback Coverage
+  const hasExternalEffectContext = (architectureContexts ?? []).some((ctx) => (
+    (typeof ctx === 'string' ? ctx : ctx.tag) === 'external-effect'
+  )) || (pathReferences ?? []).some((p) => p.role === 'PUBLIC_SURFACE');
+
+  if (hasExternalEffectContext) {
+    const publicSurfaces = (Array.isArray(pathReferences) ? pathReferences : [])
+      .filter((p) => p.role === 'PUBLIC_SURFACE' || p.role === 'PERSISTENT_STORAGE');
+
+    for (const pub of publicSurfaces) {
+      const pubPath = pub.path;
+      let covered = false;
+
+      for (const op of operations) {
+        const branches = Array.isArray(op.branches) ? op.branches : [];
+        for (const branch of branches) {
+          const extEffects = Array.isArray(branch.externalEffects) ? branch.externalEffects : [];
+          if (extEffects.some((eff) => eff.targetPath === pubPath || pubPath.includes(eff.targetPath) || eff.targetPath.includes(pubPath))) {
+            covered = true;
+            break;
+          }
+        }
+        if (covered) break;
+      }
+
+      if (!covered) {
+        for (const node of computabilityGraph) {
+          if (node.semanticType === 'EXTERNAL_EFFECT' || node.externalEffect) {
+            const effPath = node.externalEffect?.targetSurface || node.externalEffect?.targetPath || node.target;
+            if (effPath && (effPath === pubPath || pubPath.includes(effPath) || effPath.includes(pubPath))) {
+              covered = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!covered) {
+        issues.push({
+          slotId: `pathReferences/${pubPath}`,
+          kind: 'EXTERNAL_EFFECT_COVERAGE_MISSING',
+          reason: `A superfície pública '${pubPath}' não possui efeito externo físico modelado em operações ou no grafo de computabilidade (ação física no sistema de arquivos ausente).`,
+        });
+      }
+    }
+
+    for (const op of operations) {
+      const opText = `${op.name} ${op.description || ''}`;
+      const claimsPhysicalMutation = /(?:quarantine|mover|append|escrever|gravar|write|isolate|purge|ledger|audit|copiar|copy|unlink|expurgar|purgar)/i.test(opText);
+      if (claimsPhysicalMutation) {
+        const branches = Array.isArray(op.branches) ? op.branches : [];
+        const hasBranchExtEffect = branches.some((b) => Array.isArray(b.externalEffects) && b.externalEffects.length > 0);
+        const hasGraphExtEffect = computabilityGraph.some((n) => (
+          (n.semanticType === 'EXTERNAL_EFFECT' || n.externalEffect)
+          && (n.target === op.name || n.symbol === op.name || n.formula?.includes(op.name))
+        ));
+
+        if (!hasBranchExtEffect && !hasGraphExtEffect) {
+          issues.push({
+            slotId: `operations/${op.name}/externalEffects`,
+            kind: 'EXTERNAL_EFFECT_COVERAGE_MISSING',
+            reason: `A operação '${op.name}' alega mutação física ou movimentação de arquivos, mas suas transições apenas alteram contadores em memória sem modelar os efeitos externos físicos (targetPath, action, confirmationCheck).`,
+          });
+        }
+      }
+    }
+
+    // Gate 2.1: Modelar ações reais no sistema de arquivos com verificação estrita de cada efeito
+    for (const op of operations) {
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      for (const branch of branches) {
+        const extEffects = Array.isArray(branch.externalEffects) ? branch.externalEffects : [];
+        for (const eff of extEffects) {
+          const target = eff.targetPath || eff.targetSurface || op.name;
+          const action = eff.action || 'UNKNOWN_ACTION';
+
+          if (!eff.confirmationCheck || typeof eff.confirmationCheck !== 'string' || eff.confirmationCheck.trim().length === 0) {
+            issues.push({
+              slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/confirmationCheck`,
+              kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+              reason: `O efeito externo '${action}' sobre '${target}' não possui 'confirmationCheck' (como confirmar se a escrita/movimento funcionou no disco?).`,
+            });
+          }
+
+          if (!eff.onSuccess || typeof eff.onSuccess !== 'string' || eff.onSuccess.trim().length === 0) {
+            issues.push({
+              slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/onSuccess`,
+              kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+              reason: `O efeito externo '${action}' sobre '${target}' não define 'onSuccess' (o que acontece se der certo? próximo passo determinístico ausente).`,
+            });
+          }
+
+          if (!eff.onFailure || typeof eff.onFailure !== 'string' || eff.onFailure.trim().length === 0) {
+            issues.push({
+              slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/onFailure`,
+              kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+              reason: `O efeito externo '${action}' sobre '${target}' não define 'onFailure' (o que acontece se falhar no meio? cleanup + estado anterior + exit 1 ausente).`,
+            });
+          }
+        }
+      }
+    }
+
+    // Gate 2.2: Confirmação Forte Falsificável (não aceita check genérico como 'test -s', 'test -f' ou exit code 0)
+    for (const op of operations) {
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      for (const branch of branches) {
+        const extEffects = Array.isArray(branch.externalEffects) ? branch.externalEffects : [];
+        for (const eff of extEffects) {
+          const target = eff.targetPath || eff.targetSurface || op.name;
+          const action = eff.action || 'UNKNOWN_ACTION';
+          const check = (eff.confirmationCheck || '').trim();
+          if (!check) continue;
+
+          // Se a ação alega preservação de mtime, o check DEVE validar timestamp (stat, mtime, %Y, etc.)
+          if (eff.preservesTimestamp) {
+            const validatesMtime = /(?:stat|mtime|%Y|timestamp)/i.test(check);
+            if (!validatesMtime) {
+              issues.push({
+                slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/confirmationCheck`,
+                kind: 'WEAK_CONFIRMATION_CHECK',
+                reason: `O efeito externo '${action}' sobre '${target}' alega preservação de timestamp ('preservesTimestamp: true'), mas seu 'confirmationCheck' ('${check}') não verifica a preservação de mtime via stat ou comparação temporal.`,
+              });
+            }
+          }
+
+          // Se a ação é gravação de log de auditoria, o check DEVE validar conteúdo registrado (ex: grep do evento/divergência)
+          const isAuditLog = /(?:audit|log)/i.test(target) || action === 'APPEND_LOG';
+          if (isAuditLog) {
+            const validatesContent = /(?:grep|awk|diff|cmp|conteudo|divergencia|lote)/i.test(check);
+            if (!validatesContent) {
+              issues.push({
+                slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/confirmationCheck`,
+                kind: 'WEAK_CONFIRMATION_CHECK',
+                reason: `O efeito externo '${action}' sobre '${target}' possui 'confirmationCheck' fraco ('${check}'): verificar apenas existência ou saída genérica não prova que a entrada de auditoria com a divergência correta foi gravada. Exige validação falsificável do conteúdo registrado (ex.: grep do ID do lote ou delta).`,
+              });
+            }
+          }
+
+          // Verificação genérica: test -s, test -f, test -e, EXIT_CODE_ZERO, FS_SYNC, WRITE_SYNC
+          const isGenericCheck = /^(?:test\s+-[sfe]|\[\s*-[sfe]|EXIT_CODE_ZERO|FS_SYNC|WRITE_SYNC)$/i.test(check)
+            || /^test\s+-[sfe]\s+[^&|;]+$/i.test(check);
+          const isDeletion = action === 'DELETE_TEMP' || action === 'PURGE_TEMPORARY';
+          if (isGenericCheck && !isDeletion) {
+            const alreadyFlagged = issues.some((i) => i.slotId.includes(target) && i.kind === 'WEAK_CONFIRMATION_CHECK');
+            if (!alreadyFlagged) {
+              issues.push({
+                slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/confirmationCheck`,
+                kind: 'WEAK_CONFIRMATION_CHECK',
+                reason: `O efeito externo '${action}' sobre '${target}' possui 'confirmationCheck' fraco ('${check}'): teste de existência de arquivo ('test -s'/'test -f') ou sincronização genérica apenas atesta que o arquivo não está vazio, não provando que o conteúdo correto foi gravado.`,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Gate 3: Transaction / Rollback Coverage (Modelar falha e rollback em operações com efeito externo)
+    for (const op of operations) {
+      const opText = `${op.name} ${op.description || ''}`;
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      const hasExtEffects = branches.some((b) => (
+        Array.isArray(b.externalEffects) && b.externalEffects.some((eff) => (
+          eff.action === 'WRITE_FILE' || eff.action === 'APPEND_CONTENT' || eff.action === 'MOVE_FILE' || eff.action === 'ISOLATE_TO_QUARANTINE' || eff.action === 'PURGE_TEMPORARY' || eff.action === 'WRITE_TEMP' || eff.action === 'APPEND_LOG' || eff.action === 'RENAME' || eff.action === 'DELETE_TEMP' || eff.action === 'ATOMIC_SUBSTITUTE'
+        ))
+      ));
+      const isPersistentOrDestructive = hasExtEffects
+        || /(?:append|ledger|escrever|gravar|isolate|quarantine|cleanup|expurgar|purgar)/i.test(opText);
+
+      if (isPersistentOrDestructive) {
+        const hasOpRollback = Boolean(op.rollback?.strategy)
+          || branches.some((b) => Boolean(b.rollback?.strategy) || (Array.isArray(b.externalEffects) && b.externalEffects.some((e) => Boolean(e.rollback?.strategy))));
+        const hasGraphTx = computabilityGraph.some((n) => (
+          (n.semanticType === 'TRANSACTION' || n.transaction || (n.externalEffect && Boolean(n.externalEffect.rollback?.strategy)))
+          && (n.target === op.name || n.symbol === op.name || n.formula?.includes(op.name) || n.transaction?.onRollback)
+        ));
+
+        if (!hasOpRollback && !hasGraphTx) {
+          issues.push({
+            slotId: `operations/${op.name}/rollback`,
+            kind: 'TRANSACTION_ROLLBACK_MISSING',
+            reason: `A operação '${op.name}' realiza mutação externa persistente ou criação provisória sem estratégia mecânica de rollback ou limpeza de arquivos órfãos sob falha (o que acontece se falhar no meio?).`,
+          });
+        }
+      }
+    }
+
+    // Gate 3.1: Rollback Real (se move ou altera arquivo persistente, apagar /tmp não restaura o arquivo)
+    for (const op of operations) {
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      for (const branch of branches) {
+        const extEffects = Array.isArray(branch.externalEffects) ? branch.externalEffects : [];
+        for (const eff of extEffects) {
+          const target = eff.targetPath || eff.targetSurface || '';
+          const action = eff.action || '';
+          const isPersistentMutation = action === 'MOVE_FILE'
+            || action === 'ISOLATE_TO_QUARANTINE'
+            || (action === 'WRITE_FILE' && !target.startsWith('/tmp'));
+
+          if (isPersistentMutation) {
+            const rb = eff.rollback || branch.rollback || op.rollback;
+            const strategy = rb?.strategy || '';
+            const rbTarget = rb?.target || '';
+            const hasCompensation = Boolean(rb?.compensation && rb.compensation.trim().length > 0);
+            const hasCompensationTarget = Boolean(rb?.compensationTarget && rb.compensationTarget.trim().length > 0);
+            const isRestoreOriginal = strategy === 'RESTORE_ORIGINAL' || strategy === 'COMPENSATING_ACTION' || strategy === 'RESTORE_SNAPSHOT';
+
+            const onlyPurgesTemp = (strategy === 'TRAP_PURGE_TEMPORARY' || rbTarget.startsWith('/tmp')) && !hasCompensation && !hasCompensationTarget && !isRestoreOriginal;
+
+            if (onlyPurgesTemp || (!hasCompensation && !hasCompensationTarget && !isRestoreOriginal)) {
+              issues.push({
+                slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/rollback`,
+                kind: 'UNCOMPENSATED_EXTERNAL_EFFECT',
+                reason: `O efeito externo '${action}' sobre '${target}' altera o sistema de arquivos persistente, mas o rollback limita-se a purgar arquivos temporários ('${rbTarget || '/tmp/*'}') sem definir como desfazer a movimentação (ação compensatória 'compensation' ou restauração do arquivo original 'compensationTarget'). Se uma etapa posterior falhar, o arquivo permanecerá indevidamente deslocado/modificado.`,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Gate 4.1: Escrita Atômica no Ledger Persistente (proíbe APPEND_CONTENT direto em arquivos consolidados/definitivos)
+    for (const op of operations) {
+      const branches = Array.isArray(op.branches) ? op.branches : [];
+      for (const branch of branches) {
+        const extEffects = Array.isArray(branch.externalEffects) ? branch.externalEffects : [];
+        for (const eff of extEffects) {
+          const target = eff.targetPath || eff.targetSurface || '';
+          const action = eff.action || '';
+          const isLedgerPersistent = /(?:ledger|consolidado)/i.test(target) && !target.startsWith('/tmp') && !target.endsWith('.tmp');
+
+          if (isLedgerPersistent && action === 'APPEND_CONTENT') {
+            issues.push({
+              slotId: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}/action`,
+              kind: 'NON_ATOMIC_PERSISTENT_MUTATION',
+              reason: `Mutação no ledger persistente '${target}' utiliza append direto ('APPEND_CONTENT'), o que não é atômico e pode deixar o arquivo definitivo pela metade em caso de falha no meio do processo. Exige o fluxo de substituição atômica: criar o novo ledger completo em arquivo temporário ('WRITE_TEMP'), validar ('confirmationCheck') e substituir o arquivo definitivo de uma vez ('ATOMIC_SUBSTITUTE').`,
+            });
+          }
+        }
+      }
+    }
+
+    // Gate 4: Cross-Check Automático (Requisito, Transição, Efeito e Invariante contam a mesma história?)
+    const reqStatementsText = [
+      ...(requirements || []).map((r) => `${r.statement || ''} ${((r.acceptanceCases || []).map((c) => `${c.given || ''} ${c.when || ''} ${c.then || ''}`)).join(' ')}`),
+      ...(decisions || []).flatMap((d) => (d.answers || []).map((a) => `${a.label || ''} ${a.contractEffect || ''} ${a.rationale || ''}`)),
+    ].join(' ');
+
+    const requiresDeduplication = /(?:deduplic|sem duplicar|ignorar duplicadas|duplicad|linhas idênticas.*ignoradas)/i.test(reqStatementsText);
+    const hasLedgerConsolidation = [...pathReferences, ...(operations || [])].some((item) => (
+      /(?:ledger|consolidado)/i.test(item.path || item.name || item.description || '')
+    ));
+
+    if (requiresDeduplication && hasLedgerConsolidation) {
+      // 1. Verificar se a fórmula de totalização consome soma bruta em vez de linhas deduplicadas
+      const newTotalNode = computabilityGraph.find((n) => (
+        n.symbol === 'NEW_TOTAL_KG' || n.nodeId === 'NEW_TOTAL_KG' || n.target === 'newTotalKg'
+      ));
+
+      if (newTotalNode) {
+        const formula = newTotalNode.formula || '';
+        const deps = newTotalNode.dependencies || [];
+        const usesRawFileSumDirectly = deps.includes('ACCUMULATED_KG')
+          || deps.includes('PARSED_ROWS')
+          || formula.includes('accumulatedKg')
+          || formula.includes('parsedRows');
+
+        const consumesDeduplicatedSubstrate = deps.some((d) => /(?:dedup|consolidated_added|filtered|unique)/i.test(d))
+          || computabilityGraph.some((n) => (
+            /(?:dedup|consolidated_added|unique_rows|linhas_unicas)/i.test(n.symbol || n.nodeId || n.target || '')
+            && deps.includes(n.symbol || n.nodeId)
+          ));
+
+        if (usesRawFileSumDirectly && !consumesDeduplicatedSubstrate) {
+          issues.push({
+            slotId: 'computabilityGraph/NEW_TOTAL_KG/crossConsistency',
+            kind: 'CROSS_LAYER_CONTRADICTION',
+            reason: "Contradição cross-layer detectada entre Requisito, Transição, Efeito Externo e Invariante: a política acordada exige deduplicação de linhas antes da consolidação no ledger ('processed/ledger_consolidado.tsv'), mas a fórmula de totalização consome a soma bruta do arquivo ('accumulatedKg') em vez das linhas deduplicadas efetivamente adicionadas ao ledger. Isso cria divergência física entre os dados gravados no ledger e o total consolidado exibido.",
+          });
+        }
+      }
+
+      // 2. Verificar se alguma invariante alega falsamente conservação exata da soma dos arquivos aceitos
+      for (const inv of (invariants || [])) {
+        const invText = `${inv.statement || ''} ${inv.falsification || ''}`;
+        const claimsExactFileSumInLedger = /(?:soma.*adicionada ao ledger corresponde exatamente à soma dos.*arquivos aceitos|soma dos lotes de arquivos aceitos)/i.test(invText)
+          && !/(?:deduplic|unic|filtr|sem duplicat|não duplicad)/i.test(invText);
+        if (claimsExactFileSumInLedger) {
+          issues.push({
+            slotId: `invariants/${inv.id}/crossConsistency`,
+            kind: 'CONTRADICTORY_RULE_DETECTED',
+            reason: `A invariante '${inv.id}' alega que a soma adicionada ao ledger corresponde exatamente à soma dos manifestos aceitos, o que contradiz a política de deduplicação (linhas repetidas são descartadas do ledger, de modo que a massa adicionada ao ledger é estritamente menor que a soma do manifesto caso haja duplicatas).`,
+          });
+        }
+      }
+    }
+  }
+
+  // Gate 5: Ordem Determinística na Descoberta e Travessia de Arquivos
+  for (const node of computabilityGraph) {
+    const id = node.nodeId || node.symbol || '';
+    const target = node.target || '';
+    const formula = node.formula || '';
+    const cardinality = node.cardinality || 'SCALAR';
+    const isDiscoveryOrTraversal = /(?:discover|readdir|travers|find|ls|listfiles|glob|nextmanifest)/i.test(`${id} ${target} ${formula}`)
+      || (cardinality === 'COLLECTION' && /(?:file|manifest|arquivo)/i.test(`${id} ${target}`));
+
+    if (isDiscoveryOrTraversal) {
+      const hasOrdering = Boolean(node.orderingPolicy && typeof node.orderingPolicy === 'string' && node.orderingPolicy.trim().length > 0);
+      if (!hasOrdering) {
+        issues.push({
+          slotId: `computabilityGraph/${id}/orderingPolicy`,
+          kind: 'NON_DETERMINISTIC_TRAVERSAL_ORDER',
+          reason: `O nó de descoberta/leitura de arquivos '${id}' não especifica 'orderingPolicy' determinística (ex.: 'LC_ALL=C sort -d'). A travessia de diretórios sem ordenação explícita varia conforme a ordem de inodes do sistema de arquivos, podendo fazer com que duas implementações processem arquivos em ordens distintas e gerem ledgers diferentes.`,
+        });
+      }
+    }
+  }
+
   return {
     valid: issues.length === 0,
     issues,
@@ -2060,6 +2540,7 @@ export function generateClosureCertificate({
     requirements: specification.requirements ?? [],
     decisions: specification.decisions ?? [],
     boundaryRules: specification.boundaries?.boundaryRules ?? specification.boundaryRules ?? [],
+    pathReferences: specification.pathReferences ?? [],
   });
 
   const provenanceResult = validateProvenanceEnforcement({
@@ -2102,6 +2583,12 @@ export function generateClosureCertificate({
     || i.kind === 'UNRESOLVED_DERIVATION_FUNCTION'
     || i.kind === 'UNRESOLVED_BOUNDARY_CONSUMPTION'
     || i.kind === 'UNRESOLVED_CATEGORY_MEMBERSHIP'
+    || i.kind === 'EXTERNAL_EFFECT_COVERAGE_MISSING'
+    || i.kind === 'INCOMPLETE_EXTERNAL_EFFECT'
+    || i.kind === 'TRANSACTION_ROLLBACK_MISSING'
+    || i.kind === 'WEAK_CONFIRMATION_CHECK'
+    || i.kind === 'UNCOMPENSATED_EXTERNAL_EFFECT'
+    || i.kind === 'NON_ATOMIC_PERSISTENT_MUTATION'
   ));
 
   const observableIssues = stateLifecycle.issues.filter((i) => (
@@ -2114,6 +2601,7 @@ export function generateClosureCertificate({
   const declarationConflicts = stateLifecycle.issues.filter((i) => (
     i.kind === 'CONFLICTING_STATE_DECLARATIONS'
     || i.kind === 'CONTRADICTORY_RULE_DETECTED'
+    || i.kind === 'CROSS_LAYER_CONTRADICTION'
   ));
 
   // Gaps materiais sem decisão vinculada
@@ -2157,6 +2645,12 @@ export function generateClosureCertificate({
     || i.kind === 'COLLECTION_MEMBERS_MISSING'
     || i.kind === 'IDENTITY_PRESERVATION_MISSING'
     || i.kind === 'TRANSACTION_BOUNDARY_UNCLOSED'
+    || i.kind === 'STRUCTURAL_SUBSTRATE_MISMATCH'
+    || i.kind === 'DIMENSIONAL_CANCELLATION_FAILURE'
+    || i.kind === 'COLLECTION_INPUT_ABSENT'
+    || i.kind === 'ROLLBACK_TARGET_MISSING'
+    || i.kind === 'DERIVATION_PROVENANCE_MISSING'
+    || i.kind === 'NON_DETERMINISTIC_TRAVERSAL_ORDER'
   ));
   const unresolvedDependencies = computabilityIssues.length;
   const unresolvedDeterminismDimensions = determinismGaps.length + determinismDecisions.length;
@@ -2198,7 +2692,7 @@ export function generateClosureCertificate({
     unresolvedDeterminismDimensions,
     contradictoryRules,
     orphanHumanDecisions,
-    status: totalUnresolved === 0 ? 'CERTIFIED_CLOSED' : 'BLOCKED_BY_UNRESOLVED_SLOTS',
+    status: totalUnresolved === 0 && gapLedger.length === 0 ? 'CERTIFIED_CLOSED' : 'BLOCKED_BY_UNRESOLVED_SLOTS',
     gapLedger,
   };
 }
@@ -2257,9 +2751,32 @@ function classifyGapIssue(issue, index) {
       witness = issue.reason || 'Mutação ou gatilho de reset sem dono declarado no modelo.';
       break;
     case 'CONTRADICTORY_RULE_DETECTED':
+    case 'CROSS_LAYER_CONTRADICTION':
       layer = 'TRANSITION_CONSISTENCY';
-      requiredAuthority = 'USER_INTENT';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
       witness = issue.reason || 'Contradição ativa detectada entre invariantes, requisitos e operações.';
+      break;
+    case 'EXTERNAL_EFFECT_COVERAGE_MISSING':
+    case 'INCOMPLETE_EXTERNAL_EFFECT':
+    case 'TRANSACTION_ROLLBACK_MISSING':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.';
+      break;
+    case 'WEAK_CONFIRMATION_CHECK':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Check de confirmação genérico ou fraco; não refuta o efeito esperado.';
+      break;
+    case 'UNCOMPENSATED_EXTERNAL_EFFECT':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Efeito externo persistente sem restauração ou ação compensatória de rollback.';
+      break;
+    case 'NON_ATOMIC_PERSISTENT_MUTATION':
+      layer = 'TRANSITION_CONSISTENCY';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Mutação direta não atômica em arquivo persistente de ledger.';
       break;
     case 'UNRESOLVED_DERIVATION_FUNCTION':
       layer = 'TRANSITION_CONSISTENCY';
@@ -2414,6 +2931,37 @@ function classifyGapIssue(issue, index) {
       layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
       requiredAuthority = 'ARCHITECTURE_POLICY';
       witness = issue.reason || 'Operação com reversão atômica sem fronteira canônica de transação.';
+      break;
+    case 'STRUCTURAL_SUBSTRATE_MISMATCH':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Incompatibilidade estrutural entre a etiqueta lógica e o campo físico no inventário de entidades.';
+      break;
+    case 'DIMENSIONAL_CANCELLATION_FAILURE':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Falha de cancelamento dimensional na multiplicação/divisão por taxa unitária.';
+      break;
+    case 'COLLECTION_INPUT_ABSENT':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Operação alega rateio entre membros mas recebe apenas escalares agregados.';
+      break;
+    case 'ROLLBACK_TARGET_MISSING':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Operação/transação promete rollback mas não possui campo de snapshot prévio ou restauração física de saldos.';
+      break;
+    case 'DERIVATION_PROVENANCE_MISSING':
+    case 'FABRICATED_EXTERNAL_INPUT':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'USER_INTENT';
+      witness = issue.reason || 'Nó declarado como entrada externa sem proveniência legítima (atalho falso).';
+      break;
+    case 'NON_DETERMINISTIC_TRAVERSAL_ORDER':
+      layer = 'COMPUTABILITY_DEPENDENCY_CLOSURE';
+      requiredAuthority = 'ARCHITECTURE_POLICY';
+      witness = issue.reason || 'Ordem de descoberta ou travessia de arquivos sem política determinística explícita.';
       break;
 
 

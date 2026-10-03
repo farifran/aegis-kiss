@@ -99,11 +99,14 @@ function createFixture({
   literalFacts = [],
   requirements = [],
   invariants = [],
+  architectureContexts = null,
+  pathReferences = [],
 } = {}) {
   return {
-    architectureContexts: isStateful
+    architectureContexts: architectureContexts ?? (isStateful
       ? [{ tag: 'product-demand' }, { tag: 'stateful-operation' }]
-      : [{ tag: 'product-demand' }],
+      : [{ tag: 'product-demand' }]),
+    pathReferences,
     stateModel,
     unknowns,
     decisions,
@@ -3335,6 +3338,1472 @@ function createFixture({
   assert.equal(cert.unresolvedDependencies, 0);
   assert.equal(cert.gapLedger.length, 0);
   log('  PASS: TEST-68 Full Aegis Semantic Circuit v2 with dimensional units, collections, identity preservation & transaction certifies CERTIFIED_CLOSED');
+}
+
+// TEST-69: Substrate Grounding Check / Type Fabrication Trap (STRUCTURAL_SUBSTRATE_MISMATCH)
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'hasQuarantinedCarriers',
+        type: 'BOOLEAN',
+        bounds: null,
+        initialization: { kind: 'EXPLICIT_VALUE', value: 'false' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.hasQuarantinedCarriers'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'CARRIER_QUARANTINE_ISOLATION',
+        category: 'STATE_FIELD',
+        target: 'Yard.hasQuarantinedCarriers',
+        semanticType: 'COLLECTION',
+        cardinality: 'COLLECTION',
+        identityScope: { entity: 'Carrier', identifierField: 'carrierId', isPreservedSet: true },
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-69: collection/identity on boolean field must be invalid');
+  assert.ok(result.issues.some((i) => i.kind === 'STRUCTURAL_SUBSTRATE_MISMATCH'), 'TEST-69: must emit STRUCTURAL_SUBSTRATE_MISMATCH');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('incompatibilidade estrutural'));
+  assert.ok(gap, 'TEST-69: gapLedger must register STRUCTURAL_SUBSTRATE_MISMATCH witness');
+  log('  PASS: TEST-69 Collection/identity claimed on boolean substrate field blocked with STRUCTURAL_SUBSTRATE_MISMATCH');
+}
+
+// TEST-70: Strict Dimensional Cancellation Trap (DIMENSIONAL_CANCELLATION_FAILURE)
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'heldVolume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      parameters: [{ name: 'volumeCompensated' }],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.heldVolume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'VOLUME_COMPENSATED',
+        category: 'EXTERNAL_INPUT',
+        target: 'volumeCompensated',
+        semanticType: 'VALUE',
+        unit: { family: 'PHYSICAL_VOLUME', label: 'M3' },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'STANDARD_YARD_FEE_RATE',
+        category: 'SYSTEM_CONFIGURATION',
+        target: 'standardYardFeeRate',
+        semanticType: 'VALUE',
+        unit: {
+          family: 'RATIO',
+          label: 'BRL_PER_PALLET',
+          denominator: { family: 'DISCRETE_COUNT', label: 'PALLET' },
+        },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'FEE_CALCULATION',
+        category: 'COMPUTED_VARIABLE',
+        target: 'feeCalculation',
+        semanticType: 'VALUE',
+        unit: { family: 'CURRENCY', label: 'BRL' },
+        cardinality: 'SCALAR',
+        formula: 'volumeCompensated * standardYardFeeRate',
+        dependencies: ['VOLUME_COMPENSATED', 'STANDARD_YARD_FEE_RATE'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-70: multiplying volume (m3) by rate per pallet must fail dimensional cancellation');
+  assert.ok(result.issues.some((i) => i.kind === 'DIMENSIONAL_CANCELLATION_FAILURE'), 'TEST-70: must emit DIMENSIONAL_CANCELLATION_FAILURE');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('cancelamento dimensional'));
+  assert.ok(gap, 'TEST-70: gapLedger must register DIMENSIONAL_CANCELLATION_FAILURE witness');
+  log('  PASS: TEST-70 Mismatched dimensional ratio multiplication without conversion blocked with DIMENSIONAL_CANCELLATION_FAILURE');
+}
+
+// TEST-71: Granularity Conservation / Collection Input Absent Trap (COLLECTION_INPUT_ABSENT)
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [{
+        name: 'heldVolume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'apportionPallets',
+      description: 'Rateia a capacidade proporcionalmente entre todos os pedidos da fila',
+      parameters: [
+        { name: 'availableCapacity', type: 'bigint' },
+        { name: 'totalRequestedDemand', type: 'bigint' },
+      ],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.heldVolume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-71: apportionment operation without order collection parameters must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'COLLECTION_INPUT_ABSENT'), 'TEST-71: must emit COLLECTION_INPUT_ABSENT');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('teorema da conservação de granularidade'));
+  assert.ok(gap, 'TEST-71: gapLedger must register COLLECTION_INPUT_ABSENT witness');
+  log('  PASS: TEST-71 Apportionment operation with only aggregate scalar inputs blocked with COLLECTION_INPUT_ABSENT');
+}
+
+// TEST-72: Rollback Snapshot Substrate Absent Trap (ROLLBACK_TARGET_MISSING)
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [
+        {
+          name: 'isInterdicted',
+          type: 'BOOLEAN',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'false' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+        {
+          name: 'dispatchedPallets',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'verifyBlindBalanceAndDispatch',
+      guardPrecedence: ['GUARD_CONSERVATION_DIVERGENCE'],
+      branches: [
+        {
+          branchId: 'GUARD_CONSERVATION_DIVERGENCE',
+          outcomeKind: 'REJECTION',
+          statusOrError: 'ERR_CONSERVATION_DIVERGENCE',
+          defaultPreservation: true,
+          // Apenas altera flags de erro, NÃO restaura saldos nem possui snapshot prévio!
+          stateEffects: [
+            { field: 'Yard.isInterdicted', effect: 'SET', value: 'true' },
+          ],
+        },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.isInterdicted'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'BLIND_BALANCE_ROLLBACK',
+        category: 'COMPUTED_VARIABLE',
+        target: 'blindBalanceRollback',
+        semanticType: 'TRANSACTION',
+        formula: 'restoreInventoryOnDivergence()',
+        dependencies: [],
+        transaction: {
+          scope: 'MASS_CONSERVATION_CLOSURE',
+          candidateFields: ['Yard.dispatchedPallets', 'Yard.isInterdicted'],
+          commitGuard: 'BLIND_BALANCE_MATCH',
+          onCommit: 'DISPATCH_BATCH',
+          onRollback: 'RESTORE_PREVIOUS_ROUND_INVENTORY',
+        },
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-72: rollback promise without snapshot field or physical restoration must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'ROLLBACK_TARGET_MISSING'), 'TEST-72: must emit ROLLBACK_TARGET_MISSING');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('rollback fantasma'));
+  assert.ok(gap, 'TEST-72: gapLedger must register ROLLBACK_TARGET_MISSING witness');
+  log('  PASS: TEST-72 Transaction with phantom rollback lacking snapshot and restoration blocked with ROLLBACK_TARGET_MISSING');
+}
+
+// TEST-73: Full Physical Verification Runtime Circuit Passed (CERTIFIED_CLOSED)
+{
+  const model = {
+    entities: [{
+      name: 'Yard',
+      fields: [
+        {
+          name: 'quarantinedCarriers',
+          type: 'STRING',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: "'EMPTY_SET'" },
+          mutations: [{ operation: 'apportionPallets', condition: 'OK', effect: 'SET_VALUE', targetValue: 'quarantineSet' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+        {
+          name: 'previousInventorySnapshot',
+          type: 'STRING',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: "'BASELINE'" },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+        {
+          name: 'dockVolume',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '10000', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [{ operation: 'apportionPallets', condition: 'OK', effect: 'SET_VALUE', targetValue: 'dockVolume' }],
+          reset: { allowed: false },
+          preservation: [],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'apportionPallets',
+      description: 'Rateia a capacidade proporcionalmente entre todos os pedidos da fila',
+      parameters: [
+        { name: 'availableCapacity', type: 'bigint' },
+        { name: 'orderQueue', type: 'ARRAY<Order>', cardinality: 'COLLECTION' },
+        { name: 'palletsCompensated', type: 'bigint' },
+        { name: 'dockVolume', type: 'bigint' },
+        { name: 'quarantineSet', type: 'string' },
+      ],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          stateEffects: [
+            { field: 'Yard.dockVolume', effect: 'SET', value: 'dockVolume' },
+            { field: 'Yard.quarantinedCarriers', effect: 'SET', value: 'quarantineSet' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Yard.dockVolume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'PALLETS_COMPENSATED',
+        category: 'EXTERNAL_INPUT',
+        target: 'palletsCompensated',
+        semanticType: 'VALUE',
+        unit: { family: 'DISCRETE_COUNT', label: 'PALLET' },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'DOCK_VOLUME',
+        category: 'EXTERNAL_INPUT',
+        target: 'dockVolume',
+        semanticType: 'VALUE',
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'FEE_RATE',
+        category: 'SYSTEM_CONFIGURATION',
+        target: 'feeRate',
+        semanticType: 'VALUE',
+        unit: {
+          family: 'RATIO',
+          label: 'BRL_PER_PALLET',
+          denominator: { family: 'DISCRETE_COUNT', label: 'PALLET' },
+        },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'TRIANGULATION_FEE',
+        category: 'COMPUTED_VARIABLE',
+        target: 'triangulationFee',
+        semanticType: 'VALUE',
+        unit: { family: 'CURRENCY', label: 'BRL' },
+        cardinality: 'SCALAR',
+        formula: 'palletsCompensated * feeRate',
+        dependencies: ['PALLETS_COMPENSATED', 'FEE_RATE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'CARRIER_QUARANTINE',
+        category: 'STATE_FIELD',
+        target: 'Yard.quarantinedCarriers',
+        semanticType: 'COLLECTION',
+        cardinality: 'COLLECTION',
+        identityScope: { entity: 'Carrier', identifierField: 'carrierId', isPreservedSet: true },
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'TRANSACTION_WITH_ROLLBACK',
+        category: 'COMPUTED_VARIABLE',
+        target: 'txWithRollback',
+        semanticType: 'TRANSACTION',
+        formula: 'commitOrRollback(dockVolume)',
+        dependencies: ['PALLETS_COMPENSATED', 'DOCK_VOLUME'],
+        transaction: {
+          scope: 'INVENTORY_CLOSURE',
+          candidateFields: ['Yard.dockVolume', 'Yard.quarantinedCarriers'],
+          snapshotField: 'Yard.previousInventorySnapshot',
+          commitGuard: 'BALANCE_OK',
+          onCommit: 'COMMIT_INVENTORY',
+          onRollback: 'RESTORE_FROM_SNAPSHOT',
+        },
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, true, `TEST-73 must be valid, got issues: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-73 Full Physical Verification Runtime Circuit Passed with genuine types, dimensional cancellation, collection arity & snapshot substrate');
+}
+
+// TEST-74: Derivation Provenance Trap (DERIVATION_PROVENANCE_MISSING)
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'totalKg',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'reconcile',
+      parameters: [{ name: 'accumulatedKg' }],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.totalKg'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'ACCUMULATED_KG',
+        category: 'EXTERNAL_INPUT',
+        target: 'accumulatedKg',
+        semanticType: 'VALUE',
+        unit: { family: 'PHYSICAL_MASS', label: 'KG' },
+        cardinality: 'SCALAR',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-74: fabricated external input must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'DERIVATION_PROVENANCE_MISSING'), 'TEST-74: must emit DERIVATION_PROVENANCE_MISSING');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedDependencies >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'COMPUTABILITY_DEPENDENCY_CLOSURE' && g.witness?.includes('atalho falso'));
+  assert.ok(gap, 'TEST-74: gapLedger must register DERIVATION_PROVENANCE_MISSING witness');
+  log('  PASS: TEST-74 Fabricated external input shortcut blocked with DERIVATION_PROVENANCE_MISSING');
+}
+
+// TEST-75: External Effect Coverage Trap on Operations (EXTERNAL_EFFECT_COVERAGE_MISSING)
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'quarantinedCount',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '1000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'isolateQuarantineFile',
+      description: 'Mover arquivo corrompido para quarentena',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        // Apenas altera contador em memória, SEM externalEffects!
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.quarantinedCount'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-75: operation claiming quarantine without external effect modeling must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'EXTERNAL_EFFECT_COVERAGE_MISSING'), 'TEST-75: must emit EXTERNAL_EFFECT_COVERAGE_MISSING');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.witness?.includes('efeitos externos físicos'));
+  assert.ok(gap, 'TEST-75: gapLedger must register EXTERNAL_EFFECT_COVERAGE_MISSING witness');
+  log('  PASS: TEST-75 Operation claiming file movement without external effect modeling blocked with EXTERNAL_EFFECT_COVERAGE_MISSING');
+}
+
+// TEST-76: Public Surface Coverage Trap (EXTERNAL_EFFECT_COVERAGE_MISSING)
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const pathReferences = [{ path: 'quarantine/audit.log', role: 'PUBLIC_SURFACE' }];
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-76: unmodeled public surface must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'EXTERNAL_EFFECT_COVERAGE_MISSING' && i.slotId.includes('quarantine/audit.log')));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.witness?.includes('quarantine/audit.log'));
+  assert.ok(gap, 'TEST-76: gapLedger must register unmodeled public surface witness');
+  log('  PASS: TEST-76 Public surface without external physical effect blocked with EXTERNAL_EFFECT_COVERAGE_MISSING');
+}
+
+// TEST-77: Transaction / Rollback Coverage Trap (TRANSACTION_ROLLBACK_MISSING)
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'appendLedger',
+      description: 'Append de linhas válidas no consolidado definitivo',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          externalEffects: [
+            { targetPath: 'processed/ledger.tsv', action: 'APPEND_CONTENT', confirmationCheck: 'FS_SYNC' },
+          ],
+        },
+      ],
+      // rollback AUSENTE!
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.val'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-77: external write without rollback strategy must be blocked');
+  assert.ok(result.issues.some((i) => i.kind === 'TRANSACTION_ROLLBACK_MISSING'));
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'BLOCKED_BY_UNRESOLVED_SLOTS');
+  assert.ok(cert.unresolvedTransitions >= 1);
+  const gap = cert.gapLedger.find((g) => g.layer === 'TRANSITION_CONSISTENCY' && g.witness?.includes('rollback ou limpeza'));
+  assert.ok(gap, 'TEST-77: gapLedger must register TRANSACTION_ROLLBACK_MISSING witness');
+  log('  PASS: TEST-77 Operation modifying external state without rollback strategy blocked with TRANSACTION_ROLLBACK_MISSING');
+}
+
+// TEST-78: Full 3-Gate Integrated Circuit Passed (CERTIFIED_CLOSED)
+{
+  const pathReferences = [
+    { path: 'quarantine', role: 'PUBLIC_SURFACE' },
+    { path: 'quarantine/audit.log', role: 'PUBLIC_SURFACE' },
+    { path: 'processed/ledger.tsv', role: 'PUBLIC_SURFACE' },
+  ];
+
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [
+        {
+          name: 'processedCount',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '1000', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [
+      {
+        name: 'isolateQuarantine',
+        description: 'Mover arquivo com divergência para pasta quarantine',
+        parameters: [{ name: 'inputFile' }],
+        guardPrecedence: ['GUARD_LOCK'],
+        rollback: { strategy: 'COMPENSATING_ACTION', compensation: 'mv quarantine/"$FILE_NAME" "$INPUT_PATH"', compensationTarget: '$INPUT_PATH', onSignal: ['SIGINT'] },
+        branches: [
+          { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+          {
+            branchId: 'SUCCESS',
+            outcomeKind: 'RETURN_VALUE',
+            statusOrError: 'OK',
+            defaultPreservation: true,
+            externalEffects: [
+              {
+                targetPath: 'quarantine',
+                action: 'MOVE_FILE',
+                preservesTimestamp: true,
+                confirmationCheck: '[ "$ORIG_MTIME" = "$DEST_MTIME" ] && stat -c %Y quarantine/"$FILE_NAME"',
+                onSuccess: 'PROCEED_AUDIT_LOG',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'COMPENSATING_ACTION', compensation: 'mv quarantine/"$FILE_NAME" "$INPUT_PATH"', compensationTarget: '$INPUT_PATH' },
+              },
+              {
+                targetPath: 'quarantine/audit.log',
+                action: 'APPEND_LOG',
+                confirmationCheck: 'grep -Fq "$LOTE_ID" quarantine/audit.log && grep -Fq "$DIFF_KG" quarantine/audit.log',
+                onSuccess: 'PROCEED_NEXT_STEP',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/audit_*' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'appendLedger',
+        description: 'Substituição atômica no ledger consolidado definitivo',
+        guardPrecedence: ['GUARD_LOCK'],
+        rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger_*', onSignal: ['SIGINT'] },
+        branches: [
+          { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+          {
+            branchId: 'SUCCESS',
+            outcomeKind: 'RETURN_VALUE',
+            statusOrError: 'OK',
+            defaultPreservation: true,
+            externalEffects: [
+              {
+                targetPath: 'processed/ledger.tsv',
+                action: 'ATOMIC_SUBSTITUTE',
+                confirmationCheck: "cmp -s /tmp/ledger.tmp processed/ledger.tsv && awk -F'\\t' 'NF==4' processed/ledger.tsv",
+                onSuccess: 'PROCEED_NEXT_STEP',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger.tmp' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.processedCount'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'INPUT_FILE',
+        category: 'EXTERNAL_INPUT',
+        target: 'inputFile',
+        orderingPolicy: 'LC_ALL=C sort -d (ordenação léxica estrita por nome de arquivo)',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PARSED_ROWS',
+        category: 'COMPUTED_VARIABLE',
+        target: 'parsedRows',
+        formula: 'parseTsvRows(inputFile)',
+        dependencies: ['INPUT_FILE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ACCUMULATED_KG',
+        category: 'DERIVED_VALUE',
+        target: 'accumulatedKg',
+        formula: 'sumRows(parsedRows)',
+        dependencies: ['PARSED_ROWS'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, true, `TEST-78 must be valid, got issues: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.unresolvedTransitions, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-78 Full 3-Gate Integrated Circuit Passed with Derivation Provenance, External Effect Coverage & Rollback Strategy');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-79: External effect missing confirmationCheck, onSuccess, or onFailure is blocked
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'processedCount',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '1000', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'isolateQuarantine',
+      description: 'Mover arquivo inválido para quarantine',
+      guardPrecedence: ['GUARD_VALID'],
+      rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*', onSignal: ['SIGINT'] },
+      branches: [
+        { branchId: 'GUARD_VALID', outcomeKind: 'REJECTION', statusOrError: 'ERR_VAL', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          externalEffects: [
+            {
+              targetPath: 'quarantine',
+              action: 'MOVE_FILE',
+              preservesTimestamp: true,
+              confirmationCheck: 'EXIT_CODE_ZERO',
+              // Missing onSuccess and onFailure!
+            },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.processedCount'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences: [{ path: 'quarantine', description: 'Diretório de quarentena' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  assert.equal(result.valid, false, 'TEST-79 must fail when external effect lacks onSuccess/onFailure');
+  const missingOnSuccess = result.issues.find((i) => i.kind === 'INCOMPLETE_EXTERNAL_EFFECT' && i.slotId.includes('onSuccess'));
+  const missingOnFailure = result.issues.find((i) => i.kind === 'INCOMPLETE_EXTERNAL_EFFECT' && i.slotId.includes('onFailure'));
+  assert.ok(missingOnSuccess, 'Expected INCOMPLETE_EXTERNAL_EFFECT for onSuccess');
+  assert.ok(missingOnFailure, 'Expected INCOMPLETE_EXTERNAL_EFFECT for onFailure');
+  log('  PASS: TEST-79 External effect missing onSuccess/onFailure blocked with INCOMPLETE_EXTERNAL_EFFECT');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-80: Automatic Cross-Check: Deduplication requirement vs raw file sum in totalization blocked
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'totalConsolidatedKg',
+        type: 'DECIMAL',
+        bounds: { lowerBound: '0.000', upperBound: '999999999.999', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0.000' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'reconcileFileManifest',
+      description: 'Processar arquivo e consolidar no ledger',
+      guardPrecedence: ['GUARD_VALID'],
+      rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*', onSignal: ['SIGINT'] },
+      branches: [
+        { branchId: 'GUARD_VALID', outcomeKind: 'REJECTION', statusOrError: 'ERR_VAL', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          externalEffects: [{
+            targetPath: 'processed/ledger_consolidado.tsv',
+            action: 'APPEND_CONTENT',
+            confirmationCheck: 'FS_SYNC',
+            onSuccess: 'PROCEED_NEXT_STEP',
+            onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+            rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*', onSignal: ['SIGINT'] },
+          }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.totalConsolidatedKg'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'INPUT_FILE',
+        category: 'EXTERNAL_INPUT',
+        target: 'inputFile',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PARSED_ROWS',
+        category: 'COMPUTED_VARIABLE',
+        target: 'parsedRows',
+        formula: 'parseTsvRows(inputFile)',
+        dependencies: ['INPUT_FILE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'ACCUMULATED_KG',
+        category: 'DERIVED_VALUE',
+        target: 'accumulatedKg',
+        formula: 'sumKgColumn(parsedRows)',
+        dependencies: ['PARSED_ROWS'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PREVIOUS_TOTAL_KG',
+        category: 'STATE_FIELD',
+        target: 'Ingestor.totalConsolidatedKg',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'NEW_TOTAL_KG',
+        category: 'DERIVED_VALUE',
+        target: 'newTotalKg',
+        formula: 'totalConsolidatedKg + accumulatedKg', // Contradiction: adds raw accumulatedKg instead of deduplicated rows!
+        dependencies: ['PREVIOUS_TOTAL_KG', 'ACCUMULATED_KG'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const requirements = [{
+    id: 'REQ-0003',
+    statement: 'Linhas válidas devem ser adicionadas ao ledger consolidado sem duplicar linhas idênticas.',
+  }];
+
+  const pathReferences = [
+    { path: 'processed/ledger_consolidado.tsv', description: 'Ledger consolidado' },
+  ];
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    requirements,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  assert.equal(result.valid, false, 'TEST-80 must fail due to cross-layer contradiction between deduplication and totalization');
+  const contradictionIssue = result.issues.find((i) => i.kind === 'CROSS_LAYER_CONTRADICTION');
+  assert.ok(contradictionIssue, 'Expected CROSS_LAYER_CONTRADICTION issue');
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    requirements,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED', 'Must not certify closed when cross-layer contradiction exists');
+  assert.ok(
+    cert.gapLedger.some((g) => g.slotId?.includes('crossConsistency') || g.witness?.includes('Contradição cross-layer')),
+    'Gap Ledger must capture CROSS_LAYER_CONTRADICTION'
+  );
+  log('  PASS: TEST-80 Deduplication requirement vs raw sum totalization blocked with CROSS_LAYER_CONTRADICTION');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-81: Automatic Cross-Check: Invariant claiming exact file sum when deduplication is active blocked
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'totalConsolidatedKg',
+        type: 'DECIMAL',
+        bounds: { lowerBound: '0.000', upperBound: '999999999.999', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0.000' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'reconcileFileManifest',
+      description: 'Processar arquivo e consolidar no ledger',
+      guardPrecedence: ['GUARD_VALID'],
+      rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*', onSignal: ['SIGINT'] },
+      branches: [
+        { branchId: 'GUARD_VALID', outcomeKind: 'REJECTION', statusOrError: 'ERR_VAL', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          externalEffects: [{
+            targetPath: 'processed/ledger_consolidado.tsv',
+            action: 'APPEND_CONTENT',
+            confirmationCheck: 'FS_SYNC',
+            onSuccess: 'PROCEED_NEXT_STEP',
+            onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+            rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*', onSignal: ['SIGINT'] },
+          }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.totalConsolidatedKg'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const requirements = [{
+    id: 'REQ-0003',
+    statement: 'Linhas válidas devem ser adicionadas ao ledger ignorando duplicadas.',
+  }];
+
+  const invariants = [{
+    id: 'INV-0002',
+    statement: 'A soma de QUANTIDADE_KG adicionada ao ledger corresponde exatamente à soma dos lotes de arquivos aceitos.',
+    falsification: 'Divergência entre soma do ledger e soma dos arquivos aceitos.',
+  }];
+
+  const pathReferences = [
+    { path: 'processed/ledger_consolidado.tsv', description: 'Ledger consolidado' },
+  ];
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    requirements,
+    invariants,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  assert.equal(result.valid, false, 'TEST-81 must fail due to contradictory invariant under deduplication');
+  const contradictoryInvIssue = result.issues.find((i) => i.kind === 'CONTRADICTORY_RULE_DETECTED' && i.slotId.includes('INV-0002'));
+  assert.ok(contradictoryInvIssue, 'Expected CONTRADICTORY_RULE_DETECTED for contradictory invariant');
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    requirements,
+    invariants,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED');
+  assert.ok(
+    cert.gapLedger.some((g) => g.slotId?.includes('INV-0002') || g.witness?.includes('INV-0002')),
+    'Gap Ledger must capture contradictory invariant'
+  );
+  log('  PASS: TEST-81 Invariant claiming file sum conservation when deduplication is active blocked with CONTRADICTORY_RULE_DETECTED');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-82: Full Cross-Consistent External Effect Graph & Rollback Pipeline certifies CERTIFIED_CLOSED
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [
+        {
+          name: 'totalConsolidatedKg',
+          type: 'DECIMAL',
+          bounds: { lowerBound: '0.000', upperBound: '999999999.999', boundaryBehavior: 'SATURATE' },
+          initialization: { kind: 'EXPLICIT_VALUE', value: '0.000' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [
+      {
+        name: 'reconcileFileManifest',
+        description: 'Processar arquivo, quarentenar divergentes ou consolidar deduplicado no ledger',
+        parameters: [{ name: 'inputFile' }, { name: 'existingLedgerRows' }],
+        guardPrecedence: ['GUARD_LOCK'],
+        rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger_*', onSignal: ['SIGINT', 'SIGTERM', 'SIGHUP'] },
+        branches: [
+          { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+          {
+            branchId: 'DIVERGENCE_QUARANTINE',
+            outcomeKind: 'REJECTION',
+            statusOrError: 'EXIT_2_QUARANTINE',
+            defaultPreservation: true,
+            externalEffects: [
+              {
+                targetPath: 'quarantine',
+                action: 'MOVE_FILE',
+                preservesTimestamp: true,
+                confirmationCheck: '[ "$ORIG_MTIME" = "$DEST_MTIME" ] && stat -c %Y quarantine/"$FILE_NAME"',
+                onSuccess: 'APPEND_AUDIT_LOG',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'COMPENSATING_ACTION', compensation: 'mv quarantine/"$FILE_NAME" "$INPUT_PATH"', compensationTarget: '$INPUT_PATH', onSignal: ['SIGINT'] },
+              },
+              {
+                targetPath: 'quarantine/audit.log',
+                action: 'APPEND_LOG',
+                confirmationCheck: 'grep -Fq "$LOTE_ID" quarantine/audit.log && grep -Fq "$DIFF_KG" quarantine/audit.log',
+                onSuccess: 'EXIT_2_QUARANTINE',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/audit_*', onSignal: ['SIGINT'] },
+              },
+            ],
+          },
+          {
+            branchId: 'SUCCESS_CONSOLIDATION',
+            outcomeKind: 'RETURN_VALUE',
+            statusOrError: 'EXIT_0_SUCCESS',
+            defaultPreservation: true,
+            externalEffects: [
+              {
+                targetPath: '/tmp/ledger_consolidado.tmp',
+                action: 'WRITE_TEMP',
+                confirmationCheck: "awk -F'\\t' 'NF==4' /tmp/ledger_consolidado.tmp && [ $(wc -l < /tmp/ledger_consolidado.tmp) -ge 1 ]",
+                onSuccess: 'ATOMIC_SUBSTITUTE_LEDGER',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger_consolidado.tmp', onSignal: ['SIGINT'] },
+              },
+              {
+                targetPath: 'processed/ledger_consolidado.tsv',
+                action: 'ATOMIC_SUBSTITUTE',
+                confirmationCheck: "cmp -s /tmp/ledger_consolidado.tmp processed/ledger_consolidado.tsv && awk -F'\\t' 'NF==4' processed/ledger_consolidado.tsv",
+                onSuccess: 'PURGE_TEMPORARY',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger_consolidado.tmp', onSignal: ['SIGINT'] },
+              },
+              {
+                targetPath: '/tmp/ledger_consolidado.tmp',
+                action: 'DELETE_TEMP',
+                confirmationCheck: '! test -e /tmp/ledger_consolidado.tmp',
+                onSuccess: 'PROCEED_SUCCESS_EXIT',
+                onFailure: 'CLEANUP_RESTORE_AND_EXIT_1',
+                rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/ledger_consolidado.tmp', onSignal: ['SIGINT'] },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.totalConsolidatedKg'], representation: 'SCALAR', emptyBehavior: '0.000' }],
+    computabilityGraph: [
+      {
+        nodeId: 'INPUT_FILE',
+        category: 'EXTERNAL_INPUT',
+        target: 'inputFile',
+        orderingPolicy: 'LC_ALL=C sort -d (ordenação léxica estrita por nome de arquivo)',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PARSED_ROWS',
+        category: 'COMPUTED_VARIABLE',
+        target: 'parsedRows',
+        formula: 'parseTsvRows(inputFile)',
+        dependencies: ['INPUT_FILE'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'EXISTING_LEDGER_ROWS',
+        category: 'EXTERNAL_INPUT',
+        target: 'existingLedgerRows',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'DEDUPLICATED_ROWS',
+        category: 'DERIVED_VALUE',
+        target: 'deduplicatedRows',
+        formula: 'filterDuplicateRows(parsedRows, existingLedgerRows)',
+        dependencies: ['PARSED_ROWS', 'EXISTING_LEDGER_ROWS'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'CONSOLIDATED_ADDED_KG',
+        category: 'DERIVED_VALUE',
+        target: 'consolidatedAddedKg',
+        formula: 'sumKgColumn(deduplicatedRows)',
+        dependencies: ['DEDUPLICATED_ROWS'],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'PREVIOUS_TOTAL_KG',
+        category: 'STATE_FIELD',
+        target: 'Ingestor.totalConsolidatedKg',
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+      {
+        nodeId: 'NEW_TOTAL_KG',
+        category: 'DERIVED_VALUE',
+        target: 'newTotalKg',
+        formula: 'totalConsolidatedKg + consolidatedAddedKg',
+        dependencies: ['PREVIOUS_TOTAL_KG', 'CONSOLIDATED_ADDED_KG'],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const requirements = [{
+    id: 'REQ-0003',
+    statement: 'Linhas válidas devem ser adicionadas ao ledger consolidado sem duplicar linhas idênticas.',
+  }];
+
+  const invariants = [{
+    id: 'INV-0002',
+    statement: 'A soma de QUANTIDADE_KG adicionada ao ledger e ao total consolidado corresponde exatamente à soma dos lotes aceitos não duplicados (efetivamente consolidados).',
+    falsification: 'Divergência entre massa adicionada ao ledger e soma das linhas não duplicadas dos arquivos aceitos.',
+  }];
+
+  const pathReferences = [
+    { path: 'processed/ledger_consolidado.tsv', description: 'Ledger consolidado definitivo' },
+    { path: 'quarantine', description: 'Diretório de quarentena' },
+    { path: 'quarantine/audit.log', description: 'Log de auditoria da quarentena' },
+  ];
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    requirements,
+    invariants,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    requirements,
+    invariants,
+    pathReferences,
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, true, `TEST-82 must be valid, got issues: ${JSON.stringify(result.issues)}`);
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedDependencies, 0);
+  assert.equal(cert.unresolvedTransitions, 0);
+  assert.equal(cert.gapLedger.length, 0);
+  log('  PASS: TEST-82 Full Cross-Consistent External Effect Graph & Rollback Pipeline certifies CERTIFIED_CLOSED');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-83: Weak confirmation check (e.g. test -s or EXIT_CODE_ZERO) blocked with WEAK_CONFIRMATION_CHECK
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'cnt',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'quarantineFile',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'QUARANTINE',
+          outcomeKind: 'REJECTION',
+          statusOrError: 'ERR_Q',
+          defaultPreservation: true,
+          externalEffects: [{
+            targetPath: 'quarantine',
+            action: 'MOVE_FILE',
+            preservesTimestamp: true,
+            confirmationCheck: 'test -s quarantine/file.tsv', // FRACO: não valida mtime preservado
+            onSuccess: 'NEXT',
+            onFailure: 'EXIT_1',
+            rollback: { strategy: 'COMPENSATING_ACTION', compensation: 'mv quarantine/file.tsv file.tsv' },
+          }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.cnt'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    pathReferences: [{ path: 'quarantine', role: 'PUBLIC_SURFACE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences: [{ path: 'quarantine', role: 'PUBLIC_SURFACE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-83: weak confirmation check must be rejected');
+  assert.ok(result.issues.some((i) => i.kind === 'WEAK_CONFIRMATION_CHECK'), 'Must flag WEAK_CONFIRMATION_CHECK');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED');
+  assert.ok(cert.gapLedger.some((g) => g.witness?.includes('WEAK_CONFIRMATION_CHECK') || g.slotId?.includes('confirmationCheck')));
+  log('  PASS: TEST-83 Weak confirmation check blocked with WEAK_CONFIRMATION_CHECK');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-84: Moved file with only /tmp purge rollback blocked with UNCOMPENSATED_EXTERNAL_EFFECT
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'cnt',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'quarantineFile',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'QUARANTINE',
+          outcomeKind: 'REJECTION',
+          statusOrError: 'ERR_Q',
+          defaultPreservation: true,
+          externalEffects: [{
+            targetPath: 'quarantine',
+            action: 'MOVE_FILE',
+            preservesTimestamp: true,
+            confirmationCheck: 'stat -c %Y quarantine/file.tsv',
+            onSuccess: 'NEXT',
+            onFailure: 'EXIT_1',
+            rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/quarantine_*' }, // INCOMPLETO: apagar /tmp não restaura o arquivo movido!
+          }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.cnt'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    pathReferences: [{ path: 'quarantine', role: 'PUBLIC_SURFACE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences: [{ path: 'quarantine', role: 'PUBLIC_SURFACE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-84: uncompensated external move must be rejected');
+  assert.ok(result.issues.some((i) => i.kind === 'UNCOMPENSATED_EXTERNAL_EFFECT'), 'Must flag UNCOMPENSATED_EXTERNAL_EFFECT');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED');
+  assert.ok(cert.gapLedger.some((g) => g.witness?.includes('UNCOMPENSATED_EXTERNAL_EFFECT') || g.slotId?.includes('rollback')));
+  log('  PASS: TEST-84 Moved file with only /tmp purge rollback blocked with UNCOMPENSATED_EXTERNAL_EFFECT');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-85: Direct append on ledger blocked with NON_ATOMIC_PERSISTENT_MUTATION
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'cnt',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'consolidateLedger',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'CONSOLIDATE',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: true,
+          externalEffects: [{
+            targetPath: 'processed/ledger_consolidado.tsv',
+            action: 'APPEND_CONTENT', // NÃO ATÔMICO no ledger definitivo!
+            confirmationCheck: "awk -F'\\t' 'NF==4' processed/ledger_consolidado.tsv",
+            onSuccess: 'NEXT',
+            onFailure: 'EXIT_1',
+            rollback: { strategy: 'TRAP_PURGE_TEMPORARY', target: '/tmp/*' },
+          }],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.cnt'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    pathReferences: [{ path: 'processed/ledger_consolidado.tsv', role: 'PERSISTENT_STORAGE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    pathReferences: [{ path: 'processed/ledger_consolidado.tsv', role: 'PERSISTENT_STORAGE' }],
+    architectureContexts: [{ tag: 'external-effect' }],
+  });
+  assert.equal(result.valid, false, 'TEST-85: direct append on ledger must be rejected');
+  assert.ok(result.issues.some((i) => i.kind === 'NON_ATOMIC_PERSISTENT_MUTATION'), 'Must flag NON_ATOMIC_PERSISTENT_MUTATION');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED');
+  assert.ok(cert.gapLedger.some((g) => g.witness?.includes('NON_ATOMIC_PERSISTENT_MUTATION') || g.slotId?.includes('action')));
+  log('  PASS: TEST-85 Direct append on ledger blocked with NON_ATOMIC_PERSISTENT_MUTATION');
+}
+
+// -------------------------------------------------------------------------------------------------
+// TEST-86: Unordered directory discovery / traversal input blocked with NON_DETERMINISTIC_TRAVERSAL_ORDER
+// -------------------------------------------------------------------------------------------------
+{
+  const model = {
+    entities: [{
+      name: 'Ingestor',
+      fields: [{
+        name: 'cnt',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'scan',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Ingestor.cnt'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [
+      {
+        nodeId: 'DISCOVER_FILES',
+        category: 'EXTERNAL_INPUT',
+        target: 'manifestFiles',
+        formula: 'discoverNextManifest(inputDir)',
+        // orderingPolicy AUSENTE!
+        dependencies: [],
+        status: 'GROUNDED',
+      },
+    ],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: model,
+  });
+  assert.equal(result.valid, false, 'TEST-86: unordered file discovery must be rejected');
+  assert.ok(result.issues.some((i) => i.kind === 'NON_DETERMINISTIC_TRAVERSAL_ORDER'), 'Must flag NON_DETERMINISTIC_TRAVERSAL_ORDER');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.notEqual(cert.status, 'CERTIFIED_CLOSED');
+  assert.ok(cert.gapLedger.some((g) => g.witness?.includes('NON_DETERMINISTIC_TRAVERSAL_ORDER') || g.slotId?.includes('orderingPolicy')));
+  log('  PASS: TEST-86 Unordered directory discovery / traversal input blocked with NON_DETERMINISTIC_TRAVERSAL_ORDER');
 }
 
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');

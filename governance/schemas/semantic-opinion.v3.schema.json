@@ -701,6 +701,33 @@
                         ]
                       }
                     }
+                  },
+                  "numerator": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["family"],
+                    "properties": {
+                      "family": { "type": "string", "minLength": 1 },
+                      "label": { "type": "string", "minLength": 1 }
+                    }
+                  },
+                  "denominator": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["family"],
+                    "properties": {
+                      "family": { "type": "string", "minLength": 1 },
+                      "label": { "type": "string", "minLength": 1 }
+                    }
+                  },
+                  "per": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["family"],
+                    "properties": {
+                      "family": { "type": "string", "minLength": 1 },
+                      "label": { "type": "string", "minLength": 1 }
+                    }
                   }
                 }
               },
@@ -734,13 +761,16 @@
                   },
                   "commitGuard": { "type": "string", "minLength": 1 },
                   "onCommit": { "type": "string", "minLength": 1 },
-                  "onRollback": { "type": "string", "minLength": 1 }
+                  "onRollback": { "type": "string", "minLength": 1 },
+                  "snapshotField": { "type": "string", "minLength": 1 },
+                  "rollbackTarget": { "type": "string", "minLength": 1 }
                 }
               },
               "dependencies": {
                 "type": "array",
                 "items": { "type": "string", "minLength": 1 }
               },
+              "orderingPolicy": { "type": "string", "minLength": 1 },
               "derivationRule": { "type": "string" },
               "formula": { "type": "string" },
               "groundedIn": { "type": "string" },
@@ -770,6 +800,58 @@
                     ]
                   },
                   "onRejection": { "type": "string", "minLength": 1 }
+                }
+              },
+              "externalEffect": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["targetSurface", "action"],
+                "properties": {
+                  "targetSurface": { "type": "string", "minLength": 1 },
+                  "action": {
+                    "enum": [
+                      "MOVE_FILE",
+                      "COPY_FILE",
+                      "APPEND_CONTENT",
+                      "WRITE_FILE",
+                      "PURGE_TEMPORARY",
+                      "ISOLATE_TO_QUARANTINE",
+                      "RESTORE_BACKUP",
+                      "WRITE_TEMP",
+                      "APPEND_LOG",
+                      "RENAME",
+                      "DELETE_TEMP",
+                      "ATOMIC_SUBSTITUTE"
+                    ]
+                  },
+                  "preservesTimestamp": { "type": "boolean" },
+                  "confirmationCheck": { "type": "string", "minLength": 1 },
+                  "onSuccess": { "type": "string", "minLength": 1 },
+                  "onFailure": { "type": "string", "minLength": 1 },
+                  "rollback": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["strategy"],
+                    "properties": {
+                      "strategy": {
+                        "enum": [
+                          "TRAP_PURGE_TEMPORARY",
+                          "RESTORE_SNAPSHOT",
+                          "ATOMIC_REPLACE",
+                          "COMPENSATING_ACTION",
+                          "RESTORE_ORIGINAL",
+                          "NO_SIDE_EFFECTS"
+                        ]
+                      },
+                      "target": { "type": "string", "minLength": 1 },
+                      "compensation": { "type": "string", "minLength": 1 },
+                      "compensationTarget": { "type": "string", "minLength": 1 },
+                      "onSignal": {
+                        "type": "array",
+                        "items": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  }
                 }
               },
               "computabilityStatus": {

@@ -253,8 +253,9 @@ export function renderSemanticContractMarkdown(contract, {
           '| :--- | :--- | :--- | :--- | :--- | :---: |',
         );
         for (const branch of op.branches) {
-          const effectsStr = branch.stateEffects.length > 0
-            ? branch.stateEffects.map((e) => `\`${e.field}\` := ${e.effect} ${e.value ? `\`${e.value}\`` : ''}`).join('<br>')
+          const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+          const effectsStr = effects.length > 0
+            ? effects.map((e) => `\`${e.field}\` := ${e.effect} ${e.value ? `\`${e.value}\`` : ''}`).join('<br>')
             : 'Nenhum efeito colateral';
           lines.push(
             `| \`${branch.branchId}\` | \`${branch.condition ?? branch.branchId}\` | \`${branch.outcomeKind}\` | \`${branch.statusOrError ?? 'N/A'}\` | ${effectsStr} | ${branch.defaultPreservation ? 'Sim' : 'Não'} |`,
@@ -362,6 +363,7 @@ export function renderSemanticContractMarkdown(contract, {
           : '*Terminal (Grounded)*';
 
         const edgeCases = [];
+        if (node.orderingPolicy) edgeCases.push(`Ordem: \`${node.orderingPolicy}\``);
         if (node.semanticType) edgeCases.push(`Tipo: \`${node.semanticType}\``);
         if (node.unit) edgeCases.push(`Unidade: \`${node.unit.family}:${node.unit.label}\``);
         if (node.cardinality) edgeCases.push(`Card: \`${node.cardinality}\``);
@@ -388,10 +390,55 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
+    const allExternalEffects = [];
+    if (specification.stateModel.operations?.length > 0) {
+      for (const op of specification.stateModel.operations) {
+        for (const branch of op.branches || []) {
+          for (const eff of branch.externalEffects || []) {
+            const rb = eff.rollback || branch.rollback || op.rollback;
+            let rbStr = rb?.strategy || 'N/A';
+            if (rb?.compensation) {
+              rbStr += `<br>Compensação: \`${rb.compensation}\``;
+            } else if (rb?.compensationTarget) {
+              rbStr += `<br>Alvo: \`${rb.compensationTarget}\``;
+            } else if (rb?.target) {
+              rbStr += `<br>Alvo: \`${rb.target}\``;
+            }
+            allExternalEffects.push({
+              operation: op.name,
+              branchId: branch.branchId,
+              target: eff.targetPath || eff.targetSurface || 'N/A',
+              action: eff.action,
+              preservesTimestamp: eff.preservesTimestamp ? 'Sim' : 'Não',
+              confirmationCheck: eff.confirmationCheck || 'N/A',
+              onSuccess: eff.onSuccess || 'Próximo passo',
+              onFailure: eff.onFailure || 'Abort / Cleanup',
+              rollback: rbStr,
+            });
+          }
+        }
+      }
+    }
+
+    if (allExternalEffects.length > 0) {
+      lines.push(
+        '',
+        '### 6.10 Grafo de Efeitos Externos e Reversão Mecânica (External Effect & Rollback Graph)',
+        '',
+        '| Operação / Ramo | Ação Externa | Alvo / Superfície | Preserva mtime | Confirmação Física (Check) | Desfecho Sucesso (onSuccess) | Desfecho Falha (onFailure) | Estratégia de Rollback |',
+        '| :--- | :--- | :--- | :---: | :--- | :--- | :--- | :--- |',
+      );
+      for (const eff of allExternalEffects) {
+        lines.push(
+          `| \`${eff.operation} (${eff.branchId})\` | \`${eff.action}\` | \`${eff.target}\` | ${eff.preservesTimestamp} | \`${eff.confirmationCheck}\` | \`${eff.onSuccess}\` | \`${eff.onFailure}\` | \`${eff.rollback}\` |`,
+        );
+      }
+    }
+
     if (specification.closureCertificate?.gapLedger?.length > 0) {
       lines.push(
         '',
-        '### 6.10 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
+        '### 6.11 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
         '',
         '| GAP-ID | Camada | Testemunho / Witness Falsificável | Autoridade Necessária |',
         '| :--- | :--- | :--- | :---: |',

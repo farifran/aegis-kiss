@@ -2943,6 +2943,168 @@
                       }
                     }
                   }
+                },
+                "externalEffects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "targetPath",
+                      "action"
+                    ],
+                    "properties": {
+                      "targetPath": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "action": {
+                        "enum": [
+                          "MOVE_FILE",
+                          "COPY_FILE",
+                          "APPEND_CONTENT",
+                          "WRITE_FILE",
+                          "PURGE_TEMPORARY",
+                          "ISOLATE_TO_QUARANTINE",
+                          "RESTORE_BACKUP",
+                          "WRITE_TEMP",
+                          "APPEND_LOG",
+                          "RENAME",
+                          "DELETE_TEMP",
+                          "ATOMIC_SUBSTITUTE"
+                        ]
+                      },
+                      "preservesTimestamp": {
+                        "type": "boolean"
+                      },
+                      "confirmationCheck": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "onSuccess": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "onFailure": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rollback": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "strategy"
+                        ],
+                        "properties": {
+                          "strategy": {
+                            "enum": [
+                              "TRAP_PURGE_TEMPORARY",
+                              "RESTORE_SNAPSHOT",
+                              "ATOMIC_REPLACE",
+                              "COMPENSATING_ACTION",
+                              "RESTORE_ORIGINAL",
+                              "NO_SIDE_EFFECTS"
+                            ]
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "compensation": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "compensationTarget": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "onSignal": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "rollback": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "strategy"
+                  ],
+                  "properties": {
+                    "strategy": {
+                      "enum": [
+                        "TRAP_PURGE_TEMPORARY",
+                        "RESTORE_SNAPSHOT",
+                        "ATOMIC_REPLACE",
+                        "COMPENSATING_ACTION",
+                        "RESTORE_ORIGINAL",
+                        "NO_SIDE_EFFECTS"
+                      ]
+                    },
+                    "target": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "compensation": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "compensationTarget": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onSignal": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "rollback": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "strategy"
+            ],
+            "properties": {
+              "strategy": {
+                "enum": [
+                  "TRAP_PURGE_TEMPORARY",
+                  "RESTORE_SNAPSHOT",
+                  "ATOMIC_REPLACE",
+                  "COMPENSATING_ACTION",
+                  "RESTORE_ORIGINAL",
+                  "NO_SIDE_EFFECTS"
+                ]
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compensation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compensationTarget": {
+                "type": "string",
+                "minLength": 1
+              },
+              "onSignal": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
                 }
               }
             }

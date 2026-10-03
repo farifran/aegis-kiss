@@ -451,6 +451,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
           answers: item.answers,
           distinguishingCase: item.distinguishingCase,
         })),
+        pathReferences: opinion.pathReferences ?? [],
       },
       humanResolutions: [],
     }),
