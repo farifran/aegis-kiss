@@ -441,6 +441,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
             subjectId: item.subject === null ? 'PUBLIC_CONTRACT' : compileTargets([item.subject])[0],
             status: item.status,
             rationale: item.rationale,
+            targetIds: compileTargets(item.targets),
           })),
         },
         decisions: opinion.decisions.map((item, index) => ({

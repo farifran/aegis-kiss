@@ -2846,7 +2846,10 @@
                       "type": "string"
                     },
                     "upperBound": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "boundaryBehavior": {
                       "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_rangeBehavior"

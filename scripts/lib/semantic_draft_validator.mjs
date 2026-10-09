@@ -397,7 +397,7 @@ function validateDeterminism(draft, context) {
   }
 }
 
-function validateDeterminismCoverage(draft) {
+export function validateDeterminismCoverage(draft) {
   const materialClaims = draft.intentClaims.filter(({ disposition }) => (
     disposition === 'NORMATIVE' || disposition === 'DECISION'
   ));
@@ -408,6 +408,9 @@ function validateDeterminismCoverage(draft) {
     dimension,
   ]));
   const coveredDimensions = new Set();
+  const determinismKeywords = /(?:determinis|ordena|ordem|sequ[eê]nc|hash|digest|merkle|arredonda|float|ponto flutuante|taxa|rateio|fracion[aá]rio)/i;
+  const isDenial = /(?:n[aã]o promete|nenhuma.*dimens[aã]o|sem promessa|inaplic[aá]vel)/i.test(draft.determinismReview.rationale ?? '');
+  const rationaleDemandsDeterminism = determinismKeywords.test(draft.determinismReview.rationale ?? '') && !isDenial;
 
   for (const coverage of draft.determinismReview.coverage) {
     if (!materialClaimIds.has(coverage.claimId)) {
@@ -418,6 +421,11 @@ function validateDeterminismCoverage(draft) {
     }
     coveredClaimIds.add(coverage.claimId);
     const claim = materialClaims.find(({ id }) => id === coverage.claimId);
+    const claimDemandsDeterminism = determinismKeywords.test(claim.quote ?? '')
+      || determinismKeywords.test(claim.contractEffect ?? '');
+    if (coverage.disposition === 'NO_DIMENSION_APPLICABLE' && claimDemandsDeterminism) {
+      throw new Error(`inapplicable_determinism_coverage_with_determinism_claim:${coverage.claimId}`);
+    }
     const dimensionKeys = coverage.dimensions.map(({ kind, subjectId }) => `${kind}:${subjectId}`);
     if (new Set(dimensionKeys).size !== dimensionKeys.length) {
       throw new Error(`duplicate_determinism_coverage_dimension:${coverage.claimId}`);
@@ -448,6 +456,22 @@ function validateDeterminismCoverage(draft) {
   if (coveredDimensions.size !== dimensionsByKey.size
     || [...dimensionsByKey.keys()].some((key) => !coveredDimensions.has(key))) {
     throw new Error('orphan_determinism_dimension');
+  }
+  if (rationaleDemandsDeterminism && draft.determinismReview.dimensions.length === 0) {
+    throw new Error('determinism_dimensions_required_when_rationale_promises_determinism');
+  }
+  for (const decision of draft.decisions) {
+    const decisionMentionsDeterminism = determinismKeywords.test(decision.question)
+      || determinismKeywords.test(decision.presentation?.observableImpact ?? '')
+      || (decision.distinguishingCase?.outcomes ?? []).some((o) => determinismKeywords.test(o.then));
+    if (decisionMentionsDeterminism) {
+      const hasCoveringDimension = draft.determinismReview.dimensions.some((d) => (
+        d.targetIds.includes(decision.questionId)
+      ));
+      if (!hasCoveringDimension) {
+        throw new Error(`decision_without_determinism_dimension:${decision.questionId}`);
+      }
+    }
   }
   const expectedFragments = new Set(materialClaims.flatMap(({ sourceFragmentIds }) => (
     sourceFragmentIds
@@ -673,6 +697,7 @@ export function assertSemanticDraft(draft, policy, {
       ...noteIds,
       ...pathIds,
       ...policyRulesById.keys(),
+      ...knownResolved,
     ]),
   };
 

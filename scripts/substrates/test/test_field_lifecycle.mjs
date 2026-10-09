@@ -14,6 +14,7 @@ import {
   validateStateMutationOwnership,
 } from '../../lib/semantic_closure.mjs';
 import { effectiveDeterminismStatus, getEffectiveGapLedger } from '../../lib/semantic_approval.mjs';
+import { assertSemanticDraft, validateDeterminismCoverage } from '../../lib/semantic_draft_validator.mjs';
 
 function log(msg) {
   process.stdout.write(`${msg}\n`);
@@ -3642,6 +3643,7 @@ function createFixture({
         { name: 'palletsCompensated', type: 'bigint' },
         { name: 'dockVolume', type: 'bigint' },
         { name: 'quarantineSet', type: 'string' },
+        { name: 'feeRate', type: 'bigint' },
       ],
       guardPrecedence: ['GUARD_LOCK'],
       branches: [
@@ -3659,6 +3661,16 @@ function createFixture({
       ],
     }],
     observables: [{ name: 'obs', derivedFrom: ['Yard.dockVolume'], representation: 'SCALAR', emptyBehavior: '0' }],
+    producerConsumerBoundaries: [
+      {
+        signalName: 'feeRate',
+        producer: 'CONFIGURACAO_TARIFARIA',
+        consumer: 'apportionPallets',
+        ownership: 'SYSTEM_CONFIGURATION',
+        recomputableByConsumer: false,
+        provenance: [{ source: 'ARCHITECTURE_POLICY', reference: 'ARCH-PRODUCT-BOUNDARY' }],
+      },
+    ],
     computabilityGraph: [
       {
         nodeId: 'PALLETS_COMPENSATED',
@@ -4806,4 +4818,601 @@ function createFixture({
   log('  PASS: TEST-86 Unordered directory discovery / traversal input blocked with NON_DETERMINISTIC_TRAVERSAL_ORDER');
 }
 
+// TEST-87: Unbounded integer field (upperBound: null) with UNBOUNDED_ERROR passes without forced invented bounds
+{
+  const model = {
+    entities: [{
+      name: 'Counter',
+      fields: [{
+        name: 'volume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: null, boundaryBehavior: 'UNBOUNDED_ERROR' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Counter.volume'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, true, 'TEST-87: unbounded field with UNBOUNDED_ERROR must be valid with upperBound: null');
+  assert.equal(result.issues.length, 0);
+  log('  PASS: TEST-87 Unbounded integer field with upperBound: null passes without invented number');
+}
+
+// TEST-88: Saturated integer field (boundaryBehavior: 'SATURATE') with upperBound: null is blocked with UNRESOLVED_FIELD_BOUNDS
+{
+  const model = {
+    entities: [{
+      name: 'Counter',
+      fields: [{
+        name: 'volume',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: null, boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'step',
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Counter.volume'], representation: 'SCALAR', emptyBehavior: '0' }],
+  };
+
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-88: SATURATE without upperBound must be rejected');
+  assert.ok(result.issues.some((i) => i.kind === 'UNRESOLVED_FIELD_BOUNDS'), 'Must flag UNRESOLVED_FIELD_BOUNDS when SATURATE lacks upper ceiling');
+  log('  PASS: TEST-88 Saturated integer field with upperBound: null blocked with UNRESOLVED_FIELD_BOUNDS');
+}
+
+// TEST-89: Minimal sufficient closure: pure function computation without stateModel, transactionModel or identityGraph
+{
+  const fixture = createFixture({
+    isStateful: false,
+    stateModel: null,
+    architectureContexts: ['product-demand', 'public-interface'],
+  });
+
+  const result = validateFieldLifecycle({
+    stateModel: fixture.stateModel,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, true, 'TEST-89: pure stateless computation must not demand stateModel');
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  assert.equal(cert.status, 'CERTIFIED_CLOSED');
+  assert.equal(cert.unresolvedStateFields, 0);
+  assert.equal(cert.unresolvedDependencies, 0);
+  log('  PASS: TEST-89 Minimal sufficient closure: pure stateless computation certifies CERTIFIED_CLOSED');
+}
+
+// TEST-90: Unconditional token check blocks ungrounded terms even when computabilityGraph is null
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [
+        {
+          name: 'partialFillOccurred',
+          type: 'BOOLEAN',
+          bounds: null,
+          initialization: { kind: 'EXPLICIT_VALUE', value: 'false' },
+          mutations: [],
+          reset: { allowed: false },
+          preservation: ['*'],
+          readBy: ['obs'],
+        },
+      ],
+    }],
+    operations: [{
+      name: 'processBatch',
+      parameters: [{ name: 'batch', type: 'ARRAY<Order>' }],
+      guardPrecedence: ['GUARD_LOCK'],
+      branches: [
+        { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
+        {
+          branchId: 'SUCCESS',
+          outcomeKind: 'RETURN_VALUE',
+          statusOrError: 'OK',
+          defaultPreservation: false,
+          stateEffects: [
+            { field: 'Engine.partialFillOccurred', effect: 'SET', value: 'partialFillUsed' },
+          ],
+        },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.partialFillOccurred'], representation: 'SCALAR', emptyBehavior: 'false' }],
+    computabilityGraph: null,
+  };
+
+  const fixture = createFixture({ isStateful: true, stateModel: model });
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-90: ungrounded term partialFillUsed must be invalid even when computabilityGraph is null');
+  assert.ok(result.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY' && i.reason.includes('partialFillUsed')));
+  log('  PASS: TEST-90 Unconditional token check blocks ungrounded terms even with computabilityGraph: null');
+}
+
+// TEST-91: Complex algorithmic derivation without computabilityGraph blocked with OPEN_COMPUTATIONAL_DEPENDENCY
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'cyclesDetected',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['obs'],
+      }],
+    }],
+    operations: [{
+      name: 'processBatch',
+      guardPrecedence: ['LOCK'],
+      branches: [
+        { branchId: 'LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR', defaultPreservation: true },
+        { branchId: 'OK', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'obs', derivedFrom: ['Engine.cyclesDetected'], representation: 'SCALAR', emptyBehavior: '0' }],
+    computabilityGraph: [],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    requirements: [{ statement: 'Identificar e obliterar ciclos A->B->C->A multilateralmente com redução MinFlow.' }],
+  });
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    requirements: fixture.requirements,
+  });
+  assert.equal(result.valid, false, 'TEST-91: cycle detection without computabilityGraph must be blocked');
+  assert.ok(result.issues.some((i) => i.slotId === 'stateModel/computabilityGraph'));
+  log('  PASS: TEST-91 Complex algorithmic derivation without computabilityGraph blocked with OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
+// TEST-92: Merkle tree serialization with only scalar accumulator missing leaf structure blocked
+{
+  const model = {
+    entities: [{
+      name: 'Engine',
+      fields: [{
+        name: 'totalVolumeCompensated',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '999999', boundaryBehavior: 'SATURATE' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        reset: { allowed: false },
+        preservation: ['*'],
+        readBy: ['merkleRoot'],
+      }],
+    }],
+    operations: [{
+      name: 'processBatch',
+      guardPrecedence: ['LOCK'],
+      branches: [
+        { branchId: 'LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR', defaultPreservation: true },
+        { branchId: 'OK', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
+      ],
+    }],
+    observables: [{ name: 'merkleRoot', derivedFrom: ['Engine.totalVolumeCompensated'], representation: 'HASH_DIGEST', emptyBehavior: '0x0' }],
+    canonicalSerializations: [{
+      target: 'Engine.merkleRoot',
+      includedFields: ['Engine.totalVolumeCompensated'],
+      fieldEncodings: [{ field: 'Engine.totalVolumeCompensated', encoding: 'BIGINT_64_BE' }],
+      recordOrderingKey: 'Engine.totalVolumeCompensated ASC',
+      emptyStateDigest: '0x811c',
+    }],
+  };
+
+  const fixture = createFixture({
+    isStateful: true,
+    stateModel: model,
+    architectureContexts: [{ tag: 'integrity-hash' }],
+  });
+  const result = validateFieldLifecycle({
+    stateModel: model,
+    architectureContexts: fixture.architectureContexts,
+  });
+  assert.equal(result.valid, false, 'TEST-92: Merkle tree serializing only scalar total must be invalid');
+  assert.ok(result.issues.some((i) => i.slotId === 'canonicalSerialization/Engine.merkleRoot/leafDefinition'));
+  log('  PASS: TEST-92 Merkle tree serialization with only scalar accumulator missing leaf structure blocked');
+}
+
+// TEST-93: Determinism promise in rationale or claim without dimensions blocked in assertSemanticDraft
+{
+  const draft = {
+    schema: 'aegis.semantic_draft.v4',
+    title: 'Motor de Liquidez',
+    interpretation: 'Interpretação válida.',
+    changeKind: 'PRODUCT',
+    sourceContextDigest: '0000000000000000000000000000000000000000000000000000000000000000',
+    scope: { inScope: ['Motor'], outOfScope: ['UI'] },
+    intentClaims: [{
+      id: 'CLAIM-1',
+      kind: 'OBLIGATION',
+      disposition: 'NORMATIVE',
+      quote: 'processar com determinismo estrito',
+      contractEffect: 'Processar lote com determinismo estrito.',
+      sourceFragmentIds: ['FRAG-1'],
+      targetIds: ['REQ-1'],
+    }],
+    nonNormativeItems: [],
+    pathReferences: [],
+    architectureContexts: ['product-demand'],
+    policyAssessments: [],
+    complexityReview: { status: 'NO_EXCESS', rationale: 'Sem excesso.', alternatives: [] },
+    requirements: [{
+      id: 'REQ-1',
+      kind: 'FUNCTIONAL',
+      statement: 'Processar lote com determinismo estrito.',
+      sourceFragmentIds: ['FRAG-1'],
+      basis: [{ source: 'USER_INTENT', reference: 'Ref' }],
+      measurement: null,
+      acceptanceCases: [{
+        id: 'AC-1',
+        kind: 'HAPPY_PATH',
+        given: 'Lote.',
+        when: 'Executar.',
+        then: 'Processar lote com determinismo estrito.',
+        outcomeKind: 'RETURN_VALUE',
+        decisionBinding: null,
+        boundaryBinding: null,
+      }],
+    }],
+    invariants: [],
+    riskReview: { certainty: 'ASSESSED', rationale: 'Risco avaliado.' },
+    adversarialReview: { rationale: 'Adversarial OK.', findings: [] },
+    decisions: [],
+    determinismReview: {
+      status: 'NOT_APPLICABLE',
+      rationale: 'O motor opera puramente em memória com determinismo estrito.',
+      sourceFragmentIds: ['FRAG-1'],
+      coverage: [{
+        claimId: 'CLAIM-1',
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensions: [],
+      }],
+      dimensions: [],
+    },
+    boundaryRules: [],
+    stateModel: null,
+  };
+
+  const context = {
+    intent: 'processar com determinismo estrito',
+    fragmentIds: ['FRAG-1'],
+    fragmentsById: new Map([['FRAG-1', { startOffset: 0, endOffset: 34 }]]),
+    claimTargetIds: new Set(['REQ-1']),
+    semanticTargetIds: new Set(['REQ-1', 'AC-1']),
+    requirementIds: ['REQ-1'],
+    invariantIds: [],
+    riskIds: [],
+    decisionsById: new Map(),
+  };
+
+  assert.throws(
+    () => validateDeterminismCoverage(draft),
+    /inapplicable_determinism_coverage_with_determinism_claim|determinism_dimensions_required_when_rationale_promises_determinism/,
+    'TEST-93: claim promising determinism marked as NO_DIMENSION_APPLICABLE must be rejected'
+  );
+  log('  PASS: TEST-93 Determinism promise in rationale or claim without dimensions blocked in validateDeterminismCoverage');
+}
+
+// TEST-94: Pending HUMAN_DECISION leaves dependent derived nodes as OPEN_DEPENDENCY
+// and propagates COMPUTABLE once resolved via resolvedDecisionIds
+{
+  const model = {
+    entities: [],
+    operations: [{
+      name: 'processBatch',
+      parameters: [{ name: 'batchOrders', type: 'COLLECTION' }],
+      guardPrecedence: [],
+      noGuardsRationale: 'Operação incondicional sem guards de travamento.',
+      branches: [{ branchId: 'OK', outcomeKind: 'RETURN_VALUE', defaultPreservation: true }],
+    }],
+    observables: [],
+    computabilityGraph: [
+      {
+        nodeId: 'batchOrders',
+        category: 'EXTERNAL_INPUT',
+        target: 'batchOrders',
+        cardinality: 'COLLECTION',
+        itemSchema: {
+          name: 'Order',
+          fields: [
+            { name: 'orderId', type: 'IDENTIFIER' },
+            { name: 'senderAccount', type: 'IDENTIFIER' },
+            { name: 'receiverAccount', type: 'IDENTIFIER' },
+            { name: 'amount', type: 'INTEGER' },
+          ],
+        },
+        dependencies: [],
+      },
+      {
+        nodeId: 'cycleResolutionOrder',
+        category: 'HUMAN_DECISION',
+        target: 'liquidez.cycle_resolution_order',
+        dependencies: [],
+      },
+      {
+        nodeId: 'resolvedCycles',
+        category: 'COMPUTED_VARIABLE',
+        target: 'resolvedCycles',
+        formula: 'findCycles(batchOrders, cycleResolutionOrder)',
+        dependencies: ['batchOrders', 'cycleResolutionOrder'],
+        edgeCaseRules: { multipleEdges: 'PARALLEL_EDGES_PRESERVED' },
+      },
+    ],
+  };
+
+  const decisions = [{
+    questionId: 'Q-0001',
+    semanticKey: 'liquidez.cycle_resolution_order',
+    question: 'Qual a ordem de resolução de ciclos?',
+  }];
+
+  // 1. Pending decision: node remains OPEN_DEPENDENCY
+  const pendingResult = validateFieldLifecycle({
+    stateModel: model,
+    decisions,
+    resolvedDecisionIds: [],
+  });
+  assert.equal(pendingResult.valid, true);
+  const cycleNode = model.computabilityGraph.find((n) => n.nodeId === 'resolvedCycles');
+  assert.equal(cycleNode.computabilityStatus, 'OPEN_DEPENDENCY', 'TEST-94: dependent node must be OPEN_DEPENDENCY when decision is pending');
+
+  // 2. Resolved decision: node becomes COMPUTABLE
+  const resolvedResult = validateFieldLifecycle({
+    stateModel: model,
+    decisions,
+    resolvedDecisionIds: ['Q-0001'],
+  });
+  assert.equal(resolvedResult.valid, true);
+  assert.equal(cycleNode.computabilityStatus, 'COMPUTABLE', 'TEST-94: dependent node must become COMPUTABLE once decision is resolved');
+  log('  PASS: TEST-94 Pending HUMAN_DECISION propagates OPEN_DEPENDENCY and becomes COMPUTABLE once resolved');
+}
+
+// TEST-95: SYSTEM_CONFIGURATION without declared producer boundary is blocked with OPEN_COMPUTATIONAL_DEPENDENCY
+{
+  const invalidModel = {
+    entities: [],
+    operations: [],
+    observables: [],
+    computabilityGraph: [
+      {
+        nodeId: 'MIN_TOLERANCE',
+        category: 'SYSTEM_CONFIGURATION',
+        target: 'minTolerance',
+        dependencies: [],
+      },
+    ],
+  };
+
+  const blockedResult = validateFieldLifecycle({ stateModel: invalidModel });
+  assert.equal(blockedResult.valid, false);
+  assert.ok(
+    blockedResult.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY' && i.slotId.includes('producer')),
+    'TEST-95: SYSTEM_CONFIGURATION without producer boundary must be blocked'
+  );
+
+  const validModel = {
+    ...invalidModel,
+    producerConsumerBoundaries: [
+      {
+        signalName: 'minTolerance',
+        producer: 'CONFIGURACAO_DO_SISTEMA',
+        consumer: 'processBatch',
+        ownership: 'SYSTEM_CONFIGURATION',
+        recomputableByConsumer: false,
+      },
+    ],
+  };
+
+  const passedResult = validateFieldLifecycle({ stateModel: validModel });
+  assert.equal(passedResult.valid, true, 'TEST-95: SYSTEM_CONFIGURATION with declared producer boundary must pass');
+  const configNode = validModel.computabilityGraph.find((n) => n.nodeId === 'MIN_TOLERANCE');
+  assert.equal(configNode.computabilityStatus, 'COMPUTABLE');
+  log('  PASS: TEST-95 SYSTEM_CONFIGURATION without declared producer boundary blocked with OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
+// TEST-96: Gap ledger folds decision-owned DECISION_REQUIRED dimensions into pending decisions
+{
+  const fixture = createFixture({
+    isStateful: false,
+    decisions: [
+      {
+        questionId: 'Q-0001',
+        question: 'Política de folhas ímpares Merkle?',
+        semanticKey: 'domain.merkle_odd_policy',
+        distinguishingCase: {
+          given: 'Dado.',
+          when: 'Quando.',
+          outcomes: [{ answerId: 'ANS-1', then: 'A' }, { answerId: 'ANS-2', then: 'B' }],
+        },
+        answers: [{ id: 'ANS-1', label: 'A' }, { id: 'ANS-2', label: 'B' }],
+      },
+    ],
+    dimensions: [
+      {
+        kind: 'REPRESENTATION',
+        subjectId: 'REQ-0001',
+        status: 'DECISION_REQUIRED',
+        rationale: 'Folhas ímpares alteram o hash.',
+        targetIds: ['REQ-0001', 'Q-0001'],
+      },
+      {
+        kind: 'ORDERING',
+        subjectId: 'REQ-0002',
+        status: 'DECISION_REQUIRED',
+        rationale: 'Ordem de ordenação sem decisão vinculada.',
+        targetIds: ['REQ-0002'],
+      },
+    ],
+  });
+
+  const cert = generateClosureCertificate({ specification: fixture });
+  // GAP-0001: Q-0001 folds the REPRESENTATION dimension
+  // GAP-0002: ORDERING dimension without decision stays as an independent gap
+  assert.equal(cert.gapLedger.length, 2, 'TEST-96: expected exactly 2 gaps (1 folded into decision, 1 independent dimension)');
+  const decisionGap = cert.gapLedger.find((g) => g.slotId === 'decision/Q-0001');
+  assert.ok(decisionGap, 'TEST-96: decision Q-0001 gap must exist');
+  assert.ok(decisionGap.details.includes('REPRESENTATION'), 'TEST-96: related dimension must be folded into details');
+  const dimGap = cert.gapLedger.find((g) => g.slotId === 'determinism/ORDERING/REQ-0002');
+  assert.ok(dimGap, 'TEST-96: independent dimension must remain independent');
+  log('  PASS: TEST-96 Gap ledger folds decision-owned DECISION_REQUIRED dimensions into decisions without duplicating gaps');
+}
+
+// TEST-97: Whole-word heuristic prevents false positive traversal/execution checks
+{
+  const model = {
+    entities: [],
+    operations: [],
+    observables: [],
+    computabilityGraph: [
+      {
+        nodeId: 'residualsCount',
+        category: 'COMPUTED_VARIABLE',
+        target: 'residualsCount',
+        formula: 'countResiduals(orders)',
+        dependencies: ['orders'],
+      },
+      {
+        nodeId: 'orders',
+        category: 'EXTERNAL_INPUT',
+        target: 'orders',
+        dependencies: [],
+      },
+    ],
+  };
+
+  const result = validateFieldLifecycle({ stateModel: model });
+  // 'residualsCount' has 'ls' inside, but NOT as a whole word; must NOT trigger NON_DETERMINISTIC_TRAVERSAL_ORDER
+  assert.ok(
+    !result.issues.some((i) => i.kind === 'NON_DETERMINISTIC_TRAVERSAL_ORDER'),
+    'TEST-97: residualsCount must not trigger NON_DETERMINISTIC_TRAVERSAL_ORDER via substring match'
+  );
+  log('  PASS: TEST-97 Whole-word matching prevents false positive file traversal / execution gate triggers');
+}
+
+// TEST-98: Cycle detection on collection input missing topological fields is blocked with MISSING_REQUIRED_DEPENDENCY
+{
+  const model = {
+    entities: [],
+    operations: [{
+      name: 'processBatch',
+      parameters: [{ name: 'batchOrders', type: 'COLLECTION' }],
+      guardPrecedence: [],
+      noGuardsRationale: 'Operação incondicional',
+      branches: [{ branchId: 'OK', outcomeKind: 'RETURN_VALUE', defaultPreservation: true }],
+    }],
+    observables: [],
+    computabilityGraph: [
+      {
+        nodeId: 'batchOrders',
+        category: 'EXTERNAL_INPUT',
+        target: 'batchOrders',
+        cardinality: 'COLLECTION',
+        itemSchema: {
+          name: 'Order',
+          fields: [
+            { name: 'orderId', type: 'IDENTIFIER' },
+            { name: 'amount', type: 'INTEGER' },
+            // missing senderAccount and receiverAccount
+          ],
+        },
+        dependencies: [],
+      },
+      {
+        nodeId: 'resolvedCycles',
+        category: 'COMPUTED_VARIABLE',
+        target: 'resolvedCycles',
+        formula: 'findCycles(batchOrders)',
+        dependencies: ['batchOrders'],
+        edgeCaseRules: { multipleEdges: 'PARALLEL_EDGES_PRESERVED' },
+      },
+    ],
+  };
+
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-98: must fail when collection entity lacks topological fields');
+  assert.ok(
+    result.issues.some((i) => i.kind === 'MISSING_REQUIRED_DEPENDENCY'),
+    'TEST-98: must report MISSING_REQUIRED_DEPENDENCY for missing topological fields'
+  );
+  log('  PASS: TEST-98 Cycle detection on collection input missing topological fields blocked with MISSING_REQUIRED_DEPENDENCY');
+}
+
+// TEST-99: Cycle detection without multiple parallel edges policy is blocked with MULTIPLE_EDGE_POLICY_UNRESOLVED
+{
+  const model = {
+    entities: [],
+    operations: [{
+      name: 'processBatch',
+      parameters: [{ name: 'batchOrders', type: 'COLLECTION' }],
+      guardPrecedence: [],
+      noGuardsRationale: 'Operação incondicional',
+      branches: [{ branchId: 'OK', outcomeKind: 'RETURN_VALUE', defaultPreservation: true }],
+    }],
+    observables: [],
+    computabilityGraph: [
+      {
+        nodeId: 'batchOrders',
+        category: 'EXTERNAL_INPUT',
+        target: 'batchOrders',
+        cardinality: 'COLLECTION',
+        itemSchema: {
+          name: 'Order',
+          fields: [
+            { name: 'orderId', type: 'IDENTIFIER' },
+            { name: 'senderAccount', type: 'IDENTIFIER' },
+            { name: 'receiverAccount', type: 'IDENTIFIER' },
+            { name: 'amount', type: 'INTEGER' },
+          ],
+        },
+        dependencies: [],
+      },
+      {
+        nodeId: 'resolvedCycles',
+        category: 'COMPUTED_VARIABLE',
+        target: 'resolvedCycles',
+        formula: 'findCycles(batchOrders)',
+        dependencies: ['batchOrders'],
+        // missing edgeCaseRules.multipleEdges
+      },
+    ],
+  };
+
+  const result = validateFieldLifecycle({ stateModel: model });
+  assert.equal(result.valid, false, 'TEST-99: must fail when multipleEdges rule is missing');
+  assert.ok(
+    result.issues.some((i) => i.kind === 'MULTIPLE_EDGE_POLICY_UNRESOLVED'),
+    'TEST-99: must report MULTIPLE_EDGE_POLICY_UNRESOLVED'
+  );
+  log('  PASS: TEST-99 Cycle detection without multiple parallel edges policy blocked with MULTIPLE_EDGE_POLICY_UNRESOLVED');
+}
+
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
+

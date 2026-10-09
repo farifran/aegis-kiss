@@ -1,3 +1,23 @@
+// Decisões humanas ainda pendentes alcançáveis a partir do nó (evidência de por que ele está OPEN_DEPENDENCY).
+function openDecisionCauses(graph, startId) {
+  const byId = new Map(graph.map((node) => [node.symbol ?? node.nodeId, node]));
+  const causes = new Set();
+  const seen = new Set();
+  const walk = (nodeId) => {
+    if (seen.has(nodeId)) return;
+    seen.add(nodeId);
+    const node = byId.get(nodeId);
+    if (!node) return;
+    if (node.category === 'HUMAN_DECISION' && node.computabilityStatus === 'OPEN_DEPENDENCY') {
+      causes.add(node.groundedIn ?? node.target ?? nodeId);
+      return;
+    }
+    for (const dep of node.dependencies ?? []) walk(dep);
+  };
+  walk(startId);
+  return [...causes];
+}
+
 export function renderSemanticContractMarkdown(contract, {
   contractDigest = '',
   policyRules = [],
@@ -354,7 +374,8 @@ export function renderSemanticContractMarkdown(contract, {
         '| Nó Causal (Símbolo) | Categoria | Origem / Alvo | Regra de Cálculo / Derivação | Precursores / Dependências | Casos Limites / Confirmação | Corrente Causal (Status) |',
         '| :--- | :--- | :--- | :--- | :--- | :--- | :---: |',
       );
-      for (const node of specification.stateModel.computabilityGraph) {
+      const graph = specification.stateModel.computabilityGraph;
+      for (const node of graph) {
         const id = node.symbol ?? node.nodeId;
         const target = node.groundedIn ?? node.target ?? id;
         const rule = node.derivationRule ?? node.formula;
@@ -375,13 +396,16 @@ export function renderSemanticContractMarkdown(contract, {
         if (node.feedbackConfirmation?.executionMode) edgeCases.push(`Execução: \`${node.feedbackConfirmation.executionMode}\``);
         const edgeCaseStr = edgeCases.length > 0 ? edgeCases.join('; ') : 'N/A';
 
-        let statusStr = '`COMPUTABLE ✓`';
-        if (node.computabilityStatus === 'NOT_COMPUTABLE' || node.status === 'OPEN_DEPENDENCY') {
-          statusStr = '`NOT_COMPUTABLE ❌`';
-        } else if (node.computabilityStatus === 'OPEN_DEPENDENCY') {
-          statusStr = '`OPEN_DEPENDENCY ⚠️`';
-        } else if (node.computabilityStatus === 'COMPUTABLE' || node.status === 'GROUNDED') {
+        let statusStr = '`NÃO AVALIADO ⚠️`';
+        if (node.computabilityStatus === 'COMPUTABLE') {
           statusStr = '`COMPUTABLE ✓`';
+        } else if (node.computabilityStatus === 'OPEN_DEPENDENCY') {
+          const causes = openDecisionCauses(graph, id);
+          statusStr = causes.length > 0
+            ? `\`OPEN_DEPENDENCY ⚠️\` — aguarda: ${causes.map((c) => `\`${c}\``).join(', ')}`
+            : '`OPEN_DEPENDENCY ⚠️`';
+        } else if (node.computabilityStatus === 'NOT_COMPUTABLE') {
+          statusStr = '`NOT_COMPUTABLE ❌` (ver Gap Ledger)';
         }
 
         lines.push(

@@ -90,6 +90,18 @@ export function validateDecisionsWitness({
 }
 
 /**
+ * Divide um identificador (camelCase, snake_case, UPPER_CASE) em palavras minúsculas.
+ * Heurísticas de nome casam palavras inteiras, nunca subcadeias: 'residualsCount' não contém 'ls'.
+ */
+function identifierWords(text) {
+  return String(text ?? '')
+    .replace(/([a-z0-9])([A-Z])/gu, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((word) => word.length > 0);
+}
+
+/**
  * Validador Mecânico de Ciclo de Vida de Campos de Estado (validateFieldLifecycle).
  * 
  * Implementa a verificação de totalidade de transição de estado sobre o IR:
@@ -107,6 +119,7 @@ export function validateFieldLifecycle({
   decisions = [],
   boundaryRules = [],
   pathReferences = [],
+  resolvedDecisionIds = [],
 } = {}) {
   const isStateful = architectureContexts.some((ctx) => (
     (typeof ctx === 'string' ? ctx : ctx.tag) === 'stateful-operation'
@@ -147,10 +160,15 @@ export function validateFieldLifecycle({
   }
 
   for (const entity of stateModel.entities) {
+    if (entity.isCollection) {
+      entityFieldKeys.add(`${entity.name}.id`);
+      entityFieldKeys.add('id');
+    }
     const fields = Array.isArray(entity.fields) ? entity.fields : [];
     for (const field of fields) {
       const fieldKey = `${entity.name}.${field.name}`;
       entityFieldKeys.add(fieldKey);
+      entityFieldKeys.add(field.name);
 
       // 1. INIT: Obrigatório e total
       if (!field.initialization
@@ -211,7 +229,7 @@ export function validateFieldLifecycle({
           || field.bounds.lowerBound === undefined
           || field.bounds.lowerBound === null
           || field.bounds.upperBound === undefined
-          || field.bounds.upperBound === null
+          || (field.bounds.upperBound === null && (field.bounds.boundaryBehavior === 'SATURATE' || field.bounds.boundaryBehavior === 'ROLLOVER_MODULO'))
           || !field.bounds.boundaryBehavior) {
           issues.push({
             slotId: `state/${fieldKey}/bounds`,
@@ -404,6 +422,20 @@ export function validateFieldLifecycle({
             kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
             reason: `A serialização canônica '${item.target}' não define recordOrderingKey para ordenação canônica dos registros.`,
           });
+        } else {
+          const orderKeyField = item.recordOrderingKey.trim().split(/\s+/)[0];
+          const orderKeyFieldRaw = orderKeyField.includes('.') ? orderKeyField.split('.').pop() : orderKeyField;
+          const isKnownOrderKey = fields.includes(orderKeyField)
+            || fields.includes(orderKeyFieldRaw)
+            || entityFieldKeys.has(orderKeyField)
+            || entityFieldKeys.has(orderKeyFieldRaw);
+          if (!isKnownOrderKey) {
+            issues.push({
+              slotId: `canonicalSerialization/${item.target}/recordOrderingKey`,
+              kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+              reason: `O campo de ordenação '${orderKeyField}' em recordOrderingKey não pertence aos campos incluídos nem a nenhuma entidade conhecida.`,
+            });
+          }
         }
         if (!item.emptyStateDigest) {
           issues.push({
@@ -411,6 +443,17 @@ export function validateFieldLifecycle({
             kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
             reason: `A serialização canônica '${item.target}' não define o valor canônico emptyStateDigest para o estado vazio da primitiva.`,
           });
+        }
+        const isMerkle = /(?:merkle)/i.test(item.target) || observables.some((obs) => /(?:merkle)/i.test(obs.name));
+        if (isMerkle) {
+          const hasOnlyScalarAccumulator = fields.length > 0 && fields.every((f) => /(?:total|sum|accumulated|volume|count)/i.test(f));
+          if (hasOnlyScalarAccumulator) {
+            issues.push({
+              slotId: `canonicalSerialization/${item.target}/leafDefinition`,
+              kind: 'UNRESOLVED_CANONICAL_SERIALIZATION',
+              reason: `A estrutura Merkle '${item.target}' serializa apenas acumuladores escalares (${fields.join(', ')}), omitindo a representação canônica da folha individual necessária para a computação das folhas da árvore.`,
+            });
+          }
         }
       }
     }
@@ -457,6 +500,7 @@ export function validateFieldLifecycle({
     architectureContexts,
     requirements,
     invariants,
+    resolvedDecisionIds,
   });
   issues.push(...computabilityResult.issues);
 
@@ -695,7 +739,7 @@ export function validateInputDomainClosure({ stateModel = null } = {}) {
           || param.bounds.lowerBound === undefined
           || param.bounds.lowerBound === null
           || param.bounds.upperBound === undefined
-          || param.bounds.upperBound === null
+          || (param.bounds.upperBound === null && (param.bounds.boundaryBehavior === 'SATURATE' || param.bounds.boundaryBehavior === 'ROLLOVER_MODULO'))
           || !param.bounds.boundaryBehavior) {
           issues.push({
             slotId: `operation/${op.name}/parameter/${param.name}/bounds`,
@@ -1161,7 +1205,7 @@ export function validateProvenanceEnforcement({
     'ARCH-FAILURE-EXPLICIT', 'ARCH-DETERMINISTIC-TIME', 'ARCH-OBSERVABILITY-COUNTERS',
     'ARCH-HASH-SECURITY-LABEL', 'ARCH-CANONICAL-DIGEST-REPRESENTATION', 'ARCH-BIGINT-ARITHMETIC',
     'ARCH-LOCAL-DETERMINISTIC-CORE', 'ARCH-PUBLIC-INTERFACE', 'ARCH-CONTRACT-CONSISTENCY',
-    'ARCH-STATE-TRANSITION-TOTALITY', 'ARCH-TEMPORAL-INVARIANCE',
+    'ARCH-STATE-TRANSITION-TOTALITY', 'ARCH-TEMPORAL-INVARIANCE', 'ARCH-MINIMAL-SUFFICIENT-CLOSURE',
   ]);
 
   const factsById = new Map(literalFacts.map((f) => [f.id, f]));
@@ -1408,6 +1452,7 @@ export function validateComputabilityGraphClosure({
   architectureContexts = [],
   requirements = [],
   invariants = [],
+  resolvedDecisionIds = [],
 } = {}) {
   const issues = [];
   if (!stateModel) {
@@ -1426,6 +1471,10 @@ export function validateComputabilityGraphClosure({
       for (const field of fields) {
         entityFields.add(`${entity.name}.${field.name}`);
         rawFieldNames.add(field.name);
+      }
+      if (entity.isCollection) {
+        entityFields.add(`${entity.name}.id`);
+        rawFieldNames.add('id');
       }
     }
   }
@@ -1463,10 +1512,41 @@ export function validateComputabilityGraphClosure({
     if (d.id) decisionIds.add(d.id);
   }
 
+  // Uma decisão que ainda não foi escolhida por um humano mantém aberto tudo que depende dela.
+  const resolvedDecisionSet = new Set(resolvedDecisionIds);
+  const pendingDecisionAliases = new Set();
+  for (const d of decisions) {
+    const questionRef = d.questionId ?? d.id;
+    if (questionRef !== undefined && resolvedDecisionSet.has(questionRef)) continue;
+    for (const alias of [d.questionId, d.semanticKey, d.id]) {
+      if (alias) pendingDecisionAliases.add(alias);
+    }
+  }
+
   const observableNames = new Set();
   const observables = Array.isArray(stateModel.observables) ? stateModel.observables : [];
   for (const obs of observables) {
     if (obs.name) observableNames.add(obs.name);
+  }
+
+  const requiresComputabilityGraph = (
+    architectureContexts.some((ctx) => {
+      const tag = typeof ctx === 'string' ? ctx : ctx.tag;
+      return ['apportionment', 'partial-fill', 'cycle-detection', 'multilateral'].includes(tag);
+    }) ||
+    requirements.some((req) => /(?:ciclo|cycle|rateio|fracion[aá]rio|partial[ _]fill|multilateral)/i.test(req.statement ?? '')) ||
+    operations.some((op) => (op.branches ?? []).some((b) => (b.stateEffects ?? []).some((eff) => {
+      const val = typeof eff.value === 'string' ? eff.value : '';
+      return /[*/%]/u.test(val) || /min|max|floor|filter|map|reduce/iu.test(val);
+    })))
+  );
+
+  if (requiresComputabilityGraph && computabilityGraph.length === 0) {
+    issues.push({
+      slotId: 'stateModel/computabilityGraph',
+      kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+      reason: 'A demanda envolve computação algorítmica derivada (ciclos, rateio fracionário ou redução algébrica), exigindo grafo de computabilidade formal para fundamentar causalidade e provar que todos os produtores existem.',
+    });
   }
 
   const nodeMap = new Map();
@@ -1504,7 +1584,8 @@ export function validateComputabilityGraphClosure({
     const id = node.symbol ?? node.nodeId;
     const slotId = `computabilityGraph/${id}`;
 
-    if (node.status === 'OPEN_DEPENDENCY' || node.computabilityStatus === 'OPEN_DEPENDENCY') {
+    // computabilityStatus é derivado pelo runtime e regravado a cada avaliação; só 'status' é declaração do autor.
+    if (node.status === 'OPEN_DEPENDENCY') {
       recordNodeIssue(id, {
         slotId,
         kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
@@ -1573,8 +1654,23 @@ export function validateComputabilityGraphClosure({
         }
         break;
       }
-      case 'SYSTEM_CONFIGURATION':
+      case 'SYSTEM_CONFIGURATION': {
+        // Configuração é um terminal só quando alguém declarado a produz; o nome do nó não prova origem.
+        const hasDeclaredProducer = boundaries.some((b) => (
+          b.ownership === 'SYSTEM_CONFIGURATION'
+          && b.signalName === target
+          && typeof b.producer === 'string'
+          && b.producer.trim().length > 0
+        ));
+        if (!hasDeclaredProducer) {
+          recordNodeIssue(id, {
+            slotId: `${slotId}/producer`,
+            kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+            reason: `O nó de configuração '${id}' lê '${target}', mas nenhuma fronteira SYSTEM_CONFIGURATION declara quem produz esse sinal (producerConsumerBoundaries com signalName '${target}' e producer).`,
+          });
+        }
         break;
+      }
       case 'COMPUTED_VARIABLE':
       case 'DERIVED_VALUE':
       case 'MATHEMATICAL_RULE': {
@@ -1709,8 +1805,9 @@ export function validateComputabilityGraphClosure({
     }
 
     // Pergunta 5 (Loop Fechado de Execução / Confirmação de Ordem):
-    const isExecutionNode = /(?:order|trade|dispatch|execution|proceeds|fill|execucao|ordem)/i.test(id)
-      || /(?:order|trade|dispatch|execution|proceeds|fill|execucao|ordem)/i.test(target);
+    const executionWords = new Set(['order', 'trade', 'dispatch', 'execution', 'proceeds', 'fill', 'execucao', 'ordem']);
+    const isExecutionNode = identifierWords(id).some((w) => executionWords.has(w))
+      || identifierWords(target).some((w) => executionWords.has(w));
     if (isExecutionNode && (node.category === 'COMPUTED_VARIABLE' || node.category === 'DERIVED_VALUE' || node.category === 'STATE_FIELD')) {
       const hasFeedbackConfirmation = Boolean(node.feedbackConfirmation?.executionMode)
         || Boolean(node.feedbackConfirmation?.confirmedBy)
@@ -1875,6 +1972,93 @@ export function validateComputabilityGraphClosure({
       }
     }
 
+    // GATE E: COMPLETUDE ESTRUTURAL DE ENTRADAS DE COLEÇÃO PARA OPERAÇÕES DE GRAFO (validateGraphCollectionCompleteness)
+    const isGraphCycleDerivation = Boolean(formula && typeof formula === 'string' && (
+      /(?:findCycles|detectCycles|obliterateCycles|findRings|reduceCycles)/i.test(formula)
+      || /(?:findCycles|detectCycles|obliterateCycles|findRings|reduceCycles)/i.test(id)
+    ));
+
+    if (isGraphCycleDerivation) {
+      function recordCompletenessIssue(nodeId, issue) {
+        if (!nodeLocalIssues.has(nodeId)) {
+          nodeLocalIssues.set(nodeId, []);
+        }
+        nodeLocalIssues.get(nodeId).push(issue);
+        if (decisions.length === 0) {
+          issues.push(issue);
+        }
+      }
+
+      const collectionDeps = deps.map((d) => nodeMap.get(d)).filter((d) => (
+        d?.cardinality === 'COLLECTION'
+        || d?.semanticType === 'COLLECTION'
+        || operations.some((o) => (o.parameters || []).some((p) => (p.name === (d?.groundedIn || d?.target || d?.symbol)) && p.type === 'COLLECTION'))
+        || (d && Array.isArray(stateModel.entities) && stateModel.entities.some((e) => e.name.toLowerCase() === (d.identityScope?.entity || d.target || d.symbol || '').toLowerCase() && e.isCollection))
+      ));
+
+      if (collectionDeps.length === 0) {
+        recordCompletenessIssue(id, {
+          slotId: `${slotId}/collectionDependency`,
+          kind: 'COLLECTION_MEMBERS_MISSING',
+          reason: `O nó '${id}' executa detecção/obliteração de ciclos em grafo ('${formula}'), mas nenhuma de suas dependências foi modelada como coleção estruturada de arestas (cardinalidade COLLECTION).`,
+        });
+      } else {
+        for (const colDep of collectionDeps) {
+          const depId = colDep.symbol ?? colDep.nodeId;
+          const entityName = colDep.identityScope?.entity || colDep.target || depId;
+          const matchedEntity = Array.isArray(stateModel.entities)
+            ? stateModel.entities.find((e) => e.name.toLowerCase() === entityName.toLowerCase() || (colDep.identityScope?.entity && e.name.toLowerCase() === colDep.identityScope.entity.toLowerCase()))
+            : null;
+
+          const schemaFields = colDep.itemSchema?.fields
+            || colDep.identityScope?.fields
+            || matchedEntity?.fields
+            || (operations.flatMap((o) => o.parameters || []).find((p) => p.name === depId || p.name === colDep.target)?.itemSchema?.fields);
+
+          if (!matchedEntity && !schemaFields) {
+            recordCompletenessIssue(id, {
+              slotId: `${slotId}/collectionSchema/${depId}`,
+              kind: 'COLLECTION_SCHEMA_INCOMPLETE',
+              reason: `A operação de ciclos '${formula}' no nó '${id}' requer esquema estruturado para os itens da coleção '${depId}', mas nenhuma entidade ou itemSchema foi definido.`,
+            });
+          } else {
+            const fieldsList = schemaFields || matchedEntity?.fields || [];
+            const fieldNames = new Set(fieldsList.map((f) => f.name.toLowerCase()));
+            const requiredRoles = [
+              { role: 'identidade da ordem (orderId)', matches: ['orderid', 'id', 'transactionid', 'transferid'] },
+              { role: 'remetente / devedor (senderAccount)', matches: ['senderaccount', 'sender', 'from', 'source', 'devedor'] },
+              { role: 'destinatário / credor (receiverAccount)', matches: ['receiveraccount', 'receiver', 'to', 'target', 'credor'] },
+              { role: 'montante / fluxo de valor (amount)', matches: ['amount', 'value', 'fluxo', 'volume', 'montante'] },
+            ];
+
+            for (const { role, matches } of requiredRoles) {
+              const hasRole = matches.some((m) => fieldNames.has(m));
+              if (!hasRole) {
+                recordCompletenessIssue(id, {
+                  slotId: `${slotId}/collectionSchema/${depId}/${role.split(' ')[0]}`,
+                  kind: 'MISSING_REQUIRED_DEPENDENCY',
+                  reason: `A operação de ciclos '${formula}' no nó '${id}' exige ${role} nos elementos de '${depId}' (${matchedEntity?.name || colDep.itemSchema?.name || 'Order'}), mas esse atributo não está demonstrado no contrato da coleção.`,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Regra obrigatória para múltiplas arestas paralelas entre mesmos nós
+      const hasMultipleEdgeRule = Boolean(node.edgeCaseRules?.multipleEdges)
+        || /(?:MULTIPLE_PARALLEL_EDGES|PARALLEL_EDGES|MULTIPLE_EDGES|PRESERVED_BY_ORDER_ID|NET_DIRECTED)/i.test(formula || '')
+        || /(?:MULTIPLE_PARALLEL_EDGES|PARALLEL_EDGES|MULTIPLE_EDGES)/i.test(node.orderingPolicy || '');
+
+      if (!hasMultipleEdgeRule) {
+        recordCompletenessIssue(id, {
+          slotId: `${slotId}/edgeCase/multipleEdges`,
+          kind: 'MULTIPLE_EDGE_POLICY_UNRESOLVED',
+          reason: `O nó '${id}' executa detecção de ciclos sobre grafo com possíveis múltiplas arestas entre os mesmos nós, mas não define política determinística para arestas paralelas (edgeCaseRules.multipleEdges).`,
+        });
+      }
+    }
+
     // GATE C: PRESERVAÇÃO DE IDENTIDADE & VERIFICAÇÃO FÍSICA DE SUBSTRATO (validateIdentityPreservation)
     const isSelectiveAction = /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(id)
       || /(?:quarantine|isolate|penalize|penalty|block_carrier|penalidade|inadimplente|isolamento)/i.test(target);
@@ -1930,10 +2114,10 @@ export function validateComputabilityGraphClosure({
       node.semanticType === 'TRANSACTION'
       || Boolean(node.transaction)
       || (
-        (/(?:execute|execucao|commit|rollback|revert|compensat)/i.test(id)
-        || /(?:execute|execucao|commit|rollback|revert|compensat)/i.test(target))
-        && (/(?:triangulat|atomic_rollback|rollback|multilateral|reversao_atomica|multi_leg)/i.test(id)
-        || /(?:triangulat|atomic_rollback|rollback|multilateral|reversao_atomica|multi_leg)/i.test(target))
+        (/(?:execute|execucao|commit|rollback|revert)/i.test(id)
+        || /(?:execute|execucao|commit|rollback|revert)/i.test(target))
+        && (/(?:triangulat|atomic_rollback|rollback|reversao_atomica|multi_leg)/i.test(id)
+        || /(?:triangulat|atomic_rollback|rollback|reversao_atomica|multi_leg)/i.test(target))
       )
     );
 
@@ -2064,6 +2248,17 @@ export function validateComputabilityGraphClosure({
       return false;
     }
 
+    // Decisão humana ainda não escolhida: o valor existe como política, mas não está determinado.
+    if (node.category === 'HUMAN_DECISION') {
+      const decisionRef = node.groundedIn || node.target || nodeId;
+      const isPending = pendingDecisionAliases.has(decisionRef)
+        || (node.resolutionAuthority !== undefined && pendingDecisionAliases.has(node.resolutionAuthority));
+      evaluatingStack.delete(nodeId);
+      const state = isPending ? 'OPEN' : true;
+      computabilityCache.set(nodeId, state);
+      return state;
+    }
+
     // Se é terminal e passou na validação local, é computável
     if (node.category === 'EXTERNAL_INPUT'
       || node.category === 'STATE_FIELD'
@@ -2082,22 +2277,25 @@ export function validateComputabilityGraphClosure({
       return false;
     }
 
-    let allDepsComputable = true;
+    // true = computável; 'OPEN' = depende de decisão ainda não escolhida; false = corrente interrompida.
+    let derivedState = true;
     for (const depId of deps) {
-      const depComputable = evaluateComputability(depId);
-      if (!depComputable) {
-        allDepsComputable = false;
+      const depState = evaluateComputability(depId);
+      if (depState === false) {
+        derivedState = false;
         recordNodeIssue(nodeId, {
           slotId: `computabilityGraph/${nodeId}/precursor/${depId}`,
           kind: 'NON_COMPUTABLE_PRECURSOR',
           reason: `Corrente causal interrompida em '${nodeId}': o precursor '${depId}' não é computável.`,
         });
+      } else if (depState === 'OPEN' && derivedState === true) {
+        derivedState = 'OPEN';
       }
     }
 
     evaluatingStack.delete(nodeId);
-    computabilityCache.set(nodeId, allDepsComputable);
-    return allDepsComputable;
+    computabilityCache.set(nodeId, derivedState);
+    return derivedState;
   }
 
   // Avaliar todos os nós
@@ -2105,7 +2303,9 @@ export function validateComputabilityGraphClosure({
     const isComp = evaluateComputability(nodeId);
     const n = nodeMap.get(nodeId);
     if (n) {
-      n.computabilityStatus = isComp ? 'COMPUTABLE' : 'NOT_COMPUTABLE';
+      n.computabilityStatus = isComp === true
+        ? 'COMPUTABLE'
+        : isComp === 'OPEN' ? 'OPEN_DEPENDENCY' : 'NOT_COMPUTABLE';
     }
   }
 
@@ -2142,17 +2342,64 @@ export function validateComputabilityGraphClosure({
     }
   }
 
-  // 4. Verificação Reversa a partir de Efeitos de Estado de Operações
-  if (computabilityGraph.length > 0) {
-    const ignoredTokens = new Set(['null', 'undefined', 'true', 'false', 'none', 'empty', 'n']);
-    for (const op of operations) {
-      const branches = Array.isArray(op.branches) ? op.branches : [];
-      const opParams = new Set((op.parameters ?? []).map((p) => p.name));
-      for (const branch of branches) {
-        const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
-        for (const eff of effects) {
-          if (eff.effect === 'SET' && typeof eff.value === 'string') {
-            const val = eff.value.trim();
+  // 4. Verificação Reversa a partir de Efeitos de Estado de Operações e Mutações de Entidades
+  const ignoredTokens = new Set(['null', 'undefined', 'true', 'false', 'none', 'empty', 'n', 'now']);
+  for (const op of operations) {
+    const branches = Array.isArray(op.branches) ? op.branches : [];
+    const opParams = new Set((op.parameters ?? []).map((p) => p.name));
+    for (const branch of branches) {
+      const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
+      for (const eff of effects) {
+        if (typeof eff.value === 'string') {
+          const val = eff.value.trim();
+          if (/^-?\d+(?:n|\.\d+)?$/i.test(val) || val === 'true' || val === 'false' || val.startsWith("'") || val.startsWith('"')) {
+            continue;
+          }
+          const tokens = val.split(/[^a-zA-Z0-9_.]+/).filter((t) => t.length > 0 && isNaN(Number(t)));
+          for (const token of tokens) {
+            if (ignoredTokens.has(token.toLowerCase()) || /^\d+n$/i.test(token)) {
+              continue;
+            }
+            const tokenRoot = token.includes('.') ? token.split('.')[0] : token;
+            const isKnown = opParams.has(token)
+              || opParams.has(tokenRoot)
+              || rawFieldNames.has(token)
+              || rawFieldNames.has(tokenRoot)
+              || entityFields.has(token)
+              || boundarySignals.has(token)
+              || boundarySignals.has(tokenRoot)
+              || configKeys.has(token)
+              || configKeys.has(tokenRoot)
+              || (nodeMap.has(token) && computabilityCache.get(token) !== false)
+              || computabilityGraph.some((n) => (
+                (n.groundedIn === token
+                || n.target === token
+                || n.symbol === token
+                || n.nodeId === token
+                || (n.groundedIn && n.groundedIn.endsWith(`.${token}`))
+                || (n.target && n.target.endsWith(`.${token}`)))
+                && computabilityCache.get(n.symbol ?? n.nodeId) !== false
+              ))
+              || observableNames.has(token);
+            if (!isKnown) {
+              issues.push({
+                slotId: `operation/${op.name}/branch/${branch.branchId}/stateEffect/${eff.field}`,
+                kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
+                reason: `O efeito no campo '${eff.field}' na operação '${op.name}' utiliza o termo '${token}', que não é parâmetro, campo de estado, nem possui nó computável fundamentado no grafo.`,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(stateModel.entities)) {
+    for (const entity of stateModel.entities) {
+      for (const field of entity.fields ?? []) {
+        for (const m of field.mutations ?? []) {
+          if (typeof m.targetValue === 'string') {
+            const val = m.targetValue.trim();
             if (/^-?\d+(?:n|\.\d+)?$/i.test(val) || val === 'true' || val === 'false' || val.startsWith("'") || val.startsWith('"')) {
               continue;
             }
@@ -2161,9 +2408,16 @@ export function validateComputabilityGraphClosure({
               if (ignoredTokens.has(token.toLowerCase()) || /^\d+n$/i.test(token)) {
                 continue;
               }
-              const isKnown = opParams.has(token)
+              const tokenRoot = token.includes('.') ? token.split('.')[0] : token;
+              const isKnown = operationParams.has(token)
+                || operationParams.has(tokenRoot)
                 || rawFieldNames.has(token)
+                || rawFieldNames.has(tokenRoot)
                 || entityFields.has(token)
+                || boundarySignals.has(token)
+                || boundarySignals.has(tokenRoot)
+                || configKeys.has(token)
+                || configKeys.has(tokenRoot)
                 || (nodeMap.has(token) && computabilityCache.get(token) !== false)
                 || computabilityGraph.some((n) => (
                   (n.groundedIn === token
@@ -2177,9 +2431,9 @@ export function validateComputabilityGraphClosure({
                 || observableNames.has(token);
               if (!isKnown) {
                 issues.push({
-                  slotId: `operation/${op.name}/branch/${branch.branchId}/stateEffect/${eff.field}`,
+                  slotId: `entity/${entity.name}/field/${field.name}/mutation/${m.condition}`,
                   kind: 'OPEN_COMPUTATIONAL_DEPENDENCY',
-                  reason: `O efeito no campo '${eff.field}' na operação '${op.name}' utiliza o termo '${token}', que não é parâmetro, campo de estado, nem possui nó computável fundamentado no grafo.`,
+                  reason: `A mutação no campo '${entity.name}.${field.name}' na condição '${m.condition}' utiliza o termo '${token}', que não é campo de estado, nem possui nó computável fundamentado no grafo.`,
                 });
               }
             }
@@ -2493,7 +2747,10 @@ export function validateComputabilityGraphClosure({
     const target = node.target || '';
     const formula = node.formula || '';
     const cardinality = node.cardinality || 'SCALAR';
-    const isDiscoveryOrTraversal = /(?:discover|readdir|travers|find|ls|listfiles|glob|nextmanifest)/i.test(`${id} ${target} ${formula}`)
+    const traversalText = `${id} ${target} ${formula}`;
+    const traversalWords = identifierWords(traversalText);
+    const isDiscoveryOrTraversal = /(?:discover|readdir|travers|listfiles|glob|nextmanifest)/i.test(traversalText)
+      || ((traversalWords.includes('find') || traversalWords.includes('ls')) && /(?:file|dir|path|manifest|arquivo|pasta)/i.test(traversalText))
       || (cardinality === 'COLLECTION' && /(?:file|manifest|arquivo)/i.test(`${id} ${target}`));
 
     if (isDiscoveryOrTraversal) {
@@ -2541,6 +2798,7 @@ export function generateClosureCertificate({
     decisions: specification.decisions ?? [],
     boundaryRules: specification.boundaries?.boundaryRules ?? specification.boundaryRules ?? [],
     pathReferences: specification.pathReferences ?? [],
+    resolvedDecisionIds: humanResolutions.map(({ questionId }) => questionId),
   });
 
   const provenanceResult = validateProvenanceEnforcement({
@@ -2670,14 +2928,33 @@ export function generateClosureCertificate({
     + contradictoryRules
     + orphanHumanDecisions;
 
+  // Uma lacuna é uma decisão pendente, não cada superfície em que ela aparece:
+  // a dimensão de determinismo que aponta para uma decisão pendente é uma manifestação dela.
+  const pendingDecisionIssues = pendingDecisions.map((q) => ({
+    slotId: `decision/${q.questionId}`,
+    kind: 'PENDING_HUMAN_DECISION',
+    reason: q.question,
+    related: [],
+  }));
+  const pendingIssueByQuestion = new Map(pendingDecisions.map((q, index) => [
+    q.questionId,
+    pendingDecisionIssues[index],
+  ]));
+  const independentDeterminismDecisions = determinismDecisions.filter((d) => {
+    const owner = (d.targetIds ?? []).find((targetId) => pendingIssueByQuestion.has(targetId));
+    if (owner === undefined) return true;
+    pendingIssueByQuestion.get(owner).related.push(`Dimensão ${d.kind}/${d.subjectId}: ${d.rationale}`);
+    return false;
+  });
+
   const allIssues = [
     ...inventoryIssues,
     ...stateLifecycle.issues,
     ...provenanceResult.issues,
     ...materialUnknownGaps.map((u) => ({ slotId: `unknown/${u.id}`, kind: 'MATERIAL_UNKNOWN_GAP', reason: u.statement })),
     ...determinismGaps.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'DETERMINISM_GAP', reason: d.rationale })),
-    ...determinismDecisions.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'PENDING_HUMAN_DECISION', reason: d.rationale })),
-    ...pendingDecisions.map((q) => ({ slotId: `decision/${q.questionId}`, kind: 'PENDING_HUMAN_DECISION', reason: q.question })),
+    ...independentDeterminismDecisions.map((d) => ({ slotId: `determinism/${d.kind}/${d.subjectId}`, kind: 'PENDING_HUMAN_DECISION', reason: d.rationale })),
+    ...pendingDecisionIssues,
   ];
 
   const gapLedger = allIssues.map((issue, idx) => classifyGapIssue(issue, idx));
@@ -2981,8 +3258,11 @@ function classifyGapIssue(issue, index) {
   if (typeof issue.slotId === 'string' && issue.slotId.length > 0) {
     gapEntry.slotId = issue.slotId;
   }
+  const detailParts = [];
   if (typeof issue.reason === 'string' && issue.reason.length > 0 && issue.reason !== witness) {
-    gapEntry.details = issue.reason;
+    detailParts.push(issue.reason);
   }
+  if (Array.isArray(issue.related)) detailParts.push(...issue.related);
+  if (detailParts.length > 0) gapEntry.details = detailParts.join(' | ');
   return gapEntry;
 }

@@ -170,6 +170,12 @@ Todo cálculo de hash, digest ou fingerprint de integridade sobre estruturas de 
 
 Aplica-se a requisitos de hash ou integridade pública.
 
+### ARCH-MINIMAL-SUFFICIENT-CLOSURE — hard
+
+O contrato deve possuir somente as estruturas, modelos e decisões necessários para tornar todos os observáveis demandados computáveis e falsificáveis. Não deve exigir State Model, Transaction Model, Identity Graph ou decisão humana quando a propriedade não se aplica à demanda ou pode ser derivada mecanicamente a partir de premissas autorizadas. Ausência de estado, de transações ou de efeitos externos em computações puras não constitui lacuna. Propriedades deriváveis fecham citando a premissa autorizada sem criar decisões redundantes. Decisões humanas reservam-se exclusivamente a lacunas materiais com alternativas públicas divergentes compatíveis com as fontes autorizadas.
+
+Aplica-se à especificação e governança de fechamento semântico.
+
 ## Evolução da política
 
 O Contract IR calcula localmente quais regras são aplicáveis e exige avaliação
