@@ -15,6 +15,14 @@ componentes realmente iguais, não campos com autoridades diferentes.
   não remove restrições humanas e não autoriza ignorar falhas de recursos.
 - Coleção com retenção temporal contínua: `capacityPolicy.overflowPolicy=SLIDING_WINDOW_EVICTION`
   ou `EXPIRATION_TTL`. Se `maxEntries` for `null`, exige `unboundedRationale` justificando a janela.
+- Contêiner particionado dinâmico: `containerPolicy` com `partitionKey` e `retentionPolicy`
+  (`IDLE_TTL_EVICTION`, `SLIDING_WINDOW_EVICTION`, `UNBOUNDED_CONTAINER`, etc.). Garante que estados
+  indexados por usuário, sessão ou IP especifiquem reciclagem de memória.
+- ABI e Protocolo de Operação: `returnContract` com `successType` e `errorProtocol`
+  (`THROW_EXCEPTION`, `DISCRIMINATED_UNION`, `RESULT_OBJECT`, `HTTP_STATUS`, etc.) e `executionModel`
+  (`SYNCHRONOUS_IN_MEMORY`, `ASYNC_SERIALIZED`), formalizando a assinatura pública de código.
+- Granularidade temporal e fronteiras: `temporalUnit` (`MILLISECONDS`, `SECONDS`, etc.) em parâmetros
+  e campos de estado; `boundaryInclusivity` (`HALF_OPEN_RIGHT`, `CLOSED`, etc.) em `proofObligation`.
 - Operação sem guardas: `guardPrecedence=[]`, `noGuardsRationale` não vazia e
   branches explícitos sem rejeição. Uma rejeição ou guarda declarada contradiz essa
   dispensa. Sem justificativa, o fechamento continua bloqueado.

@@ -321,6 +321,19 @@
           "minLength": 1,
           "maxLength": 240
         },
+        "boundaryInclusivity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HALF_OPEN_RIGHT",
+            "HALF_OPEN_LEFT",
+            "CLOSED",
+            "OPEN",
+            null
+          ]
+        },
         "baselineOutcome": {
           "type": "string",
           "minLength": 1,
@@ -628,6 +641,19 @@
           ],
           "minLength": 1,
           "maxLength": 240
+        },
+        "boundaryInclusivity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HALF_OPEN_RIGHT",
+            "HALF_OPEN_LEFT",
+            "CLOSED",
+            "OPEN",
+            null
+          ]
         },
         "baselineOutcome": {
           "type": "string",
@@ -2410,6 +2436,19 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "temporalUnit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "MILLISECONDS",
+                    "SECONDS",
+                    "MICROSECONDS",
+                    "ISO8601_UTC",
+                    null
+                  ]
+                },
                 "bounds": {
                   "type": "object",
                   "additionalProperties": false,
@@ -2695,6 +2734,51 @@
           "noGuardsRationale": {
             "type": "string",
             "minLength": 1
+          },
+          "returnContract": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "successType",
+              "errorProtocol"
+            ],
+            "properties": {
+              "successType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "errorProtocol": {
+                "enum": [
+                  "THROW_EXCEPTION",
+                  "DISCRIMINATED_UNION",
+                  "RESULT_OBJECT",
+                  "HTTP_STATUS",
+                  "BOOLEAN_STATUS"
+                ]
+              },
+              "errorType": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "executionModel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SYNCHRONOUS_IN_MEMORY",
+              "ASYNC_SERIALIZED",
+              "DISTRIBUTED_LOCK",
+              "SINGLE_THREADED_EVENT_LOOP",
+              null
+            ]
           }
         }
       }

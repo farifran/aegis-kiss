@@ -78,6 +78,30 @@ for (const id of ['aegis.semantic_draft.v9', 'aegis.semantic_opinion.v3']) {
   assert.equal(validate({ maxEntries: '5', overflowPolicy: 'SLIDING_WINDOW_EVICTION' }), true);
   assert.equal(validate({ maxEntries: null, overflowPolicy: 'SLIDING_WINDOW_EVICTION', unboundedRationale: 'Bounded by duration.' }), true);
   assert.equal(validate({ maxEntries: '100', overflowPolicy: 'EXPIRATION_TTL' }), true);
+
+  const entityProps = standaloneSchemaDocument(id).properties.stateModel.properties.entities.items.properties;
+  const containerValidate = new Ajv2020({ strict: false }).compile(entityProps.containerPolicy);
+  assert.equal(containerValidate({ partitionKey: 'usuario', retentionPolicy: 'IDLE_TTL_EVICTION', idleRetentionDuration: '60s' }), true);
+  assert.equal(containerValidate({ partitionKey: 'usuario', retentionPolicy: 'UNBOUNDED_CONTAINER', unboundedRationale: 'No limit.' }), true);
+  assert.equal(containerValidate(null), true);
+  assert.equal(containerValidate({}), false);
+
+  const fieldValidate = new Ajv2020({ strict: false }).compile(entityProps.fields.items.properties.temporalUnit);
+  assert.equal(fieldValidate('SECONDS'), true);
+  assert.equal(fieldValidate('MILLISECONDS'), true);
+  assert.equal(fieldValidate('YEARS'), false);
+
+  const opProps = standaloneSchemaDocument(id).properties.stateModel.properties.operations.items.properties;
+  const returnValidate = new Ajv2020({ strict: false }).compile(opProps.returnContract);
+  assert.equal(returnValidate({ successType: 'boolean', errorProtocol: 'THROW_EXCEPTION', errorType: 'Error' }), true);
+  assert.equal(returnValidate({ successType: 'void', errorProtocol: 'DISCRIMINATED_UNION', errorType: null }), true);
+  assert.equal(returnValidate(null), true);
+  assert.equal(returnValidate({ successType: '' }), false);
+
+  const execValidate = new Ajv2020({ strict: false }).compile(opProps.executionModel);
+  assert.equal(execValidate('SYNCHRONOUS_IN_MEMORY'), true);
+  assert.equal(execValidate('ASYNC_SERIALIZED'), true);
+  assert.equal(execValidate('MAGIC_THREAD'), false);
 }
 
 for (const hasAmendments of [false, true]) {

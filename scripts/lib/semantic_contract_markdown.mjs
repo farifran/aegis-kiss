@@ -162,7 +162,10 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`    - Variação proposta: ${dimension.counterexampleWitness.variation}`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
     if (dimension.proofObligation !== null) {
-      lines.push(`  - Obrigação de prova: ${dimension.proofObligation.relation} sobre ${dimension.proofObligation.observables.join(', ')}.`);
+      const inclStr = dimension.proofObligation.boundaryInclusivity
+        ? ` [fronteira: ${dimension.proofObligation.boundaryInclusivity}]`
+        : '';
+      lines.push(`  - Obrigação de prova: ${dimension.proofObligation.relation} sobre ${dimension.proofObligation.observables.join(', ')}${inclStr}.`);
     }
     if (dimension.inapplicabilityProof !== undefined
       && dimension.inapplicabilityProof !== null) {
@@ -190,6 +193,9 @@ export function renderSemanticContractMarkdown(contract, {
         const capacityStr = entity.capacityPolicy
           ? `${entity.capacityPolicy.maxEntries !== null ? `Máx ${entity.capacityPolicy.maxEntries} entradas` : 'Sem limite contratual'} (overflow: \`${entity.capacityPolicy.overflowPolicy}\`${entity.capacityPolicy.provenance ? ` [Base: ${renderBasis(entity.capacityPolicy.provenance)}]` : ''}${entity.capacityPolicy.unboundedRationale ? ` — ${entity.capacityPolicy.unboundedRationale}` : ''})`
           : 'N/A';
+        const containerStr = entity.containerPolicy
+          ? `Partição: \`${entity.containerPolicy.partitionKey}\`, Retenção: \`${entity.containerPolicy.retentionPolicy}\`${entity.containerPolicy.idleRetentionDuration ? ` (${entity.containerPolicy.idleRetentionDuration})` : ''}${entity.containerPolicy.unboundedRationale ? ` — ${entity.containerPolicy.unboundedRationale}` : ''}`
+          : null;
         lines.push(
           '',
           `#### Entidade: \`${entity.name}\``,
@@ -197,12 +203,14 @@ export function renderSemanticContractMarkdown(contract, {
           `- **Topologia:** ${entity.isCollection ? 'Coleção dinâmica (instâncias múltiplas)' : 'Instância estática única (Singleton)'}`,
           `- **Política de Admissão:** \`${entity.admissionPolicy ?? 'N/A'}\``,
           `- **Política de Capacidade:** ${capacityStr}`,
+          ...(containerStr ? [`- **Política de Contêiner:** ${containerStr}`] : []),
           '',
           '| Campo | Tipo | Limites (Bounds) | Inicialização | Reset | Mutações | Leitores |',
           '| :--- | :--- | :--- | :--- | :--- | :--- | :--- |',
         );
         for (const field of entity.fields) {
-          const typeStr = field.isCounter ? `${field.type} (Contador)` : field.type;
+          const unitStr = field.temporalUnit ? ` [${field.temporalUnit}]` : '';
+          const typeStr = field.isCounter ? `${field.type} (Contador)${unitStr}` : `${field.type}${unitStr}`;
           const boundsStr = field.bounds
             ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior}${field.bounds.provenance ? `; ${renderBasis(field.bounds.provenance)}` : ''})`
             : 'N/A';
@@ -224,11 +232,17 @@ export function renderSemanticContractMarkdown(contract, {
     if (specification.stateModel?.operations?.length > 0) {
       lines.push('', `### 6.${++stateSubNum} Operações, Precedência Linear de Guardas e Efeitos de Transição`);
       for (const op of specification.stateModel.operations) {
+        const execStr = op.executionModel ? `\`${op.executionModel}\`` : null;
+        const returnStr = op.returnContract
+          ? `Sucesso: \`${op.returnContract.successType}\`, Protocolo: \`${op.returnContract.errorProtocol}\`${op.returnContract.errorType ? ` (\`${op.returnContract.errorType}\`)` : ''}`
+          : null;
         lines.push(
           '',
           `#### Operação: \`${op.name}\``,
           `- **Descrição:** ${op.description ?? 'Sem descrição'}`,
           `- **Precedência Linear Estrita de Guardas (Curto-Circuito):** ${op.guardPrecedence.length > 0 ? op.guardPrecedence.map((g, idx) => `${idx + 1}. \`${g}\``).join(' → ') : `Nenhuma (${op.noGuardsRationale ?? 'sem guardas'})`}`,
+          ...(execStr ? [`- **Modelo de Execução:** ${execStr}`] : []),
+          ...(returnStr ? [`- **Contrato de Retorno (ABI):** ${returnStr}`] : []),
         );
         if (op.parameters?.length > 0) {
           lines.push(
@@ -245,8 +259,9 @@ export function renderSemanticContractMarkdown(contract, {
             const onInvalidStr = p.onInvalid
               ? `${p.onInvalid.outcomeKind} (\`${p.onInvalid.error}\`)`
               : 'N/A';
+            const pType = p.temporalUnit ? `${p.type} [${p.temporalUnit}]` : p.type;
             lines.push(
-              `| \`${p.name}\` | \`${p.type}\` | \`${p.domain ?? 'N/A'}\` | ${pBoundsStr} | \`${p.nullability ?? 'NOT_NULL'}\` | \`${p.producer ?? 'N/A'}\` | ${onInvalidStr} |`,
+              `| \`${p.name}\` | \`${pType}\` | \`${p.domain ?? 'N/A'}\` | ${pBoundsStr} | \`${p.nullability ?? 'NOT_NULL'}\` | \`${p.producer ?? 'N/A'}\` | ${onInvalidStr} |`,
             );
           }
         }

@@ -283,6 +283,30 @@ export function validateFieldLifecycle({
           reason: `A coleção '${entity.name}' precisa de capacidade e overflow explícitos ou ausência justificada de limite contratual.`,
         });
       }
+
+      if (entity.containerPolicy) {
+        if (!entity.containerPolicy.partitionKey) {
+          issues.push({
+            slotId: `entity/${entity.name}/containerPolicy/partitionKey`,
+            kind: 'UNRESOLVED_CONTAINER_POLICY',
+            reason: `A entidade '${entity.name}' declara containerPolicy sem partitionKey válida.`,
+          });
+        }
+        if (entity.containerPolicy.retentionPolicy === 'IDLE_TTL_EVICTION' && !entity.containerPolicy.idleRetentionDuration) {
+          issues.push({
+            slotId: `entity/${entity.name}/containerPolicy/idleRetentionDuration`,
+            kind: 'UNRESOLVED_CONTAINER_POLICY',
+            reason: `A entidade '${entity.name}' declara retentionPolicy=IDLE_TTL_EVICTION mas não define idleRetentionDuration.`,
+          });
+        }
+        if (entity.containerPolicy.retentionPolicy === 'UNBOUNDED_CONTAINER' && !entity.containerPolicy.unboundedRationale) {
+          issues.push({
+            slotId: `entity/${entity.name}/containerPolicy/unboundedRationale`,
+            kind: 'UNRESOLVED_CONTAINER_POLICY',
+            reason: `A entidade '${entity.name}' declara retentionPolicy=UNBOUNDED_CONTAINER mas não define unboundedRationale.`,
+          });
+        }
+      }
     }
   }
 
@@ -580,6 +604,16 @@ export function validateOperationTotality({
   }
 
   for (const op of stateModel.operations) {
+    if (op.returnContract) {
+      if (!op.returnContract.successType || !op.returnContract.errorProtocol) {
+        issues.push({
+          slotId: `operation/${op.name}/returnContract`,
+          kind: 'UNRESOLVED_RETURN_CONTRACT',
+          reason: `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`,
+        });
+      }
+    }
+
     const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
     const branchIds = (op.branches ?? []).map(branch => branch.branchId);
     if (new Set(branchIds).size !== branchIds.length
@@ -728,7 +762,17 @@ export function validateContradictionDetection({
             const hasDecrement = effects.some((e) => e.field === fieldKey && e.effect === 'DECREMENT');
 
             if (hasDecrement) {
-              const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
+              if (op.returnContract) {
+      if (!op.returnContract.successType || !op.returnContract.errorProtocol) {
+        issues.push({
+          slotId: `operation/${op.name}/returnContract`,
+          kind: 'UNRESOLVED_RETURN_CONTRACT',
+          reason: `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`,
+        });
+      }
+    }
+
+    const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
               if (guardPrecedence.length === 0) {
                 const invIds = protectingInvariants.map((inv) => inv.id).join(', ');
                 issues.push({
@@ -1204,6 +1248,7 @@ export function generateClosureCertificate({
     || i.kind === 'UNRESOLVED_FIELD_BOUNDS'
     || i.kind === 'UNRESOLVED_COLLECTION_ADMISSION'
     || i.kind === 'UNRESOLVED_COLLECTION_CAPACITY'
+    || i.kind === 'UNRESOLVED_CONTAINER_POLICY'
   ));
 
   const transitionIssues = stateLifecycle.issues.filter((i) => (
@@ -1216,6 +1261,7 @@ export function generateClosureCertificate({
     || i.kind === 'EXTERNAL_EFFECT_COVERAGE_MISSING'
     || i.kind === 'INCOMPLETE_EXTERNAL_EFFECT'
     || i.kind === 'TRANSACTION_ROLLBACK_MISSING'
+    || i.kind === 'UNRESOLVED_RETURN_CONTRACT'
   ));
 
   const observableIssues = stateLifecycle.issues.filter((i) => (
@@ -1342,6 +1388,7 @@ const GAP_KIND_MAP = {
   EXTERNAL_EFFECT_COVERAGE_MISSING: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
   INCOMPLETE_EXTERNAL_EFFECT: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
   TRANSACTION_ROLLBACK_MISSING: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
+  UNRESOLVED_RETURN_CONTRACT: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Contrato de retorno ou protocolo de erro da operação incompleto.'],
   INVALID_SEMANTIC_KEY: ['TRANSITION_CONSISTENCY', 'USER_DECISION', (i) => i.reason],
 
   // OBSERVABLE_DEPENDENCY_CLOSURE
@@ -1363,6 +1410,7 @@ const GAP_KIND_MAP = {
   UNRESOLVED_STATE_MODEL: ['COVERAGE_ACCOUNTING', 'ARCHITECTURE_POLICY', (i) => i.reason],
   UNRESOLVED_FIELD_BOUNDS: ['COVERAGE_ACCOUNTING', 'ARCHITECTURE_POLICY', (i) => i.reason],
   UNRESOLVED_COLLECTION_CAPACITY: ['COVERAGE_ACCOUNTING', 'ARCHITECTURE_POLICY', (i) => i.reason],
+  UNRESOLVED_CONTAINER_POLICY: ['COVERAGE_ACCOUNTING', 'ARCHITECTURE_POLICY', (i) => i.reason],
   UNRESOLVED_INITIALIZATION: ['COVERAGE_ACCOUNTING', 'USER_DECISION', (i) => i.reason],
   UNRESOLVED_RESET: ['COVERAGE_ACCOUNTING', 'USER_DECISION', (i) => i.reason],
   UNRESOLVED_COLLECTION_ADMISSION: ['COVERAGE_ACCOUNTING', 'USER_DECISION', (i) => i.reason],

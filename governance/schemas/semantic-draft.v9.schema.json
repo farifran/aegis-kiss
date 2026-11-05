@@ -274,6 +274,46 @@
                   }
                 ]
               },
+              "containerPolicy": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "partitionKey",
+                  "retentionPolicy"
+                ],
+                "properties": {
+                  "partitionKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retentionPolicy": {
+                    "enum": [
+                      "IDLE_TTL_EVICTION",
+                      "SLIDING_WINDOW_EVICTION",
+                      "FIFO_EVICTION",
+                      "LRU_EVICTION",
+                      "STATIC_BOUNDED",
+                      "MANUAL_PURGE",
+                      "UNBOUNDED_CONTAINER"
+                    ]
+                  },
+                  "idleRetentionDuration": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unboundedRationale": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
               "fields": {
                 "type": "array",
                 "items": {
@@ -302,6 +342,19 @@
                         "MAP",
                         "SET",
                         "COLLECTION"
+                      ]
+                    },
+                    "temporalUnit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "MILLISECONDS",
+                        "SECONDS",
+                        "MICROSECONDS",
+                        "ISO8601_UTC",
+                        null
                       ]
                     },
                     "isCounter": {
