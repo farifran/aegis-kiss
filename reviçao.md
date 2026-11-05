@@ -313,5 +313,35 @@ A ordem abaixo prioriza **tornar o sistema realista e fluido para a IA acertar d
   - Redução massiva de payload redundante no parecer.
   - Suítes de testes (`npm test`) e sanidade (`npm run aegis:sanity`) com **100% PASS**.
 
+---
+
+## 8. Primitivas Universais de Tempo, Estado e ABI (Pós-Fase 7)
+
+- **Motivação:** No Teste 2 (demanda de rate limiter com 5 req/min e erro 429), a análise minuciosa de determinismo e prontidão de implementação revelou que o Aegis carecia de vocabulário declarativo universal para expressar sem ambiguidade:
+  1. Políticas de expiração temporal e despejo de estado (forçando modelos ingênuos de contador com reset total em vez de janela deslizante).
+  2. Unidades de tempo e inclusividade de limites (ex.: se "1 minuto" é `<=` ou `<` 60 segundos, e qual a granularidade temporal).
+  3. ABI pública executável (modelo síncrono/assíncrono e contrato de retorno explícito).
+  4. Estrutura de dados física de contêineres para coleções de eventos/janelas.
+
+- **Implementação (Universal, agnóstica de demanda):**
+  - **Tempo e Evicção no `stateModel`:**
+    - `evictionPolicy`: adicionado suporte a `SLIDING_WINDOW` e `FIFO`/`LRU`.
+    - `retention`: adicionado suporte a `TTL` (com `ttlValue` e `ttlUnit`).
+    - `temporalUnit`: `SECONDS | MILLISECONDS | MICROSECONDS` em campos temporais e regras de limite (`boundaryRules`).
+    - `boundaryInclusivity`: `INCLUSIVE | EXCLUSIVE | HALF_OPEN` para eliminar qualquer ambiguidade de borda temporal ou numérica.
+  - **ABI e Superfície Executável em `operations`:**
+    - `executionModel`: `SYNCHRONOUS | ASYNCHRONOUS`.
+    - `returnContract`: `VALUE | RESULT | OPTION | EXCEPTION`.
+  - **Políticas de Contêiner em Coleções:**
+    - `containerPolicy`: `FIXED_ARRAY | DYNAMIC_LIST | CIRCULAR_BUFFER | RING_BUFFER | HASH_MAP`.
+  - **Renderização e Instruções:**
+    - [`semantic_contract_markdown.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_contract_markdown.mjs) atualizado para renderizar as novas propriedades nas tabelas de entidades, coleções e operações.
+    - [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs) instrui o supervisor a utilizar as primitivas universais quando a demanda envolver tempo, janelas deslizantes ou contratos públicos de retorno.
+    - [`rejection_report.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/rejection_report.mjs) alinhado para incluir `ARCHITECTURE_POLICY` e `CONSTITUTION` na mensagem e remediação de `DECISION_WITHOUT_MATERIAL_UNKNOWN`.
+- **Resultado:**
+  - O Aegis agora permite modelar janelas deslizantes, expiração por TTL e contratos de chamadas públicas de forma estritamente determinística e falsificável.
+  - Suítes de testes (`npm test`) e sanidade (`npm run aegis:sanity`) com **100% PASS**.
+
+
 
 

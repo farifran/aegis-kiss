@@ -14,8 +14,8 @@ const diagnostics = new Map([
     ruleId: 'CONST-DECISIONS',
   }],
   ['DECISION_WITHOUT_MATERIAL_UNKNOWN', {
-    message: 'A decisão não está vinculada a uma claim de ambiguidade nem a um unknown material com base USER_INTENT ou USER_DECISION.',
-    remediation: 'Vincule a decisão a uma intentClaim com disposition DECISION ou a um unknown material com basis USER_INTENT/USER_DECISION.',
+    message: 'A decisão não está vinculada a uma claim de ambiguidade nem a um unknown material com base autorizada (USER_INTENT, USER_DECISION, ARCHITECTURE_POLICY ou CONSTITUTION).',
+    remediation: 'Vincule a decisão a uma intentClaim com disposition DECISION ou a um unknown material com base em USER_INTENT, USER_DECISION, ARCHITECTURE_POLICY ou CONSTITUTION.',
     ruleId: 'CONST-DECISIONS',
   }],
   ['DISCOVERY_EVIDENCE_MISMATCH', {
