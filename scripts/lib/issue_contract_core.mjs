@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
-import { canonicalDigest, sha256 } from './canonical_json.mjs';
+import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
 import {
   buildHybridSourceIndex,
   isReusableHybridSourceIndex,
@@ -48,12 +48,6 @@ const discoveryByteLimit = 1_048_576;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
-function compareText(left, right) {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
-}
-
 function portableRelativePath(repositoryRoot, absolutePath) {
   const nativePath = relative(repositoryRoot, absolutePath);
   return sep === '\\' ? nativePath.replaceAll('\\', '/') : nativePath;
@@ -83,7 +77,7 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceInde
 
   function inspectDirectory(directory) {
     const entries = readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => compareText(left.name, right.name));
+      .sort((left, right) => compareCodeUnits(left.name, right.name));
     for (const entry of entries) {
       visitedEntries += 1;
       if (visitedEntries > discoveryEntryLimit) {
@@ -152,9 +146,9 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceInde
     }
     inspectDirectory(sourceRoot);
   }
-  files.sort((left, right) => compareText(left.path, right.path));
-  ignoredEntries.sort((left, right) => compareText(left.path, right.path));
-  sourceRecords.sort((left, right) => compareText(left.path, right.path));
+  files.sort((left, right) => compareCodeUnits(left.path, right.path));
+  ignoredEntries.sort((left, right) => compareCodeUnits(left.path, right.path));
+  sourceRecords.sort((left, right) => compareCodeUnits(left.path, right.path));
   const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries);
   const sourceIndex = isReusableHybridSourceIndex(cachedSourceIndex, sourceSnapshotDigest)
     ? cachedSourceIndex

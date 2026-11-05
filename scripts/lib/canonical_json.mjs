@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-function compareCodeUnits(left, right) {
+export function compareCodeUnits(left, right) {
   if (left < right) return -1;
   if (left > right) return 1;
   return 0;

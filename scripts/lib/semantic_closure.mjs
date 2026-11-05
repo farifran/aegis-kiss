@@ -526,8 +526,8 @@ export function validateFieldLifecycle({
   });
   issues.push(...contradictionResult.issues);
 
-  // 17. COMPUTABILITY GRAPH CLOSURE: Fase 1 - Completude Causal e Grafo de Dependências
-  const computabilityResult = validateComputabilityGraphClosure({
+  // 17. OPEN TERM DEPENDENCIES: Validação de Termos Fundamentados e Efeitos Físicos
+  const termDependenciesResult = validateOpenTermDependencies({
     stateModel,
     decisions,
     boundaryRules,
@@ -537,7 +537,7 @@ export function validateFieldLifecycle({
     invariants,
     resolvedDecisionIds,
   });
-  issues.push(...computabilityResult.issues);
+  issues.push(...termDependenciesResult.issues);
 
   return {
     valid: issues.length === 0,
@@ -1023,7 +1023,7 @@ export function validateProvenanceEnforcement({
  * 2. Quando houver superfície com efeito externo (`external-effect` / `PUBLIC_SURFACE`),
  *    exista cobertura, verificação de confirmação e estratégia de rollback.
  */
-export function validateComputabilityGraphClosure({
+export function validateOpenTermDependencies({
   stateModel = null,
   decisions = [],
   boundaryRules = [],
