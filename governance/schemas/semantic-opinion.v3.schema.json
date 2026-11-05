@@ -260,6 +260,8 @@
                       "REJECT_NEW",
                       "LRU_EVICTION",
                       "FIFO_EVICTION",
+                      "SLIDING_WINDOW_EVICTION",
+                      "EXPIRATION_TTL",
                       "FAIL_OPERATION",
                       "STATIC_SINGLETON",
                       "NO_CONTRACT_LIMIT"

@@ -264,7 +264,11 @@ export function validateFieldLifecycle({
           reason: `A entidade de coleção dinâmica '${entity.name}' não define admissionPolicy (ex: ON_FIRST_REQUEST, PRE_REGISTERED).`,
         });
       }
-      const noContractLimit = entity.capacityPolicy?.overflowPolicy === 'NO_CONTRACT_LIMIT'
+      const noContractLimit = (
+        entity.capacityPolicy?.overflowPolicy === 'NO_CONTRACT_LIMIT'
+        || entity.capacityPolicy?.overflowPolicy === 'SLIDING_WINDOW_EVICTION'
+        || entity.capacityPolicy?.overflowPolicy === 'EXPIRATION_TTL'
+      )
         && entity.capacityPolicy.maxEntries === null
         && typeof entity.capacityPolicy.unboundedRationale === 'string'
         && entity.capacityPolicy.unboundedRationale.trim().length > 0;

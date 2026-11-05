@@ -13,6 +13,8 @@ componentes realmente iguais, não campos com autoridades diferentes.
 - Coleção sem máximo contratual: `capacityPolicy.overflowPolicy=NO_CONTRACT_LIMIT`,
   `maxEntries=null` e `unboundedRationale` não vazia. Não promete memória infinita,
   não remove restrições humanas e não autoriza ignorar falhas de recursos.
+- Coleção com retenção temporal contínua: `capacityPolicy.overflowPolicy=SLIDING_WINDOW_EVICTION`
+  ou `EXPIRATION_TTL`. Se `maxEntries` for `null`, exige `unboundedRationale` justificando a janela.
 - Operação sem guardas: `guardPrecedence=[]`, `noGuardsRationale` não vazia e
   branches explícitos sem rejeição. Uma rejeição ou guarda declarada contradiz essa
   dispensa. Sem justificativa, o fechamento continua bloqueado.

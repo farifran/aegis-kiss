@@ -75,6 +75,9 @@ for (const id of ['aegis.semantic_draft.v9', 'aegis.semantic_opinion.v3']) {
   assert.equal(validate({ maxEntries: null, overflowPolicy: 'NO_CONTRACT_LIMIT' }), false);
   assert.equal(validate({ maxEntries: '10', overflowPolicy: 'NO_CONTRACT_LIMIT', unboundedRationale: 'Contradictory.' }), false);
   assert.equal(validate({ maxEntries: '10', overflowPolicy: 'REJECT_NEW' }), true);
+  assert.equal(validate({ maxEntries: '5', overflowPolicy: 'SLIDING_WINDOW_EVICTION' }), true);
+  assert.equal(validate({ maxEntries: null, overflowPolicy: 'SLIDING_WINDOW_EVICTION', unboundedRationale: 'Bounded by duration.' }), true);
+  assert.equal(validate({ maxEntries: '100', overflowPolicy: 'EXPIRATION_TTL' }), true);
 }
 
 for (const hasAmendments of [false, true]) {
