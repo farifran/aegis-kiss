@@ -13,6 +13,11 @@ const diagnostics = new Map([
     remediation: 'Remova a pergunta ou diferencie os resultados observáveis de cada alternativa.',
     ruleId: 'CONST-DECISIONS',
   }],
+  ['DECISION_WITHOUT_MATERIAL_UNKNOWN', {
+    message: 'A decisão não está vinculada a uma claim de ambiguidade nem a um unknown material com base USER_INTENT ou USER_DECISION.',
+    remediation: 'Vincule a decisão a uma intentClaim com disposition DECISION ou a um unknown material com basis USER_INTENT/USER_DECISION.',
+    ruleId: 'CONST-DECISIONS',
+  }],
   ['DISCOVERY_EVIDENCE_MISMATCH', {
     message: 'Os fatos descobertos em src/ mudaram desde a captura da demanda.',
     remediation: 'Execute novamente a demanda para produzir um preflight vinculado ao estado atual de src/.',
@@ -47,18 +52,6 @@ const diagnostics = new Map([
     message: 'A recompilação eliminou uma dimensão semântica já identificada no contrato anterior.',
     remediation: 'Preserve a dimensão e materialize a decisão humana sem reduzir a cobertura anterior.',
     ruleId: 'CONST-OBSERVABLE',
-  }],
-  ['JEV_GATEWAY_AUTHENTICATION_FAILED', {
-    message: 'O Vercel AI Gateway recusou a credencial configurada para o JEV.',
-    remediation: 'Revogue a chave exposta, gere uma nova chave e exporte-a como AI_GATEWAY_API_KEY.',
-  }],
-  ['JEV_GATEWAY_BILLING_REQUIRED', {
-    message: 'A conta Vercel ainda não está habilitada para executar o JEV pelo AI Gateway.',
-    remediation: 'Habilite a cobrança exigida pela Vercel e execute novamente ./aegis --jev-run.',
-  }],
-  ['JEV_GATEWAY_UNAVAILABLE', {
-    message: 'O JEV não pôde ser consultado pelo Vercel AI Gateway.',
-    remediation: 'Use o bypass para a IA semântica ou tente novamente quando o serviço estiver disponível.',
   }],
   ['MISSING_USER_CONFIRMATION', {
     message: 'Não existe um pedido de confirmação vinculado ao rascunho atual.',

@@ -1,23 +1,3 @@
-// Decisões humanas ainda pendentes alcançáveis a partir do nó (evidência de por que ele está OPEN_DEPENDENCY).
-function openDecisionCauses(graph, startId) {
-  const byId = new Map(graph.map((node) => [node.symbol ?? node.nodeId, node]));
-  const causes = new Set();
-  const seen = new Set();
-  const walk = (nodeId) => {
-    if (seen.has(nodeId)) return;
-    seen.add(nodeId);
-    const node = byId.get(nodeId);
-    if (!node) return;
-    if (node.category === 'HUMAN_DECISION' && node.computabilityStatus === 'OPEN_DEPENDENCY') {
-      causes.add(node.groundedIn ?? node.target ?? nodeId);
-      return;
-    }
-    for (const dep of node.dependencies ?? []) walk(dep);
-  };
-  walk(startId);
-  return [...causes];
-}
-
 export function renderSemanticContractMarkdown(contract, {
   contractDigest = '',
   policyRules = [],
@@ -31,6 +11,7 @@ export function renderSemanticContractMarkdown(contract, {
   const renderBasis = (basis) => basis
     .map(({ source, reference }) => `${source}:${reference}`)
     .join(', ');
+  const ensurePeriod = (text) => (text.endsWith('.') ? text : `${text}.`);
   const lines = [
     `# Issue / Contrato: ${specification.title}`,
     '',
@@ -46,9 +27,7 @@ export function renderSemanticContractMarkdown(contract, {
       `> **Rascunho aprovado:** \`${contract.approval.contractDraftDigest}\``,
       `> **Confirmação humana:** ${contract.approval.attestation} via ${contract.approval.method}`,
     ] : []),
-    `> **Preflight:** \`${contract.sourcePreflightDigest}\``,
-    `> **Requisição semântica:** \`${contract.sourceSemanticRequestDigest}\``,
-    `> **Snapshot de src/:** \`${contract.sourceSnapshotDigest}\``,
+    `> **Custódia (Preflight / Request / src):** \`${contract.sourcePreflightDigest.slice(0, 12)}\` / \`${contract.sourceSemanticRequestDigest.slice(0, 12)}\` / \`${contract.sourceSnapshotDigest.slice(0, 12)}\``,
     '',
     '## 1. Demanda interpretada',
     specification.interpretation,
@@ -84,11 +63,6 @@ export function renderSemanticContractMarkdown(contract, {
   const conflictAssessments = specification.policyAssessments
     .filter(({ demandStatus }) => demandStatus === 'CONFLICT');
   lines.push(`- **Contextos detectados:** ${specification.architectureContexts.map(({ tag }) => tag).join(', ')}`);
-  if (contract.policySignals.length > 0) {
-    lines.push(`- **Sinais mecânicos:** ${contract.policySignals
-      .map(({ ruleId, kind, reference }) => `${ruleId}/${kind}: ${reference}`)
-      .join('; ')}.`);
-  }
   lines.push(`- **Evidência neutra:** ${contract.intentEvidence.fragments.length} fragmento(s), ${contract.intentEvidence.literalFacts.length} fato(s) literal(is).`);
   if (compliantAssessments.length > 0) {
     lines.push(`- **Regras aplicáveis já conformes:** ${compliantAssessments.map(({ ruleId }) => ruleId).join(', ')}.`);
@@ -183,7 +157,7 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`- **${dimension.kind}/${dimension.subjectId}/${dimension.status}:** ${dimension.rationale}${dimension.targetIds.length === 0 ? '' : ` → ${dimension.targetIds.join(', ')}`}`);
     lines.push(`  - Base: ${renderBasis(dimension.basis)}.`);
     lines.push(`  - Autoridade de fechamento: ${dimension.closureAuthority}.`);
-    lines.push(`  - Cenário de revisão semântica: ${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}.`);
+    lines.push(`  - Cenário de revisão semântica: ${ensurePeriod(`${dimension.counterexampleWitness.id}/${dimension.counterexampleWitness.inputClass}`)}`);
     lines.push(`    - Base proposta: ${dimension.counterexampleWitness.baseline}`);
     lines.push(`    - Variação proposta: ${dimension.counterexampleWitness.variation}`);
     if (dimension.acceptanceCaseId !== null) lines.push(`  - Prova única: ${dimension.acceptanceCaseId}.`);
@@ -197,20 +171,32 @@ export function renderSemanticContractMarkdown(contract, {
     }
   }
 
-  const hasStateModel = Boolean(specification.stateModel);
+  const hasStateModel = Boolean(
+    (specification.stateModel && (
+      specification.stateModel.entities?.length > 0
+      || specification.stateModel.operations?.length > 0
+      || specification.stateModel.observables?.length > 0
+      || specification.stateModel.canonicalSerializations?.length > 0
+    ))
+    || specification.closureCertificate?.gapLedger?.length > 0,
+  );
   if (hasStateModel) {
+    let stateSubNum = 0;
     lines.push('', '## 6. Inventário Semântico Auditável (State Model & Totalidade de Transição)');
 
-    if (specification.stateModel.entities?.length > 0) {
-      lines.push('', '### 6.2 Entidades de Estado e Ciclo de Vida dos Campos');
+    if (specification.stateModel?.entities?.length > 0) {
+      lines.push('', `### 6.${++stateSubNum} Entidades de Estado e Ciclo de Vida dos Campos`);
       for (const entity of specification.stateModel.entities) {
+        const capacityStr = entity.capacityPolicy
+          ? `${entity.capacityPolicy.maxEntries !== null ? `Máx ${entity.capacityPolicy.maxEntries} entradas` : 'Sem limite contratual'} (overflow: \`${entity.capacityPolicy.overflowPolicy}\`${entity.capacityPolicy.provenance ? ` [Base: ${renderBasis(entity.capacityPolicy.provenance)}]` : ''}${entity.capacityPolicy.unboundedRationale ? ` — ${entity.capacityPolicy.unboundedRationale}` : ''})`
+          : 'N/A';
         lines.push(
           '',
           `#### Entidade: \`${entity.name}\``,
           `- **Descrição:** ${entity.description ?? 'Sem descrição'}`,
           `- **Topologia:** ${entity.isCollection ? 'Coleção dinâmica (instâncias múltiplas)' : 'Instância estática única (Singleton)'}`,
           `- **Política de Admissão:** \`${entity.admissionPolicy ?? 'N/A'}\``,
-          `- **Política de Capacidade:** ${entity.capacityPolicy ? `Máx ${entity.capacityPolicy.maxEntries} entradas (overflow: \`${entity.capacityPolicy.overflowPolicy}\`${entity.capacityPolicy.provenance ? ` [Base: ${renderBasis(entity.capacityPolicy.provenance)}]` : ''})` : 'N/A'}`,
+          `- **Política de Capacidade:** ${capacityStr}`,
           '',
           '| Campo | Tipo | Limites (Bounds) | Inicialização | Reset | Mutações | Leitores |',
           '| :--- | :--- | :--- | :--- | :--- | :--- | :--- |',
@@ -220,12 +206,12 @@ export function renderSemanticContractMarkdown(contract, {
           const boundsStr = field.bounds
             ? `[${field.bounds.lowerBound ?? '-∞'}, ${field.bounds.upperBound ?? '+∞'}] (${field.bounds.boundaryBehavior}${field.bounds.provenance ? `; ${renderBasis(field.bounds.provenance)}` : ''})`
             : 'N/A';
-          const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*${field.derivation ? `<br>**Fórmula Total:** \`${field.derivation.formula}\`` : ''}`;
+          const initStr = `${field.initialization.kind}: \`${field.initialization.value ?? 'null'}\`<br>*${field.initialization.rationale}*`;
           const resetStr = field.reset.allowed
             ? `\`${field.reset.resetValue}\` (gatilho: \`${field.reset.trigger}\`)`
             : 'Proibido (preservado)';
           const mutsStr = field.mutations.length > 0
-            ? field.mutations.map((m) => `\`${m.operation}\`: ${m.effect} \`${m.targetValue ?? ''}\` se \`${m.condition}\``).join('<br>')
+            ? field.mutations.map((m) => `\`${m.operation}\`: ${m.effect}${m.targetValue ? ` \`${m.targetValue}\`` : ''} se \`${m.condition}\``).join('<br>')
             : 'Nenhuma (imutável pós-init)';
           const readersStr = field.readBy.length > 0
             ? field.readBy.map((r) => `\`${r}\``).join(', ')
@@ -235,18 +221,15 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
-    if (specification.stateModel.operations?.length > 0) {
-      lines.push('', '### 6.3 Operações, Precedência Linear de Guardas e Efeitos de Transição');
+    if (specification.stateModel?.operations?.length > 0) {
+      lines.push('', `### 6.${++stateSubNum} Operações, Precedência Linear de Guardas e Efeitos de Transição`);
       for (const op of specification.stateModel.operations) {
         lines.push(
           '',
           `#### Operação: \`${op.name}\``,
           `- **Descrição:** ${op.description ?? 'Sem descrição'}`,
-          `- **Precedência Linear Estrita de Guardas (Curto-Circuito):** ${op.guardPrecedence.map((g, idx) => `${idx + 1}. \`${g}\``).join(' → ')}`,
+          `- **Precedência Linear Estrita de Guardas (Curto-Circuito):** ${op.guardPrecedence.length > 0 ? op.guardPrecedence.map((g, idx) => `${idx + 1}. \`${g}\``).join(' → ') : `Nenhuma (${op.noGuardsRationale ?? 'sem guardas'})`}`,
         );
-        if (op.executionPipeline?.length > 0) {
-          lines.push(`- **Pipeline Determinístico de Execução:** ${op.executionPipeline.map((p, idx) => `${idx + 1}. [${p.stage}] \`${p.id}\``).join(' → ')}`);
-        }
         if (op.parameters?.length > 0) {
           lines.push(
             '',
@@ -275,7 +258,7 @@ export function renderSemanticContractMarkdown(contract, {
         for (const branch of op.branches) {
           const effects = Array.isArray(branch.stateEffects) ? branch.stateEffects : [];
           const effectsStr = effects.length > 0
-            ? effects.map((e) => `\`${e.field}\` := ${e.effect} ${e.value ? `\`${e.value}\`` : ''}`).join('<br>')
+            ? effects.map((e) => `\`${e.field}\` := ${e.effect}${e.value ? ` \`${e.value}\`` : ''}`).join('<br>')
             : 'Nenhum efeito colateral';
           lines.push(
             `| \`${branch.branchId}\` | \`${branch.condition ?? branch.branchId}\` | \`${branch.outcomeKind}\` | \`${branch.statusOrError ?? 'N/A'}\` | ${effectsStr} | ${branch.defaultPreservation ? 'Sim' : 'Não'} |`,
@@ -284,8 +267,9 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
-    if (specification.stateModel.observables?.length > 0) {
-      lines.push('', '### 6.4 Observáveis Públicos e Mapeamento de Bits');
+    if (specification.stateModel?.observables?.length > 0) {
+      const hasBitAllocation = specification.stateModel.observables.some((obs) => obs.bitAllocation?.length > 0);
+      lines.push('', `### 6.${++stateSubNum} ${hasBitAllocation ? 'Observáveis Públicos e Mapeamento de Bits' : 'Observáveis Públicos'}`);
       for (const obs of specification.stateModel.observables) {
         lines.push(
           '',
@@ -307,8 +291,8 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
-    if (specification.stateModel.canonicalSerializations?.length > 0) {
-      lines.push('', '### 6.5 Perfis de Serialização Canônica');
+    if (specification.stateModel?.canonicalSerializations?.length > 0) {
+      lines.push('', `### 6.${++stateSubNum} Perfis de Serialização Canônica`);
       for (const profile of specification.stateModel.canonicalSerializations) {
         lines.push(
           '',
@@ -325,97 +309,8 @@ export function renderSemanticContractMarkdown(contract, {
       }
     }
 
-    if (specification.stateModel.aggregations?.length > 0) {
-      lines.push('', '### 6.6 Agregações de Coleção e Visões Derivadas');
-      lines.push(
-        '',
-        '| Nome da Agregação | Coleção de Origem | Tipo de Agregação | Predicado de Filtro | Limite de Saturação | Proveniência |',
-        '| :--- | :--- | :---: | :--- | :---: | :--- |',
-      );
-      for (const agg of specification.stateModel.aggregations) {
-        lines.push(
-          `| \`${agg.name}\` | \`${agg.sourceCollection}\` | \`${agg.aggregationKind}\` | \`${agg.filterPredicate}\` | \`${agg.saturationLimit ?? 'Sem saturação'}\` | ${agg.provenance ? renderBasis(agg.provenance) : 'N/A'} |`,
-        );
-      }
-    }
-
-    if (specification.stateModel.producerConsumerBoundaries?.length > 0) {
-      lines.push('', '### 6.7 Fronteiras Producer / Consumer e Ownership de Sinais');
-      lines.push(
-        '',
-        '| Sinal | Produtor (Origem) | Consumidor (Destino) | Ownership | Recomputável pelo Consumidor | Proveniência |',
-        '| :--- | :--- | :--- | :---: | :---: | :--- |',
-      );
-      for (const bnd of specification.stateModel.producerConsumerBoundaries) {
-        lines.push(
-          `| \`${bnd.signalName}\` | \`${bnd.producer}\` | \`${bnd.consumer}\` | \`${bnd.ownership}\` | ${bnd.recomputableByConsumer ? 'Sim' : 'Não'} | ${bnd.provenance ? renderBasis(bnd.provenance) : 'N/A'} |`,
-        );
-      }
-    }
-
-    if (specification.stateModel.categories?.length > 0) {
-      lines.push('', '### 6.8 Categorias Abstratas e Taxonomia Fechada de Conjuntos');
-      lines.push(
-        '',
-        '| Categoria | Descrição | Membros Pertencentes (Set Membership) | Proveniência |',
-        '| :--- | :--- | :--- | :--- |',
-      );
-      for (const cat of specification.stateModel.categories) {
-        lines.push(
-          `| \`${cat.name}\` | ${cat.description} | ${cat.members.map((m) => `\`${m}\``).join(', ')} | ${cat.provenance ? renderBasis(cat.provenance) : 'N/A'} |`,
-        );
-      }
-    }
-
-    if (specification.stateModel.computabilityGraph?.length > 0) {
-      lines.push('', '### 6.9 Grafo de Computabilidade Semântica (Fase 1: Circuito e Corrente Causal)');
-      lines.push(
-        '',
-        '| Nó Causal (Símbolo) | Categoria | Origem / Alvo | Regra de Cálculo / Derivação | Precursores / Dependências | Casos Limites / Confirmação | Corrente Causal (Status) |',
-        '| :--- | :--- | :--- | :--- | :--- | :--- | :---: |',
-      );
-      const graph = specification.stateModel.computabilityGraph;
-      for (const node of graph) {
-        const id = node.symbol ?? node.nodeId;
-        const target = node.groundedIn ?? node.target ?? id;
-        const rule = node.derivationRule ?? node.formula;
-        const depsStr = (node.dependencies?.length > 0)
-          ? node.dependencies.map((d) => `\`${d}\``).join(', ')
-          : '*Terminal (Grounded)*';
-
-        const edgeCases = [];
-        if (node.orderingPolicy) edgeCases.push(`Ordem: \`${node.orderingPolicy}\``);
-        if (node.semanticType) edgeCases.push(`Tipo: \`${node.semanticType}\``);
-        if (node.unit) edgeCases.push(`Unidade: \`${node.unit.family}:${node.unit.label}\``);
-        if (node.cardinality) edgeCases.push(`Card: \`${node.cardinality}\``);
-        if (node.identityScope?.entity) edgeCases.push(`Identidade: \`${node.identityScope.entity}\``);
-        if (node.transaction?.scope) edgeCases.push(`Transação: \`${node.transaction.scope}\``);
-        if (node.edgeCaseRules?.tieBreaking) edgeCases.push(`Desempate: \`${node.edgeCaseRules.tieBreaking}\``);
-        if (node.edgeCaseRules?.zeroDivisor) edgeCases.push(`Divisor Zero: \`${node.edgeCaseRules.zeroDivisor}\``);
-        if (node.edgeCaseRules?.unfilledBuffer) edgeCases.push(`Warmup: \`${node.edgeCaseRules.unfilledBuffer}\``);
-        if (node.feedbackConfirmation?.executionMode) edgeCases.push(`Execução: \`${node.feedbackConfirmation.executionMode}\``);
-        const edgeCaseStr = edgeCases.length > 0 ? edgeCases.join('; ') : 'N/A';
-
-        let statusStr = '`NÃO AVALIADO ⚠️`';
-        if (node.computabilityStatus === 'COMPUTABLE') {
-          statusStr = '`COMPUTABLE ✓`';
-        } else if (node.computabilityStatus === 'OPEN_DEPENDENCY') {
-          const causes = openDecisionCauses(graph, id);
-          statusStr = causes.length > 0
-            ? `\`OPEN_DEPENDENCY ⚠️\` — aguarda: ${causes.map((c) => `\`${c}\``).join(', ')}`
-            : '`OPEN_DEPENDENCY ⚠️`';
-        } else if (node.computabilityStatus === 'NOT_COMPUTABLE') {
-          statusStr = '`NOT_COMPUTABLE ❌` (ver Gap Ledger)';
-        }
-
-        lines.push(
-          `| \`${id}\` | \`${node.category}\` | \`${target}\` | ${rule ? `\`${rule}\`` : 'N/A'} | ${depsStr} | ${edgeCaseStr} | ${statusStr} |`,
-        );
-      }
-    }
-
     const allExternalEffects = [];
-    if (specification.stateModel.operations?.length > 0) {
+    if (specification.stateModel?.operations?.length > 0) {
       for (const op of specification.stateModel.operations) {
         for (const branch of op.branches || []) {
           for (const eff of branch.externalEffects || []) {
@@ -447,7 +342,7 @@ export function renderSemanticContractMarkdown(contract, {
     if (allExternalEffects.length > 0) {
       lines.push(
         '',
-        '### 6.10 Grafo de Efeitos Externos e Reversão Mecânica (External Effect & Rollback Graph)',
+        `### 6.${++stateSubNum} Grafo de Efeitos Externos e Reversão Mecânica (External Effect & Rollback Graph)`,
         '',
         '| Operação / Ramo | Ação Externa | Alvo / Superfície | Preserva mtime | Confirmação Física (Check) | Desfecho Sucesso (onSuccess) | Desfecho Falha (onFailure) | Estratégia de Rollback |',
         '| :--- | :--- | :--- | :---: | :--- | :--- | :--- | :--- |',
@@ -462,7 +357,7 @@ export function renderSemanticContractMarkdown(contract, {
     if (specification.closureCertificate?.gapLedger?.length > 0) {
       lines.push(
         '',
-        '### 6.11 Gap Ledger (Lacunas Falsificáveis Bloqueantes)',
+        `### 6.${++stateSubNum} Gap Ledger (Lacunas Falsificáveis Bloqueantes)`,
         '',
         '| GAP-ID | Camada | Testemunho / Witness Falsificável | Autoridade Necessária |',
         '| :--- | :--- | :--- | :---: |',
@@ -484,8 +379,13 @@ export function renderSemanticContractMarkdown(contract, {
     lines.push(`  - Falsificado se: ${invariant.falsification}`);
   }
 
+  const riskStatusLabel = {
+    FOUND: 'Riscos identificados',
+    NONE: 'Sem riscos adicionais',
+    UNKNOWN: 'Incerteza aberta',
+  }[specification.riskReview.status] ?? specification.riskReview.status;
   lines.push('', `## ${riskSectionNum}. Riscos e vulnerabilidades`);
-  lines.push(`- **Revisão ${specification.riskReview.status}:** ${specification.riskReview.rationale}`);
+  lines.push(`- **${riskStatusLabel} (${specification.riskReview.status}):** ${specification.riskReview.rationale}`);
   if (specification.risks.length === 0) lines.push('- Nenhum risco material identificado.');
   for (const risk of specification.risks) {
     lines.push(`- **${risk.id} — ${risk.kind}/${risk.level}:** ${risk.statement}`);
@@ -556,7 +456,7 @@ export function renderSemanticContractMarkdown(contract, {
         .map(({ id }) => id);
       lines.push(`Impacta requisitos: ${decision.requirementIds.join(', ') || 'nenhum'}; provas: ${decisionCases.join(', ') || 'nenhuma'}; invariantes: ${decision.invariantIds.join(', ') || 'nenhum'}; riscos: ${decision.riskIds.join(', ') || 'nenhum'}.`);
       if (decision.distinguishingCase !== undefined) {
-        lines.push(`Caso que diferencia as opções — Dado: ${decision.distinguishingCase.given}; Quando: ${decision.distinguishingCase.when}.`);
+        lines.push(`Caso que diferencia as opções — Dado: ${decision.distinguishingCase.given}; Quando: ${ensurePeriod(decision.distinguishingCase.when)}`);
         for (const outcome of decision.distinguishingCase.outcomes) {
           lines.push(`- ${outcome.answerId} → ${outcome.then}`);
         }

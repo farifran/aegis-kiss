@@ -14,8 +14,6 @@ consumidores; não afirma que cada descrição textual seja semanticamente indis
 | `intent-evidence`, `preflight-handoff` | captura/discovery → semantic request e integridade | Texto, fragmentos, fatos e snapshot. Manter custódia e vínculos. |
 | `constitution`, `architecture-policy` | configuração confiável → semantic request/supervisor | Autoridade separada da demanda. Manter. |
 | `semantic-request` | Harness → supervisor | Contexto de entrada e referências disponíveis. Não confundir com parecer. O antigo `semantic-worksheet` não tinha produtor/consumidor e foi removido. |
-| `jev-decision-batch`, `jev-assessment`, `jev-advisory` | projeção → gateway → integração JEV | Perguntas, resposta externa e vínculo à requisição. Manter limites de confiança; não promover probabilidade a autoridade. |
-| `jev-comparison` | comparação JEV/parecer → relatório experimental | Métrica shadow, não requisito do contrato. Manter separado do contrato. |
 | `semantic-opinion`, `semantic-opinion-decision`, `prepared-opinion-effect` | supervisor → compilador | Conteúdo semântico e efeitos propostos indexados. Manter distinção de autoridade. |
 | `semantic-draft`, `semantic-draft-decision`, `prepared-draft-effect` | compilador → validação/aplicação de respostas | IDs e vínculos resolvidos. Não são segunda resposta solicitada à IA. |
 | `contract-components` | definições compartilhadas → schemas anteriores | Reutilização estrutural, não etapa nem artefato de execução. |

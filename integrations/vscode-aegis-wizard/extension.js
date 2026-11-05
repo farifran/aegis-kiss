@@ -143,7 +143,7 @@ async function writeResolution(root, request, answers) {
   } finally {
     await fs.promises.rm(temporary, { force: true });
   }
-  return result.recompilationRequired;
+  return result;
 }
 
 function resume(root) {
@@ -235,8 +235,8 @@ async function presentPending(force = false) {
       lastCancelledId = reqId;
       return;
     }
-    const recompilationRequired = await writeResolution(root, request, answers);
-    if (recompilationRequired) {
+    const { recompilationRequired, preparedEffectsReady } = await writeResolution(root, request, answers);
+    if (recompilationRequired && !preparedEffectsReady) {
       await vscode.window.showInformationMessage(
         'Aegis registrou suas decisões. O supervisor deve recompilar o contrato antes da assinatura.',
       );

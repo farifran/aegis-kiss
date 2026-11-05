@@ -3,117 +3,389 @@
   "$id": "aegis.prepared_draft_effect.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "requirements",
-    "invariants",
-    "risks",
-    "boundaryRules",
-    "dimensions"
-  ],
   "properties": {
     "requirements": {
       "type": "array",
       "maxItems": 64,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "index",
-          "value"
-        ],
-        "properties": {
-          "index": {
-            "type": "integer",
-            "minimum": 0
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "value"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {
+                "$ref": "aegis.semantic_draft.v9#/properties/requirements/items"
+              }
+            }
           },
-          "value": {
-            "$ref": "aegis.semantic_draft.v9#/properties/requirements/items"
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "patch"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "acceptanceCases": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "index"
+                      ],
+                      "properties": {
+                        "index": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "given": {
+                          "type": "string"
+                        },
+                        "when": {
+                          "type": "string"
+                        },
+                        "then": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "outcomeKind": {
+                          "enum": [
+                            "RETURN_VALUE",
+                            "REJECTION"
+                          ]
+                        },
+                        "decisionBinding": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": false,
+                          "required": [
+                            "questionId",
+                            "answerId"
+                          ],
+                          "properties": {
+                            "questionId": {
+                              "type": "string"
+                            },
+                            "answerId": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
-        }
+        ]
       }
     },
     "invariants": {
       "type": "array",
       "maxItems": 64,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "index",
-          "value"
-        ],
-        "properties": {
-          "index": {
-            "type": "integer",
-            "minimum": 0
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "value"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
+              }
+            }
           },
-          "value": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "patch"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "falsification": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
           }
-        }
+        ]
       }
     },
     "risks": {
       "type": "array",
       "maxItems": 64,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "index",
-          "value"
-        ],
-        "properties": {
-          "index": {
-            "type": "integer",
-            "minimum": 0
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "value"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
+              }
+            }
           },
-          "value": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "patch"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mitigation": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
           }
-        }
+        ]
       }
     },
     "boundaryRules": {
       "type": "array",
       "maxItems": 64,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "index",
-          "value"
-        ],
-        "properties": {
-          "index": {
-            "type": "integer",
-            "minimum": 0
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "value"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {
+                "$ref": "aegis.semantic_draft.v9#/properties/boundaryRules/items"
+              }
+            }
           },
-          "value": {
-            "$ref": "aegis.semantic_draft.v9#/properties/boundaryRules/items"
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "patch"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
           }
-        }
+        ]
       }
     },
     "dimensions": {
       "type": "array",
       "maxItems": 64,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "index",
-          "value"
-        ],
-        "properties": {
-          "index": {
-            "type": "integer",
-            "minimum": 0
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "value"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
+              }
+            }
           },
-          "value": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "index",
+              "patch"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "SPECIFIED",
+                      "DECISION_REQUIRED",
+                      "GAP_FOUND"
+                    ]
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "acceptanceCaseId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$"
+                  },
+                  "acceptanceCase": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "requirementIndex": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "caseIndex": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "proofObligation": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "required": [
+                      "relation",
+                      "baselineOutcome",
+                      "variationOutcome",
+                      "resolutionParameter"
+                    ],
+                    "properties": {
+                      "relation": {
+                        "enum": [
+                          "OUTPUTS_EQUAL",
+                          "DEFINED_RESULT",
+                          "EXPLICIT_REJECTION",
+                          "BOUNDED_DIFF"
+                        ]
+                      },
+                      "baselineOutcome": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "variationOutcome": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "resolutionKind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "resolutionParameter": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "observables": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
-        }
+        ]
       }
     }
   }

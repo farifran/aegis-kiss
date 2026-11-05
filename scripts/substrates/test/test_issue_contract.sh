@@ -115,8 +115,20 @@ if (!recommended.recompilationRequired
 }
 const alternative = buildResolution(request, [{ questionId: 'Q-0001', answerId: 'ANS-0001-02' }]);
 if (!alternative.recompilationRequired
+  || alternative.preparedEffectsReady
   || alternative.resolution.attestation !== 'DECISIONS_REVIEWED_AND_CONFIRMED') {
   throw new Error('wizard_alternative_resolution_mismatch');
+}
+const preparedRequest = {
+  ...request,
+  questions: [{
+    ...request.questions[0],
+    answers: [{ id: 'ANS-0001-01', applicationMode: 'PREPARED_EFFECT' }],
+  }],
+};
+const prepared = buildResolution(preparedRequest, [{ questionId: 'Q-0001', answerId: 'ANS-0001-01' }]);
+if (!prepared.recompilationRequired || !prepared.preparedEffectsReady) {
+  throw new Error('wizard_prepared_effect_resolution_mismatch');
 }
 NODE
 
@@ -277,8 +289,7 @@ if (complete.method !== 'LOSSLESS_NEUTRAL_SENTENCES_V2'
   || complete.fragments.length !== 1
   || completeRanges.length !== 3
   || completeRanges[0].attributes.start !== 0
-  || completeRanges[0].attributes.end !== 0
-  || complete.bitLayouts.length !== 0) {
+  || completeRanges[0].attributes.end !== 0) {
   throw new Error('complete_intent_evidence_was_not_extracted');
 }
 
@@ -292,8 +303,7 @@ if (!arithmeticGap.literalFacts.some(({ kind, reference }) => (
 const individualBits = Array.from({ length: 32 }, (_, bit) => `Bit ${bit}: campo${bit}`).join('; ');
 const fullyEnumeratedIntent = `Expor bitmask de 32 bits: ${individualBits}.`;
 const fullyEnumerated = buildIntentEvidence(fullyEnumeratedIntent);
-if (fullyEnumerated.literalFacts.filter(({ kind }) => kind === 'BIT_RANGE').length !== 32
-  || fullyEnumerated.bitLayouts.length !== 0) {
+if (fullyEnumerated.literalFacts.filter(({ kind }) => kind === 'BIT_RANGE').length !== 32) {
   throw new Error('fully_enumerated_intent_evidence_was_rejected');
 }
 
@@ -334,7 +344,6 @@ printf '%s\n' "${draft_output}" | jq -e '
   and .status == "SEMANTIC_DELIBERATION_REQUIRED"
   and .phase == "DISCOVERED"
   and .dataPath == ".harness/runtime/preflight.json"
-  and (has("jev") | not)
 ' >/dev/null
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 jq -e '
@@ -405,8 +414,6 @@ printf '%s\n' "${semantic_request}" | jq -e '
     "integrity-hash",
     "public-interface"
   ]))
-  and .policy.signalSemantics.verdict == "SEMANTIC_NOT_LEXICAL"
-  and .policy.signalSemantics.assessment == "REQUIRED_FOR_EACH_SIGNAL_RULE"
   and (.workspace.observedTextPaths == ["src/index.ts"])
   and (.workspace.sourceEvidence[0].trust == "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS")
   and .workspace.sourceEvidence[0].selection == "FULL_SOURCE"
@@ -416,27 +423,6 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and (has("sourceSnapshotDigest") | not)
 ' >/dev/null
 semantic_evidence_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.intentEvidence.evidenceDigest')"
-[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
-
-# A projeção JEV é compacta, consultiva e não grava estado nem chama serviço externo.
-jev_request="$(bash ./aegis --jev-request)"
-printf '%s\n' "${jev_request}" | jq -e \
-  --arg semanticDigest "$(printf '%s\n' "${semantic_request}" | jq -r '.requestDigest')" \
-  --arg evidenceDigest "${semantic_evidence_digest}" '
-  .schema == "aegis.jev_decision_batch.v2"
-  and .sourceSemanticRequestDigest == $semanticDigest
-  and .sourceEvidenceDigest == $evidenceDigest
-  and .protocol.authority == "ADVISORY_ONLY"
-  and .protocol.transport == "VERCEL_AI_GATEWAY"
-  and .protocol.purpose == "SHADOW_EVALUATION"
-  and .projection.questionCount == (.questions | length)
-  and .projection.questionCount == (.bindings | length)
-  and .projection.questionCount == 2
-  and ([.bindings[].family] | all(. == "INTENT_FRAGMENT"))
-  and ([.bindings[].allowedUse] | all(. == "SHADOW_METRIC_ONLY"))
-  and (.state | has("sourceEvidence") | not)
-  and (.state | has("outputSchema") | not)
-' >/dev/null
 [[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
 
 # Um adaptador IDE sem executor automático falha explicitamente; a ficha continua
@@ -1023,25 +1009,14 @@ printf '%s\n' "${policy_output}" | jq -e '
   and (.detail | contains("architecture_policy_origin_mismatch"))
 ' >/dev/null
 
-# M0 não antecipa o parecer semântico; JEV observa os mesmos fragmentos apenas em shadow mode.
+# M0 não antecipa o parecer semântico.
 node scripts/issue_contract_runner.mjs draft 'Executar Partial Fill com divisão BigInt, consolidar em Merkle e expor bitmask de 8 bits: Bits 0–1: flags; Bits 2–7: quantidade de participantes.' >/dev/null
 deterministic_request="$(bash ./aegis --semantic-request)"
 printf '%s\n' "${deterministic_request}" | jq -e '
-  .intentEvidence.bitLayouts == []
-  and .policy.signals == []
-  and (.intentEvidence.literalFacts | map(select(.kind == "BIT_RANGE")) | length) == 2
+  (.intentEvidence.literalFacts | map(select(.kind == "BIT_RANGE")) | length) == 2
   and (.intentEvidence | has("determinismActivations") | not)
   and (.intentEvidence | has("proofObligations") | not)
 ' >/dev/null
-deterministic_jev_request="$(bash ./aegis --jev-request)"
-printf '%s\n' "${deterministic_jev_request}" | jq -e '
-  .schema == "aegis.jev_decision_batch.v2"
-  and .projection.questionCount == (2 * .projection.fragmentCount)
-  and .projection.questionCount == (2 * (.state.fragments | length))
-  and ([.bindings[].family] | all(. == "INTENT_FRAGMENT"))
-  and ([.bindings[].allowedUse] | all(. == "SHADOW_METRIC_ONLY"))
-' >/dev/null
-[[ "$(printf '%s\n' "${deterministic_jev_request}" | jq -r '.batchDigest')" == "$(bash ./aegis --jev-request | jq -r '.batchDigest')" ]]
 
 # O comando público percorre captura e supervisão em uma única execução. O
 # supervisor permanece isolado e o contrato continua sem autorizar implementação.
@@ -1188,4 +1163,28 @@ assert.throws(() => replacePreparedEntries(fixture, {...plan, requirements: [{in
 assert.throws(() => replacePreparedEntries(fixture, {...plan, requirements: [{index: 9, value: {}}]}), /index_out_of_range/);
 NODE
 
+# Teste de proteção do produto: --clean e --new nunca alteram ou apagam arquivos em src/
+printf 'export const customUserProductFile = 42;\n' > "${WORK_DIR}/src/custom.ts"
+custom_before="$(shasum "${WORK_DIR}/src/custom.ts")"
+source_before="$(shasum "${WORK_DIR}/src/index.ts")"
+
+clean_output="$(bash ./aegis --clean)"
+[[ "${clean_output}" =~ "product_preserved=1" ]]
+[[ "${custom_before}" == "$(shasum "${WORK_DIR}/src/custom.ts")" ]]
+[[ "${source_before}" == "$(shasum "${WORK_DIR}/src/index.ts")" ]]
+printf '%s\n' "$(bash ./aegis --status)" | jq -e '.status == "IDLE" and .workspace == "clean"' >/dev/null
+
+# Teste de --new: reinicia o contexto mantendo o produto intacto
+AEGIS_CODEX_EXECUTABLE="${WORK_DIR}/scripts/substrates/test/fake_codex.mjs" \
+AEGIS_FAKE_CODEX_OPINION="${WORK_DIR}/fake-codex-opinion.json" \
+AEGIS_FAKE_CODEX_LOG="${WORK_DIR}/fake-codex.log" \
+bash ./aegis --new "${automatic_intent}" >/dev/null
+
+[[ "${custom_before}" == "$(shasum "${WORK_DIR}/src/custom.ts")" ]]
+[[ "${source_before}" == "$(shasum "${WORK_DIR}/src/index.ts")" ]]
+[[ -f ".harness/runtime/preflight.json" ]]
+rm -f "${WORK_DIR}/src/custom.ts"
+
 printf '[AEGIS][TEST] capture, discovery and semantic contract flow: PASS\n'
+
+

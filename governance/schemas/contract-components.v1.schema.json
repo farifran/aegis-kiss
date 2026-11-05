@@ -163,7 +163,24 @@
               "type": "null"
             },
             {
-              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "index"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "REQUIREMENT",
+                    "BOUNDARY_RULE"
+                  ]
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
             }
           ]
         },
@@ -178,7 +195,7 @@
         "rationale": {
           "type": "string",
           "minLength": 1,
-          "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados exatos do witness ficam em proofObligation e precisam ser reproduzidos exatamente no acceptance case."
+          "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados do witness ficam em proofObligation e o caso de aceitação é vinculado por acceptanceCase."
         },
         "basis": {
           "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
@@ -275,7 +292,7 @@
     "semantic_opinion_determinismProofObligation": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Resolução proposta pela IA para a propriedade observável. O Harness vincula witnessId e confere referências e resultados literais no AC; pertinência da resolução e da relação é responsabilidade semântica, não uma prova mecânica. O campo then do AC deve ser: Base: <baselineOutcome>; Variação: <variationOutcome>; Resolução: <resolutionKind>. Quando houver parâmetro: Resolução: <resolutionKind> (<resolutionParameter>).",
+      "description": "Resolução proposta pela IA para a propriedade observável. O Harness vincula witnessId e valida a coerência entre relation e outcomeKind do caso de aceitação vinculado.",
       "required": [
         "relation",
         "resolutionKind",
@@ -523,7 +540,7 @@
         "rationale": {
           "type": "string",
           "minLength": 1,
-          "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados exatos do witness ficam em proofObligation e precisam ser reproduzidos exatamente no acceptance case."
+          "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados do witness ficam em proofObligation e o caso de aceitação é vinculado por acceptanceCaseId."
         },
         "basis": {
           "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
@@ -706,34 +723,6 @@
         "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
       },
       "uniqueItems": true
-    },
-    "issue_contract_policySignals": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "ruleId",
-          "kind",
-          "reference"
-        ],
-        "properties": {
-          "ruleId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "kind": {
-            "enum": [
-              "REVIEW",
-              "POSSIBLE_CONFLICT"
-            ]
-          },
-          "reference": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      }
     },
     "issue_contract_effectiveDeterminismStatus": {
       "description": "Estado recalculado pelo Harness após aplicar resoluções humanas e considerar lacunas materiais sem decisão madura.",
@@ -1339,36 +1328,7 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "statement",
-          "falsification",
-          "requirementIds"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^INV-[A-Z0-9][A-Z0-9-]+$"
-          },
-          "statement": {
-            "type": "string",
-            "minLength": 1
-          },
-          "falsification": {
-            "type": "string",
-            "minLength": 1
-          },
-          "requirementIds": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "string"
-            },
-            "uniqueItems": true
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
       }
     },
     "semantic_draft_riskReview": {
@@ -1395,60 +1355,7 @@
     "semantic_draft_risks": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "kind",
-          "level",
-          "statement",
-          "mitigation",
-          "requirementIds",
-          "basis"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^RISK-[A-Z0-9][A-Z0-9-]+$"
-          },
-          "kind": {
-            "enum": [
-              "SECURITY",
-              "RELIABILITY",
-              "PRIVACY",
-              "PERFORMANCE",
-              "INTEGRITY",
-              "COMPLEXITY"
-            ]
-          },
-          "level": {
-            "enum": [
-              "LOW",
-              "MEDIUM",
-              "HIGH",
-              "CRITICAL"
-            ]
-          },
-          "statement": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mitigation": {
-            "type": "string",
-            "minLength": 1
-          },
-          "requirementIds": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "string"
-            },
-            "uniqueItems": true
-          },
-          "basis": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
       }
     },
     "semantic_draft_adversarialReview": {
@@ -1544,100 +1451,7 @@
     "semantic_draft_determinismReview_properties_dimensions": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "kind",
-          "subjectId",
-          "status",
-          "rationale",
-          "targetIds",
-          "basis",
-          "acceptanceCaseId",
-          "proofObligation",
-          "inapplicabilityProof",
-          "closureAuthority",
-          "counterexampleWitness"
-        ],
-        "properties": {
-          "kind": {
-            "type": "string",
-            "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
-          },
-          "subjectId": {
-            "oneOf": [
-              {
-                "const": "PUBLIC_CONTRACT"
-              },
-              {
-                "type": "string",
-                "pattern": "^(REQ|BOUND)-[A-Z0-9][A-Z0-9-]+$"
-              }
-            ]
-          },
-          "status": {
-            "enum": [
-              "SPECIFIED",
-              "NOT_APPLICABLE",
-              "DECISION_REQUIRED",
-              "GAP_FOUND"
-            ]
-          },
-          "rationale": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados exatos do witness ficam em proofObligation e precisam ser reproduzidos exatamente no acceptance case."
-          },
-          "basis": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
-          },
-          "acceptanceCaseId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$"
-          },
-          "proofObligation": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismProofObligation"
-              }
-            ]
-          },
-          "closureAuthority": {
-            "enum": [
-              "MECHANICAL_FACT",
-              "AUTHORITATIVE_RULE",
-              "HUMAN_DECISION",
-              "MODEL_ARGUMENT"
-            ]
-          },
-          "counterexampleWitness": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_counterexampleWitness"
-          },
-          "inapplicabilityProof": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_inapplicabilityProof"
-              }
-            ]
-          },
-          "targetIds": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^(REQ|INV|Q|BOUND)-[A-Z0-9][A-Z0-9-]+$"
-            }
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
       }
     },
     "semantic_draft_boundaryRules_items_properties_id": {
@@ -2024,32 +1838,7 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "statement",
-          "falsification",
-          "requirementIndexes"
-        ],
-        "properties": {
-          "statement": {
-            "type": "string",
-            "minLength": 1
-          },
-          "falsification": {
-            "type": "string",
-            "minLength": 1
-          },
-          "requirementIndexes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_invariants_items"
       }
     },
     "semantic_opinion_riskReview": {
@@ -2075,56 +1864,7 @@
     "semantic_opinion_risks": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "kind",
-          "level",
-          "statement",
-          "mitigation",
-          "requirementIndexes",
-          "basis"
-        ],
-        "properties": {
-          "kind": {
-            "enum": [
-              "SECURITY",
-              "RELIABILITY",
-              "PRIVACY",
-              "PERFORMANCE",
-              "INTEGRITY",
-              "COMPLEXITY"
-            ]
-          },
-          "level": {
-            "enum": [
-              "LOW",
-              "MEDIUM",
-              "HIGH",
-              "CRITICAL"
-            ]
-          },
-          "statement": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mitigation": {
-            "type": "string",
-            "minLength": 1
-          },
-          "basis": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
-          },
-          "requirementIndexes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_risks_items"
       }
     },
     "semantic_opinion_adversarialReview": {
@@ -2201,92 +1941,7 @@
       "type": "array",
       "description": "Somente propriedades pertinentes aos observáveis da demanda, sem catálogo obrigatório. kind é identificador aberto; subject delimita o resultado afetado. A IA propõe cenário-base e variação, regra e origem. SPECIFIED exige autoridade e caso de aceitação vinculado; DECISION_REQUIRED exige decisão material; GAP_FOUND preserva lacuna. Não preencher uma lista de NOT_APPLICABLE. Relações estruturais não certificam verdade semântica.",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "kind",
-          "subject",
-          "status",
-          "rationale",
-          "targets",
-          "basis",
-          "acceptanceCase",
-          "proofObligation",
-          "inapplicabilityProof",
-          "counterexampleWitness"
-        ],
-        "properties": {
-          "kind": {
-            "type": "string",
-            "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
-          },
-          "subject": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
-              }
-            ]
-          },
-          "status": {
-            "enum": [
-              "SPECIFIED",
-              "NOT_APPLICABLE",
-              "DECISION_REQUIRED",
-              "GAP_FOUND"
-            ]
-          },
-          "rationale": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados exatos do witness ficam em proofObligation e precisam ser reproduzidos exatamente no acceptance case."
-          },
-          "basis": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
-            },
-            "uniqueItems": true
-          },
-          "acceptanceCase": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_acceptanceCaseRef"
-              }
-            ]
-          },
-          "proofObligation": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_determinismProofObligation"
-              }
-            ]
-          },
-          "inapplicabilityProof": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_inapplicabilityProof"
-              }
-            ]
-          },
-          "counterexampleWitness": {
-            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_counterexampleWitness"
-          }
-        }
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_determinismReview_properties_dimensions_items"
       }
     },
     "semantic_request_constitution": {
@@ -2508,9 +2163,7 @@
       "additionalProperties": false,
       "required": [
         "contexts",
-        "signalSemantics",
         "rules",
-        "signals",
         "amendments"
       ],
       "properties": {
@@ -2533,26 +2186,6 @@
                 "type": "string",
                 "minLength": 1
               }
-            }
-          }
-        },
-        "signalSemantics": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "verdict",
-            "assessment",
-            "residualReview"
-          ],
-          "properties": {
-            "verdict": {
-              "const": "SEMANTIC_NOT_LEXICAL"
-            },
-            "assessment": {
-              "const": "REQUIRED_FOR_EACH_SIGNAL_RULE"
-            },
-            "residualReview": {
-              "const": "SEPARATE_FROM_POLICY_ASSESSMENT"
             }
           }
         },
@@ -2612,34 +2245,6 @@
                   "type": "string"
                 },
                 "uniqueItems": true
-              }
-            }
-          }
-        },
-        "signals": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "ruleId",
-              "kind",
-              "reference"
-            ],
-            "properties": {
-              "ruleId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "kind": {
-                "enum": [
-                  "REVIEW",
-                  "POSSIBLE_CONFLICT"
-                ]
-              },
-              "reference": {
-                "type": "string",
-                "minLength": 1
               }
             }
           }
@@ -2764,34 +2369,6 @@
             "items": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          "executionPipeline": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "stage",
-                "id"
-              ],
-              "properties": {
-                "stage": {
-                  "enum": [
-                    "GUARD",
-                    "MUTATION",
-                    "COMPUTATION",
-                    "DISPATCH"
-                  ]
-                },
-                "id": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "description": {
-                  "type": "string"
-                }
-              }
             }
           },
           "parameters": {
@@ -2967,8 +2544,8 @@
                           "COPY_FILE",
                           "APPEND_CONTENT",
                           "WRITE_FILE",
+                          "DELETE_FILE",
                           "PURGE_TEMPORARY",
-                          "ISOLATE_TO_QUARANTINE",
                           "RESTORE_BACKUP",
                           "WRITE_TEMP",
                           "APPEND_LOG",
@@ -3001,6 +2578,7 @@
                         "properties": {
                           "strategy": {
                             "enum": [
+                              "PURGE_TEMPORARY",
                               "TRAP_PURGE_TEMPORARY",
                               "RESTORE_SNAPSHOT",
                               "ATOMIC_REPLACE",
@@ -3042,6 +2620,7 @@
                   "properties": {
                     "strategy": {
                       "enum": [
+                        "PURGE_TEMPORARY",
                         "TRAP_PURGE_TEMPORARY",
                         "RESTORE_SNAPSHOT",
                         "ATOMIC_REPLACE",
@@ -3083,6 +2662,7 @@
             "properties": {
               "strategy": {
                 "enum": [
+                  "PURGE_TEMPORARY",
                   "TRAP_PURGE_TEMPORARY",
                   "RESTORE_SNAPSHOT",
                   "ATOMIC_REPLACE",

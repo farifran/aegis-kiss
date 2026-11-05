@@ -402,61 +402,15 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       operations: [],
       observables: [],
     },
-    closureCertificate: generateClosureCertificate({
-      specification: {
-        stateModel: opinion.stateModel ?? {
-          entities: [],
-          operations: [],
-          observables: [],
-        },
-        architectureContexts: opinion.architectureContexts.map((item) => ({
-          tag: indexedValue(request.policy.contexts, item.contextIndex, 'architecture_context').tag,
-          rationale: item.rationale,
-          basis: compileOpinionBasis(item.basis, request),
-        })),
-        boundaryRules: opinion.boundaryRules.map((item, index) => ({
-          id: generatedId('BOUND', index),
-          subject: item.subject,
-          lowerBound: item.lowerBound,
-          upperBound: item.upperBound,
-          overflowBehavior: item.overflowBehavior,
-          underflowBehavior: item.underflowBehavior,
-          representationKind: item.representationKind,
-        })),
-        requirements: opinion.requirements.map((item, index) => ({
-          id: generatedId('REQ', index),
-          statement: item.statement,
-        })),
-        literalFacts: request.intentEvidence?.literalFacts ?? [],
-        intentEvidence: request.intentEvidence,
-        unknowns: opinion.unknowns.map((item, index) => ({
-          id: generatedId('UNKNOWN', index),
-          statement: item.statement,
-          material: item.material,
-          decisionId: item.decisionIndex === null ? null : indexedValue(decisionIds, item.decisionIndex, 'unknown_decision'),
-        })),
-        determinismReview: {
-          dimensions: dimensions.map((item) => ({
-            kind: item.kind,
-            subjectId: item.subject === null ? 'PUBLIC_CONTRACT' : compileTargets([item.subject])[0],
-            status: item.status,
-            rationale: item.rationale,
-            targetIds: compileTargets(item.targets),
-          })),
-        },
-        decisions: opinion.decisions.map((item, index) => ({
-          ...(item.semanticKey ? { semanticKey: item.semanticKey } : {}),
-          questionId: decisionIds[index],
-          question: item.question,
-          presentation: item.presentation,
-          answers: item.answers,
-          distinguishingCase: item.distinguishingCase,
-        })),
-        pathReferences: opinion.pathReferences ?? [],
-      },
-      humanResolutions: [],
-    }),
   };
+  draft.closureCertificate = generateClosureCertificate({
+    specification: {
+      ...draft,
+      literalFacts: request.intentEvidence?.literalFacts ?? [],
+      intentEvidence: request.intentEvidence,
+    },
+    humanResolutions: [],
+  });
   if (compilePrepared) {
     for (const [decisionIndex, decision] of opinion.decisions.entries()) {
       for (const [answerIndex, answer] of decision.answers.entries()) {
@@ -466,10 +420,23 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
           for (const option of item.answers) delete option.preparedEffect;
         }
         replacePreparedEntries(variant, answer.preparedEffect);
+        for (const entry of (answer.preparedEffect.requirements ?? [])) {
+          if (entry.patch?.acceptanceCases) {
+            for (const acPatch of entry.patch.acceptanceCases) {
+              if (variant.requirements[entry.index]?.acceptanceCases[acPatch.index]) {
+                variant.requirements[entry.index].acceptanceCases[acPatch.index].decisionBinding = {
+                  decisionIndex,
+                  answerIndex,
+                };
+              }
+            }
+          }
+        }
         const compiled = compileSemanticOpinion(variant, request, false);
         draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = Object.fromEntries(
-          effectCollections.map((key) => [key, answer.preparedEffect[key].map(({ index }) => ({
-            index, value: effectCollection(compiled, key)[index],
+          effectCollections.map((key) => [key, (answer.preparedEffect[key] ?? []).map((entry) => ({
+            index: entry.index,
+            value: effectCollection(compiled, key)[entry.index],
           }))]),
         );
       }

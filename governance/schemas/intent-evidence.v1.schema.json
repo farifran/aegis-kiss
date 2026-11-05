@@ -4,7 +4,7 @@
   "title": "Aegis Neutral Intent Evidence v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "evidenceDigest", "method", "offsetUnit", "intentDigest", "fragments", "literalFacts", "bitLayouts"],
+  "required": ["schema", "evidenceDigest", "method", "offsetUnit", "intentDigest", "fragments", "literalFacts"],
   "properties": {
     "schema": { "const": "aegis.intent_evidence.v1" },
     "evidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -52,39 +52,6 @@
               ]
             }
           }
-        }
-      }
-    },
-    "bitLayouts": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "declarationFactId", "declaredWidth", "fieldFactIds", "coveredWidth", "status", "gaps", "overlaps", "outOfRange"],
-        "properties": {
-          "id": { "type": "string", "pattern": "^BIT-LAYOUT-[0-9]{4}$" },
-          "declarationFactId": { "type": ["string", "null"], "pattern": "^FACT-[0-9]{4}$" },
-          "declaredWidth": { "type": "integer", "minimum": 1 },
-          "fieldFactIds": { "type": "array", "items": { "type": "string", "pattern": "^FACT-[0-9]{4}$" }, "uniqueItems": true },
-          "coveredWidth": { "type": "integer", "minimum": 0 },
-          "status": { "enum": ["COMPLETE", "INCOMPLETE"] },
-          "gaps": { "$ref": "#/$defs/ranges" },
-          "overlaps": { "$ref": "#/$defs/ranges" },
-          "outOfRange": { "$ref": "#/$defs/ranges" }
-        }
-      }
-    }
-  },
-  "$defs": {
-    "ranges": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["startBit", "endBit"],
-        "properties": {
-          "startBit": { "type": "integer" },
-          "endBit": { "type": "integer" }
         }
       }
     }

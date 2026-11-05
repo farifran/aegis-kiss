@@ -4,15 +4,14 @@
   "title": "Aegis Semantic Supervisor Execution v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "executionDigest", "sourceSemanticRequestDigest", "provider", "model", "calls", "jevEvaluation", "usage", "opinionDigest"],
+  "required": ["schema", "executionDigest", "sourceSemanticRequestDigest", "provider", "model", "calls", "usage", "opinionDigest"],
   "properties": {
     "schema": { "const": "aegis.semantic_execution.v1" },
     "executionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "sourceSemanticRequestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "provider": { "type": "string", "minLength": 1 },
     "model": { "type": "string", "minLength": 1 },
-    "calls": { "const": 1 },
-    "jevEvaluation": { "enum": ["REUSED", "EXECUTED", "UNAVAILABLE"] },
+    "calls": { "type": "integer", "minimum": 1, "maximum": 2 },
     "usage": {
       "type": "object",
       "additionalProperties": false,

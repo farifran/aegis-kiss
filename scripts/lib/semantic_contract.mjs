@@ -10,7 +10,6 @@ export {
 } from './semantic_contract_lifecycle.mjs';
 export {
   generateClosureCertificate,
-  validateAggregationAndBoundaries,
   validateDecisionsWitness,
   validateFieldLifecycle,
   validateOperationTotality,

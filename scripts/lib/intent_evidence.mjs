@@ -134,7 +134,6 @@ export function buildIntentEvidence(intent) {
     intentDigest: canonicalDigest(intent),
     fragments,
     literalFacts: facts,
-    bitLayouts: [],
   };
   const evidence = { ...payload, evidenceDigest: canonicalDigest(payload) };
   assertIntentEvidence(evidence, intent);

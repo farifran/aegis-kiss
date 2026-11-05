@@ -33,8 +33,7 @@
       "appliesWhen": ["product-demand", "product-path"],
       "appliesMode": "any",
       "reviewReferences": ["src/"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 2011, "endByte": 2220 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-HARNESS-STATE",
@@ -43,8 +42,7 @@
       "appliesWhen": ["harness-state", "harness-runtime"],
       "appliesMode": "any",
       "reviewReferences": [".harness/state/", ".harness/runtime/", ".harness/config/roles.json"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 2255, "endByte": 2606 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-LOCAL-DETERMINISTIC-CORE",
@@ -53,8 +51,7 @@
       "appliesWhen": ["harness-core", "provider-integration"],
       "appliesMode": "any",
       "reviewReferences": ["provedor de modelo"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 2652, "endByte": 2891 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-STRICT-EXPLICIT-MODULES",
@@ -63,8 +60,7 @@
       "appliesWhen": ["typescript-form"],
       "appliesMode": "any",
       "reviewReferences": ["TypeScript"],
-      "forbiddenReferences": ["any", "@ts-ignore"],
-      "sourceRanges": [{ "startByte": 2939, "endByte": 3150 }]
+      "forbiddenReferences": ["any", "@ts-ignore"]
     },
     {
       "id": "ARCH-PARSIMONY",
@@ -73,8 +69,7 @@
       "appliesWhen": ["dependency", "persistence", "concurrency", "structural-complexity"],
       "appliesMode": "any",
       "reviewReferences": ["classe abstrata", "classes abstratas", "injeção de dependências", "factory", "factories", "decorador", "decoradores"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 3184, "endByte": 3477 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-FAILURE-EXPLICIT",
@@ -83,8 +78,7 @@
       "appliesWhen": ["stateful-operation", "external-effect"],
       "appliesMode": "any",
       "reviewReferences": ["rollback"],
-      "forbiddenReferences": ["try/catch", "catch vazio"],
-      "sourceRanges": [{ "startByte": 3515, "endByte": 3723 }]
+      "forbiddenReferences": ["try/catch", "catch vazio"]
     },
     {
       "id": "ARCH-DETERMINISTIC-TIME",
@@ -93,8 +87,7 @@
       "appliesWhen": ["time-dependent"],
       "appliesMode": "any",
       "reviewReferences": ["relógio"],
-      "forbiddenReferences": ["Date.now"],
-      "sourceRanges": [{ "startByte": 3763, "endByte": 4130 }]
+      "forbiddenReferences": ["Date.now"]
     },
     {
       "id": "ARCH-BIGINT-ARITHMETIC",
@@ -103,8 +96,7 @@
       "appliesWhen": ["integer-arithmetic"],
       "appliesMode": "any",
       "reviewReferences": ["BigInt"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 4169, "endByte": 4790 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-OBSERVABILITY-COUNTERS",
@@ -113,8 +105,7 @@
       "appliesWhen": ["bounded-observability"],
       "appliesMode": "any",
       "reviewReferences": ["bitmask", "telemetria"],
-      "forbiddenReferences": ["wrap"],
-      "sourceRanges": [{ "startByte": 4837, "endByte": 5170 }]
+      "forbiddenReferences": ["wrap"]
     },
     {
       "id": "ARCH-HASH-SECURITY-LABEL",
@@ -123,18 +114,16 @@
       "appliesWhen": ["integrity-hash"],
       "appliesMode": "any",
       "reviewReferences": ["criptográfica", "criptográfico", "hash", "fingerprint"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 5211, "endByte": 5684 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-PUBLIC-INTERFACE",
       "level": "hard",
-      "statement": "Toda função pública exigida pelo contrato possui entradas, saídas e falhas observáveis definidas. Quando a intenção não fornece uma assinatura ou modelo de dados suficiente, a ausência permanece uma lacuna bloqueante; o modelo não inventa uma API nem transfere uma opção imatura ao Wizard.",
+      "statement": "Toda função pública exigida pelo contrato possui entradas, saídas e falhas observáveis definidas. Quando a intenção não fornece uma assinatura explícita, o modelo pode propor a interface pública mínima e suficiente estritamente derivada dos observáveis da demanda, declarando-a no contrato para deliberação humana; interfaces especulativas ou sobre-engenharia permanecem proibidas.",
       "appliesWhen": ["public-interface"],
       "appliesMode": "any",
       "reviewReferences": ["função pública", "função pura", "re-exportadas"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 5722, "endByte": 6073 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-CONTRACT-CONSISTENCY",
@@ -143,8 +132,7 @@
       "appliesWhen": ["product-demand", "harness-core"],
       "appliesMode": "any",
       "reviewReferences": [],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 6115, "endByte": 6988 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-STATE-TRANSITION-TOTALITY",
@@ -153,8 +141,7 @@
       "appliesWhen": ["stateful-operation"],
       "appliesMode": "any",
       "reviewReferences": ["guards", "precedência", "reset", "estado inicial"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-TEMPORAL-INVARIANCE",
@@ -163,8 +150,7 @@
       "appliesWhen": ["time-dependent"],
       "appliesMode": "any",
       "reviewReferences": ["carry", "remainder", "frequência", "amostragem"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-CANONICAL-DIGEST-REPRESENTATION",
@@ -173,8 +159,7 @@
       "appliesWhen": ["integrity-hash"],
       "appliesMode": "any",
       "reviewReferences": ["payload", "encoding", "offset basis", "vazio"],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+      "forbiddenReferences": []
     },
     {
       "id": "ARCH-MINIMAL-SUFFICIENT-CLOSURE",
@@ -183,8 +168,7 @@
       "appliesWhen": ["product-demand", "harness-core"],
       "appliesMode": "any",
       "reviewReferences": [],
-      "forbiddenReferences": [],
-      "sourceRanges": [{ "startByte": 0, "endByte": 0 }]
+      "forbiddenReferences": []
     }
   ],
   "amendments": []

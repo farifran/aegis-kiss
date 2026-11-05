@@ -1,19 +1,6 @@
 const sourceEvidenceByteLimit = 32_768;
 const sourceEvidenceFileByteLimit = 8_192;
 
-const policySignalSemantics = {
-  verdict: 'SEMANTIC_NOT_LEXICAL',
-  assessment: 'REQUIRED_FOR_EACH_SIGNAL_RULE',
-  residualReview: 'SEPARATE_FROM_POLICY_ASSESSMENT',
-};
-
-function canonicalProofOutcome(proof) {
-  const parameter = proof.resolutionParameter === null
-    ? ''
-    : ` (${proof.resolutionParameter})`;
-  return `Base: ${proof.baselineOutcome}; Variação: ${proof.variationOutcome}; Resolução: ${proof.resolutionKind}${parameter}.`;
-}
-
 // Witness content is semantic; identity and subject binding are mechanical.
 function compileCounterexampleWitness(kind, subjectId, witness) {
   return {
@@ -21,11 +8,6 @@ function compileCounterexampleWitness(kind, subjectId, witness) {
     id: `WITNESS-${kind}-${subjectId}`,
     dimension: kind,
   };
-}
-
-function literalReferenceAppears(text, reference) {
-  return text.normalize('NFC').toLocaleLowerCase('pt-BR')
-    .includes(reference.normalize('NFC').toLocaleLowerCase('pt-BR'));
 }
 
 function closureAuthorityForDimension({ status, basis }) {
@@ -43,11 +25,8 @@ function closureAuthorityForDimension({ status, basis }) {
 }
 
 export {
-  canonicalProofOutcome,
   closureAuthorityForDimension,
   compileCounterexampleWitness,
-  literalReferenceAppears,
-  policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
 };

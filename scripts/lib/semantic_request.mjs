@@ -7,7 +7,6 @@ import { buildIntentEvidence } from './intent_evidence.mjs';
 import { assertSchema } from './schema_validator.mjs';
 import { buildSemanticOutputSchema } from './semantic_output_schema.mjs';
 import {
-  policySignalSemantics,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
 } from './semantic_authority.mjs';
@@ -190,7 +189,6 @@ export function buildSemanticRequest({
     },
     policy: {
       contexts: policy.contexts,
-      signalSemantics: policySignalSemantics,
       rules: policy.rules.map((rule) => ({
         id: rule.id,
         level: rule.level,
@@ -200,7 +198,6 @@ export function buildSemanticRequest({
         reviewReferences: rule.reviewReferences,
         forbiddenReferences: rule.forbiddenReferences,
       })),
-      signals: [],
       amendments: (policy.amendments ?? []).map(({ id, ruleId, reason }) => ({ id, ruleId, reason })),
     },
     revision,

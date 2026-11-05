@@ -12,10 +12,16 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
     ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
     : specification;
   const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
-  effectiveDeterminismStatus.lastGapLedger = certificate.gapLedger;
-  effectiveDeterminismStatus.lastCertificate = certificate;
   if (certificate.status !== 'CERTIFIED_CLOSED') {
-    if (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0) {
+    const nonDecisionGaps = certificate.unresolvedInventorySlots
+      + certificate.unresolvedDependencies
+      + certificate.unresolvedStateFields
+      + certificate.unresolvedObservables
+      + certificate.unresolvedTransitions
+      + certificate.unresolvedAuthorities
+      + certificate.contradictoryRules
+      + (specification.determinismReview?.dimensions ?? []).filter(({ status }) => status === 'GAP_FOUND').length;
+    if (nonDecisionGaps === 0 && (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0)) {
       return 'PENDING_HUMAN_DECISIONS';
     }
     return 'BLOCKED_BY_GAP';
@@ -23,18 +29,6 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
   return specification.determinismReview.status === 'NOT_APPLICABLE'
     ? 'NOT_APPLICABLE'
     : 'SEMANTICALLY_CLOSED';
-}
-
-export function getEffectiveGapLedger(specification, humanResolutions = [], {
-  intentEvidence = null,
-  literalFacts = [],
-} = {}) {
-  const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
-  const specWithEvidence = (effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts)
-    ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
-    : specification;
-  const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
-  return certificate.gapLedger;
 }
 
 function decisionMap(contract) {

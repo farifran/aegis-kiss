@@ -51,12 +51,19 @@ export function compileSemanticContract({
     for (const answer of decision.answers) {
       if (answer.preparedEffect == null) continue;
       const choices = [{ questionId: decision.questionId, answerId: answer.id, contractEffect: answer.contractEffect }];
-      const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence);
-      assertRevisionApplied(preview, { answers: choices }, draft);
-      assertSemanticDraft(preview, policy, {
-        ...validationContext,
-        resolvedDecisionIds: [...validationContext.resolvedDecisionIds, decision.questionId],
-      });
+      try {
+        const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence);
+        assertRevisionApplied(preview, { answers: choices }, draft);
+        assertSemanticDraft(preview, policy, {
+          ...validationContext,
+          resolvedDecisionIds: [...validationContext.resolvedDecisionIds, decision.questionId],
+        });
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message = `${error.message}:preparedEffect(${decision.questionId}/${answer.id})`;
+        }
+        throw error;
+      }
     }
   }
   if (draft.sourceContextDigest !== effectiveSemanticRequest.contextDigest) {
@@ -74,7 +81,6 @@ export function compileSemanticContract({
     intent: preflight.intent,
     observedPaths: observedPaths(preflight),
     intentEvidence: effectiveSemanticRequest.intentEvidence,
-    policySignals: effectiveSemanticRequest.policy.signals,
     specification: draft,
     effectiveDeterminismStatus: effectiveDeterminismStatus(
       draft,
@@ -143,10 +149,6 @@ export function assertContractDocument({
   if (canonicalDigest(contract.intentEvidence)
     !== canonicalDigest(semanticRequest.intentEvidence)) {
     throw new Error('contract_intent_evidence_mismatch');
-  }
-  if (canonicalDigest(contract.policySignals)
-    !== canonicalDigest(semanticRequest.policy.signals)) {
-    throw new Error('contract_policy_signals_mismatch');
   }
   assertContractApprovalEvidence(contract);
 }

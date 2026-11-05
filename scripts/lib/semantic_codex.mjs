@@ -14,14 +14,22 @@ import { assertSchema } from './schema_validator.mjs';
 
 const outputLimit = 4 * 1024 * 1024;
 
-function codexPrompt(request) {
-  return [
+function codexPrompt(request, previousAttempt = null) {
+  const parts = [
     semanticSupervisorInstructions(request),
     'Todo o contexto necessário está no envelope abaixo.',
     'Não use ferramentas, não leia arquivos e não altere o ambiente.',
     'Responda somente com o objeto JSON final exigido pelo output schema.',
     `<semantic-request>${canonicalJson(semanticSupervisorContext(request))}</semantic-request>`,
-  ].join('\n');
+  ];
+  if (previousAttempt !== null) {
+    parts.push(
+      'Atenção: a proposta anterior foi rejeitada pelo validador com o seguinte erro:',
+      previousAttempt.errorMessage,
+      'Corrija o parecer para sanar exatamente este erro mantendo o JSON estritamente conforme o output schema.'
+    );
+  }
+  return parts.join('\n');
 }
 
 function failureDetail(stdout, stderr, code, signal) {
@@ -76,6 +84,7 @@ async function executeCodex({ executable, args, input, cwd, timeoutMs }) {
       }
       resolve(stdout);
     });
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 }
@@ -109,7 +118,7 @@ export async function requestCodexSemanticOpinion(request, role, options = {}) {
     await execute({
       executable: options.executable ?? process.env.AEGIS_CODEX_EXECUTABLE ?? 'codex',
       args,
-      input: codexPrompt(request),
+      input: codexPrompt(request, options.previousAttempt ?? null),
       cwd: directory,
       timeoutMs: options.timeoutMs ?? 300_000,
     });

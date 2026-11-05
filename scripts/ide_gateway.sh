@@ -20,31 +20,46 @@ require_command_arity() {
 usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
-  ./aegis "<demanda>" Executa captura, Discovery, JEV e supervisão até o contrato
+  ./aegis "<demanda>" Executa captura, Discovery e supervisão até o contrato
+  ./aegis --new "<demanda>" Inicia contexto independente substituindo estado do Harness (preserva src/)
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
   ./aegis --semantic-run  Executa o supervisor configurado e compila o contrato
   ./aegis --semantic-compile  Recebe o parecer JSON da IDE pelo stdin e compila o contrato
-  ./aegis --jev-request  Exibe o lote de avaliação paralela preparado para o JEV
-  ./aegis --jev-run      Executa o JEV em modo sombra via Vercel AI Gateway
   ./aegis --wizard    Abre as decisões pendentes no terminal
   ./aegis --setup     Configura o supervisor do contrato e o agente de codificação
   ./aegis --setup --show  Exibe a configuração externa sem expor chaves
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
-  ./aegis --clean     Remove artefatos transientes e limpa src/
+  ./aegis --clean     Remove artefatos transientes e estado do Harness (preserva src/)
   ./aegis --help      Exibe esta mensagem de ajuda
 EOF
 }
 
 clean_command() {
+  [[ ! -L "${RUNTIME_DIR}" ]] || fatal 'INVALID_RUNTIME_DIRECTORY'
+  [[ ! -L "${ROOT_DIR}/.harness/state" ]] || fatal 'INVALID_STATE_DIRECTORY'
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
   rm -rf "${ROOT_DIR}/.harness/state"
-  [[ -d "${ROOT_DIR}/src" && ! -L "${ROOT_DIR}/src" ]] || fatal 'INVALID_SOURCE_DIRECTORY'
-  find "${ROOT_DIR}/src" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  echo '[AEGIS][IDE] clean=PASS source_reset=1 contracts_reset=1 resolutions_reset=1'
+  echo '[AEGIS][IDE] clean=PASS harness_reset=1 contracts_reset=1 resolutions_reset=1 product_preserved=1'
 }
+
+run_demand() {
+  node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" run "$@"
+  local run_code=$?
+  if [[ ${run_code} -ne 0 ]]; then
+    exit ${run_code}
+  fi
+  if [[ -t 0 && -t 1 && -f "${RUNTIME_DIR}/user_confirmation_request.json" ]]; then
+    local q_count
+    q_count="$(jq -r '.questionCount // 0' "${RUNTIME_DIR}/user_confirmation_request.json" 2>/dev/null || echo 0)"
+    if (( q_count > 0 )); then
+      resolve_preflight_wizard
+    fi
+  fi
+}
+
 
 resolve_preflight_wizard() {
   local request_file="${RUNTIME_DIR}/user_confirmation_request.json"
@@ -255,14 +270,6 @@ main() {
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-request
       ;;
-    --jev-request)
-      require_command_arity "$@"
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" jev-request
-      ;;
-    --jev-run)
-      require_command_arity "$@"
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" jev-run
-      ;;
     --semantic-run)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-run
@@ -292,6 +299,12 @@ main() {
       require_command_arity "$@"
       clean_command
       ;;
+    --new)
+      [[ $# -ge 2 ]] || fatal 'MISSING_ARGUMENT'
+      shift
+      clean_command >/dev/null
+      run_demand "$@"
+      ;;
     --help|-h)
       require_command_arity "$@"
       usage
@@ -301,17 +314,7 @@ main() {
       ;;
     *)
       # A demand runs the governed flow through the contract draft.
-      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" run "$@"
-      run_code=$?
-      if [[ ${run_code} -ne 0 ]]; then
-        exit ${run_code}
-      fi
-      if [[ -t 0 && -t 1 && -f "${RUNTIME_DIR}/user_confirmation_request.json" ]]; then
-        q_count="$(jq -r '.questionCount // 0' "${RUNTIME_DIR}/user_confirmation_request.json" 2>/dev/null || echo 0)"
-        if (( q_count > 0 )); then
-          resolve_preflight_wizard
-        fi
-      fi
+      run_demand "$@"
       ;;
   esac
 }

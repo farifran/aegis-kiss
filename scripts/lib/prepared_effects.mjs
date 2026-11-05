@@ -7,24 +7,59 @@ export function effectCollection(specification, key) {
   return key === 'dimensions' ? specification.determinismReview.dimensions : specification[key];
 }
 
-// Replace existing typed entries only: no arbitrary paths, identifiers or envelope writes.
+function applyPatch(target, patch) {
+  for (const [prop, patchVal] of Object.entries(patch)) {
+    if (prop === 'acceptanceCases' && Array.isArray(patchVal)) {
+      for (const casePatch of patchVal) {
+        const caseIndex = casePatch.index;
+        if (target.acceptanceCases && target.acceptanceCases[caseIndex]) {
+          const currentCase = target.acceptanceCases[caseIndex];
+          for (const [cProp, cVal] of Object.entries(casePatch)) {
+            if (cProp !== 'index' && cVal !== undefined) {
+              currentCase[cProp] = cVal;
+            }
+          }
+        }
+      }
+    } else if (prop === 'proofObligation' && patchVal && typeof patchVal === 'object') {
+      target.proofObligation = {
+        resolutionParameter: null,
+        observables: [],
+        ...(target.proofObligation ?? {}),
+        ...patchVal,
+      };
+      if (target.proofObligation.resolutionParameter === undefined) {
+        target.proofObligation.resolutionParameter = null;
+      }
+    } else if (patchVal !== undefined) {
+      target[prop] = patchVal;
+    }
+  }
+}
+
+// Replace or patch existing typed entries: no arbitrary paths, identifiers or envelope writes.
 export function replacePreparedEntries(specification, effect, touched = new Map()) {
   for (const key of effectCollections) {
     const collection = effectCollection(specification, key);
     const seen = new Set();
-    for (const { index, value } of effect[key]) {
+    for (const entry of (effect[key] ?? [])) {
+      const { index, value, patch } = entry;
       if (!Number.isInteger(index) || index < 0 || collection[index] === undefined) {
         throw new Error(`prepared_effect_index_out_of_range:${key}:${index}`);
       }
       const target = `${key}:${index}`;
       if (seen.has(target)) throw new Error(`prepared_effect_duplicate_target:${target}`);
       seen.add(target);
-      const digest = canonicalDigest(value);
+      const digest = canonicalDigest(patch !== undefined ? { patch } : value);
       if (touched.has(target) && touched.get(target) !== digest) {
         throw new Error(`prepared_effect_conflict:${target}`);
       }
       touched.set(target, digest);
-      collection[index] = globalThis.structuredClone(value);
+      if (patch !== undefined) {
+        applyPatch(collection[index], patch);
+      } else {
+        collection[index] = globalThis.structuredClone(value);
+      }
     }
   }
 }
@@ -44,7 +79,8 @@ export function assertPreparedEffectScope(specification, decision, effect) {
     risks: decision.riskIds,
   };
   for (const key of effectCollections) {
-    for (const { index, value } of effect[key]) {
+    for (const entry of (effect[key] ?? [])) {
+      const { index, value } = entry;
       const original = effectCollection(specification, key)[index];
       if (original === undefined) throw new Error(`prepared_effect_index_out_of_range:${key}:${index}`);
       const related = key === 'dimensions'
@@ -53,9 +89,11 @@ export function assertPreparedEffectScope(specification, decision, effect) {
           ? original.decisionId === decision.questionId
           : owned[key].includes(original.id);
       if (!related) throw new Error(`prepared_effect_outside_decision:${key}:${index}`);
-      if (key === 'dimensions'
-        ? value.kind !== original.kind || value.subjectId !== original.subjectId
-        : value.id !== original.id) throw new Error(`prepared_effect_identity_changed:${key}:${index}`);
+      if (value !== undefined) {
+        if (key === 'dimensions'
+          ? value.kind !== original.kind || value.subjectId !== original.subjectId
+          : value.id !== original.id) throw new Error(`prepared_effect_identity_changed:${key}:${index}`);
+      }
     }
   }
 }
@@ -78,7 +116,7 @@ export function applyPreparedAnswers(specification, answers, humanResolutions, i
     for (const requirement of draft.requirements) {
       if (decision.requirementIds.includes(requirement.id)) requirement.basis.push(authority);
     }
-    for (const { index } of option.preparedEffect.dimensions) {
+    for (const { index } of (option.preparedEffect.dimensions ?? [])) {
       const dimension = draft.determinismReview.dimensions[index];
       if (dimension.status !== 'SPECIFIED') throw new Error('prepared_effect_dimension_not_closed');
       dimension.basis.push(authority);

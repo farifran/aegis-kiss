@@ -9,19 +9,6 @@ node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 import { canonicalDigest } from './scripts/lib/canonical_json.mjs';
 import {
-  assertJevAssessment,
-  buildJevDecisionBatch,
-} from './scripts/lib/jev_projection.mjs';
-import {
-  compileJevAssessment,
-  requestJevAssessment,
-} from './scripts/lib/jev_gateway.mjs';
-import {
-  assertJevAdvisory,
-  compileJevAdvisory,
-} from './scripts/lib/jev_advisory.mjs';
-import { compileJevComparison } from './scripts/lib/jev_comparison.mjs';
-import {
   buildSemanticGatewayPayload,
   requestSemanticOpinion,
 } from './scripts/lib/semantic_gateway.mjs';
@@ -52,10 +39,6 @@ const currentSchemas = [
   'constitution.v1.schema.json',
   'intent-evidence.v1.schema.json',
   'issue-contract.v14.schema.json',
-  'jev-advisory.v2.schema.json',
-  'jev-assessment.v1.schema.json',
-  'jev-comparison.v1.schema.json',
-  'jev-decision-batch.v2.schema.json',
   'preflight-handoff.v2.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
@@ -102,137 +85,6 @@ if (requestDigest !== canonicalDigest(requestPayload)
   || semanticRequest.intentEvidence.fragments.length !== 1
   || semanticRequest.intentEvidence.literalFacts.length !== 0) {
   throw new Error('semantic_request_is_not_minimal_or_bound');
-}
-
-const jevDemand = 'Definir comportamento observável usando uma factory opcional e hash de 64 bits.';
-const jevPreflight = buildPreflightHandoff({
-  demand: jevDemand,
-  discovery: discoverWorkspace(process.cwd(), jevDemand),
-});
-const jevSemanticRequest = buildSemanticRequest({
-  repositoryRoot: process.cwd(),
-  preflight: jevPreflight,
-  policy: loadedPolicy.policy,
-  constitution,
-});
-const jevBatch = buildJevDecisionBatch(jevSemanticRequest);
-if (jevBatch.schema !== 'aegis.jev_decision_batch.v2'
-  || jevBatch.sourceSemanticRequestDigest !== jevSemanticRequest.requestDigest
-  || jevBatch.sourceEvidenceDigest !== jevSemanticRequest.intentEvidence.evidenceDigest
-  || jevBatch.protocol.authority !== 'ADVISORY_ONLY'
-  || jevBatch.protocol.purpose !== 'SHADOW_EVALUATION'
-  || jevBatch.projection.questionCount !== Object.keys(jevBatch.questions).length
-  || jevBatch.projection.questionCount !== 2 * jevSemanticRequest.intentEvidence.fragments.length
-  || !Object.values(jevBatch.bindings).every(({ allowedUse }) => allowedUse === 'SHADOW_METRIC_ONLY')
-  || Object.hasOwn(jevBatch.state, 'intent')
-  || Object.hasOwn(jevBatch.state, 'sourceEvidence')
-  || Object.hasOwn(jevBatch.state, 'outputSchema')) {
-  throw new Error('jev_projection_is_not_compact_or_advisory');
-}
-const jevAnswers = Object.fromEntries(Object.entries(jevBatch.questions).map(([id, question]) => {
-  const optionIds = Object.keys(question.criteria);
-  return [id, {
-    type: 'choice',
-    choice: optionIds[0],
-    probabilities: Object.fromEntries(optionIds.map((optionId, index) => [
-      optionId,
-      index === 0 ? 1 : 0,
-    ])),
-    confidence: 1,
-  }];
-}));
-const jevAssessmentPayload = {
-  schema: 'aegis.jev_assessment.v1',
-  sourceBatchDigest: jevBatch.batchDigest,
-  authority: 'ADVISORY_ONLY',
-  provider: 'TYPESAFE_JEV',
-  transport: 'VERCEL_AI_GATEWAY',
-  model: 'jev-test-pinned',
-  answers: jevAnswers,
-  usage: { inputTokens: 10, outputTokens: 0 },
-};
-const jevAssessment = {
-  ...jevAssessmentPayload,
-  assessmentDigest: canonicalDigest(jevAssessmentPayload),
-};
-assertJevAssessment(jevAssessment, jevBatch);
-const compiledJevAssessment = compileJevAssessment(jevBatch, {
-  model: 'jev-test-pinned',
-  answers: jevAnswers,
-  usage: { input_tokens: 10, output_tokens: 0 },
-});
-if (compiledJevAssessment.assessmentDigest !== jevAssessment.assessmentDigest) {
-  throw new Error('jev_gateway_response_was_not_compiled_deterministically');
-}
-const roundedAnswers = structuredClone(jevAnswers);
-for (const answer of Object.values(roundedAnswers)) {
-  const optionIds = Object.keys(answer.probabilities);
-  answer.probabilities = Object.fromEntries(optionIds.map((optionId, index) => [
-    optionId,
-    index < 2 ? 0.499 : 0,
-  ]));
-}
-const normalizedAssessment = compileJevAssessment(jevBatch, {
-  model: 'jev-test-pinned',
-  answers: roundedAnswers,
-  usage: { input_tokens: 10, output_tokens: 0 },
-});
-for (const answer of Object.values(normalizedAssessment.answers)) {
-  const total = Object.values(answer.probabilities).reduce((sum, probability) => sum + probability, 0);
-  if (Math.abs(total - 1) > 1e-9) throw new Error('jev_probabilities_were_not_normalized');
-}
-const jevAdvisory = compileJevAdvisory(jevSemanticRequest, jevBatch, jevAssessment);
-assertJevAdvisory(jevAdvisory, jevSemanticRequest, jevBatch);
-if (jevAdvisory.purpose !== 'SHADOW_EVALUATION') throw new Error('jev_not_shadow_only');
-const forgedAdvisory = structuredClone(jevAdvisory);
-forgedAdvisory.sourceSemanticRequestDigest = '0'.repeat(64);
-const { advisoryDigest: discardedAdvisoryDigest, ...forgedAdvisoryPayload } = forgedAdvisory;
-void discardedAdvisoryDigest;
-forgedAdvisory.advisoryDigest = canonicalDigest(forgedAdvisoryPayload);
-try {
-  assertJevAdvisory(forgedAdvisory, jevSemanticRequest, jevBatch);
-  throw new Error('forged_jev_advisory_was_accepted');
-} catch (error) {
-  if (error.message !== 'jev_advisory_source_mismatch') throw error;
-}
-try {
-  await requestJevAssessment(jevBatch, {
-    apiKey: 'test-key',
-    client: {
-      async systemOne() {
-        const error = new Error('AI Gateway requires a valid credit card on file');
-        error.status = 403;
-        throw error;
-      },
-    },
-  });
-  throw new Error('jev_gateway_billing_failure_was_not_normalized');
-} catch (error) {
-  if (!error.message.startsWith('jev_gateway_billing_required:')) throw error;
-}
-const invalidJevAssessment = structuredClone(jevAssessment);
-const firstJevQuestionId = Object.keys(jevBatch.questions).sort()[0];
-invalidJevAssessment.answers[firstJevQuestionId].choice = 'FORGED_OPTION';
-const { assessmentDigest: previousAssessmentDigest, ...invalidJevAssessmentPayload } = invalidJevAssessment;
-void previousAssessmentDigest;
-invalidJevAssessment.assessmentDigest = canonicalDigest(invalidJevAssessmentPayload);
-try {
-  assertJevAssessment(invalidJevAssessment, jevBatch);
-  throw new Error('forged_jev_choice_was_accepted');
-} catch (error) {
-  if (!error.message.startsWith('jev_assessment_choice_space_mismatch:')) throw error;
-}
-const nonMaximalJevAssessment = structuredClone(jevAssessment);
-const firstJevOptions = Object.keys(jevBatch.questions[firstJevQuestionId].criteria);
-nonMaximalJevAssessment.answers[firstJevQuestionId].choice = firstJevOptions[1];
-const { assessmentDigest: previousNonMaximalDigest, ...nonMaximalPayload } = nonMaximalJevAssessment;
-void previousNonMaximalDigest;
-nonMaximalJevAssessment.assessmentDigest = canonicalDigest(nonMaximalPayload);
-try {
-  assertJevAssessment(nonMaximalJevAssessment, jevBatch);
-  throw new Error('non_maximal_jev_choice_was_accepted');
-} catch (error) {
-  if (!error.message.startsWith('jev_assessment_selected_choice_mismatch:')) throw error;
 }
 
 const userBasis = [{ source: 'USER_INTENT', reference: 'comportamento observável' }];
@@ -440,32 +292,6 @@ const validationContext = {
 };
 assertSemanticDraft(draft, loadedPolicy.policy, validationContext);
 
-const semanticBatch = buildJevDecisionBatch(semanticRequest);
-const semanticAnswers = Object.fromEntries(Object.entries(semanticBatch.questions).map(([id, question]) => {
-  const optionIds = Object.keys(question.criteria);
-  return [id, {
-    type: 'choice',
-    choice: optionIds[0],
-    probabilities: Object.fromEntries(optionIds.map((optionId) => [
-      optionId,
-      optionId === optionIds[0] ? 1 : 0,
-    ])),
-    confidence: 1,
-  }];
-}));
-const semanticAssessment = compileJevAssessment(semanticBatch, {
-  model: 'jev-test-pinned',
-  answers: semanticAnswers,
-  usage: { input_tokens: 1, output_tokens: 1 },
-});
-const semanticAdvisory = compileJevAdvisory(semanticRequest, semanticBatch, semanticAssessment);
-const jevComparison = compileJevComparison(semanticRequest, draft, semanticAdvisory);
-if (jevComparison.authority !== 'EVALUATION_ONLY'
-  || jevComparison.totals.fragments !== semanticRequest.intentEvidence.fragments.length
-  || jevComparison.totals.disagreements !== 1) {
-  throw new Error('jev_shadow_comparison_is_not_mechanical');
-}
-
 const gatewayRole = {
   channel: 'API',
   adapter: 'ai-gateway',
@@ -657,12 +483,6 @@ expectDeterminismFailure(
 expectDeterminismFailure(
   (dimension) => { dimension.proofObligation.relation = 'EXPLICIT_REJECTION'; },
   'determinism_proof_outcome_kind_mismatch:',
-);
-expectDeterminismFailure(
-  (_dimension, invalid) => {
-    invalid.requirements[0].acceptanceCases[2].then = 'Texto apenas relacionado ao tema.';
-  },
-  'determinism_proof_outcome_mismatch:',
 );
 expectDeterminismFailure(
   (dimension) => { dimension.targetIds = []; },

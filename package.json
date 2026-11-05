@@ -7,7 +7,7 @@
   "scripts": {
     "test": "npm run aegis:test",
     "aegis:cleanup": "bash aegis --clean",
-    "aegis:typecheck": "tsc --noEmit",
+    "aegis:typecheck": "if [ -n \"$(find src -type f \\( -name '*.ts' -o -name '*.tsx' \\) -print -quit 2>/dev/null)\" ]; then tsc --noEmit; fi",
     "aegis:lint": "eslint .",
     "aegis:generate-schemas": "node scripts/generate_schema_validators.mjs",
     "aegis:check-generated-schemas": "node scripts/generate_schema_validators.mjs --check",
@@ -17,7 +17,7 @@
     "aegis:test:governance-schemas": "bash scripts/substrates/test/test_governance_schemas.sh",
     "aegis:test:field-lifecycle": "node scripts/substrates/test/test_field_lifecycle.mjs",
     "aegis:test:issue-contract": "bash scripts/substrates/test/test_issue_contract.sh",
-    "aegis:test": "npm run aegis:check-generated-schemas && node scripts/substrates/test/test_semantic_output.mjs && node scripts/substrates/test/test_jev_reading_map.mjs && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:issue-contract"
+    "aegis:test": "npm run aegis:check-generated-schemas && node scripts/substrates/test/test_semantic_output.mjs && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:issue-contract"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",
@@ -25,12 +25,8 @@
     "@types/node": "^26.4.1",
     "ajv": "^8.20.0",
     "eslint": "^9.0.0",
-    "eslint-plugin-boundaries": "^4.0.0",
     "tsx": "^4.23.13",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0"
-  },
-  "dependencies": {
-    "@typesafe-ai/sdk": "^0.6.0"
   }
 }

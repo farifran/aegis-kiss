@@ -58,8 +58,21 @@ function requiresRecompilation(request, answers) {
   return questions.size > 0;
 }
 
+function canApplyPreparedEffects(request, answers) {
+  if (!Array.isArray(answers) || answers.length === 0) return false;
+  const questions = new Map(request.questions.map((question) => [question.id, question]));
+  if (answers.length !== questions.size) return false;
+  return answers.every((answer) => {
+    if ('correction' in answer) return false;
+    const question = questions.get(answer.questionId);
+    const selected = question?.answers?.find(({ id }) => id === answer.answerId);
+    return selected?.applicationMode === 'PREPARED_EFFECT';
+  });
+}
+
 function buildResolution(request, answers) {
   const recompilationRequired = requiresRecompilation(request, answers);
+  const preparedEffectsReady = recompilationRequired && canApplyPreparedEffects(request, answers);
   return {
     resolution: {
       schema: resolutionSchema,
@@ -72,11 +85,13 @@ function buildResolution(request, answers) {
       answers,
     },
     recompilationRequired,
+    preparedEffectsReady,
   };
 }
 
 module.exports = {
   buildResolution,
+  canApplyPreparedEffects,
   recommendedAnswersFrom,
   validRequest,
   validResolutionForRequest,

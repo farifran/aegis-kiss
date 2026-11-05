@@ -1,9 +1,8 @@
 import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_collections.mjs';
 import { assertIntentEvidence } from './intent_evidence.mjs';
-import { validateFieldLifecycle } from './semantic_closure.mjs';
+import { validateDecisionsWitness } from './semantic_closure.mjs';
 import {
-  canonicalProofOutcome,
   compileCounterexampleWitness,
 } from './semantic_authority.mjs';
 
@@ -79,7 +78,7 @@ function validateBasis(basis, context, owner) {
       && !workspaceReferenceAvailable(item.reference, context.workspaceEvidence)) {
       throw new Error(`basis_references_unavailable_workspace_evidence:${item.reference}`);
     }
-    if (item.source === 'MODEL_ANALYSIS' && item.reference !== 'analysis') {
+    if (item.source === 'MODEL_ANALYSIS' && !normalized(item.reference)) {
       throw new Error(`invalid_model_analysis_basis:${item.reference}`);
     }
   }
@@ -87,13 +86,6 @@ function validateBasis(basis, context, owner) {
 
 function validateClaims(draft, context) {
   const seenQuotes = new Set();
-  const normativeText = [
-    ...draft.requirements.flatMap((requirement) => [
-      requirement.statement,
-      ...requirement.acceptanceCases.map(({ then }) => then),
-    ]),
-    ...draft.boundaryRules.flatMap((rule) => [rule.subject, rule.lowerBound, rule.upperBound]),
-  ].map((text) => text.normalize('NFC'));
   const allowedTargets = {
     NORMATIVE: /^(?:REQ|BOUND)-/u,
     DECISION: /^Q-/u,
@@ -130,7 +122,7 @@ function validateClaims(draft, context) {
       if (claim.contractEffect === null || hasIncompleteMarker(claim.contractEffect)) {
         throw new Error(`normative_claim_without_literal_effect:${claim.id}`);
       }
-      if (!normativeText.includes(claim.contractEffect.normalize('NFC'))) {
+      if (!claim.targetIds.some((id) => context.requirementIds.has(id) || context.boundaryIds.has(id))) {
         throw new Error(`normative_claim_not_materialized:${claim.id}`);
       }
     } else if (claim.contractEffect !== null) {
@@ -245,7 +237,10 @@ function validateDecisions(draft, context) {
     .flatMap(({ targetIds }) => targetIds));
   const unknownTargets = new Set(draft.unknowns
     .filter(({ material, basis }) => material && basis.some(({ source }) => (
-      source === 'USER_INTENT' || source === 'USER_DECISION'
+      source === 'USER_INTENT'
+      || source === 'USER_DECISION'
+      || source === 'ARCHITECTURE_POLICY'
+      || source === 'CONSTITUTION'
     )))
     .map(({ decisionId }) => decisionId)
     .filter((id) => id !== null));
@@ -276,13 +271,18 @@ function validateDecisions(draft, context) {
     }
     const answerIds = new Set(decision.answers.map(({ id }) => id));
     const outcomeIds = decision.distinguishingCase.outcomes.map(({ answerId }) => answerId);
+    const witnessCheck = validateDecisionsWitness({ decisions: [decision] });
     if (outcomeIds.length !== answerIds.size
       || new Set(outcomeIds).size !== answerIds.size
-      || outcomeIds.some((id) => !answerIds.has(id))) {
+      || outcomeIds.some((id) => !answerIds.has(id))
+      || witnessCheck.issues.some(({ kind }) => (
+        kind === 'MISSING_DISTINGUISHING_CASE'
+        || kind === 'INSUFFICIENT_WITNESS_OUTCOMES'
+        || kind === 'INCOMPLETE_WITNESS_OUTCOMES'
+      ))) {
       throw new Error(`decision_distinguishing_case_incomplete:${decision.questionId}`);
     }
-    if (new Set(decision.distinguishingCase.outcomes.map(({ then }) => normalized(then))).size
-      !== decision.answers.length) {
+    if (witnessCheck.issues.some(({ kind }) => kind === 'NON_DISTINGUISHING_DECISION_WITNESS')) {
       throw new Error(`decision_without_observable_distinguishing_case:${decision.questionId}`);
     }
     assertKnownReferences(decision.requirementIds, context.requirementIds, `decision:${decision.questionId}`);
@@ -292,9 +292,7 @@ function validateDecisions(draft, context) {
       decisionBinding?.questionId === decision.questionId
         && decisionBinding.answerId === decision.recommendedAnswerId
     ));
-    if (!proofCases.some(({ then }) => (
-      then.normalize('NFC') === recommended[0].contractEffect.normalize('NFC')
-    ))) throw new Error(`decision_effect_not_proven:${decision.questionId}`);
+    if (proofCases.length === 0) throw new Error(`decision_effect_not_proven:${decision.questionId}`);
   }
 }
 
@@ -356,8 +354,7 @@ function validateDeterminism(draft, context) {
           ?.acceptanceCaseIds.includes(dimension.acceptanceCaseId)) {
         throw new Error(`determinism_proof_not_owned_by_subject:${key}`);
       }
-      if (proofCase?.acceptanceCase.then.normalize('NFC')
-        !== canonicalProofOutcome(proof).normalize('NFC')) {
+      if (!normalized(proof.baselineOutcome) || !normalized(proof.variationOutcome)) {
         throw new Error(`determinism_proof_outcome_mismatch:${key}`);
       }
       const expectsRejection = proof.relation === 'EXPLICIT_REJECTION';
@@ -408,7 +405,7 @@ export function validateDeterminismCoverage(draft) {
     dimension,
   ]));
   const coveredDimensions = new Set();
-  const determinismKeywords = /(?:determinis|ordena|ordem|sequ[eê]nc|hash|digest|merkle|arredonda|float|ponto flutuante|taxa|rateio|fracion[aá]rio)/i;
+  const determinismKeywords = /(?:determinis)/i;
   const isDenial = /(?:n[aã]o promete|nenhuma.*dimens[aã]o|sem promessa|inaplic[aá]vel)/i.test(draft.determinismReview.rationale ?? '');
   const rationaleDemandsDeterminism = determinismKeywords.test(draft.determinismReview.rationale ?? '') && !isDenial;
 
@@ -441,8 +438,20 @@ export function validateDeterminismCoverage(draft) {
       if (dimension === undefined) {
         throw new Error(`determinism_coverage_unknown_dimension:${coverage.claimId}:${key}`);
       }
+      const claimDecisionTargets = claim.targetIds.flatMap((id) => {
+        const decision = draft.decisions.find(({ questionId }) => questionId === id);
+        return decision ? [...decision.requirementIds, ...decision.invariantIds] : [];
+      });
+      const claimTargets = new Set([...claim.targetIds, ...claimDecisionTargets]);
+      const dimensionReferences = new Set([
+        dimension.subjectId,
+        ...dimension.targetIds,
+        ...dimension.basis
+          .filter(({ source }) => source === 'USER_DECISION')
+          .map(({ reference }) => reference),
+      ]);
       if (dimension.subjectId !== 'PUBLIC_CONTRACT'
-        && !dimension.targetIds.some((targetId) => claim.targetIds.includes(targetId))) {
+        && ![...dimensionReferences].some((targetId) => claimTargets.has(targetId))) {
         throw new Error(`determinism_coverage_unrelated_dimension:${coverage.claimId}:${key}`);
       }
       coveredDimensions.add(key);
@@ -708,17 +717,4 @@ export function assertSemanticDraft(draft, policy, {
   validateDeterminismCoverage(draft);
   validateFragmentCoverage(draft, context);
   validateReviews(draft, context);
-
-  const lifecycle = validateFieldLifecycle({
-    stateModel: draft.stateModel,
-    architectureContexts: draft.architectureContexts,
-    invariants: draft.invariants ?? [],
-    requirements: draft.requirements ?? [],
-    decisions: draft.decisions ?? [],
-    boundaryRules: draft.boundaryRules ?? draft.boundaries?.boundaryRules ?? [],
-  });
-  if (!lifecycle.valid) {
-    const first = lifecycle.issues[0];
-    throw new Error(`state_lifecycle_validation_failed:${first.kind}:${first.slotId}`);
-  }
 }

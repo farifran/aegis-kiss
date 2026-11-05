@@ -25,22 +25,20 @@ Estas regras governam a interação de assistentes de IA (Antigravity/Gemini) co
 
 ## 3. Fluxo Pós-Deliberação Humana
 - Após o usuário fazer sua escolha legítima (via `ask_question` ou resposta no chat):
-  1. O assistente grava o payload em `.harness/runtime/preflight_resolution.json` com `method: "INTERACTIVE_WIZARD"` ou executa a recompilação semântica com o parecer revisado (`./aegis --semantic-compile`).
-  2. O assistente verifica que todas as decisões foram integradas na especificação normativa e que as dimensões de determinismo foram fechadas como `SPECIFIED`.
-  3. Somente após a recompilação limpa (sem decisões ativas) e nova confirmação expressa do usuário humano, o contrato pode ser selado com `./aegis --approve`.
+  1. O assistente grava o payload em `.harness/runtime/preflight_resolution.json` com `method: "INTERACTIVE_WIZARD"` (ou o usuário utiliza `./aegis --wizard`). Quando todas as respostas selecionadas possuem `applicationMode: "PREPARED_EFFECT"`, `./aegis --approve` materializa os efeitos preparados localmente sem nova chamada à IA; caso contrário, executa-se a recompilação semântica (`./aegis --semantic-compile`).
+  2. O assistente verifica que todas as decisões foram integradas na especificação normativa e que as dimensões de determinismo aplicáveis foram fechadas como `SPECIFIED`.
+  3. Somente após a incorporação das escolhas (sem decisões ativas) e confirmação final expressa do usuário humano, o contrato pode ser selado com `./aegis --approve`.
 
-## 4. Fechamento Semântico e Transição Total de Estados (SEMANTICALLY_CLOSED)
-- **Critério Universal de Fechamento**: Um contrato só pode ser considerado `SEMANTICALLY_CLOSED` quando satisfaz a propriedade matemática de determinismo de transição total de estados:
-  $$\forall (S, I, C, T) \implies \exists! (O, S')$$
-  *Para todo estado válido S, entrada I, configuração C e tempo T, o contrato determina exatamente um resultado observável O e exatamente um próximo estado S'.*
+## 4. Fechamento Semântico Suficiente Mínimo (`ARCH-MINIMAL-SUFFICIENT-CLOSURE`)
+- **Critério de Fechamento**: Um contrato deve possuir somente as estruturas, modelos e decisões necessários para tornar os observáveis demandados computáveis e falsificáveis (`CONST-KISS` e `CONST-OBSERVABLE`). Computações puras sem estado mutável não exigem `stateModel` (`stateModel: null`).
 - **O Teste das Duas Interpretações Conformes (*Two Conforming Interpretations Gate*)**:
   Antes de declarar o parecer pronto para aprovação, o assistente DEVE executar uma análise adversarial residual estrita:
-  *"É possível que duas implementações independentes sigam literalmente o texto do contrato e ainda assim produzam saídas observáveis ou próximos estados divergentes?"*
-  Se a resposta for sim, o contrato contém lacuna material oculta e NÃO pode receber `SEMANTICALLY_CLOSED`.
-- **Os 5 Eixos Universais de Verificação de Estado**:
-  1. **Precedência Linear de Guards (`GUARD_PRECEDENCE`)**: Toda operação com múltiplos modos de falha ou condições de bloqueio deve ter sua ordem linear de avaliação e curto-circuito estritamente fixada. A primeira guarda violada determina exclusivamente o erro público e veda efeitos colaterais das guardas posteriores.
-  2. **Inicialização e Reset (`STATE_INITIALIZATION_AND_RESET`)**: Toda variável, saldo, flag ou contador em memória exige definição explícita de: (a) valor inicial no provisionamento ou 1ª requisição; (b) gatilhos e magnitude exatos de mutação; (c) condições e valores exatos de reset.
-  3. **Invariância Temporal de Amostragem (`TEMPORAL_SEMANTICS`)**: Acúmulos por taxa temporal devem conservar restos fracionários (`carry/remainder`). $N$ avaliações com intervalo $\Delta t$ devem produzir matematicamente o mesmo acúmulo de estado que uma única avaliação com intervalo $N \cdot \Delta t$, vedando starvation por amostragem de alta frequência.
-  4. **Serialização Canônica de Hashes (`CANONICAL_SERIALIZATION`)**: Todo hash, digest ou fingerprint de integridade sobre memória deve especificar: campos nominais incluídos (excluindo voláteis), encoding posicional/length-prefixed uniforme, ordenação lexicográfica e constante canônica de estado vazio alinhada ao algoritmo (ex: offset basis de 64 bits para FNV-1a).
-  5. **Ciclo de Vida Formal (`STATE_LIFECYCLE`)**: Estados temporários ou de bloqueio exigem máquina de estados finita explícita com condições inequívocas de entrada, permanência e saída (TTL explícito ou evento administrativo formal de revogação).
+  *"É possível que duas implementações independentes sigam literalmente o texto do contrato e ainda assim produzam saídas observáveis ou próximos estados divergentes sob as mesmas condições?"*
+  Se a resposta for sim, o contrato contém lacuna material oculta e exige fechamento por regra autorizada ou decisão humana.
+- **Eixos de Verificação de Estado (Aplicáveis Somente Quando Relevantes à Demanda)**:
+  1. **Precedência Linear de Guards (`GUARD_PRECEDENCE`)**: Quando uma operação possui múltiplos modos de rejeição/bloqueio, sua ordem linear de avaliação e curto-circuito deve ser fixada.
+  2. **Inicialização e Reset (`STATE_INITIALIZATION_AND_RESET`)**: Quando há entidades de estado (`stateful-operation`), cada campo persistido em memória exige valor inicial explícito, mutações vinculadas às operações e política de reset.
+  3. **Invariância Temporal (`TEMPORAL_SEMANTICS`)**: Quando a demanda acumula grandezas em função de tempo (`time-dependent`), frações residuais (`carry/remainder`) devem ser preservadas.
+  4. **Serialização Canônica (`CANONICAL_SERIALIZATION`)**: Quando a demanda exige hash/digest de integridade (`integrity-hash`), deve definir campos incluídos, encoding, chave de ordenação e digest de estado vazio.
+  5. **Observabilidade Finita (`BOUNDED_OBSERVABILITY`)**: Quando a demanda exige contadores, métricas ou bitmasks de status (`bounded-observability`), deve definir representação finita e comportamento em estado vazio.
 

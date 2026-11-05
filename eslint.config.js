@@ -22,7 +22,6 @@
 
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
-import boundaries from "eslint-plugin-boundaries";
 
 export default [
 
@@ -72,68 +71,10 @@ export default [
     },
 
     plugins: {
-      "@typescript-eslint": tseslint.plugin,
-      boundaries
-    },
-
-    settings: {
-      "boundaries/elements": [
-        {
-          type: "ui",
-          pattern: "src/ui/**"
-        },
-
-        {
-          type: "application",
-          pattern: "src/application/**"
-        },
-
-        {
-          type: "domain",
-          pattern: "src/domain/**"
-        },
-
-        {
-          type: "infrastructure",
-          pattern: "src/infrastructure/**"
-        }
-      ]
+      "@typescript-eslint": tseslint.plugin
     },
 
     rules: {
-
-      // ---------------------------------------------------
-      // STRUCTURAL BOUNDARIES
-      // ---------------------------------------------------
-
-      "boundaries/element-types": [
-        "error",
-        {
-          default: "disallow",
-
-          rules: [
-            {
-              from: "ui",
-              allow: ["application"]
-            },
-
-            {
-              from: "application",
-              allow: ["domain"]
-            },
-
-            {
-              from: "domain",
-              allow: []
-            },
-
-            {
-              from: "infrastructure",
-              allow: ["application", "domain"]
-            }
-          ]
-        }
-      ],
 
       // ---------------------------------------------------
       // EXECUTION OBSERVABILITY

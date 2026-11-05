@@ -7,7 +7,7 @@
   "required": [
     "schema", "implementationAuthorized", "sourceSemanticRequestDigest", "semanticRevision",
     "sourcePreflightDigest", "sourceSnapshotDigest", "policyDigest", "constitutionDigest",
-    "intent", "observedPaths", "intentEvidence", "policySignals", "specification",
+    "intent", "observedPaths", "intentEvidence", "specification",
     "effectiveDeterminismStatus", "humanResolutions", "approval"
   ],
   "properties": {
@@ -22,7 +22,6 @@
     "intent": { "type": "string", "minLength": 1 },
     "observedPaths": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_observedPaths" },
     "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
-    "policySignals": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_policySignals" },
     "specification": { "$ref": "aegis.semantic_draft.v9" },
     "effectiveDeterminismStatus": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_effectiveDeterminismStatus" },
     "humanResolutions": { "$ref": "aegis.contract_components.v1#/$defs/issue_contract_humanResolutions" },

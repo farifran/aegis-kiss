@@ -8,9 +8,6 @@ export const schemaFiles = new Map([
   ['aegis.decision_presentation.v1', 'decision-presentation.v1.schema.json'],
   ['aegis.intent_evidence.v1', 'intent-evidence.v1.schema.json'],
   ['aegis.issue_contract.v14', 'issue-contract.v14.schema.json'],
-  ['aegis.jev_assessment.v1', 'jev-assessment.v1.schema.json'],
-  ['aegis.jev_comparison.v1', 'jev-comparison.v1.schema.json'],
-  ['aegis.jev_decision_batch.v2', 'jev-decision-batch.v2.schema.json'],
   ['aegis.preflight_handoff.v2', 'preflight-handoff.v2.schema.json'],
   ['aegis.rejection.v1', 'rejection.v1.schema.json'],
   ['aegis.semantic_draft.v9', 'semantic-draft.v9.schema.json'],
@@ -22,7 +19,6 @@ export const schemaFiles = new Map([
   ['aegis.semantic_resolution.v2', 'semantic-resolution.v2.schema.json'],
   ['aegis.wizard_question.v1', 'wizard-question.v1.schema.json'],
   ['aegis.role_assignment.v1', 'role-assignment.v1.schema.json'],
-  ['aegis.jev_advisory.v2', 'jev-advisory.v2.schema.json'],
 ]);
 
 export const validatorSchemaIds = [
@@ -31,9 +27,6 @@ export const validatorSchemaIds = [
   'aegis.constitution.v1',
   'aegis.intent_evidence.v1',
   'aegis.issue_contract.v14',
-  'aegis.jev_assessment.v1',
-  'aegis.jev_comparison.v1',
-  'aegis.jev_decision_batch.v2',
   'aegis.preflight_handoff.v2',
   'aegis.rejection.v1',
   'aegis.semantic_draft.v9',
@@ -43,7 +36,6 @@ export const validatorSchemaIds = [
   'aegis.semantic_resolution.v2',
   'aegis.wizard_question.v1',
   'aegis.role_assignment.v1',
-  'aegis.jev_advisory.v2',
 ];
 
 export function validatorFileName(schemaId) {
