@@ -23,6 +23,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>" Executa captura, Discovery e supervisão até o contrato
   ./aegis --new "<demanda>" Inicia contexto independente substituindo estado do Harness (preserva src/)
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
+  ./aegis --resolve Q=ANS  Aplica resolução de decisão diretamente (ex: Q-0001=ANS-0001) e sela
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
   ./aegis --semantic-run  Executa o supervisor configurado e compila o contrato
@@ -281,6 +282,21 @@ main() {
     --wizard)
       require_command_arity "$@"
       resolve_preflight_wizard
+      ;;
+    --resolve)
+      shift
+      node "${ROOT_DIR}/scripts/resolve_decision.mjs" "$@"
+      local resolve_code=$?
+      if [[ ${resolve_code} -ne 0 ]]; then
+        exit ${resolve_code}
+      fi
+      node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve >/dev/null || exit $?
+      if [[ -f "${RUNTIME_DIR}/contract.json" ]] && jq -e '.approval.attestation == "CONTRACT_REVIEWED_AND_APPROVED"' "${RUNTIME_DIR}/contract.json" >/dev/null 2>&1; then
+        echo '[AEGIS][IDE] Contrato aprovado e selado com sucesso!'
+      else
+        node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve || exit $?
+        echo '[AEGIS][IDE] Contrato aprovado e selado com sucesso!'
+      fi
       ;;
     --setup)
       if [[ "$#" -eq 1 ]]; then
