@@ -1274,7 +1274,6 @@ export function generateClosureCertificate({
   const declarationConflicts = stateLifecycle.issues.filter((i) => (
     i.kind === 'CONFLICTING_STATE_DECLARATIONS'
     || i.kind === 'CONTRADICTORY_RULE_DETECTED'
-    || i.kind === 'CROSS_LAYER_CONTRADICTION'
   ));
 
   // Gaps materiais sem decisão vinculada
@@ -1306,7 +1305,6 @@ export function generateClosureCertificate({
   const unresolvedAuthorities = authorityIssues.length;
   const computabilityIssues = stateLifecycle.issues.filter((i) => (
     i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'
-    || i.kind === 'UNRESOLVED_COMPUTATIONAL_DEPENDENCY'
     || i.kind === 'EXTERNAL_EFFECT_COVERAGE_MISSING'
     || i.kind === 'INCOMPLETE_EXTERNAL_EFFECT'
     || i.kind === 'TRANSACTION_ROLLBACK_MISSING'
@@ -1384,7 +1382,6 @@ const GAP_KIND_MAP = {
   MISSING_SUCCESS_BRANCH: ['TRANSITION_CONSISTENCY', 'USER_INTENT', (i) => i.reason || 'Operação sem ramo explícito de autorização/sucesso.'],
   CONFLICTING_STATE_DECLARATIONS: ['TRANSITION_CONSISTENCY', 'USER_INTENT', (i) => i.reason],
   CONTRADICTORY_RULE_DETECTED: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Contradição ativa detectada entre invariantes, requisitos e operações.'],
-  CROSS_LAYER_CONTRADICTION: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Contradição ativa detectada entre invariantes, requisitos e operações.'],
   EXTERNAL_EFFECT_COVERAGE_MISSING: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
   INCOMPLETE_EXTERNAL_EFFECT: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
   TRANSACTION_ROLLBACK_MISSING: ['TRANSITION_CONSISTENCY', 'ARCHITECTURE_POLICY', (i) => i.reason || 'Efeito externo físico ausente, incompleto ou sem estratégia mecânica de rollback.'],
@@ -1419,7 +1416,6 @@ const GAP_KIND_MAP = {
 
   // COMPUTABILITY_DEPENDENCY_CLOSURE
   OPEN_COMPUTATIONAL_DEPENDENCY: ['COMPUTABILITY_DEPENDENCY_CLOSURE', 'USER_INTENT', (i) => i.reason || 'Dependência semântica necessária para computabilidade não foi encontrada ou fundamentada.'],
-  UNRESOLVED_COMPUTATIONAL_DEPENDENCY: ['COMPUTABILITY_DEPENDENCY_CLOSURE', 'USER_INTENT', (i) => i.reason || 'Dependência semântica necessária para computabilidade não foi encontrada ou fundamentada.'],
 };
 
 function classifyGapIssue(issue, index) {

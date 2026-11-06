@@ -22,7 +22,7 @@ export async function loadRoleAssignment(repositoryRoot) {
   return assertRoleAssignment(JSON.parse(await readFile(path, 'utf8')));
 }
 
-export function publicRoleSummary(role) {
+function publicRoleSummary(role) {
   return {
     channel: role.channel,
     adapter: role.adapter,

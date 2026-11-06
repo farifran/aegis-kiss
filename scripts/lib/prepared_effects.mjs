@@ -72,7 +72,7 @@ export function hasPreparedAnswers(specification, answers) {
   ));
 }
 
-export function assertPreparedEffectScope(specification, decision, effect) {
+function assertPreparedEffectScope(specification, decision, effect) {
   const owned = {
     requirements: decision.requirementIds,
     invariants: decision.invariantIds,

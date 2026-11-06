@@ -351,4 +351,4 @@ export function finalizeContractApproval({ contract, request, resolution }) {
   return finalContract;
 }
 
-export { effectiveDeterminismStatus, generateClosureCertificate };
+export { effectiveDeterminismStatus };
