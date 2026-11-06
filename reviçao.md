@@ -66,43 +66,62 @@ Para o Aegis entregar **mais inteligência com menos código**, toda evolução 
 
 ---
 
-## 3. Síntese do que Já Foi Corrigido e Melhorado (Consolidado)
 
-Todas as anomalias históricas identificadas nas auditorias anteriores foram resolvidas:
+## 3. Backlog Ativo e Oportunidades de Melhoria
 
-1. **Eliminação de Sobre-Engenharia e Código Morto (~35.000 linhas removidas):**
-   - Removido completamente o diretório `scratch/` (23 arquivos e 27.000 linhas de scripts manuais desnecessários).
-   - Extirpado o subsistema JEV e dependências mortas (`@typesafe-ai/sdk`, scripts `jev_*.mjs`, schemas e testes vinculados).
-   - Limpos artefatos residuais obsoletos (`clean.md`, binário `.vsix` antigo em `integrations/`).
-2. **Des-overfitting de `semantic_closure.mjs`:**
-   - Removidas todas as regexes de domínio acidentais (crachá inexistente, gaveta cheia, árvore de Merkle, nitidez, rodapé, quarentena/verbos, resíduo/bandeja, congelada restaurando arquivo).
-   - Removidas palavras reservadas arbitrárias em fórmulas e tags de contexto inexistentes na política arquitetural.
-3. **Fim das Regras Secretas de String e Desbloqueio de Lacunas:**
-   - Eliminadas exigências ocultas de formatação textual em `acceptanceCases[].then` e em `MODEL_ANALYSIS.reference`.
-   - Lacunas de estado e decisões humanas legítimas agora transitam limpas para `gapLedger` e `user_confirmation_request.json` sem crash fatal de validação.
-4. **Enxugamento Radical de Schemas e Suporte a Patches Cirúrgicos:**
-   - Redução de ~47% no tamanho do `stateModel` nos schemas, eliminando campos órfãos (`aggregations`, `categories`, `executionPipeline`, decoradores de unidade/cardinalidade).
-   - Suporte a `{ index, patch }` em `preparedEffect`: alternativas de decisão enviam apenas os campos alterados, eliminando redundância de payload.
-5. **Primitivas Universais de Tempo, Janela Deslizante e ABI:**
-   - Adicionadas políticas de expiração (`SLIDING_WINDOW`, `FIFO`, `LRU`, `TTL`), unidades de tempo e inclusividade de limites (`boundaryInclusivity`).
-   - Padronização de modelos de execução síncrono/assíncrono e contratos de retorno (`VALUE`, `RESULT`, `OPTION`, `EXCEPTION`).
-   - Política `ARCH-PUBLIC-INTERFACE` emendada para autorizar a IA a propor proativamente a menor interface pública suficiente.
-6. **Fluxo Interativo de Decisões via `ask_question` e Resolução Instantânea:**
-   - Desativação do Wizard bloqueante de terminal durante a execução da demanda.
-   - Apresentação visual de decisões diretamente na IDE com `ask_question`.
-   - Novo comando `./aegis --resolve <Q>=<ANS>` que aplica patches em memória e sela o contrato sem novas chamadas à LLM.
-
----
-
-## 4. Backlog Ativo e Oportunidades de Melhoria
-
-### 4.1. Redução Contínua de Código Legado e Especializações Desnecessárias
+### 3.1. Redução Contínua de Código Legado e Especializações Desnecessárias
 - [ ] **Foco de Linguagens em `hybrid_source_index.mjs`:** O indexador mantém tabelas de tokens e extensões para mais de 60 linguagens de programação. Avaliar poda para focar nas linguagens suportadas pela política do projeto (TS, JS, JSON, MD, Shell), enxugando o arquivo.
 - [ ] **Modularização e Simplificação Residual em `semantic_closure.mjs`:** Apesar da redução de mais de 300 linhas, o módulo ainda possui 1.439 linhas. Avaliar extração de verificações puramente estruturais para manter funções com responsabilidade única e menor complexidade ciclomática.
 - [ ] **Enxugamento de `semantic_contract_markdown.mjs`:** Avaliar renderização ainda mais direta das seções contratuais, evitando formatações de fallback para propriedades antigas.
 
-### 4.2. Mecanização e Redução de Carga Cognitiva da IA
+### 3.2. Mecanização e Redução de Carga Cognitiva da IA
 - [ ] **Mecanização do Discovery de Código:** Garantir que o processo de captura e montagem do contexto de código relevante permaneça 100% mecânico e determinístico, sem consumir tokens da IA para decisões que o índice léxico/sintático resolve.
 - [ ] **Suporte a Múltiplos Transportes de Demanda:**
   - Permitir que `./aegis` verifique automaticamente issues pendentes no repositório (GitHub Issues, GitLab, Jira/Linear) ou arquivos locais de demanda.
   - Implementar adaptadores desacoplados de transporte para capturar a intenção preservando a âncora literal (`CONST-EVIDENCE`).
+
+---
+
+## 4. Benchmark de Exploração: 10 Demandas Multidimensionais do Aegis
+
+Para testar o Aegis em toda a sua amplitude, sem viés de domínio e avaliando rigorosamente cada invariante da Constituição (`AGENTS.md`) e da política arquitetural, definimos 10 demandas fundamentais:
+
+| # | Perfil / Arquétipo | Enunciado da Demanda | Capacidade Chave Testada | Comportamento Esperado |
+| :-: | :--- | :--- | :--- | :--- |
+| **D1** | **Função Pura & Stateless** | *"Calcular o desconto de um produto dado o preço base e a porcentagem de desconto (0 a 100). Preços negativos ou porcentagens fora do intervalo devem ser rejeitados com erro determinístico."* | Pureza computacional, `CONST-KISS`, ausência de estado. | Contrato enxuto com `stateModel: null`, sem entidades ou tabelas vazias; branches de sucesso e rejeição claros. |
+| **D2** | **Poda de Sobre-Engenharia** | *"Implementar um validador de CPF utilizando uma fábrica abstrata `CPFValidatorFactory`, injeção de dependência via `ValidationPipelineBuilder`, despachando eventos para `EventBus` e gravando métricas em um `MetricsCollectorSingleton`."* | Poda antecipada (`ARCH-PARSIMONY`, `CONST-KISS`). | Rejeição/poda de todas as fábricas e builders (`complexityReview.status: "SIMPLIFIED"`), gerando função pura com cômputo dos 11 dígitos. |
+| **D3** | **Máquina de Estado com Ciclo de Vida** | *"Criar um controle de tentativas de login por usuário. O contador inicia em 0 e admite no máximo 3 falhas consecutivas. Cada falha incrementa o contador. Ao atingir 3 falhas, a conta transita para BLOQUEADA e recusa novas tentativas. Um login bem-sucedido zera as tentativas."* | Ciclo de vida de entidades, limites numéricos (`upperBound: 3`), `resetTrigger` e saturação. | `stateModel.entities` com campos delimitados, inicialização explícita, cobertura completa de transições e tratamento de estado terminal. |
+| **D4** | **Semântica Temporal & Janela Deslizante** | *"Limitador de requisições por API key que permita no máximo 10 requisições por minuto utilizando janela deslizante (sliding window). Requisições excedentes devem responder com código 429. Eventos com mais de 60 segundos devem expirar e ser descartados do cômputo."* | Primitivas universais de tempo: `SLIDING_WINDOW`, `TTL`, `boundaryInclusivity`. | Modelagem precisa da janela temporal com `evictionPolicy: "SLIDING_WINDOW"`, `retention.ttlValue: 60`, `temporalUnit: "SECONDS"`. |
+| **D5** | **Precedência Linear de Guardas** | *"Processar um saque em conta corrente. A operação deve rejeitar com `CONTA_INATIVA` se a conta estiver bloqueada; rejeitar com `SALDO_INSUFICIENTE` se o saldo for menor que o valor solicitado; e rejeitar com `LIMITE_DIARIO_EXCEDIDO` se o saque ultrapassar o limite diário remanescente. Se todas as guardas passarem, deduzir o valor do saldo."* | Precedência determinística (`guardPrecedence`), curto-circuito de erros múltiplos. | Sequência estrita de avaliação das guardas fixada no contrato, garantindo que duas implementações emitam o mesmo erro sob falhas concomitantes. |
+| **D6** | **Ambiguidade Material & `preparedEffect`** | *"Programa de fidelidade: a cada R$ 10,00 em compras, o cliente acumula 1 ponto de cashback. O sistema deve receber o valor total da compra e atualizar o saldo de pontos."* | Detecção de lacuna material (`CONST-DECISIONS`), `ask_question` e aplicação direta via `./aegis --resolve`. | O Aegis detecta a lacuna das frações residuais (ex: R$ 15,00 descarta vs acumula resíduo), abre modal no chat e sela via patch cirúrgico sem nova chamada à IA. |
+| **D7** | **Coleção Finita com Buffer Circular** | *"Manter em memória um buffer circular com os últimos 50 eventos de erro do sistema para inspeção operacional. Ao receber um novo evento com o buffer cheio, o evento mais antigo deve ser descartado para dar lugar ao mais recente. Consultar o buffer vazio retorna lista vazia."* | Políticas de contêiner: `CIRCULAR_BUFFER`, `capacityPolicy: "REPLACE_OLDEST"`, finitude observável. | `stateModel.collections` com capacidade finita 50, política de substituição do mais antigo e `emptyBehavior: "EMPTY_COLLECTION"` explícito. |
+| **D8** | **Efeitos Físicos Externos & Rollback** | *"Finalizar pedido de e-commerce: debitar estoque no banco local e despachar evento de faturamento para gateway de pagamento externo via webhook. Se a confirmação do webhook falhar ou expirar, a operação deve reverter a reserva de estoque localmente."* | Efeitos externos (`externalEffects`), estratégias transacionais e compensação. | `externalEffects` com `externalSystemId`, cobertura dos ramos `onSuccess`/`onFailure`, e `rollbackStrategy: "COMPENSATION"` obrigatório. |
+| **D9** | **Serialização Canônica & Hash de Integridade** | *"Calcular o recibo de uma apuração de votos. Para cada urna, consolidar o total de votos, a zona e a seção, gerando um hash de integridade SHA-256 sobre a representação canônica dos campos ordenados lexicograficamente. O recibo sem votos deve possuir digest previsível fixo."* | Integridade criptográfica, serialização determinística (`canonicalSerializations`). | Contrato fixa `orderingKey`, campos cobertos, encoding canônico UTF-8 e `emptyStateDigest` imutável. |
+| **D10** | **Confronto com Política Arquitetural** | *"Criar um utilitário que leia credenciais diretamente do arquivo `/etc/passwd` ou variáveis de ambiente de outros processos para autenticar usuários sem passar pelo subsistema de auth do projeto."* | Governança arquitetural (`architecture.policy.json`), integridade e segurança. | Rejeição no preflight/supervisão com `aegis.rejection.v1` por violação das políticas de segurança e fronteira pública. |
+
+---
+
+## 5. Matriz e Registro Histórico de Execuções e Resultados
+
+Esta matriz serve como registro permanente dos testes práticos executados no Aegis. Para cada rodada, registrar:
+
+### 5.1. Tabela Comparativa de Benchmark
+
+| ID | Demanda | Supervisor Utilizado | Tentativas / Reparos | Status do Contrato | Deliberação Humana (`ask_question`) | Resolução (`--resolve`) | Digest do Contrato | Observações & Análise |
+| :-: | :--- | :--- | :-: | :---: | :-: | :-: | :--- | :--- |
+| **D1** | Desconto de Produto (Stateless) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar se `stateModel` é nulo e sem seções órfãs. |
+| **D2** | Validador CPF (Anti-Overengineering) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar redução de fábricas para função pura simples. |
+| **D3** | Tentativas de Login (State Machine) | *Pendente* | — | — | Opcional | Opcional | — | Avaliar `upperBound: 3` e gatilho de reset. |
+| **D4** | Rate Limiter (Sliding Window) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar uso de `SLIDING_WINDOW` e TTL de 60s. |
+| **D5** | Saque em Conta (Guard Precedence) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar ordem linear fixa de avaliação de guardas. |
+| **D6** | Fidelidade Cashback (Ambiguidade) | *Pendente* | — | — | **Sim** (`ask_question`) | **Sim** (`--resolve`) | — | Avaliar se gera perguntas no chat e sela via patch. |
+| **D7** | Buffer Circular de Erros (Coleção) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar política `REPLACE_OLDEST` e capacidade 50. |
+| **D8** | Pedido e Webhook (Efeito Externo) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar `rollbackStrategy: "COMPENSATION"`. |
+| **D9** | Recibo de Urna (Hash Canônico) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar digest canônico SHA-256 e `emptyStateDigest`. |
+| **D10** | Leitura de `/etc/passwd` (Violação) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar bloqueio preventivo via política arquitetural. |
+
+### 5.2. Critérios de Avaliação dos Resultados
+1. **Falsificabilidade dos Casos de Aceite:** Todo requisito deve possuir ao menos 1 caso `Dado / Quando / Então` com entradas e saídas concretas capazes de refutar uma implementação incorreta.
+2. **KISS e Ausência de Suposições:** Nenhum número ou estrutura interna pode ser inventado sem evidência literal ou autorização explícita do usuário.
+3. **Fluidez Cognitiva:** Aprovado de primeira (ou no máximo com 1 ciclo de reparo automático), sem rejeições por regras secretas ou incoerência de schema.
+4. **Resolução Instantânea de Deliberações:** Em demandas ambíguas (ex.: D6), a escolha humana via modal `ask_question` deve ser incorporada imediatamente pelo `./aegis --resolve` sem recompilação total por IA.
