@@ -256,17 +256,9 @@ function activate(context) {
   const root = workspaceRoot();
   if (root === undefined) return;
 
-  // 1. VSCode File System Watcher
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, requestRelPath));
-  context.subscriptions.push(
-    watcher,
-    watcher.onDidCreate(() => presentPending()),
-    watcher.onDidChange(() => presentPending()),
-    watcher.onDidDelete(() => resetWizardState()),
-  );
-
+  // Deliberação automática desativada: a deliberação agora ocorre exclusivamente
+  // no chat da IDE via ask_question. O comando manual é preservado sob demanda.
   context.subscriptions.push(vscode.commands.registerCommand('aegisWizard.check', () => presentPending(true)));
-  void presentPending();
 }
 
 function deactivate() {}
