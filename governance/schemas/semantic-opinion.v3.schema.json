@@ -15,10 +15,10 @@
   "properties": {
     "schema": { "const": "aegis.semantic_opinion.v3" },
     "sourceEvidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "title": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_title" },
-    "interpretation": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_interpretation" },
-    "changeKind": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_changeKind" },
-    "scope": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_scope" },
+    "title": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_title" },
+    "interpretation": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_interpretation" },
+    "changeKind": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_changeKind" },
+    "scope": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_scope" },
     "intentClaims": {
       "type": "array",
       "minItems": 1,
@@ -171,8 +171,8 @@
           "representationKind": { "enum": ["REPRESENTATION_WIDTH", "ENCODED_VALUE"] },
           "lowerBound": { "type": "string", "minLength": 1 },
           "upperBound": { "type": "string", "minLength": 1 },
-          "underflowBehavior": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_rangeBehavior" },
-          "overflowBehavior": { "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_rangeBehavior" },
+          "underflowBehavior": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior" },
+          "overflowBehavior": { "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior" },
           "decisionIndex": { "type": ["integer", "null"], "minimum": 0 },
           "requirementIndexes": {
             "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true
