@@ -109,7 +109,7 @@ Esta matriz serve como registro permanente dos testes práticos executados no Ae
 
 | ID | Demanda | Supervisor Utilizado | Tentativas / Reparos | Status do Contrato | Deliberação Humana (`ask_question`) | Resolução (`--resolve`) | Digest do Contrato | Observações & Análise |
 | :-: | :--- | :--- | :-: | :---: | :-: | :-: | :--- | :--- |
-| **D1** | Desconto de Produto (Stateless) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar se `stateModel` é nulo e sem seções órfãs. |
+| **D1** | Desconto de Produto (Stateless) | Supervisor IDE | 1 tentativa (0 reparos) | **CERTIFIED_CLOSED** | Não necessária (0 lacunas) | Não aplicável | `62fdd130090a` (Rascunho) | **Sucesso imediato (KISS Puro).** `stateModel: null`, zero poluição de seções órfãs no markdown, dual acceptance estrito (3 happy/boundary e 3 failure) cobrindo cálculo exato, bordas 0 e 100, e rejeições determinísticas. |
 | **D2** | Validador CPF (Anti-Overengineering) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar redução de fábricas para função pura simples. |
 | **D3** | Tentativas de Login (State Machine) | *Pendente* | — | — | Opcional | Opcional | — | Avaliar `upperBound: 3` e gatilho de reset. |
 | **D4** | Rate Limiter (Sliding Window) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar uso de `SLIDING_WINDOW` e TTL de 60s. |
