@@ -114,7 +114,7 @@ Esta matriz serve como registro permanente dos testes práticos executados no Ae
 | **D3** | Tentativas de Login (State Machine) | *Pendente* | — | — | Opcional | Opcional | — | Avaliar `upperBound: 3` e gatilho de reset. |
 | **D4** | Rate Limiter (Sliding Window) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar uso de `SLIDING_WINDOW` e TTL de 60s. |
 | **D5** | Saque em Conta (Guard Precedence) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar ordem linear fixa de avaliação de guardas. |
-| **D6** | Fidelidade Cashback (Ambiguidade) | *Pendente* | — | — | **Sim** (`ask_question`) | **Sim** (`--resolve`) | — | Avaliar se gera perguntas no chat e sela via patch. |
+| **D6** | Fidelidade Cashback (Ambiguidade) | Supervisor IDE | 1 tentativa (0 reparos) | **CERTIFIED_CLOSED** (Selado) | **Sim** (`ask_question` no chat) | **Sim** (`./aegis --resolve Q-0001=ANS-0001-01`) | `2878768924ea` | **Sucesso completo de ponta a ponta.** A ambiguidade de frações residuais foi detectada e apresentada no modal do chat via `ask_question`. A escolha humana (truncamento simples) foi aplicada instantaneamente via `preparedEffect` e o contrato selado em ~5ms sem chamadas extras de IA. |
 | **D7** | Buffer Circular de Erros (Coleção) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar política `REPLACE_OLDEST` e capacidade 50. |
 | **D8** | Pedido e Webhook (Efeito Externo) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar `rollbackStrategy: "COMPENSATION"`. |
 | **D9** | Recibo de Urna (Hash Canônico) | *Pendente* | — | — | Não aplicável | Não aplicável | — | Avaliar digest canônico SHA-256 e `emptyStateDigest`. |
