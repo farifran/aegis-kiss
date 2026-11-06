@@ -52,13 +52,6 @@ run_demand() {
   if [[ ${run_code} -ne 0 ]]; then
     exit ${run_code}
   fi
-  if [[ -t 0 && -t 1 && -f "${RUNTIME_DIR}/user_confirmation_request.json" ]]; then
-    local q_count
-    q_count="$(jq -r '.questionCount // 0' "${RUNTIME_DIR}/user_confirmation_request.json" 2>/dev/null || echo 0)"
-    if (( q_count > 0 )); then
-      resolve_preflight_wizard
-    fi
-  fi
 }
 
 
