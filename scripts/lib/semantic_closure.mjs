@@ -93,7 +93,7 @@ export function validateDecisionsWitness({
  * Utilitário Relacional Genérico de Integridade de Referências (Passo 3: Verificação Declarativa).
  * Valida de forma uniforme se referências de uma coleção existem no conjunto-alvo de chaves autorizadas.
  */
-export function checkReferenceIntegrity({
+function checkReferenceIntegrity({
   items,
   getKey = (item) => item,
   targetSet,
@@ -1071,7 +1071,7 @@ export function validateProvenanceEnforcement({
  * 2. Quando houver superfície com efeito externo (`external-effect` / `PUBLIC_SURFACE`),
  *    exista cobertura, verificação de confirmação e estratégia de rollback.
  */
-export function validateOpenTermDependencies({
+function validateOpenTermDependencies({
   stateModel = null,
   decisions = [],
   boundaryRules = [],
