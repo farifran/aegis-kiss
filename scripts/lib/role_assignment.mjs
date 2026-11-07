@@ -16,9 +16,19 @@ export function assertRoleAssignment(document) {
   return document;
 }
 
-export async function loadRoleAssignment(repositoryRoot) {
+export function defaultRoleAssignment() {
+  return {
+    schema: 'aegis.role_assignment.v1',
+    roles: {
+      contractSupervisor: { channel: 'IDE', adapter: 'antigravity', model: null, credentialEnv: null },
+      codingAgent: { channel: 'IDE', adapter: 'antigravity', model: null, credentialEnv: null },
+    },
+  };
+}
+
+export async function loadRoleAssignment(repositoryRoot, { fallbackToDefault = false } = {}) {
   const path = roleAssignmentPath(repositoryRoot);
-  if (!existsSync(path)) return null;
+  if (!existsSync(path)) return fallbackToDefault ? defaultRoleAssignment() : null;
   return assertRoleAssignment(JSON.parse(await readFile(path, 'utf8')));
 }
 

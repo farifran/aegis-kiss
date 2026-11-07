@@ -60,8 +60,8 @@ async function configureRole(terminal, label, defaults) {
   const compatibleDefaults = defaults?.channel === channel ? defaults : null;
   const adapter = assertAdapter(await askRequired(
     terminal,
-    `Adaptador (ex.: ${channel === 'API' ? 'ai-gateway' : 'codex, cursor'}): `,
-    compatibleDefaults?.adapter ?? (channel === 'API' ? 'ai-gateway' : 'codex'),
+    `Adaptador (ex.: ${channel === 'API' ? 'ai-gateway' : 'antigravity, codex, cursor'}): `,
+    compatibleDefaults?.adapter ?? (channel === 'API' ? 'ai-gateway' : 'antigravity'),
   ));
   const modelRequired = channel === 'API' || (channel === 'IDE' && adapter === 'codex');
   const modelAnswer = trimAnswer(await terminal.question(

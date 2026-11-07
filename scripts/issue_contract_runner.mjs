@@ -555,12 +555,11 @@ async function handleSemanticRun(args) {
   if (args.length !== 0) throw rejection('INVALID_SEMANTIC_RUN_ARITY');
   const context = await buildCurrentSemanticRequest();
   if (await compilePreparedRevision(context)) return;
-  const [{ loadRoleAssignment }, { assertSemanticSupervisorReady, requestSemanticOpinion }] = await Promise.all([
+  const [{ loadRoleAssignment, defaultRoleAssignment }, { assertSemanticSupervisorReady, requestSemanticOpinion }] = await Promise.all([
     import('./lib/role_assignment.mjs'),
     import('./lib/semantic_gateway.mjs'),
   ]);
-  const assignment = await loadRoleAssignment(root);
-  if (assignment === null) throw rejection('ROLE_ASSIGNMENT_NOT_CONFIGURED');
+  const assignment = (await loadRoleAssignment(root)) ?? defaultRoleAssignment();
   const role = assignment.roles.contractSupervisor;
 
   const invokeSupervisor = async (previousAttempt = null) => {
@@ -580,10 +579,23 @@ async function handleSemanticRun(args) {
       calls: 1,
     });
   } catch (error) {
-    if (error?.code !== 'INVALID_SEMANTIC_OPINION') throw error;
+    const isInvalidOpinion = error?.message === 'INVALID_SEMANTIC_OPINION' || error?.code === 'INVALID_SEMANTIC_OPINION';
+    if (!isInvalidOpinion) throw error;
+    const report = buildRejectionReport({
+      phase: 'SEMANTIC',
+      reason: error.message,
+      detail: error.detail || '',
+    });
+    const diagnosticMessage = [
+      `Código do erro: ${report.cause || report.reason}`,
+      report.detail ? `Detalhe: ${report.detail}` : null,
+      report.ruleId ? `Regra violada: ${report.ruleId}` : null,
+      report.message ? `Diagnóstico: ${report.message}` : null,
+      report.remediation ? `Como corrigir: ${report.remediation}` : null,
+    ].filter(Boolean).join('\n');
     const attempt2 = await invokeSupervisor({
       opinion: attempt1.opinion,
-      errorMessage: error.message,
+      errorMessage: diagnosticMessage,
     });
     const cumulativeUsage = {
       inputTokens: (attempt1.execution.usage?.inputTokens ?? 0) + (attempt2.execution.usage?.inputTokens ?? 0),
@@ -615,7 +627,12 @@ async function handleDemand(args) {
     await handleSemanticRun([]);
   } catch (error) {
     const message = error instanceof Error ? (error.detail || error.message) : '';
-    if (message.includes('executable_not_found') || message.includes('SEMANTIC_CODEX_FAILED')) {
+    if (
+      message.includes('executable_not_found') ||
+      message.includes('SEMANTIC_CODEX_FAILED') ||
+      message.includes('SEMANTIC_IDE_ADAPTER_UNSUPPORTED') ||
+      error?.message === 'SEMANTIC_IDE_ADAPTER_UNSUPPORTED'
+    ) {
       const preflight = await readPreflight();
       process.stdout.write(`${JSON.stringify({
         schema: preflight.schema,

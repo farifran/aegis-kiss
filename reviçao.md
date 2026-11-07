@@ -161,4 +161,15 @@ Em resposta à análise adversarial de eficiência do Aegis e com foco estrito e
 - **Problema resolvido:** Ao rodar `./aegis --new "<demanda>"` num ambiente onde o binário do supervisor externo (`codex`) não está no `PATH`, o CLI quebrava com exceção de terminal (`SEMANTIC_CODEX_FAILED: executable_not_found:codex`), exigindo intervenção manual ou scripts avulsos.
 - **Solução implementada (KISS Puro):** O CLI captura o preflight normalmente e, se o supervisor externo não estiver instalado, emite `preflight_handoff.v2` com exit code 0 e payload limpo para o canal IDE. A IA assistente assume a deliberação sem fricção via `./aegis --semantic-compile`, sem falhas no terminal e sem bibliotecas intermediárias complexas.
 
+### 6.4. Ponto 4: Formalização de Assistente de IDE como Primeira Classe e Desprivilegiamento do Codex
+- **Onde foi aplicado:** [`scripts/lib/role_assignment.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/role_assignment.mjs), [`scripts/setup_roles.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/setup_roles.mjs), [`.harness/config/roles.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/.harness/config/roles.json) e [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs).
+- **Problema resolvido:** O Codex figurava como supervisor padrão hardcoded nas configurações de papéis e nos scripts interativos de setup, forçando ambientes sem o binário a dependerem de exceções de terminal.
+- **Solução implementada:** `contractSupervisor` agora adota `antigravity` (ou `ai-gateway`) como padrão nativo de primeira classe. O Codex passa a ser estritamente um adaptador secundário plugável para execução headless no terminal. `./aegis --new` reconhece supervisores IDE sem travar o terminal.
+
+### 6.5. Ponto 5: Clareza Diagnóstica no Laço de Reparo Residual
+- **Onde foi aplicado:** [`scripts/lib/rejection_report.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/rejection_report.mjs) e [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs).
+- **Problema resolvido:** Quando a IA cometia erros conceituais reais (máquina de estado sem cobertura, guardas sem precedência linear, limites inteiros ausentes), o laço de reparo enviava apenas a mensagem genérica `INVALID_SEMANTIC_OPINION` ou mensagens opacas, forçando o modelo a "adivinhar" o que causou a rejeição.
+- **Solução implementada:** Catalogação exaustiva de diagnósticos com causa específica (`cause`), regra da Constituição violada (`ruleId`), explicação do problema (`message`) e guia passo-a-passo de remediação (`remediation`). O laço de reparo de 1 ciclo agora injeta esse relatório estruturado completo diretamente no prompt de reavaliação do supervisor.
+
+
 

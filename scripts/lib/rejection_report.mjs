@@ -81,8 +81,8 @@ const diagnostics = new Map([
     remediation: 'Execute ./aegis --setup e informe um modelo disponível na sua conta Codex.',
   }],
   ['SEMANTIC_IDE_ADAPTER_UNSUPPORTED', {
-    message: 'O supervisor IDE configurado não oferece execução automática no Aegis.',
-    remediation: 'Use o adaptador codex para fluxo automático ou uma API configurada em ./aegis --setup.',
+    message: 'O canal IDE opera via deliberação interativa no chat da IDE.',
+    remediation: 'Utilize a deliberação via chat no canal IDE com ./aegis --semantic-compile. Para execução automática sem intervenção humana no terminal, configure um supervisor API (ai-gateway) em ./aegis --setup ou utilize o adaptador secundário codex.',
   }],
   ['SEMANTIC_SUPERVISOR_CREDENTIAL_MISSING', {
     message: 'A chave do supervisor semântico não está disponível no ambiente.',
@@ -145,6 +145,146 @@ const diagnostics = new Map([
     remediation: 'Resolva as decisões humanas e as lacunas bloqueantes antes de solicitar a assinatura.',
     ruleId: 'CONST-DECISIONS',
   }],
+  ['MISSING_GUARD_PRECEDENCE', {
+    message: 'A operação possui múltiplas guardas de validação ou rejeição, mas não define a precedência linear estrita entre elas.',
+    remediation: 'Adicione no array "guardPrecedence" da operação a lista ordenada dos nomes de todas as guardas em ordem estrita de precedência.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNRESOLVED_GUARD_PRECEDENCE', {
+    message: 'A operação possui múltiplas guardas, mas a propriedade "guardPrecedence" está ausente ou vazia.',
+    remediation: 'Especifique "guardPrecedence" com os identificadores de todas as guardas na ordem estrita de avaliação determinística.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_GUARD_REJECTION_BRANCH', {
+    message: 'Uma guarda declarada na operação não possui branch correspondente de rejeição.',
+    remediation: 'Defina um branch com "branchKind": "REJECTION" referenciando o ID da guarda e indicando o erro ou estado de destino.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_SUCCESS_BRANCH', {
+    message: 'A operação não define nenhum branch de sucesso para quando todas as guardas forem satisfeitas.',
+    remediation: 'Defina ao menos um branch com "branchKind": "SUCCESS" especificando o estado ou efeito resultante.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['BRANCH_WITH_UNDETERMINED_NEXT_STATE', {
+    message: 'O branch de execução da operação não determina o próximo estado observável da entidade.',
+    remediation: 'Especifique "nextState" ou as mutações de campos no branch para garantir determinismo.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_TRANSITION_COVERAGE', {
+    message: 'Uma transição permitida no ciclo de vida da entidade não é coberta por nenhuma operação contratual.',
+    remediation: 'Crie uma operação correspondente ou restrinja o ciclo de vida para transições realmente necessárias.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNRESOLVED_TRANSITION', {
+    message: 'Existe uma mutação de campo declarada sem correspondência no branch de transição da operação.',
+    remediation: 'Vincule a alteração do campo ao branchId e à operação que executa a transição de estado.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNRESOLVED_FIELD_BOUNDS', {
+    message: 'Campo numérico contínuo ou contador foi especificado sem limites explícitos ou política de saturação/rejeição.',
+    remediation: 'Defina "lowerBound", "upperBound" e "boundaryBehavior" (ex.: SATURATE ou REJECT) com base em evidência literal ou decisão humana.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INTEGER_FIELD_WITHOUT_BOUNDS', {
+    message: 'Campo inteiro sem limites formais abre margem para estouro de representação ou comportamento divergente.',
+    remediation: 'Especifique limites inferior e superior autorizados ou declare ausência de limites autorizada pelo contexto.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNRESOLVED_INITIALIZATION', {
+    message: 'Campo da entidade sem valor ou comportamento determinístico de inicialização.',
+    remediation: 'Especifique "initialValue" ou a regra explícita de inicialização da entidade no momento de criação.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['COUNTER_WITHOUT_RESET_TRIGGER', {
+    message: 'Campo que atua como contador/acumulador não possui operação ou gatilho de reset definido.',
+    remediation: 'Indique a operação de reset no ciclo de vida (ex.: login bem-sucedido zera tentativas de falha).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['STATEFUL_WITHOUT_STATE_MODEL', {
+    message: 'A especificação declara estado persistente ("isStateful": true), mas não define entidades em "stateModel".',
+    remediation: 'Modele as entidades e operações em "stateModel" ou marque a demanda como puramente stateless ("isStateful": false).',
+    ruleId: 'CONST-KISS',
+  }],
+  ['INVALID_BITMASK_ALLOCATION', {
+    message: 'A alocação de bits da máscara sobrepõe fatias existentes ou ultrapassa a largura máxima do campo.',
+    remediation: 'Ajuste os intervalos em "bitAllocation" para garantir fatias disjuntas e limites consistentes.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['DYNAMIC_COLLECTION_WITHOUT_CAPACITY_POLICY', {
+    message: 'Coleção dinâmica em memória sem política de capacidade delimitada ("capacityPolicy").',
+    remediation: 'Defina "maxEntries" e "overflowPolicy" (ex.: FIFO_EVICTION, REJECT_NEW, REPLACE_OLDEST).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['DYNAMIC_COLLECTION_WITHOUT_ADMISSION_POLICY', {
+    message: 'Coleção sem política de admissão de novos elementos ("admissionPolicy").',
+    remediation: 'Defina "admissionPolicy" (ex.: ON_FIRST_REQUEST, VALIDATED_INSERTION).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['OBSERVABLE_WITHOUT_EMPTY_BEHAVIOR', {
+    message: 'Elemento observável público sem especificação de comportamento quando vazio ("emptyBehavior").',
+    remediation: 'Defina "emptyBehavior" determinístico (ex.: EMPTY_COLLECTION, ZERO_VALUE, NULL_VALUE).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['OBSERVABLE_WITHOUT_REPRESENTATION', {
+    message: 'Observável público declarado sem formato canônico de representação ("representation").',
+    remediation: 'Defina a representação e largura (ex.: PLAIN_INTEGER, CANONICAL_STRING, BITMASK).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['CANONICAL_SERIALIZATION_MISSING', {
+    message: 'Exigência de integridade ou hash criptográfico sem definição da serialização canônica correspondente.',
+    remediation: 'Especifique "canonicalSerializations" com campos ordenados lexicograficamente ("orderingKey") e encoding UTF-8.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['EXTERNAL_EFFECT_COVERAGE_MISSING', {
+    message: 'Operação com efeito físico externo não cobre todos os ramos de confirmação ou timeout.',
+    remediation: 'Especifique ações determinísticas para "onSuccess" e "onFailure" na chamada externa.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INCOMPLETE_EXTERNAL_EFFECT', {
+    message: 'Efeito externo incompleto: faltam alvos, payload canônico ou verificação de confirmação.',
+    remediation: 'Complete os dados do efeito físico externo garantindo identificador e confirmação auditável.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['TRANSACTION_ROLLBACK_MISSING', {
+    message: 'Operação que altera estado local e despacha efeito externo não possui estratégia de compensação ou rollback.',
+    remediation: 'Defina "rollbackStrategy" (ex.: COMPENSATION) especificando o estorno do estado local em caso de falha externa.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['CONTRADICTORY_RULE_DETECTED', {
+    message: 'Foram detectadas regras ou guardas mutuamente contraditórias que produzem comportamento observável indeterminado.',
+    remediation: 'Harmonize as condições de guarda e políticas para eliminar conflitos lógicos diretos.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['OPEN_COMPUTATIONAL_DEPENDENCY', {
+    message: 'Operação ou efeito de estado referencia termos ou campos não aterrados em variáveis computáveis.',
+    remediation: 'Certifique-se de que todo termo de cálculo provenha de campos da entidade, parâmetros da operação ou literais da demanda.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['SCHEMA_VALIDATION_FAILED', {
+    message: 'O parecer da IA viola restrições formais do schema JSON (propriedades obrigatórias ausentes ou tipos inválidos).',
+    remediation: 'Revise os campos indicados no erro de schema e retorne apenas a estrutura JSON estritamente conforme.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['REQUIREMENT_WITHOUT_DUAL_ACCEPTANCE', {
+    message: 'O requisito não possui a cobertura dual obrigatória de casos de aceite (ao menos 1 caminho feliz/fronteira e 1 rejeição/falha).',
+    remediation: 'Defina casos de teste de aceitação falsificáveis "Dado / Quando / Então" cobrindo tanto o sucesso quanto o erro esperado.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INVALID_USER_INTENT_BASIS', {
+    message: 'A base da afirmação ou requisito referencia um texto ou fato inexistente na demanda original.',
+    remediation: 'Aponte apenas para trechos literais da demanda ou identificadores válidos de fatos (FACT-*) e fragmentos (FRAG-*).',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['BOUNDARY_RULE_WITHOUT_EXACT_CASE_BINDING', {
+    message: 'Regra de fronteira numérica declarada sem caso de teste de aceitação vinculado.',
+    remediation: 'Vincule a regra de fronteira a um caso de teste que exercite o valor exato do limite.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['NON_DELIBERABLE_POLICY_CONFLICT', {
+    message: 'A demanda entra em conflito direto com uma regra arquitetural de nível rígido (hard), que proíbe deliberação humana ou flexibilização.',
+    remediation: 'Ajuste a demanda para respeitar as fronteiras do produto e as políticas arquiteturais mandatadas.',
+    ruleId: 'CONST-KISS',
+  }],
 ]);
 
 function diagnosticFamily(reason) {
@@ -155,7 +295,7 @@ function diagnosticFamily(reason) {
       ruleId: 'CONST-DECISIONS',
     };
   }
-  if (/^(?:ACCEPTANCE|BOUNDARY|DETERMINISM|INAPPLICABLE_DETERMINISM|INCOMPLETE_DETERMINISM|INVALID_REPRESENTATION|INVARIANT|ORPHAN_DETERMINISM|QUALITY_CONSTRAINT|REQUIREMENT|RESOLVED_DIMENSION|SPECIFIED_DETERMINISM)/u.test(reason)) {
+  if (/^(?:ACCEPTANCE|BOUNDARY|BRANCH|CANONICAL|COUNTER|DETERMINISM|DYNAMIC_COLLECTION|EXTERNAL_EFFECT|INAPPLICABLE_DETERMINISM|INCOMPLETE_DETERMINISM|INTEGER_FIELD|INVALID_BITMASK|INVALID_REPRESENTATION|INVARIANT|MISSING_GUARD|MISSING_SUCCESS|MISSING_TRANSITION|OBSERVABLE|ORPHAN_DETERMINISM|QUALITY_CONSTRAINT|REQUIREMENT|RESOLVED_DIMENSION|SPECIFIED_DETERMINISM|TRANSACTION_ROLLBACK|UNRESOLVED_FIELD|UNRESOLVED_GUARD|UNRESOLVED_INIT|UNRESOLVED_TRANSITION)/u.test(reason)) {
     return {
       message: 'A especificação não fecha uma fronteira observável com prova falsificável suficiente.',
       remediation: 'Defina um único comportamento de sucesso, falha ou limite e vincule-o ao requisito correspondente.',
