@@ -155,6 +155,19 @@ A reexecução da Demanda D1 após as melhorias arquiteturais (commits `744dc51`
 | **Digest Canônico do Rascunho (`contractDraftDigest`)** | `62fdd130090a898b33eda04b15d5785fd23fb50064038db6693b4cb975b61e78` | `62fdd130090a898b33eda04b15d5785fd23fb50064038db6693b4cb975b61e78` | **100% Bit-a-Bit Idêntico** (Zero regressão semântica) |
 | **Status Final & Custódia** | Rascunho não selado (`draft-62fdd130090a898b`) | **Selado (`f9c598727ed63bf9...`)** e arquivado em `benchmarks/results/D1_run2/` | **Ciclo completo com confirmação via `ask_question`** |
 
+### 5.5. Registro Comparativo de Poda de Sobre-Engenharia (D2 — Run 1 vs Run 2)
+
+A reexecução da Demanda D2 (*Validador de CPF com poda de `CPFValidatorFactory`, `ValidationPipelineBuilder`, `EventBus` e `MetricsCollectorSingleton`*) permitiu comparar a experiência de poda de complexidade (`CONST-KISS` e `ARCH-PARSIMONY`) e eliminar o último ponto de acoplamento posicional em `targets`:
+
+| Dimensão Avaliada | D2 — Run 1 (Baseline Inicial) | D2 — Run 2 (Pós-Sistematização KISS) | Ganho / Diagnóstico |
+| :--- | :--- | :--- | :--- |
+| **Chamadas de Ferramenta (Tool Calls)** | ~17 chamadas (criação de `scratch/test_d2_opinion.mjs`, `scratch/compile_d2.mjs` e 8 greps para depurar erro opaco) | **2 comandos CLI** (`./aegis --new` + `./aegis --semantic-compile`) + `./aegis --approve` | **Redução de ~88% nas chamadas e zero scripts temporários** |
+| **Falha Ocorrida na Compilação** | `DETERMINISM_COVERAGE_NON_MATERIAL_CLAIM` (`CLAIM-0002`) com mensagem genérica, exigindo 8 buscas no código-fonte | **Zero falha** (`normalizeSemanticOpinion` filtra automaticamente `NO_DIMENSION_APPLICABLE` em claims não materiais e `rejection_report.mjs` possui diagnóstico dedicado) | **Imunidade contra rejeição burocrática em claims podadas** |
+| **Endereçamento em `intentClaims.targets`** | Índice numérico `{ "kind": "POLICY_RULE", "index": 4 }` sujeito a erro posicional (ex.: `index: 1` aponta silenciosamente para `ARCH-HARNESS-STATE`) | **ID semântico explícito** `{ "kind": "POLICY_RULE", "ruleId": "ARCH-PARSIMONY" }` e `{ "kind": "REQUIREMENT", "id": "REQ-0001" }` | **Eliminação de desvio semântico silencioso em alvos de políticas** |
+| **Digest do Rascunho (`contractDraftDigest`)** | `be377be5ae910c36e646955246bb917557b65fe9186794f15d2014bddc5c9019` | `be377be5ae910c36e646955246bb917557b65fe9186794f15d2014bddc5c9019` | **100% Idêntico** |
+| **Digest Final do Contrato (`contractDigest`)** | `f8157b1a640e62e0e3bfa67b0ac765e988aa5fe975412ec77c5c69d9c97ff1f4` | `f8157b1a640e62e0e3bfa67b0ac765e988aa5fe975412ec77c5c69d9c97ff1f4` | **100% Idêntico** |
+| **SHA-256 `contract.json` & `contract.md`** | `9ae678bca699...` / `fca59484c81d...` | `9ae678bca699...` / `fca59484c81d...` | **100% Byte-a-Byte Idênticos** (`D2_run1` vs `D2_run2`) |
+
 ---
 
 ## 6. Implementação das Correções do Parecer do Advogado do Diabo (Plano de 3 Pontos)

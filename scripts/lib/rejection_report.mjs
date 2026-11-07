@@ -285,6 +285,11 @@ const diagnostics = new Map([
     remediation: 'Ajuste a demanda para respeitar as fronteiras do produto e as políticas arquiteturais mandatadas.',
     ruleId: 'CONST-KISS',
   }],
+  ['DETERMINISM_COVERAGE_NON_MATERIAL_CLAIM', {
+    message: 'A revisão de determinismo declarou cobertura sobre uma claim não material (ex.: POLICY_CORRECTION ou NON_NORMATIVE).',
+    remediation: 'Inclua em "determinismReview.coverage" apenas claims materiais com disposition "NORMATIVE" ou "DECISION".',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
 ]);
 
 function diagnosticFamily(reason) {

@@ -48,6 +48,30 @@ function assertEvidenceCoverage(opinion, request) {
 export function normalizeSemanticOpinion(opinion, request) {
   opinion = globalThis.structuredClone(opinion);
 
+  const normalizeTarget = (target) => {
+    if (!target || typeof target !== 'object') return;
+    if (target.index === undefined) {
+      const id = target.ruleId || target.id;
+      if (target.kind === 'POLICY_RULE' && id) {
+        const idx = request.policy.rules.findIndex((r) => r.id === id);
+        if (idx !== -1) target.index = idx;
+      } else if (id) {
+        const parsed = parseInt(String(id).replace(/\D/g, ''), 10) - 1;
+        if (!Number.isNaN(parsed) && parsed >= 0) target.index = parsed;
+      }
+    }
+    delete target.ruleId;
+    delete target.id;
+  };
+
+  if (Array.isArray(opinion.intentClaims)) {
+    for (const claim of opinion.intentClaims) {
+      if (Array.isArray(claim.targets)) {
+        for (const target of claim.targets) normalizeTarget(target);
+      }
+    }
+  }
+
   // 1. architectureContexts: aceita contextTag ou tag além de contextIndex
   if (Array.isArray(opinion.architectureContexts)) {
     for (const item of opinion.architectureContexts) {
@@ -84,6 +108,10 @@ export function normalizeSemanticOpinion(opinion, request) {
   if (opinion.determinismReview) {
     opinion.determinismReview.dimensions ??= [];
     for (const dim of opinion.determinismReview.dimensions) {
+      if (dim.subject && typeof dim.subject === 'object') normalizeTarget(dim.subject);
+      if (Array.isArray(dim.targets)) {
+        for (const target of dim.targets) normalizeTarget(target);
+      }
       dim.inapplicabilityProof ??= null;
       if (dim.proofObligation && typeof dim.proofObligation === 'object') {
         dim.proofObligation.boundaryInclusivity ??= null;
@@ -102,6 +130,14 @@ export function normalizeSemanticOpinion(opinion, request) {
         if (coverage.disposition === undefined) {
           coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
         }
+      }
+      if (Array.isArray(opinion.intentClaims)) {
+        opinion.determinismReview.coverage = opinion.determinismReview.coverage.filter((coverage) => {
+          const claim = opinion.intentClaims[coverage.claimIndex];
+          if (!claim) return true;
+          const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
+          return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
+        });
       }
     }
   }
