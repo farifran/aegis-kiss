@@ -195,8 +195,6 @@ export function buildSemanticRequest({
         statement: rule.statement,
         appliesWhen: rule.appliesWhen,
         appliesMode: rule.appliesMode,
-        reviewReferences: rule.reviewReferences,
-        forbiddenReferences: rule.forbiddenReferences,
       })),
       amendments: (policy.amendments ?? []).map(({ id, ruleId, reason }) => ({ id, ruleId, reason })),
     },

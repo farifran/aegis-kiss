@@ -4,18 +4,15 @@
   "title": "Aegis Cognitive Constitution v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "constitutionVersion", "origin", "rules"],
+  "required": ["schema","constitutionVersion","origin","rules"],
   "properties": {
-    "schema": { "const": "aegis.constitution.v1" },
-    "constitutionVersion": { "type": "integer", "minimum": 1 },
+    "schema": {"const":"aegis.constitution.v1"},
+    "constitutionVersion": {"type":"integer","minimum":1},
     "origin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourcePath", "sourceDigest"],
-      "properties": {
-        "sourcePath": { "const": "AGENTS.md" },
-        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-      }
+      "required": ["sourcePath","sourceDigest"],
+      "properties": {"sourcePath":{"const":"AGENTS.md"},"sourceDigest":{"type":"string","pattern":"^[a-f0-9]{64}$"}}
     },
     "rules": {
       "type": "array",
@@ -24,10 +21,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "statement"],
+        "required": ["id","statement"],
         "properties": {
-          "id": { "type": "string", "pattern": "^CONST-[A-Z0-9][A-Z0-9-]+$" },
-          "statement": { "type": "string", "minLength": 1 }
+          "id": {"type":"string","pattern":"^CONST-[A-Z0-9][A-Z0-9-]+$"},
+          "statement": {"type":"string","minLength":1}
         }
       }
     }

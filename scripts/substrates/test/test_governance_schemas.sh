@@ -47,7 +47,6 @@ const currentSchemas = [
   'semantic-opinion.v3.schema.json',
   'semantic-request.v10.schema.json',
   'semantic-resolution.v2.schema.json',
-  'wizard-question.v1.schema.json',
 ];
 for (const file of currentSchemas) {
   const schema = JSON.parse(readFileSync(`governance/schemas/${file}`, 'utf8'));
@@ -91,9 +90,6 @@ const userBasis = [{ source: 'USER_INTENT', reference: 'comportamento observáve
 const modelBasis = [{ source: 'MODEL_ANALYSIS', reference: 'analysis' }];
 const applicableRules = loadedPolicy.policy.rules.filter((rule) => (
   rule.appliesWhen.includes('product-demand')
-  || [...rule.reviewReferences, ...rule.forbiddenReferences]
-    .some((reference) => demand.toLocaleLowerCase('pt-BR')
-      .includes(reference.toLocaleLowerCase('pt-BR')))
 ));
 
 const draft = {

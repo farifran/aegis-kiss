@@ -4,46 +4,55 @@
   "title": "Aegis Semantic Request v10",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "requestDigest", "contextDigest", "delivery", "constitution", "intent", "intentEvidence", "workspace", "policy", "revision", "outputSchema"],
+  "required": [
+    "schema",
+    "requestDigest",
+    "contextDigest",
+    "delivery",
+    "constitution",
+    "intent",
+    "intentEvidence",
+    "workspace",
+    "policy",
+    "revision",
+    "outputSchema"
+  ],
   "properties": {
-    "schema": { "const": "aegis.semantic_request.v10" },
-    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schema": {"const":"aegis.semantic_request.v10"},
+    "requestDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "contextDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
     "delivery": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["constitution", "architecture", "intent", "intentEvidence", "workspace", "revision", "outputSchema"],
+      "required": ["constitution","architecture","intent","intentEvidence","workspace","revision","outputSchema"],
       "properties": {
-        "constitution": { "const": "SYSTEM_INSTRUCTION" },
-        "architecture": { "const": "TRUSTED_POLICY" },
-        "intent": { "const": "USER_DATA" },
-        "intentEvidence": { "const": "MECHANICAL_FACTS_NOT_SEMANTIC_VERDICTS" },
-        "workspace": { "const": "UNTRUSTED_EVIDENCE" },
-        "revision": { "const": "USER_DECISION" },
-        "outputSchema": { "const": "STRICT_STRUCTURED_OUTPUT" }
+        "constitution": {"const":"SYSTEM_INSTRUCTION"},
+        "architecture": {"const":"TRUSTED_POLICY"},
+        "intent": {"const":"USER_DATA"},
+        "intentEvidence": {"const":"MECHANICAL_FACTS_NOT_SEMANTIC_VERDICTS"},
+        "workspace": {"const":"UNTRUSTED_EVIDENCE"},
+        "revision": {"const":"USER_DECISION"},
+        "outputSchema": {"const":"STRICT_STRUCTURED_OUTPUT"}
       }
     },
-    "constitution": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_constitution" },
-    "intent": { "type": "string", "minLength": 1 },
-    "intentEvidence": { "$ref": "aegis.intent_evidence.v1" },
-    "workspace": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_workspace" },
-    "policy": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_policy" },
-    "revision": { "$ref": "aegis.contract_components.v1#/$defs/semantic_request_revision" },
+    "constitution": {"$ref":"aegis.contract_components.v1#/$defs/semantic_request_constitution"},
+    "intent": {"type":"string","minLength":1},
+    "intentEvidence": {"$ref":"aegis.intent_evidence.v1"},
+    "workspace": {"$ref":"aegis.contract_components.v1#/$defs/semantic_request_workspace"},
+    "policy": {"$ref":"aegis.contract_components.v1#/$defs/semantic_request_policy"},
+    "revision": {"$ref":"aegis.contract_components.v1#/$defs/semantic_request_revision"},
     "outputSchema": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "digest", "strict", "document"],
+      "required": ["id","digest","strict","document"],
       "properties": {
-        "id": { "const": "aegis.semantic_opinion.v3" },
-        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "strict": { "const": true },
+        "id": {"const":"aegis.semantic_opinion.v3"},
+        "digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+        "strict": {"const":true},
         "document": {
           "type": "object",
-          "required": ["$schema", "$id"],
-          "properties": {
-            "$schema": { "type": "string", "minLength": 1 },
-            "$id": { "const": "aegis.semantic_opinion.v3" }
-          }
+          "required": ["$schema","$id"],
+          "properties": {"$schema":{"type":"string","minLength":1},"$id":{"const":"aegis.semantic_opinion.v3"}}
         }
       }
     }
