@@ -74,6 +74,7 @@ export function normalizeSemanticOpinion(opinion, request) {
       if (assessment.recommendedStatus === 'CONFLICT') {
         assessment.recommendedStatus = 'AMENDED';
       }
+      assessment.demandStatus ??= assessment.recommendedStatus === 'AMENDED' ? 'CONFLICT' : (assessment.recommendedStatus ?? 'COMPLIANT');
       assessment.decisionIndex ??= null;
       assessment.amendmentIndex ??= null;
     }
@@ -82,6 +83,12 @@ export function normalizeSemanticOpinion(opinion, request) {
   // 3. determinismReview: aceita claimId além de claimIndex, e garante defaults
   if (opinion.determinismReview) {
     opinion.determinismReview.dimensions ??= [];
+    for (const dim of opinion.determinismReview.dimensions) {
+      dim.inapplicabilityProof ??= null;
+      if (dim.proofObligation && typeof dim.proofObligation === 'object') {
+        dim.proofObligation.boundaryInclusivity ??= null;
+      }
+    }
     opinion.determinismReview.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
     if (Array.isArray(opinion.determinismReview.coverage)) {
       for (const coverage of opinion.determinismReview.coverage) {
