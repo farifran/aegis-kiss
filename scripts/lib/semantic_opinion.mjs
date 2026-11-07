@@ -114,6 +114,7 @@ export function normalizeSemanticOpinion(opinion, request) {
     if (assessment.recommendedStatus === 'CONFLICT') {
       assessment.recommendedStatus = 'AMENDED';
     }
+    assessment.recommendedStatus ??= 'COMPLIANT';
     assessment.demandStatus ??= assessment.recommendedStatus === 'AMENDED' ? 'CONFLICT' : (assessment.recommendedStatus ?? 'COMPLIANT');
     assessment.decisionIndex ??= null;
     assessment.amendmentIndex ??= null;
@@ -160,6 +161,13 @@ export function normalizeSemanticOpinion(opinion, request) {
   };
   opinion.determinismReview.dimensions ??= [];
   for (const dim of opinion.determinismReview.dimensions) {
+    dim.status ??= 'SPECIFIED';
+    if (dim.subject === undefined && opinion.requirements?.length === 1) {
+      dim.subject = { kind: 'REQUIREMENT', index: 0 };
+    }
+    if (dim.targets === undefined && opinion.requirements?.length === 1) {
+      dim.targets = [{ kind: 'REQUIREMENT', index: 0 }];
+    }
     if (dim.subject && typeof dim.subject === 'object') normalizeTarget(dim.subject);
     if (Array.isArray(dim.targets)) {
       for (const target of dim.targets) normalizeTarget(target);
@@ -200,6 +208,7 @@ export function normalizeSemanticOpinion(opinion, request) {
       return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
     });
     const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
+    let inserted = false;
     opinion.intentClaims.forEach((claim, claimIndex) => {
       const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
       if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
@@ -209,8 +218,12 @@ export function normalizeSemanticOpinion(opinion, request) {
           dimensionIndexes: [],
           rationale: 'Afirmação funcional sem fonte adicional de indeterminismo.',
         });
+        inserted = true;
       }
     });
+    if (inserted) {
+      opinion.determinismReview.coverage.sort((a, b) => a.claimIndex - b.claimIndex);
+    }
   }
 
   // 4. Parâmetros e campos de stateModel: normalizações e defaults

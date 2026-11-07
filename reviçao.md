@@ -140,20 +140,19 @@ Os artefatos completos das quatro execuções foram preservados em [`benchmarks/
 | **Tempo de Resolução** | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | **Instantâneo** (Zero chamadas adicionais à LLM) |
 | **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** via `./aegis --resolve` |
 
-### 5.4. Registro Comparativo de Evolução Operacional (D1 — Run 1 vs Run 2)
+### 5.4. Registro Comparativo de Evolução Operacional (D1 — Run 1 vs Run 2 vs Run 3)
 
-A reexecução da Demanda D1 após as melhorias arquiteturais (commits `744dc51`, `2b7c287` e `e115577`) demonstrou a evolução em eficiência operacional, ergonomia de payload e determinismo criptográfico:
+A reexecução da Demanda D1 em três marcos evolutivos (Run 1: baseline inicial; Run 2: pós-eliminação de índices e `.agents/rules/`; Run 3: pós-remoção de `.agents/skills/ai-gateway/`, Briefing Determinístico Enxuto e contabilidade mecânica de políticas/cobertura) comprova o ganho de eficiência sem perda de determinismo:
 
-| Dimensão Avaliada | D1 — Run 1 (Baseline Inicial) | D1 — Run 2 (Pós-Sistematização KISS) | Ganho / Diagnóstico |
-| :--- | :--- | :--- | :--- |
-| **Chamadas de Ferramenta (Tool Calls)** | ~35 chamadas (arqueologia de schema, listagem de índices via `node -e`) | **2 comandos CLI** (`./aegis --new` + `./aegis --semantic-compile`) | **Redução de ~94% na fricção operacional** |
-| **Tempo até o Contrato** | ~6 minutos (`19:39`–`19:45` UTC) | **< 3 segundos** | **Execução direta sem arqueologia de código** |
-| **Comportamento de `./aegis --new`** | Falhou com `SEMANTIC_CODEX_FAILED: executable_not_found:codex` | **Exit 0 imediato** (`IDE_HANDOFF_READY`), gerando `semantic-request.json` automaticamente | **Supervisor IDE de primeira classe** |
-| **Referências no Parecer (`semantic_opinion`)** | Índices numéricos cegos (`contextIndex: 0`, `ruleIndex: 0, 11, 15`, `claimIndex: 0, 1`) | **IDs semânticos legíveis** (`contextTag: "product-demand"`, `ruleId: "ARCH-*"`, `claimId: "CLAIM-*"`) | **Eliminação de erros off-by-one** |
-| **Campos Decorativos (`null` / `[]`)** | 16 propriedades boilerplate obrigatórias preenchidas pela IA | **Omitidas no input** e preenchidas mecanicamente por `normalizeSemanticOpinion` | **Lei 2: A IA pensa na Semântica; o Harness faz a Contabilidade** |
-| **Dependência de `.agents/rules/`** | Dependia de `.agents/rules/aegis_interaction.md` | **Zero dependência** (diretivas `[AEGIS][PROTOCOL]` emitidas pelo próprio CLI) | **Governança 100% autocontida e autenticada** |
-| **Digest Canônico do Rascunho (`contractDraftDigest`)** | `62fdd130090a898b33eda04b15d5785fd23fb50064038db6693b4cb975b61e78` | `62fdd130090a898b33eda04b15d5785fd23fb50064038db6693b4cb975b61e78` | **100% Bit-a-Bit Idêntico** (Zero regressão semântica) |
-| **Status Final & Custódia** | Rascunho não selado (`draft-62fdd130090a898b`) | **Selado (`f9c598727ed63bf9...`)** e arquivado em `benchmarks/results/D1_run2/` | **Ciclo completo com confirmação via `ask_question`** |
+| Dimensão Avaliada | D1 — Run 1 (Baseline) | D1 — Run 2 (Sem `.agents/rules/`) | D1 — Run 3 (Briefing Enxuto & Zero `.agents/`) | Ganho / Diagnóstico |
+| :--- | :--- | :--- | :--- | :--- |
+| **Chamadas de Ferramenta (Tool Calls)** | ~35 chamadas (~6 min de arqueologia de schema) | **2 comandos CLI** (`--new` + `--semantic-compile`) | **2 comandos CLI** (`--new` + `--semantic-compile`) | **Redução de ~94% na fricção operacional** |
+| **Ruído de Contexto no Handoff (`--new`)** | Exigia ler `semantic-request.json` (**48.337 bytes**, 96% schemas/regras fixas) | `semantic-request.json` (**48.337 bytes**) | **Briefing Determinístico no stdout (`2.180 bytes`)** | **Redução de 95,5% no ruído de entrada para a IA** |
+| **Ruído Externo em `.agents/`** | `aegis_interaction.md` + `skills/ai-gateway` (~52 KB no prompt) | `skills/ai-gateway` (~50 KB no prompt) | **0 bytes (`.agents/` 100% removido)** | **Zero poluição de skills externas no prompt da IDE** |
+| **Campos Decorativos e de Contabilidade** | 16 propriedades `null`/`[]` + índices numéricos cegos | IDs semânticos (`contextTag`, `ruleId`, `claimId`), mas exigia `demandStatus`/`recommendedStatus`/`targets`/`subject` | **Auto-derivação mecânica** de `targets`, `subject`, `status`, `recommendedStatus`, `demandStatus`, `requirementIndexes` e coberturas default | **Foco 100% restrito às 4 decisões semânticas da IA (`aiTask`)** |
+| **Digest do Rascunho (`contractDraftDigest`)** | `62fdd130090a898b...` | `62fdd130090a898b...` | `62fdd130090a898b...` | **100% Bit-a-Bit Idêntico nas 3 Runs** |
+| **Digest Final (`contractDigest`)** | *(Rascunho não selado)* | `f9c598727ed63bf9...` | `f9c598727ed63bf9...` | **100% Idêntico (`D1_run2` vs `D1_run3`)** |
+| **SHA-256 `contract.json` & `contract.md`** | — | `507823d48987...` / `d38c9c557c7f...` | `507823d48987...` / `d38c9c557c7f...` | **100% Byte-a-Byte Idênticos** (`D1_run2` vs `D1_run3`) |
 
 ### 5.5. Registro Comparativo de Poda de Sobre-Engenharia (D2 — Run 1 vs Run 2)
 
