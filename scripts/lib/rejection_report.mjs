@@ -25,7 +25,7 @@ const diagnostics = new Map([
   }],
   ['HUMAN_DECISIONS_REQUIRED', {
     message: 'O contrato contém decisões materiais ainda não respondidas por uma pessoa.',
-    remediation: 'Abra o Wizard, revise cada opção e confirme suas escolhas.',
+    remediation: 'Apresente as perguntas de .harness/runtime/user_confirmation_request.json ao usuário via ask_question no chat e, após a resposta humana, execute ./aegis --resolve <questionId>=<answerId> (ou ./aegis --wizard no terminal).',
     ruleId: 'CONST-DECISIONS',
   }],
   ['CONTRACT_HAS_UNRESOLVED_DETERMINISM', {

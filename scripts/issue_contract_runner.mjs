@@ -520,6 +520,26 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
   const confirmation = buildConfirmationRequest(contract);
   await writeFileAtomic(userConfirmationPath, `${canonicalJson(confirmation)}\n`);
   process.stdout.write(`${canonicalJson(confirmation)}\n`);
+  if (preparedDraft === null && process.env.AEGIS_TEST_AUTOMATION !== '1') {
+    if (confirmation.questionCount > 0) {
+      const qSummary = confirmation.questions
+        .map((q) => `${q.id} (recomendado: ${q.recommendedAnswerId})`)
+        .join(', ');
+      process.stderr.write(
+        `\n[AEGIS][PROTOCOL] DELIBERACAO_HUMANA_OBRIGATORIA (${confirmation.questionCount} decisão(ões): ${qSummary})\n`
+        + '[AEGIS][PROTOCOL] 1. Apresente as perguntas ao usuário via ferramenta ask_question no chat destacando a recomendação KISS.\n'
+        + '[AEGIS][PROTOCOL] 2. PARE e aguarde a resposta humana explícita (NUNCA responda pelo usuário — CONST-DECISIONS).\n'
+        + '[AEGIS][PROTOCOL] 3. Após a escolha do usuário, execute: ./aegis --resolve <questionId>=<answerId>\n',
+      );
+    } else {
+      process.stderr.write(
+        '\n[AEGIS][PROTOCOL] APROVACAO_HUMANA_OBRIGATORIA (0 decisões pendentes)\n'
+        + '[AEGIS][PROTOCOL] 1. Apresente o resumo do contrato (.harness/runtime/contract.md) ao usuário e solicite confirmação via ask_question ou resposta direta.\n'
+        + '[AEGIS][PROTOCOL] 2. PARE e aguarde o consentimento humano explícito (CONST-DECISIONS).\n'
+        + '[AEGIS][PROTOCOL] 3. Após a confirmação do usuário, execute: ./aegis --approve\n',
+      );
+    }
+  }
 }
 
 async function handleSemanticCompile(args) {
@@ -633,7 +653,12 @@ async function handleDemand(args) {
       message.includes('SEMANTIC_IDE_ADAPTER_UNSUPPORTED') ||
       error?.message === 'SEMANTIC_IDE_ADAPTER_UNSUPPORTED'
     ) {
-      const preflight = await readPreflight();
+      const [{ canonicalJson }, { request, preflight }] = await Promise.all([
+        import('./lib/canonical_json.mjs'),
+        buildCurrentSemanticRequest(),
+      ]);
+      const semanticRequestPath = resolve(runtimeDir, 'semantic-request.json');
+      await writeFileAtomic(semanticRequestPath, `${canonicalJson(request)}\n`);
       process.stdout.write(`${JSON.stringify({
         schema: preflight.schema,
         status: preflight.status,
@@ -641,7 +666,9 @@ async function handleDemand(args) {
         preflightDigest: preflight.preflightDigest,
         sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
         dataPath: '.harness/runtime/preflight.json',
-        message: 'Preflight capturado com sucesso. Canal IDE pronto para deliberação semântica via ./aegis --semantic-compile.',
+        requestPath: '.harness/runtime/semantic-request.json',
+        nextCommand: './aegis --semantic-compile',
+        message: 'Preflight e semantic-request capturados com sucesso. Leia .harness/runtime/semantic-request.json, construa o parecer e envie via stdin para ./aegis --semantic-compile.',
       })}\n`);
       return;
     }

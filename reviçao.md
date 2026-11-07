@@ -171,5 +171,14 @@ Em resposta à análise adversarial de eficiência do Aegis e com foco estrito e
 - **Problema resolvido:** Quando a IA cometia erros conceituais reais (máquina de estado sem cobertura, guardas sem precedência linear, limites inteiros ausentes), o laço de reparo enviava apenas a mensagem genérica `INVALID_SEMANTIC_OPINION` ou mensagens opacas, forçando o modelo a "adivinhar" o que causou a rejeição.
 - **Solução implementada:** Catalogação exaustiva de diagnósticos com causa específica (`cause`), regra da Constituição violada (`ruleId`), explicação do problema (`message`) e guia passo-a-passo de remediação (`remediation`). O laço de reparo de 1 ciclo agora injeta esse relatório estruturado completo diretamente no prompt de reavaliação do supervisor.
 
+### 6.6. Ponto 6: Eliminação de `.agents/rules/` e Máquina de Estados Auto-Guiada no CLI
+- **Onde foi aplicado:** [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs), [`scripts/lib/rejection_report.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/rejection_report.mjs) e remoção de `.agents/rules/aegis_interaction.md`.
+- **Problema resolvido:** A orquestração operacional dependia de um arquivo solto em `.agents/rules/aegis_interaction.md`, fora da custódia criptográfica do Harness e acoplado a convenções específicas de IDE.
+- **Solução implementada:**
+  1. **Captura Unificada (`handleDemand`):** `./aegis --new "<demanda>"` já persiste automaticamente `.harness/runtime/semantic-request.json` e retorna `requestPath` e `nextCommand: "./aegis --semantic-compile"` no handoff, poupando uma chamada de CLI.
+  2. **Transição Auto-Descritiva (`compileAndPersistSemanticOpinion`):** Após compilar o parecer, o CLI emite diretrizes explícitas de protocolo (`[AEGIS][PROTOCOL]`) diferenciando quando há decisões abertas (`ask_question` $\to$ `./aegis --resolve <questionId>=<answerId>`) de quando há 0 decisões (`ask_question`/confirmação $\to$ `./aegis --approve`).
+  3. **Soberania em `AGENTS.md`:** Remoção completa de `.agents/rules/aegis_interaction.md`, mantendo 100% da governança autenticada via SHA-256 em [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json).
+
+
 
 
