@@ -664,11 +664,12 @@ async function handleDemand(args) {
         status: preflight.status,
         phase: preflight.phase,
         preflightDigest: preflight.preflightDigest,
+        evidenceDigest: request.intentEvidence.evidenceDigest,
         sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
         dataPath: '.harness/runtime/preflight.json',
         requestPath: '.harness/runtime/semantic-request.json',
         nextCommand: './aegis --semantic-compile',
-        message: 'Preflight e semantic-request capturados com sucesso. Leia .harness/runtime/semantic-request.json, construa o parecer e envie via stdin para ./aegis --semantic-compile.',
+        message: 'Preflight e semantic-request capturados com sucesso. Use evidenceDigest em sourceEvidenceDigest, construa o parecer e envie via stdin para ./aegis --semantic-compile.',
       })}\n`);
       return;
     }

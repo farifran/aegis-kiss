@@ -168,6 +168,19 @@ A reexecução da Demanda D2 (*Validador de CPF com poda de `CPFValidatorFactory
 | **Digest Final do Contrato (`contractDigest`)** | `f8157b1a640e62e0e3bfa67b0ac765e988aa5fe975412ec77c5c69d9c97ff1f4` | `f8157b1a640e62e0e3bfa67b0ac765e988aa5fe975412ec77c5c69d9c97ff1f4` | **100% Idêntico** |
 | **SHA-256 `contract.json` & `contract.md`** | `9ae678bca699...` / `fca59484c81d...` | `9ae678bca699...` / `fca59484c81d...` | **100% Byte-a-Byte Idênticos** (`D2_run1` vs `D2_run2`) |
 
+### 5.6. Registro Comparativo de Máquina de Estados (D3 — Run 1 vs Run 2)
+
+A reexecução da Demanda D3 (*Controle de Tentativas de Login por Usuário / Máquina de Estados com Ciclo de Vida*) permitiu comparar a modelagem de estado (`stateModel`) e refinar diagnósticos de políticas e de custódia:
+
+| Dimensão Avaliada | D3 — Run 1 (Baseline Inicial) | D3 — Run 2 (Pós-Sistematização KISS) | Ganho / Diagnóstico |
+| :--- | :--- | :--- | :--- |
+| **Chamadas de Ferramenta (Tool Calls)** | ~33 chamadas (~4,5 min: inspeção de schemas `stateModel`, criação de `scratch/test_d3_state.mjs`, `scratch/test_d3_full.mjs`, `scratch/compile_d3.mjs` e depuração de 3 falhas) | **2 comandos CLI** (`./aegis --new` + `./aegis --semantic-compile`) + `./aegis --approve` | **Redução de ~94% nas chamadas e zero scripts temporários** |
+| **Erros Encontrados na Compilação** | **3 falhas sequenciais:** (1) `acceptanceCases.kind: "STATE_CHANGE"`, (2) `UNAUTHORIZED_NUMERIC_LITERAL` em bounds sem provenance, e (3) `INCOMPLETE_POLICY_ASSESSMENT` sem indicar qual regra faltava | **Zero falha** de modelo/schema; `evidenceDigest` exposto diretamente no stdout de `./aegis --new` | `normalizeSemanticOpinion` converte automaticamente `kind: "STATE_CHANGE"` para `BOUNDARY` + `outcomeKind: "STATE_CHANGE"`, e `INCOMPLETE_POLICY_ASSESSMENT` lista exatamente as regras faltantes no campo `detail` |
+| **Endereçamento de Políticas e Contextos** | 4 índices de contexto (`0, 1, 2, 3`) e 7 índices de regras (`0, 5, 8, 9, 11, 12, 15`) | **IDs semânticos explícitos** (`contextTag`, `ruleId`, `claimId`, `id: "REQ-0001"`) | **Legibilidade imediata de 7 regras arquiteturais sem consulta a offsets** |
+| **Digest do Rascunho (`contractDraftDigest`)** | `c57aaf825cb54846726bb20deb0042028d5946928afb2dd52198c60ea3321b48` | `c57aaf825cb54846726bb20deb0042028d5946928afb2dd52198c60ea3321b48` | **100% Idêntico** |
+| **Digest Final do Contrato (`contractDigest`)** | `8bc994d2d8c1830e3b1b2a9e53f28934c14f3ffa34334a53dae27324f137dea4` | `8bc994d2d8c1830e3b1b2a9e53f28934c14f3ffa34334a53dae27324f137dea4` | **100% Idêntico** |
+| **SHA-256 `contract.json` & `contract.md`** | `d4c09addebe5...` / `ad93fdcce46a...` | `d4c09addebe5...` / `ad93fdcce46a...` | **100% Byte-a-Byte Idênticos** (`D3_run1` vs `D3_run2`) |
+
 ---
 
 ## 6. Implementação das Correções do Parecer do Advogado do Diabo (Plano de 3 Pontos)

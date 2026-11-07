@@ -603,8 +603,9 @@ function validateReviews(draft, context) {
 
   const applicableRuleIds = context.applicablePolicyRuleIds;
   const assessedRuleIds = assertUniqueIds(draft.policyAssessments, 'ruleId', 'policy_assessment');
-  if ([...applicableRuleIds].some((id) => !assessedRuleIds.has(id))) {
-    throw new Error('incomplete_policy_assessment');
+  const missingRuleIds = [...applicableRuleIds].filter((id) => !assessedRuleIds.has(id));
+  if (missingRuleIds.length > 0) {
+    throw new Error(`incomplete_policy_assessment:${missingRuleIds.join(',')}`);
   }
   for (const assessment of draft.policyAssessments) {
     if (!context.policyRulesById.has(assessment.ruleId)) {

@@ -290,6 +290,11 @@ const diagnostics = new Map([
     remediation: 'Inclua em "determinismReview.coverage" apenas claims materiais com disposition "NORMATIVE" ou "DECISION".',
     ruleId: 'CONST-OBSERVABLE',
   }],
+  ['INCOMPLETE_POLICY_ASSESSMENT', {
+    message: 'O parecer omitiu a avaliação de uma ou mais regras de política arquitetural aplicáveis aos contextos selecionados.',
+    remediation: 'Inclua em "policyAssessments" a avaliação explícita de todas as regras indicadas no campo "detail".',
+    ruleId: 'CONST-KISS',
+  }],
 ]);
 
 function diagnosticFamily(reason) {

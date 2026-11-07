@@ -174,6 +174,10 @@ export function normalizeSemanticOpinion(opinion, request) {
       req.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
       if (Array.isArray(req.acceptanceCases)) {
         for (const ac of req.acceptanceCases) {
+          if (ac.kind === 'STATE_CHANGE') {
+            ac.outcomeKind ??= 'STATE_CHANGE';
+            ac.kind = 'BOUNDARY';
+          }
           ac.decisionBinding ??= null;
           ac.boundaryBinding ??= null;
         }
