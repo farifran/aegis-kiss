@@ -1,0 +1,10 @@
+{
+  "schema": "aegis.rejection.v1",
+  "status": "REJECTED",
+  "phase": "SEMANTIC",
+  "reason": "NON_DELIBERABLE_POLICY_CONFLICT",
+  "detail": "ARCH-PRODUCT-BOUNDARY",
+  "ruleId": "ARCH-PRODUCT-BOUNDARY",
+  "message": "A demanda viola frontalmente a fronteira pública do produto ao exigir acesso direto a arquivos de sistema (/etc/passwd) e bypass de controle de acesso.",
+  "remediation": "Reformule a demanda para utilizar exclusivamente interfaces públicas autorizadas em src/ e o subsistema oficial de autenticação."
+}
