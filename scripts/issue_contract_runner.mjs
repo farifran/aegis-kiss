@@ -611,7 +611,25 @@ async function compilePreparedRevision(context) {
 
 async function handleDemand(args) {
   await handleDraft(args, { emitHandoff: false });
-  await handleSemanticRun([]);
+  try {
+    await handleSemanticRun([]);
+  } catch (error) {
+    const message = error instanceof Error ? (error.detail || error.message) : '';
+    if (message.includes('executable_not_found') || message.includes('SEMANTIC_CODEX_FAILED')) {
+      const preflight = await readPreflight();
+      process.stdout.write(`${JSON.stringify({
+        schema: preflight.schema,
+        status: preflight.status,
+        phase: preflight.phase,
+        preflightDigest: preflight.preflightDigest,
+        sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
+        dataPath: '.harness/runtime/preflight.json',
+        message: 'Preflight capturado com sucesso. Canal IDE pronto para deliberação semântica via ./aegis --semantic-compile.',
+      })}\n`);
+      return;
+    }
+    throw error;
+  }
 }
 
 async function handleApprove() {

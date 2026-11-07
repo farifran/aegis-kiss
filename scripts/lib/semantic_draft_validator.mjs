@@ -50,8 +50,13 @@ function applicablePolicyRuleIds(policy, architectureTags) {
 
 function validateBasis(basis, context, owner) {
   for (const item of basis) {
-    if (item.source === 'USER_INTENT' && !context.intent.includes(item.reference)) {
-      throw new Error(`invalid_user_intent_basis:${owner}:${item.reference}`);
+    if (item.source === 'USER_INTENT') {
+      const isSubstring = context.intent.includes(item.reference);
+      const isFact = context.intentEvidence?.literalFacts?.some((f) => f.id === item.reference || f.reference === item.reference);
+      const isFragment = context.intentEvidence?.fragments?.some((f) => f.id === item.reference || f.anchor === item.reference);
+      if (!isSubstring && !isFact && !isFragment) {
+        throw new Error(`invalid_user_intent_basis:${owner}:${item.reference}`);
+      }
     }
     if (item.source === 'USER_DECISION' && !context.resolvedDecisionIds.has(item.reference)) {
       throw new Error(`invalid_user_decision_basis:${owner}:${item.reference}`);
@@ -153,8 +158,13 @@ function validateRequirements(draft, context) {
     }
     if (requirement.measurement !== null) {
       const { target } = requirement.measurement;
-      if (target.source === 'USER_INTENT' && !context.intent.includes(target.reference)) {
-        throw new Error(`quality_target_not_supported_by_intent:${requirement.id}`);
+      if (target.source === 'USER_INTENT') {
+        const isSubstring = context.intent.includes(target.reference);
+        const isFact = context.intentEvidence?.literalFacts?.some((f) => f.id === target.reference || f.reference === target.reference);
+        const isFragment = context.intentEvidence?.fragments?.some((f) => f.id === target.reference || f.anchor === target.reference);
+        if (!isSubstring && !isFact && !isFragment) {
+          throw new Error(`quality_target_not_supported_by_intent:${requirement.id}`);
+        }
       }
       if (target.source === 'USER_DECISION'
         && !context.resolvedDecisionIds.has(target.reference)) {

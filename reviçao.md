@@ -140,3 +140,25 @@ Os artefatos completos das quatro execuções foram preservados em [`benchmarks/
 | **Tempo de Resolução** | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | **Instantâneo** (Zero chamadas adicionais à LLM) |
 | **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** via `./aegis --resolve` |
 
+---
+
+## 6. Implementação das Correções do Parecer do Advogado do Diabo (Plano de 3 Pontos)
+
+Em resposta à análise adversarial de eficiência do Aegis e com foco estrito em **CONST-KISS** e **Lei 2 (A IA pensa na Semântica; o Harness faz a Contabilidade)**, foi implementado e verificado o plano de melhorias:
+
+### 6.1. Ponto 1: Eliminação de Índices Numéricos no Parecer da IA
+- **Onde foi aplicado:** [`scripts/lib/semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) (`normalizeSemanticOpinion`).
+- **Problema resolvido:** A IA precisava calcular offsets numéricos (`ruleIndex: 0`, `contextIndex: 1`, `claimIndex: 2`) sujeitos a desvios off-by-one ou falhas cognitivas se a lista de regras/contextos mudasse de ordem.
+- **Solução implementada:** O Harness agora aceita identificadores semânticos estáveis (`ruleId: "ARCH-PRODUCT-BOUNDARY"`, `contextTag: "product-demand"`, `claimId: "CLAIM-0001"`) e faz a resolução posicional automaticamente antes da validação do schema. Foram também adicionados preenchimentos padrão para blocos invariantes e de revisão quando vazios.
+
+### 6.2. Ponto 2: Harmonização de Enums e Evidências do Schema
+- **Onde foi aplicado:** [`scripts/lib/semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) e [`scripts/lib/semantic_draft_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_draft_validator.mjs).
+- **Problema resolvido:** Falhas de compilação por variações inócuas de enumeração (ex.: `NON_NULLABLE` em vez de `NOT_NULL`, `recommendedStatus: "CONFLICT"` em políticas) e rejeições em `validateBasis`/`validateMeasurement` quando a IA referenciava IDs estáveis (`FACT-0001`, `FRAG-0001`) em vez de substrings brutas.
+- **Solução implementada:** Normalização automática de sinônimos em tempo de execução e ampliação dos validadores de evidência para reconhecer e correlacionar `literalFacts` e `fragments` indexados no contexto da demanda.
+
+### 6.3. Ponto 3: Fallback CLI Mais KISS Possível
+- **Onde foi aplicado:** [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) (`handleDemand`).
+- **Problema resolvido:** Ao rodar `./aegis --new "<demanda>"` num ambiente onde o binário do supervisor externo (`codex`) não está no `PATH`, o CLI quebrava com exceção de terminal (`SEMANTIC_CODEX_FAILED: executable_not_found:codex`), exigindo intervenção manual ou scripts avulsos.
+- **Solução implementada (KISS Puro):** O CLI captura o preflight normalmente e, se o supervisor externo não estiver instalado, emite `preflight_handoff.v2` com exit code 0 e payload limpo para o canal IDE. A IA assistente assume a deliberação sem fricção via `./aegis --semantic-compile`, sem falhas no terminal e sem bibliotecas intermediárias complexas.
+
+

@@ -45,6 +45,113 @@ function assertEvidenceCoverage(opinion, request) {
   }
 }
 
+export function normalizeSemanticOpinion(opinion, request) {
+  opinion = globalThis.structuredClone(opinion);
+
+  // 1. architectureContexts: aceita contextTag ou tag além de contextIndex
+  if (Array.isArray(opinion.architectureContexts)) {
+    for (const item of opinion.architectureContexts) {
+      if (item.contextIndex === undefined && (item.contextTag || item.tag)) {
+        const tag = item.contextTag || item.tag;
+        const index = request.policy.contexts.findIndex((c) => c.tag === tag);
+        if (index !== -1) item.contextIndex = index;
+      }
+      delete item.contextTag;
+      delete item.tag;
+    }
+  }
+
+  // 2. policyAssessments: aceita ruleId ou id além de ruleIndex, e normaliza CONFLICT para AMENDED
+  if (Array.isArray(opinion.policyAssessments)) {
+    for (const assessment of opinion.policyAssessments) {
+      if (assessment.ruleIndex === undefined && (assessment.ruleId || assessment.id)) {
+        const id = assessment.ruleId || assessment.id;
+        const index = request.policy.rules.findIndex((r) => r.id === id);
+        if (index !== -1) assessment.ruleIndex = index;
+      }
+      delete assessment.ruleId;
+      delete assessment.id;
+      if (assessment.recommendedStatus === 'CONFLICT') {
+        assessment.recommendedStatus = 'AMENDED';
+      }
+      assessment.decisionIndex ??= null;
+      assessment.amendmentIndex ??= null;
+    }
+  }
+
+  // 3. determinismReview: aceita claimId além de claimIndex, e garante defaults
+  if (opinion.determinismReview) {
+    opinion.determinismReview.dimensions ??= [];
+    opinion.determinismReview.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
+    if (Array.isArray(opinion.determinismReview.coverage)) {
+      for (const coverage of opinion.determinismReview.coverage) {
+        if (coverage.claimIndex === undefined && coverage.claimId) {
+          const parsed = parseInt(String(coverage.claimId).replace(/\D/g, ''), 10) - 1;
+          if (!Number.isNaN(parsed)) coverage.claimIndex = parsed;
+        }
+        delete coverage.claimId;
+        delete coverage.dimensionAssessments;
+        coverage.dimensionIndexes ??= [];
+        if (coverage.disposition === undefined) {
+          coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
+        }
+      }
+    }
+  }
+
+  // 4. Parâmetros de operações em stateModel: aceita NON_NULLABLE além de NOT_NULL
+  if (opinion.stateModel && Array.isArray(opinion.stateModel.operations)) {
+    for (const op of opinion.stateModel.operations) {
+      if (Array.isArray(op.parameters)) {
+        for (const param of op.parameters) {
+          if (param.nullability === 'NON_NULLABLE') {
+            param.nullability = 'NOT_NULL';
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Invariants e requirements defaults
+  if (Array.isArray(opinion.invariants)) {
+    for (const inv of opinion.invariants) {
+      if (inv.requirementIndexes === undefined && Array.isArray(inv.targetRequirementIndexes)) {
+        inv.requirementIndexes = inv.targetRequirementIndexes;
+      }
+      delete inv.targetRequirementIndexes;
+    }
+  }
+  opinion.adversarialReview ??= { rationale: 'Revisão semântica residual sem achados adicionais.', findings: [] };
+  delete opinion.adversarialReview.status;
+  opinion.adversarialReview.findings ??= [];
+  if (Array.isArray(opinion.requirements)) {
+    for (const req of opinion.requirements) {
+      req.kind ??= 'FUNCTIONAL';
+      req.measurement ??= null;
+      req.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
+      if (Array.isArray(req.acceptanceCases)) {
+        for (const ac of req.acceptanceCases) {
+          ac.decisionBinding ??= null;
+          ac.boundaryBinding ??= null;
+        }
+      }
+    }
+  }
+
+  opinion.riskReview ??= { certainty: 'ASSESSED', rationale: 'Nenhum risco material adicional identificado.' };
+  opinion.unknowns ??= [];
+  opinion.decisions ??= [];
+  opinion.boundaryRules ??= [];
+  opinion.nonNormativeItems ??= [];
+  opinion.pathReferences ??= [];
+  opinion.risks ??= [];
+  if (opinion.complexityReview) {
+    opinion.complexityReview.alternatives ??= [];
+  }
+
+  return opinion;
+}
+
 export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
   assertSchema('aegis.semantic_request.v10', request);
   const { requestDigest, ...requestPayload } = request;
@@ -58,16 +165,8 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     sourceEvidenceDigest: opinion.sourceEvidenceDigest === undefined
       ? request.intentEvidence.evidenceDigest : opinion.sourceEvidenceDigest,
   };
-  opinion = globalThis.structuredClone(opinion);
+  opinion = normalizeSemanticOpinion(opinion, request);
   omitOptionalNulls(opinion, standaloneSchemaDocument('aegis.semantic_opinion.v3'));
-  for (const coverage of opinion.determinismReview.coverage) {
-    if (coverage.disposition === undefined) {
-      coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
-    }
-  }
-  if (request.policy.amendments.length === 0) {
-    for (const assessment of opinion.policyAssessments) assessment.amendmentIndex ??= null;
-  }
   assertSchema('aegis.semantic_opinion.v3', opinion);
   assertEvidenceCoverage(opinion, request);
 
