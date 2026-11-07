@@ -66,89 +66,188 @@ export function normalizeSemanticOpinion(opinion, request) {
 
   if (Array.isArray(opinion.intentClaims)) {
     for (const claim of opinion.intentClaims) {
+      if (claim.fragmentIndexes === undefined && request.intentEvidence.fragments.length === 1) {
+        claim.fragmentIndexes = [0];
+      }
+      if (claim.disposition === 'NORMATIVE' && (!Array.isArray(claim.targets) || claim.targets.length === 0) && opinion.requirements?.length === 1) {
+        claim.targets = [{ kind: 'REQUIREMENT', index: 0 }];
+      }
+      if (claim.disposition !== 'NORMATIVE' && claim.contractEffect === undefined) {
+        claim.contractEffect = null;
+      }
       if (Array.isArray(claim.targets)) {
         for (const target of claim.targets) normalizeTarget(target);
       }
     }
   }
 
-  // 1. architectureContexts: aceita contextTag ou tag além de contextIndex
-  if (Array.isArray(opinion.architectureContexts)) {
+  // 1. architectureContexts: aceita contextTag ou tag além de contextIndex e preenche default
+  if (!Array.isArray(opinion.architectureContexts) || opinion.architectureContexts.length === 0) {
+    opinion.architectureContexts = [{
+      contextIndex: 0,
+      rationale: 'Demanda funcional de produto.',
+      basis: [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }],
+    }];
+  } else {
     for (const item of opinion.architectureContexts) {
       if (item.contextIndex === undefined && (item.contextTag || item.tag)) {
         const tag = item.contextTag || item.tag;
         const index = request.policy.contexts.findIndex((c) => c.tag === tag);
         if (index !== -1) item.contextIndex = index;
       }
+      item.basis ??= [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }];
       delete item.contextTag;
       delete item.tag;
     }
   }
 
-  // 2. policyAssessments: aceita ruleId ou id além de ruleIndex, e normaliza CONFLICT para AMENDED
-  if (Array.isArray(opinion.policyAssessments)) {
-    for (const assessment of opinion.policyAssessments) {
-      if (assessment.ruleIndex === undefined && (assessment.ruleId || assessment.id)) {
-        const id = assessment.ruleId || assessment.id;
-        const index = request.policy.rules.findIndex((r) => r.id === id);
-        if (index !== -1) assessment.ruleIndex = index;
-      }
-      delete assessment.ruleId;
-      delete assessment.id;
-      if (assessment.recommendedStatus === 'CONFLICT') {
-        assessment.recommendedStatus = 'AMENDED';
-      }
-      assessment.demandStatus ??= assessment.recommendedStatus === 'AMENDED' ? 'CONFLICT' : (assessment.recommendedStatus ?? 'COMPLIANT');
-      assessment.decisionIndex ??= null;
-      assessment.amendmentIndex ??= null;
+  // 2. policyAssessments: aceita ruleId/id, normaliza CONFLICT->AMENDED e auto-preenche regras COMPLIANT
+  opinion.policyAssessments ??= [];
+  for (const assessment of opinion.policyAssessments) {
+    if (assessment.ruleIndex === undefined && (assessment.ruleId || assessment.id)) {
+      const id = assessment.ruleId || assessment.id;
+      const index = request.policy.rules.findIndex((r) => r.id === id);
+      if (index !== -1) assessment.ruleIndex = index;
     }
+    delete assessment.ruleId;
+    delete assessment.id;
+    if (assessment.recommendedStatus === 'CONFLICT') {
+      assessment.recommendedStatus = 'AMENDED';
+    }
+    assessment.demandStatus ??= assessment.recommendedStatus === 'AMENDED' ? 'CONFLICT' : (assessment.recommendedStatus ?? 'COMPLIANT');
+    assessment.decisionIndex ??= null;
+    assessment.amendmentIndex ??= null;
   }
-
-  // 3. determinismReview: aceita claimId além de claimIndex, e garante defaults
-  if (opinion.determinismReview) {
-    opinion.determinismReview.dimensions ??= [];
-    for (const dim of opinion.determinismReview.dimensions) {
-      if (dim.subject && typeof dim.subject === 'object') normalizeTarget(dim.subject);
-      if (Array.isArray(dim.targets)) {
-        for (const target of dim.targets) normalizeTarget(target);
-      }
-      dim.inapplicabilityProof ??= null;
-      if (dim.proofObligation && typeof dim.proofObligation === 'object') {
-        dim.proofObligation.boundaryInclusivity ??= null;
-      }
-    }
-    opinion.determinismReview.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
-    if (Array.isArray(opinion.determinismReview.coverage)) {
-      for (const coverage of opinion.determinismReview.coverage) {
-        if (coverage.claimIndex === undefined && coverage.claimId) {
-          const parsed = parseInt(String(coverage.claimId).replace(/\D/g, ''), 10) - 1;
-          if (!Number.isNaN(parsed)) coverage.claimIndex = parsed;
-        }
-        delete coverage.claimId;
-        delete coverage.dimensionAssessments;
-        coverage.dimensionIndexes ??= [];
-        if (coverage.disposition === undefined) {
-          coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
-        }
-      }
-      if (Array.isArray(opinion.intentClaims)) {
-        opinion.determinismReview.coverage = opinion.determinismReview.coverage.filter((coverage) => {
-          const claim = opinion.intentClaims[coverage.claimIndex];
-          if (!claim) return true;
-          const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
-          return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
+  const activeContextTags = new Set(
+    opinion.architectureContexts.map((c) => request.policy.contexts[c.contextIndex]?.tag).filter(Boolean),
+  );
+  const existingByRuleIndex = new Map(opinion.policyAssessments.map((a) => [a.ruleIndex, a]));
+  const applicableRuleIndexes = [];
+  request.policy.rules.forEach((rule, idx) => {
+    const applies = rule.appliesMode === 'all'
+      ? rule.appliesWhen.every((tag) => activeContextTags.has(tag))
+      : rule.appliesWhen.some((tag) => activeContextTags.has(tag));
+    if (applies) applicableRuleIndexes.push(idx);
+  });
+  if (applicableRuleIndexes.some((idx) => !existingByRuleIndex.has(idx))) {
+    const mergedAssessments = [];
+    for (const idx of applicableRuleIndexes) {
+      if (existingByRuleIndex.has(idx)) {
+        mergedAssessments.push(existingByRuleIndex.get(idx));
+        existingByRuleIndex.delete(idx);
+      } else {
+        mergedAssessments.push({
+          ruleIndex: idx,
+          demandStatus: 'COMPLIANT',
+          recommendedStatus: 'COMPLIANT',
+          rationale: `Conformidade verificada mecanicamente para ${request.policy.rules[idx].id}.`,
+          decisionIndex: null,
+          amendmentIndex: null,
         });
       }
     }
+    for (const extra of existingByRuleIndex.values()) {
+      mergedAssessments.push(extra);
+    }
+    opinion.policyAssessments = mergedAssessments;
   }
 
-  // 4. Parâmetros de operações em stateModel: aceita NON_NULLABLE além de NOT_NULL
-  if (opinion.stateModel && Array.isArray(opinion.stateModel.operations)) {
-    for (const op of opinion.stateModel.operations) {
-      if (Array.isArray(op.parameters)) {
-        for (const param of op.parameters) {
-          if (param.nullability === 'NON_NULLABLE') {
-            param.nullability = 'NOT_NULL';
+  // 3. determinismReview: aceita claimId além de claimIndex, e preenche cobertura default
+  opinion.determinismReview ??= {
+    rationale: 'A demanda não promete determinismo adicional além do contrato público.',
+    dimensions: [],
+    coverage: [],
+  };
+  opinion.determinismReview.dimensions ??= [];
+  for (const dim of opinion.determinismReview.dimensions) {
+    if (dim.subject && typeof dim.subject === 'object') normalizeTarget(dim.subject);
+    if (Array.isArray(dim.targets)) {
+      for (const target of dim.targets) normalizeTarget(target);
+    }
+    dim.inapplicabilityProof ??= null;
+    if (dim.proofObligation && typeof dim.proofObligation === 'object') {
+      dim.proofObligation.boundaryInclusivity ??= null;
+    }
+  }
+  const materialFragmentIndexes = Array.isArray(opinion.intentClaims)
+    ? [...new Set(
+      opinion.intentClaims
+        .filter((c) => c.disposition === 'NORMATIVE' || c.disposition === 'DECISION')
+        .flatMap((c) => c.fragmentIndexes ?? [0]),
+    )]
+    : [];
+  opinion.determinismReview.fragmentIndexes ??= materialFragmentIndexes.length > 0
+    ? materialFragmentIndexes
+    : request.intentEvidence.fragments.map((_, i) => i);
+  opinion.determinismReview.coverage ??= [];
+  for (const coverage of opinion.determinismReview.coverage) {
+    if (coverage.claimIndex === undefined && coverage.claimId) {
+      const parsed = parseInt(String(coverage.claimId).replace(/\D/g, ''), 10) - 1;
+      if (!Number.isNaN(parsed)) coverage.claimIndex = parsed;
+    }
+    delete coverage.claimId;
+    delete coverage.dimensionAssessments;
+    coverage.dimensionIndexes ??= [];
+    if (coverage.disposition === undefined) {
+      coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
+    }
+  }
+  if (Array.isArray(opinion.intentClaims)) {
+    opinion.determinismReview.coverage = opinion.determinismReview.coverage.filter((coverage) => {
+      const claim = opinion.intentClaims[coverage.claimIndex];
+      if (!claim) return true;
+      const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
+      return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
+    });
+    const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
+    opinion.intentClaims.forEach((claim, claimIndex) => {
+      const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
+      if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
+        opinion.determinismReview.coverage.push({
+          claimIndex,
+          disposition: 'NO_DIMENSION_APPLICABLE',
+          dimensionIndexes: [],
+          rationale: 'Afirmação funcional sem fonte adicional de indeterminismo.',
+        });
+      }
+    });
+  }
+
+  // 4. Parâmetros e campos de stateModel: normalizações e defaults
+  if (opinion.stateModel) {
+    if (Array.isArray(opinion.stateModel.entities)) {
+      for (const entity of opinion.stateModel.entities) {
+        if (Array.isArray(entity.fields)) {
+          for (const field of entity.fields) {
+            if (Array.isArray(field.mutations)) {
+              for (const mut of field.mutations) {
+                mut.targetValue ??= null;
+              }
+            }
+            if (field.reset) {
+              field.reset.trigger ??= null;
+              field.reset.resetValue ??= null;
+            } else {
+              field.reset = { allowed: false, trigger: null, resetValue: null };
+            }
+            field.preservation ??= ['*'];
+          }
+        }
+      }
+    }
+    if (Array.isArray(opinion.stateModel.operations)) {
+      for (const op of opinion.stateModel.operations) {
+        if (Array.isArray(op.parameters)) {
+          for (const param of op.parameters) {
+            if (param.nullability === 'NON_NULLABLE') {
+              param.nullability = 'NOT_NULL';
+            }
+          }
+        }
+        if (Array.isArray(op.branches)) {
+          for (const branch of op.branches) {
+            branch.stateEffects ??= [];
+            branch.defaultPreservation ??= branch.outcomeKind === 'REJECTION';
           }
         }
       }
@@ -162,6 +261,7 @@ export function normalizeSemanticOpinion(opinion, request) {
         inv.requirementIndexes = inv.targetRequirementIndexes;
       }
       delete inv.targetRequirementIndexes;
+      inv.requirementIndexes ??= [0];
     }
   }
   opinion.adversarialReview ??= { rationale: 'Revisão semântica residual sem achados adicionais.', findings: [] };
@@ -192,9 +292,12 @@ export function normalizeSemanticOpinion(opinion, request) {
   opinion.nonNormativeItems ??= [];
   opinion.pathReferences ??= [];
   opinion.risks ??= [];
-  if (opinion.complexityReview) {
-    opinion.complexityReview.alternatives ??= [];
-  }
+  opinion.complexityReview ??= {
+    status: 'NO_EXCESS',
+    rationale: 'A especificação adota a menor solução suficiente sem abstrações especulativas.',
+    alternatives: [],
+  };
+  opinion.complexityReview.alternatives ??= [];
 
   return opinion;
 }

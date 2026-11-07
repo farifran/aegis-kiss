@@ -659,18 +659,49 @@ async function handleDemand(args) {
       ]);
       const semanticRequestPath = resolve(runtimeDir, 'semantic-request.json');
       await writeFileAtomic(semanticRequestPath, `${canonicalJson(request)}\n`);
-      process.stdout.write(`${JSON.stringify({
+      const brief = {
         schema: preflight.schema,
         status: preflight.status,
         phase: preflight.phase,
         preflightDigest: preflight.preflightDigest,
         evidenceDigest: request.intentEvidence.evidenceDigest,
         sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
+        intent: request.intent,
+        fragments: request.intentEvidence.fragments.map((f, index) => ({
+          index,
+          id: f.id,
+          anchor: f.anchor,
+        })),
+        literalFacts: request.intentEvidence.literalFacts.map((f) => ({
+          id: f.id,
+          kind: f.kind,
+          value: f.reference,
+          fragmentIndex: f.fragmentIndex,
+        })),
+        workspace: {
+          status: request.workspace.status,
+          observedTextPaths: request.workspace.observedTextPaths,
+          matches: request.workspace.lexicalEvidence.matches,
+          sourceExcerpts: request.workspace.sourceEvidence.map(({ path, startLine, endLine, content }) => ({
+            path,
+            startLine,
+            endLine,
+            content,
+          })),
+        },
+        availableContextTags: request.policy.contexts.map((c) => c.tag),
+        aiTask: [
+          '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION.',
+          '2. architectureContexts: declare as tags aplicáveis (policyAssessments COMPLIANT e determinismReview.coverage NO_DIMENSION_APPLICABLE são preenchidos mecanicamente pelo Harness; declare apenas conflitos reais ou dimensões específicas).',
+          '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
+          '4. stateModel / decisions: inclua stateModel apenas se houver estado mutável, e decisions apenas se houver ambiguidade material.',
+        ],
         dataPath: '.harness/runtime/preflight.json',
         requestPath: '.harness/runtime/semantic-request.json',
         nextCommand: './aegis --semantic-compile',
-        message: 'Preflight e semantic-request capturados com sucesso. Use evidenceDigest em sourceEvidenceDigest, construa o parecer e envie via stdin para ./aegis --semantic-compile.',
-      })}\n`);
+        message: 'Briefing determinístico pronto. Construa o parecer (usando evidenceDigest em sourceEvidenceDigest) e envie via stdin para ./aegis --semantic-compile.',
+      };
+      process.stdout.write(`${JSON.stringify(brief)}\n`);
       return;
     }
     throw error;

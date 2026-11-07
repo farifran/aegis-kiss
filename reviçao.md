@@ -220,6 +220,17 @@ Em resposta à análise adversarial de eficiência do Aegis e com foco estrito e
   2. **Transição Auto-Descritiva (`compileAndPersistSemanticOpinion`):** Após compilar o parecer, o CLI emite diretrizes explícitas de protocolo (`[AEGIS][PROTOCOL]`) diferenciando quando há decisões abertas (`ask_question` $\to$ `./aegis --resolve <questionId>=<answerId>`) de quando há 0 decisões (`ask_question`/confirmação $\to$ `./aegis --approve`).
   3. **Soberania em `AGENTS.md`:** Remoção completa de `.agents/rules/aegis_interaction.md`, mantendo 100% da governança autenticada via SHA-256 em [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json).
 
+### 6.7. Ponto 7: Remoção de `.agents/skills/ai-gateway`, Briefing Determinístico Enxuto e Contabilidade Mecânica de Políticas
+- **Onde foi aplicado:** Remoção integral de `.agents/`, evolução de [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) (`handleDemand`) e [`scripts/lib/semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) (`normalizeSemanticOpinion`).
+- **Problema resolvido:**
+  1. `.agents/skills/ai-gateway/` continha ~50 KB de documentação genérica da Vercel sem nenhuma dependência no Aegis, injetando ruído no prompt de sistema da IDE em todos os turnos.
+  2. `semantic-request.json` possuía ~48 KB (sendo 96% schemas fixos e políticas completas), obrigando a IA a filtrar manualmente regras e preencher blocos repetitivos de `policyAssessments` (`COMPLIANT`) e `determinismReview.coverage` (`NO_DIMENSION_APPLICABLE`).
+- **Solução implementada:**
+  1. **Eliminação Total de `.agents/`:** Zero dependência de skills ou rules externas; governança concentrada em [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md).
+  2. **Briefing Determinístico Enxuto no `./aegis --new`:** O stdout de `./aegis --new` já entrega diretamente `evidenceDigest`, `fragments` (`FRAG-*`), `literalFacts` (`FACT-*`), `workspace`, `availableContextTags` e as 4 tarefas intelectuais da IA (`aiTask`), eliminando a necessidade de ler os 48 KB de `semantic-request.json`.
+  3. **Contabilidade Mecânica de Políticas e Cobertura:** A partir das tags declaradas em `architectureContexts` e das afirmações em `intentClaims`, [`normalizeSemanticOpinion`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) preenche mecanicamente todas as regras aplicáveis conformes (`COMPLIANT`) em `policyAssessments` e todas as coberturas default (`NO_DIMENSION_APPLICABLE`) em `determinismReview.coverage`, reservando a atenção da IA exclusivamente para conflitos reais (ex.: `ARCH-PARSIMONY`) e para a especificação falsificável do contrato.
+
+
 
 
 
