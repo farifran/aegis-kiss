@@ -126,17 +126,17 @@ Esta matriz serve como registro permanente dos testes práticos executados no Ae
 3. **Fluidez Cognitiva:** Aprovado de primeira (ou no máximo com 1 ciclo de reparo automático), sem rejeições por regras secretas ou incoerência de schema.
 4. **Resolução Instantânea de Deliberações:** Em demandas ambíguas (ex.: D6), a escolha humana via modal `ask_question` deve ser incorporada imediatamente pelo `./aegis --resolve` sem recompilação total por IA.
 
-### 5.3. Registro Comparativo de Reprodutibilidade e Regressão (D6 — Run 1 vs Run 2 vs Run 3)
+### 5.3. Registro Comparativo de Reprodutibilidade e Regressão (D6 — Run 1 vs Run 2 vs Run 3 vs Run 4)
 
-Os artefatos completos das três execuções foram preservados em [`benchmarks/results/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/):
+Os artefatos completos das quatro execuções foram preservados em [`benchmarks/results/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/):
 
-| Métrica / Dimensão | Run 1 | Run 2 | Run 3 | Diagnóstico de Reprodutibilidade |
-| :--- | :--- | :--- | :--- | :--- |
-| **Digest do Contrato** | `2878768924ea...` | `2878768924ea...` | `2878768924ea...` | **100% Idêntico** (Determinismo criptográfico estrito) |
-| **SHA-256 `contract.json`** | `e0dd3985816c...` | `e0dd3985816c...` | `e0dd3985816c...` | **100% Idêntico** (0 bytes divergentes) |
-| **SHA-256 `contract.md`** | `8259a05bf659...` | `8259a05bf659...` | `8259a05bf659...` | **100% Idêntico** (Renderização determinística) |
-| **SHA-256 `semantic-state.json`** | `320f8033636e...` | `320f8033636e...` | `320f8033636e...` | **100% Idêntico** (Estado canônico fechado) |
-| **Canal da Pergunta** | Chat + Popup Editor | Chat + Popup Editor | **Apenas Chat** (`ask_question`) | **Resolvido** (Extensão legada excluída do disco) |
-| **Tempo de Resolução** | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | **Instantâneo** (Zero chamadas adicionais à LLM) |
-| **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** |
+| Métrica / Dimensão | Run 1 | Run 2 | Run 3 | Run 4 | Diagnóstico de Reprodutibilidade |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Digest do Contrato** | `2878768924ea...` | `2878768924ea...` | `2878768924ea...` | `2878768924ea...` | **100% Idêntico** (Determinismo criptográfico estrito) |
+| **SHA-256 `contract.json`** | `e0dd3985816c...` | `e0dd3985816c...` | `e0dd3985816c...` | `e0dd3985816c...` | **100% Idêntico** (0 bytes divergentes em 4 rodadas) |
+| **SHA-256 `contract.md`** | `8259a05bf659...` | `8259a05bf659...` | `8259a05bf659...` | `8259a05bf659...` | **100% Idêntico** (Renderização determinística perfeita) |
+| **SHA-256 `semantic-state.json`** | `320f8033636e...` | `320f8033636e...` | `320f8033636e...` | `320f8033636e...` | **100% Idêntico** (Estado canônico e governança) |
+| **Canal da Pergunta** | Chat + Popup Editor | Chat + Popup Editor | Chat + Popup Editor (RAM) | **Exclusivamente Chat** (`ask_question`) | **Resolvido** (Extensão removida do Antigravity IDE) |
+| **Tempo de Resolução** | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | **Instantâneo** (Zero chamadas adicionais à LLM) |
+| **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** via `./aegis --resolve` |
 
