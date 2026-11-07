@@ -529,7 +529,7 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
         `\n[AEGIS][PROTOCOL] DELIBERACAO_HUMANA_OBRIGATORIA (${confirmation.questionCount} decisão(ões): ${qSummary})\n`
         + '[AEGIS][PROTOCOL] 1. Apresente as perguntas ao usuário via ferramenta ask_question no chat destacando a recomendação KISS.\n'
         + '[AEGIS][PROTOCOL] 2. PARE e aguarde a resposta humana explícita (NUNCA responda pelo usuário — CONST-DECISIONS).\n'
-        + '[AEGIS][PROTOCOL] 3. Após a escolha do usuário, execute: ./aegis --resolve <questionId>=<answerId>\n',
+        + '[AEGIS][PROTOCOL] 3. Após a escolha do usuário, execute apenas: ./aegis --resolve <questionId>=<answerId> (aplica preparedEffect e sela o contrato automaticamente).\n',
       );
     } else {
       process.stderr.write(

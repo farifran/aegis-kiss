@@ -126,19 +126,18 @@ Esta matriz serve como registro permanente dos testes práticos executados no Ae
 3. **Fluidez Cognitiva:** Aprovado de primeira (ou no máximo com 1 ciclo de reparo automático), sem rejeições por regras secretas ou incoerência de schema.
 4. **Resolução Instantânea de Deliberações:** Em demandas ambíguas (ex.: D6), a escolha humana via modal `ask_question` deve ser incorporada imediatamente pelo `./aegis --resolve` sem recompilação total por IA.
 
-### 5.3. Registro Comparativo de Reprodutibilidade e Regressão (D6 — Run 1 vs Run 2 vs Run 3 vs Run 4)
+### 5.3. Registro Comparativo de Reprodutibilidade e Regressão (D6 — Run 1 a Run 4 vs Run 5 Pós-Poda KISS de `governance/`)
 
-Os artefatos completos das quatro execuções foram preservados em [`benchmarks/results/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/):
+Os artefatos completos das cinco execuções foram preservados em [`benchmarks/results/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/):
 
-| Métrica / Dimensão | Run 1 | Run 2 | Run 3 | Run 4 | Diagnóstico de Reprodutibilidade |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Digest do Contrato** | `2878768924ea...` | `2878768924ea...` | `2878768924ea...` | `2878768924ea...` | **100% Idêntico** (Determinismo criptográfico estrito) |
-| **SHA-256 `contract.json`** | `e0dd3985816c...` | `e0dd3985816c...` | `e0dd3985816c...` | `e0dd3985816c...` | **100% Idêntico** (0 bytes divergentes em 4 rodadas) |
-| **SHA-256 `contract.md`** | `8259a05bf659...` | `8259a05bf659...` | `8259a05bf659...` | `8259a05bf659...` | **100% Idêntico** (Renderização determinística perfeita) |
-| **SHA-256 `semantic-state.json`** | `320f8033636e...` | `320f8033636e...` | `320f8033636e...` | `320f8033636e...` | **100% Idêntico** (Estado canônico e governança) |
-| **Canal da Pergunta** | Chat + Popup Editor | Chat + Popup Editor | Chat + Popup Editor (RAM) | **Exclusivamente Chat** (`ask_question`) | **Resolvido** (Extensão removida do Antigravity IDE) |
-| **Tempo de Resolução** | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | ~5ms (`preparedEffect`) | **Instantâneo** (Zero chamadas adicionais à LLM) |
-| **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** via `./aegis --resolve` |
+| Métrica / Dimensão | Run 1 a Run 4 | Run 5 (Pós-Briefing Enxuto & Poda `governance/`) | Diagnóstico de Reprodutibilidade |
+| :--- | :--- | :--- | :--- |
+| **Bloco `.specification` (360+ linhas JSON)** | Idêntico nas Runs 1–4 | **100% Bit-a-Bit Idêntico** (`0` linhas divergentes em `requirements`, `invariants`, `intentClaims`, `policyAssessments`, `adversarialReview`, `determinismReview`, `closureCertificate`) | **Preservação Semântica Absoluta** |
+| **Corpo Renderizado de `contract.md` (Seções 1–10)** | `8259a05bf659...` | **100% Idêntico linha a linha** (mudam apenas os 3 hashes de cabeçalho vinculados ao novo `policyDigest`) | **Renderização Determinística Perfeita** |
+| **`policyDigest` (`architecture.policy.json`)** | `e757ead294c1...` (com `reviewReferences`/`forbiddenReferences` mortos) | `cda91b0d9c78...` (sem campos mortos, `-64 linhas` em `architecture.policy.json`) | **Política Enxuta e Autenticada** |
+| **Digest Final do Contrato (`contractDigest`)** | `2878768924ea...` | `6c08f852f8bd...` (reflete exclusivamente o novo `policyDigest`) | **Custódia Criptográfica Íntegra** |
+| **Canal da Pergunta & Resolução** | `ask_question` + `./aegis --resolve Q-0001=ANS-0001-01` | **Exclusivamente Chat** (`ask_question`) + `./aegis --resolve Q-0001=ANS-0001-01` (~5ms via `preparedEffect`, já aprovando e selando em comando único) | **Zero Chamada Extra à LLM** |
+| **Status da Deliberação** | `USER_DECISION:Q-0001` | `USER_DECISION:Q-0001` | **Soberania Humana Preservada** via `./aegis --resolve` |
 
 ### 5.4. Registro Comparativo de Evolução Operacional (D1 — Run 1 vs Run 2 vs Run 3)
 
@@ -228,6 +227,14 @@ Em resposta à análise adversarial de eficiência do Aegis e com foco estrito e
   1. **Eliminação Total de `.agents/`:** Zero dependência de skills ou rules externas; governança concentrada em [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md).
   2. **Briefing Determinístico Enxuto no `./aegis --new`:** O stdout de `./aegis --new` já entrega diretamente `evidenceDigest`, `fragments` (`FRAG-*`), `literalFacts` (`FACT-*`), `workspace`, `availableContextTags` e as 4 tarefas intelectuais da IA (`aiTask`), eliminando a necessidade de ler os 48 KB de `semantic-request.json`.
   3. **Contabilidade Mecânica de Políticas e Cobertura:** A partir das tags declaradas em `architectureContexts` e das afirmações em `intentClaims`, [`normalizeSemanticOpinion`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) preenche mecanicamente todas as regras aplicáveis conformes (`COMPLIANT`) em `policyAssessments` e todas as coberturas default (`NO_DIMENSION_APPLICABLE`) em `determinismReview.coverage`, reservando a atenção da IA exclusivamente para conflitos reais (ex.: `ARCH-PARSIMONY`) e para a especificação falsificável do contrato.
+
+### 6.8. Ponto 8: Poda KISS de `governance/` (Remoção de Documentação Morta, Campos de Política Legados e Sub-Schemas Fragmentados)
+- **Onde foi aplicado:** [`governance/architecture.policy.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/architecture.policy.json), [`governance/schemas/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas), [`scripts/lib/schema_catalog.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_catalog.mjs) e [`scripts/lib/semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs).
+- **Problema resolvido:**
+  1. `governance/` continha 5 arquivos `.md` (~17 KB) de notas históricas sem referência em runtime (sendo que `prepared-decisions.md` documentava formato obsoleto `{index, value}`).
+  2. `architecture.policy.json` carregava arrays legados `reviewReferences` e `forbiddenReferences` em cada regra, copiados para `semantic-request.json` mas nunca lidos por nenhum validador.
+  3. `governance/schemas/` estava fragmentado em 20 arquivos, incluindo 6 sub-schemas nunca validados diretamente em runtime e um validador standalone morto (`aegis_wizard_question_v1.cjs`, ~39 KB).
+- **Solução implementada:** Remoção dos 5 arquivos `.md`, eliminação de `reviewReferences`/`forbiddenReferences` da política e do request, e consolidação dos 6 sub-schemas em [`contract-components.v1.schema.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas/contract-components.v1.schema.json), reduzindo **2.747 linhas líquidas** e **12 arquivos** sem alterar em nada a semântica dos contratos gerados (comprovado em `D6_run5`).
 
 
 
