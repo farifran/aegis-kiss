@@ -32,8 +32,8 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | Arquivo | Linhas | Papel Atual |
 | :--- | ---: | :--- |
 | [`aegis`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/aegis) | 3 | Wrapper bash que define `AEGIS_ROOT` e delega para `scripts/ide_gateway.sh`. |
-| [`scripts/ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh) | 331 | Gateway CLI principal (`--new`, `--clean`, `--approve`, `--resolve`, `--verify`, `--status`, `--setup`, `--semantic-*`). Suporta resolução e selamento atômico em comando único. |
-| [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) | 889 | Orquestrador de captura, briefing determinístico, supervisão com reparo de 1 ciclo, compilação, aprovação e verificação. |
+| [`scripts/ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh) | 295 | Gateway CLI principal (`--new`, `--clean`, `--approve`, `--resolve`, `--verify`, `--status`, `--setup`, `--semantic-*`, `--wizard`). Suporta resolução e selamento atômico em comando único e wizard TTY enxuto. |
+| [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) | 874 | Orquestrador de captura, briefing determinístico, supervisão com reparo de 1 ciclo, compilação, aprovação e verificação. |
 | [`scripts/resolve_decision.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/resolve_decision.mjs) | 79 | Grava respostas de decisões deliberadas via `ask_question` em `preflight_resolution.json`. |
 | [`scripts/setup_roles.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/setup_roles.mjs) | 157 | Configurador de `.harness/config/roles.json` (`contractSupervisor` e `codingAgent`). |
 | [`scripts/generate_schema_validators.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/generate_schema_validators.mjs) | 61 | Compila os 14 JSON Schemas de `governance/schemas/` em validadores standalone Ajv CommonJS em `scripts/generated/schema_validators/`. |
@@ -46,7 +46,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | [`hybrid_source_index.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/hybrid_source_index.mjs) | 424 | Índice léxico BM25 e identificadores compostos sobre `src/` para discovery determinístico. |
 | [`preflight_integrity.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/preflight_integrity.mjs) | 80 | Validação da integridade estrutural e criptográfica de `preflight.json`. |
 | [`intent_evidence.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs) | 168 | Fragmentação neutra da demanda (`FRAG-*`) e extração mecânica de fatos literais (`FACT-*`). |
-| [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) | 219 | Autenticação da Constituição contra `AGENTS.md`, seleção de trechos de `src/` e montagem de `aegis.semantic_request.v10`. |
+| [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) | 233 | Autenticação de `constitution.json` e extração direta dos artigos de `AGENTS.md`, seleção de trechos de `src/` e montagem de `aegis.semantic_request.v10`. |
 | [`semantic_output_schema.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_output_schema.mjs) | 98 | Geração de schema compacto com `$defs` compartilhados para Structured Outputs e remoção de `null`s opcionais. |
 | [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs) | 174 | Prompt do supervisor externo e chamadas HTTP para provedores compatíveis com OpenAI/AI Gateway. |
 | [`semantic_codex.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_codex.mjs) | 142 | Adaptador secundário opcional via CLI `codex exec` em sandbox read-only. |
@@ -69,15 +69,15 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 ### 2.3. Governança e Schemas (`governance/`)
 | Arquivo / Diretório | Formato / Volume | Papel Atual |
 | :--- | :---: | :--- |
-| [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json) | JSON (30 linhas) | Espelho canônico e criptográfico dos 5 artigos de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md). |
+| [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json) | JSON (8 linhas) | Âncora de versão e SHA-256 (`sourceDigest`) de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md), de onde as 5 regras (`CONST-*`) são extraídas diretamente em runtime sem duplicação textual. |
 | [`governance/architecture.policy.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/architecture.policy.json) | JSON (143 linhas) | 16 regras arquiteturais (`ARCH-*`) e 18 tags de contexto vinculadas por SHA-256 a [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md). |
-| [`governance/schemas/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas) | 14 arquivos JSON (3.287 linhas) | 13 schemas raiz validados em runtime + catálogo unificado [`contract-components.v1.schema.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas/contract-components.v1.schema.json). |
+| [`governance/schemas/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas) | 14 arquivos JSON (3.252 linhas) | 13 schemas raiz validados em runtime + catálogo unificado [`contract-components.v1.schema.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas/contract-components.v1.schema.json). |
 
 ---
 
 ## 3. Análise Forense: Novas Melhorias Potenciais (Backlog Ativo)
 
-A inspeção forense sobre o código-fonte atual (`7.771 linhas` em `scripts/`) e sobre os artefatos gerados durante a execução da Demanda D6 identificou **7 oportunidades concretas de simplificação e endurecimento determinístico**:
+A inspeção forense sobre o código-fonte atual (`7.734 linhas` em `scripts/`) e sobre os artefatos gerados durante a execução da Demanda D6 mantém **5 oportunidades concretas de simplificação e endurecimento determinístico**:
 
 ### 3.1. Correção de Fragmentação de Decimais (`10,00` $\to$ `"10"` e `"00"`) em `intent_evidence.mjs`
 - **Evidência Forense (observada ao vivo na D6):** Na linha [`scripts/lib/intent_evidence.mjs:100`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs#L100), a regex de extração numérica `/(?<![\p{L}\p{N}_])\d+(?:\.\d+)?n?(?![\p{L}\p{N}_])/gu` reconhece apenas ponto decimal (`.`), ignorando vírgula decimal (`,`) usada em português.
@@ -90,7 +90,7 @@ A inspeção forense sobre o código-fonte atual (`7.771 linhas` em `scripts/`) 
   - `policy`: **9.353 bytes (19,9%)**
   - `constitution`: **3.478 bytes (7,4%)**
   - Dados reais da demanda (`intent` + `intentEvidence` + `workspace` + `revision`): **1.390 bytes (2,9%)**
-- **Impacto:** Em toda execução de `./aegis --new`, [`scripts/lib/semantic_request.mjs:206`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L206) invoca [`buildSemanticOutputSchema`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_output_schema.mjs#L54) para expandir, compactar, deduplicar `$defs` e serializar **32 KB de JSON Schema** dentro de `semantic-request.json`. No fluxo nativo da IDE (`antigravity`), esse documento de 32 KB nunca é consumido (servia apenas para o campo `response_format.json_schema.schema` da API HTTP externa em [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs)).
+- **Impacto:** Em toda execução de `./aegis --new`, [`scripts/lib/semantic_request.mjs:220`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L220) invoca [`buildSemanticOutputSchema`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_output_schema.mjs#L54) para expandir, compactar, deduplicar `$defs` e serializar **32 KB de JSON Schema** dentro de `semantic-request.json`. No fluxo nativo da IDE (`antigravity`), esse documento de 32 KB nunca é consumido (servia apenas para o campo `response_format.json_schema.schema` da API HTTP externa em [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs)).
 - **Melhoria Proposta:** Manter em `semantic-request.json` apenas `{ id: "aegis.semantic_opinion.v3", digest, strict: true }` (calculando `buildSemanticOutputSchema` sob demanda apenas quando `semantic_gateway.mjs` ou `semantic_codex.mjs` for realmente invocado), reduzindo `semantic-request.json` de **47 KB para ~14,8 KB (-68,6%)**.
 
 ### 3.3. Desidratação de Boilerplate em Decisões Humanas (`decisions` / `unknowns` / `adversarialReview`) em `semantic_opinion.mjs`
@@ -100,21 +100,11 @@ A inspeção forense sobre o código-fonte atual (`7.771 linhas` em `scripts/`) 
   3. Um achado em `adversarialReview.findings` com `disposition: "DECISION"` apontando para `{ kind: "DECISION", index: 0 }` apenas para espelhar a mesma dúvida já registrada na decisão.
 - **Melhoria Proposta:** Em [`normalizeSemanticOpinion`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs#L48), auto-preencher defaults em `decisions` (`recommendedAnswerIndex ??= 0`, `requirementIndexes ??= [0]`, `invariantIndexes ??= []`, `riskIndexes ??= []`, `presentation.glossary ??= []`) e auto-derivar `unknowns` a partir das `intentClaims` com `disposition === "DECISION"` quando `unknowns` for omitido, reduzindo em **~35%** o tamanho do JSON que a IA precisa redigir em demandas ambíguas.
 
-### 3.4. Remoção de Comandos Mortos e Isolamento do Wizard TTY Legado (`ide_gateway.sh` e `issue_contract_runner.mjs`)
-- **Evidência Forense:**
-  1. Em [`scripts/issue_contract_runner.mjs:199-229`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs#L199-L229), as funções `handleValidatePreflight` (`validate-preflight`) e `handleValidateContract` (`validate-contract`) possuem **zero chamadas** em `ide_gateway.sh`, nos scripts ou na suíte de testes (`gateway=false | test=false`).
-  2. Em [`scripts/ide_gateway.sh:58-250`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh#L58-L250), a função bash `resolve_preflight_wizard` ocupa **192 das 331 linhas (58% do arquivo)** apenas para dar suporte ao wizard interativo de terminal TTY (`--wizard`), enquanto a deliberação oficial ocorre via chat (`ask_question` + `./aegis --resolve`).
-- **Melhoria Proposta:** Remover os subcomandos mortos `validate-preflight` e `validate-contract` de [`issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) e avaliar a extração ou enxugamento do wizard TTY legado em [`ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh).
-
-### 3.5. Eliminação da Duplicação Textual entre `AGENTS.md` e `governance/constitution.json`
-- **Evidência Forense:** [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json) copia literalmente o texto dos 5 artigos de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md), e [`scripts/substrates/test/test_semantic_output.mjs:20-26`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/test/test_semantic_output.mjs#L20-L26) já faz o parse mecânico dos cabeçalhos `## N. ... (CONST-...)` de `AGENTS.md` para verificar se os textos coincidem.
-- **Melhoria Proposta:** Fazer [`loadSemanticConstitution`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L14) extrair os enunciados `rules` diretamente de `AGENTS.md` após validar `sourceDigest` em `constitution.json`, eliminando a duplicação manual de prosa constitucional em dois arquivos.
-
-### 3.6. Poda de Tabelas Poliglotas em `hybrid_source_index.mjs` (424 linhas)
+### 3.4. Poda de Tabelas Poliglotas em `hybrid_source_index.mjs` (424 linhas)
 - **Evidência Forense:** [`scripts/lib/hybrid_source_index.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/hybrid_source_index.mjs) mantém expressões e heurísticas para dezenas de ecossistemas fora do escopo da política arquitetural do projeto (que rege TypeScript/JavaScript/Node.js).
 - **Melhoria Proposta:** Enxugar o reconhecedor de regiões e tokens para focar nas linguagens suportadas pela arquitetura (`TS`, `JS`, `MJS`, `CJS`, `JSON`, `MD`, `SH`), reduzindo complexidade e superfície de manutenção.
 
-### 3.7. Modularização de `semantic_closure.mjs` (1.439 linhas — 18,5% de todo o código JS)
+### 3.5. Modularização de `semantic_closure.mjs` (1.439 linhas — 18,6% de todo o código JS)
 - **Evidência Forense:** [`scripts/lib/semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) concentra 8 validadores distintos em um único arquivo de 1.439 linhas, destacando-se `validateFieldLifecycle` (linhas 124–583, **460 linhas**), `validateProvenanceEnforcement` (linhas 866–1073, **208 linhas**), `validateOperationTotality` (linhas 584–727, **144 linhas**) e `validateContradictionDetection` (linhas 728–865, **138 linhas**).
 - **Melhoria Proposta:** Dividir `semantic_closure.mjs` em submódulos coesos (ciclo de vida de estado/transições vs proveniência/contradições textuais) e substituir heurísticas de regex bilíngues redundantes por verificações estruturais diretas sobre os campos tipados do `stateModel`.
 

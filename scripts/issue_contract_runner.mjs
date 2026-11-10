@@ -196,10 +196,6 @@ async function handleDraft(args, { emitHandoff = true } = {}) {
   }
 }
 
-async function handleValidatePreflight() {
-  await readPreflight();
-}
-
 async function validateContract(contract, preflight) {
   const { assertContractDocument } = await import('./lib/semantic_contract_lifecycle.mjs');
   const [loadedPolicy, constitution] = await Promise.all([
@@ -217,14 +213,6 @@ async function validateContract(contract, preflight) {
     constitutionDigest: constitution.digest,
     workspaceObservation,
   });
-}
-
-async function handleValidateContract() {
-  const [contract, preflight] = await Promise.all([
-    readFile(contractJsonPath, 'utf8').then(JSON.parse),
-    readPreflight(),
-  ]);
-  await validateContract(contract, preflight);
 }
 
 async function handleConfirmationRequest() {
@@ -857,8 +845,6 @@ const remainingArgs = process.argv.slice(3);
 try {
   if (command === 'run') await handleDemand(remainingArgs);
   else if (command === 'draft') await handleDraft(remainingArgs);
-  else if (command === 'validate-preflight') await handleValidatePreflight();
-  else if (command === 'validate-contract') await handleValidateContract();
   else if (command === 'confirmation-request') await handleConfirmationRequest();
   else if (command === 'status') await handleStatus();
   else if (command === 'semantic-request') await handleSemanticRequest();
@@ -872,11 +858,10 @@ try {
   const separator = message.indexOf(':');
   const rawReason = separator === -1 ? message : message.slice(0, separator);
   const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
-  const phase = command === 'draft' || command === 'validate-preflight'
+  const phase = command === 'draft'
     ? 'PREFLIGHT'
     : command === 'run' || command === 'semantic-request'
-      || command === 'semantic-run'
-      || command === 'semantic-compile' || command === 'validate-contract'
+      || command === 'semantic-run' || command === 'semantic-compile'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';
   process.stderr.write(`${JSON.stringify(buildRejectionReport({

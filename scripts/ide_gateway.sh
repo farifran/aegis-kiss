@@ -98,80 +98,58 @@ resolve_preflight_wizard() {
     return 1
   fi
 
-  local count index question answer_count choice correction answer_id answers='[]'
-  local recommended_index recommended_label recommended_effect remaining_answers
-  local selected_label final_confirmation attestation
+  local count index question q_id answer_count choice correction answer_id answers='[]'
+  local recommended_id recommended_index remaining_answers final_confirmation attestation
   local requires_recompilation=0 bulk_selected=0
   count="$(jq '.questionCount' <<< "${result}")"
   [[ "${count}" == "$(jq '.questions | length' <<< "${result}")" ]] || fatal 'INVALID_WIZARD_QUESTION_COUNT'
-  if (( count > 0 )); then
-    requires_recompilation=1
-  fi
-  printf '\n══════════════════════════════════════════════════════════════\n' >&2
-  printf ' AEGIS — Deliberação e Aprovação Humana\n' >&2
-  printf '══════════════════════════════════════════════════════════════\n' >&2
-  printf 'Contrato: %s\n' "$(jq -r '.title' <<< "${result}")" >&2
-  printf 'Digest do rascunho: %s\n' "$(jq -r '.contractDraftDigest' <<< "${result}")" >&2
-  printf 'Revisão completa: %s\n' "$(jq -r '.artifactPath' <<< "${result}")" >&2
-  printf 'Uma recomendação é apenas uma proposta; nada será selado sem sua confirmação final.\n' >&2
-  if (( count == 0 )); then
-    printf '\n[AEGIS] Nenhuma decisão material está pendente, mas o contrato ainda exige aprovação humana explícita.\n' >&2
-  fi
+  (( count > 0 )) && requires_recompilation=1
+  jq -r '
+    "\n══════════════════════════════════════════════════════════════\n AEGIS — Deliberação e Aprovação Humana\n══════════════════════════════════════════════════════════════",
+    "Contrato: \(.title)\nDigest do rascunho: \(.contractDraftDigest)\nRevisão completa: \(.artifactPath)",
+    "Uma recomendação é apenas uma proposta; nada será selado sem sua confirmação final.",
+    (if .questionCount == 0 then "\n[AEGIS] Nenhuma decisão material está pendente, mas o contrato ainda exige aprovação humana explícita." else empty end)
+  ' <<< "${result}" >&2
   for ((index = 0; index < count; index++)); do
     question="$(jq -c ".questions[${index}]" <<< "${result}")"
-    answer_count="$(jq '.answers | length' <<< "${question}")"
-    recommended_index="$(jq -r '(.recommendedAnswerId) as $recommended | .answers | to_entries[] | select(.value.id == $recommended) | .key + 1' <<< "${question}")"
-    recommended_label="$(jq -r '(.recommendedAnswerId) as $recommended | .answers[] | select(.id == $recommended) | .label' <<< "${question}")"
-    recommended_effect="$(jq -r '(.recommendedAnswerId) as $recommended | .answers[] | select(.id == $recommended) | .contractEffect' <<< "${question}")"
-    printf '\n[%d/%d] [%s] %s\n' "$((index + 1))" "${count}" "$(jq -r '.id' <<< "${question}")" "$(jq -r '.question' <<< "${question}")" >&2
-    printf '  Contexto da demanda:\n' >&2
-    printf '  %s\n' "$(jq -r '.presentation.context' <<< "${question}")" >&2
-    printf '  Por que você precisa decidir:\n' >&2
-    printf '  %s\n' "$(jq -r '.presentation.whyHumanDecision' <<< "${question}")" >&2
-    printf '  O que muda na prática:\n' >&2
-    printf '  %s\n' "$(jq -r '.presentation.observableImpact' <<< "${question}")" >&2
-    if [[ "$(jq '.gaps | length' <<< "${question}")" -gt 0 ]]; then
-      printf '  Lacunas da demanda:\n' >&2
-      jq -r '.gaps[] | "  - \(.)"' <<< "${question}" >&2
-    fi
-    printf '  Exemplo que demonstra a diferença:\n' >&2
-    printf '  - Dado: %s\n' "$(jq -r '.distinguishingCase.given' <<< "${question}")" >&2
-    printf '  - Quando: %s\n' "$(jq -r '.distinguishingCase.when' <<< "${question}")" >&2
-    jq -r '.distinguishingCase.outcomes[] as $outcome | .answers[] | select(.id == $outcome.answerId) | "  - Se escolher \(.label): \($outcome.then)"' <<< "${question}" >&2
-    printf '  Recomendação do Aegis: %s\n' "${recommended_label}" >&2
-    printf '  Por quê: %s\n' "$(jq -r '.presentation.recommendationReasoning' <<< "${question}")" >&2
-    printf '  Se aceita: %s\n' "${recommended_effect}" >&2
-    if [[ "$(jq '.presentation.glossary | length' <<< "${question}")" -gt 0 ]]; then
-      printf '  Termos usados:\n' >&2
-      jq -r '.presentation.glossary[] | "  - \(.term): \(.meaning)"' <<< "${question}" >&2
-    fi
-    printf '  O que esta decisão altera no contrato:\n' >&2
-    jq -r '.traceability.requirements[] | "  - Requisito \(.id): \(.statement)"' <<< "${question}" >&2
-    jq -r '.traceability.acceptanceCases[] | "  - Prova \(.id): dado \(.given) quando \(.when), deve ocorrer: \(.then) [\(.outcomeKind)]"' <<< "${question}" >&2
-    jq -r '.traceability.invariants[] | "  - Invariante \(.id): \(.statement) Falha se: \(.falsification)"' <<< "${question}" >&2
-    jq -r '.traceability.risks[] | "  - Risco \(.id) [\(.level)/\(.kind)]: \(.statement) Mitigação: \(.mitigation)"' <<< "${question}" >&2
-    jq -r '.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"' <<< "${question}" >&2
-    printf '  %d) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.\n' "$((answer_count + 1))" >&2
-    jq -r '.answers[] | select(.applicationMode == "SEMANTIC_REVIEW_REQUIRED") | "  Aviso: “\(.label)” exige nova análise antes de fechar o contrato."' <<< "${question}" >&2
-    printf '  ── Ação rápida ──\n' >&2
-    printf '  A) %s\n     %s\n' \
-      "$(jq -r '.bulkRecommendationAction.label' <<< "${result}")" \
-      "$(jq -r '.bulkRecommendationAction.description' <<< "${result}")" >&2
+    IFS=$'\t' read -r q_id answer_count recommended_id recommended_index < <(
+      jq -r '(.recommendedAnswerId) as $rec | [.id, (.answers | length), $rec, ((.answers | to_entries[] | select(.value.id == $rec) | .key) + 1)] | @tsv' <<< "${question}"
+    )
+    jq -r --argjson i "$((index + 1))" --argjson n "${count}" '
+      .bulkRecommendationAction as $bulk | .questions[$i - 1] |
+      (.recommendedAnswerId) as $rec | (.answers | map(select(.id == $rec))[0]) as $recAns |
+      "\n[\($i)/\($n)] [\(.id)] \(.question)",
+      "  Contexto da demanda:\n  \(.presentation.context)",
+      "  Por que você precisa decidir:\n  \(.presentation.whyHumanDecision)",
+      "  O que muda na prática:\n  \(.presentation.observableImpact)",
+      (if (.gaps | length) > 0 then "  Lacunas da demanda:", (.gaps[] | "  - \(.)") else empty end),
+      "  Exemplo que demonstra a diferença:\n  - Dado: \(.distinguishingCase.given)\n  - Quando: \(.distinguishingCase.when)",
+      (.distinguishingCase.outcomes[] as $o | .answers[] | select(.id == $o.answerId) | "  - Se escolher \(.label): \($o.then)"),
+      "  Recomendação do Aegis: \($recAns.label)\n  Por quê: \(.presentation.recommendationReasoning)\n  Se aceita: \($recAns.contractEffect)",
+      (if (.presentation.glossary | length) > 0 then "  Termos usados:", (.presentation.glossary[] | "  - \(.term): \(.meaning)") else empty end),
+      "  O que esta decisão altera no contrato:",
+      (.traceability.requirements[] | "  - Requisito \(.id): \(.statement)"),
+      (.traceability.acceptanceCases[] | "  - Prova \(.id): dado \(.given) quando \(.when), deve ocorrer: \(.then) [\(.outcomeKind)]"),
+      (.traceability.invariants[] | "  - Invariante \(.id): \(.statement) Falha se: \(.falsification)"),
+      (.traceability.risks[] | "  - Risco \(.id) [\(.level)/\(.kind)]: \(.statement) Mitigação: \(.mitigation)"),
+      (.answers | to_entries[] | "  \(.key + 1)) \(.value.label)" + (if .value.recommended then " [RECOMENDADO — PROPOSTA]" else "" end) + "\n     Motivo: \(.value.rationale)\n     Efeito no contrato: \(.value.contractEffect)"),
+      "  \((.answers | length) + 1)) Outra interpretação\n     Descreva uma opção diferente; o contrato voltará para revisão semântica.",
+      (.answers[] | select(.applicationMode == "SEMANTIC_REVIEW_REQUIRED") | "  Aviso: “\(.label)” exige nova análise antes de fechar o contrato."),
+      "  ── Ação rápida ──\n  A) \($bulk.label)\n     \($bulk.description)"
+    ' <<< "${result}" >&2
     while true; do
       read -r -p "Escolha [${recommended_index} recomendado]: " choice
       choice="${choice:-${recommended_index}}"
       if [[ "${choice}" =~ ^[1-9][0-9]*$ ]] && ((choice >= 1 && choice <= answer_count)); then
         answer_id="$(jq -r ".answers[$((choice - 1))].id" <<< "${question}")"
-        answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg answerId "${answer_id}" '. + [{questionId:$questionId, answerId:$answerId}]' <<< "${answers}")"
-        if [[ "${answer_id}" != "$(jq -r '.recommendedAnswerId' <<< "${question}")" ]]; then
-          requires_recompilation=1
-        fi
+        answers="$(jq -c --arg questionId "${q_id}" --arg answerId "${answer_id}" '. + [{questionId:$questionId, answerId:$answerId}]' <<< "${answers}")"
+        [[ "${answer_id}" != "${recommended_id}" ]] && requires_recompilation=1
         break
       fi
       if [[ "${choice}" == "$((answer_count + 1))" ]]; then
         read -r -p 'Sua interpretação: ' correction
         [[ -n "${correction}" ]] || { printf '[AEGIS] A interpretação não pode ficar vazia.\n' >&2; continue; }
-        answers="$(jq -c --arg questionId "$(jq -r '.id' <<< "${question}")" --arg correction "${correction}" '. + [{questionId:$questionId, correction:$correction}]' <<< "${answers}")"
+        answers="$(jq -c --arg questionId "${q_id}" --arg correction "${correction}" '. + [{questionId:$questionId, correction:$correction}]' <<< "${answers}")"
         requires_recompilation=1
         break
       fi
@@ -190,19 +168,11 @@ resolve_preflight_wizard() {
   done
 
   if (( count > 0 )); then
-    printf '\n──────────────────────────────────────────────────────────────\n' >&2
-    printf ' Resumo das suas escolhas\n' >&2
-    printf '──────────────────────────────────────────────────────────────\n' >&2
-    for ((index = 0; index < count; index++)); do
-      question="$(jq -c ".questions[${index}]" <<< "${result}")"
-      answer_id="$(jq -r ".[$index].answerId // empty" <<< "${answers}")"
-      if [[ -n "${answer_id}" ]]; then
-        selected_label="$(jq -r --arg answerId "${answer_id}" '.answers[] | select(.id == $answerId) | .label' <<< "${question}")"
-      else
-        selected_label="Interpretação própria: $(jq -r ".[$index].correction" <<< "${answers}")"
-      fi
-      printf -- '- %s → %s\n' "$(jq -r '.id' <<< "${question}")" "${selected_label}" >&2
-    done
+    jq -r --argjson answers "${answers}" '
+      "\n──────────────────────────────────────────────────────────────\n Resumo das suas escolhas\n──────────────────────────────────────────────────────────────",
+      (range(0; .questionCount) as $i | .questions[$i] as $q | $answers[$i] as $a |
+        "- \($q.id) → " + (if $a.answerId then ($q.answers[] | select(.id == $a.answerId) | .label) else "Interpretação própria: \($a.correction)" end))
+    ' <<< "${result}" >&2
   fi
 
   if (( requires_recompilation == 1 )); then
@@ -217,17 +187,11 @@ resolve_preflight_wizard() {
     return
   fi
 
-  local execution_id contract_draft_digest resolution_staging
-  execution_id="$(jq -r '.executionId' <<< "${result}")"
-  contract_draft_digest="$(jq -r '.contractDraftDigest' <<< "${result}")"
+  local resolution_staging
   resolution_staging="$(mktemp "${RUNTIME_DIR}/.preflight_resolution.XXXXXX")"
-  jq -n \
-    --arg executionId "${execution_id}" \
-    --arg contractDraftDigest "${contract_draft_digest}" \
-    --arg attestation "${attestation}" \
-    --argjson answers "${answers}" \
-    '{schema:"aegis.semantic_resolution.v2",executionId:$executionId,contractDraftDigest:$contractDraftDigest,method:"INTERACTIVE_WIZARD",attestation:$attestation,answers:$answers}' \
-    > "${resolution_staging}"
+  jq --arg attestation "${attestation}" --argjson answers "${answers}" \
+    '{schema:"aegis.semantic_resolution.v2",executionId,contractDraftDigest,method:"INTERACTIVE_WIZARD",attestation:$attestation,answers:$answers}' \
+    <<< "${result}" > "${resolution_staging}"
   mv "${resolution_staging}" "${resolution_file}"
   if (( requires_recompilation == 1 )); then
     if jq -e --argjson choices "${answers}" '

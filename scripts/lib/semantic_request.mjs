@@ -29,15 +29,29 @@ export function loadSemanticConstitution(repositoryRoot) {
   if (!sourceMetadata.isFile() || sourceMetadata.isSymbolicLink()) {
     throw new Error('semantic_constitution_origin_unavailable');
   }
-  if (sha256(readFileSync(sourcePath)) !== policy.origin.sourceDigest) {
+  const sourceBytes = readFileSync(sourcePath);
+  if (sha256(sourceBytes) !== policy.origin.sourceDigest) {
     throw new Error('semantic_constitution_origin_mismatch');
   }
+  const rules = sourceBytes
+    .toString('utf8')
+    .trim()
+    .split(/^## /mu)
+    .slice(1)
+    .map((section) => {
+      const [heading, ...body] = section.split('\n');
+      const match = heading.match(/\((CONST-[A-Z0-9][A-Z0-9-]+)\)\s*$/u);
+      const statement = body.join('\n').trim();
+      if (!match || !statement) throw new Error('semantic_constitution_invalid_rules');
+      return { id: match[1], statement };
+    });
+  if (rules.length === 0) throw new Error('semantic_constitution_invalid_rules');
   return {
     schema: policy.schema,
     version: policy.constitutionVersion,
-    digest: canonicalDigest(policy),
+    digest: canonicalDigest({ ...policy, rules }),
     authority: 'TRUSTED_CONSTITUTION',
-    rules: policy.rules,
+    rules,
   };
 }
 
