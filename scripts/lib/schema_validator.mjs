@@ -82,6 +82,8 @@ export function schemaErrors(schemaId, value) {
   return (validate.errors ?? []).map((error) => (
     `${error.instancePath || '/'}:${error.keyword}${
       error.keyword === 'required' ? `:${error.params.missingProperty}` : ''
+    }${
+      error.keyword === 'additionalProperties' ? `:${error.params.additionalProperty}` : ''
     }`
   ));
 }

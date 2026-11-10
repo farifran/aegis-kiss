@@ -51,7 +51,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs) | 174 | Prompt do supervisor externo e chamadas HTTP para provedores compatíveis com OpenAI/AI Gateway. |
 | [`semantic_codex.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_codex.mjs) | 142 | Adaptador secundário opcional via CLI `codex exec` em sandbox read-only. |
 | [`role_assignment.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/role_assignment.mjs) | 57 | Leitura e validação de `.harness/config/roles.json` (assistente nativo da IDE como padrão). |
-| [`semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) | 708 | Normalização de IDs semânticos, auto-derivação de `policyAssessments` e `determinismReview.coverage`, e compilação para `semantic_draft.v9` + `preparedEffect`. |
+| [`semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) | 821 | Normalização de IDs semânticos, auto-derivação de `policyAssessments`, `determinismReview.coverage`, contabilidade de `stateModel` (`mutations`, `readBy`, `preservation`, `bounds`, `containerPolicy`) e defaults de `decisions`/`unknowns`, compilando para `semantic_draft.v9` + `preparedEffect`. |
 | [`semantic_draft_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_draft_validator.mjs) | 731 | Validação de citações literais, rastreabilidade de fatos, invariantes, decisões humanas e limites estruturais. |
 | [`semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) | 1439 | Certificado de fechamento semântico (`closureCertificate`) e `gapLedger`, validando totalidade de operações e ciclo de vida de campos. |
 | [`prepared_effects.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/prepared_effects.mjs) | 162 | Aplicação cirúrgica de patches semânticos (`preparedEffect`) em memória sem nova consulta à IA. |
@@ -63,7 +63,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | [`semantic_collections.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_collections.mjs) | 5 | Utilitário `assertUniqueIds`. |
 | [`semantic_contract.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_contract.mjs) | 21 | Barrel de exportação das funções do contrato semântico. |
 | [`schema_catalog.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_catalog.mjs) | 36 | Catálogo dos 14 JSON Schemas e 13 validadores compilados. |
-| [`schema_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_validator.mjs) | 94 | Carregador e expansor de validadores Ajv standalone. |
+| [`schema_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_validator.mjs) | 96 | Carregador e expansor de validadores Ajv standalone com diagnóstico explícito de `missingProperty` e `additionalProperty`. |
 | [`rejection_report.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/rejection_report.mjs) | 355 | Diagnósticos estruturados com causa exata, regra violada e remediação acionável. |
 
 ### 2.3. Governança e Schemas (`governance/`)
@@ -77,7 +77,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 
 ## 3. Análise Forense: Novas Melhorias Potenciais (Backlog Ativo)
 
-A inspeção forense sobre o código-fonte atual (`7.734 linhas` em `scripts/`) e sobre os artefatos gerados durante a execução da Demanda D6 mantém **5 oportunidades concretas de simplificação e endurecimento determinístico**:
+A inspeção forense sobre o código-fonte atual (`7.849 linhas` em `scripts/`) e sobre os artefatos gerados durante a execução das Demandas D6 e D7 mantém **4 oportunidades concretas de simplificação e endurecimento determinístico**:
 
 ### 3.1. Correção de Fragmentação de Decimais (`10,00` $\to$ `"10"` e `"00"`) em `intent_evidence.mjs`
 - **Evidência Forense (observada ao vivo na D6):** Na linha [`scripts/lib/intent_evidence.mjs:100`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs#L100), a regex de extração numérica `/(?<![\p{L}\p{N}_])\d+(?:\.\d+)?n?(?![\p{L}\p{N}_])/gu` reconhece apenas ponto decimal (`.`), ignorando vírgula decimal (`,`) usada em português.
@@ -93,35 +93,28 @@ A inspeção forense sobre o código-fonte atual (`7.734 linhas` em `scripts/`) 
 - **Impacto:** Em toda execução de `./aegis --new`, [`scripts/lib/semantic_request.mjs:220`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L220) invoca [`buildSemanticOutputSchema`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_output_schema.mjs#L54) para expandir, compactar, deduplicar `$defs` e serializar **32 KB de JSON Schema** dentro de `semantic-request.json`. No fluxo nativo da IDE (`antigravity`), esse documento de 32 KB nunca é consumido (servia apenas para o campo `response_format.json_schema.schema` da API HTTP externa em [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs)).
 - **Melhoria Proposta:** Manter em `semantic-request.json` apenas `{ id: "aegis.semantic_opinion.v3", digest, strict: true }` (calculando `buildSemanticOutputSchema` sob demanda apenas quando `semantic_gateway.mjs` ou `semantic_codex.mjs` for realmente invocado), reduzindo `semantic-request.json` de **47 KB para ~14,8 KB (-68,6%)**.
 
-### 3.3. Desidratação de Boilerplate em Decisões Humanas (`decisions` / `unknowns` / `adversarialReview`) em `semantic_opinion.mjs`
-- **Evidência Forense (observada na compilação da D6):** Embora `policyAssessments` e `determinismReview.coverage` já sejam auto-derivados, quando uma demanda possui 1 decisão humana (`decisions`), a IA ainda é obrigada pelo schema `semantic_opinion.v3` a fornecer manualmente:
-  1. Um bloco `unknowns: [...]` que duplica exatamente a afirmação já marcada com `kind: "AMBIGUITY", disposition: "DECISION"` em `intentClaims`;
-  2. Campos de contabilidade óbvios em cada decisão: `recommendedAnswerIndex: 0`, `requirementIndexes: [0]`, `invariantIndexes: [0]`, `riskIndexes: []` e `presentation.glossary: []`;
-  3. Um achado em `adversarialReview.findings` com `disposition: "DECISION"` apontando para `{ kind: "DECISION", index: 0 }` apenas para espelhar a mesma dúvida já registrada na decisão.
-- **Melhoria Proposta:** Em [`normalizeSemanticOpinion`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs#L48), auto-preencher defaults em `decisions` (`recommendedAnswerIndex ??= 0`, `requirementIndexes ??= [0]`, `invariantIndexes ??= []`, `riskIndexes ??= []`, `presentation.glossary ??= []`) e auto-derivar `unknowns` a partir das `intentClaims` com `disposition === "DECISION"` quando `unknowns` for omitido, reduzindo em **~35%** o tamanho do JSON que a IA precisa redigir em demandas ambíguas.
-
-### 3.4. Poda de Tabelas Poliglotas em `hybrid_source_index.mjs` (424 linhas)
+### 3.3. Poda de Tabelas Poliglotas em `hybrid_source_index.mjs` (424 linhas)
 - **Evidência Forense:** [`scripts/lib/hybrid_source_index.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/hybrid_source_index.mjs) mantém expressões e heurísticas para dezenas de ecossistemas fora do escopo da política arquitetural do projeto (que rege TypeScript/JavaScript/Node.js).
 - **Melhoria Proposta:** Enxugar o reconhecedor de regiões e tokens para focar nas linguagens suportadas pela arquitetura (`TS`, `JS`, `MJS`, `CJS`, `JSON`, `MD`, `SH`), reduzindo complexidade e superfície de manutenção.
 
-### 3.5. Modularização de `semantic_closure.mjs` (1.439 linhas — 18,6% de todo o código JS)
+### 3.4. Modularização de `semantic_closure.mjs` (1.439 linhas — 18,3% de todo o código JS)
 - **Evidência Forense:** [`scripts/lib/semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) concentra 8 validadores distintos em um único arquivo de 1.439 linhas, destacando-se `validateFieldLifecycle` (linhas 124–583, **460 linhas**), `validateProvenanceEnforcement` (linhas 866–1073, **208 linhas**), `validateOperationTotality` (linhas 584–727, **144 linhas**) e `validateContradictionDetection` (linhas 728–865, **138 linhas**).
 - **Melhoria Proposta:** Dividir `semantic_closure.mjs` em submódulos coesos (ciclo de vida de estado/transições vs proveniência/contradições textuais) e substituir heurísticas de regex bilíngues redundantes por verificações estruturais diretas sobre os campos tipados do `stateModel`.
 
 ---
 
-## 4. Benchmark das 10 Demandas Multidimensionais e Execução Atualizada (D6 — Run 6)
+## 4. Benchmark das 10 Demandas Multidimensionais e Execução Atualizada (D6 Run 6 e D7 Run 2)
 
 ### 4.1. Matriz Consolidada das 10 Demandas
 | ID | Arquétipo da Demanda | Fluxo / Comandos | Status Final | Deliberação Humana | Digest Selado (`contractDigest`) | Resultado Observado |
-| :-: | :--- | :---: | :---: | :---: | :--- | :--- |
+| :-: | :--- | :---: | :---: | :---: | :---: | :--- |
 | **D1** | **Função Pura & Stateless** (*Desconto de Produto*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `f9c598727ed6` (Runs 2 e 3) | `stateModel: null`, 6 casos `Dado/Quando/Então`, 100% bit-a-bit idêntico entre as Runs 1, 2 e 3. |
 | **D2** | **Poda de Sobre-Engenharia** (*Validador CPF*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `f8157b1a640e` (Runs 1 e 2) | Poda integral de `CPFValidatorFactory`, `ValidationPipelineBuilder`, `EventBus` e `MetricsCollectorSingleton` (`ARCH-PARSIMONY`). |
 | **D3** | **Máquina de Estado** (*Tentativas de Login*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `8bc994d2d8c1` (Runs 1 e 2) | Entidade `UserLoginState`, limite `[0, 3]` com `SATURATE`, reset por login com sucesso e guarda `GUARD_ALREADY_BLOCKED`. |
 | **D4** | **Janela Deslizante & TTL** (*Rate Limiter*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `e47152ab90c6` | `SLIDING_WINDOW_EVICTION` (máx 10, TTL 60s), `SECONDS` e rejeição HTTP 429 na 11ª requisição. |
 | **D5** | **Precedência Linear de Guardas** (*Saque*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `ad79dd970874` | Ordem estrita `["GUARD_CONTA_INATIVA", "GUARD_SALDO_INSUFICIENTE", "GUARD_LIMITE_DIARIO_EXCEDIDO"]` sem mutação em falha. |
 | **D6** | **Ambiguidade Material & `preparedEffect`** (*Fidelidade Cashback*) | `--new` $\to$ `--semantic-compile` $\to$ `--resolve Q-0001=ANS-0001-01` | **CERTIFIED_CLOSED** | `ask_question` (`Q-0001`) | `6c08f852f8bd` (Runs 5 e 6) | Lacuna de frações inferiores a R$ 10,00 resolvida via `preparedEffect` e selada atomicamente em comando único (`--resolve`). |
-| **D7** | **Coleção Finita FIFO** (*Buffer Circular 50*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `0fe6d18da400` | `maxEntries: "50"`, `FIFO_EVICTION` e `emptyBehavior: "EMPTY_COLLECTION"`. |
+| **D7** | **Coleção Finita FIFO** (*Buffer Circular 50*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `f826ef8ec3f9` (Run 2) | `maxEntries: "50"`, `FIFO_EVICTION` e `emptyBehavior: "EMPTY_COLLECTION"`, com auto-derivação mecânica de `mutations`, `readBy`, `preservation`, `bounds` e `containerPolicy`. |
 | **D8** | **Efeito Físico Externo & Rollback** (*Webhook*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `c7a752b7176e` | Cobertura explícita `onSuccess`/`onFailure` e `rollback.strategy: "COMPENSATING_ACTION"` sobre o estoque local. |
 | **D9** | **Serialização Canônica & SHA-256** (*Urna*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `26f2a65f6edd` | Ordenação canônica `"zona ASC, secao ASC"`, campos lexicográficos e `emptyStateDigest` fixo. |
 | **D10** | **Violação de Política Hard** (`/etc/passwd`) | `--new` $\to$ `--semantic-compile` (Bloqueado) | **REJECTED** | Não aplicável | — (Bloqueio preventivo) | Rejeição imediata com `NON_DELIBERABLE_POLICY_CONFLICT` (`ARCH-PRODUCT-BOUNDARY`). |
