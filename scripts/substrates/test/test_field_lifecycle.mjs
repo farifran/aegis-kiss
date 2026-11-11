@@ -2324,6 +2324,161 @@ function createFixture({
   log('  PASS: TEST-107 Collection canonical serialization with non-identifier simple ordering key blocked');
 }
 
+// TEST-108: Invented numeric literal citing WORKSPACE_EVIDENCE without presence in lines is blocked
+{
+  const model = {
+    entities: [{
+      name: 'Account',
+      isCollection: false,
+      fields: [{
+        name: 'balance',
+        type: 'INTEGER',
+        bounds: {
+          lowerBound: '0',
+          upperBound: '500000000',
+          boundaryBehavior: 'REJECT',
+          provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/ledger.ts#L25' }],
+        },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['*'],
+      }],
+    }],
+  };
+  const workspaceEvidence = [{
+    path: 'src/ledger.ts',
+    startLine: 20,
+    endLine: 30,
+    content: 'line20\nline21\nline22\nline23\nline24\nreadonly balance: number;\nline26\nline27\nline28\nline29\nline30',
+  }];
+  const res = validateProvenanceEnforcement({
+    stateModel: model,
+    workspaceEvidence,
+    literalFacts: [{ id: 'FACT-0001', kind: 'NUMBER_LITERAL', attributes: { value: '0' } }],
+  });
+  assert.equal(res.valid, false, 'TEST-108: invented number 500000000 not in line 25 must fail');
+  assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_NUMERIC_LITERAL' && i.reason.includes('500000000')));
+  log('  PASS: TEST-108 Invented numeric literal in WORKSPACE_EVIDENCE blocked with UNAUTHORIZED_NUMERIC_LITERAL');
+}
+
+// TEST-109: Ungrounded guard codes blocked with UNAUTHORIZED_GUARD_OR_ERROR_CODE
+{
+  const model = {
+    entities: [{
+      name: 'Ledger',
+      fields: [{
+        name: 'balance',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'REJECT' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['*'],
+      }],
+    }],
+    operations: [{
+      name: 'reverseSettlement',
+      guardPrecedence: ['GUARD_ACCOUNT_FROZEN', 'INSUFFICIENT_SETTLED_BALANCE'],
+      branches: [
+        { branchId: 'GUARD_ACCOUNT_FROZEN', outcomeKind: 'REJECTION', defaultPreservation: true },
+        { branchId: 'INSUFFICIENT_SETTLED_BALANCE', outcomeKind: 'REJECTION', defaultPreservation: true },
+        { branchId: 'SUCCESS', outcomeKind: 'STATE_CHANGE', defaultPreservation: false, stateEffects: [{ effect: 'DECREMENT', field: 'Ledger.balance', value: '1' }] },
+      ],
+      parameters: [{
+        name: 'amount',
+        type: 'INTEGER',
+        bounds: { lowerBound: '1', upperBound: '100', boundaryBehavior: 'REJECT' },
+        onInvalid: { error: 'INVALID_REVERSE_AMOUNT' },
+      }],
+    }],
+  };
+  const res = validateProvenanceEnforcement({
+    stateModel: model,
+    intent: 'Estender reverseSettlement e verificar GUARD_ACCOUNT_FROZEN.',
+    workspaceEvidence: [{ path: 'src/guard.ts', content: 'export type GuardCode = "GUARD_ACCOUNT_FROZEN";' }],
+  });
+  assert.equal(res.valid, false, 'TEST-109: ungrounded guard and param error codes must fail');
+  assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_GUARD_OR_ERROR_CODE' && i.slotId.includes('INSUFFICIENT_SETTLED_BALANCE')));
+  assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_GUARD_OR_ERROR_CODE' && i.slotId.includes('INVALID_REVERSE_AMOUNT')));
+  log('  PASS: TEST-109 Ungrounded guard and parameter error codes blocked with UNAUTHORIZED_GUARD_OR_ERROR_CODE');
+}
+
+// TEST-110: Acceptance cases expecting STATE_CHANGE vs operation branches without mutations blocked with CONTRADICTORY_RULE_DETECTED
+{
+  const model = {
+    entities: [{
+      name: 'Counter',
+      fields: [{
+        name: 'val',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'REJECT' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['*'],
+      }],
+    }],
+    operations: [{
+      name: 'doAction',
+      guardPrecedence: [],
+      branches: [
+        { branchId: 'BRANCH_1', outcomeKind: 'STATE_CHANGE', defaultPreservation: true, stateEffects: [] },
+      ],
+    }],
+  };
+  const requirements = [{
+    id: 'REQ-0001',
+    statement: 'Deve alterar o contador.',
+    acceptanceCases: [{ id: 'AC-0001', kind: 'SUCCESS', outcomeKind: 'STATE_CHANGE', given: 'val = 0', when: 'action', then: 'val = 1' }],
+  }];
+  const res = validateContradictionDetection({
+    stateModel: model,
+    requirements,
+  });
+  assert.equal(res.valid, false, 'TEST-110: STATE_CHANGE with defaultPreservation: true and no mutations must fail');
+  assert.ok(res.issues.some((i) => i.kind === 'CONTRADICTORY_RULE_DETECTED'));
+  log('  PASS: TEST-110 Contradiction between STATE_CHANGE and defaultPreservation blocked with CONTRADICTORY_RULE_DETECTED');
+}
+
+// TEST-111: Math.* expressions in operation state effects do not trigger OPEN_COMPUTATIONAL_DEPENDENCY
+{
+  const model = {
+    entities: [{
+      name: 'Ledger',
+      fields: [{
+        name: 'balance',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '100', boundaryBehavior: 'REJECT' },
+        initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
+        mutations: [],
+        preservation: ['*'],
+        readBy: ['*'],
+      }],
+    }],
+    operations: [{
+      name: 'clampBalance',
+      guardPrecedence: [],
+      parameters: [{ name: 'delta', type: 'INTEGER', bounds: { lowerBound: '0', upperBound: '10' } }],
+      branches: [{
+        branchId: 'SUCCESS',
+        outcomeKind: 'STATE_CHANGE',
+        defaultPreservation: false,
+        stateEffects: [{
+          field: 'Ledger.balance',
+          effect: 'SET',
+          value: 'Math.min(Ledger.balance + delta, 100)',
+        }],
+      }],
+    }],
+  };
+  const res = validateFieldLifecycle({
+    stateModel: model,
+  });
+  assert.ok(!res.issues.some((i) => i.kind === 'OPEN_COMPUTATIONAL_DEPENDENCY'), 'TEST-111: Math.min must not trigger OPEN_COMPUTATIONAL_DEPENDENCY');
+  log('  PASS: TEST-111 Standard Math functions in stateEffects pass without OPEN_COMPUTATIONAL_DEPENDENCY');
+}
+
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
 
 

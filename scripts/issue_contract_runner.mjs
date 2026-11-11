@@ -622,7 +622,7 @@ async function compilePreparedRevision(context) {
   const { hasPreparedAnswers, applyPreparedAnswers } = await import('./lib/prepared_effects.mjs');
   const { sourceSpecification, resolution, humanResolutions } = context.revision;
   if (!hasPreparedAnswers(sourceSpecification, resolution.answers)) return false;
-  const draft = applyPreparedAnswers(sourceSpecification, resolution.answers, humanResolutions, context.request.intentEvidence);
+  const draft = applyPreparedAnswers(sourceSpecification, resolution.answers, humanResolutions, context.request.intentEvidence, context.request.workspace?.sourceEvidence);
   draft.sourceContextDigest = context.request.contextDigest;
   draft.sourceEvidenceDigest = context.request.intentEvidence.evidenceDigest;
   await compileAndPersistSemanticOpinion(null, context, null, draft);
@@ -828,12 +828,13 @@ async function handleVerify() {
       activeContext = 'INVALID_PREFLIGHT';
     }
   }
+  const freshness = await inspectWorkspaceFreshness(state.contract);
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.contract_verification.v2',
     status: 'VALID',
     contractDigest: state.contractDigest,
     contractIntegrity: 'VALID',
-    workspaceFreshness: 'NOT_CHECKED',
+    ...freshness,
     implementationCompliance: 'NOT_EVALUATED',
     activeContext,
   })}\n`);

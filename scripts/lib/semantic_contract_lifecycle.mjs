@@ -52,7 +52,7 @@ export function compileSemanticContract({
       if (answer.preparedEffect == null) continue;
       const choices = [{ questionId: decision.questionId, answerId: answer.id, contractEffect: answer.contractEffect }];
       try {
-        const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence);
+        const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence, effectiveSemanticRequest.workspace?.sourceEvidence);
         assertRevisionApplied(preview, { answers: choices }, draft);
         assertSemanticDraft(preview, policy, {
           ...validationContext,

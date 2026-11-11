@@ -253,6 +253,9 @@ export function normalizeSemanticOpinion(opinion, request) {
         if (Array.isArray(op.branches)) {
           for (const branch of op.branches) {
             branch.stateEffects ??= [];
+            for (const eff of branch.stateEffects) {
+              if (eff.effect === 'SET_VALUE') eff.effect = 'SET';
+            }
             branch.defaultPreservation ??= branch.outcomeKind === 'REJECTION' || branch.stateEffects.length === 0;
             if (branch.defaultPreservation === false && allEntityFieldKeys.length > 0) {
               const covered = new Set(branch.stateEffects.map((e) => e.field));
@@ -301,6 +304,7 @@ export function normalizeSemanticOpinion(opinion, request) {
             }
             if (Array.isArray(field.mutations)) {
               for (const mut of field.mutations) {
+                if (mut.effect === 'SET') mut.effect = 'SET_VALUE';
                 mut.targetValue ??= null;
               }
             } else {
@@ -312,7 +316,7 @@ export function normalizeSemanticOpinion(opinion, request) {
                       field.mutations.push({
                         operation: op.name,
                         condition: branch.condition ?? branch.branchId,
-                        effect: eff.effect,
+                        effect: eff.effect === 'SET' ? 'SET_VALUE' : eff.effect,
                         targetValue: eff.value ?? null,
                       });
                     }
@@ -352,6 +356,23 @@ export function normalizeSemanticOpinion(opinion, request) {
   }
 
   // 5. Invariants, decisions, unknowns e requirements defaults
+  const defaultFragmentIndexes = request.intentEvidence.fragments.map((_, i) => i);
+  const normalizeRequirementItem = (req) => {
+    if (!req || typeof req !== 'object') return;
+    req.kind ??= 'FUNCTIONAL';
+    req.measurement ??= null;
+    req.fragmentIndexes ??= defaultFragmentIndexes;
+    if (Array.isArray(req.acceptanceCases)) {
+      for (const ac of req.acceptanceCases) {
+        if (ac.kind === 'STATE_CHANGE') {
+          ac.outcomeKind ??= 'STATE_CHANGE';
+          ac.kind = 'BOUNDARY';
+        }
+        ac.decisionBinding ??= null;
+        ac.boundaryBinding ??= null;
+      }
+    }
+  };
   if (Array.isArray(opinion.decisions)) {
     for (const dec of opinion.decisions) {
       dec.recommendedAnswerIndex ??= 0;
@@ -360,6 +381,20 @@ export function normalizeSemanticOpinion(opinion, request) {
       dec.riskIndexes ??= [];
       if (dec.presentation && typeof dec.presentation === 'object') {
         dec.presentation.glossary ??= [];
+      }
+      if (Array.isArray(dec.answers)) {
+        for (const ans of dec.answers) {
+          if (ans.preparedEffect && typeof ans.preparedEffect === 'object') {
+            ans.preparedEffect.requirements ??= [];
+            ans.preparedEffect.invariants ??= [];
+            ans.preparedEffect.risks ??= [];
+            ans.preparedEffect.boundaryRules ??= [];
+            ans.preparedEffect.dimensions ??= [];
+            for (const entry of ans.preparedEffect.requirements) {
+              if (entry.value) normalizeRequirementItem(entry.value);
+            }
+          }
+        }
       }
     }
     if (opinion.unknowns === undefined && opinion.decisions.length > 0 && Array.isArray(opinion.intentClaims)) {
@@ -395,19 +430,7 @@ export function normalizeSemanticOpinion(opinion, request) {
   opinion.adversarialReview.findings ??= [];
   if (Array.isArray(opinion.requirements)) {
     for (const req of opinion.requirements) {
-      req.kind ??= 'FUNCTIONAL';
-      req.measurement ??= null;
-      req.fragmentIndexes ??= request.intentEvidence.fragments.map((_, i) => i);
-      if (Array.isArray(req.acceptanceCases)) {
-        for (const ac of req.acceptanceCases) {
-          if (ac.kind === 'STATE_CHANGE') {
-            ac.outcomeKind ??= 'STATE_CHANGE';
-            ac.kind = 'BOUNDARY';
-          }
-          ac.decisionBinding ??= null;
-          ac.boundaryBinding ??= null;
-        }
-      }
+      normalizeRequirementItem(req);
     }
   }
 
@@ -783,6 +806,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       ...draft,
       literalFacts: request.intentEvidence?.literalFacts ?? [],
       intentEvidence: request.intentEvidence,
+      workspaceEvidence: request.workspace?.sourceEvidence ?? [],
     },
     humanResolutions: [],
   });

@@ -118,40 +118,60 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
     <= sourceEvidenceByteLimit;
   const entrypoints = textFiles.map(({ path }) => path)
     .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
-  const selections = smallWorkspace
-    ? textFiles.map(({ path }) => ({ path, line: null }))
-    : [
-      ...new Map(preflight.discovery.lexicalEvidence.matches
-        .map(({ path, line }) => [`${path}:${line}`, { path, line }])).values(),
-      ...entrypoints.filter((path) => !preflight.discovery.lexicalEvidence.matches
-        .some((match) => match.path === path)).map((path) => ({ path, line: null })),
-    ];
-  if (!smallWorkspace && selections.length === 0 && textFiles[0] !== undefined) {
-    selections.push({ path: textFiles[0].path, line: null });
+
+  const selectionsByPath = new Map();
+  if (smallWorkspace) {
+    for (const { path } of textFiles) {
+      selectionsByPath.set(path, { path, lines: [] });
+    }
+  } else {
+    for (const match of preflight.discovery.lexicalEvidence.matches ?? []) {
+      if (!selectionsByPath.has(match.path)) {
+        selectionsByPath.set(match.path, { path: match.path, lines: [] });
+      }
+      if (typeof match.line === 'number') {
+        selectionsByPath.get(match.path).lines.push(match.line);
+      }
+    }
+    for (const entrypoint of entrypoints) {
+      if (!selectionsByPath.has(entrypoint)) {
+        selectionsByPath.set(entrypoint, { path: entrypoint, lines: [] });
+      }
+    }
+    if (selectionsByPath.size === 0 && textFiles[0] !== undefined) {
+      selectionsByPath.set(textFiles[0].path, { path: textFiles[0].path, lines: [] });
+    }
   }
+
   const evidence = [];
   let remainingBytes = sourceEvidenceByteLimit;
-  for (const { path, line: matchLine } of selections) {
+  for (const { path, lines } of selectionsByPath.values()) {
     if (remainingBytes === 0) break;
     const manifestEntry = filesByPath.get(path);
     if (manifestEntry === undefined) continue;
     const bytes = verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation);
     const limit = Math.min(smallWorkspace ? bytes.byteLength : sourceEvidenceFileByteLimit, remainingBytes);
-    const excerpt = !smallWorkspace && matchLine !== null
-      ? lineWindow(bytes, matchLine, limit)
-      : (() => {
-        const content = decodeUtf8Prefix(bytes, limit);
-        return { content, startLine: 1, endLine: content.split('\n').length };
-      })();
+
+    let excerpt;
+    let selection;
+    if (smallWorkspace || lines.length === 0 || bytes.byteLength <= limit) {
+      const content = decodeUtf8Prefix(bytes, limit);
+      excerpt = { content, startLine: 1, endLine: content.split('\n').length };
+      selection = smallWorkspace ? 'FULL_SOURCE' : (lines.length === 0 ? 'ENTRYPOINT_PREFIX' : 'LEXICAL_WINDOW');
+    } else {
+      const sortedLines = [...lines].sort((a, b) => a - b);
+      const medianLine = sortedLines[Math.floor(sortedLines.length / 2)];
+      excerpt = lineWindow(bytes, medianLine, limit);
+      selection = 'LEXICAL_WINDOW';
+    }
+
     const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
     remainingBytes -= consumedBytes;
     evidence.push({
       path,
       ...excerpt,
       truncated: consumedBytes < bytes.byteLength,
-      selection: smallWorkspace
-        ? 'FULL_SOURCE'
-        : matchLine === null ? 'ENTRYPOINT_PREFIX' : 'LEXICAL_WINDOW',
+      selection,
       trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
     });
   }

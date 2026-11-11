@@ -101,11 +101,35 @@ A inspeção forense sobre o código-fonte atual (`7.849 linhas` em `scripts/`) 
 - **Evidência Forense:** [`scripts/lib/semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) concentra 8 validadores distintos em um único arquivo de 1.439 linhas, destacando-se `validateFieldLifecycle` (linhas 124–583, **460 linhas**), `validateProvenanceEnforcement` (linhas 866–1073, **208 linhas**), `validateOperationTotality` (linhas 584–727, **144 linhas**) e `validateContradictionDetection` (linhas 728–865, **138 linhas**).
 - **Melhoria Proposta:** Dividir `semantic_closure.mjs` em submódulos coesos (ciclo de vida de estado/transições vs proveniência/contradições textuais) e substituir heurísticas de regex bilíngues redundantes por verificações estruturais diretas sobre os campos tipados do `stateModel`.
 
+### 3.5. Deduplicação e Fusão de Janelas de Código em `buildSourceEvidence` (`semantic_request.mjs`) — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (resolvida após a Demanda D11):** Em repositórios onde o código excede 32 KB (`smallWorkspace === false`), agrupamento de seleções por arquivo (`path`) evita duplicações redundantes do mesmo arquivo, garantindo o teto global de 32 KB para cobrir todos os módulos observados.
+
+### 3.6. Validação de Proposições e Passagem de `intentEvidence` em `assertSemanticDraft` — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (resolvida após a Demanda D11):** Passagem correta de `intentEvidence` no objeto `context` de [`scripts/lib/semantic_draft_validator.mjs:680`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_draft_validator.mjs#L680) para validar referências a `FACT-*` e `FRAG-*`.
+
+### 3.7. Validação Estrita de Literais Numéricos em `WORKSPACE_EVIDENCE` — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 1):** Invenções de números arbitrários citando linhas de arquivos de código (ex.: `500000000` citando linha que apenas declara tipo) agora são verificadas diretamente contra o texto das linhas de `workspaceEvidence`, bloqueando com `UNAUTHORIZED_NUMERIC_LITERAL` (`TEST-108`).
+
+### 3.8. Detecção Mecânica de Guardas e Códigos de Rejeição Espúrios — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 2):** Bloqueio com `UNAUTHORIZED_GUARD_OR_ERROR_CODE` de guardas em `guardPrecedence` ou parâmetros com `onInvalid.error` que não existem na demanda, no código de `src/` ou nos requisitos autorizados (`TEST-109`).
+
+### 3.9. Cruzamento de Consistência `STATE_CHANGE` vs Preservação Padrão — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 3):** Detecção ativa em `validateContradictionDetection` de aceitações que exigem mutação contra branches configurados apenas com `defaultPreservation: true` e zero mutações (`TEST-110`).
+
+### 3.10. Normalização de Funções Padrão `Math.*` no Fechamento Semântico — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 4):** Expressões de mutação contendo `Math.min`, `Math.max`, `Math.floor`, etc. são reconhecidas como chamadas canônicas globais sem falso positivo de `OPEN_COMPUTATIONAL_DEPENDENCY` (`TEST-111`).
+
+### 3.11. Casamento Semântico em Revisão e Resumo de Erros de Schema — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 5):** `assertRevisionApplied` aceita casamento de substring/semântico de `contractEffect`, e `assertSchema` sumariza erros quando excedem 5 ocorrências, prevenindo explosão de payload de diagnóstico.
+
+### 3.12. Conexão Real de `handleVerify` ao `inspectWorkspaceFreshness` — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (Item 7):** `./aegis --verify` inspeciona o estado real de frescor do workspace (`MATCHES_BASELINE` ou `CHANGED_SINCE_BASELINE`) em vez de retornar `'NOT_CHECKED'` estático.
+
 ---
 
-## 4. Benchmark das 10 Demandas Multidimensionais e Execução Atualizada (D6 Run 6 e D7 Run 2)
+## 4. Benchmark das Demandas Multidimensionais e Execução Atualizada (D6, D7 e D11)
 
-### 4.1. Matriz Consolidada das 10 Demandas
+### 4.1. Matriz Consolidada das Demandas
 | ID | Arquétipo da Demanda | Fluxo / Comandos | Status Final | Deliberação Humana | Digest Selado (`contractDigest`) | Resultado Observado |
 | :-: | :--- | :---: | :---: | :---: | :---: | :--- |
 | **D1** | **Função Pura & Stateless** (*Desconto de Produto*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `f9c598727ed6` (Runs 2 e 3) | `stateModel: null`, 6 casos `Dado/Quando/Então`, 100% bit-a-bit idêntico entre as Runs 1, 2 e 3. |
@@ -118,6 +142,7 @@ A inspeção forense sobre o código-fonte atual (`7.849 linhas` em `scripts/`) 
 | **D8** | **Efeito Físico Externo & Rollback** (*Webhook*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `c7a752b7176e` | Cobertura explícita `onSuccess`/`onFailure` e `rollback.strategy: "COMPENSATING_ACTION"` sobre o estoque local. |
 | **D9** | **Serialização Canônica & SHA-256** (*Urna*) | `--new` $\to$ `--semantic-compile` $\to$ `--approve` | **CERTIFIED_CLOSED** | Confirmação (`0` lacunas) | `26f2a65f6edd` | Ordenação canônica `"zona ASC, secao ASC"`, campos lexicográficos e `emptyStateDigest` fixo. |
 | **D10** | **Violação de Política Hard** (`/etc/passwd`) | `--new` $\to$ `--semantic-compile` (Bloqueado) | **REJECTED** | Não aplicável | — (Bloqueio preventivo) | Rejeição imediata com `NON_DELIBERABLE_POLICY_CONFLICT` (`ARCH-PRODUCT-BOUNDARY`). |
+| **D11** | **Intervenção Cirúrgica em Código Existente** (*Motor de Liquidação, `src/` > 32 KB*) | `--new` $\to$ `--semantic-compile` $\to$ `--resolve Q-0001=ANS-0001-01` | **CERTIFIED_CLOSED** | `ask_question` (`Q-0001`) | `91f875788873` (Run 1) | Extensão cirúrgica de `reverseSettlement` e inserção de `GUARD_DISPUTE_HOLD_ACTIVE` em `src/`; descoberta 100% determinística de `MAX_PENDING_SETTLEMENTS = 250`, `DAILY_SETTLEMENT_LIMIT_CENTS = 5000000` e `MAX_BATCH_REJECTIONS = 5` a partir do código; rejeição dos 95 comentários-isca de `deprecated_comments_trap.ts`; resolução atômica de `Q-0001`. |
 
 ### 4.2. Verificação de Reprodutibilidade da Demanda D6 (Run 5 vs Run 6 Atual)
 Os artefatos da execução atual foram salvos em [`benchmarks/results/D6_run6/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/D6_run6/) e confrontados via SHA-256 com [`benchmarks/results/D6_run5/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/benchmarks/results/D6_run5/):

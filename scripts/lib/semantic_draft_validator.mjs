@@ -678,6 +678,7 @@ export function assertSemanticDraft(draft, policy, {
   const context = {
     policy,
     intent,
+    intentEvidence,
     workspaceEvidence,
     requirementIds,
     invariantIds,

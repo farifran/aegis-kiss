@@ -91,6 +91,9 @@ export function schemaErrors(schemaId, value) {
 export function assertSchema(schemaId, value) {
   const errors = schemaErrors(schemaId, value);
   if (errors.length > 0) {
-    throw new Error(`schema_validation_failed:${schemaId}:${errors.join(',')}`);
+    const errorSummary = errors.length > 5
+      ? `${errors.slice(0, 5).join(',')},(+${errors.length - 5}_more_errors)`
+      : errors.join(',');
+    throw new Error(`schema_validation_failed:${schemaId}:${errorSummary}`);
   }
 }

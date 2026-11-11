@@ -814,6 +814,46 @@ export function validateContradictionDetection({
     }
   }
 
+  // Contradição de Mudança de Estado vs Preservação Estática Total
+  const hasStateChangeAC = (requirements ?? []).some((r) =>
+    (r.acceptanceCases ?? []).some((ac) => ac.outcomeKind === 'STATE_CHANGE' || ac.outcomeKind === 'SUCCESS')
+  );
+  if (hasStateChangeAC && operations.length > 0) {
+    const hasAnyMutatingBranch = operations.some((op) =>
+      (op.branches ?? []).some((b) =>
+        b.outcomeKind === 'STATE_CHANGE' &&
+        b.defaultPreservation !== true &&
+        Array.isArray(b.stateEffects) &&
+        b.stateEffects.some((e) => e.effect !== 'PRESERVE')
+      )
+    );
+    const hasMutableFields = entities.some((e) => (e.fields ?? []).some((f) => !f.isReadOnly));
+    if (hasMutableFields && !hasAnyMutatingBranch) {
+      issues.push({
+        slotId: 'operations/stateChangeContradiction',
+        kind: 'CONTRADICTORY_RULE_DETECTED',
+        reason: 'Os critérios de aceitação (acceptanceCases) exigem mudança de estado (STATE_CHANGE), mas nenhuma operação declara ramo de mutação efetivo.',
+      });
+    }
+  }
+
+  // Contradição Interna de Ramo: outcomeKind 'STATE_CHANGE' com defaultPreservation: true e sem mutações
+  for (const op of operations) {
+    for (const branch of (op.branches ?? [])) {
+      if (branch.outcomeKind === 'STATE_CHANGE') {
+        const effects = branch.stateEffects ?? [];
+        const mutatingEffects = effects.filter((e) => e.effect !== 'PRESERVE');
+        if (mutatingEffects.length === 0 && branch.defaultPreservation === true) {
+          issues.push({
+            slotId: `operation/${op.name}/branch/${branch.branchId}/contradiction`,
+            kind: 'CONTRADICTORY_RULE_DETECTED',
+            reason: `O branch '${branch.branchId}' da operação '${op.name}' declara outcomeKind 'STATE_CHANGE', mas possui defaultPreservation: true e nenhum efeito de mutação (stateEffects).`,
+          });
+        }
+      }
+    }
+  }
+
   // 3. Contradição de Admissão vs Comportamento de Observáveis
   for (const entity of entities) {
     if (entity.isCollection && entity.admissionPolicy === 'ON_FIRST_REQUEST') {
@@ -869,6 +909,10 @@ export function validateProvenanceEnforcement({
   literalFacts = [],
   fragments = [],
   intent = '',
+  workspaceEvidence = [],
+  requirements = [],
+  invariants = [],
+  decisions = [],
 } = {}) {
   const issues = [];
   if (!stateModel) return { valid: true, issues: [] };
@@ -879,10 +923,6 @@ export function validateProvenanceEnforcement({
       || e.fields?.some((f) => Boolean(f.bounds?.provenance))
     ))
   );
-
-  if (!hasProvenanceContext) {
-    return { valid: true, issues: [] };
-  }
 
   const validPolicyRuleIds = new Set(architecturePolicy?.rules?.map((r) => r.id) ?? [
     'ARCH-PARSIMONY', 'ARCH-PRODUCT-BOUNDARY', 'ARCH-STRICT-EXPLICIT-MODULES',
@@ -921,7 +961,67 @@ export function validateProvenanceEnforcement({
     return false;
   };
 
-  if (Array.isArray(stateModel.entities)) {
+  const workspaceSupportsValue = (reference, valStr) => {
+    if (valStr === '0' || valStr === '1') return true;
+    if (!workspaceEvidence || workspaceEvidence.length === 0) return true;
+    if (typeof reference !== 'string' || reference.trim().length === 0) return false;
+
+    const cleanVal = String(valStr).replaceAll('_', '').replace(/n$/u, '').trim();
+    const hashIdx = reference.indexOf('#');
+    const colonIdx = reference.lastIndexOf(':');
+    let refPath = reference;
+    let targetStartLine = null;
+    let targetEndLine = null;
+
+    if (hashIdx !== -1) {
+      refPath = reference.slice(0, hashIdx).trim();
+      const lineSpec = reference.slice(hashIdx + 1);
+      const m = lineSpec.match(/L(\d+)(?:-L?(\d+))?/i);
+      if (m) {
+        targetStartLine = Number.parseInt(m[1], 10);
+        targetEndLine = m[2] ? Number.parseInt(m[2], 10) : targetStartLine;
+      }
+    } else if (colonIdx > 1 && !isNaN(Number(reference.slice(colonIdx + 1)))) {
+      refPath = reference.slice(0, colonIdx).trim();
+      const rest = reference.slice(colonIdx + 1);
+      const linePart = rest.startsWith('L') ? rest.slice(1) : rest;
+      const m = linePart.match(/(\d+)(?:-(\d+))?/);
+      if (m) {
+        targetStartLine = Number.parseInt(m[1], 10);
+        targetEndLine = m[2] ? Number.parseInt(m[2], 10) : targetStartLine;
+      }
+    }
+
+    const matchingSources = workspaceEvidence.filter((entry) =>
+      entry.path === refPath || entry.path.endsWith(refPath) || refPath.endsWith(entry.path)
+    );
+
+    if (matchingSources.length === 0) return false;
+
+    for (const src of matchingSources) {
+      const content = src.content ?? '';
+      const lines = content.split('\n');
+      const startLineOffset = src.startLine ?? 1;
+
+      let textToCheck = content;
+      if (targetStartLine !== null) {
+        const fromIdx = Math.max(0, targetStartLine - startLineOffset);
+        const toIdx = Math.min(lines.length - 1, (targetEndLine ?? targetStartLine) - startLineOffset);
+        if (fromIdx <= toIdx && fromIdx < lines.length) {
+          textToCheck = lines.slice(fromIdx, toIdx + 1).join('\n');
+        } else {
+          continue;
+        }
+      }
+
+      const cleanText = textToCheck.replaceAll('_', '').replace(/n\b/gu, '');
+      if (cleanText.includes(cleanVal) || textToCheck.includes(valStr)) return true;
+    }
+
+    return false;
+  };
+
+  if (hasProvenanceContext && Array.isArray(stateModel.entities)) {
     for (const entity of stateModel.entities) {
       if (entity.isCollection && entity.capacityPolicy?.maxEntries !== null && entity.capacityPolicy?.maxEntries !== undefined) {
         const maxVal = String(entity.capacityPolicy.maxEntries);
@@ -963,6 +1063,14 @@ export function validateProvenanceEnforcement({
                   slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
                   kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
                   reason: `A referência '${p.reference}' citada em USER_INTENT para a capacidade máxima '${maxVal}' não aparece no texto da demanda.`,
+                });
+              }
+            } else if (p.source === 'WORKSPACE_EVIDENCE') {
+              if (!workspaceSupportsValue(p.reference, maxVal)) {
+                issues.push({
+                  slotId: `entity/${entity.name}/capacityPolicy/unauthorizedLiteral`,
+                  kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                  reason: `A capacidade máxima '${maxVal}' da entidade '${entity.name}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o valor não existe no trecho de código referenciado.`,
                 });
               }
             } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
@@ -1028,6 +1136,16 @@ export function validateProvenanceEnforcement({
                   } else {
                     hasNonFactSupport = true;
                   }
+                } else if (p.source === 'WORKSPACE_EVIDENCE') {
+                  if (!workspaceSupportsValue(p.reference, valStr)) {
+                    issues.push({
+                      slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
+                      kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+                      reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o valor não existe no trecho de código referenciado.`,
+                    });
+                  } else {
+                    hasNonFactSupport = true;
+                  }
                 } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
                   issues.push({
                     slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedPolicy`,
@@ -1050,6 +1168,71 @@ export function validateProvenanceEnforcement({
 
           checkBound(lowerBound, 'lowerBound');
           checkBound(upperBound, 'upperBound');
+        }
+      }
+    }
+  }
+
+  // 2. Grounding obrigatório de guardas e códigos de erro de rejeição
+  const hasGroundingCorpus = (workspaceEvidence.length > 0 || intent.length > 0);
+  if (hasGroundingCorpus && Array.isArray(stateModel.operations)) {
+    const groundingCorpus = [
+      intent,
+      ...literalFacts.map((f) => f.reference),
+      ...workspaceEvidence.map((w) => w.content ?? ''),
+      ...requirements.flatMap((r) => [r.statement, ...(r.acceptanceCases ?? []).flatMap((ac) => [ac.given, ac.when, ac.then, ac.falsificationRule])]),
+      ...invariants.flatMap((inv) => [inv.statement, inv.falsification]),
+      ...decisions.flatMap((d) => [d.question, d.rationale, ...(d.answers ?? []).map((a) => a.contractEffect)]),
+    ].join('\n').toLowerCase();
+
+    const standardGuardPrefixes = [
+      'guard_', 'err_', 'error_', 'invalid_', 'insufficient_', 'queue_',
+      'capacity_', 'limit_', 'timeout_', 'unauthorized_', 'not_found_', 'conflict_',
+    ];
+
+    const standardAllowedCodes = new Set([
+      'queue_full_rejected', 'queue_full', 'capacity_exceeded', 'max_entries_exceeded',
+      'batch_empty_noop', 'batch_settled', 'success', 'noop', 'rejected', 'default_rejection',
+      'err_lock', 'err_val', 'err_valid', 'err_corrupted', 'err_global_lock', 'err_insufficient_credits',
+    ]);
+
+    const isCodeGrounded = (rawCode) => {
+      if (!rawCode || typeof rawCode !== 'string') return true;
+      const code = rawCode.trim().toLowerCase();
+      if (standardAllowedCodes.has(code)) return true;
+      if (groundingCorpus.includes(code)) return true;
+
+      let coreToken = code;
+      for (const prefix of standardGuardPrefixes) {
+        if (coreToken.startsWith(prefix)) {
+          coreToken = coreToken.slice(prefix.length);
+          break;
+        }
+      }
+      if (coreToken.length >= 3 && groundingCorpus.includes(coreToken)) {
+        return true;
+      }
+      return false;
+    };
+
+    for (const op of stateModel.operations) {
+      for (const guard of (op.guardPrecedence ?? [])) {
+        if (!isCodeGrounded(guard)) {
+          issues.push({
+            slotId: `operation/${op.name}/guard/${guard}/unauthorized`,
+            kind: 'UNAUTHORIZED_GUARD_OR_ERROR_CODE',
+            reason: `A guarda ou código de rejeição '${guard}' na operação '${op.name}' não possui fundamentação no texto da demanda, evidências do repositório ou requisitos.`,
+          });
+        }
+      }
+      for (const param of (op.parameters ?? [])) {
+        const errCode = param.onInvalid?.error || param.bounds?.onInvalid?.error;
+        if (errCode && !isCodeGrounded(errCode)) {
+          issues.push({
+            slotId: `operation/${op.name}/parameter/${param.name}/onInvalid/${errCode}`,
+            kind: 'UNAUTHORIZED_GUARD_OR_ERROR_CODE',
+            reason: `O código de erro de parâmetro '${errCode}' na operação '${op.name}' não possui fundamentação no texto da demanda, evidências do repositório ou requisitos.`,
+          });
         }
       }
     }
@@ -1105,10 +1288,14 @@ function validateOpenTermDependencies({
     'if', 'then', 'else', 'true', 'false', 'null', 'undefined', 'none', 'empty', 'now',
     'max', 'min', 'abs', 'sum', 'avg', 'sqrt', 'floor', 'ceil', 'round', 'clamp',
     'return', 'and', 'or', 'not', 'n', 'bigint', 'case', 'when', 'end', 'is', 'in',
+    'math', 'number', 'string', 'boolean', 'object', 'array', 'date', 'json', 'console',
   ]);
 
   function isTermKnown(token, extraParams = null) {
     const tokenRoot = token.includes('.') ? token.split('.')[0] : token;
+    if (['math', 'number', 'string', 'boolean', 'bigint', 'json'].includes(tokenRoot.toLowerCase())) {
+      return true;
+    }
     return (extraParams && (extraParams.has(token) || extraParams.has(tokenRoot)))
       || rawFieldNames.has(token) || rawFieldNames.has(tokenRoot)
       || entityFields.has(token)
@@ -1121,11 +1308,18 @@ function validateOpenTermDependencies({
     if (typeof exprStr !== 'string') return [];
     const val = exprStr.trim();
     if (!val || /^-?\d+(?:n|\.\d+)?$/i.test(val) || val === 'true' || val === 'false' || val.startsWith("'") || val.startsWith('"')) return [];
-    const functionCalls = new Set([...val.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)].map((m) => m[1]));
+    const functionCalls = new Set([...val.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_.]*)\s*\(/g)].map((m) => m[1]));
     return val
       .replace(/['"][^'"]*['"]/g, ' ')
       .split(/[^a-zA-Z0-9_.]+/)
-      .filter((t) => t.length > 0 && isNaN(Number(t)) && !ignoredTokens.has(t.toLowerCase()) && !functionCalls.has(t) && !/^\d+n$/i.test(t));
+      .filter((t) => (
+        t.length > 0 &&
+        isNaN(Number(t)) &&
+        !ignoredTokens.has(t.toLowerCase()) &&
+        !ignoredTokens.has((t.split('.')[0] ?? '').toLowerCase()) &&
+        !functionCalls.has(t) &&
+        !/^\d+n$/i.test(t)
+      ));
   }
 
   for (const op of operations) {
@@ -1232,6 +1426,10 @@ export function generateClosureCertificate({
     literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
     fragments: specification.intentEvidence?.fragments ?? specification.fragments ?? [],
     intent: specification.intent ?? '',
+    workspaceEvidence: specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? [],
+    requirements: specification.requirements ?? [],
+    invariants: specification.invariants ?? [],
+    decisions: specification.decisions ?? [],
   });
 
   const inventoryIssues = [
@@ -1398,6 +1596,7 @@ const GAP_KIND_MAP = {
 
   // AUTHORITY_PROVENANCE
   UNAUTHORIZED_NUMERIC_LITERAL: ['AUTHORITY_PROVENANCE', 'USER_INTENT', (i) => i.reason],
+  UNAUTHORIZED_GUARD_OR_ERROR_CODE: ['AUTHORITY_PROVENANCE', 'USER_INTENT', (i) => i.reason || 'Guarda ou código de erro sem fundamentação na intenção, workspace ou governança.'],
   MATERIAL_UNKNOWN_GAP: ['AUTHORITY_PROVENANCE', 'USER_DECISION', (i) => i.reason || 'Lacuna material sem proveniência resolvida e sem decisão vinculada.'],
   DETERMINISM_GAP: ['AUTHORITY_PROVENANCE', 'USER_DECISION', (i) => i.reason || 'Dimensão de determinismo com GAP_FOUND.'],
 

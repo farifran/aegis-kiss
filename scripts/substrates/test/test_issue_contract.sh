@@ -857,7 +857,7 @@ printf '%s\n' "${stale_verification_output}" | jq -e '
   .schema == "aegis.contract_verification.v2"
   and .status == "VALID"
   and .contractIntegrity == "VALID"
-  and .workspaceFreshness == "NOT_CHECKED"
+  and .workspaceFreshness == "MATCHES_BASELINE"
   and .implementationCompliance == "NOT_EVALUATED"
   and .activeContext == "DIFFERENT_PREFLIGHT"
 ' >/dev/null
@@ -953,7 +953,7 @@ printf '%s\n' "$(bash ./aegis --verify)" | jq -e '
   .schema == "aegis.contract_verification.v2"
   and .status == "VALID"
   and .contractIntegrity == "VALID"
-  and .workspaceFreshness == "NOT_CHECKED"
+  and .workspaceFreshness == "MATCHES_BASELINE"
   and .implementationCompliance == "NOT_EVALUATED"
   and .activeContext == "MATCHES_CONTRACT"
 ' >/dev/null
@@ -972,7 +972,7 @@ printf '%s\n' "$(bash ./aegis --status)" | jq -e '
 printf '%s\n' "$(bash ./aegis --verify)" | jq -e '
   .status == "VALID"
   and .contractIntegrity == "VALID"
-  and .workspaceFreshness == "NOT_CHECKED"
+  and .workspaceFreshness == "CHANGED_SINCE_BASELINE"
   and .implementationCompliance == "NOT_EVALUATED"
 ' >/dev/null
 mv "${WORK_DIR}/index.before-implementation.ts" src/index.ts

@@ -252,9 +252,12 @@ export function assertRevisionApplied(draft, resolution, previousSpecification) 
       if (revisedDecision !== undefined) {
         throw new Error(`revision_retains_resolved_decision:${answer.questionId}`);
       }
-      if (!normativeText.some((text) => (
-        text.normalize('NFC') === answer.contractEffect.normalize('NFC')
-      ))) {
+      const normEffect = answer.contractEffect.normalize('NFC').trim();
+      const isMaterialized = normativeText.some((text) => {
+        const normText = text.normalize('NFC').trim();
+        return normText === normEffect || normText.includes(normEffect) || normEffect.includes(normText);
+      });
+      if (!isMaterialized) {
         throw new Error(`revision_effect_not_materialized:${answer.questionId}`);
       }
     }

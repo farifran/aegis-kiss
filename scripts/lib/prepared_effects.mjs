@@ -98,7 +98,7 @@ function assertPreparedEffectScope(specification, decision, effect) {
   }
 }
 
-export function applyPreparedAnswers(specification, answers, humanResolutions, intentEvidence) {
+export function applyPreparedAnswers(specification, answers, humanResolutions, intentEvidence, workspaceEvidence = []) {
   if (!hasPreparedAnswers(specification, answers)) throw new Error('prepared_effect_unavailable');
   const draft = globalThis.structuredClone(specification);
   const touched = new Map();
@@ -156,7 +156,7 @@ export function applyPreparedAnswers(specification, answers, humanResolutions, i
     : dimensions.some(({ status }) => ['DECISION_REQUIRED', 'GAP_FOUND'].includes(status))
       ? 'GAPS_FOUND' : 'SEMANTICALLY_CLOSED';
   draft.closureCertificate = generateClosureCertificate({
-    specification: { ...draft, intentEvidence }, humanResolutions,
+    specification: { ...draft, intentEvidence, workspaceEvidence }, humanResolutions,
   });
   return draft;
 }
