@@ -21,6 +21,7 @@ usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>" Executa captura, Discovery e supervisão até o contrato
+  ./aegis draft "<demanda>" Executa captura e Discovery (emite preflight v3 e workspace skeleton)
   ./aegis --new "<demanda>" Inicia contexto independente substituindo estado do Harness (preserva src/)
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --resolve Q=ANS  Aplica resolução de decisão diretamente (ex: Q-0001=ANS-0001) e sela
@@ -216,6 +217,10 @@ main() {
   [[ $# -ge 1 ]] || fatal 'MISSING_ARGUMENT'
 
   case "${1}" in
+    draft|--draft)
+      shift
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" draft "$@"
+      ;;
     --approve)
       require_command_arity "$@"
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" approve

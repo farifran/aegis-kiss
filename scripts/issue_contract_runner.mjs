@@ -669,7 +669,13 @@ async function handleDemand(args) {
         workspace: {
           status: request.workspace.status,
           observedTextPaths: request.workspace.observedTextPaths,
-          matches: request.workspace.lexicalEvidence.matches,
+          matches: request.workspace.lexicalEvidence?.matches ?? [],
+          symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
+            name: s.name,
+            kind: s.kind,
+            path: s.path,
+            line: s.line,
+          })),
           sourceExcerpts: request.workspace.sourceEvidence.map(({ path, startLine, endLine, content }) => ({
             path,
             startLine,
