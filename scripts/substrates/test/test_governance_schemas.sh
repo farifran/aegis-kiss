@@ -40,6 +40,7 @@ const currentSchemas = [
   'intent-evidence.v1.schema.json',
   'issue-contract.v14.schema.json',
   'preflight-handoff.v2.schema.json',
+  'preflight-handoff.v3.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',
   'semantic-draft.v9.schema.json',
@@ -641,6 +642,59 @@ try {
   throw new Error('wizard_accepted_material_gap');
 } catch (error) {
   if (!error.message.startsWith('unresolved_semantic_gap:')) throw error;
+}
+
+const validPreflightV3 = {
+  schema: 'aegis.preflight_handoff.v3',
+  phase: 'DISCOVERED',
+  status: 'SEMANTIC_DELIBERATION_REQUIRED',
+  intent: 'Exemplo de intenção v3',
+  preflightDigest: '0'.repeat(64),
+  capture: {
+    provenance: 'USER',
+    transport: 'ARGV_STRING',
+    unicodeNormalization: 'NFC',
+    lineEndings: 'LF',
+    byteLength: 20,
+  },
+  discovery: {
+    sourceRoot: 'src',
+    status: 'SOURCE_OBSERVED',
+    files: [{
+      path: 'src/index.ts',
+      bytes: 100,
+      digest: '0'.repeat(64),
+      kind: 'UTF8_TEXT',
+    }],
+    ignoredEntries: [],
+    visitedEntries: 1,
+    scannedBytes: 100,
+    sourceSnapshotDigest: '0'.repeat(64),
+    workspaceSkeleton: {
+      schema: 'aegis.workspace_skeleton.v1',
+      digest: '0'.repeat(64),
+      symbolCount: 1,
+      symbols: [{
+        path: 'src/index.ts',
+        name: 'testFn',
+        kind: 'FUNCTION',
+        startLine: 1,
+        endLine: 5,
+        exported: true,
+        signature: 'export function testFn(): void',
+      }],
+    },
+  },
+};
+assertSchema('aegis.preflight_handoff.v3', validPreflightV3);
+
+const invalidV3 = structuredClone(validPreflightV3);
+delete invalidV3.discovery.workspaceSkeleton;
+try {
+  assertSchema('aegis.preflight_handoff.v3', invalidV3);
+  throw new Error('v3_accepted_missing_workspaceSkeleton');
+} catch (e) {
+  if (!e.message.startsWith('schema_validation_failed:aegis.preflight_handoff.v3')) throw e;
 }
 
 console.log('governance schema tests passed');

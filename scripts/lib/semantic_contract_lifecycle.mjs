@@ -85,7 +85,10 @@ export function compileSemanticContract({
     effectiveDeterminismStatus: effectiveDeterminismStatus(
       draft,
       humanResolutions,
-      { intentEvidence: effectiveSemanticRequest.intentEvidence },
+      {
+        intentEvidence: effectiveSemanticRequest.intentEvidence,
+        workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
+      },
     ),
     humanResolutions,
     approval: null,
@@ -138,7 +141,10 @@ export function assertContractDocument({
     !== effectiveDeterminismStatus(
       contract.specification,
       contract.humanResolutions,
-      { intentEvidence: contract.intentEvidence },
+      {
+        intentEvidence: contract.intentEvidence,
+        workspaceEvidence: semanticRequest.workspace?.sourceEvidence ?? [],
+      },
     )) {
     throw new Error('contract_effective_determinism_status_mismatch');
   }

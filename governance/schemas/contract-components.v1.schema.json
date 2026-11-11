@@ -859,7 +859,7 @@
     "semantic_request_workspace": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status","observedTextPaths","unavailablePaths","lexicalEvidence","sourceEvidence"],
+      "required": ["status","observedTextPaths","unavailablePaths","sourceEvidence"],
       "properties": {
         "status": {"enum":["SOURCE_OBSERVED","NO_TEXT_SOURCE","EMPTY_SOURCE"]},
         "observedTextPaths": {"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
@@ -870,6 +870,48 @@
             "additionalProperties": false,
             "required": ["path","reason"],
             "properties": {"path":{"type":"string","minLength":1},"reason":{"enum":["BINARY","INVALID_UTF8","SYMLINK"]}}
+          }
+        },
+        "workspaceSkeleton": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema","digest","symbols","symbolCount"],
+          "properties": {
+            "schema": {"const":"aegis.workspace_skeleton.v1"},
+            "digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "symbolCount": {"type":"integer","minimum":0},
+            "symbols": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path","name","kind","startLine","endLine","exported","signature"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
+                  },
+                  "name": {"type":"string","minLength":1,"maxLength":128},
+                  "kind": {
+                    "enum": [
+                      "INTERFACE",
+                      "TYPE_ALIAS",
+                      "ENUM",
+                      "FUNCTION",
+                      "CLASS",
+                      "CONST",
+                      "VARIABLE"
+                    ]
+                  },
+                  "startLine": {"type":"integer","minimum":1},
+                  "endLine": {"type":"integer","minimum":1},
+                  "exported": {"type":"boolean"},
+                  "signature": {"type":"string","maxLength":4096},
+                  "docComment": {"type":"string","maxLength":1024}
+                }
+              }
+            }
           }
         },
         "lexicalEvidence": {

@@ -3,11 +3,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node
 import { relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
-import {
-  buildHybridSourceIndex,
-  isReusableHybridSourceIndex,
-  searchHybridSourceIndex,
-} from './hybrid_source_index.mjs';
+import { buildWorkspaceSkeleton } from './workspace_skeleton.mjs';
 
 const maxDemandBytes = 65_536;
 
@@ -61,12 +57,21 @@ export function computeSourceSnapshotDigest(files, ignoredEntries) {
   });
 }
 
+export function isReusableWorkspaceSkeleton(cachedSkeleton) {
+  if (!cachedSkeleton || typeof cachedSkeleton !== 'object') return false;
+  if (cachedSkeleton.schema !== 'aegis.workspace_skeleton.v1') return false;
+  const { digest, ...unsigned } = cachedSkeleton;
+  return canonicalDigest(unsigned) === digest;
+}
+
+export { isReusableWorkspaceSkeleton as isReusableHybridSourceIndex };
+
 /**
  * Descobre apenas fatos estruturais já presentes em src/.
- * A evidência nasce em RAM; somente o índice derivado pode ser reutilizado como
+ * A evidência nasce em RAM; somente o esqueleto/índice derivado pode ser reutilizado como
  * cache transitório e nunca substitui a leitura/hash do snapshot atual.
  */
-export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceIndex = null } = {}) {
+export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceSkeleton = null, cachedSourceIndex = null } = {}) {
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
@@ -150,10 +155,10 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceInde
   ignoredEntries.sort((left, right) => compareCodeUnits(left.path, right.path));
   sourceRecords.sort((left, right) => compareCodeUnits(left.path, right.path));
   const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries);
-  const sourceIndex = isReusableHybridSourceIndex(cachedSourceIndex, sourceSnapshotDigest)
-    ? cachedSourceIndex
-    : buildHybridSourceIndex(sourceRecords, sourceSnapshotDigest);
-  const lexicalEvidence = searchHybridSourceIndex(sourceIndex, intent);
+  const skeletonCandidate = cachedWorkspaceSkeleton ?? cachedSourceIndex;
+  const workspaceSkeleton = isReusableWorkspaceSkeleton(skeletonCandidate)
+    ? skeletonCandidate
+    : buildWorkspaceSkeleton(sourceRecords);
   const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
   const discovery = {
@@ -166,9 +171,9 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedSourceInde
     visitedEntries,
     scannedBytes,
     sourceSnapshotDigest,
-    lexicalEvidence,
+    workspaceSkeleton,
   };
-  return { discovery, sourceBytesByPath, sourceIndex };
+  return { discovery, sourceBytesByPath, workspaceSkeleton, sourceIndex: workspaceSkeleton };
 }
 
 export function discoverWorkspace(repositoryRoot, intent = '') {
@@ -179,9 +184,12 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
  * Compila somente os fatos mecânicos das Fases 1 a 3.
  * Deliberação, requisitos, riscos e provas pertencem às fases seguintes.
  */
-export function buildPreflightHandoff({ demand, discovery }) {
+export function buildPreflightHandoff({ demand, discovery, version = 'v3' }) {
+  const schema = (version === 'v2')
+    ? 'aegis.preflight_handoff.v2'
+    : 'aegis.preflight_handoff.v3';
   const handoff = {
-    schema: 'aegis.preflight_handoff.v2',
+    schema,
     phase: 'DISCOVERED',
     status: 'SEMANTIC_DELIBERATION_REQUIRED',
     intent: demand,

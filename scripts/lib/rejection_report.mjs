@@ -329,7 +329,7 @@ function diagnosticFamily(reason) {
   return undefined;
 }
 
-export function normalizedReason(value) {
+function normalizedReason(value) {
   return value.replace(/[^a-z0-9]+/giu, '_').replace(/^_+|_+$/gu, '').toUpperCase();
 }
 

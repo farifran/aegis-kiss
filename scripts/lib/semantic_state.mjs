@@ -3,7 +3,7 @@ import { assertSchema } from './schema_validator.mjs';
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertContractApprovalEvidence } from './semantic_approval.mjs';
 
-export const semanticStateRelativePath = '.harness/state/semantic-state.json';
+const semanticStateRelativePath = '.harness/state/semantic-state.json';
 
 export function semanticStatePath(root) {
   return resolve(root, semanticStateRelativePath);

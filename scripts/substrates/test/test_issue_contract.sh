@@ -176,83 +176,34 @@ try {
     root,
     `${naturalTerms} para \`ComponenteExtensivel\` \`TipoExplicito\` observar tokenAlfa`,
   );
-  const evidence = discovery.lexicalEvidence;
-  if (evidence.method !== 'HYBRID_BM25_IDENTIFIER_V2'
-    || !evidence.termsTruncated
-    || evidence.queryTerms.includes('para')) {
-    throw new Error('lexical_selection_failed');
+  const skeleton = discovery.workspaceSkeleton;
+  if (!skeleton || skeleton.schema !== 'aegis.workspace_skeleton.v1') {
+    throw new Error('workspace_skeleton_discovery_failed');
   }
-  if (!evidence.queryTerms.includes('ComponenteExtensivel')
-    || !evidence.queryTerms.includes('TipoExplicito')) {
-    throw new Error('late_identifier_was_omitted');
+  if (!skeleton.symbols.some((s) => s.path === 'src/index.ts' && s.name === 'tokenAlfa' && s.kind === 'CONST')) {
+    throw new Error('tokenAlfa_was_omitted_from_skeleton');
   }
-  const vocabularyDiscovery = discoverWorkspace(
-    root,
-    'Precisamos garantir, utilizando qualquer forma possível, um processador de registros com protocolo Aurora determinístico.',
-  );
-  if (vocabularyDiscovery.lexicalEvidence.queryTerms.includes('Precisamos')
-    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('garantir')
-    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('utilizando')
-    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('qualquer')
-    || vocabularyDiscovery.lexicalEvidence.queryTerms.includes('possível')
-    || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('processador')
-    || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('registros')
-    || !vocabularyDiscovery.lexicalEvidence.queryTerms.includes('Aurora')) {
-    throw new Error('lexical_specific_terms_lost_to_generic_words');
+  if (!skeleton.symbols.some((s) => s.path === 'src/index.ts' && s.name === 'LiquidityResolver')) {
+    throw new Error('LiquidityResolver_was_omitted_from_skeleton');
   }
-  const rankedDiscovery = discoverWorkspace(root, 'sistema processador');
-  if (rankedDiscovery.lexicalEvidence.queryTerms[0] !== 'processador'
-    || rankedDiscovery.lexicalEvidence.queryTerms[1] !== 'sistema') {
-    throw new Error('rare_repository_term_was_not_prioritized');
-  }
-  const documentRanking = discoverWorkspace(root, 'alvoRaro');
-  if (documentRanking.lexicalEvidence.matches[0]?.path !== 'src/short.ts'
-    || documentRanking.lexicalEvidence.matches[0]?.sourceRegion !== 'COMMENT') {
-    throw new Error('bm25_did_not_select_best_document');
-  }
-  const codePreferredDiscovery = discoverWorkspace(root, 'tokenAlfa');
-  if (codePreferredDiscovery.lexicalEvidence.matches[0]?.sourceRegion !== 'CODE'
-    || codePreferredDiscovery.lexicalEvidence.matches[0]?.line !== 3) {
-    throw new Error('code_occurrence_was_not_preferred_over_comment');
-  }
-  const repeatedDiscovery = discoverWorkspace(root, 'alvoRaro');
-  if (JSON.stringify(documentRanking.lexicalEvidence)
-    !== JSON.stringify(repeatedDiscovery.lexicalEvidence)) {
-    throw new Error('lexical_ranking_is_not_deterministic');
-  }
-  const structuralDiscovery = discoverWorkspace(root, 'liquidity resolver');
-  if (!structuralDiscovery.lexicalEvidence.matches.some((match) => (
-    match.matchKind === 'IDENTIFIER_COMPONENT'
-    && match.sourceToken === 'LiquidityResolver'
-    && match.path === 'src/index.ts'
-  ))) {
-    throw new Error('identifier_component_fallback_failed');
-  }
+
   const firstObservation = observeWorkspace(root, 'liquidity resolver');
   const reusedObservation = observeWorkspace(root, 'liquidity resolver', {
-    cachedSourceIndex: firstObservation.sourceIndex,
+    cachedWorkspaceSkeleton: firstObservation.workspaceSkeleton,
   });
-  if (firstObservation.sourceIndex !== reusedObservation.sourceIndex
+  if (firstObservation.workspaceSkeleton !== reusedObservation.workspaceSkeleton
     || JSON.stringify(firstObservation.discovery) !== JSON.stringify(reusedObservation.discovery)) {
-    throw new Error('hybrid_index_was_not_reused');
+    throw new Error('workspace_skeleton_was_not_reused');
   }
-  const corruptedIndex = { ...firstObservation.sourceIndex, digest: '0'.repeat(64) };
+  const corruptedSkeleton = { ...firstObservation.workspaceSkeleton, digest: '0'.repeat(64) };
   const rebuiltObservation = observeWorkspace(root, 'liquidity resolver', {
-    cachedSourceIndex: corruptedIndex,
+    cachedWorkspaceSkeleton: corruptedSkeleton,
   });
-  if (rebuiltObservation.sourceIndex === corruptedIndex
-    || rebuiltObservation.sourceIndex.digest !== firstObservation.sourceIndex.digest) {
-    throw new Error('corrupt_hybrid_index_was_not_rebuilt');
+  if (rebuiltObservation.workspaceSkeleton === corruptedSkeleton
+    || rebuiltObservation.workspaceSkeleton.digest !== firstObservation.workspaceSkeleton.digest) {
+    throw new Error('corrupt_workspace_skeleton_was_not_rebuilt');
   }
-  writeFileSync(join(root, 'src/new.ts'), 'export const newlyIndexed = true;\n');
-  const changedObservation = observeWorkspace(root, 'newly indexed', {
-    cachedSourceIndex: firstObservation.sourceIndex,
-  });
-  if (changedObservation.sourceIndex === firstObservation.sourceIndex
-    || changedObservation.discovery.sourceSnapshotDigest
-      === firstObservation.discovery.sourceSnapshotDigest) {
-    throw new Error('stale_hybrid_index_was_reused');
-  }
+
   if (!discovery.ignoredEntries.some(({ reason }) => reason === 'SYMLINK')) {
     throw new Error('symlink_was_not_reported');
   }
@@ -260,17 +211,13 @@ try {
   writeFileSync(join(root, 'src/script.sh'), '#!/usr/bin/env bash\n# ComentarioBash\nEXECUTAR_OPERACAO=1\n');
   writeFileSync(join(root, 'src/modulo.py'), '# ComentarioPy\ndef operacao_python():\n    return True\n');
   const multiLangDiscovery = discoverWorkspace(root, 'EXECUTAR_OPERACAO operacao_python ComentarioBash');
-  const bashCodeMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/script.sh' && m.sourceToken === 'EXECUTAR_OPERACAO');
-  const bashCommentMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/script.sh' && m.sourceToken === 'ComentarioBash');
-  const pyCodeMatch = multiLangDiscovery.lexicalEvidence.matches.find((m) => m.path === 'src/modulo.py' && m.sourceToken === 'operacao_python');
-  if (!bashCodeMatch || bashCodeMatch.sourceRegion !== 'CODE') {
-    throw new Error('bash_code_not_classified_as_code');
+  const bashSymbol = multiLangDiscovery.workspaceSkeleton.symbols.find((s) => s.path === 'src/script.sh' && s.name === 'EXECUTAR_OPERACAO');
+  const pySymbol = multiLangDiscovery.workspaceSkeleton.symbols.find((s) => s.path === 'src/modulo.py' && s.name === 'operacao_python');
+  if (!bashSymbol || bashSymbol.kind !== 'CONST') {
+    throw new Error('bash_symbol_not_extracted');
   }
-  if (!bashCommentMatch || bashCommentMatch.sourceRegion !== 'COMMENT') {
-    throw new Error('bash_comment_not_classified_as_comment');
-  }
-  if (!pyCodeMatch || pyCodeMatch.sourceRegion !== 'CODE') {
-    throw new Error('python_code_not_classified_as_code');
+  if (!pySymbol || pySymbol.kind !== 'FUNCTION') {
+    throw new Error('python_function_not_extracted');
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
@@ -340,17 +287,17 @@ printf '{}\n' > .harness/runtime/contract.json
 printf '{}\n' > .harness/runtime/stale.json
 draft_output="$(node scripts/issue_contract_runner.mjs draft 'Definir transformador de registros com saída ainda a escolher')"
 printf '%s\n' "${draft_output}" | jq -e '
-  .schema == "aegis.preflight_handoff.v2"
+  .schema == "aegis.preflight_handoff.v3"
   and .status == "SEMANTIC_DELIBERATION_REQUIRED"
   and .phase == "DISCOVERED"
   and .dataPath == ".harness/runtime/preflight.json"
 ' >/dev/null
-[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
+[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/workspace_skeleton.json' ]]
 jq -e '
-  .schema == "aegis.hybrid_source_index.v2"
-  and (.sourceSnapshotDigest | test("^[a-f0-9]{64}$"))
+  .schema == "aegis.workspace_skeleton.v1"
   and (.digest | test("^[a-f0-9]{64}$"))
-' .harness/runtime/source-index.json >/dev/null
+  and (.symbolCount >= 0)
+' .harness/runtime/workspace_skeleton.json >/dev/null
 [[ "${source_before}" == "$(shasum src/index.ts)" ]]
 
 # A IA recebe diretamente a intenção, a evidência mecânica neutra e o schema estrito.
@@ -423,7 +370,7 @@ printf '%s\n' "${semantic_request}" | jq -e '
   and (has("sourceSnapshotDigest") | not)
 ' >/dev/null
 semantic_evidence_digest="$(printf '%s\n' "${semantic_request}" | jq -r '.intentEvidence.evidenceDigest')"
-[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/source-index.json' ]]
+[[ "$(find .harness/runtime -mindepth 1 -maxdepth 1 -type f -print | sort)" == $'.harness/runtime/preflight.json\n.harness/runtime/workspace_skeleton.json' ]]
 
 # Um adaptador IDE sem executor automático falha explicitamente; a ficha continua
 # disponível pelo comando de inspeção --semantic-request.

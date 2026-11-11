@@ -45,7 +45,7 @@ function assertEvidenceCoverage(opinion, request) {
   }
 }
 
-export function normalizeSemanticOpinion(opinion, request) {
+function normalizeSemanticOpinion(opinion, request) {
   opinion = globalThis.structuredClone(opinion);
 
   const normalizeTarget = (target) => {

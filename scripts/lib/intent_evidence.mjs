@@ -97,8 +97,10 @@ function literalCandidates(intent) {
   for (const match of intent.matchAll(/\b(?:src|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu)) {
     add('REPOSITORY_PATH', match, { path: match[0].replace(/[.,;:!?]+$/u, '') });
   }
-  for (const match of intent.matchAll(/(?<![\p{L}\p{N}_])\d+(?:\.\d+)?n?(?![\p{L}\p{N}_])/gu)) {
-    add('NUMBER_LITERAL', match, { value: match[0] });
+  for (const match of intent.matchAll(/(?<![\p{L}\p{N}_])\d+(?:[.,]\d+)?n?(?![\p{L}\p{N}_])/gu)) {
+    const rawVal = match[0];
+    const canonicalVal = rawVal.replace(',', '.');
+    add('NUMBER_LITERAL', match, { value: rawVal, canonicalValue: canonicalVal });
   }
   for (const match of intent.matchAll(/\(\s*\)/gu)) add('EMPTY_PARENS', match);
 

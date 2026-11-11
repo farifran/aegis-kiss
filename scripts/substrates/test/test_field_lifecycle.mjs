@@ -2479,6 +2479,322 @@ function createFixture({
   log('  PASS: TEST-111 Standard Math functions in stateEffects pass without OPEN_COMPUTATIONAL_DEPENDENCY');
 }
 
+// TEST-112: Rigorous provenance & anti-self-grounding verification
+{
+  const ws = [
+    {
+      path: 'src/ledger/settlement.ts',
+      startLine: 1,
+      endLine: 20,
+      content: 'line1\nexport const MAX_ITEMS = 250;\nexport const DAILY_LIMIT = 5000000;\nline4\nreadonly balance: number;\n',
+    },
+    {
+      path: 'src/risk/guard.ts',
+      startLine: 1,
+      endLine: 10,
+      content: 'export const MAX_RETRIES = 5;\nexport type Guard = "GUARD_FROZEN";\n',
+    },
+  ];
+
+  // 1. Valid bounds citing :Lx-Ly format pass
+  const validModel = {
+    entities: [{
+      name: 'State',
+      fields: [
+        {
+          name: 'items',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '250', provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/ledger/settlement.ts:L2-L2' }] },
+        },
+        {
+          name: 'daily',
+          type: 'INTEGER',
+          bounds: { lowerBound: '0', upperBound: '5000000', provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/ledger/settlement.ts:L3-L3' }] },
+        },
+      ],
+    }],
+    operations: [{
+      name: 'reverse',
+      guardPrecedence: ['GUARD_FROZEN'],
+      branches: [{ branchId: 'GUARD_FROZEN', outcomeKind: 'REJECTION', defaultPreservation: true }],
+      parameters: [{
+        name: 'amt',
+        type: 'INTEGER',
+        bounds: { lowerBound: '1', upperBound: '5000000', provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/ledger/settlement.ts:L3-L3' }] },
+      }],
+    }],
+  };
+
+  const validRes = validateProvenanceEnforcement({
+    stateModel: validModel,
+    workspaceEvidence: ws,
+    intent: 'Operação reverse com guarda GUARD_FROZEN.',
+    literalFacts: [{ id: 'FACT-0001', kind: 'NUMBER_LITERAL', attributes: { value: '0' } }],
+  });
+  assert.equal(validRes.valid, true, 'TEST-112: valid references with :Lx-Ly and parameter bounds must pass');
+
+  // 2. Substring '50' matching within '5000000' is rejected
+  const substringModel = {
+    entities: [{
+      name: 'State',
+      fields: [{
+        name: 'fake',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '50', provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/ledger/settlement.ts:L3-L3' }] },
+      }],
+    }],
+  };
+  const subRes = validateProvenanceEnforcement({
+    stateModel: substringModel,
+    workspaceEvidence: ws,
+    literalFacts: [{ id: 'FACT-0001', kind: 'NUMBER_LITERAL', attributes: { value: '0' } }],
+  });
+  assert.equal(subRes.valid, false, 'TEST-112: substring number 50 inside 5000000 must be blocked');
+
+  // 3. Fail-closed when workspaceEvidence is empty
+  const emptyWsRes = validateProvenanceEnforcement({
+    stateModel: validModel,
+    workspaceEvidence: [],
+    literalFacts: [{ id: 'FACT-0001', kind: 'NUMBER_LITERAL', attributes: { value: '0' } }],
+  });
+  assert.equal(emptyWsRes.valid, false, 'TEST-112: citing WORKSPACE_EVIDENCE with empty workspaceEvidence must fail closed');
+
+  // 4. Operation parameter bounds without provenance are blocked
+  const unbackedParamModel = {
+    operations: [{
+      name: 'op',
+      parameters: [{
+        name: 'p1',
+        type: 'INTEGER',
+        bounds: { lowerBound: '1', upperBound: '999999' },
+      }],
+    }],
+  };
+  const paramRes = validateProvenanceEnforcement({
+    stateModel: unbackedParamModel,
+    workspaceEvidence: ws,
+    literalFacts: [{ id: 'FACT-0001', kind: 'NUMBER_LITERAL', attributes: { value: '0' } }],
+  });
+  assert.equal(paramRes.valid, false, 'TEST-112: parameter bounds without provenance must fail');
+
+  log('  PASS: TEST-112 Rigorous provenance, whole-token matching, fail-closed & param bound checks verified');
+}
+
+// TEST-113: Decimal commas in pt-BR ("10,00", "0,5") extracted as single facts and authorized in provenance
+{
+  const { buildIntentEvidence } = await import('../../lib/intent_evidence.mjs');
+  const evidence = buildIntentEvidence('A cada R$ 10,00 em compras com taxa de 0,5% conceder 1 ponto.');
+  const numFacts = evidence.literalFacts.filter((f) => f.kind === 'NUMBER_LITERAL');
+
+  // Must not fragment "10,00" into "10" and "00"
+  assert.ok(numFacts.some((f) => f.reference === '10,00' && f.attributes?.canonicalValue === '10.00'), 'TEST-113: 10,00 must be extracted as single literal fact');
+  assert.ok(numFacts.some((f) => f.reference === '0,5' && f.attributes?.canonicalValue === '0.5'), 'TEST-113: 0,5 must be extracted as single literal fact');
+
+  const fact10 = numFacts.find((f) => f.reference === '10,00');
+  const model = {
+    entities: [{
+      name: 'Reward',
+      fields: [{
+        name: 'step',
+        type: 'INTEGER',
+        bounds: { lowerBound: '0', upperBound: '10', provenance: [{ source: 'USER_INTENT', reference: fact10.id }] },
+      }],
+    }],
+  };
+  const res = validateProvenanceEnforcement({
+    stateModel: model,
+    literalFacts: evidence.literalFacts,
+    intent: 'A cada R$ 10,00 em compras.',
+  });
+  assert.equal(res.valid, true, 'TEST-113: fact with canonicalValue 10.00 must support bound 10');
+  log('  PASS: TEST-113 Decimal comma in pt-BR extracted losslessly as single fact and verified');
+}
+
+// TEST-114: Workspace Skeleton AST symbol extraction and subtoken/morphological matching
+{
+  const { buildWorkspaceSkeleton } = await import('../../lib/workspace_skeleton.mjs');
+  const sourceRecords = [
+    {
+      path: 'src/ledger/settlement_engine.ts',
+      text: [
+        'export const MAX_BATCH_REJECTIONS = 10;',
+        'export interface SettlementLedgerState { accountFrozen: boolean; }',
+        'export function reverseSettlement(state: SettlementLedgerState, amount: number) { return state; }',
+      ].join('\n'),
+    },
+  ];
+  const skeleton = buildWorkspaceSkeleton(sourceRecords);
+  assert.equal(skeleton.schema, 'aegis.workspace_skeleton.v1');
+  assert.equal(skeleton.symbolCount, 3);
+  assert.ok(skeleton.symbols.some((s) => s.name === 'MAX_BATCH_REJECTIONS' && s.kind === 'CONST'));
+  assert.ok(skeleton.symbols.some((s) => s.name === 'SettlementLedgerState' && s.kind === 'INTERFACE'));
+  assert.ok(skeleton.symbols.some((s) => s.name === 'reverseSettlement' && s.kind === 'FUNCTION'));
+
+  // Test subtoken matching on AST symbols
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_subtoken_ast');
+  fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
+  fs.writeFileSync(path.resolve(tempDir, 'src/ledger/settlement_engine.ts'), sourceRecords[0].text);
+  // Add padding to exceed smallWorkspace byte limit (32768) so lexical/symbol selection triggers
+  const bigPadding = Array.from({ length: 600 }, (_, i) => `// Padding line ${i} with filler text to exceed byte limits\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    // Demand uses Portuguese natural term "rejeições"
+    const obs = observeWorkspace(tempDir, 'Precisamos tratar as rejeições consecutivas no fluxo');
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: 'Precisamos tratar as rejeições consecutivas no fluxo',
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 1, 'TEST-114: sourceEvidence must be produced');
+    const hasTargetFile = evidence.some((e) => e.path === 'src/ledger/settlement_engine.ts');
+    assert.ok(hasTargetFile, 'TEST-114: settlement_engine.ts must be selected via subtoken matching on MAX_BATCH_REJECTIONS');
+    const targetContent = evidence.find((e) => e.path === 'src/ledger/settlement_engine.ts').content;
+    assert.ok(targetContent.includes('MAX_BATCH_REJECTIONS'), 'TEST-114: content must include MAX_BATCH_REJECTIONS');
+    assert.ok(req.workspace.workspaceSkeleton, 'TEST-114: workspaceSkeleton must be present in request');
+    assert.equal(req.workspace.workspaceSkeleton.symbols[0].name, 'MAX_BATCH_REJECTIONS', 'TEST-114: top prioritized symbol must be MAX_BATCH_REJECTIONS due to affinity matching on "rejeições"');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-114 Workspace Skeleton AST symbols and subtoken/morphological matching verified');
+}
+
+// TEST-115: Structural header prioritization in buildSourceEvidence (Type guarantee)
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+
+  const header = [
+    'import { GuardCode } from "../risk/velocity_guard.js";',
+    'export const DAILY_LIMIT = 50000;',
+    'export interface SettlementLedgerState {',
+    '  readonly accountFrozen: boolean;',
+    '  readonly settledBalanceCents: number;',
+    '}',
+    'export type LedgerStatus = "SETTLED" | "FROZEN";',
+  ].join('\n');
+
+  const filler = Array.from({ length: 150 }, (_, i) => `// Line filler comment ${i}`).join('\n');
+  const targetFn = [
+    'export function processTargetBatch(state: SettlementLedgerState) {',
+    '  if (state.accountFrozen) return "FROZEN";',
+    '  return "SETTLED";',
+    '}',
+  ].join('\n');
+
+  const largeFileContent = `${header}\n${filler}\n${targetFn}\n`;
+  const tempDir = path.resolve('.harness/tmp_test_header');
+  fs.mkdirSync(path.resolve(tempDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.resolve(tempDir, 'src/engine.ts'), largeFileContent);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    const observation = observeWorkspace(tempDir, 'processTargetBatch');
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v2',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: 'processTargetBatch',
+      discovery: observation.discovery,
+    };
+    const policy = {
+      contexts: [{ tag: 'default', description: 'test' }],
+      rules: [],
+      amendments: [],
+    };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: observation,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 1, 'TEST-115: evidence must be produced');
+    const allContent = evidence.map((e) => e.content).join('\n');
+    assert.ok(allContent.includes('interface SettlementLedgerState'), 'TEST-115: structural header types must be present in sourceEvidence');
+    assert.ok(allContent.includes('DAILY_LIMIT'), 'TEST-115: structural constants must be present in sourceEvidence');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-115 Structural header prioritization (type guarantee) verified');
+}
+
+// TEST-116: Provenance enforcement fail-closed on unauthorized numeric literals and guard codes
+{
+  const model = {
+    entities: [{
+      name: 'Account',
+      fields: [{
+        name: 'balance',
+        type: 'INTEGER',
+        bounds: {
+          lowerBound: '0',
+          upperBound: '999999999',
+          provenance: [{ source: 'WORKSPACE_EVIDENCE', reference: 'src/index.ts:L1' }],
+        },
+      }],
+    }],
+    operations: [{
+      name: 'testOp',
+      guardPrecedence: ['HALLUCINATED_GUARD_CODE_XYZ'],
+      branches: [
+        { branchId: 'HALLUCINATED_GUARD_CODE_XYZ', outcomeKind: 'REJECTION', defaultPreservation: true },
+        { branchId: 'OK', outcomeKind: 'RETURN_VALUE', defaultPreservation: true },
+      ],
+    }],
+  };
+
+  const res = validateProvenanceEnforcement({
+    stateModel: model,
+    intent: 'Operação simples',
+    workspaceEvidence: [{ path: 'src/index.ts', content: 'const x = 10;', startLine: 1 }],
+  });
+
+  assert.equal(res.valid, false, 'TEST-116: hallucinated number and guard code must fail provenance');
+  assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_NUMERIC_LITERAL'), 'TEST-116: UNAUTHORIZED_NUMERIC_LITERAL expected');
+  assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_GUARD_OR_ERROR_CODE'), 'TEST-116: UNAUTHORIZED_GUARD_OR_ERROR_CODE expected');
+
+  log('  PASS: TEST-116 Provenance enforcement fail-closed on unauthorized literals verified');
+}
+
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');
 
 

@@ -79,10 +79,8 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 
 A inspeção forense sobre o código-fonte atual (`7.849 linhas` em `scripts/`) e sobre os artefatos gerados durante a execução das Demandas D6 e D7 mantém **4 oportunidades concretas de simplificação e endurecimento determinístico**:
 
-### 3.1. Correção de Fragmentação de Decimais (`10,00` $\to$ `"10"` e `"00"`) em `intent_evidence.mjs`
-- **Evidência Forense (observada ao vivo na D6):** Na linha [`scripts/lib/intent_evidence.mjs:100`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs#L100), a regex de extração numérica `/(?<![\p{L}\p{N}_])\d+(?:\.\d+)?n?(?![\p{L}\p{N}_])/gu` reconhece apenas ponto decimal (`.`), ignorando vírgula decimal (`,`) usada em português.
-- **Impacto:** Na Demanda D6 (*"a cada R$ 10,00 em compras"*), o extrator quebrou `"10,00"` em dois fatos inteiros separados: `FACT-0001` (`"10"`) e um fato espúrio `FACT-0002` (`"00"`). Além de poluir `literalFacts`, isso impede que valores decimais em pt-BR (como `"9,99"` ou `"0,5"`) sejam reconhecidos como um único literal autorizado na validação de proveniência (`validateProvenanceEnforcement`).
-- **Melhoria Proposta:** Atualizar a regex para `/(?<![\p{L}\p{N}_])\d+(?:[.,]\d+)?n?(?![\p{L}\p{N}_])/gu` e normalizar o atributo `canonicalValue` (ex.: `"10.00"`), preservando `reference: "10,00"` fiel ao offset UTF-16.
+### 3.1. Correção de Fragmentação de Decimais (`10,00` $\to$ `"10,00"`) em `intent_evidence.mjs` — [IMPLEMENTADO E TESTADO]
+- **Evidência Forense (observada na D6 e corrigida):** Regex em [`scripts/lib/intent_evidence.mjs:100`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs#L100) agora reconhece vírgula decimal pt-BR (`\d+(?:[.,]\d+)?n?`), preservando a referência original (ex.: `"10,00"`) e adicionando `canonicalValue: "10.00"`. `factSupportsValue` em `semantic_closure.mjs` suporta conversão e comparação equivalentes (`TEST-113`).
 
 ### 3.2. Redução de 68,6% do Payload de `.harness/runtime/semantic-request.json` (`outputSchema.document`)
 - **Evidência Forense:** Medição exata de `.harness/runtime/semantic-request.json` (`47.103 bytes` totais) mostra a seguinte distribuição:

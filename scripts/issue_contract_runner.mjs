@@ -16,7 +16,7 @@ const semanticStateJsonPath = resolve(harnessDir, 'state', 'semantic-state.json'
 const contractJsonPath = resolve(runtimeDir, 'contract.json');
 const contractMdPath = resolve(runtimeDir, 'contract.md');
 const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
-const sourceIndexPath = resolve(runtimeDir, 'source-index.json');
+const skeletonJsonPath = resolve(runtimeDir, 'workspace_skeleton.json');
 const semanticExecutionPath = resolve(runtimeDir, 'semantic-execution.json');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
@@ -43,16 +43,16 @@ async function writeFileAtomic(target, content) {
 
 async function clearSupersededRuntime() {
   const entries = await readdir(runtimeDir, { withFileTypes: true });
-  const preserved = new Set([basename(preflightJsonPath), basename(sourceIndexPath)]);
+  const preserved = new Set([basename(preflightJsonPath), basename(skeletonJsonPath)]);
   await Promise.all(entries
     .filter(({ name }) => !preserved.has(name))
     .map(({ name }) => rm(resolve(runtimeDir, name), { recursive: true, force: true })));
 }
 
-async function readCachedSourceIndex() {
-  if (!existsSync(sourceIndexPath)) return null;
+async function readCachedSkeleton() {
+  if (!existsSync(skeletonJsonPath)) return null;
   try {
-    return JSON.parse(await readFile(sourceIndexPath, 'utf8'));
+    return JSON.parse(await readFile(skeletonJsonPath, 'utf8'));
   } catch {
     return null;
   }
@@ -97,7 +97,7 @@ async function assertDiscoveryUnchanged(preflight) {
     import('./lib/issue_contract_core.mjs'),
   ]);
   const workspaceObservation = observeWorkspace(root, preflight.intent, {
-    cachedSourceIndex: await readCachedSourceIndex(),
+    cachedWorkspaceSkeleton: await readCachedSkeleton(),
   });
   const currentDiscovery = workspaceObservation.discovery;
   if (currentDiscovery.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest) {
@@ -171,17 +171,17 @@ async function handleDraft(args, { emitHandoff = true } = {}) {
   ]);
   const demand = captureDemand(args);
   const workspaceObservation = observeWorkspace(root, demand, {
-    cachedSourceIndex: await readCachedSourceIndex(),
+    cachedWorkspaceSkeleton: await readCachedSkeleton(),
   });
-  const { discovery, sourceIndex } = workspaceObservation;
-  const preflight = buildPreflightHandoff({ demand, discovery });
+  const { discovery, workspaceSkeleton } = workspaceObservation;
+  const preflight = buildPreflightHandoff({ demand, discovery, version: 'v3' });
   assertPreflightDocument(preflight);
   const serializedPreflight = `${canonicalJson(preflight)}\n`;
 
   await clearSupersededRuntime();
   await Promise.all([
     writeFileAtomic(preflightJsonPath, serializedPreflight),
-    writeFileAtomic(sourceIndexPath, `${canonicalJson(sourceIndex)}\n`),
+    writeFileAtomic(skeletonJsonPath, `${canonicalJson(workspaceSkeleton)}\n`),
   ]);
 
   if (emitHandoff) {

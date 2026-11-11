@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
-import { canonicalDigest, sha256 } from './canonical_json.mjs';
+import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
 import { buildIntentEvidence } from './intent_evidence.mjs';
 import { assertSchema } from './schema_validator.mjs';
 import { buildSemanticOutputSchema } from './semantic_output_schema.mjs';
@@ -10,6 +10,7 @@ import {
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
 } from './semantic_authority.mjs';
+import { extractFileSymbols } from './workspace_skeleton.mjs';
 
 export function loadSemanticConstitution(repositoryRoot) {
   const policyPath = resolve(repositoryRoot, 'governance/constitution.json');
@@ -89,6 +90,118 @@ function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation 
   return bytes;
 }
 
+function findStructuralHeaderEndLine(path, text) {
+  const symbols = extractFileSymbols(path, text);
+  let headerEnd = 0;
+  for (const s of symbols) {
+    if (s.kind === 'INTERFACE' || s.kind === 'TYPE_ALIAS' || s.kind === 'ENUM' || s.kind === 'CONST') {
+      if (s.startLine <= 150 && s.endLine > headerEnd) {
+        headerEnd = s.endLine;
+      }
+    }
+  }
+  return headerEnd;
+}
+
+function stripDiacritics(text) {
+  return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+function extractSubtokens(name) {
+  if (!name) return [];
+  const separated = name
+    .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1 $2')
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2')
+    .replace(/[_$-]+/gu, ' ');
+  return [...new Set(separated
+    .split(/\s+/u)
+    .map((part) => stripDiacritics(part))
+    .filter((part) => part.length >= 3))];
+}
+
+function matchSkeletonSymbols(symbols, intent, domainAliases = {}) {
+  const stripped = stripDiacritics(intent);
+  const words = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
+  if (words.length === 0) return [];
+  const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
+
+  const scored = [];
+  for (const sym of symbols) {
+    if (!sym.name) continue;
+    const subtokens = extractSubtokens(sym.name);
+    let score = 0;
+    for (const sub of subtokens) {
+      const subStem = sub.length >= 4 ? sub.slice(0, 4) : sub;
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const stem = stems[i];
+        const alias = domainAliases[word];
+        if (sub === word || (alias && sub === alias)) {
+          score += 3;
+        } else if (stem.length >= 4 && (sub.startsWith(stem) || word.startsWith(subStem))) {
+          score += 2;
+        }
+      }
+    }
+    if (stripped.includes(stripDiacritics(sym.name))) {
+      score += 5;
+    }
+    if (score > 0) {
+      scored.push({ path: sym.path, line: sym.startLine, score });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+function computeSymbolAffinity(sym, words, stems, entrypoints) {
+  let score = 100;
+  if (sym.docComment && sym.docComment.includes('@deprecated')) score -= 300;
+  if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_') || sym.path.includes('trap')) score -= 200;
+  if (entrypoints.includes(sym.path)) score += 200;
+
+  const subtokens = extractSubtokens(sym.name);
+  let matchScore = 0;
+  for (const sub of subtokens) {
+    const subStem = sub.length >= 4 ? sub.slice(0, 4) : sub;
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      const stem = stems[i];
+      if (sub === word) matchScore += 30;
+      else if (stem.length >= 4 && (sub.startsWith(stem) || word.startsWith(subStem))) matchScore += 20;
+    }
+  }
+  return score + matchScore * 10;
+}
+
+function prioritizeWorkspaceSkeleton(skeleton, intent, entrypoints = [], maxPromptSymbols = 512) {
+  if (!skeleton || !Array.isArray(skeleton.symbols)) return skeleton;
+  const stripped = stripDiacritics(intent ?? '');
+  const words = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
+  const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
+
+  const sorted = [...skeleton.symbols].sort((a, b) => {
+    const affinityA = computeSymbolAffinity(a, words, stems, entrypoints);
+    const affinityB = computeSymbolAffinity(b, words, stems, entrypoints);
+    return affinityB - affinityA
+      || compareCodeUnits(a.path, b.path)
+      || a.startLine - b.startLine
+      || compareCodeUnits(a.name, b.name);
+  });
+
+  const pruned = sorted.slice(0, maxPromptSymbols);
+  const unsigned = {
+    schema: skeleton.schema,
+    symbolCount: pruned.length,
+    symbols: pruned,
+  };
+  return {
+    ...unsigned,
+    digest: canonicalDigest(unsigned),
+  };
+}
+
 function lineWindow(bytes, targetLine, byteLimit) {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   const lines = text.split('\n');
@@ -125,7 +238,19 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
       selectionsByPath.set(path, { path, lines: [] });
     }
   } else {
-    for (const match of preflight.discovery.lexicalEvidence.matches ?? []) {
+    // 1. Prioritize symbols from workspaceSkeleton matched via subtokens and stems
+    if (preflight.discovery.workspaceSkeleton?.symbols) {
+      const intent = preflight.intent ?? '';
+      const matched = matchSkeletonSymbols(preflight.discovery.workspaceSkeleton.symbols, intent);
+      for (const { path, line } of matched) {
+        if (!selectionsByPath.has(path)) {
+          selectionsByPath.set(path, { path, lines: [] });
+        }
+        selectionsByPath.get(path).lines.push(line);
+      }
+    }
+    // 2. Fallback to lexical matches if present
+    for (const match of preflight.discovery.lexicalEvidence?.matches ?? []) {
       if (!selectionsByPath.has(match.path)) {
         selectionsByPath.set(match.path, { path: match.path, lines: [] });
       }
@@ -133,11 +258,13 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
         selectionsByPath.get(match.path).lines.push(match.line);
       }
     }
+    // 3. Entrypoints
     for (const entrypoint of entrypoints) {
       if (!selectionsByPath.has(entrypoint)) {
         selectionsByPath.set(entrypoint, { path: entrypoint, lines: [] });
       }
     }
+    // 4. Default to first text file if still empty
     if (selectionsByPath.size === 0 && textFiles[0] !== undefined) {
       selectionsByPath.set(textFiles[0].path, { path: textFiles[0].path, lines: [] });
     }
@@ -152,28 +279,76 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
     const bytes = verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation);
     const limit = Math.min(smallWorkspace ? bytes.byteLength : sourceEvidenceFileByteLimit, remainingBytes);
 
-    let excerpt;
-    let selection;
     if (smallWorkspace || lines.length === 0 || bytes.byteLength <= limit) {
       const content = decodeUtf8Prefix(bytes, limit);
-      excerpt = { content, startLine: 1, endLine: content.split('\n').length };
-      selection = smallWorkspace ? 'FULL_SOURCE' : (lines.length === 0 ? 'ENTRYPOINT_PREFIX' : 'LEXICAL_WINDOW');
+      const excerpt = { content, startLine: 1, endLine: content.split('\n').length };
+      const selection = smallWorkspace ? 'FULL_SOURCE' : (lines.length === 0 ? 'ENTRYPOINT_PREFIX' : 'LEXICAL_WINDOW');
+      const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
+      remainingBytes -= consumedBytes;
+      evidence.push({
+        path,
+        ...excerpt,
+        truncated: consumedBytes < bytes.byteLength,
+        selection,
+        trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
+      });
     } else {
       const sortedLines = [...lines].sort((a, b) => a - b);
       const medianLine = sortedLines[Math.floor(sortedLines.length / 2)];
-      excerpt = lineWindow(bytes, medianLine, limit);
-      selection = 'LEXICAL_WINDOW';
-    }
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      const fileLines = text.split('\n');
+      const headerEndLine = findStructuralHeaderEndLine(manifestEntry.path, text);
 
-    const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
-    remainingBytes -= consumedBytes;
-    evidence.push({
-      path,
-      ...excerpt,
-      truncated: consumedBytes < bytes.byteLength,
-      selection,
-      trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
-    });
+      if (headerEndLine > 0 && medianLine > headerEndLine + 5) {
+        // Reserva os primeiros bytes para incluir o cabeçalho estrutural
+        const headerText = fileLines.slice(0, headerEndLine).join('\n');
+        const headerBytes = Buffer.byteLength(headerText, 'utf8');
+        const maxHeaderBudget = Math.min(headerBytes, Math.max(512, Math.floor(limit * 0.4)));
+
+        let headerExcerpt;
+        if (headerBytes <= maxHeaderBudget) {
+          headerExcerpt = { content: headerText, startLine: 1, endLine: headerEndLine };
+        } else {
+          const content = decodeUtf8Prefix(Buffer.from(headerText), maxHeaderBudget);
+          headerExcerpt = { content, startLine: 1, endLine: content.split('\n').length };
+        }
+
+        const consumedHeader = Buffer.byteLength(headerExcerpt.content, 'utf8');
+        remainingBytes -= consumedHeader;
+        evidence.push({
+          path,
+          ...headerExcerpt,
+          truncated: true,
+          selection: 'LEXICAL_WINDOW',
+          trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
+        });
+
+        const windowBudget = Math.min(limit - consumedHeader, remainingBytes);
+        if (windowBudget > 0) {
+          const windowExcerpt = lineWindow(bytes, medianLine, windowBudget);
+          const consumedWindow = Buffer.byteLength(windowExcerpt.content, 'utf8');
+          remainingBytes -= consumedWindow;
+          evidence.push({
+            path,
+            ...windowExcerpt,
+            truncated: true,
+            selection: 'LEXICAL_WINDOW',
+            trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
+          });
+        }
+      } else {
+        const excerpt = lineWindow(bytes, medianLine, limit);
+        const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
+        remainingBytes -= consumedBytes;
+        evidence.push({
+          path,
+          ...excerpt,
+          truncated: consumedBytes < bytes.byteLength,
+          selection: 'LEXICAL_WINDOW',
+          trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
+        });
+      }
+    }
   }
   return evidence;
 }
@@ -187,8 +362,17 @@ export function buildSemanticRequest({
   workspaceObservation = null,
 }) {
   const intentEvidence = buildIntentEvidence(preflight.intent);
-  const observedTextPaths = preflight.discovery.files
-    .filter(({ kind }) => kind === 'UTF8_TEXT').map(({ path }) => path);
+  const textFiles = preflight.discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
+  const entrypoints = textFiles.map(({ path }) => path)
+    .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
+  const prioritizedSkeleton = preflight.discovery.workspaceSkeleton
+    ? prioritizeWorkspaceSkeleton(
+        preflight.discovery.workspaceSkeleton,
+        preflight.intent,
+        entrypoints,
+      )
+    : undefined;
+  const observedTextPaths = textFiles.map(({ path }) => path);
   const unavailablePaths = [
     ...preflight.discovery.files.filter(({ kind }) => kind !== 'UTF8_TEXT')
       .map(({ path, kind }) => ({ path, reason: kind })),
@@ -211,14 +395,21 @@ export function buildSemanticRequest({
       status: preflight.discovery.status,
       observedTextPaths,
       unavailablePaths,
-      lexicalEvidence: {
-        status: preflight.discovery.lexicalEvidence.status,
-        termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
-        matches: preflight.discovery.lexicalEvidence.matches
-          .map(({ term, sourceToken, matchKind, path, line, sourceRegion }) => ({
-            term, sourceToken, matchKind, path, line, sourceRegion,
-          })),
-      },
+      ...(prioritizedSkeleton
+        ? { workspaceSkeleton: prioritizedSkeleton }
+        : {}),
+      ...(preflight.discovery.lexicalEvidence
+        ? {
+            lexicalEvidence: {
+              status: preflight.discovery.lexicalEvidence.status,
+              termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
+              matches: preflight.discovery.lexicalEvidence.matches
+                .map(({ term, sourceToken, matchKind, path, line, sourceRegion }) => ({
+                  term, sourceToken, matchKind, path, line, sourceRegion,
+                })),
+            },
+          }
+        : {}),
       sourceEvidence: buildSourceEvidence(repositoryRoot, preflight, workspaceObservation),
     },
     policy: {

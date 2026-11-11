@@ -76,7 +76,7 @@ export function standaloneSchemaDocument(schemaId) {
   return expandSchema(document, schemaId, new Set(), new Map([[schemaId, document]]));
 }
 
-export function schemaErrors(schemaId, value) {
+function schemaErrors(schemaId, value) {
   const validate = loadValidator(schemaId);
   if (validate(value)) return [];
   return (validate.errors ?? []).map((error) => (

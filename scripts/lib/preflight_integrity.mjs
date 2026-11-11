@@ -1,4 +1,5 @@
 import { assertSchema } from './schema_validator.mjs';
+import { canonicalDigest } from './canonical_json.mjs';
 import { computePreflightDigest, computeSourceSnapshotDigest } from './issue_contract_core.mjs';
 
 function integrityFailure(detail) {
@@ -6,7 +7,8 @@ function integrityFailure(detail) {
 }
 
 export function assertPreflightDocument(preflight) {
-  assertSchema('aegis.preflight_handoff.v2', preflight);
+  const schemaId = preflight?.schema ?? 'aegis.preflight_handoff.v3';
+  assertSchema(schemaId, preflight);
 
   if (computePreflightDigest(preflight) !== preflight.preflightDigest) {
     integrityFailure('preflight_digest');
@@ -42,39 +44,51 @@ export function assertPreflightDocument(preflight) {
     integrityFailure('discovery_status');
   }
 
-  const evidence = discovery.lexicalEvidence;
-  const queryTermKeys = evidence.queryTerms.map((term) => term.normalize('NFC').toLowerCase());
-  if (new Set(queryTermKeys).size !== queryTermKeys.length) {
-    integrityFailure('duplicate_query_term');
-  }
-  if (evidence.termsTruncated && evidence.queryTerms.length !== 64) {
-    integrityFailure('term_truncation');
-  }
-
-  const textPaths = new Set(
-    discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT').map(({ path }) => path),
-  );
-  const matchedTermKeys = new Set();
-  const queryTermKeySet = new Set(queryTermKeys);
-  for (const match of evidence.matches) {
-    const termKey = match.term.normalize('NFC').toLowerCase();
-    if (!queryTermKeySet.has(termKey) || matchedTermKeys.has(termKey) || !textPaths.has(match.path)) {
-      integrityFailure('lexical_match');
+  if (schemaId === 'aegis.preflight_handoff.v3') {
+    const skeleton = discovery.workspaceSkeleton;
+    if (skeleton) {
+      const { digest, ...unsigned } = skeleton;
+      if (canonicalDigest(unsigned) !== digest) {
+        integrityFailure('workspace_skeleton_digest');
+      }
+      if (skeleton.symbolCount !== skeleton.symbols.length) {
+        integrityFailure('workspace_skeleton_symbol_count');
+      }
     }
-    const sourceTokenKey = match.sourceToken.normalize('NFC').toLowerCase();
-    if ((match.matchKind === 'EXACT_TOKEN' && sourceTokenKey !== termKey)
-      || (match.matchKind === 'IDENTIFIER_COMPONENT' && sourceTokenKey === termKey)) {
-      integrityFailure('lexical_match_kind');
+  } else if (discovery.lexicalEvidence) {
+    const evidence = discovery.lexicalEvidence;
+    const queryTermKeys = evidence.queryTerms.map((term) => term.normalize('NFC').toLowerCase());
+    if (new Set(queryTermKeys).size !== queryTermKeys.length) {
+      integrityFailure('duplicate_query_term');
     }
-    matchedTermKeys.add(termKey);
-  }
+    if (evidence.termsTruncated && evidence.queryTerms.length !== 64) {
+      integrityFailure('term_truncation');
+    }
 
-  const applicable = textPaths.size > 0 && evidence.queryTerms.length > 0;
-  const expectedEvidenceStatus = applicable
-    ? (evidence.matches.length > 0 ? 'MATCH' : 'NO_MATCH')
-    : 'NOT_APPLICABLE';
-  if (evidence.status !== expectedEvidenceStatus) {
-    integrityFailure('lexical_status');
-  }
+    const textPaths = new Set(
+      discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT').map(({ path }) => path),
+    );
+    const matchedTermKeys = new Set();
+    const queryTermKeySet = new Set(queryTermKeys);
+    for (const match of evidence.matches) {
+      const termKey = match.term.normalize('NFC').toLowerCase();
+      if (!queryTermKeySet.has(termKey) || matchedTermKeys.has(termKey) || !textPaths.has(match.path)) {
+        integrityFailure('lexical_match');
+      }
+      const sourceTokenKey = match.sourceToken.normalize('NFC').toLowerCase();
+      if ((match.matchKind === 'EXACT_TOKEN' && sourceTokenKey !== termKey)
+        || (match.matchKind === 'IDENTIFIER_COMPONENT' && sourceTokenKey === termKey)) {
+        integrityFailure('lexical_match_kind');
+      }
+      matchedTermKeys.add(termKey);
+    }
 
+    const applicable = textPaths.size > 0 && evidence.queryTerms.length > 0;
+    const expectedEvidenceStatus = applicable
+      ? (evidence.matches.length > 0 ? 'MATCH' : 'NO_MATCH')
+      : 'NOT_APPLICABLE';
+    if (evidence.status !== expectedEvidenceStatus) {
+      integrityFailure('lexical_status');
+    }
+  }
 }

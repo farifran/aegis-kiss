@@ -6,11 +6,21 @@ import { generateClosureCertificate } from './semantic_closure.mjs';
 function effectiveDeterminismStatus(specification, humanResolutions, {
   intentEvidence = null,
   literalFacts = [],
+  workspaceEvidence = [],
 } = {}) {
   const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
-  const specWithEvidence = (effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts)
-    ? { ...specification, literalFacts: effectiveFacts, intentEvidence }
-    : specification;
+  const effectiveWorkspace = (workspaceEvidence && workspaceEvidence.length > 0)
+    ? workspaceEvidence
+    : (specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? []);
+  const specWithEvidence = {
+    ...specification,
+    ...(effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts
+      ? { literalFacts: effectiveFacts, intentEvidence }
+      : {}),
+    ...(effectiveWorkspace.length > 0 && !specification.workspaceEvidence
+      ? { workspaceEvidence: effectiveWorkspace }
+      : {}),
+  };
   const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
   if (certificate.status !== 'CERTIFIED_CLOSED') {
     const nonDecisionGaps = certificate.unresolvedInventorySlots
@@ -255,7 +265,7 @@ export function assertRevisionApplied(draft, resolution, previousSpecification) 
       const normEffect = answer.contractEffect.normalize('NFC').trim();
       const isMaterialized = normativeText.some((text) => {
         const normText = text.normalize('NFC').trim();
-        return normText === normEffect || normText.includes(normEffect) || normEffect.includes(normText);
+        return normText === normEffect || normText.includes(normEffect);
       });
       if (!isMaterialized) {
         throw new Error(`revision_effect_not_materialized:${answer.questionId}`);
@@ -335,7 +345,10 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     effectiveDeterminismStatus: effectiveDeterminismStatus(
       contract.specification,
       humanResolutions,
-      { intentEvidence: contract.intentEvidence },
+      {
+        intentEvidence: contract.intentEvidence,
+        workspaceEvidence: request?.workspace?.sourceEvidence ?? [],
+      },
     ),
     humanResolutions,
     approval: {

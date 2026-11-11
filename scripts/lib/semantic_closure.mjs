@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+
 /**
  * Checks inventory obligations activated explicitly by semantic context tags.
  * It does not infer applicability from names, prose or unclassified literal facts.
@@ -937,16 +939,25 @@ export function validateProvenanceEnforcement({
 
   const factSupportsValue = (fact, valStr) => {
     if (valStr === '0' || valStr === '1') return true;
-    const clean = (s) => String(s).replaceAll('_', '').replace(/n$/u, '').trim();
+    const clean = (s) => String(s).replaceAll('_', '').replace(/n$/u, '').replace(',', '.').trim();
     const cleanVal = clean(valStr);
-    if (fact.attributes?.value !== undefined) {
-      const cleanFact = clean(fact.attributes.value);
-      if (cleanFact === cleanVal) return true;
+
+    const compareVals = (a, b) => {
+      if (a === b) return true;
       try {
-        if (BigInt(cleanFact) === BigInt(cleanVal)) return true;
-      } catch {
-        // ignore non-integer comparison
-      }
+        if (BigInt(a) === BigInt(b)) return true;
+      } catch {}
+      const numA = Number.parseFloat(a);
+      const numB = Number.parseFloat(b);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB) && numA === numB) return true;
+      return false;
+    };
+
+    if (fact.attributes?.value !== undefined) {
+      if (compareVals(clean(fact.attributes.value), cleanVal)) return true;
+    }
+    if (fact.attributes?.canonicalValue !== undefined) {
+      if (compareVals(clean(fact.attributes.canonicalValue), cleanVal)) return true;
     }
     if (fact.attributes?.width !== undefined) {
       const w = fact.attributes.width;
@@ -961,42 +972,49 @@ export function validateProvenanceEnforcement({
     return false;
   };
 
+  const parseWorkspaceReference = (reference) => {
+    if (typeof reference !== 'string' || reference.trim().length === 0) {
+      return { refPath: '', targetStartLine: null, targetEndLine: null };
+    }
+    const raw = reference.trim();
+    const sepIdx = Math.max(raw.lastIndexOf('#'), raw.lastIndexOf(':'));
+    if (sepIdx > 0) {
+      const potentialPath = raw.slice(0, sepIdx).trim();
+      const potentialLineSpec = raw.slice(sepIdx + 1).trim();
+      const m = potentialLineSpec.match(/^L?(\d+)(?:-L?(\d+))?$/i);
+      if (m) {
+        const start = Number.parseInt(m[1], 10);
+        const end = m[2] ? Number.parseInt(m[2], 10) : start;
+        return { refPath: potentialPath, targetStartLine: start, targetEndLine: end };
+      }
+    }
+    return { refPath: raw, targetStartLine: null, targetEndLine: null };
+  };
+
   const workspaceSupportsValue = (reference, valStr) => {
     if (valStr === '0' || valStr === '1') return true;
-    if (!workspaceEvidence || workspaceEvidence.length === 0) return true;
     if (typeof reference !== 'string' || reference.trim().length === 0) return false;
 
     const cleanVal = String(valStr).replaceAll('_', '').replace(/n$/u, '').trim();
-    const hashIdx = reference.indexOf('#');
-    const colonIdx = reference.lastIndexOf(':');
-    let refPath = reference;
-    let targetStartLine = null;
-    let targetEndLine = null;
+    const { refPath, targetStartLine, targetEndLine } = parseWorkspaceReference(reference);
+    if (!refPath) return false;
 
-    if (hashIdx !== -1) {
-      refPath = reference.slice(0, hashIdx).trim();
-      const lineSpec = reference.slice(hashIdx + 1);
-      const m = lineSpec.match(/L(\d+)(?:-L?(\d+))?/i);
-      if (m) {
-        targetStartLine = Number.parseInt(m[1], 10);
-        targetEndLine = m[2] ? Number.parseInt(m[2], 10) : targetStartLine;
-      }
-    } else if (colonIdx > 1 && !isNaN(Number(reference.slice(colonIdx + 1)))) {
-      refPath = reference.slice(0, colonIdx).trim();
-      const rest = reference.slice(colonIdx + 1);
-      const linePart = rest.startsWith('L') ? rest.slice(1) : rest;
-      const m = linePart.match(/(\d+)(?:-(\d+))?/);
-      if (m) {
-        targetStartLine = Number.parseInt(m[1], 10);
-        targetEndLine = m[2] ? Number.parseInt(m[2], 10) : targetStartLine;
-      }
-    }
-
-    const matchingSources = workspaceEvidence.filter((entry) =>
-      entry.path === refPath || entry.path.endsWith(refPath) || refPath.endsWith(entry.path)
+    let matchingSources = (workspaceEvidence || []).filter((entry) =>
+      entry.path === refPath || entry.path.endsWith(`/${refPath}`) || refPath.endsWith(`/${entry.path}`)
     );
 
-    if (matchingSources.length === 0) return false;
+    if (matchingSources.length === 0) {
+      if (existsSync(refPath)) {
+        try {
+          const content = readFileSync(refPath, 'utf8');
+          matchingSources = [{ path: refPath, content, startLine: 1 }];
+        } catch {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
 
     for (const src of matchingSources) {
       const content = src.content ?? '';
@@ -1014,11 +1032,102 @@ export function validateProvenanceEnforcement({
         }
       }
 
-      const cleanText = textToCheck.replaceAll('_', '').replace(/n\b/gu, '');
-      if (cleanText.includes(cleanVal) || textToCheck.includes(valStr)) return true;
+      const numMatches = textToCheck.match(/(?<![\w$])\d+(?:_\d+)*n?(?![\w$])/g) ?? [];
+      for (const rawToken of numMatches) {
+        const cleanToken = rawToken.replaceAll('_', '').replace(/n$/u, '').trim();
+        if (cleanToken === cleanVal) return true;
+        try {
+          if (BigInt(cleanToken) === BigInt(cleanVal)) return true;
+        } catch {
+          // ignore non-integer comparison
+        }
+      }
     }
 
     return false;
+  };
+
+  const validateBoundProvenance = (val, boundKind, slotPrefix, bounds) => {
+    if (val === null || val === undefined) return;
+    const valStr = String(val);
+    const provenance = bounds?.provenance;
+
+    if (!provenance || !Array.isArray(provenance) || provenance.length === 0) {
+      issues.push({
+        slotId: `${slotPrefix}/bounds/${boundKind}/provenance`,
+        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+        reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' não possui provenance autorizada.`,
+      });
+      return;
+    }
+
+    let hasValidFactRef = false;
+    let anyFactSupportsBound = false;
+    let hasNonFactSupport = false;
+
+    for (const p of provenance) {
+      if (p.source === 'USER_INTENT') {
+        if (typeof p.reference === 'string' && p.reference.startsWith('FACT-')) {
+          const fact = factsById.get(p.reference);
+          if (!fact) {
+            issues.push({
+              slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
+              kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+              reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita o fato '${p.reference}' que não existe na evidência da demanda.`,
+            });
+          } else {
+            hasValidFactRef = true;
+            if (factSupportsValue(fact, valStr)) {
+              anyFactSupportsBound = true;
+            }
+          }
+        } else if (typeof p.reference === 'string' && p.reference.startsWith('FRAG-')) {
+          if (fragmentsById.size > 0 && !fragmentsById.has(p.reference)) {
+            issues.push({
+              slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
+              kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+              reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita o fragmento '${p.reference}' que não existe na evidência da demanda.`,
+            });
+          } else {
+            hasNonFactSupport = true;
+          }
+        } else if (intent && intent.length > 0 && typeof p.reference === 'string' && !intent.includes(p.reference)) {
+          issues.push({
+            slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
+            kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+            reason: `A referência '${p.reference}' citada em USER_INTENT para o limite '${valStr}' em '${slotPrefix}' não aparece no texto da demanda.`,
+          });
+        } else {
+          hasNonFactSupport = true;
+        }
+      } else if (p.source === 'WORKSPACE_EVIDENCE') {
+        if (!workspaceSupportsValue(p.reference, valStr)) {
+          issues.push({
+            slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
+            kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+            reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o valor não existe no trecho de código referenciado.`,
+          });
+        } else {
+          hasNonFactSupport = true;
+        }
+      } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
+        issues.push({
+          slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedPolicy`,
+          kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+          reason: `A regra de política '${p.reference}' citada para o limite '${valStr}' em '${slotPrefix}' não existe na governança.`,
+        });
+      } else {
+        hasNonFactSupport = true;
+      }
+    }
+
+    if (hasValidFactRef && !anyFactSupportsBound && !hasNonFactSupport) {
+      issues.push({
+        slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
+        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
+        reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' não é autorizado pelos fatos literais citados em provenance.`,
+      });
+    }
   };
 
   if (hasProvenanceContext && Array.isArray(stateModel.entities)) {
@@ -1086,103 +1195,32 @@ export function validateProvenanceEnforcement({
 
       for (const field of entity.fields ?? []) {
         if (field.bounds) {
-          const { lowerBound, upperBound, provenance } = field.bounds;
-          const checkBound = (val, boundKind) => {
-            if (val === null || val === undefined) return;
-            const valStr = String(val);
-
-            if (!provenance || !Array.isArray(provenance) || provenance.length === 0) {
-              issues.push({
-                slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/provenance`,
-                kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' não possui provenance autorizada.`,
-              });
-            } else {
-              let hasValidFactRef = false;
-              let anyFactSupportsBound = false;
-              let hasNonFactSupport = false;
-              for (const p of provenance) {
-                if (p.source === 'USER_INTENT') {
-                  if (typeof p.reference === 'string' && p.reference.startsWith('FACT-')) {
-                    const fact = factsById.get(p.reference);
-                    if (!fact) {
-                      issues.push({
-                        slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                        reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita o fato '${p.reference}' que não existe na evidência da demanda.`,
-                      });
-                    } else {
-                      hasValidFactRef = true;
-                      if (factSupportsValue(fact, valStr)) {
-                        anyFactSupportsBound = true;
-                      }
-                    }
-                  } else if (typeof p.reference === 'string' && p.reference.startsWith('FRAG-')) {
-                    if (fragmentsById.size > 0 && !fragmentsById.has(p.reference)) {
-                      issues.push({
-                        slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                        kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                        reason: `O limite ${boundKind} '${valStr}' cita o fragmento '${p.reference}' que não existe na evidência da demanda.`,
-                      });
-                    } else {
-                      hasNonFactSupport = true;
-                    }
-                  } else if (intent && intent.length > 0 && typeof p.reference === 'string' && !intent.includes(p.reference)) {
-                    issues.push({
-                      slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                      kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                      reason: `A referência '${p.reference}' citada em USER_INTENT para o limite '${valStr}' não aparece no texto da demanda.`,
-                    });
-                  } else {
-                    hasNonFactSupport = true;
-                  }
-                } else if (p.source === 'WORKSPACE_EVIDENCE') {
-                  if (!workspaceSupportsValue(p.reference, valStr)) {
-                    issues.push({
-                      slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                      kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                      reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o valor não existe no trecho de código referenciado.`,
-                    });
-                  } else {
-                    hasNonFactSupport = true;
-                  }
-                } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
-                  issues.push({
-                    slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedPolicy`,
-                    kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                    reason: `A regra de política '${p.reference}' citada para o limite '${valStr}' não existe na governança.`,
-                  });
-                } else {
-                  hasNonFactSupport = true;
-                }
-              }
-              if (hasValidFactRef && !anyFactSupportsBound && !hasNonFactSupport) {
-                issues.push({
-                  slotId: `state/${entity.name}.${field.name}/bounds/${boundKind}/unauthorizedLiteral`,
-                  kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-                  reason: `O limite ${boundKind} '${valStr}' do campo '${entity.name}.${field.name}' não é autorizado pelos fatos literais citados em provenance.`,
-                });
-              }
-            }
-          };
-
-          checkBound(lowerBound, 'lowerBound');
-          checkBound(upperBound, 'upperBound');
+          validateBoundProvenance(field.bounds.lowerBound, 'lowerBound', `state/${entity.name}.${field.name}`, field.bounds);
+          validateBoundProvenance(field.bounds.upperBound, 'upperBound', `state/${entity.name}.${field.name}`, field.bounds);
         }
       }
     }
   }
 
-  // 2. Grounding obrigatório de guardas e códigos de erro de rejeição
+  // Validação de bounds em parâmetros de operação
+  if (Array.isArray(stateModel.operations)) {
+    for (const op of stateModel.operations) {
+      for (const param of (op.parameters ?? [])) {
+        if (param.bounds) {
+          validateBoundProvenance(param.bounds.lowerBound, 'lowerBound', `operation/${op.name}/parameter/${param.name}`, param.bounds);
+          validateBoundProvenance(param.bounds.upperBound, 'upperBound', `operation/${op.name}/parameter/${param.name}`, param.bounds);
+        }
+      }
+    }
+  }
+
+  // 2. Grounding obrigatório de guardas e códigos de erro de rejeição (apenas fontes autorizadas)
   const hasGroundingCorpus = (workspaceEvidence.length > 0 || intent.length > 0);
   if (hasGroundingCorpus && Array.isArray(stateModel.operations)) {
     const groundingCorpus = [
       intent,
       ...literalFacts.map((f) => f.reference),
       ...workspaceEvidence.map((w) => w.content ?? ''),
-      ...requirements.flatMap((r) => [r.statement, ...(r.acceptanceCases ?? []).flatMap((ac) => [ac.given, ac.when, ac.then, ac.falsificationRule])]),
-      ...invariants.flatMap((inv) => [inv.statement, inv.falsification]),
-      ...decisions.flatMap((d) => [d.question, d.rationale, ...(d.answers ?? []).map((a) => a.contractEffect)]),
     ].join('\n').toLowerCase();
 
     const standardGuardPrefixes = [
@@ -1193,7 +1231,6 @@ export function validateProvenanceEnforcement({
     const standardAllowedCodes = new Set([
       'queue_full_rejected', 'queue_full', 'capacity_exceeded', 'max_entries_exceeded',
       'batch_empty_noop', 'batch_settled', 'success', 'noop', 'rejected', 'default_rejection',
-      'err_lock', 'err_val', 'err_valid', 'err_corrupted', 'err_global_lock', 'err_insufficient_credits',
     ]);
 
     const isCodeGrounded = (rawCode) => {
