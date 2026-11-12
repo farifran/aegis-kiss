@@ -136,15 +136,26 @@ Antes de qualquer alteração de código, confrontamos as alternativas teóricas
 
 Com base nas evidências, foram implementadas soluções 100% mecânicas, determinísticas e parsimoniosas em [`scripts/lib/semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs):
 
-### Resolução 1: Matching Aumentado por JSDoc e Subtokens de Caminho (Resolve Problema 1)
-* **Mecanismo:**
-  - O analisador de AST ([`workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs)) já extraía docstrings JSDoc (`docComment`) de funções, interfaces e constantes.
-  - Atualizamos [`matchSkeletonSymbols`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L122) e [`computeSymbolAffinity`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L198) para cruzar a intenção humana contra:
-    1. **Identificador do símbolo (`sym.name`):** Pontuação dominante (+3 exato / +2 stem).
-    2. **Subtokens do caminho (`sym.path`):** Afinidade de módulo e pasta (+2 exato / +1 stem).
-    3. **Comentários de documentação JSDoc (`sym.docComment`):** Captura de sinônimos em linguagem natural (+2 exato / +1 stem).
-  - Comentários com `@deprecated` continuam penalizados em -300 pontos para evitar iscas de legado.
-* **Prova Falsificável:** Validado pelo teste **`TEST-118`** em [`scripts/substrates/test/test_field_lifecycle.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/test/test_field_lifecycle.mjs), onde uma demanda com o termo informal *"estorno"* localiza a função técnica `processUndo` exclusivamente pela docstring em português.
+### Resolução 1: Defesa em 3 Camadas Contra o Abismo Semântico (Mitiga Problema 1)
+
+O abismo semântico entre a linguagem natural humana e a sintaxe formal de código não é um bug pontual solúvel por um único truque sintático; é uma tensão ontológica fundamental. Dizer que um simples comentário JSDoc "resolve 100% o abismo semântico" foi um diagnóstico prematuro refutado pelo teste de estresse real (onde o Askesis provou que JSDocs podem atuar como cavalos de Troia de ruído). 
+
+O Aegis estabelece uma **Defesa Arquitetural em 3 Camadas**, combinando velocidade determinística com expansão semântica sob demanda:
+
+* **Camada 1: Mecânica Direta de AST (0 ms, $0.00, 100% Offline e Determinístico)**
+  - O extrator de AST ([`workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs)) extrai identificadores, subtokens estruturais (camelCase, snake_case), caminhos de pasta e docstrings JSDoc (`docComment`).
+  - [`computeSymbolAffinity`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs#L198) cruza a intenção humana priorizando símbolos exportados públicos e pontuando identificadores e caminhos com pesos dominantes (+3 exato / +2 stem).
+  - **Blindagem Anti-Sequestro:** JSDocs só pontuam se houver afinidade estrutural prévia (no identificador ou caminho do módulo), impedindo que comentários narrativos alheios sequestrem o contexto.
+
+* **Camada 2: Léxico Declarativo de Domínio (`.harness/domain-lexicon.json` - 0 ms, $0.00, Determinístico)**
+  - Mapeamento determinístico e auditável entre o vocabulário de negócio (ex: português informal) e os identificadores técnicos em inglês do código-fonte (`estorno -> reversal`, `tarifa -> fee`, `risco -> risk`).
+  - 100% sob custódia e soberania humana ([`CONST-EVIDENCE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L10)), sem dependência de rede, sem modelos neurais e com zero latência.
+
+* **Camada 3: Adaptive Semantic Scout (Acordo Semântico sob Silêncio Léxico)**
+  - Acionado exclusivamente quando as Camadas 1 e 2 falham (Silêncio Léxico em repositórios grandes com `src/ > 64 KB`).
+  - Utiliza um mapa topográfico panorâmico compacto (< 4 KB JSON), filtra as sugestões de forma *fail-closed* contra o disco físico, hidrata linhas de código e **persiste automaticamente os novos sinônimos aprendidos de volta na Camada 2 (*Auto-Lexicon*)**.
+  - A primeira execução preenche a lacuna; todas as execuções subsequentes daquele termo são automaticamente promovidas para o Fast-Path determinístico das Camadas 1 e 2.
+* **Provas Falsificáveis:** Coberto por `TEST-118` (JSDoc), `TEST-121` (Léxico) e os 10 testes de `test_semantic_scout.mjs` (Scout, Anti-Alucinação e Auto-Lexicon).
 
 ### Resolução 2: Ancoragem Automática por Diretório Irmão (Resolve Problema 5)
 * **Mecanismo:**
@@ -165,7 +176,7 @@ Com base nas evidências, foram implementadas soluções 100% mecânicas, determ
 
 | Problema Estrutural | Abordagem Adotada no Aegis | Prova / Teste Falsificável | Status Atual |
 | :--- | :--- | :--- | :---: |
-| **P1: Abismo Semântico** | Tokenização de JSDoc (`docComment`) + subtokens do caminho do arquivo (`sym.path`). | `TEST-118` em `test_field_lifecycle.mjs` | **RESOLVIDO** |
+| **P1: Abismo Semântico** | Defesa em 3 Camadas: AST Subtokens/JSDoc $\rightarrow$ Léxico Declarativo $\rightarrow$ Scout Adaptativo + Auto-Lexicon. | `TEST-118`, `TEST-121`, `test_semantic_scout.mjs` | **MITIGADO EM 3 CAMADAS (DESAFIO ABERTO)** |
 | **P2: Dilema de Goldilocks** | Esqueleto AST (assinaturas sem corpos) + janelas focadas de 8 KB com teto global de 32 KB. | `TEST-114` e `TEST-115` | **RESOLVIDO** |
 | **P3: Fronteira Sintática** | Preservação compulsória do cabeçalho de tipos/interfaces (`findStructuralHeaderEndLine`). | `TEST-115` em `test_field_lifecycle.mjs` | **RESOLVIDO** |
 | **P4: Falácia da Escala** | Priorização determinística por afinidade (`computeSymbolAffinity`) limitada a 512 símbolos. | Benchmark D11 (`src/` > 32 KB) | **RESOLVIDO** |
@@ -294,4 +305,65 @@ Com a estabilização completa do **Workspace Skeleton (AST Tipado)** no preflig
    Eliminado o loop de fallback para `lexicalEvidence?.matches` na montagem da evidência física de código, mantendo apenas o matching estrutural por nós de AST e âncoras de diretório.
 4. **Alinhamento do Árbitro e do Runner CLI (`semantic_scout.mjs` e `issue_contract_runner.mjs`):**  
    A detecção de casamento direto foi atualizada para inspecionar a presença real de recortes focados (`selection: 'LEXICAL_WINDOW'`) derivados do AST Skeleton, eliminando referências fantasmas a contagens de casamentos léxicos legados.
+
+---
+
+## 8. A Fronteira Arquitetural: O Desafio do Acordo Mecânico-Semântico (Como Fazer a Mecânica e a IA Concordarem de Forma KISS)
+
+O avanço dos LLMs locais (executados via Ollama, llama.cpp, vLLM com modelos compactos quantizados como Gemma 2/3, Qwen 2.5 Coder, Llama 3.2/3.3) transformou radicalmente a premissa de custo: **a inferência semântica agora pode rodar na máquina do desenvolvedor a custo financeiro zero (\$0.00), em baixa latência e com 100% de privacidade de código proprietário**.
+
+Isso desmonta o dogma anterior de que qualquer uso de LLM no preflight deveria ser banido por custo ou dependência de nuvem. No entanto, abre uma nova e profunda fronteira arquitetural: **como a parte mecânica (determinística) e a parte semântica (estocástica) chegam a um acordo quando necessário, da melhor forma possível, mantendo o princípio KISS e sem sobre-engenharia?**
+
+---
+
+### 8.1. O Choque de Mundos: A Tensão Dialética
+
+| Dimensão | O Polo Mecânico (AST / Skeleton / Hashes) | O Polo da IA Semântica (LLM / Embeddings) |
+| :--- | :--- | :--- |
+| **Ponto Forte** | Reprodutibilidade absoluta, auditoria trivial, 0 ms de latência, fail-closed por disco. | Compreensão de nuances, gírias de negócio, metáforas, sinônimos e intenção implícita. |
+| **Armadilha Fatal** | **Inanição por Rigidez Sintática:** Se o usuário diz *"dar baixa no lote de cobrança"* e o código usa `reconcileBillingBatch`, o algoritmo mecânico pontua zero e entrega contexto vazio, forçando a IA subsequente a alucinar. | **Anarquia Estocástica e Alucinação:** Duas execuções da mesma demanda para o mesmo commit podem retornar arquivos diferentes (jitter), quebrando [`CONST-OBSERVABLE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L21). Além disso, a IA pode inventar arquivos que não existem fisicamente. |
+| **Comportamento em Falha** | Silêncio cego (omissão de contexto crítico). | Alucinação plausível (engana o desenvolvedor). |
+
+A tentação comum da indústria de software é escolher um dos extremos ou misturá-los de forma caótica (bancos de vetores pesados, orquestradores de múltiplos agentes debatendo indefinidamente). Ambas as abordagens quebram os preceitos fundamentais da Constituição Aegis ([`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md)).
+
+---
+
+### 8.2. As Armadilhas de Sobre-Engenharia Rejeitadas (`CONST-KISS`)
+
+Em conformidade estrita com [`CONST-KISS`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L5), rejeitamos categoricamente os três "padrões de mercado" que inflariam o Harness com complexidade acidental:
+
+1. ❌ **Bancos de Vetores Locais (ChromaDB, FAISS, LanceDB, Pinecone):**
+   - *Por que foi rejeitado:* Exigem dependências binárias nativas (C/C++), compilação pesada, índices binários de gigabytes no disco e sofrem do clássico pesadelo de invalidação de cache: a cada `git checkout` ou edição de linha, o índice vetorial fica desatualizado e requer reindexação custosa.
+2. ❌ **Enxames de Múltiplos Agentes Conversacionais (CrewAI, AutoGen, LangGraph):**
+   - *Por que foi rejeitado:* Fazer agentes conversarem entre si ("Agente Crítico confronta Agente Scout que pede parecer ao Agente Juiz") gera latência imprevisível, loops não-determinísticos de tokens e custo de computação injustificável, sem garantia matemática de convergência.
+3. ❌ **Grafos Dinâmicos de Conhecimento em Tempo de Execução (Knowledge Graphs / Triplestores):**
+   - *Por que foi rejeitado:* Manter um grafo ontológico que mapeia conceitos semânticos a cada nó do repositório exige parsing completo contínuo e infraestrutura pesada, violando o princípio de harness leve e portátil.
+
+---
+
+### 8.3. Os 4 Princípios do Acordo Mecânico-Semântico KISS
+
+Para alcançar o equilíbrio ótimo sem sobre-engenharia, o Aegis adota 4 princípios de consenso:
+
+#### 1. A Mecânica é a Âncora e o Teto (Fail-Closed Físico)
+A IA semântica atua estritamente como **proponente de hipóteses**, jamais como autoridade final.
+* O mapa topográfico entregue à IA é construído pela mecânica (`buildTopographicalMap`), sem viés alfabético e em tamanho microscópico (< 4 KB).
+* Toda e qualquer sugestão retornada pela IA passa pelo crivo mecânico fail-closed: se o arquivo sugerido não existir fisicamente no disco ou se estiver fora do escopo observado, ele é sumariamente purgado (`filterPhysicalPaths`). A IA não tem o poder de forçar arquivos imaginários na evidência física.
+
+#### 2. Protocolo de Consenso em Rodada Única ($O(1)$ Round)
+Não há debate conversacional nem rodadas recursivas.
+* A consulta é realizada em **uma única transação atômica** com schema restrito (`json_schema` / structured outputs): a IA recebe a intenção e o mapa topográfico, e responde exclusivamente com a lista de caminhos prováveis e o mapa conceitual de sinônimos (`inferredAliases`).
+* A mecânica consome o JSON, valida em $O(1)$, hidrata as linhas de corte via AST e encerra o preflight sem ciclos adicionais.
+
+#### 3. Cristalização Mecânica do Consenso (O Ciclo Virtuoso do Auto-Lexicon)
+A estocasticidade da IA só é tolerada uma única vez por conceito novo:
+* Quando a IA encontra um casamento semântico legítimo (ex: *"estornar"* $\leftrightarrow$ `reversal`, *"liquidar"* $\leftrightarrow$ `settlement`), esse acordo é imediatamente gravado e canonizado no arquivo mecânico [`.harness/domain-lexicon.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/.harness/domain-lexicon.json).
+* A partir desse momento, a ponte semântica vira **lei mecânica determinística**. Nas próximas 1.000 execuções daquela demanda ou de demandas semelhantes, o Scout nem sequer é acordado: a Camada 2 mecânica resolve a busca em **0 ms**, offline e sem consultar nenhum LLM.
+* O acordo é auditável por humanos via `git diff`, respeitando integralmente [`CONST-EVIDENCE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L10).
+
+#### 4. O Humano como Árbitro Soberano do Impasse (`CONST-DECISIONS`)
+Se a camada mecânica e a camada semântica não conseguirem convergir (ex: o Scout sugere arquivos em múltiplos módulos contraditórios, ou há silêncio persistente sem nenhuma confiança estrutural), o sistema **não adivinha**:
+* O Harness aciona o Wizard interativo no TTY, expondo o impasse de forma parsimoniosa ao desenvolvedor:
+  > *"A demanda cita 'trava de segurança', mas encontramos guardas tanto no módulo de Risco (`src/risk/velocity_guard.ts`) quanto no módulo de Ledger (`src/ledger/settlement_engine.ts`). Qual o escopo pretendido para esta demanda?"*
+* A escolha humana torna-se a verdade do contrato, selando a divergência com autoridade soberana.
 
