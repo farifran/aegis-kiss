@@ -2638,8 +2638,8 @@ function createFixture({
   const tempDir = path.resolve('.harness/tmp_test_subtoken_ast');
   fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
   fs.writeFileSync(path.resolve(tempDir, 'src/ledger/settlement_engine.ts'), sourceRecords[0].text);
-  // Add padding to exceed smallWorkspace byte limit (32768) so lexical/symbol selection triggers
-  const bigPadding = Array.from({ length: 600 }, (_, i) => `// Padding line ${i} with filler text to exceed byte limits\n`).join('');
+  // Add padding to exceed smallWorkspace byte limit (65536) so lexical/symbol selection triggers
+  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text to exceed byte limits\n`).join('');
   fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
 
   try {
@@ -2793,6 +2793,344 @@ function createFixture({
   assert.ok(res.issues.some((i) => i.kind === 'UNAUTHORIZED_GUARD_OR_ERROR_CODE'), 'TEST-116: UNAUTHORIZED_GUARD_OR_ERROR_CODE expected');
 
   log('  PASS: TEST-116 Provenance enforcement fail-closed on unauthorized literals verified');
+}
+
+// TEST-117: Directory anchor fallback for new/unmatched files
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_anchor_fallback');
+  fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
+  fs.writeFileSync(path.resolve(tempDir, 'src/ledger/settlement_engine.ts'), 'export const SIBLING_LEDGER_CONST = 999;');
+  // Add padding to exceed smallWorkspace limit (64KB)
+  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    // Demand cites a completely new, non-existent file in src/ledger/
+    const demand = 'Criar novo fluxo em src/ledger/installment_reversal.ts para amortização';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 1, 'TEST-117: sourceEvidence must be produced');
+    const hasSiblingFile = evidence.some((e) => e.path === 'src/ledger/settlement_engine.ts');
+    assert.ok(hasSiblingFile, 'TEST-117: sibling file src/ledger/settlement_engine.ts must be selected via directory anchor fallback');
+    const siblingContent = evidence.find((e) => e.path === 'src/ledger/settlement_engine.ts').content;
+    assert.ok(siblingContent.includes('SIBLING_LEDGER_CONST'), 'TEST-117: sibling content must include SIBLING_LEDGER_CONST');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-117 Directory anchor fallback for new/unmatched files verified');
+}
+
+// TEST-118: Augmented matching via JSDoc comments and path subtokens
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_jsdoc_matching');
+  fs.mkdirSync(path.resolve(tempDir, 'src/billing'), { recursive: true });
+  fs.writeFileSync(path.resolve(tempDir, 'src/billing/engine.ts'), [
+    '/**',
+    ' * Responsável pelo estorno e liquidação da conta',
+    ' */',
+    'export function processUndo(amount: number) { return amount; }',
+  ].join('\n'));
+  // Padding to exceed smallWorkspace limit (64KB)
+  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    // Demand uses Portuguese term "estorno", which only appears in JSDoc comment
+    const demand = 'Realizar estorno do cliente sem tarifas';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 1, 'TEST-118: sourceEvidence must be produced');
+    const hasTargetFile = evidence.some((e) => e.path === 'src/billing/engine.ts');
+    assert.ok(hasTargetFile, 'TEST-118: src/billing/engine.ts must be selected via JSDoc natural term matching ("estorno")');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-118 Augmented matching via JSDoc comments and path subtokens verified');
+}
+
+// TEST-119: Multi-module Floor Guarantee under budget pressure preserves secondary modules
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_multi_module_floor');
+  fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
+  fs.mkdirSync(path.resolve(tempDir, 'src/reporting'), { recursive: true });
+
+  // Ledger has multiple strong matching symbols (high score ~20+)
+  fs.writeFileSync(path.resolve(tempDir, 'src/ledger/processor.ts'), [
+    'export class LedgerProcessor {',
+    '  processLedgerBatch() { return true; }',
+    '  executeLedgerAudit() { return true; }',
+    '}',
+  ].join('\n'));
+
+  // Reporting has a single symbol with moderate score (~7)
+  fs.writeFileSync(path.resolve(tempDir, 'src/reporting/exporter.ts'), [
+    'export class CsvExporter {',
+    '  exportCsvData() { return "csv"; }',
+    '}',
+  ].join('\n'));
+
+  // Large filler to simulate enterprise monorepo exceeding 64KB and trigger budget pressure
+  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    const demand = 'Integrar src/ledger com src/reporting para exportar dados';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 2, 'TEST-119: sourceEvidence must include files from both authorized modules');
+    const hasLedger = evidence.some((e) => e.path === 'src/ledger/processor.ts');
+    const hasReporting = evidence.some((e) => e.path === 'src/reporting/exporter.ts');
+    assert.ok(hasLedger, 'TEST-119: src/ledger/processor.ts must be preserved');
+    assert.ok(hasReporting, 'TEST-119: src/reporting/exporter.ts must be preserved via Floor Guarantee despite lower score');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-119 Multi-module Floor Guarantee under budget pressure verified');
+}
+
+// TEST-120: Budget-driven cutoff preserves moderate affinity files when quota has ample space
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_budget_elasticity');
+  fs.mkdirSync(path.resolve(tempDir, 'src/auth'), { recursive: true });
+
+  // Moderate file: score ~3.5
+  fs.writeFileSync(path.resolve(tempDir, 'src/auth/token_guard.ts'), [
+    'export class TokenGuard {',
+    '  validateSessionToken() { return true; }',
+    '}',
+  ].join('\n'));
+
+  // High affinity file: score ~15
+  fs.writeFileSync(path.resolve(tempDir, 'src/auth/session_manager.ts'), [
+    'export class SessionManager {',
+    '  createSession() { return true; }',
+    '  destroySession() { return true; }',
+    '  refreshSession() { return true; }',
+    '}',
+  ].join('\n'));
+
+  // Small filler: total workspace ~10KB (well below 64KB, no budget pressure)
+  const smallFiller = Array.from({ length: 80 }, (_, i) => `// Small filler line ${i}\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/index.ts'), smallFiller);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    const demand = 'Gerenciar sessão de autenticação com validação de token em src/auth';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    const hasSessionManager = evidence.some((e) => e.path === 'src/auth/session_manager.ts');
+    const hasTokenGuard = evidence.some((e) => e.path === 'src/auth/token_guard.ts');
+    assert.ok(hasSessionManager, 'TEST-120: high affinity file must be selected');
+    assert.ok(hasTokenGuard, 'TEST-120: moderate affinity file must be preserved when no budget pressure exists');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-120 Budget-driven cutoff (quota elasticity) verified');
+}
+
+// TEST-121: Bilingual domain lexicon bridges Portuguese demand to English code without paths
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_domain_lexicon');
+  fs.mkdirSync(path.resolve(tempDir, '.harness'), { recursive: true });
+  fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
+  fs.mkdirSync(path.resolve(tempDir, 'src/reporting'), { recursive: true });
+
+  // Declarative domain lexicon
+  fs.writeFileSync(path.resolve(tempDir, '.harness/domain-lexicon.json'), JSON.stringify({
+    estorno: ['reversal', 'refund'],
+    liquidacao: ['settlement', 'ledger'],
+    relatorio: ['reporting', 'report'],
+  }, null, 2));
+
+  // Pure English code, zero Portuguese comments or terms
+  fs.writeFileSync(path.resolve(tempDir, 'src/ledger/settlement.ts'), [
+    'export class SettlementEngine {',
+    '  processReversal(amount: number) { return amount; }',
+    '}',
+  ].join('\n'));
+
+  fs.writeFileSync(path.resolve(tempDir, 'src/reporting/generator.ts'), [
+    'export class ReportGenerator {',
+    '  generateAuditCsv() { return "csv"; }',
+    '}',
+  ].join('\n'));
+
+  // Large filler to exceed smallWorkspace limit
+  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    // Demand 100% in Portuguese, NO PATHS cited
+    const demand = 'Realizar estorno de liquidacao e emitir relatorio';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+    });
+
+    const evidence = req.workspace.sourceEvidence;
+    assert.ok(evidence.length >= 2, 'TEST-121: sourceEvidence must include both aliased English modules');
+    const hasSettlement = evidence.some((e) => e.path === 'src/ledger/settlement.ts');
+    const hasReporting = evidence.some((e) => e.path === 'src/reporting/generator.ts');
+    assert.ok(hasSettlement, 'TEST-121: src/ledger/settlement.ts must be matched via "estorno"/"liquidacao" -> "reversal"/"settlement"');
+    assert.ok(hasReporting, 'TEST-121: src/reporting/generator.ts must be matched via "relatorio" -> "reporting"');
+
+    // Also verify prompt skeleton prioritization with domain lexicon
+    const prioritizedSymbols = req.workspace.workspaceSkeleton?.symbols ?? [];
+    assert.ok(prioritizedSymbols.length >= 2, 'TEST-121: workspaceSkeleton symbols must be present');
+    const topSymbolNames = prioritizedSymbols.slice(0, 5).map((s) => s.name);
+    assert.ok(
+      topSymbolNames.includes('SettlementEngine') || topSymbolNames.includes('ReportGenerator'),
+      'TEST-121: top prioritized symbols in skeleton must match aliased terms',
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-121 Bilingual domain lexicon bridging verified');
 }
 
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');

@@ -1,0 +1,43 @@
+name: Smoke Prod
+
+# Verifica a PRODUÇÃO REAL após cada push no main (aguardando o deploy da
+# Vercel propagar) e diariamente — pega a classe de falha "configurado mas
+# nunca provado" que os testes de unidade não conseguem ver.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 3 * * *' # diário, 03:30 UTC (após o nightly-audit)
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    name: Smoke test de produção
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # Sem npm ci: o script é zero-deps de propósito (só fetch nativo).
+      - name: Aguardar deploy e rodar smoke test (retries)
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            echo "== Tentativa $attempt/6 =="
+            if node scripts/smoke-prod.js; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then
+              echo "Falhou — aguardando 45s (deploy pode estar propagando)..."
+              sleep 45
+            fi
+          done
+          echo "Smoke test falhou após 6 tentativas (~4min de espera total)."
+          exit 1

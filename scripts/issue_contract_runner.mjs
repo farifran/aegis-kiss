@@ -570,6 +570,45 @@ async function handleSemanticRun(args) {
   const assignment = (await loadRoleAssignment(root)) ?? defaultRoleAssignment();
   const role = assignment.roles.contractSupervisor;
 
+  // Adaptive Semantic Scout (Arbiter): acionado exclusivamente sob Silêncio Léxico em repositórios > 64KB
+  if (role.channel === 'API') {
+    const { shouldTriggerSemanticScout, executeSemanticScout } = await import('./lib/semantic_scout.mjs');
+    if (shouldTriggerSemanticScout({
+      preflight: context.preflight,
+      workspace: context.request.workspace,
+    })) {
+      try {
+        const readiness = assertSemanticSupervisorReady(role);
+        const scoutResult = await executeSemanticScout({
+          role,
+          intent: context.preflight.intent,
+          workspaceSkeleton: context.preflight.discovery.workspaceSkeleton,
+          observedTextPaths: context.request.workspace.observedTextPaths,
+          endpoint: readiness.endpoint,
+          credential: readiness.credential,
+        });
+        if (scoutResult.relevantPaths.length > 0) {
+          const { buildSemanticRequest } = await import('./lib/semantic_request.mjs');
+          context.request = buildSemanticRequest({
+            repositoryRoot: root,
+            preflight: context.preflight,
+            policy: context.loadedPolicy.policy,
+            constitution: context.constitution,
+            revision: context.revision?.request ?? null,
+            workspaceObservation: context.workspaceObservation,
+            explicitTargetPaths: scoutResult.relevantPaths,
+          });
+        }
+        if (scoutResult.inferredAliases && Object.keys(scoutResult.inferredAliases).length > 0) {
+          const { persistInferredAliases } = await import('./lib/semantic_scout.mjs');
+          await persistInferredAliases(root, scoutResult.inferredAliases);
+        }
+      } catch {
+        // Fallback gracioso: prossegue com o contexto original determinístico
+      }
+    }
+  }
+
   const invokeSupervisor = async (previousAttempt = null) => {
     if (role.channel === 'IDE') {
       if (role.adapter !== 'codex') throw rejection('SEMANTIC_IDE_ADAPTER_UNSUPPORTED', role.adapter);
@@ -695,6 +734,13 @@ async function handleDemand(args) {
         nextCommand: './aegis --semantic-compile',
         message: 'Briefing determinístico pronto. Construa o parecer (usando evidenceDigest em sourceEvidenceDigest) e envie via stdin para ./aegis --semantic-compile.',
       };
+      const isFallbackOnly = request.workspace.sourceEvidence.length <= 1 &&
+        request.workspace.sourceEvidence.every((e) => e.selection === 'ENTRYPOINT_PREFIX' || e.selection === 'FULL_SOURCE');
+      const hasNoLexicalMatches = (request.workspace.lexicalEvidence?.matches?.length ?? 0) === 0;
+      const hasNoSkeletonMatches = (brief.workspace.symbols?.length ?? 0) === 0;
+      if (hasNoLexicalMatches && hasNoSkeletonMatches && isFallbackOnly) {
+        brief.warning = 'Nenhum símbolo do repositório coincidiu diretamente com os termos da demanda. Especifique o caminho do módulo (ex: src/ledger) ou adicione termos ao léxico (.harness/domain-lexicon.json) para ancoragem precisa.';
+      }
       process.stdout.write(`${JSON.stringify(brief)}\n`);
       return;
     }

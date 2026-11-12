@@ -18,7 +18,8 @@
     "aegis:test:field-lifecycle": "node scripts/substrates/test/test_field_lifecycle.mjs",
     "aegis:test:issue-contract": "bash scripts/substrates/test/test_issue_contract.sh",
     "aegis:test:workspace-skeleton": "node scripts/substrates/test/test_workspace_skeleton.mjs",
-    "aegis:test": "npm run aegis:check-generated-schemas && node scripts/substrates/test/test_semantic_output.mjs && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:workspace-skeleton && npm run aegis:test:issue-contract"
+    "aegis:test:semantic-scout": "node scripts/substrates/test/test_semantic_scout.mjs",
+    "aegis:test": "npm run aegis:check-generated-schemas && node scripts/substrates/test/test_semantic_output.mjs && npm run aegis:test:governance-schemas && npm run aegis:test:field-lifecycle && npm run aegis:test:workspace-skeleton && npm run aegis:test:semantic-scout && npm run aegis:test:issue-contract"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.30.0",

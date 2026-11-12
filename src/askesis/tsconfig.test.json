@@ -1,0 +1,19 @@
+{
+  // Test-only project: enables Vitest/Node/Vite type globals.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["vitest", "node", "vite/client"]
+  },
+  // O `exclude` do tsconfig.app.json é herdado e exclui **/*.test.ts — sem esta
+  // linha o projeto de teste não enxergava nenhum arquivo e `npm run typecheck:test`
+  // passava sempre, vazio. Descoberto em 2026-08-13, com um import morto num teste
+  // que só a execução pegou.
+  "exclude": ["node_modules"],
+  "include": [
+    "**/*.test.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "types/**/*.d.ts"
+  ]
+}

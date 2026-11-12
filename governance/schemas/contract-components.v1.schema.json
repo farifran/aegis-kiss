@@ -882,7 +882,7 @@
             "symbolCount": {"type":"integer","minimum":0},
             "symbols": {
               "type": "array",
-              "maxItems": 1024,
+              "maxItems": 4096,
               "items": {
                 "type": "object",
                 "additionalProperties": false,

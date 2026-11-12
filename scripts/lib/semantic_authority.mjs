@@ -1,4 +1,4 @@
-const sourceEvidenceByteLimit = 32_768;
+const sourceEvidenceByteLimit = 65_536;
 const sourceEvidenceFileByteLimit = 8_192;
 
 // Witness content is semantic; identity and subject binding are mechanical.

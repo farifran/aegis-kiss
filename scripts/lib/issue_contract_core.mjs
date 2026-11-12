@@ -38,9 +38,9 @@ export function captureDemand(args) {
   return text;
 }
 
-const discoveryFileLimit = 256;
-const discoveryEntryLimit = 512;
-const discoveryByteLimit = 1_048_576;
+const discoveryFileLimit = 1024;
+const discoveryEntryLimit = 4096;
+const discoveryByteLimit = 8_388_608;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -98,6 +98,9 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceS
         continue;
       }
       if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === 'build' || entry.name === 'coverage' || entry.name === '.turbo' || entry.name === '.next') {
+          continue;
+        }
         inspectDirectory(absolutePath);
         continue;
       }

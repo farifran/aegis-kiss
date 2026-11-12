@@ -41,7 +41,7 @@
         "status": {"enum":["EMPTY_SOURCE","NO_TEXT_SOURCE","SOURCE_OBSERVED"]},
         "files": {
           "type": "array",
-          "maxItems": 256,
+          "maxItems": 1024,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -51,7 +51,7 @@
                 "type": "string",
                 "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
               },
-              "bytes": {"type":"integer","minimum":0,"maximum":1048576},
+              "bytes": {"type":"integer","minimum":0,"maximum":8388608},
               "digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
               "kind": {"enum":["UTF8_TEXT","BINARY","INVALID_UTF8"]}
             }
@@ -60,7 +60,7 @@
         },
         "ignoredEntries": {
           "type": "array",
-          "maxItems": 512,
+          "maxItems": 2048,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -75,8 +75,8 @@
           },
           "uniqueItems": true
         },
-        "visitedEntries": {"type":"integer","minimum":0,"maximum":512},
-        "scannedBytes": {"type":"integer","minimum":0,"maximum":1048576},
+        "visitedEntries": {"type":"integer","minimum":0,"maximum":4096},
+        "scannedBytes": {"type":"integer","minimum":0,"maximum":8388608},
         "sourceSnapshotDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
         "workspaceSkeleton": {
           "type": "object",
@@ -88,7 +88,7 @@
             "symbolCount": {"type":"integer","minimum":0},
             "symbols": {
               "type": "array",
-              "maxItems": 1024,
+              "maxItems": 4096,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
