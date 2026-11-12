@@ -18,27 +18,61 @@
     "artifactPath"
   ],
   "properties": {
-    "schema": {"const":"aegis.confirmation_request.v5"},
-    "status": {"const":"USER_CONFIRMATION_REQUIRED"},
-    "executionId": {"type":"string","pattern":"^draft-[a-f0-9]{16}$"},
-    "contractDraftDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "title": {"type":"string","minLength":1},
-    "recommendationPolicy": {"const":"RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS"},
-    "requiredAttestation": {"const":"CONTRACT_REVIEWED_AND_APPROVED"},
-    "questionCount": {"type":"integer","minimum":0},
+    "schema": {
+      "const": "aegis.confirmation_request.v5"
+    },
+    "status": {
+      "const": "USER_CONFIRMATION_REQUIRED"
+    },
+    "executionId": {
+      "type": "string",
+      "pattern": "^draft-[a-f0-9]{16}$"
+    },
+    "contractDraftDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommendationPolicy": {
+      "const": "RECOMMENDATIONS_ARE_NOT_HUMAN_DECISIONS"
+    },
+    "requiredAttestation": {
+      "const": "CONTRACT_REVIEWED_AND_APPROVED"
+    },
+    "questionCount": {
+      "type": "integer",
+      "minimum": 0
+    },
     "bulkRecommendationAction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id","label","description"],
+      "required": [
+        "id",
+        "label",
+        "description"
+      ],
       "properties": {
-        "id": {"const":"ACCEPT_RECOMMENDED_REMAINING"},
-        "label": {"const":"Aceitar esta recomendação e todas as restantes"},
+        "id": {
+          "const": "ACCEPT_RECOMMENDED_REMAINING"
+        },
+        "label": {
+          "const": "Aceitar esta recomendação e todas as restantes"
+        },
         "description": {
           "const": "Preserva escolhas anteriores e seleciona a opção recomendada desta pergunta e de todas as perguntas seguintes."
         }
       }
     },
-    "questions": {"type":"array","items":{"$ref":"aegis.contract_components.v1#/$defs/wizard_question"}},
-    "artifactPath": {"const":".harness/runtime/contract.md"}
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/wizard_question"
+      }
+    },
+    "artifactPath": {
+      "const": ".harness/runtime/contract.md"
+    }
   }
 }

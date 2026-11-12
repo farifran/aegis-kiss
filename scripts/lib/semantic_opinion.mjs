@@ -457,24 +457,7 @@ function normalizeSemanticOpinion(opinion, request) {
   return cloned;
 }
 
-export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
-  assertSchema('aegis.semantic_request.v10', request);
-  const { requestDigest, ...requestPayload } = request;
-  if (requestDigest !== canonicalDigest(requestPayload)) {
-    throw new Error('semantic_request_digest_mismatch');
-  }
-  // The transport binds the response to this request; the model need not echo custody fields.
-  opinion = {
-    ...opinion,
-    schema: opinion.schema === undefined ? 'aegis.semantic_opinion.v3' : opinion.schema,
-    sourceEvidenceDigest: opinion.sourceEvidenceDigest === undefined
-      ? request.intentEvidence.evidenceDigest : opinion.sourceEvidenceDigest,
-  };
-  opinion = normalizeSemanticOpinion(opinion, request);
-  omitOptionalNulls(opinion, standaloneSchemaDocument('aegis.semantic_opinion.v3'));
-  assertSchema('aegis.semantic_opinion.v3', opinion);
-  assertEvidenceCoverage(opinion, request);
-
+function buildOpinionCompileContext(opinion, request) {
   const requirementIds = opinion.requirements.map((_, index) => generatedId('REQ', index));
   const invariantIds = opinion.invariants.map((_, index) => generatedId('INV', index));
   const riskIds = opinion.risks.map((_, index) => generatedId('RISK', index));
@@ -495,6 +478,8 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       `ANS-${String(decisionIndex + 1).padStart(4, '0')}-${String(answerIndex + 1).padStart(2, '0')}`
     ))
   ));
+  const fragmentIds = request.intentEvidence.fragments.map(({ id }) => id);
+  const dimensions = opinion.determinismReview.dimensions;
   const targetCollections = {
     REQUIREMENT: requirementIds,
     INVARIANT: invariantIds,
@@ -512,6 +497,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
   const compileIndexes = (indexes, values, kind) => indexes.map((index) => (
     indexedValue(values, index, kind)
   ));
+  const compileFragmentIndexes = (indexes) => compileIndexes(indexes, fragmentIds, 'fragment');
   const compileAcceptanceReference = ({ requirementIndex, caseIndex }) => (
     indexedValue(
       indexedValue(acceptanceIds, requirementIndex, 'acceptance_requirement'),
@@ -537,7 +523,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
         value: measurement.target.value,
         source: measurement.target.source,
         reference: indexedValue(
-          request.revision?.answers.map(({ questionId }) => questionId) ?? [],
+          resolvedDecisionIds,
           measurement.target.resolutionIndex,
           'measurement_decision',
         ),
@@ -546,9 +532,6 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       : measurement.target;
     return { ...measurement, target };
   };
-  const dimensions = opinion.determinismReview.dimensions;
-  const fragmentIds = request.intentEvidence.fragments.map(({ id }) => id);
-  const compileFragmentIndexes = (indexes) => compileIndexes(indexes, fragmentIds, 'fragment');
   const dimensionIdentity = (dimensionIndex) => {
     const dimension = indexedValue(dimensions, dimensionIndex, 'determinism_coverage_dimension');
     return {
@@ -559,6 +542,193 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     };
   };
 
+  return {
+    requirementIds,
+    invariantIds,
+    riskIds,
+    decisionIds,
+    noteIds,
+    pathIds,
+    boundaryIds,
+    policyRuleIds,
+    amendmentIds,
+    acceptanceIds,
+    answerIds,
+    fragmentIds,
+    dimensions,
+    compileTargets,
+    compileIndexes,
+    compileFragmentIndexes,
+    compileAcceptanceReference,
+    compileDecisionBinding,
+    compileMeasurement,
+    dimensionIdentity,
+  };
+}
+
+function compileRequirementsSection(opinion, request, ctx) {
+  return opinion.requirements.map((requirement, requirementIndex) => ({
+    id: ctx.requirementIds[requirementIndex],
+    kind: requirement.kind,
+    statement: requirement.statement,
+    basis: compileOpinionBasis(requirement.basis, request),
+    sourceFragmentIds: ctx.compileFragmentIndexes(requirement.fragmentIndexes),
+    measurement: ctx.compileMeasurement(requirement.measurement),
+    acceptanceCases: requirement.acceptanceCases.map((acceptanceCase, caseIndex) => ({
+      id: ctx.acceptanceIds[requirementIndex][caseIndex],
+      kind: acceptanceCase.kind,
+      given: acceptanceCase.given,
+      when: acceptanceCase.when,
+      then: acceptanceCase.then,
+      outcomeKind: acceptanceCase.outcomeKind,
+      decisionBinding: ctx.compileDecisionBinding(acceptanceCase.decisionBinding),
+      boundaryBinding: acceptanceCase.boundaryBinding === null
+        ? null
+        : {
+          ruleId: indexedValue(
+            ctx.boundaryIds,
+            acceptanceCase.boundaryBinding.boundaryIndex,
+            'boundary_rule',
+          ),
+          side: acceptanceCase.boundaryBinding.side,
+          expectedBehavior: acceptanceCase.boundaryBinding.expectedBehavior,
+          expectedValue: acceptanceCase.boundaryBinding.expectedValue,
+        },
+    })),
+  }));
+}
+
+function compileDeterminismReviewSection(opinion, request, ctx) {
+  const { dimensions } = ctx;
+  const claimIds = opinion.intentClaims.map((_, index) => generatedId('CLAIM', index));
+  return {
+    status: dimensions.length === 0
+      ? 'NOT_APPLICABLE'
+      : dimensions.some(({ status }) => (
+        status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
+      ))
+        ? 'GAPS_FOUND'
+        : 'SEMANTICALLY_CLOSED',
+    rationale: opinion.determinismReview.rationale,
+    sourceFragmentIds: ctx.compileFragmentIndexes(opinion.determinismReview.fragmentIndexes),
+    coverage: opinion.determinismReview.coverage.map((item) => ({
+      claimId: indexedValue(claimIds, item.claimIndex, 'determinism_coverage_claim'),
+      disposition: item.disposition,
+      dimensions: item.dimensionIndexes.map(ctx.dimensionIdentity),
+      rationale: item.rationale,
+    })),
+    dimensions: dimensions.map((item) => {
+      const basis = compileOpinionBasis(item.basis, request);
+      const subjectId = item.subject === null
+        ? 'PUBLIC_CONTRACT'
+        : ctx.compileTargets([item.subject])[0];
+      const witness = compileCounterexampleWitness(item.kind, subjectId, item.counterexampleWitness);
+      return {
+        kind: item.kind,
+        subjectId,
+        status: item.status,
+        rationale: item.rationale,
+        targetIds: ctx.compileTargets(item.targets),
+        basis,
+        closureAuthority: closureAuthorityForDimension({ status: item.status, basis }),
+        counterexampleWitness: witness,
+        proofObligation: item.proofObligation === null
+          ? null
+          : {
+            ...item.proofObligation,
+            witnessId: witness.id,
+          },
+        inapplicabilityProof: item.inapplicabilityProof,
+        acceptanceCaseId: item.acceptanceCase === null
+          ? null
+          : ctx.compileAcceptanceReference(item.acceptanceCase),
+      };
+    }),
+  };
+}
+
+function compileDecisionsSection(opinion, ctx) {
+  return opinion.decisions.map((item, decisionIndex) => ({
+    ...(item.semanticKey ? { semanticKey: item.semanticKey } : {}),
+    questionId: ctx.decisionIds[decisionIndex],
+    question: item.question,
+    presentation: item.presentation,
+    recommendedAnswerId: indexedValue(
+      ctx.answerIds[decisionIndex],
+      item.recommendedAnswerIndex,
+      'recommended_answer',
+    ),
+    requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
+    invariantIds: ctx.compileIndexes(item.invariantIndexes, ctx.invariantIds, 'invariant'),
+    riskIds: ctx.compileIndexes(item.riskIndexes, ctx.riskIds, 'risk'),
+    distinguishingCase: {
+      given: item.distinguishingCase.given,
+      when: item.distinguishingCase.when,
+      outcomes: item.distinguishingCase.outcomes.map(({ answerIndex, then }) => ({
+        answerId: indexedValue(ctx.answerIds[decisionIndex], answerIndex, 'distinguishing_answer'),
+        then,
+      })),
+    },
+    answers: item.answers.map((answer, answerIndex) => ({
+      id: ctx.answerIds[decisionIndex][answerIndex],
+      label: answer.label,
+      rationale: answer.rationale,
+      contractEffect: answer.contractEffect,
+      recommended: answerIndex === item.recommendedAnswerIndex,
+    })),
+  }));
+}
+
+function compilePreparedAnswerEffects(opinion, draft, request) {
+  for (const [decisionIndex, decision] of opinion.decisions.entries()) {
+    for (const [answerIndex, answer] of decision.answers.entries()) {
+      if (answer.preparedEffect == null) continue;
+      const variant = globalThis.structuredClone(opinion);
+      for (const item of variant.decisions) {
+        for (const option of item.answers) delete option.preparedEffect;
+      }
+      replacePreparedEntries(variant, answer.preparedEffect);
+      for (const entry of (answer.preparedEffect.requirements ?? [])) {
+        if (!entry.patch?.acceptanceCases) continue;
+        for (const acPatch of entry.patch.acceptanceCases) {
+          if (variant.requirements[entry.index]?.acceptanceCases[acPatch.index]) {
+            variant.requirements[entry.index].acceptanceCases[acPatch.index].decisionBinding = {
+              decisionIndex,
+              answerIndex,
+            };
+          }
+        }
+      }
+      const compiled = compileSemanticOpinion(variant, request, false);
+      draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = Object.fromEntries(
+        effectCollections.map((key) => [key, (answer.preparedEffect[key] ?? []).map((entry) => ({
+          index: entry.index,
+          value: effectCollection(compiled, key)[entry.index],
+        }))]),
+      );
+    }
+  }
+}
+
+export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
+  assertSchema('aegis.semantic_request.v10', request);
+  const { requestDigest, ...requestPayload } = request;
+  if (requestDigest !== canonicalDigest(requestPayload)) {
+    throw new Error('semantic_request_digest_mismatch');
+  }
+  // The transport binds the response to this request; the model need not echo custody fields.
+  opinion = {
+    ...opinion,
+    schema: opinion.schema === undefined ? 'aegis.semantic_opinion.v3' : opinion.schema,
+    sourceEvidenceDigest: opinion.sourceEvidenceDigest === undefined
+      ? request.intentEvidence.evidenceDigest : opinion.sourceEvidenceDigest,
+  };
+  opinion = normalizeSemanticOpinion(opinion, request);
+  omitOptionalNulls(opinion, standaloneSchemaDocument('aegis.semantic_opinion.v3'));
+  assertSchema('aegis.semantic_opinion.v3', opinion);
+  assertEvidenceCoverage(opinion, request);
+
+  const ctx = buildOpinionCompileContext(opinion, request);
   const draft = {
     schema: 'aegis.semantic_draft.v9',
     sourceContextDigest: request.contextDigest,
@@ -567,7 +737,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     interpretation: opinion.interpretation,
     changeKind: opinion.changeKind,
     scope: opinion.scope,
-    fragmentDispositions: fragmentIds.map((fragmentId, fragmentIndex) => {
+    fragmentDispositions: ctx.fragmentIds.map((fragmentId, fragmentIndex) => {
       const claimIds = opinion.intentClaims.flatMap((claim, claimIndex) => (
         claim.fragmentIndexes.includes(fragmentIndex) ? [generatedId('CLAIM', claimIndex)] : []
       ));
@@ -583,27 +753,27 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     intentClaims: opinion.intentClaims.map((claim, index) => ({
       id: generatedId('CLAIM', index),
       quote: claim.quote,
-      sourceFragmentIds: compileFragmentIndexes(claim.fragmentIndexes),
+      sourceFragmentIds: ctx.compileFragmentIndexes(claim.fragmentIndexes),
       kind: claim.kind,
       disposition: claim.disposition,
       contractEffect: claim.contractEffect,
-      targetIds: compileTargets(claim.targets),
+      targetIds: ctx.compileTargets(claim.targets),
       rationale: claim.rationale,
     })),
     nonNormativeItems: opinion.nonNormativeItems.map((item, index) => ({
-      id: noteIds[index],
+      id: ctx.noteIds[index],
       kind: item.kind,
       statement: item.statement,
       status: 'NON_NORMATIVE',
-      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
+      sourceFragmentIds: ctx.compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
     pathReferences: opinion.pathReferences.map((item, index) => ({
-      id: pathIds[index],
+      id: ctx.pathIds[index],
       path: item.path,
       role: item.role,
       rationale: item.rationale,
-      requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
+      requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
       basis: compileOpinionBasis(item.basis, request),
     })),
     architectureContexts: opinion.architectureContexts.map((item) => ({
@@ -612,16 +782,16 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       basis: compileOpinionBasis(item.basis, request),
     })),
     policyAssessments: opinion.policyAssessments.map((item) => ({
-      ruleId: indexedValue(policyRuleIds, item.ruleIndex, 'policy_rule'),
+      ruleId: indexedValue(ctx.policyRuleIds, item.ruleIndex, 'policy_rule'),
       demandStatus: item.demandStatus,
       recommendedStatus: item.recommendedStatus,
       rationale: item.rationale,
       decisionId: item.decisionIndex === null
         ? null
-        : indexedValue(decisionIds, item.decisionIndex, 'policy_decision'),
+        : indexedValue(ctx.decisionIds, item.decisionIndex, 'policy_decision'),
       amendmentId: item.amendmentIndex === null
         ? null
-        : indexedValue(amendmentIds, item.amendmentIndex, 'policy_amendment'),
+        : indexedValue(ctx.amendmentIds, item.amendmentIndex, 'policy_amendment'),
     })),
     complexityReview: {
       ...opinion.complexityReview,
@@ -630,48 +800,20 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
         basis: compileOpinionBasis(item.basis, request),
       })),
     },
-    requirements: opinion.requirements.map((requirement, requirementIndex) => ({
-      id: requirementIds[requirementIndex],
-      kind: requirement.kind,
-      statement: requirement.statement,
-      basis: compileOpinionBasis(requirement.basis, request),
-      sourceFragmentIds: compileFragmentIndexes(requirement.fragmentIndexes),
-      measurement: compileMeasurement(requirement.measurement),
-      acceptanceCases: requirement.acceptanceCases.map((acceptanceCase, caseIndex) => ({
-        id: acceptanceIds[requirementIndex][caseIndex],
-        kind: acceptanceCase.kind,
-        given: acceptanceCase.given,
-        when: acceptanceCase.when,
-        then: acceptanceCase.then,
-        outcomeKind: acceptanceCase.outcomeKind,
-        decisionBinding: compileDecisionBinding(acceptanceCase.decisionBinding),
-        boundaryBinding: acceptanceCase.boundaryBinding === null
-          ? null
-          : {
-            ruleId: indexedValue(
-              boundaryIds,
-              acceptanceCase.boundaryBinding.boundaryIndex,
-              'boundary_rule',
-            ),
-            side: acceptanceCase.boundaryBinding.side,
-            expectedBehavior: acceptanceCase.boundaryBinding.expectedBehavior,
-            expectedValue: acceptanceCase.boundaryBinding.expectedValue,
-          },
-      })),
-    })),
+    requirements: compileRequirementsSection(opinion, request, ctx),
     invariants: opinion.invariants.map((item, index) => ({
-      id: invariantIds[index],
+      id: ctx.invariantIds[index],
       statement: item.statement,
       falsification: item.falsification,
-      requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
+      requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
     })),
     risks: opinion.risks.map((item, index) => ({
-      id: riskIds[index],
+      id: ctx.riskIds[index],
       kind: item.kind,
       level: item.level,
       statement: item.statement,
       mitigation: item.mitigation,
-      requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
+      requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
       basis: compileOpinionBasis(item.basis, request),
     })),
     riskReview: {
@@ -691,63 +833,13 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
         disposition: item.disposition,
         challenge: item.challenge,
         response: item.response,
-        targetIds: compileTargets(item.targets),
+        targetIds: ctx.compileTargets(item.targets),
         basis: compileOpinionBasis(item.basis, request),
       })),
     },
-    determinismReview: {
-      status: dimensions.length === 0
-        ? 'NOT_APPLICABLE'
-        : dimensions.some(({ status }) => (
-          status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
-        ))
-          ? 'GAPS_FOUND'
-          : 'SEMANTICALLY_CLOSED',
-      rationale: opinion.determinismReview.rationale,
-      sourceFragmentIds: compileFragmentIndexes(opinion.determinismReview.fragmentIndexes),
-      coverage: opinion.determinismReview.coverage.map((item) => ({
-        claimId: indexedValue(
-          opinion.intentClaims.map((_, index) => generatedId('CLAIM', index)),
-          item.claimIndex,
-          'determinism_coverage_claim',
-        ),
-        disposition: item.disposition,
-        dimensions: item.dimensionIndexes.map(dimensionIdentity),
-        rationale: item.rationale,
-      })),
-      dimensions: dimensions.map((item) => {
-        const basis = compileOpinionBasis(item.basis, request);
-        const subjectId = item.subject === null
-          ? 'PUBLIC_CONTRACT'
-          : compileTargets([item.subject])[0];
-        const witness = compileCounterexampleWitness(item.kind, subjectId, item.counterexampleWitness);
-        return {
-          kind: item.kind,
-          subjectId,
-          status: item.status,
-          rationale: item.rationale,
-          targetIds: compileTargets(item.targets),
-          basis,
-          closureAuthority: closureAuthorityForDimension({
-            status: item.status,
-            basis,
-          }),
-          counterexampleWitness: witness,
-          proofObligation: item.proofObligation === null
-            ? null
-            : {
-              ...item.proofObligation,
-              witnessId: witness.id,
-            },
-          inapplicabilityProof: item.inapplicabilityProof,
-          acceptanceCaseId: item.acceptanceCase === null
-            ? null
-            : compileAcceptanceReference(item.acceptanceCase),
-        };
-      }),
-    },
+    determinismReview: compileDeterminismReviewSection(opinion, request, ctx),
     boundaryRules: opinion.boundaryRules.map((item, index) => ({
-      id: boundaryIds[index],
+      id: ctx.boundaryIds[index],
       subject: item.subject,
       representationKind: item.representationKind,
       lowerBound: item.lowerBound,
@@ -756,10 +848,10 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       overflowBehavior: item.overflowBehavior,
       decisionId: item.decisionIndex === null
         ? null
-        : indexedValue(decisionIds, item.decisionIndex, 'boundary_decision'),
-      requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
-      acceptanceCaseIds: item.acceptanceCases.map(compileAcceptanceReference),
-      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
+        : indexedValue(ctx.decisionIds, item.decisionIndex, 'boundary_decision'),
+      requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
+      acceptanceCaseIds: item.acceptanceCases.map(ctx.compileAcceptanceReference),
+      sourceFragmentIds: ctx.compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
     unknowns: opinion.unknowns.map((item, index) => ({
@@ -768,39 +860,11 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       material: item.material,
       decisionId: item.decisionIndex === null
         ? null
-        : indexedValue(decisionIds, item.decisionIndex, 'unknown_decision'),
-      sourceFragmentIds: compileFragmentIndexes(item.fragmentIndexes),
+        : indexedValue(ctx.decisionIds, item.decisionIndex, 'unknown_decision'),
+      sourceFragmentIds: ctx.compileFragmentIndexes(item.fragmentIndexes),
       basis: compileOpinionBasis(item.basis, request),
     })),
-    decisions: opinion.decisions.map((item, decisionIndex) => ({
-      ...(item.semanticKey ? { semanticKey: item.semanticKey } : {}),
-      questionId: decisionIds[decisionIndex],
-      question: item.question,
-      presentation: item.presentation,
-      recommendedAnswerId: indexedValue(
-        answerIds[decisionIndex],
-        item.recommendedAnswerIndex,
-        'recommended_answer',
-      ),
-      requirementIds: compileIndexes(item.requirementIndexes, requirementIds, 'requirement'),
-      invariantIds: compileIndexes(item.invariantIndexes, invariantIds, 'invariant'),
-      riskIds: compileIndexes(item.riskIndexes, riskIds, 'risk'),
-      distinguishingCase: {
-        given: item.distinguishingCase.given,
-        when: item.distinguishingCase.when,
-        outcomes: item.distinguishingCase.outcomes.map(({ answerIndex, then }) => ({
-          answerId: indexedValue(answerIds[decisionIndex], answerIndex, 'distinguishing_answer'),
-          then,
-        })),
-      },
-      answers: item.answers.map((answer, answerIndex) => ({
-        id: answerIds[decisionIndex][answerIndex],
-        label: answer.label,
-        rationale: answer.rationale,
-        contractEffect: answer.contractEffect,
-        recommended: answerIndex === item.recommendedAnswerIndex,
-      })),
-    })),
+    decisions: compileDecisionsSection(opinion, ctx),
     stateModel: opinion.stateModel ?? {
       entities: [],
       operations: [],
@@ -816,36 +880,6 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     },
     humanResolutions: [],
   });
-  if (compilePrepared) {
-    for (const [decisionIndex, decision] of opinion.decisions.entries()) {
-      for (const [answerIndex, answer] of decision.answers.entries()) {
-        if (answer.preparedEffect == null) continue;
-        const variant = globalThis.structuredClone(opinion);
-        for (const item of variant.decisions) {
-          for (const option of item.answers) delete option.preparedEffect;
-        }
-        replacePreparedEntries(variant, answer.preparedEffect);
-        for (const entry of (answer.preparedEffect.requirements ?? [])) {
-          if (entry.patch?.acceptanceCases) {
-            for (const acPatch of entry.patch.acceptanceCases) {
-              if (variant.requirements[entry.index]?.acceptanceCases[acPatch.index]) {
-                variant.requirements[entry.index].acceptanceCases[acPatch.index].decisionBinding = {
-                  decisionIndex,
-                  answerIndex,
-                };
-              }
-            }
-          }
-        }
-        const compiled = compileSemanticOpinion(variant, request, false);
-        draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = Object.fromEntries(
-          effectCollections.map((key) => [key, (answer.preparedEffect[key] ?? []).map((entry) => ({
-            index: entry.index,
-            value: effectCollection(compiled, key)[entry.index],
-          }))]),
-        );
-      }
-    }
-  }
+  if (compilePrepared) compilePreparedAnswerEffects(opinion, draft, request);
   return draft;
 }

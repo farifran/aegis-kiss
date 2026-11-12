@@ -4,15 +4,34 @@
   "title": "Aegis Cognitive Constitution v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema","constitutionVersion","origin"],
+  "required": [
+    "schema",
+    "constitutionVersion",
+    "origin"
+  ],
   "properties": {
-    "schema": {"const":"aegis.constitution.v1"},
-    "constitutionVersion": {"type":"integer","minimum":1},
+    "schema": {
+      "const": "aegis.constitution.v1"
+    },
+    "constitutionVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
     "origin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourcePath","sourceDigest"],
-      "properties": {"sourcePath":{"const":"AGENTS.md"},"sourceDigest":{"type":"string","pattern":"^[a-f0-9]{64}$"}}
+      "required": [
+        "sourcePath",
+        "sourceDigest"
+      ],
+      "properties": {
+        "sourcePath": {
+          "const": "AGENTS.md"
+        },
+        "sourceDigest": {
+          "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+        }
+      }
     }
   }
 }

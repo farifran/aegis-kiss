@@ -22,20 +22,51 @@
     "approval"
   ],
   "properties": {
-    "schema": {"const":"aegis.issue_contract.v14"},
-    "implementationAuthorized": {"const":false},
-    "sourceSemanticRequestDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "semanticRevision": {"$ref":"aegis.semantic_request.v10#/properties/revision"},
-    "sourcePreflightDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "sourceSnapshotDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "policyDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "constitutionDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-    "intent": {"type":"string","minLength":1},
-    "observedPaths": {"$ref":"aegis.contract_components.v1#/$defs/issue_contract_observedPaths"},
-    "intentEvidence": {"$ref":"aegis.intent_evidence.v1"},
-    "specification": {"$ref":"aegis.semantic_draft.v9"},
-    "effectiveDeterminismStatus": {"$ref":"aegis.contract_components.v1#/$defs/issue_contract_effectiveDeterminismStatus"},
-    "humanResolutions": {"$ref":"aegis.contract_components.v1#/$defs/issue_contract_humanResolutions"},
-    "approval": {"$ref":"aegis.contract_components.v1#/$defs/issue_contract_approval"}
+    "schema": {
+      "const": "aegis.issue_contract.v14"
+    },
+    "implementationAuthorized": {
+      "const": false
+    },
+    "sourceSemanticRequestDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "semanticRevision": {
+      "$ref": "aegis.semantic_request.v10#/properties/revision"
+    },
+    "sourcePreflightDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "sourceSnapshotDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "policyDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "constitutionDigest": {
+      "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observedPaths": {
+      "$ref": "aegis.contract_components.v1#/$defs/issue_contract_observedPaths"
+    },
+    "intentEvidence": {
+      "$ref": "aegis.intent_evidence.v1"
+    },
+    "specification": {
+      "$ref": "aegis.semantic_draft.v9"
+    },
+    "effectiveDeterminismStatus": {
+      "$ref": "aegis.contract_components.v1#/$defs/issue_contract_effectiveDeterminismStatus"
+    },
+    "humanResolutions": {
+      "$ref": "aegis.contract_components.v1#/$defs/issue_contract_humanResolutions"
+    },
+    "approval": {
+      "$ref": "aegis.contract_components.v1#/$defs/issue_contract_approval"
+    }
   }
 }

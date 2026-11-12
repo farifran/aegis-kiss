@@ -2,34 +2,101 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "aegis.contract_components.v1",
   "$defs": {
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "src_path": {
+      "type": "string",
+      "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
+    },
     "semantic_opinion_invariants_items": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["statement","falsification","requirementIndexes"],
+      "required": [
+        "statement",
+        "falsification",
+        "requirementIndexes"
+      ],
       "properties": {
-        "statement": {"type":"string","minLength":1},
-        "falsification": {"type":"string","minLength":1},
-        "requirementIndexes": {"type":"array","minItems":1,"items":{"type":"integer","minimum":0},"uniqueItems":true}
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "falsification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirementIndexes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        }
       }
     },
     "semantic_opinion_risks_items": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind","level","statement","mitigation","requirementIndexes","basis"],
+      "required": [
+        "kind",
+        "level",
+        "statement",
+        "mitigation",
+        "requirementIndexes",
+        "basis"
+      ],
       "properties": {
-        "kind": {"enum":["SECURITY","RELIABILITY","PRIVACY","PERFORMANCE","INTEGRITY","COMPLEXITY"]},
-        "level": {"enum":["LOW","MEDIUM","HIGH","CRITICAL"]},
-        "statement": {"type":"string","minLength":1},
-        "mitigation": {"type":"string","minLength":1},
-        "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"},
-        "requirementIndexes": {"type":"array","minItems":1,"items":{"type":"integer","minimum":0},"uniqueItems":true}
+        "kind": {
+          "enum": [
+            "SECURITY",
+            "RELIABILITY",
+            "PRIVACY",
+            "PERFORMANCE",
+            "INTEGRITY",
+            "COMPLEXITY"
+          ]
+        },
+        "level": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mitigation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "basis": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+        },
+        "requirementIndexes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        }
       }
     },
     "semantic_opinion_basis": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basisRef"}
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basisRef"
+      }
     },
     "semantic_opinion_basisRef": {
       "description": "Selecione uma fonte verificável. resolutionIndex aponta para revision.answers; referências textuais são validadas pelo Harness contra a intenção, Constituição, política ou evidência disponível.",
@@ -37,13 +104,27 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source","resolutionIndex"],
-          "properties": {"source":{"const":"USER_DECISION"},"resolutionIndex":{"type":"integer","minimum":0}}
+          "required": [
+            "source",
+            "resolutionIndex"
+          ],
+          "properties": {
+            "source": {
+              "const": "USER_DECISION"
+            },
+            "resolutionIndex": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source","reference"],
+          "required": [
+            "source",
+            "reference"
+          ],
           "properties": {
             "source": {
               "enum": [
@@ -55,7 +136,11 @@
                 "MODEL_ANALYSIS"
               ]
             },
-            "reference": {"type":"string","minLength":1,"maxLength":240}
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            }
           }
         }
       ]
@@ -76,53 +161,103 @@
         "counterexampleWitness"
       ],
       "properties": {
-        "kind": {"type":"string","pattern":"^[A-Z][A-Z0-9_]{1,79}$"},
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
+        },
         "subject": {
           "oneOf": [
-            {"type":"null"},
+            {
+              "type": "null"
+            },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["kind","index"],
-              "properties": {"kind":{"enum":["REQUIREMENT","BOUNDARY_RULE"]},"index":{"type":"integer","minimum":0}}
+              "required": [
+                "kind",
+                "index"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "REQUIREMENT",
+                    "BOUNDARY_RULE"
+                  ]
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
             }
           ]
         },
-        "status": {"enum":["SPECIFIED","NOT_APPLICABLE","DECISION_REQUIRED","GAP_FOUND"]},
+        "status": {
+          "enum": [
+            "SPECIFIED",
+            "NOT_APPLICABLE",
+            "DECISION_REQUIRED",
+            "GAP_FOUND"
+          ]
+        },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados do witness ficam em proofObligation e o caso de aceitação é vinculado por acceptanceCase."
         },
-        "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"},
+        "basis": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+        },
         "targets": {
           "type": "array",
-          "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"},
+          "items": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
+          },
           "uniqueItems": true
         },
         "acceptanceCase": {
-          "oneOf": [{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_acceptanceCaseRef"}]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_acceptanceCaseRef"
+            }
+          ]
         },
         "proofObligation": {
           "oneOf": [
-            {"type":"null"},
-            {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_determinismProofObligation"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_determinismProofObligation"
+            }
           ]
         },
         "inapplicabilityProof": {
           "oneOf": [
-            {"type":"null"},
-            {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_inapplicabilityProof"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_inapplicabilityProof"
+            }
           ]
         },
-        "counterexampleWitness": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_counterexampleWitness"}
+        "counterexampleWitness": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_counterexampleWitness"
+        }
       }
     },
     "semantic_opinion_targetRef": {
       "description": "Vínculo posicional. POLICY_RULE aponta para policy.rules da solicitação; RESOLVED_DECISION aponta para revision.answers; os demais tipos apontam para o array correspondente deste parecer.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind","index"],
+      "required": [
+        "kind",
+        "index"
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -137,15 +272,30 @@
             "POLICY_RULE"
           ]
         },
-        "index": {"type":"integer","minimum":0}
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "semantic_opinion_acceptanceCaseRef": {
       "description": "Vínculo posicional com requirements[requirementIndex].acceptanceCases[caseIndex] deste parecer.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["requirementIndex","caseIndex"],
-      "properties": {"requirementIndex":{"type":"integer","minimum":0},"caseIndex":{"type":"integer","minimum":0}}
+      "required": [
+        "requirementIndex",
+        "caseIndex"
+      ],
+      "properties": {
+        "requirementIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "caseIndex": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "semantic_opinion_determinismProofObligation": {
       "type": "object",
@@ -160,18 +310,58 @@
         "observables"
       ],
       "properties": {
-        "relation": {"enum":["OUTPUTS_EQUAL","DEFINED_RESULT","EXPLICIT_REJECTION"]},
-        "resolutionKind": {"type":"string","pattern":"^[A-Z][A-Z0-9_]{1,79}$"},
-        "resolutionParameter": {"type":["string","null"],"minLength":1,"maxLength":240},
-        "boundaryInclusivity": {"type":["string","null"],"enum":["HALF_OPEN_RIGHT","HALF_OPEN_LEFT","CLOSED","OPEN",null]},
-        "baselineOutcome": {"type":"string","minLength":1,"maxLength":240},
-        "variationOutcome": {"type":"string","minLength":1,"maxLength":240},
+        "relation": {
+          "enum": [
+            "OUTPUTS_EQUAL",
+            "DEFINED_RESULT",
+            "EXPLICIT_REJECTION"
+          ]
+        },
+        "resolutionKind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
+        },
+        "resolutionParameter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "boundaryInclusivity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HALF_OPEN_RIGHT",
+            "HALF_OPEN_LEFT",
+            "CLOSED",
+            "OPEN",
+            null
+          ]
+        },
+        "baselineOutcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "variationOutcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
         "observables": {
           "type": "array",
           "minItems": 1,
           "maxItems": 16,
           "uniqueItems": true,
-          "items": {"type":"string","minLength":2,"maxLength":120}
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120
+          }
         }
       }
     },
@@ -179,49 +369,136 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Prova autorizada de que a estrutura que ativaria a dimensão não existe na fronteira pública contratada.",
-      "required": ["proofKind","structuralRule","absentStructure","evidence"],
+      "required": [
+        "proofKind",
+        "structuralRule",
+        "absentStructure",
+        "evidence"
+      ],
       "properties": {
-        "proofKind": {"const":"STRUCTURAL_ABSENCE"},
-        "structuralRule": {"enum":["OPERATION_ABSENT","INPUT_CLASS_FORBIDDEN","INPUT_SCHEMA_EXCLUDES_CLASS"]},
-        "absentStructure": {"type":"string","minLength":1},
-        "evidence": {"type":"string","minLength":1}
+        "proofKind": {
+          "const": "STRUCTURAL_ABSENCE"
+        },
+        "structuralRule": {
+          "enum": [
+            "OPERATION_ABSENT",
+            "INPUT_CLASS_FORBIDDEN",
+            "INPUT_SCHEMA_EXCLUDES_CLASS"
+          ]
+        },
+        "absentStructure": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "semantic_draft_invariants_items": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id","statement","falsification","requirementIds"],
+      "required": [
+        "id",
+        "statement",
+        "falsification",
+        "requirementIds"
+      ],
       "properties": {
-        "id": {"type":"string","pattern":"^INV-[A-Z0-9][A-Z0-9-]+$"},
-        "statement": {"type":"string","minLength":1},
-        "falsification": {"type":"string","minLength":1},
-        "requirementIds": {"type":"array","minItems":1,"items":{"type":"string"},"uniqueItems":true}
+        "id": {
+          "type": "string",
+          "pattern": "^INV-[A-Z0-9][A-Z0-9-]+$"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "falsification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirementIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       }
     },
     "semantic_draft_risks_items": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id","kind","level","statement","mitigation","requirementIds","basis"],
+      "required": [
+        "id",
+        "kind",
+        "level",
+        "statement",
+        "mitigation",
+        "requirementIds",
+        "basis"
+      ],
       "properties": {
-        "id": {"type":"string","pattern":"^RISK-[A-Z0-9][A-Z0-9-]+$"},
-        "kind": {"enum":["SECURITY","RELIABILITY","PRIVACY","PERFORMANCE","INTEGRITY","COMPLEXITY"]},
-        "level": {"enum":["LOW","MEDIUM","HIGH","CRITICAL"]},
-        "statement": {"type":"string","minLength":1},
-        "mitigation": {"type":"string","minLength":1},
-        "requirementIds": {"type":"array","minItems":1,"items":{"type":"string"},"uniqueItems":true},
-        "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"}
+        "id": {
+          "type": "string",
+          "pattern": "^RISK-[A-Z0-9][A-Z0-9-]+$"
+        },
+        "kind": {
+          "enum": [
+            "SECURITY",
+            "RELIABILITY",
+            "PRIVACY",
+            "PERFORMANCE",
+            "INTEGRITY",
+            "COMPLEXITY"
+          ]
+        },
+        "level": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mitigation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirementIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "basis": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+        }
       }
     },
     "semantic_draft_basis": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basisRef"}
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basisRef"
+      }
     },
     "semantic_draft_basisRef": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source","reference"],
+      "required": [
+        "source",
+        "reference"
+      ],
       "properties": {
         "source": {
           "enum": [
@@ -234,7 +511,11 @@
             "MODEL_ANALYSIS"
           ]
         },
-        "reference": {"type":"string","minLength":1,"maxLength":240}
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
       }
     },
     "semantic_draft_determinismReview_properties_dimensions_items": {
@@ -254,33 +535,82 @@
         "counterexampleWitness"
       ],
       "properties": {
-        "kind": {"type":"string","pattern":"^[A-Z][A-Z0-9_]{1,79}$"},
-        "subjectId": {
-          "oneOf": [{"const":"PUBLIC_CONTRACT"},{"type":"string","pattern":"^(REQ|BOUND)-[A-Z0-9][A-Z0-9-]+$"}]
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
         },
-        "status": {"enum":["SPECIFIED","NOT_APPLICABLE","DECISION_REQUIRED","GAP_FOUND"]},
+        "subjectId": {
+          "oneOf": [
+            {
+              "const": "PUBLIC_CONTRACT"
+            },
+            {
+              "type": "string",
+              "pattern": "^(REQ|BOUND)-[A-Z0-9][A-Z0-9-]+$"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "SPECIFIED",
+            "NOT_APPLICABLE",
+            "DECISION_REQUIRED",
+            "GAP_FOUND"
+          ]
+        },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "description": "Para SPECIFIED, contém a regra autorizada que sustenta a resolução tipada; os resultados do witness ficam em proofObligation e o caso de aceitação é vinculado por acceptanceCaseId."
         },
-        "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"},
-        "acceptanceCaseId": {"type":["string","null"],"pattern":"^AC-[A-Z0-9][A-Z0-9-]+$"},
+        "basis": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+        },
+        "acceptanceCaseId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$"
+        },
         "proofObligation": {
           "oneOf": [
-            {"type":"null"},
-            {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_determinismProofObligation"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismProofObligation"
+            }
           ]
         },
-        "closureAuthority": {"enum":["MECHANICAL_FACT","AUTHORITATIVE_RULE","HUMAN_DECISION","MODEL_ARGUMENT"]},
-        "counterexampleWitness": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_counterexampleWitness"},
+        "closureAuthority": {
+          "enum": [
+            "MECHANICAL_FACT",
+            "AUTHORITATIVE_RULE",
+            "HUMAN_DECISION",
+            "MODEL_ARGUMENT"
+          ]
+        },
+        "counterexampleWitness": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_counterexampleWitness"
+        },
         "inapplicabilityProof": {
-          "oneOf": [{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_inapplicabilityProof"}]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_inapplicabilityProof"
+            }
+          ]
         },
         "targetIds": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"type":"string","pattern":"^(REQ|INV|Q|BOUND)-[A-Z0-9][A-Z0-9-]+$"}
+          "items": {
+            "type": "string",
+            "pattern": "^(REQ|INV|Q|BOUND)-[A-Z0-9][A-Z0-9-]+$"
+          }
         }
       }
     },
@@ -297,60 +627,150 @@
         "observables"
       ],
       "properties": {
-        "witnessId": {"type":"string","pattern":"^WITNESS-[A-Z0-9_-]+$"},
-        "relation": {"enum":["OUTPUTS_EQUAL","DEFINED_RESULT","EXPLICIT_REJECTION"]},
-        "resolutionKind": {"type":"string","pattern":"^[A-Z][A-Z0-9_]{1,79}$"},
-        "resolutionParameter": {"type":["string","null"],"minLength":1,"maxLength":240},
-        "boundaryInclusivity": {"type":["string","null"],"enum":["HALF_OPEN_RIGHT","HALF_OPEN_LEFT","CLOSED","OPEN",null]},
-        "baselineOutcome": {"type":"string","minLength":1,"maxLength":240},
-        "variationOutcome": {"type":"string","minLength":1,"maxLength":240},
+        "witnessId": {
+          "type": "string",
+          "pattern": "^WITNESS-[A-Z0-9_-]+$"
+        },
+        "relation": {
+          "enum": [
+            "OUTPUTS_EQUAL",
+            "DEFINED_RESULT",
+            "EXPLICIT_REJECTION"
+          ]
+        },
+        "resolutionKind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
+        },
+        "resolutionParameter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "boundaryInclusivity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HALF_OPEN_RIGHT",
+            "HALF_OPEN_LEFT",
+            "CLOSED",
+            "OPEN",
+            null
+          ]
+        },
+        "baselineOutcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "variationOutcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
         "observables": {
           "type": "array",
           "minItems": 1,
           "maxItems": 16,
           "uniqueItems": true,
-          "items": {"type":"string","minLength":2,"maxLength":120}
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120
+          }
         }
       }
     },
     "semantic_draft_counterexampleWitness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id","dimension","inputClass","baseline","variation"],
+      "required": [
+        "id",
+        "dimension",
+        "inputClass",
+        "baseline",
+        "variation"
+      ],
       "properties": {
-        "id": {"type":"string","pattern":"^WITNESS-[A-Z0-9_-]+$"},
-        "dimension": {"type":"string","pattern":"^[A-Z][A-Z0-9_]{1,79}$"},
-        "inputClass": {"type":"string","minLength":1,"maxLength":240},
-        "baseline": {"type":"string","minLength":1},
-        "variation": {"type":"string","minLength":1}
+        "id": {
+          "type": "string",
+          "pattern": "^WITNESS-[A-Z0-9_-]+$"
+        },
+        "dimension": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
+        },
+        "inputClass": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "baseline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variation": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "semantic_draft_inapplicabilityProof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["proofKind","structuralRule","absentStructure","evidence"],
+      "required": [
+        "proofKind",
+        "structuralRule",
+        "absentStructure",
+        "evidence"
+      ],
       "properties": {
-        "proofKind": {"const":"STRUCTURAL_ABSENCE"},
-        "structuralRule": {"enum":["OPERATION_ABSENT","INPUT_CLASS_FORBIDDEN","INPUT_SCHEMA_EXCLUDES_CLASS"]},
-        "absentStructure": {"type":"string","minLength":1},
-        "evidence": {"type":"string","minLength":1}
+        "proofKind": {
+          "const": "STRUCTURAL_ABSENCE"
+        },
+        "structuralRule": {
+          "enum": [
+            "OPERATION_ABSENT",
+            "INPUT_CLASS_FORBIDDEN",
+            "INPUT_SCHEMA_EXCLUDES_CLASS"
+          ]
+        },
+        "absentStructure": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "issue_contract_observedPaths": {
       "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
+        "$ref": "aegis.contract_components.v1#/$defs/src_path"
       },
       "uniqueItems": true
     },
     "issue_contract_effectiveDeterminismStatus": {
       "description": "Estado recalculado pelo Harness após aplicar resoluções humanas e considerar lacunas materiais sem decisão madura.",
-      "enum": ["NOT_APPLICABLE","SEMANTICALLY_CLOSED","PENDING_HUMAN_DECISIONS","BLOCKED_BY_GAP"]
+      "enum": [
+        "NOT_APPLICABLE",
+        "SEMANTICALLY_CLOSED",
+        "PENDING_HUMAN_DECISIONS",
+        "BLOCKED_BY_GAP"
+      ]
     },
     "issue_contract_humanResolutions": {
       "type": "array",
-      "items": {"$ref":"aegis.contract_components.v1#/$defs/issue_contract_humanResolution"}
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/issue_contract_humanResolution"
+      }
     },
     "issue_contract_humanResolution": {
       "oneOf": [
@@ -370,61 +790,172 @@
             "attestation"
           ],
           "properties": {
-            "questionId": {"type":"string","minLength":1},
-            "question": {"type":"string","minLength":1},
-            "kind": {"const":"ANSWER"},
-            "answerId": {"type":"string","minLength":1},
-            "label": {"type":"string","minLength":1},
-            "rationale": {"type":"string","minLength":1},
-            "contractEffect": {"type":"string","minLength":1},
-            "sourceContractDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-            "method": {"enum":["INTERACTIVE_WIZARD","DIRECT_COMMAND"]},
-            "attestation": {"enum":["DECISIONS_REVIEWED_AND_CONFIRMED","CONTRACT_REVIEWED_AND_APPROVED"]}
+            "questionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "ANSWER"
+            },
+            "answerId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rationale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contractEffect": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceContractDigest": {
+              "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+            },
+            "method": {
+              "enum": [
+                "INTERACTIVE_WIZARD",
+                "DIRECT_COMMAND"
+              ]
+            },
+            "attestation": {
+              "enum": [
+                "DECISIONS_REVIEWED_AND_CONFIRMED",
+                "CONTRACT_REVIEWED_AND_APPROVED"
+              ]
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["questionId","question","kind","correction","sourceContractDigest","method","attestation"],
+          "required": [
+            "questionId",
+            "question",
+            "kind",
+            "correction",
+            "sourceContractDigest",
+            "method",
+            "attestation"
+          ],
           "properties": {
-            "questionId": {"type":"string","minLength":1},
-            "question": {"type":"string","minLength":1},
-            "kind": {"const":"CORRECTION"},
-            "correction": {"type":"string","minLength":1},
-            "sourceContractDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-            "method": {"enum":["INTERACTIVE_WIZARD","DIRECT_COMMAND"]},
-            "attestation": {"enum":["DECISIONS_REVIEWED_AND_CONFIRMED","CONTRACT_REVIEWED_AND_APPROVED"]}
+            "questionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "CORRECTION"
+            },
+            "correction": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceContractDigest": {
+              "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+            },
+            "method": {
+              "enum": [
+                "INTERACTIVE_WIZARD",
+                "DIRECT_COMMAND"
+              ]
+            },
+            "attestation": {
+              "enum": [
+                "DECISIONS_REVIEWED_AND_CONFIRMED",
+                "CONTRACT_REVIEWED_AND_APPROVED"
+              ]
+            }
           }
         }
       ]
     },
     "issue_contract_approval": {
       "oneOf": [
-        {"type":"null"},
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["method","attestation","executionId","contractDraftDigest"],
+          "required": [
+            "method",
+            "attestation",
+            "executionId",
+            "contractDraftDigest"
+          ],
           "properties": {
-            "method": {"enum":["INTERACTIVE_WIZARD","DIRECT_COMMAND"]},
-            "attestation": {"const":"CONTRACT_REVIEWED_AND_APPROVED"},
-            "executionId": {"type":"string","pattern":"^draft-[a-f0-9]{16}$"},
-            "contractDraftDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"}
+            "method": {
+              "enum": [
+                "INTERACTIVE_WIZARD",
+                "DIRECT_COMMAND"
+              ]
+            },
+            "attestation": {
+              "const": "CONTRACT_REVIEWED_AND_APPROVED"
+            },
+            "executionId": {
+              "type": "string",
+              "pattern": "^draft-[a-f0-9]{16}$"
+            },
+            "contractDraftDigest": {
+              "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+            }
           }
         }
       ]
     },
-    "semantic_draft_title": {"type":"string","minLength":1},
-    "semantic_draft_interpretation": {"type":"string","minLength":1},
-    "semantic_draft_changeKind": {"enum":["PRODUCT","HARNESS"]},
+    "semantic_draft_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_draft_interpretation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_draft_changeKind": {
+      "enum": [
+        "PRODUCT",
+        "HARNESS"
+      ]
+    },
     "semantic_draft_scope": {
       "type": "object",
       "additionalProperties": false,
       "description": "Declare somente comportamentos e fronteiras públicas observáveis. Caminhos são classificados separadamente em pathReferences.",
-      "required": ["inScope","outOfScope"],
+      "required": [
+        "inScope",
+        "outOfScope"
+      ],
       "properties": {
-        "inScope": {"type":"array","minItems":1,"items":{"type":"string","minLength":1},"uniqueItems":true},
-        "outOfScope": {"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true}
+        "inScope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "outOfScope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
       }
     },
     "semantic_draft_pathReferences": {
@@ -433,14 +964,44 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id","path","role","rationale","requirementIds","basis"],
+        "required": [
+          "id",
+          "path",
+          "role",
+          "rationale",
+          "requirementIds",
+          "basis"
+        ],
         "properties": {
-          "id": {"type":"string","pattern":"^PATH-[A-Z0-9][A-Z0-9-]+$"},
-          "path": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_repositoryPath"},
-          "role": {"enum":["PUBLIC_SURFACE","IMPLEMENTATION_CONSTRAINT","IMPLEMENTATION_SUGGESTION","EVIDENCE_ONLY"]},
-          "rationale": {"type":"string","minLength":1},
-          "requirementIds": {"type":"array","items":{"type":"string"},"uniqueItems":true},
-          "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"}
+          "id": {
+            "type": "string",
+            "pattern": "^PATH-[A-Z0-9][A-Z0-9-]+$"
+          },
+          "path": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_repositoryPath"
+          },
+          "role": {
+            "enum": [
+              "PUBLIC_SURFACE",
+              "IMPLEMENTATION_CONSTRAINT",
+              "IMPLEMENTATION_SUGGESTION",
+              "EVIDENCE_ONLY"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requirementIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "basis": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+          }
         }
       }
     },
@@ -455,11 +1016,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["tag","rationale","basis"],
+        "required": [
+          "tag",
+          "rationale",
+          "basis"
+        ],
         "properties": {
-          "tag": {"type":"string","pattern":"^[a-z0-9][a-z0-9-]*$"},
-          "rationale": {"type":"string","minLength":1},
-          "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"}
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "basis": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+          }
         }
       }
     },
@@ -469,14 +1042,49 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ruleId","demandStatus","recommendedStatus","rationale","decisionId","amendmentId"],
+        "required": [
+          "ruleId",
+          "demandStatus",
+          "recommendedStatus",
+          "rationale",
+          "decisionId",
+          "amendmentId"
+        ],
         "properties": {
-          "ruleId": {"type":"string","pattern":"^ARCH-[A-Z0-9][A-Z0-9-]+$"},
-          "demandStatus": {"enum":["COMPLIANT","CONFLICT"]},
-          "recommendedStatus": {"enum":["COMPLIANT","AMENDED"]},
-          "rationale": {"type":"string","minLength":1},
-          "decisionId": {"type":["string","null"],"pattern":"^Q-[A-Z0-9][A-Z0-9-]+$"},
-          "amendmentId": {"type":["string","null"],"pattern":"^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$"}
+          "ruleId": {
+            "type": "string",
+            "pattern": "^ARCH-[A-Z0-9][A-Z0-9-]+$"
+          },
+          "demandStatus": {
+            "enum": [
+              "COMPLIANT",
+              "CONFLICT"
+            ]
+          },
+          "recommendedStatus": {
+            "enum": [
+              "COMPLIANT",
+              "AMENDED"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decisionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$"
+          },
+          "amendmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^ARCH-AMEND-[A-Z0-9][A-Z0-9-]+$"
+          }
         }
       }
     },
@@ -484,51 +1092,135 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Pode simplificar automaticamente complexidade apenas sugerida. Não crie decisão quando KISS já determinar a resposta.",
-      "required": ["status","rationale","alternatives"],
+      "required": [
+        "status",
+        "rationale",
+        "alternatives"
+      ],
       "properties": {
-        "status": {"enum":["NO_EXCESS","SIMPLIFIED","JUSTIFIED"]},
-        "rationale": {"type":"string","minLength":1},
+        "status": {
+          "enum": [
+            "NO_EXCESS",
+            "SIMPLIFIED",
+            "JUSTIFIED"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
         "alternatives": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["requested","simpler","rationale","basis"],
+            "required": [
+              "requested",
+              "simpler",
+              "rationale",
+              "basis"
+            ],
             "properties": {
-              "requested": {"type":"string","minLength":1},
-              "simpler": {"type":"string","minLength":1},
-              "rationale": {"type":"string","minLength":1},
-              "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"}
+              "requested": {
+                "type": "string",
+                "minLength": 1
+              },
+              "simpler": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "basis": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+              }
             }
           }
         }
       }
     },
-    "semantic_draft_requirements_items_properties_id": {"type":"string","pattern":"^REQ-[A-Z0-9][A-Z0-9-]+$"},
-    "semantic_draft_requirements_items_properties_kind": {"enum":["FUNCTIONAL","QUALITY"]},
-    "semantic_draft_requirements_items_properties_statement": {"type":"string","minLength":1},
+    "semantic_draft_requirements_items_properties_id": {
+      "type": "string",
+      "pattern": "^REQ-[A-Z0-9][A-Z0-9-]+$"
+    },
+    "semantic_draft_requirements_items_properties_kind": {
+      "enum": [
+        "FUNCTIONAL",
+        "QUALITY"
+      ]
+    },
+    "semantic_draft_requirements_items_properties_statement": {
+      "type": "string",
+      "minLength": 1
+    },
     "semantic_draft_requirements_items_properties_measurement": {
-      "oneOf": [{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_measurement"}]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_measurement"
+        }
+      ]
     },
     "semantic_draft_measurement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["method","metric","target","conditions"],
+      "required": [
+        "method",
+        "metric",
+        "target",
+        "conditions"
+      ],
       "properties": {
-        "method": {"type":"string","minLength":1},
-        "metric": {"type":"string","minLength":1},
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
         "target": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["value","source","reference","evidenceStatus"],
+          "required": [
+            "value",
+            "source",
+            "reference",
+            "evidenceStatus"
+          ],
           "properties": {
-            "value": {"type":"string","minLength":1},
-            "source": {"enum":["USER_INTENT","USER_DECISION","WORKSPACE_EVIDENCE"]},
-            "reference": {"type":"string","minLength":1,"maxLength":240},
-            "evidenceStatus": {"enum":["EVIDENCE_BACKED","UNVERIFIED"]}
+            "value": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "enum": [
+                "USER_INTENT",
+                "USER_DECISION",
+                "WORKSPACE_EVIDENCE"
+              ]
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "evidenceStatus": {
+              "enum": [
+                "EVIDENCE_BACKED",
+                "UNVERIFIED"
+              ]
+            }
           }
         },
-        "conditions": {"type":"string","minLength":1}
+        "conditions": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "semantic_draft_requirements_items_properties_acceptanceCases": {
@@ -537,19 +1229,68 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id","kind","given","when","then","outcomeKind","decisionBinding","boundaryBinding"],
+        "required": [
+          "id",
+          "kind",
+          "given",
+          "when",
+          "then",
+          "outcomeKind",
+          "decisionBinding",
+          "boundaryBinding"
+        ],
         "properties": {
-          "id": {"type":"string","pattern":"^AC-[A-Z0-9][A-Z0-9-]+$"},
-          "kind": {"enum":["HAPPY_PATH","FAILURE","BOUNDARY"]},
-          "given": {"type":"string","minLength":1},
-          "when": {"type":"string","minLength":1},
-          "then": {"type":"string","minLength":1},
-          "outcomeKind": {"enum":["RETURN_VALUE","REJECTION","NO_OP","STATE_CHANGE","OBSERVABLE_EFFECT"]},
+          "id": {
+            "type": "string",
+            "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$"
+          },
+          "kind": {
+            "enum": [
+              "HAPPY_PATH",
+              "FAILURE",
+              "BOUNDARY"
+            ]
+          },
+          "given": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "type": "string",
+            "minLength": 1
+          },
+          "then": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcomeKind": {
+            "enum": [
+              "RETURN_VALUE",
+              "REJECTION",
+              "NO_OP",
+              "STATE_CHANGE",
+              "OBSERVABLE_EFFECT"
+            ]
+          },
           "decisionBinding": {
-            "oneOf": [{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_decisionBinding"}]
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_decisionBinding"
+              }
+            ]
           },
           "boundaryBinding": {
-            "oneOf": [{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_boundaryBinding"}]
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_boundaryBinding"
+              }
+            ]
           }
         }
       }
@@ -557,52 +1298,135 @@
     "semantic_draft_decisionBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["questionId","answerId"],
+      "required": [
+        "questionId",
+        "answerId"
+      ],
       "properties": {
-        "questionId": {"type":"string","pattern":"^Q-[A-Z0-9][A-Z0-9-]+$"},
-        "answerId": {"type":"string","pattern":"^ANS-[A-Z0-9][A-Z0-9-]+$"}
+        "questionId": {
+          "type": "string",
+          "pattern": "^Q-[A-Z0-9][A-Z0-9-]+$"
+        },
+        "answerId": {
+          "type": "string",
+          "pattern": "^ANS-[A-Z0-9][A-Z0-9-]+$"
+        }
       }
     },
     "semantic_draft_boundaryBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ruleId","side","expectedBehavior","expectedValue"],
+      "required": [
+        "ruleId",
+        "side",
+        "expectedBehavior",
+        "expectedValue"
+      ],
       "properties": {
-        "ruleId": {"type":"string","pattern":"^BOUND-[A-Z0-9][A-Z0-9-]+$"},
-        "side": {"enum":["UNDERFLOW","OVERFLOW","EXACT_WIDTH"]},
-        "expectedBehavior": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"},
-        "expectedValue": {"type":["string","null"]}
+        "ruleId": {
+          "type": "string",
+          "pattern": "^BOUND-[A-Z0-9][A-Z0-9-]+$"
+        },
+        "side": {
+          "enum": [
+            "UNDERFLOW",
+            "OVERFLOW",
+            "EXACT_WIDTH"
+          ]
+        },
+        "expectedBehavior": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"
+        },
+        "expectedValue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
-    "semantic_draft_rangeBehavior": {"enum":["REJECT","SATURATE","EXPLICIT_SENTINEL","WRAP","NOT_APPLICABLE"]},
+    "semantic_draft_rangeBehavior": {
+      "enum": [
+        "REJECT",
+        "SATURATE",
+        "EXPLICIT_SENTINEL",
+        "WRAP",
+        "NOT_APPLICABLE"
+      ]
+    },
     "semantic_draft_invariants": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"}
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
+      }
     },
     "semantic_draft_riskReview": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status","rationale"],
-      "properties": {"status":{"enum":["FOUND","NONE","UNKNOWN"]},"rationale":{"type":"string","minLength":1}}
+      "required": [
+        "status",
+        "rationale"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "FOUND",
+            "NONE",
+            "UNKNOWN"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
-    "semantic_draft_risks": {"type":"array","items":{"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_risks_items"}},
+    "semantic_draft_risks": {
+      "type": "array",
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
+      }
+    },
     "semantic_draft_adversarialReview": {
       "type": "object",
       "additionalProperties": false,
       "description": "Revisão semântica residual: procure contradições, deriva semântica, omissões, lacunas de determinismo e perguntas artificiais depois das correções mecânicas e de política. Registre somente achados materiais já absorvidos pelo contrato.",
-      "required": ["status","rationale","findings"],
+      "required": [
+        "status",
+        "rationale",
+        "findings"
+      ],
       "properties": {
-        "status": {"enum":["NO_ADDITIONAL_FINDINGS","CHALLENGES_INTEGRATED"]},
-        "rationale": {"type":"string","minLength":1},
+        "status": {
+          "enum": [
+            "NO_ADDITIONAL_FINDINGS",
+            "CHALLENGES_INTEGRATED"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
         "findings": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","kind","disposition","challenge","response","targetIds","basis"],
+            "required": [
+              "id",
+              "kind",
+              "disposition",
+              "challenge",
+              "response",
+              "targetIds",
+              "basis"
+            ],
             "properties": {
-              "id": {"type":"string","pattern":"^ADV-[A-Z0-9][A-Z0-9-]+$"},
+              "id": {
+                "type": "string",
+                "pattern": "^ADV-[A-Z0-9][A-Z0-9-]+$"
+              },
               "kind": {
                 "enum": [
                   "CONTRADICTION",
@@ -613,8 +1437,18 @@
                   "TECHNICAL_RISK"
                 ]
               },
-              "disposition": {"enum":["REQUIREMENT","DECISION","POLICY_CORRECTION","NON_NORMATIVE"]},
-              "challenge": {"type":"string","minLength":1},
+              "disposition": {
+                "enum": [
+                  "REQUIREMENT",
+                  "DECISION",
+                  "POLICY_CORRECTION",
+                  "NON_NORMATIVE"
+                ]
+              },
+              "challenge": {
+                "type": "string",
+                "minLength": 1
+              },
               "response": {
                 "type": "string",
                 "minLength": 1,
@@ -624,36 +1458,80 @@
                 "type": "array",
                 "minItems": 1,
                 "uniqueItems": true,
-                "items": {"type":"string","pattern":"^(REQ|INV|RISK|Q|BOUND|NOTE|PATH|ARCH)-[A-Z0-9][A-Z0-9-]+$"}
+                "items": {
+                  "type": "string",
+                  "pattern": "^(REQ|INV|RISK|Q|BOUND|NOTE|PATH|ARCH)-[A-Z0-9][A-Z0-9-]+$"
+                }
               },
-              "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_basis"}
+              "basis": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_basis"
+              }
             }
           }
         }
       }
     },
-    "semantic_draft_determinismReview_properties_status": {"enum":["NOT_APPLICABLE","SEMANTICALLY_CLOSED","GAPS_FOUND"]},
+    "semantic_draft_determinismReview_properties_status": {
+      "enum": [
+        "NOT_APPLICABLE",
+        "SEMANTICALLY_CLOSED",
+        "GAPS_FOUND"
+      ]
+    },
     "semantic_draft_determinismReview_properties_dimensions": {
       "type": "array",
       "items": {
         "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
       }
     },
-    "semantic_draft_boundaryRules_items_properties_id": {"type":"string","pattern":"^BOUND-[A-Z0-9][A-Z0-9-]+$"},
-    "semantic_draft_unknowns_items_properties_id": {"type":"string","pattern":"^UNKNOWN-[A-Z0-9][A-Z0-9-]+$"},
+    "semantic_draft_boundaryRules_items_properties_id": {
+      "type": "string",
+      "pattern": "^BOUND-[A-Z0-9][A-Z0-9-]+$"
+    },
+    "semantic_draft_unknowns_items_properties_id": {
+      "type": "string",
+      "pattern": "^UNKNOWN-[A-Z0-9][A-Z0-9-]+$"
+    },
     "semantic_opinion_pathReferences": {
       "type": "array",
       "description": "Classifica caminhos citados sem confundir superfície pública, restrição interna explícita, sugestão não normativa e evidência observada.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path","role","rationale","requirementIndexes","basis"],
+        "required": [
+          "path",
+          "role",
+          "rationale",
+          "requirementIndexes",
+          "basis"
+        ],
         "properties": {
-          "path": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_repositoryPath"},
-          "role": {"enum":["PUBLIC_SURFACE","IMPLEMENTATION_CONSTRAINT","IMPLEMENTATION_SUGGESTION","EVIDENCE_ONLY"]},
-          "rationale": {"type":"string","minLength":1},
-          "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"},
-          "requirementIndexes": {"type":"array","items":{"type":"integer","minimum":0},"uniqueItems":true}
+          "path": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_repositoryPath"
+          },
+          "role": {
+            "enum": [
+              "PUBLIC_SURFACE",
+              "IMPLEMENTATION_CONSTRAINT",
+              "IMPLEMENTATION_SUGGESTION",
+              "EVIDENCE_ONLY"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "basis": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+          },
+          "requirementIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          }
         }
       }
     },
@@ -663,11 +1541,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["contextIndex","rationale","basis"],
+        "required": [
+          "contextIndex",
+          "rationale",
+          "basis"
+        ],
         "properties": {
-          "rationale": {"type":"string","minLength":1},
-          "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"},
-          "contextIndex": {"type":"integer","minimum":0}
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "basis": {
+            "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+          },
+          "contextIndex": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     },
@@ -677,18 +1567,50 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ruleIndex","demandStatus","recommendedStatus","rationale","decisionIndex","amendmentIndex"],
+        "required": [
+          "ruleIndex",
+          "demandStatus",
+          "recommendedStatus",
+          "rationale",
+          "decisionIndex",
+          "amendmentIndex"
+        ],
         "properties": {
-          "demandStatus": {"enum":["COMPLIANT","CONFLICT"]},
-          "recommendedStatus": {"enum":["COMPLIANT","AMENDED"]},
-          "rationale": {"type":"string","minLength":1},
-          "ruleIndex": {"type":"integer","minimum":0},
-          "decisionIndex": {
-            "description": "Índice da decisão somente quando já existem alternativas maduras e materialmente distintas. Use null para lacuna material bloqueante que ainda não pode chegar ao Wizard.",
-            "type": ["integer","null"],
+          "demandStatus": {
+            "enum": [
+              "COMPLIANT",
+              "CONFLICT"
+            ]
+          },
+          "recommendedStatus": {
+            "enum": [
+              "COMPLIANT",
+              "AMENDED"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ruleIndex": {
+            "type": "integer",
             "minimum": 0
           },
-          "amendmentIndex": {"type":["integer","null"],"minimum":0}
+          "decisionIndex": {
+            "description": "Índice da decisão somente quando já existem alternativas maduras e materialmente distintas. Use null para lacuna material bloqueante que ainda não pode chegar ao Wizard.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "amendmentIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
         }
       }
     },
@@ -696,21 +1618,50 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Pode simplificar automaticamente complexidade apenas sugerida. Não crie decisão quando KISS já determinar a resposta.",
-      "required": ["status","rationale","alternatives"],
+      "required": [
+        "status",
+        "rationale",
+        "alternatives"
+      ],
       "properties": {
-        "status": {"enum":["NO_EXCESS","SIMPLIFIED","JUSTIFIED"]},
-        "rationale": {"type":"string","minLength":1},
+        "status": {
+          "enum": [
+            "NO_EXCESS",
+            "SIMPLIFIED",
+            "JUSTIFIED"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
         "alternatives": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["requested","simpler","rationale","basis"],
+            "required": [
+              "requested",
+              "simpler",
+              "rationale",
+              "basis"
+            ],
             "properties": {
-              "requested": {"type":"string","minLength":1},
-              "simpler": {"type":"string","minLength":1},
-              "rationale": {"type":"string","minLength":1},
-              "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"}
+              "requested": {
+                "type": "string",
+                "minLength": 1
+              },
+              "simpler": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "basis": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+              }
             }
           }
         }
@@ -719,82 +1670,203 @@
     "semantic_opinion_measurement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["method","metric","target","conditions"],
+      "required": [
+        "method",
+        "metric",
+        "target",
+        "conditions"
+      ],
       "properties": {
-        "method": {"type":"string","minLength":1},
-        "metric": {"type":"string","minLength":1},
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
         "target": {
           "oneOf": [
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["value","source","resolutionIndex","evidenceStatus"],
+              "required": [
+                "value",
+                "source",
+                "resolutionIndex",
+                "evidenceStatus"
+              ],
               "properties": {
-                "value": {"type":"string","minLength":1},
-                "source": {"const":"USER_DECISION"},
-                "resolutionIndex": {"type":"integer","minimum":0},
-                "evidenceStatus": {"enum":["EVIDENCE_BACKED","UNVERIFIED"]}
+                "value": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source": {
+                  "const": "USER_DECISION"
+                },
+                "resolutionIndex": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "evidenceStatus": {
+                  "enum": [
+                    "EVIDENCE_BACKED",
+                    "UNVERIFIED"
+                  ]
+                }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["value","source","reference","evidenceStatus"],
+              "required": [
+                "value",
+                "source",
+                "reference",
+                "evidenceStatus"
+              ],
               "properties": {
-                "value": {"type":"string","minLength":1},
-                "source": {"enum":["USER_INTENT","WORKSPACE_EVIDENCE"]},
-                "reference": {"type":"string","minLength":1,"maxLength":240},
-                "evidenceStatus": {"enum":["EVIDENCE_BACKED","UNVERIFIED"]}
+                "value": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source": {
+                  "enum": [
+                    "USER_INTENT",
+                    "WORKSPACE_EVIDENCE"
+                  ]
+                },
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "evidenceStatus": {
+                  "enum": [
+                    "EVIDENCE_BACKED",
+                    "UNVERIFIED"
+                  ]
+                }
               }
             }
           ]
         },
-        "conditions": {"type":"string","minLength":1}
+        "conditions": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "semantic_opinion_decisionBinding": {
       "description": "Vínculo posicional com decisions[decisionIndex].answers[answerIndex] deste parecer.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["decisionIndex","answerIndex"],
-      "properties": {"decisionIndex":{"type":"integer","minimum":0},"answerIndex":{"type":"integer","minimum":0}}
+      "required": [
+        "decisionIndex",
+        "answerIndex"
+      ],
+      "properties": {
+        "decisionIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "answerIndex": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "semantic_opinion_boundaryBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["boundaryIndex","side","expectedBehavior","expectedValue"],
+      "required": [
+        "boundaryIndex",
+        "side",
+        "expectedBehavior",
+        "expectedValue"
+      ],
       "properties": {
-        "boundaryIndex": {"type":"integer","minimum":0},
-        "side": {"enum":["UNDERFLOW","OVERFLOW","EXACT_WIDTH"]},
-        "expectedBehavior": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"},
-        "expectedValue": {"type":["string","null"]}
+        "boundaryIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "side": {
+          "enum": [
+            "UNDERFLOW",
+            "OVERFLOW",
+            "EXACT_WIDTH"
+          ]
+        },
+        "expectedBehavior": {
+          "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"
+        },
+        "expectedValue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "semantic_opinion_invariants": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_invariants_items"}
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_invariants_items"
+      }
     },
     "semantic_opinion_riskReview": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["certainty","rationale"],
-      "properties": {"certainty":{"enum":["ASSESSED","UNKNOWN"]},"rationale":{"type":"string","minLength":1}}
+      "required": [
+        "certainty",
+        "rationale"
+      ],
+      "properties": {
+        "certainty": {
+          "enum": [
+            "ASSESSED",
+            "UNKNOWN"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
-    "semantic_opinion_risks": {"type":"array","items":{"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_risks_items"}},
+    "semantic_opinion_risks": {
+      "type": "array",
+      "items": {
+        "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_risks_items"
+      }
+    },
     "semantic_opinion_adversarialReview": {
       "type": "object",
       "additionalProperties": false,
       "description": "Revisão semântica residual: procure contradições, deriva semântica, omissões, lacunas de determinismo e perguntas artificiais depois das correções mecânicas e de política. Registre somente achados materiais já absorvidos pelo contrato.",
-      "required": ["rationale","findings"],
+      "required": [
+        "rationale",
+        "findings"
+      ],
       "properties": {
-        "rationale": {"type":"string","minLength":1},
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
         "findings": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind","disposition","challenge","response","targets","basis"],
+            "required": [
+              "kind",
+              "disposition",
+              "challenge",
+              "response",
+              "targets",
+              "basis"
+            ],
             "properties": {
               "kind": {
                 "enum": [
@@ -806,18 +1878,32 @@
                   "TECHNICAL_RISK"
                 ]
               },
-              "disposition": {"enum":["REQUIREMENT","DECISION","POLICY_CORRECTION","NON_NORMATIVE"]},
-              "challenge": {"type":"string","minLength":1},
+              "disposition": {
+                "enum": [
+                  "REQUIREMENT",
+                  "DECISION",
+                  "POLICY_CORRECTION",
+                  "NON_NORMATIVE"
+                ]
+              },
+              "challenge": {
+                "type": "string",
+                "minLength": 1
+              },
               "response": {
                 "type": "string",
                 "minLength": 1,
                 "description": "Trecho da correção já incorporada em pelo menos um targetId; não é promessa paralela."
               },
-              "basis": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"},
+              "basis": {
+                "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+              },
               "targets": {
                 "type": "array",
                 "minItems": 1,
-                "items": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"},
+                "items": {
+                  "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
+                },
                 "uniqueItems": true
               }
             }
@@ -835,22 +1921,46 @@
     "semantic_request_constitution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema","version","digest","authority","rules"],
+      "required": [
+        "schema",
+        "version",
+        "digest",
+        "authority",
+        "rules"
+      ],
       "properties": {
-        "schema": {"const":"aegis.constitution.v1"},
-        "version": {"type":"integer","minimum":1},
-        "digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-        "authority": {"const":"TRUSTED_CONSTITUTION"},
+        "schema": {
+          "const": "aegis.constitution.v1"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+        },
+        "authority": {
+          "const": "TRUSTED_CONSTITUTION"
+        },
         "rules": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","statement"],
+            "required": [
+              "id",
+              "statement"
+            ],
             "properties": {
-              "id": {"type":"string","pattern":"^CONST-[A-Z0-9][A-Z0-9-]+$"},
-              "statement": {"type":"string","minLength":1}
+              "id": {
+                "type": "string",
+                "pattern": "^CONST-[A-Z0-9][A-Z0-9-]+$"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }
@@ -859,40 +1969,96 @@
     "semantic_request_workspace": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status","observedTextPaths","unavailablePaths","sourceEvidence"],
+      "required": [
+        "status",
+        "observedTextPaths",
+        "unavailablePaths",
+        "sourceEvidence"
+      ],
       "properties": {
-        "status": {"enum":["SOURCE_OBSERVED","NO_TEXT_SOURCE","EMPTY_SOURCE"]},
-        "observedTextPaths": {"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
+        "status": {
+          "enum": [
+            "SOURCE_OBSERVED",
+            "NO_TEXT_SOURCE",
+            "EMPTY_SOURCE"
+          ]
+        },
+        "observedTextPaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
         "unavailablePaths": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path","reason"],
-            "properties": {"path":{"type":"string","minLength":1},"reason":{"enum":["BINARY","INVALID_UTF8","SYMLINK"]}}
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "enum": [
+                  "BINARY",
+                  "INVALID_UTF8",
+                  "SYMLINK"
+                ]
+              }
+            }
           }
         },
         "workspaceSkeleton": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schema","digest","symbols","symbolCount"],
+          "required": [
+            "schema",
+            "digest",
+            "symbols",
+            "symbolCount"
+          ],
           "properties": {
-            "schema": {"const":"aegis.workspace_skeleton.v1"},
-            "digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
-            "symbolCount": {"type":"integer","minimum":0},
+            "schema": {
+              "const": "aegis.workspace_skeleton.v1"
+            },
+            "digest": {
+              "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+            },
+            "symbolCount": {
+              "type": "integer",
+              "minimum": 0
+            },
             "symbols": {
               "type": "array",
               "maxItems": 4096,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["path","name","kind","startLine","endLine","exported","signature"],
+                "required": [
+                  "path",
+                  "name",
+                  "kind",
+                  "startLine",
+                  "endLine",
+                  "exported",
+                  "signature"
+                ],
                 "properties": {
                   "path": {
-                    "type": "string",
-                    "pattern": "^src/(?!\\.\\.(?:/|$))(?!.*\\/\\.\\.(?:/|$))[^\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]+$"
+                    "$ref": "aegis.contract_components.v1#/$defs/src_path"
                   },
-                  "name": {"type":"string","minLength":1,"maxLength":128},
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
                   "kind": {
                     "enum": [
                       "INTERFACE",
@@ -904,11 +2070,25 @@
                       "VARIABLE"
                     ]
                   },
-                  "startLine": {"type":"integer","minimum":1},
-                  "endLine": {"type":"integer","minimum":1},
-                  "exported": {"type":"boolean"},
-                  "signature": {"type":"string","maxLength":4096},
-                  "docComment": {"type":"string","maxLength":1024}
+                  "startLine": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "endLine": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "exported": {
+                    "type": "boolean"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "docComment": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
                 }
               }
             }
@@ -917,23 +2097,65 @@
         "lexicalEvidence": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["status","termsTruncated","matches"],
+          "required": [
+            "status",
+            "termsTruncated",
+            "matches"
+          ],
           "properties": {
-            "status": {"enum":["MATCH","NO_MATCH","NOT_APPLICABLE"]},
-            "termsTruncated": {"type":"boolean"},
+            "status": {
+              "enum": [
+                "MATCH",
+                "NO_MATCH",
+                "NOT_APPLICABLE"
+              ]
+            },
+            "termsTruncated": {
+              "type": "boolean"
+            },
             "matches": {
               "type": "array",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["term","sourceToken","matchKind","path","line","sourceRegion"],
+                "required": [
+                  "term",
+                  "sourceToken",
+                  "matchKind",
+                  "path",
+                  "line",
+                  "sourceRegion"
+                ],
                 "properties": {
-                  "term": {"type":"string","minLength":1},
-                  "sourceToken": {"type":"string","minLength":1},
-                  "matchKind": {"enum":["EXACT_TOKEN","IDENTIFIER_COMPONENT"]},
-                  "path": {"type":"string","minLength":1},
-                  "line": {"type":"integer","minimum":1},
-                  "sourceRegion": {"enum":["CODE","COMMENT","UNKNOWN"]}
+                  "term": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sourceToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "matchKind": {
+                    "enum": [
+                      "EXACT_TOKEN",
+                      "IDENTIFIER_COMPONENT"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sourceRegion": {
+                    "enum": [
+                      "CODE",
+                      "COMMENT",
+                      "UNKNOWN"
+                    ]
+                  }
                 }
               }
             }
@@ -944,15 +2166,44 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path","content","startLine","endLine","truncated","selection","trust"],
+            "required": [
+              "path",
+              "content",
+              "startLine",
+              "endLine",
+              "truncated",
+              "selection",
+              "trust"
+            ],
             "properties": {
-              "path": {"type":"string","minLength":1},
-              "content": {"type":"string"},
-              "startLine": {"type":"integer","minimum":1},
-              "endLine": {"type":"integer","minimum":1},
-              "truncated": {"type":"boolean"},
-              "selection": {"enum":["FULL_SOURCE","LEXICAL_WINDOW","ENTRYPOINT_PREFIX"]},
-              "trust": {"const":"UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS"}
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "string"
+              },
+              "startLine": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "endLine": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "selection": {
+                "enum": [
+                  "FULL_SOURCE",
+                  "LEXICAL_WINDOW",
+                  "ENTRYPOINT_PREFIX"
+                ]
+              },
+              "trust": {
+                "const": "UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS"
+              }
             }
           }
         }
@@ -961,7 +2212,11 @@
     "semantic_request_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contexts","rules","amendments"],
+      "required": [
+        "contexts",
+        "rules",
+        "amendments"
+      ],
       "properties": {
         "contexts": {
           "type": "array",
@@ -969,10 +2224,19 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["tag","description"],
+            "required": [
+              "tag",
+              "description"
+            ],
             "properties": {
-              "tag": {"type":"string","pattern":"^[a-z0-9][a-z0-9-]*$"},
-              "description": {"type":"string","minLength":1}
+              "tag": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
@@ -981,13 +2245,42 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","level","statement","appliesWhen","appliesMode"],
+            "required": [
+              "id",
+              "level",
+              "statement",
+              "appliesWhen",
+              "appliesMode"
+            ],
             "properties": {
-              "id": {"type":"string","minLength":1},
-              "level": {"enum":["hard","default","preference"]},
-              "statement": {"type":"string","minLength":1},
-              "appliesWhen": {"type":"array","items":{"type":"string"},"uniqueItems":true},
-              "appliesMode": {"enum":["any","all"]}
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "enum": [
+                  "hard",
+                  "default",
+                  "preference"
+                ]
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "appliesWhen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "appliesMode": {
+                "enum": [
+                  "any",
+                  "all"
+                ]
+              }
             }
           }
         },
@@ -996,22 +2289,43 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","ruleId","reason"],
+            "required": [
+              "id",
+              "ruleId",
+              "reason"
+            ],
             "properties": {
-              "id": {"type":"string","minLength":1},
-              "ruleId": {"type":"string","minLength":1},
-              "reason": {"type":"string","minLength":1}
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ruleId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }
       }
     },
     "semantic_request_revision": {
-      "type": ["object","null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["sourceContractDigest","answers"],
+      "required": [
+        "sourceContractDigest",
+        "answers"
+      ],
       "properties": {
-        "sourceContractDigest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+        "sourceContractDigest": {
+          "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
+        },
         "answers": {
           "type": "array",
           "minItems": 1,
@@ -1020,20 +2334,47 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["questionId","answerId","label","rationale","contractEffect"],
+                "required": [
+                  "questionId",
+                  "answerId",
+                  "label",
+                  "rationale",
+                  "contractEffect"
+                ],
                 "properties": {
-                  "questionId": {"type":"string"},
-                  "answerId": {"type":"string"},
-                  "label": {"type":"string"},
-                  "rationale": {"type":"string"},
-                  "contractEffect": {"type":"string"}
+                  "questionId": {
+                    "type": "string"
+                  },
+                  "answerId": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "contractEffect": {
+                    "type": "string"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["questionId","correction"],
-                "properties": {"questionId":{"type":"string"},"correction":{"type":"string","minLength":1}}
+                "required": [
+                  "questionId",
+                  "correction"
+                ],
+                "properties": {
+                  "questionId": {
+                    "type": "string"
+                  },
+                  "correction": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
             ]
           }
@@ -1045,42 +2386,122 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name","guardPrecedence"],
+        "required": [
+          "name",
+          "guardPrecedence"
+        ],
         "properties": {
-          "name": {"type":"string","minLength":1},
-          "description": {"type":"string"},
-          "guardPrecedence": {"type":"array","items":{"type":"string","minLength":1}},
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "guardPrecedence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "parameters": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name","type"],
+              "required": [
+                "name",
+                "type"
+              ],
               "properties": {
-                "name": {"type":"string","minLength":1},
-                "type": {"type":"string","minLength":1},
-                "description": {"type":"string"},
-                "domain": {"type":"string","minLength":1},
-                "nullability": {"enum":["NOT_NULL","NULLABLE"]},
-                "producer": {"type":"string","minLength":1},
-                "authority": {"type":"string","minLength":1},
-                "temporalUnit": {"type":["string","null"],"enum":["MILLISECONDS","SECONDS","MICROSECONDS","ISO8601_UTC",null]},
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string"
+                },
+                "domain": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "nullability": {
+                  "enum": [
+                    "NOT_NULL",
+                    "NULLABLE"
+                  ]
+                },
+                "producer": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "authority": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "temporalUnit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "MILLISECONDS",
+                    "SECONDS",
+                    "MICROSECONDS",
+                    "ISO8601_UTC",
+                    null
+                  ]
+                },
                 "bounds": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["lowerBound","upperBound","boundaryBehavior"],
+                  "required": [
+                    "lowerBound",
+                    "upperBound",
+                    "boundaryBehavior"
+                  ],
                   "properties": {
-                    "lowerBound": {"type":"string"},
-                    "upperBound": {"type":["string","null"]},
-                    "boundaryBehavior": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"},
-                    "provenance": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_basis"}
+                    "lowerBound": {
+                      "type": "string"
+                    },
+                    "upperBound": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "boundaryBehavior": {
+                      "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"
+                    },
+                    "provenance": {
+                      "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+                    }
                   }
                 },
                 "onInvalid": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["outcomeKind","error"],
-                  "properties": {"outcomeKind":{"enum":["REJECTION","NO_OP"]},"error":{"type":"string","minLength":1}}
+                  "required": [
+                    "outcomeKind",
+                    "error"
+                  ],
+                  "properties": {
+                    "outcomeKind": {
+                      "enum": [
+                        "REJECTION",
+                        "NO_OP"
+                      ]
+                    },
+                    "error": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
                 }
               }
             }
@@ -1090,23 +2511,63 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["branchId","outcomeKind"],
+              "required": [
+                "branchId",
+                "outcomeKind"
+              ],
               "properties": {
-                "branchId": {"type":"string","minLength":1},
-                "condition": {"type":"string"},
-                "outcomeKind": {"enum":["RETURN_VALUE","REJECTION","NO_OP","STATE_CHANGE","OBSERVABLE_EFFECT"]},
-                "statusOrError": {"type":"string"},
-                "defaultPreservation": {"type":"boolean"},
+                "branchId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "condition": {
+                  "type": "string"
+                },
+                "outcomeKind": {
+                  "enum": [
+                    "RETURN_VALUE",
+                    "REJECTION",
+                    "NO_OP",
+                    "STATE_CHANGE",
+                    "OBSERVABLE_EFFECT"
+                  ]
+                },
+                "statusOrError": {
+                  "type": "string"
+                },
+                "defaultPreservation": {
+                  "type": "boolean"
+                },
                 "stateEffects": {
                   "type": "array",
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["field","effect"],
+                    "required": [
+                      "field",
+                      "effect"
+                    ],
                     "properties": {
-                      "field": {"type":"string","minLength":1},
-                      "effect": {"enum":["SET","INCREMENT","DECREMENT","PRESERVE","MUTATE_COLLECTION","CUSTOM"]},
-                      "value": {"type":["string","null"]}
+                      "field": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "effect": {
+                        "enum": [
+                          "SET",
+                          "INCREMENT",
+                          "DECREMENT",
+                          "PRESERVE",
+                          "MUTATE_COLLECTION",
+                          "CUSTOM"
+                        ]
+                      },
+                      "value": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
                     }
                   }
                 },
@@ -1115,9 +2576,15 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["targetPath","action"],
+                    "required": [
+                      "targetPath",
+                      "action"
+                    ],
                     "properties": {
-                      "targetPath": {"type":"string","minLength":1},
+                      "targetPath": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "action": {
                         "enum": [
                           "MOVE_FILE",
@@ -1134,14 +2601,27 @@
                           "ATOMIC_SUBSTITUTE"
                         ]
                       },
-                      "preservesTimestamp": {"type":"boolean"},
-                      "confirmationCheck": {"type":"string","minLength":1},
-                      "onSuccess": {"type":"string","minLength":1},
-                      "onFailure": {"type":"string","minLength":1},
+                      "preservesTimestamp": {
+                        "type": "boolean"
+                      },
+                      "confirmationCheck": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "onSuccess": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "onFailure": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "rollback": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["strategy"],
+                        "required": [
+                          "strategy"
+                        ],
                         "properties": {
                           "strategy": {
                             "enum": [
@@ -1154,10 +2634,25 @@
                               "NO_SIDE_EFFECTS"
                             ]
                           },
-                          "target": {"type":"string","minLength":1},
-                          "compensation": {"type":"string","minLength":1},
-                          "compensationTarget": {"type":"string","minLength":1},
-                          "onSignal": {"type":"array","items":{"type":"string","minLength":1}}
+                          "target": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "compensation": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "compensationTarget": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "onSignal": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
                         }
                       }
                     }
@@ -1166,7 +2661,9 @@
                 "rollback": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["strategy"],
+                  "required": [
+                    "strategy"
+                  ],
                   "properties": {
                     "strategy": {
                       "enum": [
@@ -1179,10 +2676,25 @@
                         "NO_SIDE_EFFECTS"
                       ]
                     },
-                    "target": {"type":"string","minLength":1},
-                    "compensation": {"type":"string","minLength":1},
-                    "compensationTarget": {"type":"string","minLength":1},
-                    "onSignal": {"type":"array","items":{"type":"string","minLength":1}}
+                    "target": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "compensation": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "compensationTarget": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onSignal": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
                   }
                 }
               }
@@ -1191,7 +2703,9 @@
           "rollback": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["strategy"],
+            "required": [
+              "strategy"
+            ],
             "properties": {
               "strategy": {
                 "enum": [
@@ -1204,26 +2718,75 @@
                   "NO_SIDE_EFFECTS"
                 ]
               },
-              "target": {"type":"string","minLength":1},
-              "compensation": {"type":"string","minLength":1},
-              "compensationTarget": {"type":"string","minLength":1},
-              "onSignal": {"type":"array","items":{"type":"string","minLength":1}}
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compensation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "compensationTarget": {
+                "type": "string",
+                "minLength": 1
+              },
+              "onSignal": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           },
-          "noGuardsRationale": {"type":"string","minLength":1},
+          "noGuardsRationale": {
+            "type": "string",
+            "minLength": 1
+          },
           "returnContract": {
-            "type": ["object","null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "additionalProperties": false,
-            "required": ["successType","errorProtocol"],
+            "required": [
+              "successType",
+              "errorProtocol"
+            ],
             "properties": {
-              "successType": {"type":"string","minLength":1},
-              "errorProtocol": {"enum":["THROW_EXCEPTION","DISCRIMINATED_UNION","RESULT_OBJECT","HTTP_STATUS","BOOLEAN_STATUS"]},
-              "errorType": {"type":["string","null"]}
+              "successType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "errorProtocol": {
+                "enum": [
+                  "THROW_EXCEPTION",
+                  "DISCRIMINATED_UNION",
+                  "RESULT_OBJECT",
+                  "HTTP_STATUS",
+                  "BOOLEAN_STATUS"
+                ]
+              },
+              "errorType": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           },
           "executionModel": {
-            "type": ["string","null"],
-            "enum": ["SYNCHRONOUS_IN_MEMORY","ASYNC_SERIALIZED","DISTRIBUTED_LOCK","SINGLE_THREADED_EVENT_LOOP",null]
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SYNCHRONOUS_IN_MEMORY",
+              "ASYNC_SERIALIZED",
+              "DISTRIBUTED_LOCK",
+              "SINGLE_THREADED_EVENT_LOOP",
+              null
+            ]
           }
         }
       }
@@ -1233,26 +2796,69 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name","derivedFrom"],
+        "required": [
+          "name",
+          "derivedFrom"
+        ],
         "properties": {
-          "name": {"type":"string","minLength":1},
-          "derivedFrom": {"type":"array","items":{"type":"string","minLength":1}},
-          "representation": {"enum":["UINT32_BITMASK","ENUM","SCALAR","RECORD","BOOLEAN"]},
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "derivedFrom": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "representation": {
+            "enum": [
+              "UINT32_BITMASK",
+              "ENUM",
+              "SCALAR",
+              "RECORD",
+              "BOOLEAN"
+            ]
+          },
           "bitAllocation": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["slice","field","bitWidth"],
+              "required": [
+                "slice",
+                "field",
+                "bitWidth"
+              ],
               "properties": {
-                "slice": {"type":"string","minLength":1},
-                "field": {"type":"string","minLength":1},
-                "bitWidth": {"type":"integer","minimum":1},
-                "mapping": {"type":["string","null"]}
+                "slice": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bitWidth": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "mapping": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             }
           },
-          "emptyBehavior": {"type":["string","null"]}
+          "emptyBehavior": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
@@ -1261,39 +2867,92 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["target","includedFields","fieldEncodings","recordOrderingKey","emptyStateDigest"],
+        "required": [
+          "target",
+          "includedFields",
+          "fieldEncodings",
+          "recordOrderingKey",
+          "emptyStateDigest"
+        ],
         "properties": {
-          "target": {"type":"string","minLength":1},
-          "includedFields": {"type":"array","items":{"type":"string","minLength":1}},
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "includedFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "fieldEncodings": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["field","encoding"],
-              "properties": {"field":{"type":"string","minLength":1},"encoding":{"type":"string","minLength":1}}
+              "required": [
+                "field",
+                "encoding"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "encoding": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           },
-          "recordOrderingKey": {"type":"string","minLength":1},
-          "emptyStateDigest": {"type":"string","minLength":1}
+          "recordOrderingKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "emptyStateDigest": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
     "semantic_opinion_counterexampleWitness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["inputClass","baseline","variation"],
+      "required": [
+        "inputClass",
+        "baseline",
+        "variation"
+      ],
       "properties": {
-        "inputClass": {"type":"string","minLength":1,"maxLength":240},
-        "baseline": {"type":"string","minLength":1},
-        "variation": {"type":"string","minLength":1}
+        "inputClass": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "baseline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variation": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "decision_presentation": {
       "description": "Explicação semântica, não normativa, necessária para que uma pessoa decida com conhecimento de causa.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["context","whyHumanDecision","observableImpact","recommendationReasoning","glossary"],
+      "required": [
+        "context",
+        "whyHumanDecision",
+        "observableImpact",
+        "recommendationReasoning",
+        "glossary"
+      ],
       "properties": {
         "context": {
           "type": "string",
@@ -1321,8 +2980,20 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["term","meaning"],
-            "properties": {"term":{"type":"string","minLength":1},"meaning":{"type":"string","minLength":1}}
+            "required": [
+              "term",
+              "meaning"
+            ],
+            "properties": {
+              "term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "meaning": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }
@@ -1339,40 +3010,89 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.semantic_opinion.v3#/properties/requirements/items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.semantic_opinion.v3#/properties/requirements/items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "statement": {"type":"string","minLength":1},
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "acceptanceCases": {
                         "type": "array",
                         "items": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["index"],
+                          "required": [
+                            "index"
+                          ],
                           "properties": {
-                            "index": {"type":"integer","minimum":0},
-                            "given": {"type":"string"},
-                            "when": {"type":"string"},
-                            "then": {"type":"string","minLength":1},
-                            "outcomeKind": {"enum":["RETURN_VALUE","REJECTION"]},
+                            "index": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "given": {
+                              "type": "string"
+                            },
+                            "when": {
+                              "type": "string"
+                            },
+                            "then": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "outcomeKind": {
+                              "enum": [
+                                "RETURN_VALUE",
+                                "REJECTION"
+                              ]
+                            },
                             "decisionBinding": {
-                              "type": ["object","null"],
+                              "type": [
+                                "object",
+                                "null"
+                              ],
                               "additionalProperties": false,
-                              "required": ["decisionIndex","answerIndex"],
-                              "properties": {"decisionIndex":{"type":"integer","minimum":0},"answerIndex":{"type":"integer","minimum":0}}
+                              "required": [
+                                "decisionIndex",
+                                "answerIndex"
+                              ],
+                              "properties": {
+                                "decisionIndex": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "answerIndex": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         }
@@ -1392,22 +3112,45 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_invariants_items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_invariants_items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
-                    "properties": {"statement":{"type":"string","minLength":1},"falsification":{"type":"string","minLength":1}}
+                    "properties": {
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "falsification": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
                   }
                 }
               }
@@ -1422,22 +3165,45 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.contract_components.v1#/$defs/semantic_opinion_risks_items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_risks_items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
-                    "properties": {"statement":{"type":"string","minLength":1},"mitigation":{"type":"string","minLength":1}}
+                    "properties": {
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "mitigation": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
                   }
                 }
               }
@@ -1452,19 +3218,42 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.semantic_opinion.v3#/properties/boundaryRules/items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.semantic_opinion.v3#/properties/boundaryRules/items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "patch": {"type":"object","additionalProperties":false,"properties":{"rule":{"type":"string","minLength":1}}}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "patch": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "rule": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
                 }
               }
             ]
@@ -1478,9 +3267,15 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "value": {
                     "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_determinismReview_properties_dimensions_items"
                   }
@@ -1489,32 +3284,98 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "status": {"enum":["SPECIFIED","DECISION_REQUIRED","GAP_FOUND"]},
-                      "rationale": {"type":"string","minLength":1},
+                      "status": {
+                        "enum": [
+                          "SPECIFIED",
+                          "DECISION_REQUIRED",
+                          "GAP_FOUND"
+                        ]
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "acceptanceCase": {
-                        "type": ["object","null"],
+                        "type": [
+                          "object",
+                          "null"
+                        ],
                         "additionalProperties": false,
-                        "required": ["requirementIndex","caseIndex"],
-                        "properties": {"requirementIndex":{"type":"integer","minimum":0},"caseIndex":{"type":"integer","minimum":0}}
+                        "required": [
+                          "requirementIndex",
+                          "caseIndex"
+                        ],
+                        "properties": {
+                          "requirementIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "caseIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
                       },
                       "proofObligation": {
-                        "type": ["object","null"],
+                        "type": [
+                          "object",
+                          "null"
+                        ],
                         "additionalProperties": false,
-                        "required": ["relation","baselineOutcome","variationOutcome","resolutionParameter"],
+                        "required": [
+                          "relation",
+                          "baselineOutcome",
+                          "variationOutcome",
+                          "resolutionParameter"
+                        ],
                         "properties": {
-                          "relation": {"enum":["OUTPUTS_EQUAL","DEFINED_RESULT","EXPLICIT_REJECTION","BOUNDED_DIFF"]},
-                          "baselineOutcome": {"type":"string","minLength":1},
-                          "variationOutcome": {"type":"string","minLength":1},
-                          "resolutionKind": {"type":["string","null"]},
-                          "resolutionParameter": {"type":["string","null"]},
-                          "observables": {"type":"array","items":{"type":"string"}}
+                          "relation": {
+                            "enum": [
+                              "OUTPUTS_EQUAL",
+                              "DEFINED_RESULT",
+                              "EXPLICIT_REJECTION",
+                              "BOUNDED_DIFF"
+                            ]
+                          },
+                          "baselineOutcome": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "variationOutcome": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resolutionKind": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resolutionParameter": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "observables": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
                         }
                       }
                     }
@@ -1538,40 +3399,87 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.semantic_draft.v9#/properties/requirements/items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.semantic_draft.v9#/properties/requirements/items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "statement": {"type":"string","minLength":1},
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "acceptanceCases": {
                         "type": "array",
                         "items": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["index"],
+                          "required": [
+                            "index"
+                          ],
                           "properties": {
-                            "index": {"type":"integer","minimum":0},
-                            "given": {"type":"string"},
-                            "when": {"type":"string"},
-                            "then": {"type":"string","minLength":1},
-                            "outcomeKind": {"enum":["RETURN_VALUE","REJECTION"]},
+                            "index": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "given": {
+                              "type": "string"
+                            },
+                            "when": {
+                              "type": "string"
+                            },
+                            "then": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "outcomeKind": {
+                              "enum": [
+                                "RETURN_VALUE",
+                                "REJECTION"
+                              ]
+                            },
                             "decisionBinding": {
-                              "type": ["object","null"],
+                              "type": [
+                                "object",
+                                "null"
+                              ],
                               "additionalProperties": false,
-                              "required": ["questionId","answerId"],
-                              "properties": {"questionId":{"type":"string"},"answerId":{"type":"string"}}
+                              "required": [
+                                "questionId",
+                                "answerId"
+                              ],
+                              "properties": {
+                                "questionId": {
+                                  "type": "string"
+                                },
+                                "answerId": {
+                                  "type": "string"
+                                }
+                              }
                             }
                           }
                         }
@@ -1591,22 +3499,45 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_invariants_items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
-                    "properties": {"statement":{"type":"string","minLength":1},"falsification":{"type":"string","minLength":1}}
+                    "properties": {
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "falsification": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
                   }
                 }
               }
@@ -1621,22 +3552,45 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.contract_components.v1#/$defs/semantic_draft_risks_items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_risks_items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
-                    "properties": {"statement":{"type":"string","minLength":1},"mitigation":{"type":"string","minLength":1}}
+                    "properties": {
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "mitigation": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
                   }
                 }
               }
@@ -1651,19 +3605,42 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "value": {"$ref":"aegis.semantic_draft.v9#/properties/boundaryRules/items"}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "$ref": "aegis.semantic_draft.v9#/properties/boundaryRules/items"
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
-                  "patch": {"type":"object","additionalProperties":false,"properties":{"rule":{"type":"string","minLength":1}}}
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "patch": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "rule": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
                 }
               }
             ]
@@ -1677,9 +3654,15 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","value"],
+                "required": [
+                  "index",
+                  "value"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "value": {
                     "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions_items"
                   }
@@ -1688,32 +3671,101 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["index","patch"],
+                "required": [
+                  "index",
+                  "patch"
+                ],
                 "properties": {
-                  "index": {"type":"integer","minimum":0},
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "patch": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "status": {"enum":["SPECIFIED","DECISION_REQUIRED","GAP_FOUND"]},
-                      "rationale": {"type":"string","minLength":1},
-                      "acceptanceCaseId": {"type":["string","null"],"pattern":"^AC-[A-Z0-9][A-Z0-9-]+$"},
+                      "status": {
+                        "enum": [
+                          "SPECIFIED",
+                          "DECISION_REQUIRED",
+                          "GAP_FOUND"
+                        ]
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "acceptanceCaseId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^AC-[A-Z0-9][A-Z0-9-]+$"
+                      },
                       "acceptanceCase": {
-                        "type": ["object","null"],
+                        "type": [
+                          "object",
+                          "null"
+                        ],
                         "additionalProperties": false,
-                        "properties": {"requirementIndex":{"type":"integer","minimum":0},"caseIndex":{"type":"integer","minimum":0}}
+                        "properties": {
+                          "requirementIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "caseIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
                       },
                       "proofObligation": {
-                        "type": ["object","null"],
+                        "type": [
+                          "object",
+                          "null"
+                        ],
                         "additionalProperties": false,
-                        "required": ["relation","baselineOutcome","variationOutcome","resolutionParameter"],
+                        "required": [
+                          "relation",
+                          "baselineOutcome",
+                          "variationOutcome",
+                          "resolutionParameter"
+                        ],
                         "properties": {
-                          "relation": {"enum":["OUTPUTS_EQUAL","DEFINED_RESULT","EXPLICIT_REJECTION","BOUNDED_DIFF"]},
-                          "baselineOutcome": {"type":"string","minLength":1},
-                          "variationOutcome": {"type":"string","minLength":1},
-                          "resolutionKind": {"type":["string","null"]},
-                          "resolutionParameter": {"type":["string","null"]},
-                          "observables": {"type":"array","items":{"type":"string"}}
+                          "relation": {
+                            "enum": [
+                              "OUTPUTS_EQUAL",
+                              "DEFINED_RESULT",
+                              "EXPLICIT_REJECTION",
+                              "BOUNDED_DIFF"
+                            ]
+                          },
+                          "baselineOutcome": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "variationOutcome": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resolutionKind": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resolutionParameter": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "observables": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
                         }
                       }
                     }
@@ -1739,9 +3791,17 @@
         "distinguishingCase"
       ],
       "properties": {
-        "semanticKey": {"type":"string","pattern":"^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$"},
-        "question": {"type":"string","minLength":1},
-        "presentation": {"$ref":"aegis.contract_components.v1#/$defs/decision_presentation"},
+        "semanticKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "presentation": {
+          "$ref": "aegis.contract_components.v1#/$defs/decision_presentation"
+        },
         "answers": {
           "type": "array",
           "minItems": 2,
@@ -1749,26 +3809,83 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["label","rationale","contractEffect"],
+            "required": [
+              "label",
+              "rationale",
+              "contractEffect"
+            ],
             "properties": {
-              "preparedEffect": {"anyOf":[{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/prepared_opinion_effect"}]},
-              "label": {"type":"string","minLength":1},
-              "rationale": {"type":"string","minLength":1},
-              "contractEffect": {"type":"string","minLength":1}
+              "preparedEffect": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "aegis.contract_components.v1#/$defs/prepared_opinion_effect"
+                  }
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "contractEffect": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
-        "recommendedAnswerIndex": {"type":"integer","minimum":0},
-        "requirementIndexes": {"type":"array","minItems":1,"items":{"type":"integer","minimum":0},"uniqueItems":true},
-        "invariantIndexes": {"type":"array","items":{"type":"integer","minimum":0},"uniqueItems":true},
-        "riskIndexes": {"type":"array","items":{"type":"integer","minimum":0},"uniqueItems":true},
+        "recommendedAnswerIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requirementIndexes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
+        "invariantIndexes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
+        "riskIndexes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
         "distinguishingCase": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["given","when","outcomes"],
+          "required": [
+            "given",
+            "when",
+            "outcomes"
+          ],
           "properties": {
-            "given": {"type":"string","minLength":1},
-            "when": {"type":"string","minLength":1},
+            "given": {
+              "type": "string",
+              "minLength": 1
+            },
+            "when": {
+              "type": "string",
+              "minLength": 1
+            },
             "outcomes": {
               "type": "array",
               "minItems": 2,
@@ -1776,8 +3893,20 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["answerIndex","then"],
-                "properties": {"answerIndex":{"type":"integer","minimum":0},"then":{"type":"string","minLength":1}}
+                "required": [
+                  "answerIndex",
+                  "then"
+                ],
+                "properties": {
+                  "answerIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "then": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
             }
           }
@@ -1799,21 +3928,64 @@
         "answers"
       ],
       "properties": {
-        "semanticKey": {"type":"string","pattern":"^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$"},
-        "questionId": {"type":"string","pattern":"^(?:Q-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$"},
-        "question": {"type":"string","minLength":1},
-        "presentation": {"$ref":"aegis.contract_components.v1#/$defs/decision_presentation"},
-        "recommendedAnswerId": {"type":"string","minLength":1},
-        "requirementIds": {"type":"array","minItems":1,"items":{"type":"string"},"uniqueItems":true},
-        "invariantIds": {"type":"array","items":{"type":"string"},"uniqueItems":true},
-        "riskIds": {"type":"array","items":{"type":"string"},"uniqueItems":true},
+        "semanticKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)+$"
+        },
+        "questionId": {
+          "type": "string",
+          "pattern": "^(?:Q-[A-Z0-9][A-Z0-9-]+|decision/[a-z0-9-]+/[a-z0-9-]+)$"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "presentation": {
+          "$ref": "aegis.contract_components.v1#/$defs/decision_presentation"
+        },
+        "recommendedAnswerId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirementIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "invariantIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "riskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
         "distinguishingCase": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["given","when","outcomes"],
+          "required": [
+            "given",
+            "when",
+            "outcomes"
+          ],
           "properties": {
-            "given": {"type":"string","minLength":1},
-            "when": {"type":"string","minLength":1},
+            "given": {
+              "type": "string",
+              "minLength": 1
+            },
+            "when": {
+              "type": "string",
+              "minLength": 1
+            },
             "outcomes": {
               "type": "array",
               "minItems": 2,
@@ -1821,10 +3993,19 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["answerId","then"],
+                "required": [
+                  "answerId",
+                  "then"
+                ],
                 "properties": {
-                  "answerId": {"type":"string","pattern":"^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$"},
-                  "then": {"type":"string","minLength":1}
+                  "answerId": {
+                    "type": "string",
+                    "pattern": "^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$"
+                  },
+                  "then": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             }
@@ -1837,14 +4018,43 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","label","rationale","contractEffect","recommended"],
+            "required": [
+              "id",
+              "label",
+              "rationale",
+              "contractEffect",
+              "recommended"
+            ],
             "properties": {
-              "preparedEffect": {"anyOf":[{"type":"null"},{"$ref":"aegis.contract_components.v1#/$defs/prepared_draft_effect"}]},
-              "id": {"type":"string","pattern":"^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$"},
-              "label": {"type":"string","minLength":1},
-              "rationale": {"type":"string","minLength":1},
-              "contractEffect": {"type":"string","minLength":1},
-              "recommended": {"type":"boolean"}
+              "preparedEffect": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "aegis.contract_components.v1#/$defs/prepared_draft_effect"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^(?:ANS-[A-Z0-9][A-Z0-9-]+|answer/[a-z0-9-]+/[a-z0-9-]+)$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "contractEffect": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recommended": {
+                "type": "boolean"
+              }
             }
           }
         }
@@ -1864,18 +4074,46 @@
         "answers"
       ],
       "properties": {
-        "id": {"type":"string","minLength":1},
-        "question": {"type":"string","minLength":1},
-        "presentation": {"$ref":"aegis.contract_components.v1#/$defs/decision_presentation"},
-        "gaps": {"type":"array","items":{"type":"string","minLength":1},"uniqueItems":true},
-        "recommendedAnswerId": {"type":"string","minLength":1},
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "presentation": {
+          "$ref": "aegis.contract_components.v1#/$defs/decision_presentation"
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "recommendedAnswerId": {
+          "type": "string",
+          "minLength": 1
+        },
         "distinguishingCase": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["given","when","outcomes"],
+          "required": [
+            "given",
+            "when",
+            "outcomes"
+          ],
           "properties": {
-            "given": {"type":"string","minLength":1},
-            "when": {"type":"string","minLength":1},
+            "given": {
+              "type": "string",
+              "minLength": 1
+            },
+            "when": {
+              "type": "string",
+              "minLength": 1
+            },
             "outcomes": {
               "type": "array",
               "minItems": 2,
@@ -1883,8 +4121,20 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["answerId","then"],
-                "properties": {"answerId":{"type":"string","minLength":1},"then":{"type":"string","minLength":1}}
+                "required": [
+                  "answerId",
+                  "then"
+                ],
+                "properties": {
+                  "answerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "then": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
             }
           }
@@ -1892,7 +4142,12 @@
         "traceability": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["requirements","acceptanceCases","invariants","risks"],
+          "required": [
+            "requirements",
+            "acceptanceCases",
+            "invariants",
+            "risks"
+          ],
           "properties": {
             "requirements": {
               "type": "array",
@@ -1900,8 +4155,20 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id","statement"],
-                "properties": {"id":{"type":"string","minLength":1},"statement":{"type":"string","minLength":1}}
+                "required": [
+                  "id",
+                  "statement"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
             },
             "acceptanceCases": {
@@ -1910,13 +4177,34 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id","given","when","then","outcomeKind"],
+                "required": [
+                  "id",
+                  "given",
+                  "when",
+                  "then",
+                  "outcomeKind"
+                ],
                 "properties": {
-                  "id": {"type":"string","minLength":1},
-                  "given": {"type":"string","minLength":1},
-                  "when": {"type":"string","minLength":1},
-                  "then": {"type":"string","minLength":1},
-                  "outcomeKind": {"type":"string","minLength":1}
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "given": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "when": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "then": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "outcomeKind": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             },
@@ -1925,11 +4213,24 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id","statement","falsification"],
+                "required": [
+                  "id",
+                  "statement",
+                  "falsification"
+                ],
                 "properties": {
-                  "id": {"type":"string","minLength":1},
-                  "statement": {"type":"string","minLength":1},
-                  "falsification": {"type":"string","minLength":1}
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "falsification": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             },
@@ -1938,13 +4239,34 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id","kind","level","statement","mitigation"],
+                "required": [
+                  "id",
+                  "kind",
+                  "level",
+                  "statement",
+                  "mitigation"
+                ],
                 "properties": {
-                  "id": {"type":"string","minLength":1},
-                  "kind": {"type":"string","minLength":1},
-                  "level": {"type":"string","minLength":1},
-                  "statement": {"type":"string","minLength":1},
-                  "mitigation": {"type":"string","minLength":1}
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "level": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mitigation": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             }
@@ -1957,14 +4279,40 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id","label","rationale","contractEffect","recommended","applicationMode"],
+            "required": [
+              "id",
+              "label",
+              "rationale",
+              "contractEffect",
+              "recommended",
+              "applicationMode"
+            ],
             "properties": {
-              "applicationMode": {"enum":["PREPARED_EFFECT","SEMANTIC_REVIEW_REQUIRED"]},
-              "id": {"type":"string","minLength":1},
-              "label": {"type":"string","minLength":1},
-              "rationale": {"type":"string","minLength":1},
-              "contractEffect": {"type":"string","minLength":1},
-              "recommended": {"type":"boolean"}
+              "applicationMode": {
+                "enum": [
+                  "PREPARED_EFFECT",
+                  "SEMANTIC_REVIEW_REQUIRED"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "contractEffect": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recommended": {
+                "type": "boolean"
+              }
             }
           }
         }

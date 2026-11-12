@@ -2,8 +2,8 @@
 
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -12,150 +12,23 @@ import {
   buildRejectionReport,
   createRejectionError as rejection,
 } from './lib/rejection_report.mjs';
+import {
+  assertDiscoveryUnchanged,
+  clearSupersededRuntime,
+  readCachedSkeleton,
+  readConstitution,
+  readPendingRevision,
+  readPolicy,
+  readPreflight,
+  resolveRunnerPaths,
+  validateContract,
+  writeFileAtomic,
+} from './lib/runner_runtime.mjs';
+import { handleStatus, handleVerify } from './lib/runner_status.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
-const harnessDir = resolve(root, '.harness');
-const runtimeDir = resolve(harnessDir, 'runtime');
-const semanticStateJsonPath = resolve(harnessDir, 'state', 'semantic-state.json');
-const contractJsonPath = resolve(runtimeDir, 'contract.json');
-const contractMdPath = resolve(runtimeDir, 'contract.md');
-const preflightJsonPath = resolve(runtimeDir, 'preflight.json');
-const skeletonJsonPath = resolve(runtimeDir, 'workspace_skeleton.json');
-const semanticExecutionPath = resolve(runtimeDir, 'semantic-execution.json');
-const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
-const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
+const paths = resolveRunnerPaths(root);
 const semanticOpinionByteLimit = 262_144;
-
-async function writeFileAtomic(target, content) {
-  const parent = dirname(target);
-  await mkdir(parent, { recursive: true });
-  const stagingDirectory = await mkdtemp(resolve(parent, '.aegis-write-'));
-  const stagedPath = resolve(stagingDirectory, basename(target));
-  try {
-    await writeFile(stagedPath, content, { encoding: 'utf8', flush: true });
-    await rename(stagedPath, target);
-  } finally {
-    await rm(stagingDirectory, { recursive: true, force: true });
-  }
-}
-
-async function clearSupersededRuntime() {
-  const entries = await readdir(runtimeDir, { withFileTypes: true });
-  const preserved = new Set([basename(preflightJsonPath), basename(skeletonJsonPath)]);
-  await Promise.all(entries
-    .filter(({ name }) => !preserved.has(name))
-    .map(({ name }) => rm(resolve(runtimeDir, name), { recursive: true, force: true })));
-}
-
-async function readCachedSkeleton() {
-  if (!existsSync(skeletonJsonPath)) return null;
-  try {
-    return JSON.parse(await readFile(skeletonJsonPath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-async function readPreflight() {
-  if (!existsSync(preflightJsonPath)) throw rejection('MISSING_PREFLIGHT');
-  const [{ assertPreflightDocument }, preflight] = await Promise.all([
-    import('./lib/preflight_integrity.mjs'),
-    readFile(preflightJsonPath, 'utf8').then(JSON.parse),
-  ]);
-  assertPreflightDocument(preflight);
-  return preflight;
-}
-
-async function readPolicy() {
-  const [{ loadArchitecturePolicy }, { assertSchema }] = await Promise.all([
-    import('./lib/issue_contract_core.mjs'),
-    import('./lib/schema_validator.mjs'),
-  ]);
-  try {
-    const loaded = loadArchitecturePolicy(root);
-    assertSchema('aegis.architecture_policy.v3', loaded.policy);
-    return loaded;
-  } catch (error) {
-    throw rejection('ARCHITECTURE_POLICY_UNAVAILABLE', error.message);
-  }
-}
-
-async function readConstitution() {
-  try {
-    const { loadSemanticConstitution } = await import('./lib/semantic_request.mjs');
-    return loadSemanticConstitution(root);
-  } catch (error) {
-    throw rejection('SEMANTIC_CONSTITUTION_UNAVAILABLE', error.message);
-  }
-}
-
-async function assertDiscoveryUnchanged(preflight) {
-  const [{ canonicalDigest }, { observeWorkspace }] = await Promise.all([
-    import('./lib/canonical_json.mjs'),
-    import('./lib/issue_contract_core.mjs'),
-  ]);
-  const workspaceObservation = observeWorkspace(root, preflight.intent, {
-    cachedWorkspaceSkeleton: await readCachedSkeleton(),
-  });
-  const currentDiscovery = workspaceObservation.discovery;
-  if (currentDiscovery.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest) {
-    throw rejection('SOURCE_SNAPSHOT_CHANGED');
-  }
-  if (canonicalDigest(currentDiscovery) !== canonicalDigest(preflight.discovery)) {
-    throw rejection('DISCOVERY_EVIDENCE_MISMATCH');
-  }
-  return workspaceObservation;
-}
-
-async function readPendingRevision(preflight, loadedPolicy, constitution, workspaceObservation = null) {
-  const pathsExist = [contractJsonPath, userConfirmationPath, resolutionPath]
-    .map((path) => existsSync(path));
-  if (!pathsExist[2]) return null;
-  if (!pathsExist[0] || !pathsExist[1]) throw rejection('INCOMPLETE_SEMANTIC_REVISION_STATE');
-
-  const [
-    { assertContractDocument },
-    {
-      buildHumanResolutionRecords,
-      buildSemanticRevision,
-      resolutionRequiresRecompilation,
-    },
-    contract,
-    request,
-    resolution,
-  ] = await Promise.all([
-    import('./lib/semantic_contract_lifecycle.mjs'),
-    import('./lib/semantic_approval.mjs'),
-    readFile(contractJsonPath, 'utf8').then(JSON.parse),
-    readFile(userConfirmationPath, 'utf8').then(JSON.parse),
-    readFile(resolutionPath, 'utf8').then(JSON.parse),
-  ]);
-  if (contract.constitutionDigest !== constitution.digest
-    || contract.policyDigest !== loadedPolicy.policyDigest) {
-    return null;
-  }
-  if (contract.schema !== 'aegis.issue_contract.v14') return null;
-  assertContractDocument({
-    repositoryRoot: root,
-    contract,
-    preflight,
-    policy: loadedPolicy.policy,
-    policyDigest: loadedPolicy.policyDigest,
-    constitution,
-    constitutionDigest: constitution.digest,
-    workspaceObservation,
-  });
-  if (!resolutionRequiresRecompilation({ contract, request, resolution })) return null;
-  return {
-    resolution,
-    request: buildSemanticRevision(contract, resolution),
-    sourceSpecification: contract.specification,
-    humanResolutions: [
-      ...contract.humanResolutions,
-      ...buildHumanResolutionRecords(contract, resolution),
-    ],
-  };
-}
 
 async function handleDraft(args, { emitHandoff = true, maxBytes = undefined } = {}) {
   const [
@@ -169,17 +42,17 @@ async function handleDraft(args, { emitHandoff = true, maxBytes = undefined } = 
   ]);
   const demand = captureDemand(args, { maxBytes });
   const workspaceObservation = observeWorkspace(root, demand, {
-    cachedWorkspaceSkeleton: await readCachedSkeleton(),
+    cachedWorkspaceSkeleton: await readCachedSkeleton(paths),
   });
   const { discovery, workspaceSkeleton } = workspaceObservation;
   const preflight = buildPreflightHandoff({ demand, discovery, version: 'v3' });
   assertPreflightDocument(preflight);
   const serializedPreflight = `${canonicalJson(preflight)}\n`;
 
-  await clearSupersededRuntime();
+  await clearSupersededRuntime(paths);
   await Promise.all([
-    writeFileAtomic(preflightJsonPath, serializedPreflight),
-    writeFileAtomic(skeletonJsonPath, `${canonicalJson(workspaceSkeleton)}\n`),
+    writeFileAtomic(paths.preflightJsonPath, serializedPreflight),
+    writeFileAtomic(paths.skeletonJsonPath, `${canonicalJson(workspaceSkeleton)}\n`),
   ]);
 
   if (emitHandoff) {
@@ -194,206 +67,31 @@ async function handleDraft(args, { emitHandoff = true, maxBytes = undefined } = 
   }
 }
 
-async function validateContract(contract, preflight) {
-  const { assertContractDocument } = await import('./lib/semantic_contract_lifecycle.mjs');
-  const [loadedPolicy, constitution] = await Promise.all([
-    readPolicy(),
-    readConstitution(),
-  ]);
-  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
-  assertContractDocument({
-    repositoryRoot: root,
-    contract,
-    preflight,
-    policy: loadedPolicy.policy,
-    policyDigest: loadedPolicy.policyDigest,
-    constitution,
-    constitutionDigest: constitution.digest,
-    workspaceObservation,
-  });
-}
-
 async function handleConfirmationRequest() {
   const [contract, preflight] = await Promise.all([
-    readFile(contractJsonPath, 'utf8').then(JSON.parse),
-    readPreflight(),
+    readFile(paths.contractJsonPath, 'utf8').then(JSON.parse),
+    readPreflight(paths),
   ]);
-  await validateContract(contract, preflight);
+  await validateContract(paths, contract, preflight);
   const [{ canonicalJson }, { buildConfirmationRequest }] = await Promise.all([
     import('./lib/canonical_json.mjs'),
     import('./lib/semantic_approval.mjs'),
   ]);
   const request = buildConfirmationRequest(contract);
-  await writeFileAtomic(userConfirmationPath, `${canonicalJson(request)}\n`);
+  await writeFileAtomic(paths.userConfirmationPath, `${canonicalJson(request)}\n`);
   process.stdout.write(`${canonicalJson(request)}\n`);
-}
-
-async function readGovernedState(statePath) {
-  const { parseSemanticState } = await import('./lib/semantic_state.mjs');
-  return parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
-}
-
-function writeStatus(status) {
-  process.stdout.write(`${JSON.stringify(status)}\n`);
-}
-
-async function inspectWorkspaceFreshness(contract) {
-  try {
-    const { discoverWorkspace } = await import('./lib/issue_contract_core.mjs');
-    const currentSnapshotDigest = discoverWorkspace(root).sourceSnapshotDigest;
-    return {
-      workspaceFreshness: currentSnapshotDigest === contract.sourceSnapshotDigest
-        ? 'MATCHES_BASELINE'
-        : 'CHANGED_SINCE_BASELINE',
-    };
-  } catch (error) {
-    return {
-      workspaceFreshness: 'UNAVAILABLE',
-      workspaceFreshnessReason: error instanceof Error ? error.message : 'unknown_error',
-    };
-  }
-}
-
-async function writeGovernedStatus(statePath, runtimeContract = null) {
-  try {
-    const [{ canonicalDigest }, state] = await Promise.all([
-      import('./lib/canonical_json.mjs'),
-      readGovernedState(statePath),
-    ]);
-    if (runtimeContract !== null && canonicalDigest(runtimeContract) !== state.contractDigest) {
-      writeStatus({
-        status: 'INVALID_SEMANTIC_STATE',
-        reason: 'RUNTIME_CONTRACT_MISMATCH',
-        contractIntegrity: 'INVALID',
-        workspaceFreshness: 'NOT_CHECKED',
-        implementationCompliance: 'NOT_EVALUATED',
-        semanticState: statePath,
-      });
-      return;
-    }
-    const freshness = await inspectWorkspaceFreshness(state.contract);
-    const requiresSemanticRevision = state.contract.approval !== null && (
-      state.contract.specification.decisions.length > 0
-      || state.contract.specification.determinismReview.dimensions.some(({ status }) => (
-        status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
-      ))
-    );
-    writeStatus({
-      status: requiresSemanticRevision ? 'GOVERNED_REVISION_REQUIRED' : 'GOVERNED',
-      contractDigest: state.contractDigest,
-      contractIntegrity: 'VALID',
-      governanceFreshness: requiresSemanticRevision ? 'REVISION_REQUIRED' : 'CURRENT',
-      ...(requiresSemanticRevision ? { reason: 'SEMANTIC_DECISIONS_NOT_MATERIALIZED' } : {}),
-      ...freshness,
-      implementationCompliance: 'NOT_EVALUATED',
-      semanticState: statePath,
-    });
-  } catch {
-    writeStatus({
-      status: 'INVALID_SEMANTIC_STATE',
-      contractIntegrity: 'INVALID',
-      workspaceFreshness: 'NOT_CHECKED',
-      implementationCompliance: 'NOT_EVALUATED',
-      semanticState: statePath,
-    });
-  }
-}
-
-async function statusForContract(statePath) {
-  let contract;
-  try {
-    contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
-  } catch {
-    return {
-      status: 'SEMANTIC_REDELIBERATION_REQUIRED',
-      foundSchema: 'INVALID',
-      requiredSchema: 'aegis.issue_contract.v14',
-    };
-  }
-  if (contract.schema !== 'aegis.issue_contract.v14') {
-    return {
-      status: 'SEMANTIC_REDELIBERATION_REQUIRED',
-      foundSchema: contract.schema ?? 'INVALID',
-      requiredSchema: 'aegis.issue_contract.v14',
-    };
-  }
-  if (contract.approval !== null) {
-    if (!existsSync(statePath)) {
-      return {
-        status: 'INVALID_SEMANTIC_STATE',
-        reason: 'MISSING_GOVERNED_STATE',
-        contractIntegrity: 'INVALID',
-        workspaceFreshness: 'NOT_CHECKED',
-        implementationCompliance: 'NOT_EVALUATED',
-        semanticState: statePath,
-      };
-    }
-    await writeGovernedStatus(statePath, contract);
-    return null;
-  }
-
-  let preflight;
-  try {
-    preflight = await readPreflight();
-  } catch {
-    return { status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath };
-  }
-  try {
-    await validateContract(contract, preflight);
-  } catch {
-    return { status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' };
-  }
-  if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
-    return {
-      status: 'BLOCKED_BY_GAP',
-      draftPath: contractJsonPath,
-      gapCount: contract.specification.closureCertificate?.gapLedger?.length ?? 0,
-      gapLedger: contract.specification.closureCertificate?.gapLedger ?? [],
-    };
-  }
-  return { status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath };
-}
-
-async function handleStatus() {
-  const statePath = semanticStateJsonPath;
-
-  if (existsSync(contractJsonPath)) {
-    const status = await statusForContract(statePath);
-    if (status !== null) writeStatus(status);
-    return;
-  }
-
-  if (existsSync(preflightJsonPath)) {
-    try {
-      await readPreflight();
-      writeStatus({
-        status: 'SEMANTIC_DELIBERATION_REQUIRED',
-        phase: 'DISCOVERED',
-        preflightPath: preflightJsonPath,
-      });
-    } catch {
-      writeStatus({ status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath });
-    }
-    return;
-  }
-
-  if (existsSync(statePath)) {
-    await writeGovernedStatus(statePath);
-    return;
-  }
-
-  writeStatus({ status: 'IDLE', workspace: 'clean' });
 }
 
 async function buildCurrentSemanticRequest() {
   const { buildSemanticRequest } = await import('./lib/semantic_request.mjs');
   const [preflight, loadedPolicy, constitution] = await Promise.all([
-    readPreflight(),
-    readPolicy(),
-    readConstitution(),
+    readPreflight(paths),
+    readPolicy(paths),
+    readConstitution(paths),
   ]);
-  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
+  const workspaceObservation = await assertDiscoveryUnchanged(paths, preflight);
   const revision = await readPendingRevision(
+    paths,
     preflight,
     loadedPolicy,
     constitution,
@@ -417,14 +115,10 @@ async function buildCurrentSemanticRequest() {
   };
 }
 
-async function writeSemanticRequest(request) {
-  const { canonicalJson } = await import('./lib/canonical_json.mjs');
-  process.stdout.write(`${canonicalJson(request)}\n`);
-}
-
 async function handleSemanticRequest() {
+  const { canonicalJson } = await import('./lib/canonical_json.mjs');
   const { request } = await buildCurrentSemanticRequest();
-  await writeSemanticRequest(request);
+  process.stdout.write(`${canonicalJson(request)}\n`);
 }
 
 async function compileAndPersistSemanticOpinion(opinion, context, execution = null, preparedDraft = null) {
@@ -473,13 +167,13 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     semanticRequest: request,
   });
 
-  await mkdir(runtimeDir, { recursive: true });
+  await mkdir(paths.runtimeDir, { recursive: true });
   const writes = [
-    writeFileAtomic(contractJsonPath, `${canonicalJson(contract)}\n`),
-    writeFileAtomic(contractMdPath, `${renderSemanticContractMarkdown(contract, {
+    writeFileAtomic(paths.contractJsonPath, `${canonicalJson(contract)}\n`),
+    writeFileAtomic(paths.contractMdPath, `${renderSemanticContractMarkdown(contract, {
       policyRules: loadedPolicy.policy.rules,
     })}\n`),
-    rm(resolutionPath, { force: true }),
+    rm(paths.resolutionPath, { force: true }),
   ];
   if (execution !== null) {
     const { assertSchema } = await import('./lib/schema_validator.mjs');
@@ -497,13 +191,13 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
       executionDigest: canonicalDigest(receiptPayload),
     };
     assertSchema('aegis.semantic_execution.v1', receipt);
-    writes.push(writeFileAtomic(semanticExecutionPath, `${canonicalJson(receipt)}\n`));
+    writes.push(writeFileAtomic(paths.semanticExecutionPath, `${canonicalJson(receipt)}\n`));
   } else {
-    writes.push(rm(semanticExecutionPath, { force: true }));
+    writes.push(rm(paths.semanticExecutionPath, { force: true }));
   }
   await Promise.all(writes);
   const confirmation = buildConfirmationRequest(contract);
-  await writeFileAtomic(userConfirmationPath, `${canonicalJson(confirmation)}\n`);
+  await writeFileAtomic(paths.userConfirmationPath, `${canonicalJson(confirmation)}\n`);
   process.stdout.write(`${canonicalJson(confirmation)}\n`);
   if (preparedDraft === null && process.env.AEGIS_TEST_AUTOMATION !== '1') {
     if (confirmation.questionCount > 0) {
@@ -662,11 +356,80 @@ async function compilePreparedRevision(context) {
   const { hasPreparedAnswers, applyPreparedAnswers } = await import('./lib/prepared_effects.mjs');
   const { sourceSpecification, resolution, humanResolutions } = context.revision;
   if (!hasPreparedAnswers(sourceSpecification, resolution.answers)) return false;
-  const draft = applyPreparedAnswers(sourceSpecification, resolution.answers, humanResolutions, context.request.intentEvidence, context.request.workspace?.sourceEvidence);
+  const draft = applyPreparedAnswers(
+    sourceSpecification,
+    resolution.answers,
+    humanResolutions,
+    context.request.intentEvidence,
+    context.request.workspace?.sourceEvidence,
+  );
   draft.sourceContextDigest = context.request.contextDigest;
   draft.sourceEvidenceDigest = context.request.intentEvidence.evidenceDigest;
   await compileAndPersistSemanticOpinion(null, context, null, draft);
   return true;
+}
+
+async function emitIdeBriefing() {
+  const [{ canonicalJson }, { isFallbackOnlyEvidence }, { request, preflight }] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/source_evidence.mjs'),
+    buildCurrentSemanticRequest(),
+  ]);
+  await writeFileAtomic(resolve(paths.runtimeDir, 'semantic-request.json'), `${canonicalJson(request)}\n`);
+  const brief = {
+    schema: preflight.schema,
+    status: preflight.status,
+    phase: preflight.phase,
+    preflightDigest: preflight.preflightDigest,
+    evidenceDigest: request.intentEvidence.evidenceDigest,
+    sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
+    intent: request.intent,
+    fragments: request.intentEvidence.fragments.map((f, index) => ({
+      index,
+      id: f.id,
+      anchor: f.anchor,
+    })),
+    literalFacts: request.intentEvidence.literalFacts.map((f) => ({
+      id: f.id,
+      kind: f.kind,
+      value: f.reference,
+      fragmentIndex: f.fragmentIndex,
+    })),
+    workspace: {
+      status: request.workspace.status,
+      observedTextPaths: request.workspace.observedTextPaths,
+      symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
+        name: s.name,
+        kind: s.kind,
+        path: s.path,
+        line: s.line,
+      })),
+      sourceExcerpts: request.workspace.sourceEvidence.map(({ path, startLine, endLine, content }) => ({
+        path,
+        startLine,
+        endLine,
+        content,
+      })),
+    },
+    availableContextTags: request.policy.contexts.map((c) => c.tag),
+    aiTask: [
+      '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION.',
+      '2. architectureContexts: declare as tags aplicáveis (policyAssessments COMPLIANT e determinismReview.coverage NO_DIMENSION_APPLICABLE são preenchidos mecanicamente pelo Harness; declare apenas conflitos reais ou dimensões específicas).',
+      '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
+      '4. stateModel / decisions: inclua stateModel apenas se houver estado mutável, e decisions apenas se houver ambiguidade material.',
+    ],
+    dataPath: '.harness/runtime/preflight.json',
+    requestPath: '.harness/runtime/semantic-request.json',
+    nextCommand: './aegis --semantic-compile',
+    message: 'Briefing determinístico pronto. Construa o parecer (usando evidenceDigest em sourceEvidenceDigest) e envie via stdin para ./aegis --semantic-compile.',
+  };
+  const isFallbackOnly = isFallbackOnlyEvidence(request.workspace.sourceEvidence);
+  const hasNoDirectWindowMatches = !request.workspace.sourceEvidence.some((e) => e.selection === 'LEXICAL_WINDOW');
+  const hasNoSkeletonMatches = (brief.workspace.symbols?.length ?? 0) === 0;
+  if (hasNoDirectWindowMatches && hasNoSkeletonMatches && isFallbackOnly) {
+    brief.warning = 'Nenhum símbolo do repositório coincidiu diretamente com os termos da demanda. Especifique o caminho do módulo (ex: src/ledger) ou adicione termos ao léxico (.harness/domain-lexicon.json) para ancoragem precisa.';
+  }
+  process.stdout.write(`${JSON.stringify(brief)}\n`);
 }
 
 async function handleDemand(args, options = {}) {
@@ -676,72 +439,12 @@ async function handleDemand(args, options = {}) {
   } catch (error) {
     const message = error instanceof Error ? (error.detail || error.message) : '';
     if (
-      message.includes('executable_not_found') ||
-      message.includes('SEMANTIC_CODEX_FAILED') ||
-      message.includes('SEMANTIC_IDE_ADAPTER_UNSUPPORTED') ||
-      error?.message === 'SEMANTIC_IDE_ADAPTER_UNSUPPORTED'
+      message.includes('executable_not_found')
+      || message.includes('SEMANTIC_CODEX_FAILED')
+      || message.includes('SEMANTIC_IDE_ADAPTER_UNSUPPORTED')
+      || error?.message === 'SEMANTIC_IDE_ADAPTER_UNSUPPORTED'
     ) {
-      const [{ canonicalJson }, { isFallbackOnlyEvidence }, { request, preflight }] = await Promise.all([
-        import('./lib/canonical_json.mjs'),
-        import('./lib/source_evidence.mjs'),
-        buildCurrentSemanticRequest(),
-      ]);
-      const semanticRequestPath = resolve(runtimeDir, 'semantic-request.json');
-      await writeFileAtomic(semanticRequestPath, `${canonicalJson(request)}\n`);
-      const brief = {
-        schema: preflight.schema,
-        status: preflight.status,
-        phase: preflight.phase,
-        preflightDigest: preflight.preflightDigest,
-        evidenceDigest: request.intentEvidence.evidenceDigest,
-        sourceSnapshotDigest: preflight.discovery.sourceSnapshotDigest,
-        intent: request.intent,
-        fragments: request.intentEvidence.fragments.map((f, index) => ({
-          index,
-          id: f.id,
-          anchor: f.anchor,
-        })),
-        literalFacts: request.intentEvidence.literalFacts.map((f) => ({
-          id: f.id,
-          kind: f.kind,
-          value: f.reference,
-          fragmentIndex: f.fragmentIndex,
-        })),
-        workspace: {
-          status: request.workspace.status,
-          observedTextPaths: request.workspace.observedTextPaths,
-          symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
-            name: s.name,
-            kind: s.kind,
-            path: s.path,
-            line: s.line,
-          })),
-          sourceExcerpts: request.workspace.sourceEvidence.map(({ path, startLine, endLine, content }) => ({
-            path,
-            startLine,
-            endLine,
-            content,
-          })),
-        },
-        availableContextTags: request.policy.contexts.map((c) => c.tag),
-        aiTask: [
-          '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION.',
-          '2. architectureContexts: declare as tags aplicáveis (policyAssessments COMPLIANT e determinismReview.coverage NO_DIMENSION_APPLICABLE são preenchidos mecanicamente pelo Harness; declare apenas conflitos reais ou dimensões específicas).',
-          '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
-          '4. stateModel / decisions: inclua stateModel apenas se houver estado mutável, e decisions apenas se houver ambiguidade material.',
-        ],
-        dataPath: '.harness/runtime/preflight.json',
-        requestPath: '.harness/runtime/semantic-request.json',
-        nextCommand: './aegis --semantic-compile',
-        message: 'Briefing determinístico pronto. Construa o parecer (usando evidenceDigest em sourceEvidenceDigest) e envie via stdin para ./aegis --semantic-compile.',
-      };
-      const isFallbackOnly = isFallbackOnlyEvidence(request.workspace.sourceEvidence);
-      const hasNoDirectWindowMatches = !request.workspace.sourceEvidence.some((e) => e.selection === 'LEXICAL_WINDOW');
-      const hasNoSkeletonMatches = (brief.workspace.symbols?.length ?? 0) === 0;
-      if (hasNoDirectWindowMatches && hasNoSkeletonMatches && isFallbackOnly) {
-        brief.warning = 'Nenhum símbolo do repositório coincidiu diretamente com os termos da demanda. Especifique o caminho do módulo (ex: src/ledger) ou adicione termos ao léxico (.harness/domain-lexicon.json) para ancoragem precisa.';
-      }
-      process.stdout.write(`${JSON.stringify(brief)}\n`);
+      await emitIdeBriefing();
       return;
     }
     throw error;
@@ -749,8 +452,8 @@ async function handleDemand(args, options = {}) {
 }
 
 async function handleApprove() {
-  if (!existsSync(contractJsonPath)) {
-    throw rejection(existsSync(preflightJsonPath)
+  if (!existsSync(paths.contractJsonPath)) {
+    throw rejection(existsSync(paths.preflightJsonPath)
       ? 'SEMANTIC_DELIBERATION_REQUIRED'
       : 'MISSING_CONTRACT_DRAFT');
   }
@@ -772,15 +475,15 @@ async function handleApprove() {
     import('./lib/semantic_state.mjs'),
   ]);
   const [draftContract, preflight, loadedPolicy, constitution] = await Promise.all([
-    readFile(contractJsonPath, 'utf8').then(JSON.parse),
-    readPreflight(),
-    readPolicy(),
-    readConstitution(),
+    readFile(paths.contractJsonPath, 'utf8').then(JSON.parse),
+    readPreflight(paths),
+    readPolicy(paths),
+    readConstitution(paths),
   ]);
   if (draftContract.schema !== 'aegis.issue_contract.v14') {
     throw rejection('SEMANTIC_REDELIBERATION_REQUIRED', `found=${draftContract.schema ?? 'unknown'} required=aegis.issue_contract.v14`);
   }
-  const workspaceObservation = await assertDiscoveryUnchanged(preflight);
+  const workspaceObservation = await assertDiscoveryUnchanged(paths, preflight);
   assertContractDocument({
     repositoryRoot: root,
     contract: draftContract,
@@ -792,12 +495,12 @@ async function handleApprove() {
     workspaceObservation,
   });
 
-  if (!existsSync(userConfirmationPath)) throw rejection('MISSING_USER_CONFIRMATION');
-  const request = JSON.parse(await readFile(userConfirmationPath, 'utf8'));
+  if (!existsSync(paths.userConfirmationPath)) throw rejection('MISSING_USER_CONFIRMATION');
+  const request = JSON.parse(await readFile(paths.userConfirmationPath, 'utf8'));
   assertConfirmationRequest(draftContract, request);
   let resolution;
-  if (existsSync(resolutionPath)) {
-    resolution = JSON.parse(await readFile(resolutionPath, 'utf8'));
+  if (existsSync(paths.resolutionPath)) {
+    resolution = JSON.parse(await readFile(paths.resolutionPath, 'utf8'));
     if (resolutionRequiresRecompilation({ contract: draftContract, request, resolution })) {
       if (await compilePreparedRevision(await buildCurrentSemanticRequest())) return;
       throw rejection('SEMANTIC_RECOMPILATION_REQUIRED');
@@ -839,16 +542,16 @@ async function handleApprove() {
   };
   await mkdir(dirname(statePath), { recursive: true });
   await Promise.all([
-    writeFileAtomic(contractJsonPath, `${canonicalJson(contract)}\n`),
-    writeFileAtomic(contractMdPath, `${renderSemanticContractMarkdown(contract, {
+    writeFileAtomic(paths.contractJsonPath, `${canonicalJson(contract)}\n`),
+    writeFileAtomic(paths.contractMdPath, `${renderSemanticContractMarkdown(contract, {
       contractDigest,
       policyRules: loadedPolicy.policy.rules,
     })}\n`),
   ]);
   await writeFileAtomic(statePath, `${canonicalJson(semanticState)}\n`);
   await Promise.all([
-    rm(userConfirmationPath, { force: true }),
-    rm(resolutionPath, { force: true }),
+    rm(paths.userConfirmationPath, { force: true }),
+    rm(paths.resolutionPath, { force: true }),
   ]);
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v14',
@@ -861,34 +564,6 @@ async function handleApprove() {
     approvalMethod: contract.approval.method,
     humanDecisionCount: contract.humanResolutions.length,
     implementationAuthorized: false,
-  })}\n`);
-}
-
-async function handleVerify() {
-  const { semanticStatePath, parseSemanticState } = await import('./lib/semantic_state.mjs');
-  const statePath = semanticStatePath(root);
-  if (!existsSync(statePath)) throw rejection('NO_GOVERNED_CONTRACT');
-  const state = parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
-  let activeContext = 'NOT_PRESENT';
-  if (existsSync(preflightJsonPath)) {
-    try {
-      const preflight = await readPreflight();
-      activeContext = state.contract.sourcePreflightDigest === preflight.preflightDigest
-        ? 'MATCHES_CONTRACT'
-        : 'DIFFERENT_PREFLIGHT';
-    } catch {
-      activeContext = 'INVALID_PREFLIGHT';
-    }
-  }
-  const freshness = await inspectWorkspaceFreshness(state.contract);
-  process.stdout.write(`${JSON.stringify({
-    schema: 'aegis.contract_verification.v2',
-    status: 'VALID',
-    contractDigest: state.contractDigest,
-    contractIntegrity: 'VALID',
-    ...freshness,
-    implementationCompliance: 'NOT_EVALUATED',
-    activeContext,
   })}\n`);
 }
 
@@ -906,12 +581,12 @@ try {
   else if (command === 'issue') await handleIssue(remainingArgs);
   else if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'confirmation-request') await handleConfirmationRequest();
-  else if (command === 'status') await handleStatus();
+  else if (command === 'status') await handleStatus(paths);
   else if (command === 'semantic-request') await handleSemanticRequest();
   else if (command === 'semantic-run') await handleSemanticRun(remainingArgs);
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();
-  else if (command === 'verify') await handleVerify();
+  else if (command === 'verify') await handleVerify(paths);
   else throw rejection('UNKNOWN_INTERNAL_COMMAND', command);
 } catch (error) {
   const phase = command === 'draft'

@@ -296,6 +296,19 @@ function extractDocTokens(docComment) {
     .filter((w) => w.length >= 3 && !['param', 'returns', 'return', 'type', 'const', 'export'].includes(w));
 }
 
+function symbolPathPenalty(sym, deprecatedPenalty, nonProdPenalty) {
+  let penalty = 0;
+  if (sym.docComment && sym.docComment.includes('@deprecated')) penalty -= deprecatedPenalty;
+  if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_') || sym.path.includes('trap')) {
+    penalty -= nonProdPenalty;
+  }
+  if (sym.path.includes('/tests/') || sym.path.includes('.test.') || sym.path.includes('.spec.')) {
+    penalty -= nonProdPenalty;
+  }
+  if (sym.path.includes('/scripts/')) penalty -= nonProdPenalty;
+  return penalty;
+}
+
 function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixes = new Set(), precomputedIdf = null) {
   const stripped = stripDiacritics(intent);
   const rawWords = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
@@ -330,10 +343,7 @@ function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixe
       score += Math.min(docBonus, 6);
     }
 
-    if (sym.docComment && sym.docComment.includes('@deprecated')) score -= 5;
-    if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_') || sym.path.includes('trap')) score -= 5;
-    if (sym.path.includes('/tests/') || sym.path.includes('.test.') || sym.path.includes('.spec.')) score -= 5;
-    if (sym.path.includes('/scripts/') || sym.path.includes('/benchmarks/')) score -= 5;
+    score += symbolPathPenalty(sym, 5, 5);
 
     if (score > 0) scored.push({ path: sym.path, line: sym.startLine, score });
   }
@@ -343,11 +353,7 @@ function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixe
 }
 
 function computeSymbolAffinity(sym, words, stems, entrypoints, idfWeights = new Map(), domainAliases = {}, targetPrefixes = new Set()) {
-  let score = 100;
-  if (sym.docComment && sym.docComment.includes('@deprecated')) score -= 300;
-  if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_') || sym.path.includes('trap')) score -= 200;
-  if (sym.path.includes('/tests/') || sym.path.includes('.test.') || sym.path.includes('.spec.')) score -= 200;
-  if (sym.path.includes('/scripts/') || sym.path.includes('/benchmarks/')) score -= 200;
+  let score = 100 + symbolPathPenalty(sym, 300, 200);
   if (entrypoints.includes(sym.path)) score += 200;
   if (sym.exported) score += 50;
 
