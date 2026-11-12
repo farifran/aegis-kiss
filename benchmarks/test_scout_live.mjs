@@ -43,7 +43,8 @@ const tPreflight = performance.now() - t0;
 console.log('\n[ESTADO 1: ANTES DO SCOUT - MECÂNICA PURA]');
 console.log(`• Tempo de preflight mecânico: ${tPreflight.toFixed(2)} ms`);
 console.log(`• Total de arquivos no monorepo: ${preflight1.discovery.files.length} arquivos`);
-console.log(`• Casamentos léxicos BM25: ${reqBefore.workspace.lexicalEvidence?.matches?.length ?? 0}`);
+const directAstMatches = reqBefore.workspace.sourceEvidence.filter((e) => e.selection === 'LEXICAL_WINDOW').length;
+console.log(`• Casamentos estruturais diretos (LEXICAL_WINDOW): ${directAstMatches}`);
 console.log(`• Arquivos na evidência física entregue: ${reqBefore.workspace.sourceEvidence.length}`);
 reqBefore.workspace.sourceEvidence.forEach((e) => {
   console.log(`  - ${e.path} (${e.selection}, ${Buffer.byteLength(e.content, 'utf8')} bytes)`);

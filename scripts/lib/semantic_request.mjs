@@ -728,22 +728,8 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
         selectionsByPath.get(path).lines.push(line);
       }
     }
-    // 2. Fallback to lexical matches if present
-    for (const match of preflight.discovery.lexicalEvidence?.matches ?? []) {
-      if (targetDirs.size > 0) {
-        const parts = match.path.split('/');
-        const inTarget = parts.length > 2 ? targetDirs.has(parts[1]) : true;
-        if (!inTarget) continue;
-      }
-      if (!selectionsByPath.has(match.path)) {
-        selectionsByPath.set(match.path, { path: match.path, lines: [] });
-      }
-      if (typeof match.line === 'number') {
-        selectionsByPath.get(match.path).lines.push(match.line);
-      }
-    }
 
-    // 3. Directory anchor fallback for new or unmatched sibling files
+    // 2. Directory anchor fallback for new or unmatched sibling files
     if (targetDirs.size > 0) {
       // Prioritize executable code files (.ts, .js) over docs/config (.md, .yml, dotfiles)
       const candidateFiles = textFiles.filter((file) => {
@@ -911,18 +897,6 @@ export function buildSemanticRequest({
       unavailablePaths,
       ...(prioritizedSkeleton
         ? { workspaceSkeleton: prioritizedSkeleton }
-        : {}),
-      ...(preflight.discovery.lexicalEvidence
-        ? {
-            lexicalEvidence: {
-              status: preflight.discovery.lexicalEvidence.status,
-              termsTruncated: preflight.discovery.lexicalEvidence.termsTruncated,
-              matches: preflight.discovery.lexicalEvidence.matches
-                .map(({ term, sourceToken, matchKind, path, line, sourceRegion }) => ({
-                  term, sourceToken, matchKind, path, line, sourceRegion,
-                })),
-            },
-          }
         : {}),
       sourceEvidence: buildSourceEvidence(repositoryRoot, preflight, workspaceObservation, explicitTargetPaths),
     },

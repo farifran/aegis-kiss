@@ -23,7 +23,6 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
       status: 'EMPTY_SOURCE',
       files: [],
       workspaceSkeleton: { symbolCount: 0, symbols: [] },
-      lexicalEvidence: { matches: [] },
     },
   };
   const trigger = shouldTriggerSemanticScout({ preflight, workspace: { sourceEvidence: [] } });
@@ -41,7 +40,6 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
         { path: 'src/utils.ts', kind: 'UTF8_TEXT', bytes: 2048 },
       ],
       workspaceSkeleton: { symbolCount: 5, symbols: [{ path: 'src/app.ts', name: 'runApp', kind: 'FUNCTION' }] },
-      lexicalEvidence: { matches: [] },
     },
   };
   const trigger = shouldTriggerSemanticScout({
@@ -61,7 +59,6 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
         { path: 'src/filler.ts', kind: 'UTF8_TEXT', bytes: 80_000 },
       ],
       workspaceSkeleton: { symbolCount: 0, symbols: [] },
-      lexicalEvidence: { matches: [] },
     },
   };
   const trigger = shouldTriggerSemanticScout({ preflight, workspace: { sourceEvidence: [] } });
@@ -69,21 +66,28 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
   log('  PASS: Empty skeleton guard (symbolCount === 0) verified');
 }
 
-// 4. Guardião de Correspondência Existente: se houve match léxico, deve retornar false
+// 4. Guardião de Correspondência Existente: se a evidência já contém janelas focadas (LEXICAL_WINDOW), deve retornar false
 {
   const preflight = {
     discovery: {
       status: 'SOURCE_OBSERVED',
       files: [
         { path: 'src/ledger/fee.ts', kind: 'UTF8_TEXT', bytes: 80_000 },
+        { path: 'src/ledger/other.ts', kind: 'UTF8_TEXT', bytes: 500 },
       ],
       workspaceSkeleton: { symbolCount: 10, symbols: [{ path: 'src/ledger/fee.ts', name: 'calcFee', kind: 'FUNCTION' }] },
-      lexicalEvidence: { matches: [{ term: 'fee', path: 'src/ledger/fee.ts', line: 10 }] },
     },
+    intent: 'Calcular calcFee para o lote de taxa',
   };
-  const trigger = shouldTriggerSemanticScout({ preflight, workspace: { sourceEvidence: [] } });
-  assert.equal(trigger, false, 'Scout must NOT trigger when lexicalEvidence already matched');
-  log('  PASS: Existing lexical match guard verified');
+  const workspace = {
+    sourceEvidence: [
+      { path: 'src/ledger/fee.ts', selection: 'LEXICAL_WINDOW', content: 'export function calcFee() { /* lote de taxa */ }' },
+      { path: 'src/ledger/other.ts', selection: 'LEXICAL_WINDOW', content: 'export function other() {}' },
+    ],
+  };
+  const trigger = shouldTriggerSemanticScout({ preflight, workspace });
+  assert.equal(trigger, false, 'Scout must NOT trigger when sourceEvidence already contains direct AST matches (LEXICAL_WINDOW)');
+  log('  PASS: Direct AST match guard verified');
 }
 
 // 5. Ativação Correta sob Silêncio Léxico em Monorepo (> 64KB)
@@ -101,7 +105,6 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
           { path: 'src/ledger/fee.ts', name: 'calculateSettlementFee', kind: 'FUNCTION' },
         ],
       },
-      lexicalEvidence: { matches: [] },
     },
   };
   const workspace = {
@@ -112,6 +115,34 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
   const trigger = shouldTriggerSemanticScout({ preflight, workspace });
   assert.equal(trigger, true, 'Scout MUST trigger on pure lexical silence in large repo with existing symbols');
   log('  PASS: Trigger on genuine lexical silence in large repo verified');
+}
+
+// 5b. Ativação sob Silêncio Parcial (Falsa Saciedade / Canibalização de Módulos)
+{
+  const preflight = {
+    intent: 'Gerar relatorio analitico em CSV dos limites de velocidade de risco e das tarifas de liquidacao mercantil.',
+    discovery: {
+      status: 'SOURCE_OBSERVED',
+      files: [
+        { path: 'src/reporting/csv.ts', kind: 'UTF8_TEXT', bytes: 50_000 },
+        { path: 'src/ledger/fee.ts', kind: 'UTF8_TEXT', bytes: 50_000 },
+      ],
+      workspaceSkeleton: {
+        symbolCount: 20,
+        symbols: [{ path: 'src/reporting/csv.ts', name: 'CsvExporter', kind: 'CLASS' }],
+      },
+    },
+  };
+  // Simulando que apenas o arquivo de CSV foi entregue (cobriu 'csv', mas nada de risco ou liquidação)
+  const workspace = {
+    sourceEvidence: [
+      { path: 'src/reporting/csv.ts', selection: 'LEXICAL_WINDOW', content: 'export class CsvExporter { exportCsv() {} }' },
+      { path: 'src/index.ts', selection: 'ENTRYPOINT_PREFIX', content: 'export * from "./reporting/csv";' },
+    ],
+  };
+  const trigger = shouldTriggerSemanticScout({ preflight, workspace });
+  assert.equal(trigger, true, 'Scout MUST trigger on partial silence (false satiety) where 1 module monopolizes evidence');
+  log('  PASS: Trigger on partial silence (false satiety multi-module deficit) verified');
 }
 
 // 6. Validação Física Fail-Closed: Rejeição de Alucinações

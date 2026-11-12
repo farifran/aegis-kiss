@@ -708,7 +708,7 @@ async function handleDemand(args) {
         workspace: {
           status: request.workspace.status,
           observedTextPaths: request.workspace.observedTextPaths,
-          matches: request.workspace.lexicalEvidence?.matches ?? [],
+          ...(request.workspace.lexicalEvidence ? { matches: request.workspace.lexicalEvidence.matches } : {}),
           symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
             name: s.name,
             kind: s.kind,
@@ -736,9 +736,9 @@ async function handleDemand(args) {
       };
       const isFallbackOnly = request.workspace.sourceEvidence.length <= 1 &&
         request.workspace.sourceEvidence.every((e) => e.selection === 'ENTRYPOINT_PREFIX' || e.selection === 'FULL_SOURCE');
-      const hasNoLexicalMatches = (request.workspace.lexicalEvidence?.matches?.length ?? 0) === 0;
+      const hasNoDirectWindowMatches = !request.workspace.sourceEvidence.some((e) => e.selection === 'LEXICAL_WINDOW');
       const hasNoSkeletonMatches = (brief.workspace.symbols?.length ?? 0) === 0;
-      if (hasNoLexicalMatches && hasNoSkeletonMatches && isFallbackOnly) {
+      if (hasNoDirectWindowMatches && hasNoSkeletonMatches && isFallbackOnly) {
         brief.warning = 'Nenhum símbolo do repositório coincidiu diretamente com os termos da demanda. Especifique o caminho do módulo (ex: src/ledger) ou adicione termos ao léxico (.harness/domain-lexicon.json) para ancoragem precisa.';
       }
       process.stdout.write(`${JSON.stringify(brief)}\n`);

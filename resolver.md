@@ -279,3 +279,19 @@ Foi criada a suíte [`scripts/substrates/test/test_semantic_scout.mjs`](file:///
 1. **Amostragem Estrutural Panorâmica (Sem Viés Alfabético):** `buildTopographicalMap` agrupa até 2 símbolos exportados por arquivo de toda a árvore de `src/`, garantindo que arquivos posteriores no alfabeto (ex: `src/ledger` e `src/risk` após centenas de arquivos de `src/askesis`) sejam visíveis ao Scout em menos de 4 KB de JSON.
 2. **Hidratação de Linhas de Símbolos:** Arquivos descobertos pelo Scout populam `lines` com os `startLine` reais dos símbolos exportados via `workspaceSkeleton`, ativando janelas focadas (`LEXICAL_WINDOW`) em vez de cabeçalhos genéricos (`ENTRYPOINT_PREFIX`).
 3. **Auto-Lexicon Persistente:** Mapeamentos conceituais inferidos pela IA (`inferredAliases`) são automaticamente consolidados em `.harness/domain-lexicon.json`. As execuções seguintes da mesma intenção são promovidas permanentemente para o **Fast-Path determinístico (0 ms, $0.00, offline)**.
+
+---
+
+### 7.8. Expurgo e Purificação dos Resíduos do BM25 Legado
+
+Com a estabilização completa do **Workspace Skeleton (AST Tipado)** no preflight v3, realizamos a limpeza integral de todos os resíduos sintáticos e estruturais do antigo algoritmo BM25 (`hybrid_source_index.mjs`):
+
+1. **Purificação do Schema de Governança (`preflight-handoff.v3`):**  
+   Removida a definição residual da propriedade opcional `lexicalEvidence` (que referia o método `HYBRID_BM25_IDENTIFIER_V2`), tornando o schema v3 100% estrito aos metadados do `workspaceSkeleton`. Validadores Ajv foram devidamente recompilados.
+2. **Eliminação de Aliases Obsoletos (`issue_contract_core.mjs`):**  
+   Removidos os re-exports e parâmetros mortos `isReusableHybridSourceIndex`, `cachedSourceIndex` e o alias `sourceIndex: workspaceSkeleton`.
+3. **Limpeza do Pipeline de Evidência (`semantic_request.mjs`):**  
+   Eliminado o loop de fallback para `lexicalEvidence?.matches` na montagem da evidência física de código, mantendo apenas o matching estrutural por nós de AST e âncoras de diretório.
+4. **Alinhamento do Árbitro e do Runner CLI (`semantic_scout.mjs` e `issue_contract_runner.mjs`):**  
+   A detecção de casamento direto foi atualizada para inspecionar a presença real de recortes focados (`selection: 'LEXICAL_WINDOW'`) derivados do AST Skeleton, eliminando referências fantasmas a contagens de casamentos léxicos legados.
+

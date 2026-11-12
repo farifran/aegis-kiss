@@ -64,14 +64,12 @@ export function isReusableWorkspaceSkeleton(cachedSkeleton) {
   return canonicalDigest(unsigned) === digest;
 }
 
-export { isReusableWorkspaceSkeleton as isReusableHybridSourceIndex };
-
 /**
  * Descobre apenas fatos estruturais já presentes em src/.
- * A evidência nasce em RAM; somente o esqueleto/índice derivado pode ser reutilizado como
+ * A evidência nasce em RAM; somente o esqueleto derivado pode ser reutilizado como
  * cache transitório e nunca substitui a leitura/hash do snapshot atual.
  */
-export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceSkeleton = null, cachedSourceIndex = null } = {}) {
+export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceSkeleton = null } = {}) {
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
@@ -158,9 +156,8 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceS
   ignoredEntries.sort((left, right) => compareCodeUnits(left.path, right.path));
   sourceRecords.sort((left, right) => compareCodeUnits(left.path, right.path));
   const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries);
-  const skeletonCandidate = cachedWorkspaceSkeleton ?? cachedSourceIndex;
-  const workspaceSkeleton = isReusableWorkspaceSkeleton(skeletonCandidate)
-    ? skeletonCandidate
+  const workspaceSkeleton = isReusableWorkspaceSkeleton(cachedWorkspaceSkeleton)
+    ? cachedWorkspaceSkeleton
     : buildWorkspaceSkeleton(sourceRecords);
   const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
@@ -176,7 +173,7 @@ export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceS
     sourceSnapshotDigest,
     workspaceSkeleton,
   };
-  return { discovery, sourceBytesByPath, workspaceSkeleton, sourceIndex: workspaceSkeleton };
+  return { discovery, sourceBytesByPath, workspaceSkeleton };
 }
 
 export function discoverWorkspace(repositoryRoot, intent = '') {

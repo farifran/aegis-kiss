@@ -24,7 +24,7 @@ import { sourceEvidenceByteLimit } from './semantic_authority.mjs';
 export function shouldTriggerSemanticScout({ preflight, workspace, explicitTargetPaths = [] }) {
   if (Array.isArray(explicitTargetPaths) && explicitTargetPaths.length > 0) return false;
   if (!preflight || !preflight.discovery) return false;
-  const { status, files, workspaceSkeleton, lexicalEvidence } = preflight.discovery;
+  const { status, files, workspaceSkeleton } = preflight.discovery;
 
   // 1. Guardião Greenfield: se não há código em src/, não há o que buscar
   if (status !== 'SOURCE_OBSERVED') return false;
@@ -37,15 +37,61 @@ export function shouldTriggerSemanticScout({ preflight, workspace, explicitTarge
   // 3. Guardião do Esqueleto Vazio: se não há símbolos estruturais extraídos, não há o que avaliar
   if ((workspaceSkeleton?.symbolCount ?? 0) === 0) return false;
 
-  // 4. Se houve casamento léxico direto (BM25)
-  if ((lexicalEvidence?.matches?.length ?? 0) > 0) return false;
-
-  // 5. Silêncio Léxico: a evidência atual caiu em fallback puro de entrypoint ou arquivo vazio
+  // 4. Silêncio Total: a evidência atual caiu em fallback puro de entrypoint ou arquivo vazio
   const sourceEvidence = workspace?.sourceEvidence ?? [];
   const isFallbackOnly = sourceEvidence.length <= 1 &&
     sourceEvidence.every((e) => e.selection === 'ENTRYPOINT_PREFIX' || e.selection === 'FULL_SOURCE');
 
-  return isFallbackOnly;
+  if (isFallbackOnly) return true;
+
+  // 6. Silêncio Parcial (Falsa Saciedade em Demandas Multi-Módulo):
+  // Se a evidência entregue cobre apenas 1 módulo raiz (ex: apenas src/reporting),
+  // mas a demanda humana contém múltiplos termos substantivos que não aparecem
+  // em nenhum dos arquivos selecionados (déficit severo de cobertura de intenção).
+  const intentText = preflight.intent ?? '';
+  const intentWords = intentText
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9_$-]+/i)
+    .filter((w) => w.length >= 4);
+
+  const stopwords = new Set([
+    'para', 'com', 'sem', 'sob', 'sobre', 'entre', 'como', 'onde', 'quando',
+    'mais', 'menos', 'cada', 'todo', 'toda', 'todos', 'todas', 'outro', 'outra',
+    'mesmo', 'mesma', 'deve', 'devem', 'pode', 'podem', 'sera', 'serao', 'esse',
+    'essa', 'esses', 'essas', 'este', 'esta', 'estes', 'estas', 'aquele', 'aquela',
+    'qual', 'quais', 'pelo', 'pela', 'pelos', 'pelas', 'fazer', 'gerar', 'criar',
+    'alterar', 'remover', 'atualizar', 'incluir', 'permitir', 'calcular', 'executar',
+  ]);
+  const domainWords = intentWords.filter((w) => !stopwords.has(w));
+
+  if (domainWords.length >= 3) {
+    const coveredSubdirs = new Set();
+    const deliveredContent = sourceEvidence.map((e) => (e.content ?? '').toLowerCase()).join(' ');
+
+    for (const e of sourceEvidence) {
+      const parts = e.path.split('/');
+      if (parts.length > 2 && parts[0] === 'src') {
+        coveredSubdirs.add(parts[1]);
+      }
+    }
+
+    if (coveredSubdirs.size <= 1) {
+      let coveredWordsCount = 0;
+      for (const dw of domainWords) {
+        if (deliveredContent.includes(dw)) {
+          coveredWordsCount += 1;
+        }
+      }
+      const coverageRatio = coveredWordsCount / domainWords.length;
+      if (coverageRatio < 0.35) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
