@@ -125,38 +125,66 @@ export function buildSemanticGatewayPayload(request, role, previousAttempt = nul
   };
 }
 
-export async function requestSemanticOpinion(request, role, options = {}) {
-  const environment = options.environment ?? process.env;
-  const readiness = assertSemanticSupervisorReady(role, environment);
-  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
-  const endpoint = options.endpoint ?? readiness.endpoint;
+export async function postChatCompletion({
+  endpoint,
+  credential,
+  payload,
+  timeoutMs = 120_000,
+  fetchImplementation = globalThis.fetch,
+}) {
   let response;
   try {
     response = await fetchImplementation(endpoint, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${readiness.credential}`,
+        authorization: `Bearer ${credential}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(buildSemanticGatewayPayload(request, role, options.previousAttempt ?? null)),
-      signal: globalThis.AbortSignal.timeout(options.timeoutMs ?? 120_000),
+      body: JSON.stringify(payload),
+      signal: globalThis.AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    throw new Error(`semantic_gateway_unavailable:${error instanceof Error ? error.message : 'network_error'}`);
+    return { ok: false, kind: 'NETWORK', error };
   }
   const responseText = await response.text();
-  if (!response.ok) throw gatewayError(response.status, responseText.slice(0, 500));
+  if (!response.ok) {
+    return { ok: false, kind: 'HTTP', status: response.status, responseText };
+  }
   let envelope;
   try {
     envelope = JSON.parse(responseText);
   } catch {
+    return { ok: false, kind: 'INVALID_ENVELOPE' };
+  }
+  return {
+    ok: true,
+    envelope,
+    content: envelope.choices?.[0]?.message?.content,
+  };
+}
+
+export async function requestSemanticOpinion(request, role, options = {}) {
+  const environment = options.environment ?? process.env;
+  const readiness = assertSemanticSupervisorReady(role, environment);
+  const endpoint = options.endpoint ?? readiness.endpoint;
+  const result = await postChatCompletion({
+    endpoint,
+    credential: readiness.credential,
+    payload: buildSemanticGatewayPayload(request, role, options.previousAttempt ?? null),
+    timeoutMs: options.timeoutMs ?? 120_000,
+    fetchImplementation: options.fetchImplementation ?? globalThis.fetch,
+  });
+  if (!result.ok) {
+    if (result.kind === 'NETWORK') {
+      throw new Error(`semantic_gateway_unavailable:${result.error instanceof Error ? result.error.message : 'network_error'}`);
+    }
+    if (result.kind === 'HTTP') throw gatewayError(result.status, result.responseText.slice(0, 500));
     throw new Error('semantic_gateway_invalid_envelope');
   }
-  const content = envelope.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') throw new Error('semantic_gateway_missing_content');
+  if (typeof result.content !== 'string') throw new Error('semantic_gateway_missing_content');
   let opinion;
   try {
-    opinion = JSON.parse(content);
+    opinion = JSON.parse(result.content);
   } catch {
     throw new Error('semantic_gateway_invalid_json_opinion');
   }
@@ -164,10 +192,10 @@ export async function requestSemanticOpinion(request, role, options = {}) {
     opinion,
     execution: {
       provider: role.adapter,
-      model: envelope.model ?? role.model,
+      model: result.envelope.model ?? role.model,
       usage: {
-        inputTokens: envelope.usage?.prompt_tokens ?? 0,
-        outputTokens: envelope.usage?.completion_tokens ?? 0,
+        inputTokens: result.envelope.usage?.prompt_tokens ?? 0,
+        outputTokens: result.envelope.usage?.completion_tokens ?? 0,
       },
     },
   };

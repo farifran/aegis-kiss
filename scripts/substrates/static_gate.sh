@@ -113,43 +113,39 @@ run_eval_grep_fallback() {
 
   # Only when sg is unavailable — otherwise AST rules own this surface.
   # Mechanical static hygiene check (console.log, debugger, secret tokens)
-  case "${file}" in
-    *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
-      # 1. Debugger ban
-      hits="$(grep -nE '([[:space:]]|^)debugger([[:space:]]*;|$)' "${file}" 2>/dev/null || true)"
-      if [[ -n "${hits}" ]]; then
-        failed=1
-        gate_error "debugger statement is forbidden: ${file}"
-        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-      fi
+  # 1. Debugger ban
+  hits="$(grep -nE '([[:space:]]|^)debugger([[:space:]]*;|$)' "${file}" 2>/dev/null || true)"
+  if [[ -n "${hits}" ]]; then
+    failed=1
+    gate_error "debugger statement is forbidden: ${file}"
+    printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+  fi
 
-      # 2. Console.log ban (outside test files)
-      if [[ "${file}" != *"test"* ]] && [[ "${file}" != *"spec"* ]]; then
-        hits="$(grep -nE '([[:space:]]|^)console\.log\(' "${file}" 2>/dev/null || true)"
-        if [[ -n "${hits}" ]]; then
-          failed=1
-          gate_error "console.log in production code is forbidden: ${file}"
-          printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-        fi
-      fi
+  # 2. Console.log ban (outside test files)
+  if [[ "${file}" != *"test"* ]] && [[ "${file}" != *"spec"* ]]; then
+    hits="$(grep -nE '([[:space:]]|^)console\.log\(' "${file}" 2>/dev/null || true)"
+    if [[ -n "${hits}" ]]; then
+      failed=1
+      gate_error "console.log in production code is forbidden: ${file}"
+      printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+    fi
+  fi
 
-      # 3. Hardcoded secret token scan
-      hits="$(grep -nE '(ghp_[A-Za-z0-9_]{30,}|sk-proj-[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})' "${file}" 2>/dev/null || true)"
-      if [[ -n "${hits}" ]]; then
-        failed=1
-        gate_error "hardcoded secret token detected: ${file}"
-        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-      fi
+  # 3. Hardcoded secret token scan
+  hits="$(grep -nE '(ghp_[A-Za-z0-9_]{30,}|sk-proj-[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})' "${file}" 2>/dev/null || true)"
+  if [[ -n "${hits}" ]]; then
+    failed=1
+    gate_error "hardcoded secret token detected: ${file}"
+    printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+  fi
 
-      # 4. Silent exception swallowing ban (empty catch block)
-      hits="$(grep -nE 'catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}' "${file}" 2>/dev/null || true)"
-      if [[ -n "${hits}" ]]; then
-        failed=1
-        gate_error "empty catch block swallowing exceptions is forbidden: ${file}"
-        printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
-      fi
-      ;;
-  esac
+  # 4. Silent exception swallowing ban (empty catch block)
+  hits="$(grep -nE 'catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}' "${file}" 2>/dev/null || true)"
+  if [[ -n "${hits}" ]]; then
+    failed=1
+    gate_error "empty catch block swallowing exceptions is forbidden: ${file}"
+    printf '%s\n' "${hits}" | while IFS= read -r line; do gate_error "  ${line}"; done
+  fi
 
   # TypeScript Type-Tightening & Zero-GC Checks
   case "${file}" in
@@ -321,8 +317,11 @@ gate_file() {
   [[ -n "${file}" ]] || return 0
   [[ -f "${file}" ]] || return 0
 
-  run_ast_rules_on_path "${file}" || failed=1
-  run_eval_grep_fallback "${file}" || failed=1
+  if resolve_sg >/dev/null; then
+    run_ast_rules_on_path "${file}" || failed=1
+  else
+    run_eval_grep_fallback "${file}" || failed=1
+  fi
   check_undeclared_imports "${file}" || failed=1
 
   return "${failed}"
@@ -331,7 +330,10 @@ gate_file() {
 gate_workspace() {
   local -a paths=("$@")
   local failed=0
+  local has_sg=0
   local p
+
+  resolve_sg >/dev/null && has_sg=1
 
   if [[ "${#paths[@]}" -eq 0 ]]; then
     paths=("${AEGIS_STATIC_ROOT}/src")
@@ -341,11 +343,15 @@ gate_workspace() {
     if [[ -f "${p}" ]]; then
       gate_file "${p}" || failed=1
     elif [[ -d "${p}" ]]; then
-      run_ast_rules_on_path "${p}" || failed=1
+      if [[ "${has_sg}" -eq 1 ]]; then
+        run_ast_rules_on_path "${p}" || failed=1
+      fi
       # Import check is per-file (needs package.json proximity).
       while IFS= read -r -d '' f; do
         check_undeclared_imports "${f}" || failed=1
-        run_eval_grep_fallback "${f}" || failed=1
+        if [[ "${has_sg}" -eq 0 ]]; then
+          run_eval_grep_fallback "${f}" || failed=1
+        fi
       done < <(
         find "${p}" \( \
           -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o \

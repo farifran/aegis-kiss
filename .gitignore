@@ -10,6 +10,7 @@
 # =========================================================
 
 .harness/runtime/
+.harness/domain-lexicon.json
 
 # Governed state for the current local demand
 .harness/state/

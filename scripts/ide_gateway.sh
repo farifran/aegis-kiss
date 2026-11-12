@@ -21,8 +21,10 @@ usage() {
   cat <<'EOF'
 Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis "<demanda>" Executa captura, Discovery e supervisão até o contrato
+  ./aegis --issue [id|arquivo] Captura issue explícita (ou única aberta) como demanda
   ./aegis draft "<demanda>" Executa captura e Discovery (emite preflight v3 e workspace skeleton)
   ./aegis --new "<demanda>" Inicia contexto independente substituindo estado do Harness (preserva src/)
+  ./aegis --new --issue [id|arquivo] Reinicia estado do Harness e captura issue como demanda
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --resolve Q=ANS  Aplica resolução de decisão diretamente (ex: Q-0001=ANS-0001) e sela
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
@@ -44,7 +46,8 @@ clean_command() {
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
   rm -rf "${ROOT_DIR}/.harness/state"
-  echo '[AEGIS][IDE] clean=PASS harness_reset=1 contracts_reset=1 resolutions_reset=1 product_preserved=1'
+  rm -f "${ROOT_DIR}/.harness/domain-lexicon.json"
+  echo '[AEGIS][IDE] clean=PASS harness_reset=1 contracts_reset=1 resolutions_reset=1 lexicon_reset=1 product_preserved=1'
 }
 
 run_demand() {
@@ -277,10 +280,18 @@ main() {
       require_command_arity "$@"
       clean_command
       ;;
+    --issue)
+      shift
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" issue "$@"
+      ;;
     --new)
       [[ $# -ge 2 ]] || fatal 'MISSING_ARGUMENT'
       shift
       clean_command >/dev/null
+      if [[ "${1}" == "--issue" ]]; then
+        shift
+        exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" issue "$@"
+      fi
       run_demand "$@"
       ;;
     --help|-h)

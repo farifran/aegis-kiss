@@ -38,6 +38,7 @@ export default [
       "coverage/**",
       "build/**",
       "scratch/**",
+      "benchmarks/**",
       "scripts/generated/**",
 
       ".harness/runtime/**",

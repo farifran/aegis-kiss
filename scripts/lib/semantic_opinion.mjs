@@ -45,25 +45,23 @@ function assertEvidenceCoverage(opinion, request) {
   }
 }
 
-function normalizeSemanticOpinion(opinion, request) {
-  opinion = globalThis.structuredClone(opinion);
-
-  const normalizeTarget = (target) => {
-    if (!target || typeof target !== 'object') return;
-    if (target.index === undefined) {
-      const id = target.ruleId || target.id;
-      if (target.kind === 'POLICY_RULE' && id) {
-        const idx = request.policy.rules.findIndex((r) => r.id === id);
-        if (idx !== -1) target.index = idx;
-      } else if (id) {
-        const parsed = parseInt(String(id).replace(/\D/g, ''), 10) - 1;
-        if (!Number.isNaN(parsed) && parsed >= 0) target.index = parsed;
-      }
+function normalizeTargetRef(target, request) {
+  if (!target || typeof target !== 'object') return;
+  if (target.index === undefined) {
+    const id = target.ruleId || target.id;
+    if (target.kind === 'POLICY_RULE' && id) {
+      const idx = request.policy.rules.findIndex((r) => r.id === id);
+      if (idx !== -1) target.index = idx;
+    } else if (id) {
+      const parsed = parseInt(String(id).replace(/\D/g, ''), 10) - 1;
+      if (!Number.isNaN(parsed) && parsed >= 0) target.index = parsed;
     }
-    delete target.ruleId;
-    delete target.id;
-  };
+  }
+  delete target.ruleId;
+  delete target.id;
+}
 
+function normalizeIntentClaimsAndContexts(opinion, request) {
   if (Array.isArray(opinion.intentClaims)) {
     for (const claim of opinion.intentClaims) {
       if (claim.fragmentIndexes === undefined && request.intentEvidence.fragments.length === 1) {
@@ -76,7 +74,7 @@ function normalizeSemanticOpinion(opinion, request) {
         claim.contractEffect = null;
       }
       if (Array.isArray(claim.targets)) {
-        for (const target of claim.targets) normalizeTarget(target);
+        for (const target of claim.targets) normalizeTargetRef(target, request);
       }
     }
   }
@@ -88,19 +86,21 @@ function normalizeSemanticOpinion(opinion, request) {
       rationale: 'Demanda funcional de produto.',
       basis: [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }],
     }];
-  } else {
-    for (const item of opinion.architectureContexts) {
-      if (item.contextIndex === undefined && (item.contextTag || item.tag)) {
-        const tag = item.contextTag || item.tag;
-        const index = request.policy.contexts.findIndex((c) => c.tag === tag);
-        if (index !== -1) item.contextIndex = index;
-      }
-      item.basis ??= [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }];
-      delete item.contextTag;
-      delete item.tag;
-    }
+    return;
   }
+  for (const item of opinion.architectureContexts) {
+    if (item.contextIndex === undefined && (item.contextTag || item.tag)) {
+      const tag = item.contextTag || item.tag;
+      const index = request.policy.contexts.findIndex((c) => c.tag === tag);
+      if (index !== -1) item.contextIndex = index;
+    }
+    item.basis ??= [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }];
+    delete item.contextTag;
+    delete item.tag;
+  }
+}
 
+function normalizePolicyAssessments(opinion, request) {
   // 2. policyAssessments: aceita ruleId/id, normaliza CONFLICT->AMENDED e auto-preenche regras COMPLIANT
   opinion.policyAssessments ??= [];
   for (const assessment of opinion.policyAssessments) {
@@ -130,29 +130,31 @@ function normalizeSemanticOpinion(opinion, request) {
       : rule.appliesWhen.some((tag) => activeContextTags.has(tag));
     if (applies) applicableRuleIndexes.push(idx);
   });
-  if (applicableRuleIndexes.some((idx) => !existingByRuleIndex.has(idx))) {
-    const mergedAssessments = [];
-    for (const idx of applicableRuleIndexes) {
-      if (existingByRuleIndex.has(idx)) {
-        mergedAssessments.push(existingByRuleIndex.get(idx));
-        existingByRuleIndex.delete(idx);
-      } else {
-        mergedAssessments.push({
-          ruleIndex: idx,
-          demandStatus: 'COMPLIANT',
-          recommendedStatus: 'COMPLIANT',
-          rationale: `Conformidade verificada mecanicamente para ${request.policy.rules[idx].id}.`,
-          decisionIndex: null,
-          amendmentIndex: null,
-        });
-      }
-    }
-    for (const extra of existingByRuleIndex.values()) {
-      mergedAssessments.push(extra);
-    }
-    opinion.policyAssessments = mergedAssessments;
-  }
+  if (!applicableRuleIndexes.some((idx) => !existingByRuleIndex.has(idx))) return;
 
+  const mergedAssessments = [];
+  for (const idx of applicableRuleIndexes) {
+    if (existingByRuleIndex.has(idx)) {
+      mergedAssessments.push(existingByRuleIndex.get(idx));
+      existingByRuleIndex.delete(idx);
+    } else {
+      mergedAssessments.push({
+        ruleIndex: idx,
+        demandStatus: 'COMPLIANT',
+        recommendedStatus: 'COMPLIANT',
+        rationale: `Conformidade verificada mecanicamente para ${request.policy.rules[idx].id}.`,
+        decisionIndex: null,
+        amendmentIndex: null,
+      });
+    }
+  }
+  for (const extra of existingByRuleIndex.values()) {
+    mergedAssessments.push(extra);
+  }
+  opinion.policyAssessments = mergedAssessments;
+}
+
+function normalizeDeterminismReview(opinion, request) {
   // 3. determinismReview: aceita claimId além de claimIndex, e preenche cobertura default
   opinion.determinismReview ??= {
     rationale: 'A demanda não promete determinismo adicional além do contrato público.',
@@ -171,9 +173,9 @@ function normalizeSemanticOpinion(opinion, request) {
     if (dim.targets === undefined && opinion.requirements?.length === 1) {
       dim.targets = [{ kind: 'REQUIREMENT', index: 0 }];
     }
-    if (dim.subject && typeof dim.subject === 'object') normalizeTarget(dim.subject);
+    if (dim.subject && typeof dim.subject === 'object') normalizeTargetRef(dim.subject, request);
     if (Array.isArray(dim.targets)) {
-      for (const target of dim.targets) normalizeTarget(target);
+      for (const target of dim.targets) normalizeTargetRef(target, request);
     }
     dim.inapplicabilityProof ??= null;
     if (dim.proofObligation && typeof dim.proofObligation === 'object') {
@@ -203,176 +205,178 @@ function normalizeSemanticOpinion(opinion, request) {
       coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
     }
   }
-  if (Array.isArray(opinion.intentClaims)) {
-    opinion.determinismReview.coverage = opinion.determinismReview.coverage.filter((coverage) => {
-      const claim = opinion.intentClaims[coverage.claimIndex];
-      if (!claim) return true;
-      const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
-      return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
-    });
-    const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
-    let inserted = false;
-    opinion.intentClaims.forEach((claim, claimIndex) => {
-      const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
-      if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
-        opinion.determinismReview.coverage.push({
-          claimIndex,
-          disposition: 'NO_DIMENSION_APPLICABLE',
-          dimensionIndexes: [],
-          rationale: 'Afirmação funcional sem fonte adicional de indeterminismo.',
-        });
-        inserted = true;
-      }
-    });
-    if (inserted) {
-      opinion.determinismReview.coverage.sort((a, b) => a.claimIndex - b.claimIndex);
+  if (!Array.isArray(opinion.intentClaims)) return;
+
+  opinion.determinismReview.coverage = opinion.determinismReview.coverage.filter((coverage) => {
+    const claim = opinion.intentClaims[coverage.claimIndex];
+    if (!claim) return true;
+    const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
+    return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
+  });
+  const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
+  let inserted = false;
+  opinion.intentClaims.forEach((claim, claimIndex) => {
+    const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
+    if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
+      opinion.determinismReview.coverage.push({
+        claimIndex,
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensionIndexes: [],
+        rationale: 'Afirmação funcional sem fonte adicional de indeterminismo.',
+      });
+      inserted = true;
+    }
+  });
+  if (inserted) {
+    opinion.determinismReview.coverage.sort((a, b) => a.claimIndex - b.claimIndex);
+  }
+}
+
+function collectEntityFieldKeys(entities) {
+  const keys = [];
+  for (const entity of entities ?? []) {
+    for (const field of entity.fields ?? []) {
+      keys.push(`${entity.name}.${field.name}`);
     }
   }
+  return keys;
+}
 
-  // 4. Parâmetros e campos de stateModel: normalizações, propagação de bounds e auto-derivação de transições
-  if (opinion.stateModel) {
-    const allEntityFieldKeys = [];
-    if (Array.isArray(opinion.stateModel.entities)) {
-      for (const entity of opinion.stateModel.entities) {
-        if (Array.isArray(entity.fields)) {
-          for (const field of entity.fields) {
-            allEntityFieldKeys.push(`${entity.name}.${field.name}`);
-          }
+function deriveFieldMutations(stateModel, fieldKey, fieldName) {
+  const mutations = [];
+  for (const op of stateModel.operations ?? []) {
+    for (const branch of op.branches ?? []) {
+      for (const eff of branch.stateEffects ?? []) {
+        if ((eff.field === fieldKey || eff.field === fieldName) && eff.effect && eff.effect !== 'PRESERVE') {
+          mutations.push({
+            operation: op.name,
+            condition: branch.condition ?? branch.branchId,
+            effect: eff.effect === 'SET' ? 'SET_VALUE' : eff.effect,
+            targetValue: eff.value ?? null,
+          });
         }
       }
     }
-    if (Array.isArray(opinion.stateModel.operations)) {
-      for (const op of opinion.stateModel.operations) {
-        op.parameters ??= [];
-        op.guardPrecedence ??= [];
-        for (const param of op.parameters) {
-          if (param.nullability === 'NON_NULLABLE') {
-            param.nullability = 'NOT_NULL';
-          }
-        }
-        if (Array.isArray(op.branches)) {
-          for (const branch of op.branches) {
-            branch.stateEffects ??= [];
-            for (const eff of branch.stateEffects) {
-              if (eff.effect === 'SET_VALUE') eff.effect = 'SET';
-            }
-            branch.defaultPreservation ??= branch.outcomeKind === 'REJECTION' || branch.stateEffects.length === 0;
-            if (branch.defaultPreservation === false && allEntityFieldKeys.length > 0) {
-              const covered = new Set(branch.stateEffects.map((e) => e.field));
-              for (const fieldKey of allEntityFieldKeys) {
-                const shortName = fieldKey.split('.').slice(1).join('.');
-                if (!covered.has(fieldKey) && !covered.has(shortName)) {
-                  branch.stateEffects.push({ field: fieldKey, effect: 'PRESERVE' });
-                }
-              }
-            }
-          }
-        }
-      }
+  }
+  return mutations;
+}
+
+function deriveFieldReaders(stateModel, fieldKey, fieldName) {
+  const readers = new Set();
+  for (const op of stateModel.operations ?? []) {
+    const touches = (op.branches ?? []).some((b) => (
+      (typeof b.condition === 'string' && (b.condition.includes(fieldKey) || b.condition.includes(fieldName)))
+      || (b.stateEffects ?? []).some((eff) => eff.field === fieldKey || eff.field === fieldName)
+    ));
+    if (touches || (op.branches ?? []).every((b) => b.defaultPreservation === true)) {
+      readers.add(op.name);
     }
-    if (Array.isArray(opinion.stateModel.entities)) {
-      for (const entity of opinion.stateModel.entities) {
-        if (entity.isCollection === true && entity.capacityPolicy) {
-          entity.admissionPolicy ??= 'ON_FIRST_REQUEST';
-          if (
-            entity.containerPolicy === undefined
-            && ['FIFO_EVICTION', 'LRU_EVICTION', 'SLIDING_WINDOW_EVICTION'].includes(entity.capacityPolicy.overflowPolicy)
-          ) {
-            entity.containerPolicy = {
-              partitionKey: 'id',
-              retentionPolicy: entity.capacityPolicy.overflowPolicy,
-            };
-          }
-        }
-        if (Array.isArray(entity.fields)) {
-          for (const field of entity.fields) {
-            const fieldKey = `${entity.name}.${field.name}`;
-            if (
-              field.bounds === undefined
-              && entity.isCollection === true
-              && entity.capacityPolicy?.maxEntries != null
-              && (field.type === 'COLLECTION' || field.isCounter === true)
-            ) {
-              field.bounds = {
-                lowerBound: '0',
-                upperBound: String(entity.capacityPolicy.maxEntries),
-                boundaryBehavior: 'SATURATE',
-                ...(entity.capacityPolicy.provenance
-                  ? { provenance: structuredClone(entity.capacityPolicy.provenance) }
-                  : {}),
-              };
-            }
-            if (Array.isArray(field.mutations)) {
-              for (const mut of field.mutations) {
-                if (mut.effect === 'SET') mut.effect = 'SET_VALUE';
-                mut.targetValue ??= null;
-              }
-            } else {
-              field.mutations = [];
-              for (const op of opinion.stateModel.operations ?? []) {
-                for (const branch of op.branches ?? []) {
-                  for (const eff of branch.stateEffects ?? []) {
-                    if ((eff.field === fieldKey || eff.field === field.name) && eff.effect && eff.effect !== 'PRESERVE') {
-                      field.mutations.push({
-                        operation: op.name,
-                        condition: branch.condition ?? branch.branchId,
-                        effect: eff.effect === 'SET' ? 'SET_VALUE' : eff.effect,
-                        targetValue: eff.value ?? null,
-                      });
-                    }
-                  }
-                }
-              }
-            }
-            if (field.reset) {
-              field.reset.trigger ??= null;
-              field.reset.resetValue ??= null;
-            } else {
-              field.reset = { allowed: false, trigger: null, resetValue: null };
-            }
-            field.preservation ??= ['*'];
-            if (!Array.isArray(field.readBy) || field.readBy.length === 0) {
-              const readers = new Set();
-              for (const op of opinion.stateModel.operations ?? []) {
-                const touches = (op.branches ?? []).some((b) => (
-                  (typeof b.condition === 'string' && (b.condition.includes(fieldKey) || b.condition.includes(field.name)))
-                  || (b.stateEffects ?? []).some((eff) => eff.field === fieldKey || eff.field === field.name)
-                ));
-                if (touches || (op.branches ?? []).every((b) => b.defaultPreservation === true)) {
-                  readers.add(op.name);
-                }
-              }
-              for (const obs of opinion.stateModel.observables ?? []) {
-                if ((obs.derivedFrom ?? []).some((d) => d === fieldKey || d === field.name || d === '*')) {
-                  readers.add(obs.name);
-                }
-              }
-              field.readBy = [...readers];
-            }
+  }
+  for (const obs of stateModel.observables ?? []) {
+    if ((obs.derivedFrom ?? []).some((d) => d === fieldKey || d === fieldName || d === '*')) {
+      readers.add(obs.name);
+    }
+  }
+  return [...readers];
+}
+
+function normalizeStateModel(stateModel) {
+  if (!stateModel) return;
+  const allEntityFieldKeys = collectEntityFieldKeys(stateModel.entities);
+
+  for (const op of stateModel.operations ?? []) {
+    op.parameters ??= [];
+    op.guardPrecedence ??= [];
+    for (const param of op.parameters) {
+      if (param.nullability === 'NON_NULLABLE') param.nullability = 'NOT_NULL';
+    }
+    for (const branch of op.branches ?? []) {
+      branch.stateEffects ??= [];
+      for (const eff of branch.stateEffects) {
+        if (eff.effect === 'SET_VALUE') eff.effect = 'SET';
+      }
+      branch.defaultPreservation ??= branch.outcomeKind === 'REJECTION' || branch.stateEffects.length === 0;
+      if (branch.defaultPreservation === false && allEntityFieldKeys.length > 0) {
+        const covered = new Set(branch.stateEffects.map((e) => e.field));
+        for (const fieldKey of allEntityFieldKeys) {
+          const shortName = fieldKey.split('.').slice(1).join('.');
+          if (!covered.has(fieldKey) && !covered.has(shortName)) {
+            branch.stateEffects.push({ field: fieldKey, effect: 'PRESERVE' });
           }
         }
       }
     }
   }
 
-  // 5. Invariants, decisions, unknowns e requirements defaults
+  for (const entity of stateModel.entities ?? []) {
+    if (entity.isCollection === true && entity.capacityPolicy) {
+      entity.admissionPolicy ??= 'ON_FIRST_REQUEST';
+      if (
+        entity.containerPolicy === undefined
+        && ['FIFO_EVICTION', 'LRU_EVICTION', 'SLIDING_WINDOW_EVICTION'].includes(entity.capacityPolicy.overflowPolicy)
+      ) {
+        entity.containerPolicy = {
+          partitionKey: 'id',
+          retentionPolicy: entity.capacityPolicy.overflowPolicy,
+        };
+      }
+    }
+    for (const field of entity.fields ?? []) {
+      const fieldKey = `${entity.name}.${field.name}`;
+      if (
+        field.bounds === undefined
+        && entity.isCollection === true
+        && entity.capacityPolicy?.maxEntries != null
+        && (field.type === 'COLLECTION' || field.isCounter === true)
+      ) {
+        field.bounds = {
+          lowerBound: '0',
+          upperBound: String(entity.capacityPolicy.maxEntries),
+          boundaryBehavior: 'SATURATE',
+          ...(entity.capacityPolicy.provenance
+            ? { provenance: globalThis.structuredClone(entity.capacityPolicy.provenance) }
+            : {}),
+        };
+      }
+      if (Array.isArray(field.mutations)) {
+        for (const mut of field.mutations) {
+          if (mut.effect === 'SET') mut.effect = 'SET_VALUE';
+          mut.targetValue ??= null;
+        }
+      } else {
+        field.mutations = deriveFieldMutations(stateModel, fieldKey, field.name);
+      }
+      if (field.reset) {
+        field.reset.trigger ??= null;
+        field.reset.resetValue ??= null;
+      } else {
+        field.reset = { allowed: false, trigger: null, resetValue: null };
+      }
+      field.preservation ??= ['*'];
+      if (!Array.isArray(field.readBy) || field.readBy.length === 0) {
+        field.readBy = deriveFieldReaders(stateModel, fieldKey, field.name);
+      }
+    }
+  }
+}
+
+function normalizeRequirementItem(req, defaultFragmentIndexes) {
+  if (!req || typeof req !== 'object') return;
+  req.kind ??= 'FUNCTIONAL';
+  req.measurement ??= null;
+  req.fragmentIndexes ??= defaultFragmentIndexes;
+  for (const ac of req.acceptanceCases ?? []) {
+    if (ac.kind === 'STATE_CHANGE') {
+      ac.outcomeKind ??= 'STATE_CHANGE';
+      ac.kind = 'BOUNDARY';
+    }
+    ac.decisionBinding ??= null;
+    ac.boundaryBinding ??= null;
+  }
+}
+
+function normalizeDecisionsAndInventory(opinion, request) {
   const defaultFragmentIndexes = request.intentEvidence.fragments.map((_, i) => i);
-  const normalizeRequirementItem = (req) => {
-    if (!req || typeof req !== 'object') return;
-    req.kind ??= 'FUNCTIONAL';
-    req.measurement ??= null;
-    req.fragmentIndexes ??= defaultFragmentIndexes;
-    if (Array.isArray(req.acceptanceCases)) {
-      for (const ac of req.acceptanceCases) {
-        if (ac.kind === 'STATE_CHANGE') {
-          ac.outcomeKind ??= 'STATE_CHANGE';
-          ac.kind = 'BOUNDARY';
-        }
-        ac.decisionBinding ??= null;
-        ac.boundaryBinding ??= null;
-      }
-    }
-  };
   if (Array.isArray(opinion.decisions)) {
     for (const dec of opinion.decisions) {
       dec.recommendedAnswerIndex ??= 0;
@@ -382,17 +386,15 @@ function normalizeSemanticOpinion(opinion, request) {
       if (dec.presentation && typeof dec.presentation === 'object') {
         dec.presentation.glossary ??= [];
       }
-      if (Array.isArray(dec.answers)) {
-        for (const ans of dec.answers) {
-          if (ans.preparedEffect && typeof ans.preparedEffect === 'object') {
-            ans.preparedEffect.requirements ??= [];
-            ans.preparedEffect.invariants ??= [];
-            ans.preparedEffect.risks ??= [];
-            ans.preparedEffect.boundaryRules ??= [];
-            ans.preparedEffect.dimensions ??= [];
-            for (const entry of ans.preparedEffect.requirements) {
-              if (entry.value) normalizeRequirementItem(entry.value);
-            }
+      for (const ans of dec.answers ?? []) {
+        if (ans.preparedEffect && typeof ans.preparedEffect === 'object') {
+          ans.preparedEffect.requirements ??= [];
+          ans.preparedEffect.invariants ??= [];
+          ans.preparedEffect.risks ??= [];
+          ans.preparedEffect.boundaryRules ??= [];
+          ans.preparedEffect.dimensions ??= [];
+          for (const entry of ans.preparedEffect.requirements) {
+            if (entry.value) normalizeRequirementItem(entry.value, defaultFragmentIndexes);
           }
         }
       }
@@ -416,22 +418,18 @@ function normalizeSemanticOpinion(opinion, request) {
       });
     }
   }
-  if (Array.isArray(opinion.invariants)) {
-    for (const inv of opinion.invariants) {
-      if (inv.requirementIndexes === undefined && Array.isArray(inv.targetRequirementIndexes)) {
-        inv.requirementIndexes = inv.targetRequirementIndexes;
-      }
-      delete inv.targetRequirementIndexes;
-      inv.requirementIndexes ??= [0];
+  for (const inv of opinion.invariants ?? []) {
+    if (inv.requirementIndexes === undefined && Array.isArray(inv.targetRequirementIndexes)) {
+      inv.requirementIndexes = inv.targetRequirementIndexes;
     }
+    delete inv.targetRequirementIndexes;
+    inv.requirementIndexes ??= [0];
   }
   opinion.adversarialReview ??= { rationale: 'Revisão semântica residual sem achados adicionais.', findings: [] };
   delete opinion.adversarialReview.status;
   opinion.adversarialReview.findings ??= [];
-  if (Array.isArray(opinion.requirements)) {
-    for (const req of opinion.requirements) {
-      normalizeRequirementItem(req);
-    }
+  for (const req of opinion.requirements ?? []) {
+    normalizeRequirementItem(req, defaultFragmentIndexes);
   }
 
   opinion.riskReview ??= { certainty: 'ASSESSED', rationale: 'Nenhum risco material adicional identificado.' };
@@ -447,8 +445,16 @@ function normalizeSemanticOpinion(opinion, request) {
     alternatives: [],
   };
   opinion.complexityReview.alternatives ??= [];
+}
 
-  return opinion;
+function normalizeSemanticOpinion(opinion, request) {
+  const cloned = globalThis.structuredClone(opinion);
+  normalizeIntentClaimsAndContexts(cloned, request);
+  normalizePolicyAssessments(cloned, request);
+  normalizeDeterminismReview(cloned, request);
+  normalizeStateModel(cloned.stateModel);
+  normalizeDecisionsAndInventory(cloned, request);
+  return cloned;
 }
 
 export function compileSemanticOpinion(opinion, request, compilePrepared = true) {

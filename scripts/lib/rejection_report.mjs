@@ -295,6 +295,28 @@ const diagnostics = new Map([
     remediation: 'Inclua em "policyAssessments" a avaliação explícita de todas as regras indicadas no campo "detail".',
     ruleId: 'CONST-KISS',
   }],
+  ['MULTIPLE_OPEN_ISSUES', {
+    message: 'Existem múltiplas issues abertas; a captura automática sem seleção explícita foi bloqueada.',
+    remediation: 'Informe o número ou caminho da issue desejada via ./aegis --issue <id|arquivo>.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['NO_OPEN_ISSUES', {
+    message: 'Nenhuma issue aberta foi encontrada para captura automática.',
+    remediation: 'Informe uma demanda textual direta ou crie/referencie uma issue explícita.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['ISSUE_FETCH_FAILED', {
+    message: 'Não foi possível obter a issue solicitada no adaptador externo.',
+    remediation: 'Verifique se o GitHub CLI (gh) está autenticado e acessível ou informe um arquivo local de issue.',
+  }],
+  ['INVALID_ISSUE_REFERENCE', {
+    message: 'A referência de issue informada não é um número, URL válida do GitHub nem arquivo local legível.',
+    remediation: 'Use ./aegis --issue <número>, ./aegis --issue <url> ou ./aegis --issue <caminho>.',
+  }],
+  ['INVALID_ISSUE_ARITY', {
+    message: 'O comando --issue aceita no máximo um identificador ou caminho de issue.',
+    remediation: 'Execute ./aegis --issue ou ./aegis --issue <id|arquivo>.',
+  }],
 ]);
 
 function diagnosticFamily(reason) {
@@ -331,6 +353,24 @@ function diagnosticFamily(reason) {
 
 function normalizedReason(value) {
   return value.replace(/[^a-z0-9]+/giu, '_').replace(/^_+|_+$/gu, '').toUpperCase();
+}
+
+export function createRejectionError(reason, detail = '') {
+  const error = new Error(reason);
+  if (detail) error.detail = detail;
+  return error;
+}
+
+export function buildErrorRejectionReport(phase, error, fallbackReason) {
+  const message = error instanceof Error ? error.message : fallbackReason;
+  const separator = message.indexOf(':');
+  const reason = separator === -1 ? message : message.slice(0, separator);
+  const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
+  return buildRejectionReport({
+    phase,
+    reason,
+    detail: error?.detail || inferredDetail,
+  });
 }
 
 export function buildRejectionReport({ phase, reason, detail = '' }) {

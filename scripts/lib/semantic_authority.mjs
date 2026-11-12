@@ -1,5 +1,6 @@
-const sourceEvidenceByteLimit = 65_536;
+const sourceEvidenceByteLimit = 98_304;
 const sourceEvidenceFileByteLimit = 8_192;
+const sourceEvidenceExplicitFileByteLimit = 24_576;
 
 // Witness content is semantic; identity and subject binding are mechanical.
 function compileCounterexampleWitness(kind, subjectId, witness) {
@@ -24,9 +25,17 @@ function closureAuthorityForDimension({ status, basis }) {
   return 'MODEL_ARGUMENT';
 }
 
+function assertUniqueIds(items, field, kind) {
+  const ids = items.map((item) => item[field]);
+  if (new Set(ids).size !== ids.length) throw new Error(`duplicate_${kind}_id`);
+  return new Set(ids);
+}
+
 export {
+  assertUniqueIds,
   closureAuthorityForDimension,
   compileCounterexampleWitness,
   sourceEvidenceByteLimit,
   sourceEvidenceFileByteLimit,
+  sourceEvidenceExplicitFileByteLimit,
 };

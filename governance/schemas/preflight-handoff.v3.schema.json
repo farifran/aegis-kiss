@@ -20,7 +20,7 @@
         "transport": {"const":"ARGV_STRING"},
         "unicodeNormalization": {"const":"NFC"},
         "lineEndings": {"const":"LF"},
-        "byteLength": {"type":"integer","minimum":1,"maximum":65536}
+        "byteLength": {"type":"integer","minimum":1,"maximum":262144}
       }
     },
     "discovery": {

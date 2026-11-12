@@ -14,15 +14,12 @@ import {
   roleAssignmentRelativePath,
 } from './lib/role_assignment.mjs';
 import { canonicalJson } from './lib/canonical_json.mjs';
-import { buildRejectionReport } from './lib/rejection_report.mjs';
+import {
+  buildErrorRejectionReport,
+  createRejectionError as rejection,
+} from './lib/rejection_report.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
-
-function rejection(reason, detail = '') {
-  const error = new Error(reason);
-  if (detail) error.detail = detail;
-  return error;
-}
 
 function trimAnswer(value) {
   return value.normalize('NFC').trim();
@@ -144,14 +141,6 @@ try {
   else if (process.argv.length === 3 && process.argv[2] === '--show') await show();
   else throw rejection('INVALID_SETUP_ARITY');
 } catch (error) {
-  const message = error instanceof Error ? error.message : 'setup_failed';
-  const separator = message.indexOf(':');
-  const reason = separator === -1 ? message : message.slice(0, separator);
-  const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
-  process.stderr.write(`${JSON.stringify(buildRejectionReport({
-    phase: 'SETUP',
-    reason,
-    detail: error?.detail || inferredDetail,
-  }))}\n`);
+  process.stderr.write(`${JSON.stringify(buildErrorRejectionReport('SETUP', error, 'setup_failed'))}\n`);
   process.exitCode = 1;
 }

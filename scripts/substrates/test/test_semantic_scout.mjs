@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 import {
   shouldTriggerSemanticScout,
   filterPhysicalPaths,
-  buildScoutPayload,
   buildTopographicalMap,
   persistInferredAliases,
   executeSemanticScout,
@@ -90,13 +90,13 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
   log('  PASS: Direct AST match guard verified');
 }
 
-// 5. Ativação Correta sob Silêncio Léxico em Monorepo (> 64KB)
+// 5. Ativação Correta sob Silêncio Léxico em Monorepo (> 96KB)
 {
   const preflight = {
     discovery: {
       status: 'SOURCE_OBSERVED',
       files: [
-        { path: 'src/ledger/fee.ts', kind: 'UTF8_TEXT', bytes: 70_000 },
+        { path: 'src/ledger/fee.ts', kind: 'UTF8_TEXT', bytes: 110_000 },
         { path: 'src/index.ts', kind: 'UTF8_TEXT', bytes: 500 },
       ],
       workspaceSkeleton: {
@@ -254,6 +254,69 @@ log('[CTDD TEST] Starting Adaptive Semantic Scout (Arbiter) Test Suite...');
     assert.deepEqual(loaded.estorno, ['reversal', 'refund'], 'Subsequent alias must merge into array without overwriting');
     assert.equal(loaded.liquidacao, 'settlement');
     log('  PASS: Auto-Lexicon continuous learning (persistence & merge) verified');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// 11. Bounded Cap: Prevenção contra crescimento ilimitado (MAX_AUTO_LEXICON_ENTRIES = 200)
+{
+  const tempDir = path.resolve('.harness/tmp_test_lexicon_cap');
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  try {
+    const { MAX_AUTO_LEXICON_ENTRIES } = await import('../../lib/semantic_scout.mjs');
+    assert.equal(MAX_AUTO_LEXICON_ENTRIES, 200, 'MAX_AUTO_LEXICON_ENTRIES must be 200');
+
+    // Gera 250 aliases para exceder o teto
+    const largeBatch = {};
+    for (let i = 1; i <= 250; i++) {
+      largeBatch[`termo_${i}`] = `alias_${i}`;
+    }
+    await persistInferredAliases(tempDir, largeBatch);
+
+    const lexiconFile = path.resolve(tempDir, '.harness/domain-lexicon.json');
+    const loaded = JSON.parse(fs.readFileSync(lexiconFile, 'utf8'));
+    const entryCount = Object.keys(loaded).length;
+    assert.equal(entryCount, 200, 'Auto-Lexicon must be pruned to exactly MAX_AUTO_LEXICON_ENTRIES (200)');
+    // Verifica que as entradas mais antigas foram descartadas e as mais recentes foram preservadas
+    assert.equal(loaded['termo_1'], undefined, 'Oldest entry termo_1 must be pruned');
+    assert.equal(loaded['termo_250'], 'alias_250', 'Newest entry termo_250 must be preserved');
+
+    log('  PASS: Auto-Lexicon bounded cap (200 entries ceiling) verified');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// 12. Layered Lexicon: Mesclagem transparente entre config curado e cache dinâmico
+{
+  const tempDir = path.resolve('.harness/tmp_test_layered_lexicon');
+  const configDir = path.resolve(tempDir, '.harness/config');
+  const harnessDir = path.resolve(tempDir, '.harness');
+  fs.mkdirSync(configDir, { recursive: true });
+
+  try {
+    const { loadDomainLexicon } = await import('../../lib/semantic_request.mjs');
+
+    // 1. Config curado
+    fs.writeFileSync(path.resolve(configDir, 'lexicon.json'), JSON.stringify({
+      tarifa: 'fee',
+      liquidacao: 'ledger',
+    }));
+
+    // 2. Cache dinâmico
+    fs.writeFileSync(path.resolve(harnessDir, 'domain-lexicon.json'), JSON.stringify({
+      liquidacao: 'settlement',
+      estorno: 'reversal',
+    }));
+
+    const merged = loadDomainLexicon(tempDir);
+    assert.equal(merged.tarifa, 'fee', 'Curated entry must be present');
+    assert.equal(merged.estorno, 'reversal', 'Dynamic entry must be present');
+    assert.deepEqual(merged.liquidacao, ['ledger', 'settlement'], 'Overlapping keys must merge without duplicates');
+
+    log('  PASS: Layered Lexicon merging (.harness/config + .harness/domain) verified');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

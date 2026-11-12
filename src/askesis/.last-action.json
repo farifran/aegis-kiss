@@ -1,6 +1,0 @@
-{
-  "action": "promote-metadata",
-  "promoted": ["metadata.json"],
-  "support": ["metadata.schema.json", ".stylelintrc.json", "scripts/validate-json.js", "package.json"],
-  "note": "Guardrail L3->L4 passed locally. Commit/PR not created due to environment limitations."
-}

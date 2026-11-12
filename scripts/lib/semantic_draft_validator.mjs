@@ -1,5 +1,5 @@
 import { assertSchema } from './schema_validator.mjs';
-import { assertUniqueIds } from './semantic_collections.mjs';
+import { assertUniqueIds } from './semantic_authority.mjs';
 import { assertIntentEvidence } from './intent_evidence.mjs';
 import { validateDecisionsWitness } from './semantic_closure.mjs';
 import {

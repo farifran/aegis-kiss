@@ -39,7 +39,6 @@ const currentSchemas = [
   'constitution.v1.schema.json',
   'intent-evidence.v1.schema.json',
   'issue-contract.v14.schema.json',
-  'preflight-handoff.v2.schema.json',
   'preflight-handoff.v3.schema.json',
   'rejection.v1.schema.json',
   'role-assignment.v1.schema.json',

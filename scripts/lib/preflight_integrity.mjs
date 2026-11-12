@@ -55,40 +55,5 @@ export function assertPreflightDocument(preflight) {
         integrityFailure('workspace_skeleton_symbol_count');
       }
     }
-  } else if (discovery.lexicalEvidence) {
-    const evidence = discovery.lexicalEvidence;
-    const queryTermKeys = evidence.queryTerms.map((term) => term.normalize('NFC').toLowerCase());
-    if (new Set(queryTermKeys).size !== queryTermKeys.length) {
-      integrityFailure('duplicate_query_term');
-    }
-    if (evidence.termsTruncated && evidence.queryTerms.length !== 64) {
-      integrityFailure('term_truncation');
-    }
-
-    const textPaths = new Set(
-      discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT').map(({ path }) => path),
-    );
-    const matchedTermKeys = new Set();
-    const queryTermKeySet = new Set(queryTermKeys);
-    for (const match of evidence.matches) {
-      const termKey = match.term.normalize('NFC').toLowerCase();
-      if (!queryTermKeySet.has(termKey) || matchedTermKeys.has(termKey) || !textPaths.has(match.path)) {
-        integrityFailure('lexical_match');
-      }
-      const sourceTokenKey = match.sourceToken.normalize('NFC').toLowerCase();
-      if ((match.matchKind === 'EXACT_TOKEN' && sourceTokenKey !== termKey)
-        || (match.matchKind === 'IDENTIFIER_COMPONENT' && sourceTokenKey === termKey)) {
-        integrityFailure('lexical_match_kind');
-      }
-      matchedTermKeys.add(termKey);
-    }
-
-    const applicable = textPaths.size > 0 && evidence.queryTerms.length > 0;
-    const expectedEvidenceStatus = applicable
-      ? (evidence.matches.length > 0 ? 'MATCH' : 'NO_MATCH')
-      : 'NOT_APPLICABLE';
-    if (evidence.status !== expectedEvidenceStatus) {
-      integrityFailure('lexical_status');
-    }
   }
 }

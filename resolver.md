@@ -19,8 +19,8 @@
 ### 1.3. Comportamento Operacional Atual (Fluxo Determinístico em 3 Passos)
 O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md), sem depender de `.agents/` ou de regras externas:
 
-1. **Captura e Briefing Determinístico (`./aegis --new "<demanda>"`):**
-   * Sanitiza a intenção, fragmenta sentenças neutras (`FRAG-*`), extrai fatos literais (`FACT-*`), executa discovery estrutural via Workspace Skeleton (AST tipado) e matching morfológico sobre `src/`, autenticando os digests de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md).
+1. **Captura e Briefing Determinístico (`./aegis --new "<demanda>"` ou `./aegis --issue [id|arquivo]`):**
+   * Sanitiza a intenção (`65_536` bytes padrão; ou orçamento dinâmico até `262_144` bytes via [`issue_intake.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/issue_intake.mjs) para issues explícitas/única aberta, sem comentários ou logs ruidosos), fragmenta sentenças neutras (`FRAG-*`), extrai fatos literais (`FACT-*`), executa discovery estrutural via Workspace Skeleton (AST tipado) e matching morfológico sobre `src/`, autenticando os digests de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md).
    * Emite no `stdout` um **Briefing Determinístico compacto (~2.1 KB)** contendo `evidenceDigest`, `fragments`, `literalFacts`, `workspace`, `availableContextTags` e as tarefas intelectuais da IA (`aiTask`).
 2. **Compilação Semântica e Contabilidade Mecânica (`./aegis --semantic-compile`):**
    * Recebe o parecer semântico via `stdin` usando identificadores estáveis (`ruleId`, `contextTag`, `claimId`, `REQ-*`).
@@ -37,7 +37,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | Arquivo | Papel no Sistema |
 | :--- | :--- |
 | [`aegis`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/aegis) | Wrapper bash que define `AEGIS_ROOT` e delega para `scripts/ide_gateway.sh`. |
-| [`scripts/ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh) | Gateway CLI principal (`--new`, `--clean`, `--approve`, `--resolve`, `--verify`, `--status`, `--setup`, `--semantic-*`, `--wizard`). Suporta resolução e selamento atômico em comando único e wizard TTY enxuto. |
+| [`scripts/ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh) | Gateway CLI principal (`--new`, `--issue`, `--clean`, `--approve`, `--resolve`, `--verify`, `--status`, `--setup`, `--semantic-*`, `--wizard`). Suporta resolução e selamento atômico em comando único e wizard TTY enxuto. |
 | [`scripts/issue_contract_runner.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/issue_contract_runner.mjs) | Orquestrador de captura, briefing determinístico, supervisão com reparo de 1 ciclo, compilação, aprovação e verificação. |
 | [`scripts/resolve_decision.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/resolve_decision.mjs) | Grava respostas de decisões deliberadas via `ask_question` em `preflight_resolution.json`. |
 | [`scripts/setup_roles.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/setup_roles.mjs) | Configurador de `.harness/config/roles.json` (`contractSupervisor` e `codingAgent`). |
@@ -48,28 +48,29 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | :--- | :--- |
 | [`canonical_json.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/canonical_json.mjs) | Serialização JSON canônica (chaves ordenadas lexicograficamente) e hashing criptográfico SHA-256. |
 | [`issue_contract_core.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/issue_contract_core.mjs) | Sanitização da demanda (`captureDemand`), observação de `src/` (`observeWorkspace`), `preflight.json` e autenticação de `architecture.policy.json`. |
+| [`issue_intake.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/issue_intake.mjs) | Adaptador de borda para `--issue`: captura issue explícita (`gh` CLI ou arquivo local) ou única issue aberta, bloqueando captura mágica ambígua e removendo comentários/logs ruidosos. |
 | [`workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs) | Extrator de esqueleto de AST via TypeScript Compiler API: extrai interfaces, types, funções e classes com corpos despojados e docstrings JSDoc. |
 | [`semantic_scout.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_scout.mjs) | Adaptive Semantic Scout: árbitro condicional sob silêncio léxico com mapa topográfico panorâmico, filtro físico fail-closed e Auto-Lexicon. |
 | [`.harness/domain-lexicon.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/.harness/domain-lexicon.json) | Léxico declarativo canônico de termos de negócio para código (`estorno -> reversal`, `tarifa -> fee`), 100% determinístico. |
 | [`preflight_integrity.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/preflight_integrity.mjs) | Validação da integridade estrutural e criptográfica de `preflight.json`. |
 | [`intent_evidence.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/intent_evidence.mjs) | Fragmentação neutra da demanda (`FRAG-*`) e extração mecânica de fatos literais (`FACT-*`) com suporte a decimais pt-BR. |
-| [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) | Extração de artigos de `AGENTS.md`, matching por nós de AST/caminhos e montagem da evidência física com tetos elásticos e corte residual. |
+| [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) | Carregamento da constituição (`AGENTS.md`), montagem de `aegis.semantic_request.v10` e re-export de helpers de escopo. |
+| [`source_evidence.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs) | Matching por nós de AST/caminhos, léxico de domínio e montagem da evidência física com tetos elásticos e corte residual. |
 | [`semantic_output_schema.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_output_schema.mjs) | Geração de schema compacto com `$defs` compartilhados para Structured Outputs. |
 | [`semantic_gateway.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_gateway.mjs) | Prompt do supervisor externo e chamadas HTTP para provedores compatíveis com OpenAI/AI Gateway/Ollama. |
 | [`semantic_codex.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_codex.mjs) | Adaptador secundário opcional via CLI `codex exec` em sandbox read-only. |
 | [`role_assignment.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/role_assignment.mjs) | Leitura e validação de `.harness/config/roles.json` (assistente nativo da IDE como padrão). |
 | [`semantic_opinion.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_opinion.mjs) | Normalização de IDs semânticos, auto-derivação de `policyAssessments`, `determinismReview.coverage`, contabilidade de `stateModel` e defaults de `decisions`/`unknowns`, compilando para `semantic_draft.v9` + `preparedEffect`. |
 | [`semantic_draft_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_draft_validator.mjs) | Validação de citações literais, rastreabilidade de fatos, invariantes, decisões humanas e limites estruturais. |
-| [`semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) | Certificado de fechamento semântico (`closureCertificate`) e `gapLedger`, validando totalidade de operações e ciclo de vida de campos. |
+| [`semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) | Barrel público do certificado de fechamento semântico (`closureCertificate`) e `gapLedger`, delegando para [`scripts/lib/closure/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/closure/gap_ledger.mjs) (`operation_totality.mjs`, `state_lifecycle.mjs`, `provenance.mjs`, `gap_ledger.mjs`). |
 | [`prepared_effects.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/prepared_effects.mjs) | Aplicação cirúrgica de patches semânticos (`preparedEffect`) em memória sem nova consulta à IA. |
 | [`semantic_contract_lifecycle.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_contract_lifecycle.mjs) | Ciclo de vida de `contract.json`, simulação preventiva de variantes de `preparedEffect` e validação documental. |
 | [`semantic_approval.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_approval.mjs) | Geração de `user_confirmation_request.json` e selamento criptográfico da aprovação humana. |
 | [`semantic_contract_markdown.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_contract_markdown.mjs) | Renderização determinística de `contract.md`. |
 | [`semantic_state.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_state.mjs) | Persistência e verificação de `.harness/state/semantic-state.json`. |
-| [`semantic_authority.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_authority.mjs) | Autoridade de fechamento e compilação de testemunhas de contraexemplo (`counterexampleWitness`). |
-| [`semantic_collections.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_collections.mjs) | Utilitário `assertUniqueIds`. |
+| [`semantic_authority.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_authority.mjs) | Autoridade de fechamento, limites de evidência, `assertUniqueIds` e compilação de testemunhas de contraexemplo (`counterexampleWitness`). |
 | [`semantic_contract.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_contract.mjs) | Barrel de exportação das funções do contrato semântico. |
-| [`schema_catalog.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_catalog.mjs) | Catálogo dos 14 JSON Schemas e validadores compilados. |
+| [`schema_catalog.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_catalog.mjs) | Catálogo dos JSON Schemas e validadores compilados em `scripts/generated/schema_validators/`. |
 | [`schema_validator.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/schema_validator.mjs) | Carregador e expansor de validadores Ajv standalone com diagnóstico explícito de `missingProperty` e `additionalProperty`. |
 | [`rejection_report.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/rejection_report.mjs) | Diagnósticos estruturados com causa exata, regra violada e remediação acionável. |
 
@@ -78,7 +79,7 @@ O Aegis opera de forma 100% autossuficiente a partir de [`AGENTS.md`](file:///Us
 | :--- | :--- |
 | [`governance/constitution.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/constitution.json) | Âncora de versão e SHA-256 (`sourceDigest`) de [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md), de onde os 5 artigos constitucionais (`CONST-*`) são extraídos em runtime sem duplicação textual. |
 | [`governance/architecture.policy.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/architecture.policy.json) | 16 regras arquiteturais (`ARCH-*`) e 18 tags de contexto vinculadas por SHA-256 a [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md). |
-| [`governance/schemas/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas) | 14 schemas JSON validados em runtime (preflight, handoff v3, draft v9, contract v6, etc.). |
+| [`governance/schemas/`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas) | 14 schemas JSON validados em runtime (preflight v3, draft v9, contract v14, etc.). |
 
 ---
 
@@ -164,14 +165,15 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
   * Extrator de AST ([`workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs)) captura identificadores, subtokens estruturais (camelCase, snake_case), caminhos de pasta e docstrings JSDoc (`docComment`).
   * Pontuação dominante para símbolos exportados públicos (+3 exato / +2 stem).
   * **Blindagem Anti-Sequestro:** JSDocs só pontuam se houver afinidade estrutural prévia (no identificador ou caminho do módulo), impedindo que comentários narrativos alheios sequestrem o contexto.
-* **Camada 2: Léxico Declarativo de Domínio (`.harness/domain-lexicon.json` — 0 ms, $0.00, Determinístico)**
-  * Mapeamento canônico determinístico entre termos de negócio e identificadores em inglês (`estorno -> reversal`, `tarifa -> fee`, `risco -> risk`).
-  * 100% sob custódia e soberania humana ([`CONST-EVIDENCE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L10)), sem modelos neurais e com zero latência.
+* **Camada 2: Léxico Declarativo de Domínio em Duas Camadas (Curado vs. Cache Dinâmico — 0 ms, $0.00, Determinístico)**
+  * **Léxico Curado Permanente (`.harness/config/lexicon.json`):** Mapeamento canônico oficial do projeto (`estorno -> reversal`, `tarifa -> fee`, `risco -> risk`), sob custódia e soberania humana ([`CONST-EVIDENCE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L10)), versionado no Git e preservado de forma indelével.
+  * **Cache Dinâmico Auto-Aprendido (`.harness/domain-lexicon.json`):** Armazena novos sinônimos aprendidos pelo Scout com **trava de teto estrita (`MAX_AUTO_LEXICON_ENTRIES = 200`)** para evitar crescimento ilimitado.
+  * **Higiene e Reset no `./aegis --clean`:** O comando `./aegis --clean` purga o cache dinâmico (`domain-lexicon.json`), restaurando o estado limpo do repositório enquanto preserva intacto o léxico curado permanente.
 * **Camada 3: Adaptive Semantic Scout (Acordo Semântico sob Silêncio Léxico)**
   * Acionado exclusivamente quando as Camadas 1 e 2 falham (Silêncio Léxico em repositórios grandes com `src/ > 64 KB`).
   * Utiliza mapa topográfico panorâmico compacto (< 4 KB JSON), filtra as sugestões de forma *fail-closed* contra o disco físico, hidrata linhas de código e **persiste automaticamente os novos sinônimos aprendidos de volta na Camada 2 (*Auto-Lexicon*)**.
   * A primeira execução preenche a lacuna; todas as execuções subsequentes daquele termo são automaticamente promovidas para o Fast-Path determinístico das Camadas 1 e 2.
-* **Provas Falsificáveis:** Coberto por `TEST-118` (JSDoc), `TEST-121` (Léxico) e os 10 testes de `test_semantic_scout.mjs` (Scout, Anti-Alucinação e Auto-Lexicon).
+* **Provas Falsificáveis:** Coberto por `TEST-118` (JSDoc), `TEST-121` (Léxico), `test_issue_contract.sh` (purge no `--clean`) e os 12 testes de `test_semantic_scout.mjs` (Scout, Anti-Alucinação, Bounded Cap e Layered Lexicon).
 
 ### 6.2. Resolução do Problema 2: O Dilema de Goldilocks do Contexto (Ruído vs. Omissão)
 * **Combate à Omissão (Faltou Dado):**
@@ -179,11 +181,12 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
   * **Blindagem de Proveniência Fail-Closed (`validateProvenanceEnforcement`, `TEST-108`):** Se a IA tentar inventar um limite padrão ou constante de mercado (ex: teto arbitrário de `500000000` centavos) citando uma linha de código que apenas declara um tipo sem valor, o Harness rejeita a proposta com `UNAUTHORIZED_NUMERIC_LITERAL`.
 * **Combate ao Ruído (Lost in the Middle):**
   * O esqueleto AST ([`buildWorkspaceSkeleton`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs)) despoja corpos internos de funções (`stripped bodies`), reduzindo o volume de tokens em mais de 75%.
-  * Teto focado por arquivo de 8 KB e orçamento global elástico de 64 KB com **Corte por Relevância Residual**: se os arquivos úteis somam 12 KB, a coleta encerra imediatamente sem arrastar arquivos irrelevantes para preencher a cota.
+  * **Alocação Dinâmica Estratificada:** Teto focado de **24 KB para arquivos explicitamente citados/autorizados** (`sourceEvidenceExplicitFileByteLimit = 24_576`) e **8 KB para arquivos irmãos e descoberta estrutural** (`sourceEvidenceFileByteLimit = 8_192`). Em repositórios compactos (`src <= 96 KB`), arquivos são entregues 100% íntegros sem truncamento.
+  * **Orçamento Global Elástico de 96 KB com Parada Inteligente:** Se os arquivos úteis somam 11.5 KB (ex.: D11), a coleta encerra imediatamente com 0% de ruído, sem arrastar arquivos irrelevantes para preencher a cota.
 * **Provas Falsificáveis:** Coberto por `TEST-108`, `TEST-114`, `TEST-115` e `TEST-120`.
 
 ### 6.3. Resolução do Problema 3: A Falácia da Fronteira Sintática (Onde Cortar o Código?)
-* **Corte Estrutural de Imports e Tipos:** A função [`findStructuralHeaderEndLine`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) inspeciona onde terminam os cabeçalhos de tipos e interfaces nas primeiras 150 linhas e os preserva integralmente, eliminando cortes cegos de decorators e imports.
+* **Corte Estrutural de Imports e Tipos:** A função [`findStructuralHeaderEndLine`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs) inspeciona onde terminam os cabeçalhos de tipos e interfaces nas primeiras 150 linhas e os preserva integralmente, eliminando cortes cegos de decorators e imports.
 * **Corte Focado em Nós de AST:** O seletor de janelas (`selection: 'LEXICAL_WINDOW'`) ancora a extração nas linhas de início e fim reais (`startLine`/`endLine`) do símbolo identificado pela TypeScript Compiler API, em vez de fatias arbitrárias de 20 linhas.
 * **Visibilidade de Regras sem Inchar o Corpo:** Comentários JSDoc são associados diretamente ao nó do símbolo (`sym.docComment`), permitindo que a IA conheça as regras documentadas de uma função sem precisar receber centenas de linhas de código utilitário interno.
 * **Provas Falsificáveis:** Coberto por `TEST-115` e pela suíte `test_workspace_skeleton.mjs`.
@@ -191,11 +194,11 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
 ### 6.4. Resolução do Problema 4: A Falácia da Escala (Do Repositório de Teste ao Monorepo Real)
 * **Confinamento de Escopo por Módulos-Alvo (`targetDirs`):** Quando a demanda cita pastas (ex: `src/ledger`), o escopo é confinado aos módulos autorizados, descartando arquivos alheios do monorepo.
 * **Garantia de Piso Multi-Módulo (Multi-Module Floor Guarantee):** Cada pasta citada no escopo tem a preservação garantida do seu melhor arquivo representante (`isTopForTargetDir`), impedindo que o pico de pontuação de um módulo canibalize outros módulos autorizados.
-* **Ranking Determinístico em Sub-Segundo:** O algoritmo [`computeSymbolAffinity`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) ranqueia os 512 nós estruturais mais relevantes em menos de **300 ms**, provado sob estresse real com os 204 arquivos do Askesis.
+* **Ranking Determinístico em Sub-Segundo:** O algoritmo [`computeSymbolAffinity`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs) ranqueia os 512 nós estruturais mais relevantes em menos de **300 ms**, provado sob estresse real com os 204 arquivos do Askesis.
 * **Provas Falsificáveis:** Coberto pelo Benchmark D11 e pelo teste de estresse real Askesis (Seção 8).
 
 ### 6.5. Resolução do Problema 5: O Paradoxo da Criação (O Código que Ainda Não Existe)
-* **Directory Anchor Fallback:** Em [`scripts/lib/semantic_request.mjs:buildSourceEvidence`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs), se a demanda cita um caminho que ainda não existe fisicamente no disco (ex.: `src/ledger/installment_reversal.ts`) ou pastas conhecidas (`ledger`, `risk`):
+* **Directory Anchor Fallback:** Em [`scripts/lib/source_evidence.mjs:buildSourceEvidence`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs), se a demanda cita um caminho que ainda não existe fisicamente no disco (ex.: `src/ledger/installment_reversal.ts`) ou pastas conhecidas (`ledger`, `risk`):
   * O Harness detecta o diretório pretendido e seleciona automaticamente os **arquivos irmãos existentes** no mesmo módulo (`settlement_engine.ts`, `fee_calculator.ts`).
   * O novo código nasce conhecendo os tipos, padrões e modelos existentes do subsistema, impedindo que a IA invente convenções alienígenas.
 * **Prova Falsificável:** Validado pelo teste **`TEST-117`** em `test_field_lifecycle.mjs`.
@@ -230,7 +233,7 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
 | Problema Estrutural | Abordagem Adotada no Aegis | Prova / Teste Falsificável | Status Atual |
 | :--- | :--- | :--- | :---: |
 | **P1: Abismo Semântico** | Defesa em 3 Camadas: AST Subtokens/JSDoc $\rightarrow$ Léxico Declarativo $\rightarrow$ Scout Adaptativo + Auto-Lexicon. | `TEST-118`, `TEST-121`, `test_semantic_scout.mjs` | **MITIGADO EM 3 CAMADAS (DESAFIO ABERTO)** |
-| **P2: Dilema de Goldilocks** | Esqueleto AST (corpos despojados) + corte residual (64 KB) + bloqueio fail-closed de literais inventados. | `TEST-108`, `TEST-114`, `TEST-115`, `TEST-120` | **RESOLVIDO** |
+| **P2: Dilema de Goldilocks** | Esqueleto AST (corpos despojados) + orçamento elástico de 96 KB (`98_304` B) + bloqueio fail-closed de literais inventados. | `TEST-108`, `TEST-114`, `TEST-115`, `TEST-120` | **RESOLVIDO** |
 | **P3: Fronteira Sintática** | Preservação de cabeçalho de tipos (`findStructuralHeaderEndLine`) + janelas ancoradas em nós de AST. | `TEST-115`, `test_workspace_skeleton.mjs` | **RESOLVIDO** |
 | **P4: Falácia da Escala** | Bounded Context (`targetDirs`) + piso multi-módulo + afinidade determinística em sub-segundo (< 300 ms). | Benchmark D11, teste Askesis (204 arquivos) | **RESOLVIDO** |
 | **P5: Paradoxo da Criação** | Directory Anchor Fallback: injeção mecânica dos arquivos irmãos do diretório pretendido. | `TEST-117` em `test_field_lifecycle.mjs` | **RESOLVIDO** |
@@ -255,23 +258,14 @@ Ao submeter uma demanda bancária em português livre (*"Permitir estornar a liq
 5. **Priorização Precoce de Diretórios-Alvo:** Módulos citados na demanda (`src/ledger`, `src/risk`) capturam imediatamente as primeiras cotas de evidência física.
 6. **Penalização de Testes e Scripts Internos:** Arquivos em `/tests/`, `*.test.ts` e `/scripts/` recebem penalidade de relevância.
 
-### 8.3. Expansão para 64 KB e Corte por Relevância Residual
-* **Confinamento de Escopo por `targetDirs`:** Arquivos fora dos módulos autorizados são descartados.
-* **Piso Residual de Relevância:** Se o topo da AST tem alta afinidade (`topScore >= 6.0`), símbolos com pontuação residual (< 40% do pico ou piso absoluto de 3.0) são descartados.
-* **Parada Inteligente (Sem Enchimento Forçado):** O Harness não força o preenchimento dos 64 KB. Se os arquivos úteis somam 12 KB, encerra imediatamente com 0% de ruído.
-* **Piso Multi-Módulo (Multi-Module Floor Guarantee):** Cada pasta declarada no escopo autorizado tem a preservação garantida do seu melhor arquivo representante (`isTopForTargetDir`), impedindo que um módulo dominante canibalize outro módulo autorizado.
-* **Corte por Pressão de Orçamento:** O corte de 40% só atua quando a soma dos arquivos ultrapassa a cota física de 64 KB (`underBudgetPressure`).
+### 8.3. Orçamento Elástico (96 KB) e Scout Adaptativo
+* **Alocação Estratificada e Piso Multi-Módulo:** Conforme detalhado na Seção 6.2 e 6.4 (`sourceEvidenceByteLimit = 98_304`, 24 KB para arquivos explicitamente citados e 8 KB para irmãos), com parada inteligente em 11.5 KB no D11 e piso garantido por `targetDir` (`isTopForTargetDir`).
+* **Piso Residual sob Pressão:** Se o topo da AST tem alta afinidade (`topScore >= 6.0`), símbolos abaixo de 40% do pico (ou piso 3.0) são descartados sob pressão de cota.
+* **Scout Adaptativo & Auto-Lexicon:** Acionado apenas acima de 96 KB (`totalBytes > sourceEvidenceByteLimit`) sob silêncio léxico, usando mapa topográfico (< 4 KB JSON), filtro físico fail-closed (`filterPhysicalPaths`) e persistência de `inferredAliases` em `.harness/domain-lexicon.json`.
 
-### 8.4. Adaptive Semantic Scout & Auto-Lexicon Persistente
-* **Guardiões de Custo Zero:** O Scout é travado imediatamente ($0.00, 0 ms) se o workspace for verde (`EMPTY_SOURCE`), compacto ($\le 64\text{ KB}$), esqueleto vazio ou se houver correspondência léxica direta.
-* **Validação Física Fail-Closed:** Qualquer caminho sugerido pela IA é filtrado estritamente contra os arquivos observados no disco (`filterPhysicalPaths`). Alucinações são descartadas sumariamente.
-* **Amostragem Estrutural Panorâmica:** `buildTopographicalMap` agrupa até 2 símbolos exportados por arquivo de toda a árvore, garantindo visibilidade em < 4 KB de JSON sem viés alfabético.
-* **Auto-Lexicon Contínuo:** Sinônimos inferidos pela IA (`inferredAliases`) são automaticamente consolidados em `.harness/domain-lexicon.json`. As execuções seguintes passam a rodar pelo fast-path mecânico determinístico (0 ms, offline).
-
-### 8.5. Expurgo dos Resíduos do BM25 Legado
-* Purificado o schema de governança `preflight-handoff.v3` (removida a propriedade residual `lexicalEvidence`).
-* Eliminados os aliases obsoletos `isReusableHybridSourceIndex`, `cachedSourceIndex` e `sourceIndex` em `issue_contract_core.mjs`.
-* O pipeline de evidência e o árbitro Scout inspecionam exclusivamente seleções focadas (`selection === 'LEXICAL_WINDOW'`) derivadas do AST Skeleton.
+### 8.4. Expurgo Integral do BM25 / Preflight v2 Legado
+* Removidos `preflight-handoff.v2.schema.json`, `aegis_preflight_handoff_v2.cjs`, o branch `version === 'v2'` em [`issue_contract_core.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/issue_contract_core.mjs), o bloco legado `discovery.lexicalEvidence` em [`preflight_integrity.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/preflight_integrity.mjs) e `scripts/benchmark_v2_v3.mjs`.
+* O pipeline ativo opera exclusivamente sobre `aegis.preflight_handoff.v3` e seleções `LEXICAL_WINDOW` derivadas do AST Skeleton.
 
 ---
 
@@ -353,7 +347,7 @@ Confronto criptográfico de artefatos salvos em [`benchmarks/results/D6_run6/`](
 
 ### 11.1. Melhorias Implementadas e Blindadas no Core
 1. **Fragmentação de Decimais pt-BR em `intent_evidence.mjs`:** Suporte a vírgula decimal (`\d+(?:[.,]\d+)?n?`), normalizando para `canonicalValue` (`TEST-113`).
-2. **Deduplicação e Fusão de Janelas de Código (`semantic_request.mjs`):** Agrupamento por arquivo e garantia de teto global de 64 KB (`TEST-114`, `TEST-115`).
+2. **Deduplicação e Fusão de Janelas de Código (`semantic_request.mjs`):** Agrupamento por arquivo sob teto global de 96 KB (`98_304` bytes; `TEST-114`, `TEST-115`).
 3. **Passagem de `intentEvidence` em `assertSemanticDraft`:** Rastreabilidade formal de `FACT-*` e `FRAG-*` no validador.
 4. **Validação Estrita de Literais Numéricos em `WORKSPACE_EVIDENCE`:** Bloqueio fail-closed com `UNAUTHORIZED_NUMERIC_LITERAL` para números inventados que não constam nas linhas de evidência citadas (`TEST-108`).
 5. **Detecção Mecânica de Guardas e Erros Espúrios:** Bloqueio com `UNAUTHORIZED_GUARD_OR_ERROR_CODE` para códigos não autorizados (`TEST-109`).
@@ -363,10 +357,9 @@ Confronto criptográfico de artefatos salvos em [`benchmarks/results/D6_run6/`](
 9. **Inspeção Real de Frescor no `./aegis --verify`:** Retorno dinâmico (`MATCHES_BASELINE` ou `CHANGED_SINCE_BASELINE`) conectado a `inspectWorkspaceFreshness`.
 10. **Expurgo Integral do BM25:** Substituição completa pelo Workspace Skeleton AST tipado e purificação de schemas v3.
 
-### 11.2. Oportunidades Futuras de Otimização (Backlog Ativo)
-1. **Redução de 68,6% do Payload de `.harness/runtime/semantic-request.json`:**
-   * Medições comprovam que `outputSchema` consome 32 KB de um arquivo de 47 KB. No fluxo nativo da IDE, esse documento não é consumido.
-   * Proposta: Manter apenas o digest e calcular o schema expandido sob demanda exclusivamente ao invocar adaptadores HTTP externos (`semantic_gateway.mjs`), enxugando o payload para ~14,8 KB.
-2. **Modularização de `semantic_closure.mjs` (1.439 linhas):**
-   * O arquivo concentra 8 validadores distintos (ciclo de vida de estado, proveniência, totalidade de operações, contradições).
-   * Proposta: Dividir em submódulos coesos em `scripts/lib/closure/` preservando a interface pública do barrel.
+### 11.2. Dívida Técnica e Backlog Ativo (Parecer Adversarial)
+1. **Modularização de [`semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) e [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) (Concluída):**
+   * [`semantic_closure.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_closure.mjs) (11 linhas) atua agora como barrel público preservando as 7 exportações e delegando para submódulos coesos em `scripts/lib/closure/`: [`operation_totality.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/closure/operation_totality.mjs) (483 linhas), [`state_lifecycle.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/closure/state_lifecycle.mjs) (544 linhas), [`provenance.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/closure/provenance.mjs) (382 linhas) e [`gap_ledger.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/closure/gap_ledger.mjs) (239 linhas).
+   * [`semantic_request.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) (181 linhas) foi separado da coleta e ranqueamento de evidências em [`source_evidence.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs) (788 linhas), mantendo intacta a interface pública.
+2. **Redução do Payload de `.harness/runtime/semantic-request.json` (Adiada por `CONST-KISS`):**
+   * `outputSchema` (`id`, `digest`, `strict`, `document` com `$schema` e `$id`) é exigido pelo contrato `aegis.semantic_request.v10` ([`semantic-request.v10.schema.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/governance/schemas/semantic-request.v10.schema.json)) e validado por `test_governance_schemas.sh` (`outputSchema.digest === canonicalDigest(outputSchema.document)`). Omiti-lo exigiria bump para `v11` sem necessidade demonstrada.

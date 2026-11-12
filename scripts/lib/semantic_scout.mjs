@@ -3,8 +3,8 @@
  *
  * Princípios (CONST-KISS / ARCH-LOCAL-DETERMINISTIC-CORE / ARCH-PARSIMONY):
  * 1. O Scout é estritamente condicional: só é executado no Silêncio Léxico
- *    em repositórios não-vazios e que excedam a cota de 64 KB (onde a seleção é necessária).
- * 2. Em repositórios greenfield (EMPTY_SOURCE), compactos (smallWorkspace <= 64 KB)
+ *    em repositórios não-vazios e que excedam a cota de 96 KB (onde a seleção é necessária).
+ * 2. Em repositórios greenfield (EMPTY_SOURCE), compactos (smallWorkspace <= 96 KB)
  *    ou onde houver correspondência mecânica, o Scout permanece inativo (custo $0.00, latência 0 ms).
  * 3. Amostragem Estrutural Panorâmica: Agrupa até 2 símbolos exportados por arquivo
  *    de todo o repositório, eliminando viés e truncamento alfabético em monorepos.
@@ -16,7 +16,10 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import process from 'node:process';
 import { sourceEvidenceByteLimit } from './semantic_authority.mjs';
+import { postChatCompletion } from './semantic_gateway.mjs';
+import { isFallbackOnlyEvidence, stripDiacritics } from './source_evidence.mjs';
 
 /**
  * Avalia se o Scout Semântico deve ser ativado.
@@ -39,20 +42,14 @@ export function shouldTriggerSemanticScout({ preflight, workspace, explicitTarge
 
   // 4. Silêncio Total: a evidência atual caiu em fallback puro de entrypoint ou arquivo vazio
   const sourceEvidence = workspace?.sourceEvidence ?? [];
-  const isFallbackOnly = sourceEvidence.length <= 1 &&
-    sourceEvidence.every((e) => e.selection === 'ENTRYPOINT_PREFIX' || e.selection === 'FULL_SOURCE');
-
-  if (isFallbackOnly) return true;
+  if (isFallbackOnlyEvidence(sourceEvidence)) return true;
 
   // 6. Silêncio Parcial (Falsa Saciedade em Demandas Multi-Módulo):
   // Se a evidência entregue cobre apenas 1 módulo raiz (ex: apenas src/reporting),
   // mas a demanda humana contém múltiplos termos substantivos que não aparecem
   // em nenhum dos arquivos selecionados (déficit severo de cobertura de intenção).
   const intentText = preflight.intent ?? '';
-  const intentWords = intentText
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
+  const intentWords = stripDiacritics(intentText)
     .split(/[^a-z0-9_$-]+/i)
     .filter((w) => w.length >= 4);
 
@@ -124,7 +121,7 @@ export function buildTopographicalMap(workspaceSkeleton, maxSymbolsPerFile = 2, 
 /**
  * Prepara o payload compacto para a chamada de arbitragem de escopo.
  */
-export function buildScoutPayload({ intent, workspaceSkeleton, role }) {
+function buildScoutPayload({ intent, workspaceSkeleton, role }) {
   const topography = buildTopographicalMap(workspaceSkeleton);
 
   const systemPrompt = [
@@ -164,6 +161,8 @@ export function filterPhysicalPaths(suggestedPaths, observedTextPaths) {
   const validSet = new Set(observedTextPaths);
   return [...new Set(suggestedPaths.filter((p) => typeof p === 'string' && validSet.has(p)))];
 }
+
+export const MAX_AUTO_LEXICON_ENTRIES = 200;
 
 /**
  * Persiste aliases inferidos em .harness/domain-lexicon.json para aprendizado contínuo.
@@ -213,6 +212,18 @@ export async function persistInferredAliases(repositoryRoot, newAliases) {
     }
   }
 
+  // Trava de teto (Bounded Cap): se exceder MAX_AUTO_LEXICON_ENTRIES, mantém as entradas mais recentes
+  const allKeys = Object.keys(currentLexicon);
+  if (allKeys.length > MAX_AUTO_LEXICON_ENTRIES) {
+    const prunedLexicon = {};
+    const keepKeys = allKeys.slice(allKeys.length - MAX_AUTO_LEXICON_ENTRIES);
+    for (const key of keepKeys) {
+      prunedLexicon[key] = currentLexicon[key];
+    }
+    currentLexicon = prunedLexicon;
+    modified = true;
+  }
+
   if (modified) {
     writeFileSync(lexiconPath, `${JSON.stringify(currentLexicon, null, 2)}\n`, 'utf8');
     process.stderr.write(`[AEGIS][AUTO-LEXICON] Mapeamento aprendido e salvo em .harness/domain-lexicon.json: ${learnedList.join(', ')}\n`);
@@ -235,30 +246,25 @@ export async function executeSemanticScout({
   timeoutMs = 15_000,
 }) {
   const payload = buildScoutPayload({ intent, workspaceSkeleton, role });
-  let response;
-  try {
-    response = await fetchImplementation(endpoint, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${credential}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: globalThis.AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    return { relevantPaths: [], inferredAliases: {}, skipped: true, reason: error.message };
-  }
-
-  if (!response.ok) {
-    return { relevantPaths: [], inferredAliases: {}, skipped: true, reason: `HTTP_${response.status}` };
+  const result = await postChatCompletion({
+    endpoint,
+    credential,
+    payload,
+    timeoutMs,
+    fetchImplementation,
+  });
+  if (!result.ok) {
+    if (result.kind === 'NETWORK') {
+      return { relevantPaths: [], inferredAliases: {}, skipped: true, reason: result.error.message };
+    }
+    if (result.kind === 'HTTP') {
+      return { relevantPaths: [], inferredAliases: {}, skipped: true, reason: `HTTP_${result.status}` };
+    }
+    return { relevantPaths: [], inferredAliases: {}, skipped: true, reason: 'INVALID_JSON_OUTPUT' };
   }
 
   try {
-    const text = await response.text();
-    const envelope = JSON.parse(text);
-    const content = envelope.choices?.[0]?.message?.content;
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content;
+    const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
     const physicalPaths = filterPhysicalPaths(parsed.relevantPaths, observedTextPaths);
     return {
       relevantPaths: physicalPaths,

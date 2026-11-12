@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import process from 'node:process';
 import { buildWorkspaceSkeleton, extractFileSymbols } from '../../lib/workspace_skeleton.mjs';
 import { assertSchema } from '../../lib/schema_validator.mjs';
 import { canonicalDigest } from '../../lib/canonical_json.mjs';

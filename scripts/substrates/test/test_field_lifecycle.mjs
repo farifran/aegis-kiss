@@ -2638,8 +2638,8 @@ function createFixture({
   const tempDir = path.resolve('.harness/tmp_test_subtoken_ast');
   fs.mkdirSync(path.resolve(tempDir, 'src/ledger'), { recursive: true });
   fs.writeFileSync(path.resolve(tempDir, 'src/ledger/settlement_engine.ts'), sourceRecords[0].text);
-  // Add padding to exceed smallWorkspace byte limit (65536) so lexical/symbol selection triggers
-  const bigPadding = Array.from({ length: 1500 }, (_, i) => `// Padding line ${i} with filler text to exceed byte limits\n`).join('');
+  // Add padding to exceed smallWorkspace byte limit (98304) so lexical/symbol selection triggers
+  const bigPadding = Array.from({ length: 2500 }, (_, i) => `// Padding line ${i} with filler text to exceed byte limits\n`).join('');
   fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
 
   try {
@@ -2718,7 +2718,7 @@ function createFixture({
     const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
     const observation = observeWorkspace(tempDir, 'processTargetBatch');
     const preflight = {
-      schema: 'aegis.preflight_handoff.v2',
+      schema: 'aegis.preflight_handoff.v3',
       phase: 'DISCOVERED',
       status: 'SEMANTIC_DELIBERATION_REQUIRED',
       intent: 'processTargetBatch',
@@ -3131,6 +3131,169 @@ function createFixture({
   }
 
   log('  PASS: TEST-121 Bilingual domain lexicon bridging verified');
+}
+
+// TEST-122: Deep subdirectory prefix anchoring and creation paradox sibling fallback verified
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_deep_prefix_fallback');
+  fs.mkdirSync(path.resolve(tempDir, 'src/askesis/api'), { recursive: true });
+  fs.mkdirSync(path.resolve(tempDir, 'src/askesis/services/habitActions'), { recursive: true });
+
+  // api/analyze.ts starts with letter 'a' (alphabetically earlier than 'services')
+  fs.writeFileSync(path.resolve(tempDir, 'src/askesis/api/analyze.ts'), 'export const API_ANALYZE_VALUE = 1;');
+  // services/habitActions/crudCore.ts is in deep subfolder
+  fs.writeFileSync(path.resolve(tempDir, 'src/askesis/services/habitActions/crudCore.ts'), 'export const SIBLING_ACTION_VALUE = 42;');
+
+  // Large filler to exceed smallWorkspace limit (64KB)
+  const bigPadding = Array.from({ length: 3000 }, (_, i) => `// Padding line ${i} with filler text to exceed sixty-four kilobytes\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    // Scenario 1: Demand creates a brand new, non-existent file in deep subfolder
+    const demand1 = 'Criar nova regra em src/askesis/services/habitActions/streakFreeze.ts para congelamento';
+    const obs1 = observeWorkspace(tempDir, demand1);
+    const preflight1 = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand1,
+      discovery: obs1.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req1 = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight: preflight1,
+      policy,
+      constitution,
+      workspaceObservation: obs1,
+    });
+
+    const evidence1 = req1.workspace.sourceEvidence;
+    assert.ok(evidence1.length >= 1, 'TEST-122: sourceEvidence must be produced');
+    const crudIndex = evidence1.findIndex((e) => e.path === 'src/askesis/services/habitActions/crudCore.ts');
+    const apiIndex = evidence1.findIndex((e) => e.path === 'src/askesis/api/analyze.ts');
+    assert.ok(crudIndex !== -1, 'TEST-122: crudCore.ts must be selected as exact sibling in deep subfolder');
+    // Deep sibling MUST be prioritized ahead of alphabetically earlier shallow sibling
+    if (apiIndex !== -1) {
+      assert.ok(crudIndex < apiIndex, 'TEST-122: deep sibling crudCore.ts must be ranked before api/analyze.ts');
+    }
+    const crudContent = evidence1.find((e) => e.path === 'src/askesis/services/habitActions/crudCore.ts').content;
+    assert.ok(crudContent.includes('SIBLING_ACTION_VALUE'), 'TEST-122: sibling content must include SIBLING_ACTION_VALUE');
+
+    // Scenario 2: Demand specifies deep subdirectory without filename
+    const demand2 = 'Refatorar ações em src/askesis/services/habitActions para congelamento';
+    const obs2 = observeWorkspace(tempDir, demand2);
+    const preflight2 = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand2,
+      discovery: obs2.discovery,
+    };
+    const req2 = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight: preflight2,
+      policy,
+      constitution,
+      workspaceObservation: obs2,
+    });
+    const evidence2 = req2.workspace.sourceEvidence;
+    const hasCrudInSubdir = evidence2.some((e) => e.path === 'src/askesis/services/habitActions/crudCore.ts');
+    assert.ok(hasCrudInSubdir, 'TEST-122: subfolder specification must capture files in targeted subfolder');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-122 Deep subdirectory prefix anchoring and creation paradox sibling fallback verified');
+}
+
+// TEST-123: Multi-anchor score-based window extraction & Scout 24KB explicit target tier
+{
+  const { buildSemanticRequest } = await import('../../lib/semantic_request.mjs');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+
+  const tempDir = path.resolve('.harness/tmp_test_anchored_windows');
+  fs.mkdirSync(path.resolve(tempDir, 'src/billing'), { recursive: true });
+
+  // Build a ~16KB file with two distant matching symbols (top and bottom) separated by ~220 lines of unrelated code
+  const header = [
+    'import type { InvoiceRecord } from "./types";',
+    'export interface BillingAnchorResult { ok: boolean; }',
+    '',
+  ].join('\n');
+  const middleFiller = Array.from({ length: 220 }, (_, i) => `// Unrelated neutral helper line ${i} padding text\n`).join('');
+  const topSymbol = 'export function calculateInvoiceTax(amount: number): number { return amount * 0.15; }\n';
+  const bottomSymbol = 'export function finalizeInvoiceSettlement(id: string): boolean { return Boolean(id); }\n';
+  fs.writeFileSync(
+    path.resolve(tempDir, 'src/billing/engine.ts'),
+    `${header}${topSymbol}${middleFiller}${bottomSymbol}`,
+  );
+
+  // Build an ~18KB file that will be passed via explicitTargetPaths (Scout target)
+  const scoutLines = Array.from({ length: 300 }, (_, i) => `export const SCOUT_RULE_${i} = ${i}; // Business rule line padding ${i}`).join('\n');
+  fs.writeFileSync(path.resolve(tempDir, 'src/billing/scout_target.ts'), scoutLines);
+
+  // Large filler to exceed 96KB smallWorkspace limit
+  const bigPadding = Array.from({ length: 2500 }, (_, i) => `// Padding line ${i} with filler text to exceed ninety-six kilobytes\n`).join('');
+  fs.writeFileSync(path.resolve(tempDir, 'src/filler.ts'), bigPadding);
+
+  try {
+    const { observeWorkspace } = await import('../../lib/issue_contract_core.mjs');
+    const demand = 'Ajustar calculateInvoiceTax e finalizeInvoiceSettlement para faturamento';
+    const obs = observeWorkspace(tempDir, demand);
+    const preflight = {
+      schema: 'aegis.preflight_handoff.v3',
+      phase: 'DISCOVERED',
+      status: 'SEMANTIC_DELIBERATION_REQUIRED',
+      intent: demand,
+      discovery: obs.discovery,
+    };
+    const policy = { contexts: [{ tag: 'default', description: 'test' }], rules: [], amendments: [] };
+    const constitution = {
+      schema: 'aegis.constitution.v1',
+      version: 1,
+      digest: '0'.repeat(64),
+      authority: 'TRUSTED_CONSTITUTION',
+      rules: [{ id: 'CONST-KISS', statement: 'Parcimony' }],
+    };
+
+    const req = buildSemanticRequest({
+      repositoryRoot: tempDir,
+      preflight,
+      policy,
+      constitution,
+      workspaceObservation: obs,
+      explicitTargetPaths: ['src/billing/scout_target.ts'],
+    });
+
+    const engineWindows = req.workspace.sourceEvidence.filter((e) => e.path === 'src/billing/engine.ts');
+    assert.ok(engineWindows.length >= 1, 'TEST-123: engine.ts must be included in sourceEvidence');
+    const combinedEngine = engineWindows.map((w) => w.content).join('\n');
+    assert.ok(combinedEngine.includes('calculateInvoiceTax'), 'TEST-123: top-scoring symbol calculateInvoiceTax must be captured');
+    assert.ok(combinedEngine.includes('finalizeInvoiceSettlement'), 'TEST-123: distant matching symbol finalizeInvoiceSettlement must also be captured without medianLine blindspot');
+
+    const scoutEntry = req.workspace.sourceEvidence.find((e) => e.path === 'src/billing/scout_target.ts');
+    assert.ok(scoutEntry, 'TEST-123: Scout target must be included in sourceEvidence');
+    assert.strictEqual(scoutEntry.truncated, false, 'TEST-123: Scout explicitTargetPaths (~18KB) must receive 24KB tier and remain untruncated');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  log('  PASS: TEST-123 Score-anchored multi-window extraction & Scout 24KB tier verified');
 }
 
 log('[CTDD TEST] Structural Field Lifecycle, Closure Certificate & Gap Ledger tests passed!');

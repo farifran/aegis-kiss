@@ -5,7 +5,8 @@ import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
 import { buildWorkspaceSkeleton } from './workspace_skeleton.mjs';
 
-const maxDemandBytes = 65_536;
+export const maxDemandBytes = 65_536;
+export const maxIssueDemandBytes = 262_144;
 
 function hasUnsafeControlCharacter(text) {
   for (const character of text) {
@@ -21,10 +22,13 @@ function hasUnsafeControlCharacter(text) {
  * Captura exatamente um argumento textual, sem reconstruir tokens do shell.
  * Normaliza quebras de linha e equivalência Unicode, preservando a semântica.
  */
-export function captureDemand(args) {
+export function captureDemand(args, { maxBytes = maxDemandBytes } = {}) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== 'string') {
     throw new Error('invalid_demand_arity');
   }
+  const effectiveMaxBytes = Number.isInteger(maxBytes) && maxBytes > 0
+    ? Math.min(maxBytes, maxIssueDemandBytes)
+    : maxDemandBytes;
   const text = args[0].replace(/\r\n?/gu, '\n').normalize('NFC');
   if (text.trim().length === 0) {
     throw new Error('empty_demand');
@@ -32,7 +36,7 @@ export function captureDemand(args) {
   if (hasUnsafeControlCharacter(text)) {
     throw new Error('unsafe_control_character');
   }
-  if (Buffer.byteLength(text, 'utf8') > maxDemandBytes) {
+  if (Buffer.byteLength(text, 'utf8') > effectiveMaxBytes) {
     throw new Error('input_too_large');
   }
   return text;
@@ -57,7 +61,7 @@ export function computeSourceSnapshotDigest(files, ignoredEntries) {
   });
 }
 
-export function isReusableWorkspaceSkeleton(cachedSkeleton) {
+function isReusableWorkspaceSkeleton(cachedSkeleton) {
   if (!cachedSkeleton || typeof cachedSkeleton !== 'object') return false;
   if (cachedSkeleton.schema !== 'aegis.workspace_skeleton.v1') return false;
   const { digest, ...unsigned } = cachedSkeleton;
@@ -70,6 +74,7 @@ export function isReusableWorkspaceSkeleton(cachedSkeleton) {
  * cache transitório e nunca substitui a leitura/hash do snapshot atual.
  */
 export function observeWorkspace(repositoryRoot, intent = '', { cachedWorkspaceSkeleton = null } = {}) {
+  void intent;
   const sourceRoot = resolve(repositoryRoot, 'src');
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
@@ -184,12 +189,9 @@ export function discoverWorkspace(repositoryRoot, intent = '') {
  * Compila somente os fatos mecânicos das Fases 1 a 3.
  * Deliberação, requisitos, riscos e provas pertencem às fases seguintes.
  */
-export function buildPreflightHandoff({ demand, discovery, version = 'v3' }) {
-  const schema = (version === 'v2')
-    ? 'aegis.preflight_handoff.v2'
-    : 'aegis.preflight_handoff.v3';
+export function buildPreflightHandoff({ demand, discovery }) {
   const handoff = {
-    schema,
+    schema: 'aegis.preflight_handoff.v3',
     phase: 'DISCOVERED',
     status: 'SEMANTIC_DELIBERATION_REQUIRED',
     intent: demand,

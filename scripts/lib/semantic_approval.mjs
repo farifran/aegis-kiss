@@ -1,6 +1,6 @@
 import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
-import { assertUniqueIds } from './semantic_collections.mjs';
+import { assertUniqueIds } from './semantic_authority.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 
 function effectiveDeterminismStatus(specification, humanResolutions, {

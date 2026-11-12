@@ -7,7 +7,11 @@ import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
-import { buildRejectionReport } from './lib/rejection_report.mjs';
+import {
+  buildErrorRejectionReport,
+  buildRejectionReport,
+  createRejectionError as rejection,
+} from './lib/rejection_report.mjs';
 
 const root = resolve(process.env.AEGIS_ROOT ?? fileURLToPath(new URL('..', import.meta.url)));
 const harnessDir = resolve(root, '.harness');
@@ -21,12 +25,6 @@ const semanticExecutionPath = resolve(runtimeDir, 'semantic-execution.json');
 const userConfirmationPath = resolve(runtimeDir, 'user_confirmation_request.json');
 const resolutionPath = resolve(runtimeDir, 'preflight_resolution.json');
 const semanticOpinionByteLimit = 262_144;
-
-function rejection(reason, detail = '') {
-  const error = new Error(reason);
-  if (detail) error.detail = detail;
-  return error;
-}
 
 async function writeFileAtomic(target, content) {
   const parent = dirname(target);
@@ -159,7 +157,7 @@ async function readPendingRevision(preflight, loadedPolicy, constitution, worksp
   };
 }
 
-async function handleDraft(args, { emitHandoff = true } = {}) {
+async function handleDraft(args, { emitHandoff = true, maxBytes = undefined } = {}) {
   const [
     { canonicalJson },
     { buildPreflightHandoff, captureDemand, observeWorkspace },
@@ -169,7 +167,7 @@ async function handleDraft(args, { emitHandoff = true } = {}) {
     import('./lib/issue_contract_core.mjs'),
     import('./lib/preflight_integrity.mjs'),
   ]);
-  const demand = captureDemand(args);
+  const demand = captureDemand(args, { maxBytes });
   const workspaceObservation = observeWorkspace(root, demand, {
     cachedWorkspaceSkeleton: await readCachedSkeleton(),
   });
@@ -301,68 +299,67 @@ async function writeGovernedStatus(statePath, runtimeContract = null) {
   }
 }
 
+async function statusForContract(statePath) {
+  let contract;
+  try {
+    contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
+  } catch {
+    return {
+      status: 'SEMANTIC_REDELIBERATION_REQUIRED',
+      foundSchema: 'INVALID',
+      requiredSchema: 'aegis.issue_contract.v14',
+    };
+  }
+  if (contract.schema !== 'aegis.issue_contract.v14') {
+    return {
+      status: 'SEMANTIC_REDELIBERATION_REQUIRED',
+      foundSchema: contract.schema ?? 'INVALID',
+      requiredSchema: 'aegis.issue_contract.v14',
+    };
+  }
+  if (contract.approval !== null) {
+    if (!existsSync(statePath)) {
+      return {
+        status: 'INVALID_SEMANTIC_STATE',
+        reason: 'MISSING_GOVERNED_STATE',
+        contractIntegrity: 'INVALID',
+        workspaceFreshness: 'NOT_CHECKED',
+        implementationCompliance: 'NOT_EVALUATED',
+        semanticState: statePath,
+      };
+    }
+    await writeGovernedStatus(statePath, contract);
+    return null;
+  }
+
+  let preflight;
+  try {
+    preflight = await readPreflight();
+  } catch {
+    return { status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath };
+  }
+  try {
+    await validateContract(contract, preflight);
+  } catch {
+    return { status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' };
+  }
+  if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
+    return {
+      status: 'BLOCKED_BY_GAP',
+      draftPath: contractJsonPath,
+      gapCount: contract.specification.closureCertificate?.gapLedger?.length ?? 0,
+      gapLedger: contract.specification.closureCertificate?.gapLedger ?? [],
+    };
+  }
+  return { status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath };
+}
+
 async function handleStatus() {
   const statePath = semanticStateJsonPath;
 
   if (existsSync(contractJsonPath)) {
-    let contract;
-    try {
-      contract = JSON.parse(await readFile(contractJsonPath, 'utf8'));
-    } catch {
-      writeStatus({
-        status: 'SEMANTIC_REDELIBERATION_REQUIRED',
-        foundSchema: 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v14',
-      });
-      return;
-    }
-    if (contract.schema !== 'aegis.issue_contract.v14') {
-      writeStatus({
-        status: 'SEMANTIC_REDELIBERATION_REQUIRED',
-        foundSchema: contract.schema ?? 'INVALID',
-        requiredSchema: 'aegis.issue_contract.v14',
-      });
-      return;
-    }
-    if (contract.approval !== null) {
-      if (!existsSync(statePath)) {
-        writeStatus({
-          status: 'INVALID_SEMANTIC_STATE',
-          reason: 'MISSING_GOVERNED_STATE',
-          contractIntegrity: 'INVALID',
-          workspaceFreshness: 'NOT_CHECKED',
-          implementationCompliance: 'NOT_EVALUATED',
-          semanticState: statePath,
-        });
-        return;
-      }
-      await writeGovernedStatus(statePath, contract);
-      return;
-    }
-
-    let preflight;
-    try {
-      preflight = await readPreflight();
-    } catch {
-      writeStatus({ status: 'INVALID_PREFLIGHT', preflightPath: preflightJsonPath });
-      return;
-    }
-    try {
-      await validateContract(contract, preflight);
-    } catch {
-      writeStatus({ status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' });
-      return;
-    }
-    if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
-      writeStatus({
-        status: 'BLOCKED_BY_GAP',
-        draftPath: contractJsonPath,
-        gapCount: contract.specification.closureCertificate?.gapLedger?.length ?? 0,
-        gapLedger: contract.specification.closureCertificate?.gapLedger ?? [],
-      });
-      return;
-    }
-    writeStatus({ status: 'DRAFT_PENDING_CONFIRMATION', draftPath: contractJsonPath });
+    const status = await statusForContract(statePath);
+    if (status !== null) writeStatus(status);
     return;
   }
 
@@ -559,6 +556,47 @@ async function handleSemanticCompile(args) {
   await compileAndPersistSemanticOpinion(opinion, context);
 }
 
+// Adaptive Semantic Scout (Arbiter): acionado exclusivamente sob Silêncio Léxico em repositórios > 96KB
+async function applyAdaptiveSemanticScout(context, role, assertSemanticSupervisorReady) {
+  if (role.channel !== 'API') return;
+  const { shouldTriggerSemanticScout, executeSemanticScout } = await import('./lib/semantic_scout.mjs');
+  if (!shouldTriggerSemanticScout({
+    preflight: context.preflight,
+    workspace: context.request.workspace,
+  })) {
+    return;
+  }
+  try {
+    const readiness = assertSemanticSupervisorReady(role);
+    const scoutResult = await executeSemanticScout({
+      role,
+      intent: context.preflight.intent,
+      workspaceSkeleton: context.preflight.discovery.workspaceSkeleton,
+      observedTextPaths: context.request.workspace.observedTextPaths,
+      endpoint: readiness.endpoint,
+      credential: readiness.credential,
+    });
+    if (scoutResult.relevantPaths.length > 0) {
+      const { buildSemanticRequest } = await import('./lib/semantic_request.mjs');
+      context.request = buildSemanticRequest({
+        repositoryRoot: root,
+        preflight: context.preflight,
+        policy: context.loadedPolicy.policy,
+        constitution: context.constitution,
+        revision: context.revision?.request ?? null,
+        workspaceObservation: context.workspaceObservation,
+        explicitTargetPaths: scoutResult.relevantPaths,
+      });
+    }
+    if (scoutResult.inferredAliases && Object.keys(scoutResult.inferredAliases).length > 0) {
+      const { persistInferredAliases } = await import('./lib/semantic_scout.mjs');
+      await persistInferredAliases(root, scoutResult.inferredAliases);
+    }
+  } catch {
+    // Fallback gracioso: prossegue com o contexto original determinístico
+  }
+}
+
 async function handleSemanticRun(args) {
   if (args.length !== 0) throw rejection('INVALID_SEMANTIC_RUN_ARITY');
   const context = await buildCurrentSemanticRequest();
@@ -570,44 +608,7 @@ async function handleSemanticRun(args) {
   const assignment = (await loadRoleAssignment(root)) ?? defaultRoleAssignment();
   const role = assignment.roles.contractSupervisor;
 
-  // Adaptive Semantic Scout (Arbiter): acionado exclusivamente sob Silêncio Léxico em repositórios > 64KB
-  if (role.channel === 'API') {
-    const { shouldTriggerSemanticScout, executeSemanticScout } = await import('./lib/semantic_scout.mjs');
-    if (shouldTriggerSemanticScout({
-      preflight: context.preflight,
-      workspace: context.request.workspace,
-    })) {
-      try {
-        const readiness = assertSemanticSupervisorReady(role);
-        const scoutResult = await executeSemanticScout({
-          role,
-          intent: context.preflight.intent,
-          workspaceSkeleton: context.preflight.discovery.workspaceSkeleton,
-          observedTextPaths: context.request.workspace.observedTextPaths,
-          endpoint: readiness.endpoint,
-          credential: readiness.credential,
-        });
-        if (scoutResult.relevantPaths.length > 0) {
-          const { buildSemanticRequest } = await import('./lib/semantic_request.mjs');
-          context.request = buildSemanticRequest({
-            repositoryRoot: root,
-            preflight: context.preflight,
-            policy: context.loadedPolicy.policy,
-            constitution: context.constitution,
-            revision: context.revision?.request ?? null,
-            workspaceObservation: context.workspaceObservation,
-            explicitTargetPaths: scoutResult.relevantPaths,
-          });
-        }
-        if (scoutResult.inferredAliases && Object.keys(scoutResult.inferredAliases).length > 0) {
-          const { persistInferredAliases } = await import('./lib/semantic_scout.mjs');
-          await persistInferredAliases(root, scoutResult.inferredAliases);
-        }
-      } catch {
-        // Fallback gracioso: prossegue com o contexto original determinístico
-      }
-    }
-  }
+  await applyAdaptiveSemanticScout(context, role, assertSemanticSupervisorReady);
 
   const invokeSupervisor = async (previousAttempt = null) => {
     if (role.channel === 'IDE') {
@@ -668,8 +669,8 @@ async function compilePreparedRevision(context) {
   return true;
 }
 
-async function handleDemand(args) {
-  await handleDraft(args, { emitHandoff: false });
+async function handleDemand(args, options = {}) {
+  await handleDraft(args, { emitHandoff: false, ...options });
   try {
     await handleSemanticRun([]);
   } catch (error) {
@@ -680,8 +681,9 @@ async function handleDemand(args) {
       message.includes('SEMANTIC_IDE_ADAPTER_UNSUPPORTED') ||
       error?.message === 'SEMANTIC_IDE_ADAPTER_UNSUPPORTED'
     ) {
-      const [{ canonicalJson }, { request, preflight }] = await Promise.all([
+      const [{ canonicalJson }, { isFallbackOnlyEvidence }, { request, preflight }] = await Promise.all([
         import('./lib/canonical_json.mjs'),
+        import('./lib/source_evidence.mjs'),
         buildCurrentSemanticRequest(),
       ]);
       const semanticRequestPath = resolve(runtimeDir, 'semantic-request.json');
@@ -708,7 +710,6 @@ async function handleDemand(args) {
         workspace: {
           status: request.workspace.status,
           observedTextPaths: request.workspace.observedTextPaths,
-          ...(request.workspace.lexicalEvidence ? { matches: request.workspace.lexicalEvidence.matches } : {}),
           symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
             name: s.name,
             kind: s.kind,
@@ -734,8 +735,7 @@ async function handleDemand(args) {
         nextCommand: './aegis --semantic-compile',
         message: 'Briefing determinístico pronto. Construa o parecer (usando evidenceDigest em sourceEvidenceDigest) e envie via stdin para ./aegis --semantic-compile.',
       };
-      const isFallbackOnly = request.workspace.sourceEvidence.length <= 1 &&
-        request.workspace.sourceEvidence.every((e) => e.selection === 'ENTRYPOINT_PREFIX' || e.selection === 'FULL_SOURCE');
+      const isFallbackOnly = isFallbackOnlyEvidence(request.workspace.sourceEvidence);
       const hasNoDirectWindowMatches = !request.workspace.sourceEvidence.some((e) => e.selection === 'LEXICAL_WINDOW');
       const hasNoSkeletonMatches = (brief.workspace.symbols?.length ?? 0) === 0;
       if (hasNoDirectWindowMatches && hasNoSkeletonMatches && isFallbackOnly) {
@@ -892,11 +892,18 @@ async function handleVerify() {
   })}\n`);
 }
 
+async function handleIssue(args) {
+  const { resolveIssueDemand } = await import('./lib/issue_intake.mjs');
+  const resolved = await resolveIssueDemand(args, { repositoryRoot: root });
+  await handleDemand([resolved.demandText], { maxBytes: resolved.maxBytes });
+}
+
 const command = process.argv[2];
 const remainingArgs = process.argv.slice(3);
 
 try {
   if (command === 'run') await handleDemand(remainingArgs);
+  else if (command === 'issue') await handleIssue(remainingArgs);
   else if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'confirmation-request') await handleConfirmationRequest();
   else if (command === 'status') await handleStatus();
@@ -907,21 +914,13 @@ try {
   else if (command === 'verify') await handleVerify();
   else throw rejection('UNKNOWN_INTERNAL_COMMAND', command);
 } catch (error) {
-  const message = error instanceof Error ? error.message : 'issue_runner_failed';
-  const separator = message.indexOf(':');
-  const rawReason = separator === -1 ? message : message.slice(0, separator);
-  const inferredDetail = separator === -1 ? '' : message.slice(separator + 1).trim();
   const phase = command === 'draft'
     ? 'PREFLIGHT'
-    : command === 'run' || command === 'semantic-request'
+    : command === 'run' || command === 'issue' || command === 'semantic-request'
       || command === 'semantic-run' || command === 'semantic-compile'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';
-  process.stderr.write(`${JSON.stringify(buildRejectionReport({
-    phase,
-    reason: rawReason,
-    detail: error?.detail || inferredDetail,
-  }))}\n`);
+  process.stderr.write(`${JSON.stringify(buildErrorRejectionReport(phase, error, 'issue_runner_failed'))}\n`);
   process.exitCode = 1;
   process.exit(1);
 }
