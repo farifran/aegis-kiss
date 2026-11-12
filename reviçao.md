@@ -32,14 +32,14 @@ Confrontando o estado atual da arte no Aegis contra os princípios inegociáveis
 
 Para consultar o conteúdo completo, acesse diretamente os links abaixo:
 
-* [**1. Bússola Fundamental e Arquitetura Operacional do Aegis**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L9): Missão, Visão, As 3 Leis Anti-Regressão e Fluxo em 3 Passos.
-* [**2. Mapa do Sistema Atual (Componentes Ativos)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L35): Inventário completo e atualizado de CLI, Core Mecânico/Semântico (com AST Skeleton e Scout) e Governança.
-* [**3. O Problema Fundamental da Descoberta de Código (`src/` $\to$ IA)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L91): O dilema central da entrega de contexto.
-* [**4. Inventário dos 8 Problemas Estruturais de Terreno**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L106): Do Abismo Semântico (P1) à Ancoragem Humana (P8).
-* [**5. Matriz de Requisitos Inegociáveis e Julgamento Adversarial**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L148): Critérios de aceitação e reprovação de alternativas teóricas.
-* [**6. Resoluções Implementadas no Core do Aegis**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L170): Defesa em 3 Camadas, Ancoragem por Diretório Irmão e Esqueleto AST tipado.
-* [**7. Matriz Consolidada de Fechamento dos 8 Problemas**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L198): Tabela com status falsificáveis e testes associados.
-* [**8. O Teste de Estresse Extremo em Monorepo Real (Askesis)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L213): Diagnóstico de contaminação, blindagens, corte residual, Scout e expurgo do BM25.
-* [**9. A Fronteira Arquitetural: O Desafio do Acordo Mecânico-Semântico**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L260): O choque dialético, as armadilhas rejeitadas, os 4 princípios KISS e o parecer do Advogado do Diabo.
-* [**10. Validação Empírica: Benchmark das Demandas Multidimensionais (D1 a D11)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L318): Matriz consolidada de demandas e verificação de reprodutibilidade bit-a-bit (D6 Run 5 vs Run 6).
-* [**11. Análise Forense: Histórico de Melhorias do Core e Backlog Ativo**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L354): As 10 melhorias blindadas e as 2 oportunidades ativas de simplificação.
+* [**1. Bússola Fundamental e Arquitetura Operacional do Aegis**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L8): Missão, Visão, As 3 Leis Anti-Regressão e Fluxo em 3 Passos.
+* [**2. Mapa do Sistema Atual (Componentes Ativos)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L34): Inventário completo e atualizado de CLI, Core Mecânico/Semântico (com AST Skeleton e Scout) e Governança.
+* [**3. O Problema Fundamental da Descoberta de Código (`src/` $\to$ IA)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L85): O dilema central da entrega de contexto.
+* [**4. Inventário dos 8 Problemas Estruturais de Terreno**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L98): Do Abismo Semântico (P1) à Ancoragem Humana (P8).
+* [**5. Matriz de Requisitos Inegociáveis e Julgamento Adversarial**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L137): Critérios de aceitação e reprovação de alternativas teóricas.
+* [**6. Resoluções Estruturais Implementadas no Core do Aegis**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L156): Detalhamento técnico da solução dos Problemas 1 a 8.
+* [**7. Matriz Consolidada de Fechamento dos 8 Problemas**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L228): Tabela com status falsificáveis e testes associados.
+* [**8. O Teste de Estresse Extremo em Monorepo Real (Askesis)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L243): Diagnóstico de contaminação, blindagens, corte residual, Scout e expurgo do BM25.
+* [**9. A Fronteira Arquitetural: O Desafio do Acordo Mecânico-Semântico**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L278): O choque dialético, as armadilhas rejeitadas, os 4 princípios KISS e o parecer do Advogado do Diabo.
+* [**10. Validação Empírica: Benchmark das Demandas Multidimensionais (D1 a D11)**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L322): Matriz consolidada de demandas e verificação de reprodutibilidade bit-a-bit (D6 Run 5 vs Run 6).
+* [**11. Análise Forense: Histórico de Melhorias do Core e Backlog Ativo**](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/resolver.md#L352): As 10 melhorias blindadas e as 2 oportunidades ativas de simplificação.

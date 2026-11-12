@@ -153,9 +153,11 @@ Na prática, isso esbarra em uma contradição de engenharia:
 
 ---
 
-## 6. Resoluções Implementadas no Core do Aegis
+## 6. Resoluções Estruturais Implementadas no Core do Aegis
 
-### Resolução 1: Defesa em 3 Camadas Contra o Abismo Semântico (Mitiga Problema 1)
+Abaixo está o detalhamento técnico e falsificável de como **cada um dos 8 problemas** é resolvido ou mitigado no Aegis sob [`CONST-KISS`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L5) e [`CONST-OBSERVABLE`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L21):
+
+### 6.1. Resolução do Problema 1: Defesa em 3 Camadas Contra o Abismo Semântico
 O abismo semântico entre linguagem natural e código formal não é solucionável por um único truque sintático; é uma tensão ontológica permanente. O Aegis estabelece uma **Defesa Arquitetural em 3 Camadas**:
 
 * **Camada 1: Mecânica Direta de AST (0 ms, $0.00, 100% Offline e Determinístico)**
@@ -171,14 +173,55 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
   * A primeira execução preenche a lacuna; todas as execuções subsequentes daquele termo são automaticamente promovidas para o Fast-Path determinístico das Camadas 1 e 2.
 * **Provas Falsificáveis:** Coberto por `TEST-118` (JSDoc), `TEST-121` (Léxico) e os 10 testes de `test_semantic_scout.mjs` (Scout, Anti-Alucinação e Auto-Lexicon).
 
-### Resolução 2: Ancoragem Automática por Diretório Irmão (Resolve Problema 5)
-* Quando a demanda cita um caminho inexistente (`src/ledger/installment_reversal.ts`) ou pastas conhecidas (`ledger`, `risk`):
-* O Harness seleciona automaticamente os **arquivos irmãos existentes** no mesmo módulo (`settlement_engine.ts`, `fee_calculator.ts`), fornecendo à IA os tipos e contratos existentes antes que o arquivo novo seja criado.
+### 6.2. Resolução do Problema 2: O Dilema de Goldilocks do Contexto (Ruído vs. Omissão)
+* **Combate à Omissão (Faltou Dado):**
+  * Preservação compulsória do cabeçalho estrutural de imports, interfaces e tipos (`findStructuralHeaderEndLine`), garantindo que declarações vitais não sejam cortadas.
+  * **Blindagem de Proveniência Fail-Closed (`validateProvenanceEnforcement`, `TEST-108`):** Se a IA tentar inventar um limite padrão ou constante de mercado (ex: teto arbitrário de `500000000` centavos) citando uma linha de código que apenas declara um tipo sem valor, o Harness rejeita a proposta com `UNAUTHORIZED_NUMERIC_LITERAL`.
+* **Combate ao Ruído (Lost in the Middle):**
+  * O esqueleto AST ([`buildWorkspaceSkeleton`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs)) despoja corpos internos de funções (`stripped bodies`), reduzindo o volume de tokens em mais de 75%.
+  * Teto focado por arquivo de 8 KB e orçamento global elástico de 64 KB com **Corte por Relevância Residual**: se os arquivos úteis somam 12 KB, a coleta encerra imediatamente sem arrastar arquivos irrelevantes para preencher a cota.
+* **Provas Falsificáveis:** Coberto por `TEST-108`, `TEST-114`, `TEST-115` e `TEST-120`.
+
+### 6.3. Resolução do Problema 3: A Falácia da Fronteira Sintática (Onde Cortar o Código?)
+* **Corte Estrutural de Imports e Tipos:** A função [`findStructuralHeaderEndLine`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) inspeciona onde terminam os cabeçalhos de tipos e interfaces nas primeiras 150 linhas e os preserva integralmente, eliminando cortes cegos de decorators e imports.
+* **Corte Focado em Nós de AST:** O seletor de janelas (`selection: 'LEXICAL_WINDOW'`) ancora a extração nas linhas de início e fim reais (`startLine`/`endLine`) do símbolo identificado pela TypeScript Compiler API, em vez de fatias arbitrárias de 20 linhas.
+* **Visibilidade de Regras sem Inchar o Corpo:** Comentários JSDoc são associados diretamente ao nó do símbolo (`sym.docComment`), permitindo que a IA conheça as regras documentadas de uma função sem precisar receber centenas de linhas de código utilitário interno.
+* **Provas Falsificáveis:** Coberto por `TEST-115` e pela suíte `test_workspace_skeleton.mjs`.
+
+### 6.4. Resolução do Problema 4: A Falácia da Escala (Do Repositório de Teste ao Monorepo Real)
+* **Confinamento de Escopo por Módulos-Alvo (`targetDirs`):** Quando a demanda cita pastas (ex: `src/ledger`), o escopo é confinado aos módulos autorizados, descartando arquivos alheios do monorepo.
+* **Garantia de Piso Multi-Módulo (Multi-Module Floor Guarantee):** Cada pasta citada no escopo tem a preservação garantida do seu melhor arquivo representante (`isTopForTargetDir`), impedindo que o pico de pontuação de um módulo canibalize outros módulos autorizados.
+* **Ranking Determinístico em Sub-Segundo:** O algoritmo [`computeSymbolAffinity`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) ranqueia os 512 nós estruturais mais relevantes em menos de **300 ms**, provado sob estresse real com os 204 arquivos do Askesis.
+* **Provas Falsificáveis:** Coberto pelo Benchmark D11 e pelo teste de estresse real Askesis (Seção 8).
+
+### 6.5. Resolução do Problema 5: O Paradoxo da Criação (O Código que Ainda Não Existe)
+* **Directory Anchor Fallback:** Em [`scripts/lib/semantic_request.mjs:buildSourceEvidence`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs), se a demanda cita um caminho que ainda não existe fisicamente no disco (ex.: `src/ledger/installment_reversal.ts`) ou pastas conhecidas (`ledger`, `risk`):
+  * O Harness detecta o diretório pretendido e seleciona automaticamente os **arquivos irmãos existentes** no mesmo módulo (`settlement_engine.ts`, `fee_calculator.ts`).
+  * O novo código nasce conhecendo os tipos, padrões e modelos existentes do subsistema, impedindo que a IA invente convenções alienígenas.
 * **Prova Falsificável:** Validado pelo teste **`TEST-117`** em `test_field_lifecycle.mjs`.
 
-### Resolução 3: Esqueleto AST com Corpos Despojados + Cabeçalho Estrutural (Resolve Problemas 2, 3 e 4)
-* O [`buildWorkspaceSkeleton`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs) usa a TypeScript Compiler API oficial para emitir contratos públicos com corpos despojados (`stripped bodies`), reduzindo o volume de tokens em mais de 75%.
-* O [`findStructuralHeaderEndLine`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/semantic_request.mjs) garante que interfaces e types nas primeiras 150 linhas de um arquivo grande nunca sejam cortados pela janela deslizante.
+### 6.6. Resolução do Problema 6: Dependências Ocultas e Arquiteturas Desacopladas
+* **Rejeição da Sobre-Engenharia:** Rastrear barramentos de eventos e injeções de dependência via grafos estáticos profundos exigiria crawlers complexos que estouram o limite de tokens com barrels transitivos.
+* **A Mitigação KISS Adotada:**
+  1. A ancoragem de diretório injeta os contratos e barramentos do módulo autorizado.
+  2. **Validação Fail-Closed de Guardas (`validateProvenanceEnforcement`, `TEST-109`):** Códigos de erro espúrios ou guardas não ancoradas na evidência autorizada são terminantemente rejeitados com `UNAUTHORIZED_GUARD_OR_ERROR_CODE`.
+  3. **Validação de Totalidade de Efeitos Externos (`validateOperationTotality`, `TEST-76`, `TEST-77`, `TEST-79`):** Operações que afetam estado externo (filas, banco, webhooks) são obrigadas a declarar branches de sucesso/falha, idempotência e estratégia explícita de compensação/rollback (`strategy: "COMPENSATING_ACTION"`).
+* **Provas Falsificáveis:** Coberto por `TEST-76`, `TEST-77`, `TEST-79`, `TEST-109` e `TEST-117`.
+
+### 6.7. Resolução do Problema 7: O Pesadelo Poliglota e a Manutenção da AST
+* **Sem Compiladores Mastodônticos Próprios:** Em vez de construir ou manter parsers nativos para cada linguagem, o Aegis delega a extração principal diretamente para a **TypeScript Compiler API oficial (`typescript`)**.
+* **Imunidade a Mudanças Sintáticas:** Novas sintaxes do TypeScript/JavaScript (decorators, satisfying, type-imports) são absorvidas automaticamente pelo parser oficial da linguagem.
+* **Extratores Leves para Linguagens Auxiliares:** Para scripts utilitários em Python ou Shell presentes no repositório, [`workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs) adota extratores lineares regex ultra-leves para assinaturas públicas (`def ...`, `function ...`).
+* **Zero Dependências Nativas C++:** Sem `tree-sitter`, sem compilações de SO no `npm install`, preservando 100% de portabilidade e fidelidade a [`CONST-KISS`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md#L5).
+* **Prova Falsificável:** Validado pela suíte `test_workspace_skeleton.mjs` (testes de TypeScript, Python e Shell).
+
+### 6.8. Resolução do Problema 8: O Efeito de Ancoragem Humana (*Rubber-Stamping* no Wizard)
+* **A Trava Anti-Acidente no TTY:** No Wizard interativo (`scripts/ide_gateway.sh`), a pergunta de confirmação final usa estritamente `[s/N]` (default `N` - Não).
+  * Se o desenvolvedor sob pressão teclar `Enter` cegamente sem ler, **o processo é imediatamente abortado**:
+    > `[AEGIS] Operação cancelada. Nenhuma nova decisão ou aprovação foi gravada.`
+  * A aprovação requer a digitação explícita do caractere `s` (ou `S`), tornando o "dar Enter cego" uma ação 100% inócua.
+* **Falsificabilidade Compulsória (`Dado / Quando / Então`):** Nenhuma recomendação é selada sem que seus efeitos materiais pré-calculados (`preparedEffect`) estejam vinculados a cenários de teste refutáveis, auditáveis no `git diff` do contrato.
+* **Prova Falsificável:** Validado por `test_issue_contract.sh:758` e `test_issue_contract.sh:793`.
 
 ---
 
@@ -187,13 +230,13 @@ O abismo semântico entre linguagem natural e código formal não é solucionáv
 | Problema Estrutural | Abordagem Adotada no Aegis | Prova / Teste Falsificável | Status Atual |
 | :--- | :--- | :--- | :---: |
 | **P1: Abismo Semântico** | Defesa em 3 Camadas: AST Subtokens/JSDoc $\rightarrow$ Léxico Declarativo $\rightarrow$ Scout Adaptativo + Auto-Lexicon. | `TEST-118`, `TEST-121`, `test_semantic_scout.mjs` | **MITIGADO EM 3 CAMADAS (DESAFIO ABERTO)** |
-| **P2: Dilema de Goldilocks** | Esqueleto AST (assinaturas sem corpos) + janelas focadas de 8 KB com teto global de 64 KB. | `TEST-114` e `TEST-115` | **RESOLVIDO** |
-| **P3: Fronteira Sintática** | Preservação compulsória do cabeçalho de tipos/interfaces (`findStructuralHeaderEndLine`). | `TEST-115` em `test_field_lifecycle.mjs` | **RESOLVIDO** |
-| **P4: Falácia da Escala** | Priorização determinística por afinidade (`computeSymbolAffinity`) limitada a 512 símbolos. | Benchmark D11 (`src/` > 32 KB) | **RESOLVIDO** |
+| **P2: Dilema de Goldilocks** | Esqueleto AST (corpos despojados) + corte residual (64 KB) + bloqueio fail-closed de literais inventados. | `TEST-108`, `TEST-114`, `TEST-115`, `TEST-120` | **RESOLVIDO** |
+| **P3: Fronteira Sintática** | Preservação de cabeçalho de tipos (`findStructuralHeaderEndLine`) + janelas ancoradas em nós de AST. | `TEST-115`, `test_workspace_skeleton.mjs` | **RESOLVIDO** |
+| **P4: Falácia da Escala** | Bounded Context (`targetDirs`) + piso multi-módulo + afinidade determinística em sub-segundo (< 300 ms). | Benchmark D11, teste Askesis (204 arquivos) | **RESOLVIDO** |
 | **P5: Paradoxo da Criação** | Directory Anchor Fallback: injeção mecânica dos arquivos irmãos do diretório pretendido. | `TEST-117` em `test_field_lifecycle.mjs` | **RESOLVIDO** |
-| **P6: Dependências Ocultas** | Contexto do módulo entregue via Directory Anchors + validação fail-closed de guardas/erros. | `TEST-109` e `TEST-117` | **MITIGADO (KISS)** |
-| **P7: Pesadelo Poliglota** | Delegação direta para o parser nativo da linguagem (TypeScript Compiler API) sem compiladores extras. | `test_workspace_skeleton.mjs` | **BLINDADO** |
-| **P8: Ancoragem Humana** | Confirmação final estrita com `[s/N]` (default `N` que aborta por Enter) + `Dado/Quando/Então`. | `test_issue_contract.sh:758` | **BLINDADO** |
+| **P6: Dependências Ocultas** | Ancoragem de módulo + validação fail-closed de guardas/erros + exigência de rollback em efeitos externos. | `TEST-76`, `TEST-77`, `TEST-109`, `TEST-117` | **MITIGADO (KISS)** |
+| **P7: Pesadelo Poliglota** | Delegação à TypeScript Compiler API oficial + regex lineares para Python/Shell (zero dependências C++). | `test_workspace_skeleton.mjs` | **BLINDADO** |
+| **P8: Ancoragem Humana** | Confirmação final estrita com `[s/N]` (default `N` que aborta por Enter) + `Dado/Quando/Então` no diff. | `test_issue_contract.sh:758` | **BLINDADO** |
 
 ---
 
