@@ -95,7 +95,15 @@ function literalCandidates(intent) {
     add('CODE_SPAN', match, { content: match[1] });
   }
   for (const match of intent.matchAll(/\b(?:src|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu)) {
-    add('REPOSITORY_PATH', match, { path: match[0].replace(/[.,;:!?]+$/u, '') });
+    const raw = match[0];
+    const cleaned = raw.replace(/[.,;:!?]+$/u, '');
+    candidates.push({
+      kind: 'REPOSITORY_PATH',
+      offset: match.index,
+      endOffset: match.index + cleaned.length,
+      reference: cleaned,
+      attributes: { path: cleaned },
+    });
   }
   for (const match of intent.matchAll(/(?<![\p{L}\p{N}_])\d+(?:[.,]\d+)?n?(?![\p{L}\p{N}_])/gu)) {
     const rawVal = match[0];

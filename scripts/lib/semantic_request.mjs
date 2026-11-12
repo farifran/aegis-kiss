@@ -626,6 +626,22 @@ function buildSourceEvidence(repositoryRoot, preflight, workspaceObservation = n
     const pathMatches = intentText.match(/(?:^|\s|`|'|")(src\/[a-zA-Z0-9_-]+)(?:\/[a-zA-Z0-9_.-]+)?/gu) || [];
     const targetDirs = new Set(pathMatches.map((m) => m.replace(/[`'"]/gu, '').trim().split('/')[1]).filter(Boolean));
 
+    // 0.1 Injeção Prioritária (Prioridade 0): Arquivos de código explicitamente citados na demanda humana
+    const explicitFileMatches = intentText.match(/\b(?:src|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu) || [];
+    const explicitFilePaths = explicitFileMatches.map((m) => m.replace(/[.,;:!?]+$/u, '').trim()).filter(Boolean);
+    for (const p of explicitFilePaths) {
+      if (filesByPath.has(p)) {
+        if (!selectionsByPath.has(p)) {
+          const symbolLines = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
+            .filter((s) => s.path === p && typeof s.startLine === 'number')
+            .map((s) => s.startLine);
+          selectionsByPath.set(p, { path: p, lines: symbolLines });
+        }
+        const parts = p.split('/');
+        if (parts.length > 2) targetDirs.add(parts[1]);
+      }
+    }
+
     // Se houver caminhos explicitamente fornecidos (ex: Scout Semântico validado), adiciona imediatamente
     if (Array.isArray(explicitTargetPaths) && explicitTargetPaths.length > 0) {
       for (const p of explicitTargetPaths) {
