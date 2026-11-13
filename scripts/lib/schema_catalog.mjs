@@ -2,6 +2,7 @@ export const schemaFiles = new Map([
   ['aegis.contract_components.v1', 'contract-components.v1.schema.json'],
   ['aegis.architecture_policy.v3', 'architecture-policy.v3.schema.json'],
   ['aegis.confirmation_request.v5', 'confirmation-request.v5.schema.json'],
+  ['aegis.clarification_request.v1', 'clarification-request.v1.schema.json'],
   ['aegis.constitution.v1', 'constitution.v1.schema.json'],
   ['aegis.intent_evidence.v1', 'intent-evidence.v1.schema.json'],
   ['aegis.issue_contract.v14', 'issue-contract.v14.schema.json'],
@@ -18,6 +19,7 @@ export const schemaFiles = new Map([
 export const validatorSchemaIds = [
   'aegis.architecture_policy.v3',
   'aegis.confirmation_request.v5',
+  'aegis.clarification_request.v1',
   'aegis.constitution.v1',
   'aegis.intent_evidence.v1',
   'aegis.issue_contract.v14',

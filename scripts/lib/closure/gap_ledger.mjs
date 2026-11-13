@@ -558,8 +558,11 @@ export function generateClosureCertificate({
     status: totalUnresolved === 0
       && gapLedger.length === 0
       && closureAudit.counts.AWAITING_HUMAN_DECISION === 0
-      && (semanticReviewAcknowledged || closureAudit.counts.SEMANTIC_REVIEW_REQUIRED === 0)
-      ? 'CERTIFIED_CLOSED'
+      ? (closureAudit.counts.SEMANTIC_REVIEW_REQUIRED === 0
+        ? 'CERTIFIED_CLOSED'
+        : semanticReviewAcknowledged
+          ? 'CLOSED_WITH_ACKNOWLEDGED_SEMANTIC_REVIEW'
+          : 'BLOCKED_BY_UNRESOLVED_SLOTS')
       : 'BLOCKED_BY_UNRESOLVED_SLOTS',
     gapLedger,
     closureAudit,

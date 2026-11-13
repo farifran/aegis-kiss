@@ -121,6 +121,21 @@ export function buildSemanticRequest({
       .map(({ path, kind }) => ({ path, reason: kind })),
     ...preflight.discovery.ignoredEntries,
   ];
+  const sourceEvidence = buildSourceEvidence(
+    repositoryRoot,
+    preflight,
+    workspaceObservation,
+    explicitTargetPaths,
+    { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf },
+  );
+  const excerptedPaths = [...new Set(sourceEvidence.map(({ path }) => path))].sort();
+  const demandReferencedPaths = [...new Set(intentEvidence.literalFacts
+    .filter(({ kind }) => kind === 'REPOSITORY_PATH')
+    .map(({ attributes, reference }) => attributes.path ?? reference))].sort();
+  const truncatedPaths = [...new Set(sourceEvidence
+    .filter(({ truncated }) => truncated)
+    .map(({ path }) => path))].sort();
+  const excerptedPathSet = new Set(excerptedPaths);
   const context = {
     delivery: {
       constitution: 'SYSTEM_INSTRUCTION',
@@ -138,16 +153,19 @@ export function buildSemanticRequest({
       status: preflight.discovery.status,
       observedTextPaths,
       unavailablePaths,
+      evidenceCoverage: {
+        discoveryRoot: 'src',
+        observedTextFileCount: observedTextPaths.length,
+        demandReferencedPaths,
+        referencedPathsNotDiscovered: demandReferencedPaths.filter((path) => !observedTextPaths.includes(path)),
+        excerptedPaths,
+        truncatedPaths,
+        pathsWithoutExcerpt: observedTextPaths.filter((path) => !excerptedPathSet.has(path)),
+      },
       ...(prioritizedSkeleton
         ? { workspaceSkeleton: prioritizedSkeleton }
         : {}),
-      sourceEvidence: buildSourceEvidence(
-        repositoryRoot,
-        preflight,
-        workspaceObservation,
-        explicitTargetPaths,
-        { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf },
-      ),
+      sourceEvidence,
     },
     policy: {
       contexts: policy.contexts,

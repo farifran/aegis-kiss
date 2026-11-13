@@ -12,7 +12,7 @@ function renderHeaderAndScope(contract, { contractDigest, governed, specificatio
     '',
     `> **Status:** ${governed ? 'Selado & Governado' : 'Rascunho aguardando confirmação'}`,
     `> **Modo:** ${specification.changeKind}`,
-    `> **Determinismo efetivo:** ${contract.effectiveDeterminismStatus}`,
+    `> **Estado efetivo de fechamento e revisão:** ${contract.effectiveDeterminismStatus}`,
     ...(specification.closureCertificate ? [
       `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, dependências abertas: ${specification.closureCertificate.unresolvedDependencies ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions}, lacunas ativas: ${specification.closureCertificate.gapLedger?.length ?? 0})`,
     ] : []),
@@ -507,8 +507,13 @@ function renderDecisionsAndResolutions(contract, { specification, governed, sele
     }
   }
   if (blockingUnknowns.length > 0) {
-    lines.push('', '### Lacunas bloqueantes — não chegam ao Wizard');
-    for (const unknown of blockingUnknowns) lines.push(`- **${unknown.id}:** ${unknown.statement}`);
+    lines.push('', '### Esclarecimentos humanos necessários — aprovação bloqueada');
+    for (const unknown of blockingUnknowns) {
+      lines.push(`- **${unknown.id}:** ${unknown.statement}`);
+      if (unknown.sourceFragmentIds.length > 0) {
+        lines.push(`  - Trechos da demanda: ${unknown.sourceFragmentIds.join(', ')}.`);
+      }
+    }
   }
   if (informationalUnknowns.length > 0) {
     lines.push('', '### Lacunas informativas — não exigem decisão');

@@ -26,7 +26,8 @@
     "determinismReview",
     "boundaryRules",
     "unknowns",
-    "decisions"
+    "decisions",
+    "stateModel"
   ],
   "properties": {
     "schema": {
@@ -533,7 +534,8 @@
         "properties": {
           "statement": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Para unknown material sem decisão madura, formule como pergunta objetiva ao usuário; não invente alternativas nem uma resposta."
           },
           "material": {
             "type": "boolean"

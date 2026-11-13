@@ -31,7 +31,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
   ./aegis --semantic-run  Executa o supervisor configurado e compila o contrato
   ./aegis --semantic-compile  Recebe o parecer JSON da IDE pelo stdin e compila o contrato
-  ./aegis --wizard    Abre as decisões pendentes no terminal
+  ./aegis --wizard    Responde esclarecimentos abertos e decisões pendentes no terminal
   ./aegis --setup     Configura o supervisor do contrato e o agente de codificação
   ./aegis --setup --show  Exibe a configuração externa sem expor chaves
   ./aegis --status    Exibe o status do contrato e da árvore de trabalho
@@ -61,8 +61,51 @@ run_demand() {
 
 resolve_preflight_wizard() {
   local request_file="${RUNTIME_DIR}/user_confirmation_request.json"
+  local clarification_file="${RUNTIME_DIR}/user_clarification_request.json"
   local resolution_file="${RUNTIME_DIR}/preflight_resolution.json"
   local semantic_file="${ROOT_DIR}/.harness/state/semantic-state.json"
+
+  if [[ -f "${clarification_file}" ]]; then
+    local clarification original preflight count index response responses='[]' combined confirm
+    clarification="$(cat "${clarification_file}")"
+    if [[ ! -t 0 ]]; then
+      printf '\n[AEGIS] A demanda precisa de esclarecimento humano. Execute ./aegis --wizard em um terminal interativo.\n' >&2
+      jq -r '.questions[] | "- " + .question + " (trecho: " + ([.sourceFragments[].text] | join(" | ")) + ")"' <<< "${clarification}" >&2
+      return 1
+    fi
+    preflight="$(cat "${RUNTIME_DIR}/preflight.json")"
+    original="$(jq -r '.intent' <<< "${preflight}")"
+    count="$(jq '.questionCount' <<< "${clarification}")"
+    jq -r '
+      "\n══════════════════════════════════════════════════════════════\n AEGIS — Esclarecimento da Demanda\n══════════════════════════════════════════════════════════════",
+      "Contrato bloqueado: \(.title)",
+      "A resposta será anexada literalmente à demanda e analisada novamente. Nenhuma recomendação será escolhida por você."
+    ' <<< "${clarification}" >&2
+    for ((index = 0; index < count; index++)); do
+      jq -r --argjson i "${index}" '.questions[$i] | "\n[" + .id + "] " + .question + "\nTrecho original: " + ([.sourceFragments[].text] | join(" | "))' <<< "${clarification}" >&2
+      while true; do
+        read -r -p 'Sua resposta (ou q para cancelar): ' response
+        if [[ "${response}" == 'q' || "${response}" == 'Q' ]]; then
+          printf '[AEGIS] Esclarecimento cancelado; o contrato continua bloqueado.\n' >&2
+          return 0
+        fi
+        [[ -n "${response//[[:space:]]/}" ]] && break
+        printf '[AEGIS] Informe uma resposta ou cancele com q.\n' >&2
+      done
+      responses="$(jq -c --arg id "$(jq -r --argjson i "${index}" '.questions[$i].id' <<< "${clarification}")" --arg response "${response}" '. + [{id:$id,response:$response}]' <<< "${responses}")"
+    done
+    read -r -p 'Reanalisar a demanda original junto com esses esclarecimentos? [s/N]: ' confirm
+    if [[ ! "${confirm}" =~ ^([sS]|[sS][iI][mM]|[yY]|[yY][eE][sS])$ ]]; then
+      printf '[AEGIS] Reanálise cancelada; o contrato continua bloqueado.\n' >&2
+      return 0
+    fi
+    combined="$(jq -nr --arg original "${original}" --argjson responses "${responses}" '
+      $original + "\n\nEsclarecimentos explícitos do usuário (preserve a demanda acima):\n" +
+      ($responses | map("- " + .id + ": " + .response) | join("\n"))
+    ')"
+    run_demand "${combined}"
+    return $?
+  fi
 
   if [[ ! -f "${request_file}" ]]; then
     if [[ -f "${semantic_file}" ]]; then

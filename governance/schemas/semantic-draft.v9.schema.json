@@ -942,6 +942,7 @@
         "status": {
           "enum": [
             "CERTIFIED_CLOSED",
+            "CLOSED_WITH_ACKNOWLEDGED_SEMANTIC_REVIEW",
             "BLOCKED_BY_UNRESOLVED_SLOTS"
           ]
         },

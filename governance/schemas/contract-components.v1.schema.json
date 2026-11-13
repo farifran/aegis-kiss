@@ -782,6 +782,7 @@
       "enum": [
         "NOT_APPLICABLE",
         "SEMANTICALLY_CLOSED",
+        "APPROVED_WITH_SEMANTIC_REVIEW",
         "PENDING_HUMAN_DECISIONS",
         "BLOCKED_BY_GAP"
       ]
@@ -2030,6 +2031,7 @@
         "status",
         "observedTextPaths",
         "unavailablePaths",
+        "evidenceCoverage",
         "sourceEvidence"
       ],
       "properties": {
@@ -2070,6 +2072,28 @@
                 ]
               }
             }
+          }
+        },
+        "evidenceCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "discoveryRoot",
+            "observedTextFileCount",
+            "demandReferencedPaths",
+            "referencedPathsNotDiscovered",
+            "excerptedPaths",
+            "truncatedPaths",
+            "pathsWithoutExcerpt"
+          ],
+          "properties": {
+            "discoveryRoot": { "const": "src" },
+            "observedTextFileCount": { "type": "integer", "minimum": 0 },
+            "demandReferencedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "referencedPathsNotDiscovered": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "excerptedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "truncatedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "pathsWithoutExcerpt": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
           }
         },
         "workspaceSkeleton": {

@@ -50,7 +50,8 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
     workspaceSkeleton,
     semanticReviewAcknowledged,
   });
-  if (certificate.status !== 'CERTIFIED_CLOSED') {
+  if (certificate.status !== 'CERTIFIED_CLOSED'
+    && certificate.status !== 'CLOSED_WITH_ACKNOWLEDGED_SEMANTIC_REVIEW') {
     const nonDecisionGaps = certificate.unresolvedInventorySlots
       + certificate.unresolvedDependencies
       + certificate.unresolvedStateFields
@@ -69,6 +70,9 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
       return 'PENDING_HUMAN_DECISIONS';
     }
     return 'BLOCKED_BY_GAP';
+  }
+  if (certificate.status === 'CLOSED_WITH_ACKNOWLEDGED_SEMANTIC_REVIEW') {
+    return 'APPROVED_WITH_SEMANTIC_REVIEW';
   }
   return specification.determinismReview.status === 'NOT_APPLICABLE'
     ? 'NOT_APPLICABLE'
@@ -262,6 +266,42 @@ export function buildConfirmationRequest(contract) {
     artifactPath: '.harness/runtime/contract.md',
   };
   assertSchema('aegis.confirmation_request.v5', request);
+  return request;
+}
+
+export function buildClarificationRequest(contract) {
+  if (contract.approval !== null) throw new Error('contract_already_approved');
+  const fragments = new Map((contract.intentEvidence?.fragments ?? []).map((fragment) => [fragment.id, fragment]));
+  const questions = contract.specification.unknowns
+    .filter(({ material, decisionId }) => material && decisionId === null)
+    .map((unknown) => ({
+      id: unknown.id,
+      question: unknown.statement,
+      sourceFragmentIds: unknown.sourceFragmentIds,
+      sourceFragments: unknown.sourceFragmentIds.map((id) => {
+        const fragment = fragments.get(id);
+        return fragment === undefined
+          ? { id, text: '' }
+          : {
+            id,
+            text: contract.intent.slice(fragment.startOffset, fragment.endOffset),
+          };
+      }),
+    }));
+  if (questions.length === 0) return null;
+  const contractDraftDigest = canonicalDigest(contract);
+  const request = {
+    schema: 'aegis.clarification_request.v1',
+    status: 'USER_CLARIFICATION_REQUIRED',
+    executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
+    contractDraftDigest,
+    title: contract.specification.title,
+    questionCount: questions.length,
+    questions,
+    artifactPath: '.harness/runtime/contract.md',
+    responseInstructions: 'Responda com fatos ou intenção explícitos. A resposta será incorporada literalmente a uma nova captura da demanda; nenhuma interpretação ou recomendação do Aegis substitui a resposta humana.',
+  };
+  assertSchema('aegis.clarification_request.v1', request);
   return request;
 }
 

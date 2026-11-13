@@ -18,6 +18,7 @@ export function resolveRunnerPaths(root) {
     skeletonJsonPath: resolve(runtimeDir, 'workspace_skeleton.json'),
     semanticExecutionPath: resolve(runtimeDir, 'semantic-execution.json'),
     userConfirmationPath: resolve(runtimeDir, 'user_confirmation_request.json'),
+    userClarificationPath: resolve(runtimeDir, 'user_clarification_request.json'),
     resolutionPath: resolve(runtimeDir, 'preflight_resolution.json'),
   };
 }
@@ -177,4 +178,3 @@ export async function validateContract(paths, contract, preflight) {
     workspaceObservation,
   });
 }
-

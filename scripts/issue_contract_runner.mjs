@@ -126,6 +126,7 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     { canonicalDigest, canonicalJson },
     {
       assertRevisionApplied,
+      buildClarificationRequest,
       buildConfirmationRequest,
       compileSemanticContract,
       compileSemanticOpinion,
@@ -196,6 +197,21 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     writes.push(rm(paths.semanticExecutionPath, { force: true }));
   }
   await Promise.all(writes);
+  const clarification = buildClarificationRequest(contract);
+  if (clarification?.questionCount > 0) {
+    await rm(paths.userConfirmationPath, { force: true });
+    await writeFileAtomic(paths.userClarificationPath, `${canonicalJson(clarification)}\n`);
+    process.stdout.write(`${canonicalJson(clarification)}\n`);
+    if (process.env.AEGIS_TEST_AUTOMATION !== '1') {
+      process.stderr.write(
+        `\n[AEGIS][PROTOCOL] ESCLARECIMENTO_HUMANO_OBRIGATORIO (${clarification.questionCount} pergunta(s))\n`
+        + '[AEGIS][PROTOCOL] Apresente as perguntas abertas ao usuário, incluindo o trecho de origem. Não sugira respostas nem aprove o rascunho.\n'
+        + '[AEGIS][PROTOCOL] Após a resposta, preserve o texto original e acrescente literalmente os esclarecimentos à demanda; execute novamente o fluxo.\n',
+      );
+    }
+    return;
+  }
+  await rm(paths.userClarificationPath, { force: true });
   const confirmation = buildConfirmationRequest(contract, {
     workspaceSkeleton: preflight.discovery?.workspaceSkeleton ?? request.workspace?.workspaceSkeleton ?? null,
   });
@@ -397,6 +413,7 @@ async function emitIdeBriefing() {
     })),
     workspace: {
       status: request.workspace.status,
+      evidenceCoverage: request.workspace.evidenceCoverage,
       observedTextPaths: request.workspace.observedTextPaths,
       symbols: (request.workspace.workspaceSkeleton?.symbols ?? []).slice(0, 30).map((s) => ({
         name: s.name,
@@ -416,10 +433,11 @@ async function emitIdeBriefing() {
     availableContextTags: request.policy.contexts.map((c) => c.tag),
     supervisionInstructions: semanticSupervisorInstructions(request),
     aiTask: [
-      '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION.',
+      '0. checkpoint de compreensão: resuma o resultado público pretendido; identifique requisitos independentes, pressupostos e lacunas materiais. Pergunte sobre qualquer domínio material da demanda, não só variáveis, quando respostas conformes mudariam o resultado público.',
+      '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION; separe obrigações independentes no mesmo fragmento.',
       '2. architectureContexts: declare tags e bases; avalie cada regra aplicável. Declare coverage e rationale de determinismo para cada claim material; o Harness não preenche conclusões semânticas ausentes.',
       '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
-      '4. stateModel / decisions: inclua stateModel apenas se houver estado mutável, e decisions apenas se houver ambiguidade material.',
+      '4. stateModel / decisions / unknowns: stateModel sempre explícito (listas vazias quando sem estado pertinente); use decisions para alternativas materiais e unknowns materiais em forma de pergunta quando faltar informação para definir alternativas. Lacunas materiais bloqueiam aprovação e geram solicitação aberta de esclarecimento.',
     ],
     dataPath: '.harness/runtime/preflight.json',
     requestPath: '.harness/runtime/semantic-request.json',

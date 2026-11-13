@@ -58,6 +58,7 @@ async function writeGovernedStatus(paths, statePath, runtimeContract = null) {
     writeStatus({
       status: requiresSemanticRevision ? 'GOVERNED_REVISION_REQUIRED' : 'GOVERNED',
       contractDigest: state.contractDigest,
+      effectiveDeterminismStatus: state.contract.effectiveDeterminismStatus,
       contractIntegrity: 'VALID',
       governanceFreshness: requiresSemanticRevision ? 'REVISION_REQUIRED' : 'CURRENT',
       ...(requiresSemanticRevision ? { reason: 'SEMANTIC_DECISIONS_NOT_MATERIALIZED' } : {}),
@@ -119,6 +120,17 @@ async function statusForContract(paths, statePath) {
     await validateContract(paths, contract, preflight);
   } catch {
     return { status: 'SEMANTIC_REDELIBERATION_REQUIRED', reason: 'INVALID_OR_STALE_CONTRACT' };
+  }
+  const clarificationCount = contract.specification.unknowns
+    .filter(({ material, decisionId }) => material && decisionId === null).length;
+  if (clarificationCount > 0) {
+    return {
+      status: 'USER_CLARIFICATION_REQUIRED',
+      clarificationCount,
+      clarificationPath: paths.userClarificationPath,
+      draftPath: paths.contractJsonPath,
+      approvalAllowed: false,
+    };
   }
   if (contract.effectiveDeterminismStatus === 'BLOCKED_BY_GAP') {
     return {
@@ -189,4 +201,3 @@ export async function handleVerify(paths) {
     activeContext,
   })}\n`);
 }
-

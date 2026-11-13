@@ -678,11 +678,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       basis: compileOpinionBasis(item.basis, request),
     })),
     decisions: compileDecisionsSection(opinion, ctx),
-    stateModel: opinion.stateModel ?? {
-      entities: [],
-      operations: [],
-      observables: [],
-    },
+    stateModel: opinion.stateModel,
   };
   draft.closureCertificate = generateClosureCertificate({
     specification: {
