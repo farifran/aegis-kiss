@@ -20,7 +20,7 @@ export async function runStateAndInventoryTests() {
         bounds: { lowerBound: '0', upperBound: '10', boundaryBehavior: 'SATURATE' },
         initialization: { kind: 'EXPLICIT_VALUE', value: '0' },
         reset: { allowed: false }, mutations: [], preservation: ['*'], readBy: ['observe'] }] }],
-      operations: [{ name: 'observe', guardPrecedence: ['拒绝'], branches: [
+      operations: [{ name: 'observe', evaluatedInputs: [], guardPrecedence: ['拒绝'], branches: [
         { branchId: '拒绝', outcomeKind: 'REJECTION', defaultPreservation: true,
           stateEffects: [{ field: fieldKey, effect: 'DECREMENT', value: '1' }] },
         { branchId: '成功', outcomeKind: 'RETURN_VALUE', defaultPreservation: true },
@@ -55,7 +55,7 @@ export async function runStateAndInventoryTests() {
     entities: [{ name: 'Items', fields: [], isCollection: true, admissionPolicy: 'Explicit ingress',
       capacityPolicy: { maxEntries: null, overflowPolicy: 'NO_CONTRACT_LIMIT',
         unboundedRationale: 'The public contract does not impose a maximum collection size.' } }],
-    operations: [{ name: 'read', guardPrecedence: [],
+    operations: [{ name: 'read', evaluatedInputs: [], guardPrecedence: [],
       noGuardsRationale: 'Read accepts every valid state without a rejection condition.',
       branches: [{ branchId: 'read', outcomeKind: 'RETURN_VALUE', defaultPreservation: true }] }],
     observables: [],
@@ -153,7 +153,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['evaluateRequest'],
         }],
       }],
-      operations: [{ name: 'evaluateRequest', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'evaluateRequest', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{ name: 'decision', derivedFrom: ['Badge.insufficientStreak'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
@@ -190,8 +190,8 @@ export async function runStateAndInventoryTests() {
         }],
       }],
       operations: [
-        { name: 'evaluateRequest', guardPrecedence: ['LOCK'] },
-        { name: 'unquarantine', guardPrecedence: ['ADMIN'] },
+        { name: 'evaluateRequest', evaluatedInputs: [], guardPrecedence: ['LOCK'] },
+        { name: 'unquarantine', evaluatedInputs: [], guardPrecedence: ['ADMIN'] },
       ],
       observables: [{ name: 'decision', derivedFrom: ['Badge.fractionalRemainder'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
@@ -228,7 +228,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['evaluateRequest'],
         }],
       }],
-      operations: [{ name: 'evaluateRequest', guardPrecedence: [] }], // PRECEDÊNCIA VAZIA
+      operations: [{ name: 'evaluateRequest', evaluatedInputs: [], guardPrecedence: [] }], // PRECEDÊNCIA VAZIA
       observables: [{ name: 'decision', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
@@ -264,7 +264,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['evaluateRequest'],
         }],
       }],
-      operations: [{ name: 'evaluateRequest', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'evaluateRequest', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{ name: 'bitmask', derivedFrom: ['Badge.ghostField'], representation: 'SCALAR', emptyBehavior: '0' }], // CAMPO FANTASMA
     },
   });
@@ -319,8 +319,8 @@ export async function runStateAndInventoryTests() {
         ],
       }],
       operations: [
-        { name: 'evaluateRequest', guardPrecedence: ['GLOBAL_LOCK', 'QUARANTINE', 'TIME_REGRESSION', 'REFILL', 'BALANCE'] },
-        { name: 'unquarantine', guardPrecedence: ['ADMIN_AUTH'] },
+        { name: 'evaluateRequest', evaluatedInputs: [], guardPrecedence: ['GLOBAL_LOCK', 'QUARANTINE', 'TIME_REGRESSION', 'REFILL', 'BALANCE'] },
+        { name: 'unquarantine', evaluatedInputs: [], guardPrecedence: ['ADMIN_AUTH'] },
       ],
       observables: [
         {
@@ -561,6 +561,7 @@ export async function runStateAndInventoryTests() {
       operations: [
         {
           name: 'evaluateRequest',
+          evaluatedInputs: [],
           guardPrecedence: ['GUARD_GLOBAL_LOCK', 'GUARD_INSUFFICIENT_FUNDS'],
           branches: [
             {
@@ -830,7 +831,7 @@ export async function runStateAndInventoryTests() {
           },
         ],
       }],
-      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'eval', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{
         name: 'bitmask',
         derivedFrom: ['Badge.lock', 'Badge.quarantine'],
@@ -912,7 +913,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['bitmask'],
         }],
       }],
-      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'eval', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{
         name: 'bitmask',
         derivedFrom: ['Badge.tokens'],
@@ -972,7 +973,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['eval'],
         }],
       }],
-      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'eval', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
     },
   });
@@ -1008,7 +1009,7 @@ export async function runStateAndInventoryTests() {
           readBy: ['eval'],
         }],
       }],
-      operations: [{ name: 'eval', guardPrecedence: ['LOCK'] }],
+      operations: [{ name: 'eval', evaluatedInputs: [], guardPrecedence: ['LOCK'] }],
       observables: [{ name: 'tokensObs', derivedFrom: ['Badge.tokens'], representation: 'SCALAR', emptyBehavior: '0' }],
       canonicalSerializations: [],
     },
@@ -1150,6 +1151,7 @@ export async function runStateAndInventoryTests() {
       }],
       operations: [{
         name: 'evaluateRequest',
+        evaluatedInputs: [],
         guardPrecedence: ['GUARD_CLOCK_REGRESSION', 'GUARD_LOCK', 'GUARD_BALANCE'],
         branches: [
           {

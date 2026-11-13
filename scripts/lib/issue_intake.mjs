@@ -46,15 +46,16 @@ export function stripNoisyIssueSections(body = '') {
 }
 
 /**
- * Formata título e corpo limpo da issue como demanda única e calcula o teto
- * necessário para que o cabeçalho e o tamanho da issue não restrinjam a demanda.
+ * Formata título e corpo integral da issue como demanda única. O texto capturado
+ * não é filtrado por heurísticas que possam remover conteúdo normativo.
  */
 export function formatIssueDemand({ number = null, title, body = '' }) {
   const cleanTitle = String(title ?? '').replace(/\r\n?/gu, '\n').trim();
   if (cleanTitle.length === 0) {
     throw new Error('invalid_issue_title');
   }
-  const cleanBody = stripNoisyIssueSections(body);
+  const normalizedBody = String(body ?? '').replace(/\r\n?/gu, '\n');
+  const cleanBody = normalizedBody.trim().length > 0 ? normalizedBody.trim() : '';
   const header = number !== null ? `# Issue #${number}: ${cleanTitle}` : `# Issue: ${cleanTitle}`;
   const demandText = cleanBody.length > 0 ? `${header}\n\n${cleanBody}` : header;
   const headerBytes = Buffer.byteLength(header, 'utf8');
@@ -153,4 +154,3 @@ export async function resolveIssueDemand(args, {
     ...formatIssueDemand({ number: issue.number ?? target.number, title: issue.title, body: issue.body ?? '' }),
   };
 }
-

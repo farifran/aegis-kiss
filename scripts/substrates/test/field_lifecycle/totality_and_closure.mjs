@@ -213,6 +213,7 @@ export async function runTotalityAndClosureTests() {
       }],
       operations: [{
         name: 'evaluateRequest',
+        evaluatedInputs: [],
         guardPrecedence: ['GUARD_BALANCE'],
         branches: [
           { branchId: 'ALLOW', outcomeKind: 'RETURN_VALUE', statusOrError: 'OK', defaultPreservation: true },
@@ -244,15 +245,28 @@ export async function runTotalityAndClosureTests() {
       id: 'REQ-0001',
       statement: 'Controle de saldo',
       basis: [{ source: 'USER_INTENT', reference: 'demanda' }],
-      acceptanceCases: [{
-        id: 'AC-0001-01',
-        kind: 'HAPPY_PATH',
-        outcomeKind: 'RETURN_VALUE',
-        given: 'Um saldo válido',
-        when: 'Requisitar',
-        then: 'Autoriza',
-        decisionBinding: null,
-      }],
+      acceptanceCases: [
+        {
+          id: 'AC-0001-01',
+          kind: 'HAPPY_PATH',
+          outcomeKind: 'RETURN_VALUE',
+          branchRef: 'ALLOW',
+          given: 'Um saldo válido',
+          when: 'Requisitar',
+          then: 'Autoriza',
+          decisionBinding: null,
+        },
+        {
+          id: 'AC-0001-02',
+          kind: 'FAILURE',
+          outcomeKind: 'REJECTION',
+          branchRef: 'GUARD_BALANCE',
+          given: 'Saldo insuficiente',
+          when: 'Requisitar',
+          then: 'Rejeita com ERR_INSUFFICIENT_CREDITS',
+          decisionBinding: null,
+        },
+      ],
     }],
   });
   fixture.policy = { rules: [{ id: 'ARCH-LOCAL' }] };
@@ -518,6 +532,7 @@ export async function runTotalityAndClosureTests() {
     }],
     operations: [{
       name: 'step',
+      evaluatedInputs: [],
       guardPrecedence: ['GUARD_LOCK'],
       branches: [
         { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
@@ -685,6 +700,7 @@ export async function runTotalityAndClosureTests() {
     }],
     operations: [{
       name: 'step',
+      evaluatedInputs: [],
       guardPrecedence: ['GUARD_LOCK'],
       branches: [
         { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },
@@ -718,6 +734,7 @@ export async function runTotalityAndClosureTests() {
     }],
     operations: [{
       name: 'step',
+      evaluatedInputs: [],
       guardPrecedence: ['GUARD_LOCK'],
       branches: [
         { branchId: 'GUARD_LOCK', outcomeKind: 'REJECTION', statusOrError: 'ERR_LOCK', defaultPreservation: true },

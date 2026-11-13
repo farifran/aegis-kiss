@@ -4,6 +4,11 @@ import {
   validateOpenTermDependencies,
   validateOperationTotality,
 } from './operation_totality.mjs';
+import {
+  CLOSED_KEY_NORMALIZATION_RULES,
+  evaluateBatchWitnessError,
+  normalizeKey,
+} from './v7_rules.mjs';
 
 /**
  * Checks inventory obligations activated explicitly by semantic context tags.
@@ -452,6 +457,312 @@ function validateCanonicalSerializations(stateModel, entityFieldKeys, issues) {
   }
 }
 
+function entityExistsInWorkspaceSkeleton(entityName, fieldName, workspaceSkeleton) {
+  if (!workspaceSkeleton) return false;
+  const fieldKey = `${entityName}.${fieldName}`;
+  return (workspaceSkeleton.symbols ?? []).some((sym) => (
+    sym.name === entityName
+    || sym.name === fieldName
+    || sym.name === fieldKey
+    || (typeof sym.signature === 'string' && (sym.signature.includes(entityName) || sym.signature.includes(fieldName)))
+  ));
+}
+
+function isConcreteTypedValue(value, fieldType, allowedValues = null) {
+  if (value === null || value === undefined) return false;
+  if (fieldType === 'INTEGER' || fieldType === 'NUMBER') {
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'string') return /^-?\d+(?:\.\d+)?n?$/u.test(value.trim());
+    return false;
+  }
+  if (fieldType === 'BOOLEAN') {
+    return typeof value === 'boolean' || value === 'true' || value === 'false';
+  }
+  if (fieldType === 'STRING') {
+    if (typeof value !== 'string' || value.trim().length === 0) return false;
+    if (Array.isArray(allowedValues) && allowedValues.length > 0 && !allowedValues.includes(value)) {
+      return false;
+    }
+    return true;
+  }
+  return typeof value !== 'string' || value.trim().length > 0;
+}
+
+function validateProducerConsumerSymmetry(stateModel, workspaceSkeleton, issues) {
+  const operations = stateModel.operations ?? [];
+  for (const entity of stateModel.entities ?? []) {
+    const entityHasProducer = (entity.fields ?? []).some((f) => {
+      const fKey = `${entity.name}.${f.name}`;
+      const viaMutation = (f.mutations ?? []).some((m) => operations.some((op) => op.name === m.operation));
+      const viaBranch = operations.some((op) => (op.branches ?? []).some((b) => (
+        (b.stateEffects ?? []).some((e) => (e.field === fKey || e.field === f.name) && e.effect !== 'PRESERVE')
+      )));
+      return viaMutation || viaBranch;
+    });
+
+    for (const field of entity.fields ?? []) {
+      const readBy = Array.isArray(field.readBy) ? field.readBy : [];
+      if (field.isReadOnly === true || readBy.length === 0) continue;
+      if (entityExistsInWorkspaceSkeleton(entity.name, field.name, workspaceSkeleton)) continue;
+
+      const fieldKey = `${entity.name}.${field.name}`;
+      const hasFieldProducer = (field.mutations ?? []).some((m) => operations.some((op) => op.name === m.operation))
+        || operations.some((op) => (op.branches ?? []).some((b) => (
+          (b.stateEffects ?? []).some((e) => (e.field === fieldKey || e.field === field.name) && e.effect !== 'PRESERVE')
+        )));
+      if (hasFieldProducer) continue;
+
+      const initKind = field.initialization?.kind;
+      const initRaw = String(field.initialization?.value ?? '').trim();
+      const isEmptyLiteral = /^(?:\[\]|\{\}|empty)$/iu.test(initRaw);
+      const isScalarConstantInit = initKind === 'EXPLICIT_VALUE'
+        && !isEmptyLiteral
+        && field.type !== 'MAP'
+        && field.type !== 'SET'
+        && !/^ARRAY\b/i.test(String(field.type ?? ''));
+
+      if (!isScalarConstantInit && !(entity.isCollection && entityHasProducer && initKind === 'EXPLICIT_VALUE' && !isEmptyLiteral)) {
+        issues.push({
+          slotId: `state/${fieldKey}/producer`,
+          kind: 'MISSING_PRODUCER_OPERATION',
+          reason: `O campo dinâmico ou coleção '${fieldKey}' está ausente de workspaceSkeleton, não possui inicialização constante suficiente e aparece em readBy sem operação produtora declarada.`,
+        });
+      }
+    }
+  }
+}
+
+function validateStatusPartitionsAndWitnesses({ stateModel, requirements, issues }) {
+  const operations = stateModel.operations ?? [];
+  const operationsByName = new Map(operations.map((op) => [op.name, op]));
+  const allAcceptanceCases = (requirements ?? []).flatMap((r) => r.acceptanceCases ?? []);
+  const allBranchRefs = new Set();
+  for (const op of operations) {
+    for (const b of op.branches ?? []) {
+      allBranchRefs.add(b.branchId);
+      allBranchRefs.add(`${op.name}.${b.branchId}`);
+    }
+  }
+
+  for (const entity of stateModel.entities ?? []) {
+    if (!entity.isCollection) continue;
+    for (const field of entity.fields ?? []) {
+      const allowed = Array.isArray(field.allowedValues) ? field.allowedValues : null;
+      if (!allowed || allowed.length <= 1) continue;
+      const fieldKey = `${entity.name}.${field.name}`;
+      const guardedSet = new Set();
+      for (const op of operations) {
+        for (const branch of op.branches ?? []) {
+          if (!Array.isArray(branch.guardedValues)) continue;
+          if (branch.guardedField && branch.guardedField !== field.name && branch.guardedField !== fieldKey) continue;
+          for (const val of branch.guardedValues) guardedSet.add(val);
+        }
+      }
+      const missingValues = allowed.filter((val) => !guardedSet.has(val));
+      if (missingValues.length > 0) {
+        issues.push({
+          slotId: `state/${fieldKey}/statusPartition`,
+          kind: 'INCOMPLETE_STATUS_PARTITION',
+          reason: `O campo de status multi-valor '${fieldKey}' em coleção exige partição completa explícita de todos os valores em allowedValues (ausentes: ${missingValues.join(', ')}).`,
+        });
+      }
+    }
+  }
+
+  for (const op of operations) {
+    const hasCollectionParam = (op.parameters ?? []).some((p) => (
+      p.isCollection === true || String(p.type ?? '').toUpperCase() === 'ARRAY'
+    ));
+    const hasGuardOrQuota = (op.guardPrecedence ?? []).length > 0
+      || (op.branches ?? []).some((b) => b.outcomeKind === 'REJECTION')
+      || op.quota != null
+      || (op.parameters ?? []).some((p) => p.bounds != null || p.domain != null);
+    if (hasCollectionParam && hasGuardOrQuota) {
+      const validPolicy = op.partialFailurePolicy === 'ALL_OR_NOTHING'
+        || op.partialFailurePolicy === 'FAIL_FAST'
+        || op.partialFailurePolicy === 'CONTINUE_ON_ERROR';
+      if (!validPolicy) {
+        issues.push({
+          slotId: `operation/${op.name}/partialFailurePolicy`,
+          kind: 'INCOMPLETE_BATCH_POLICY_OR_WITNESS',
+          reason: `A operação em lote '${op.name}' sob guarda/cota não declara partialFailurePolicy ('ALL_OR_NOTHING' | 'FAIL_FAST' | 'CONTINUE_ON_ERROR').`,
+        });
+      }
+      if (typeof op.consumptionOrder !== 'string' || op.consumptionOrder.trim().length === 0) {
+        issues.push({
+          slotId: `operation/${op.name}/consumptionOrder`,
+          kind: 'INCOMPLETE_BATCH_POLICY_OR_WITNESS',
+          reason: `A operação em lote '${op.name}' não declara consumptionOrder explícito.`,
+        });
+      }
+      if (Array.isArray(requirements) && requirements.length > 0) {
+        const opBranchRefs = new Set((op.branches ?? []).flatMap((b) => [b.branchId, `${op.name}.${b.branchId}`]));
+        const batchCases = allAcceptanceCases.filter((ac) => (
+          ac.batchWitness != null
+          && (opBranchRefs.size === 0 || !ac.branchRef || opBranchRefs.has(ac.branchRef))
+        ));
+        if (batchCases.length === 0) {
+          issues.push({
+            slotId: `operation/${op.name}/batchWitness`,
+            kind: 'INCOMPLETE_BATCH_POLICY_OR_WITNESS',
+            reason: `A operação em lote '${op.name}' exige ao menos um acceptanceCase com batchWitness estruturado.`,
+          });
+        } else if (validPolicy) {
+          for (const ac of batchCases) {
+            const err = evaluateBatchWitnessError(op.partialFailurePolicy, ac.batchWitness);
+            if (err) {
+              issues.push({
+                slotId: `operation/${op.name}/batchWitness/${ac.id ?? 'case'}`,
+                kind: 'INCOMPLETE_BATCH_POLICY_OR_WITNESS',
+                reason: err,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (const ac of allAcceptanceCases) {
+    if (ac.batchWitness != null && ac.branchRef) {
+      const ownerOp = operations.find((op) => (op.branches ?? []).some((b) => (
+        b.branchId === ac.branchRef || `${op.name}.${b.branchId}` === ac.branchRef
+      )));
+      if (ownerOp?.partialFailurePolicy) {
+        const err = evaluateBatchWitnessError(ownerOp.partialFailurePolicy, ac.batchWitness);
+        if (err && !issues.some((i) => i.slotId.includes(ownerOp.name) && i.kind === 'INCOMPLETE_BATCH_POLICY_OR_WITNESS')) {
+          issues.push({
+            slotId: `acceptanceCase/${ac.id ?? 'case'}/batchWitness`,
+            kind: 'INCOMPLETE_BATCH_POLICY_OR_WITNESS',
+            reason: err,
+          });
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(requirements) && requirements.length > 0) {
+    for (const entity of stateModel.entities ?? []) {
+      for (const field of entity.fields ?? []) {
+        const fieldKey = `${entity.name}.${field.name}`;
+        const touchingOps = new Set();
+        for (const r of field.readBy ?? []) {
+          if (operationsByName.has(r)) touchingOps.add(r);
+        }
+        for (const m of field.mutations ?? []) {
+          if (operationsByName.has(m.operation)) touchingOps.add(m.operation);
+        }
+        for (const op of operations) {
+          if ((op.branches ?? []).some((b) => (b.stateEffects ?? []).some((e) => e.field === fieldKey || e.field === field.name))) {
+            touchingOps.add(op.name);
+          }
+        }
+        if (touchingOps.size > 1) {
+          const matchingCases = allAcceptanceCases.filter((ac) => (
+            ac.crossOperationWitness != null
+            && (ac.crossOperationWitness.sharedField === field.name || ac.crossOperationWitness.sharedField === fieldKey)
+          ));
+          if (matchingCases.length === 0) {
+            issues.push({
+              slotId: `state/${fieldKey}/crossOperationWitness`,
+              kind: 'MISSING_OR_INVALID_CROSS_OPERATION_WITNESS',
+              reason: `O campo compartilhado '${fieldKey}' é tocado por ${touchingOps.size} operações distintas e exige acceptanceCase com crossOperationWitness estruturado.`,
+            });
+          } else {
+            for (const ac of matchingCases) {
+              const w = ac.crossOperationWitness;
+              const seq = Array.isArray(w.operationSequence) ? w.operationSequence : [];
+              const distinctValidSeq = new Set(seq.filter((opName) => touchingOps.has(opName))).size >= 2;
+              const branchValid = typeof ac.branchRef === 'string' && ac.branchRef.trim().length > 0 && allBranchRefs.has(ac.branchRef);
+              const concreteValid = isConcreteTypedValue(w.initialValue, field.type, field.allowedValues)
+                && isConcreteTypedValue(w.expectedFinalValue, field.type, field.allowedValues);
+              const outcomeValid = typeof w.expectedOutcome === 'string' && w.expectedOutcome.trim().length > 0;
+              if (!distinctValidSeq || !branchValid || !concreteValid || !outcomeValid) {
+                issues.push({
+                  slotId: `state/${fieldKey}/crossOperationWitness/${ac.id ?? 'case'}`,
+                  kind: 'MISSING_OR_INVALID_CROSS_OPERATION_WITNESS',
+                  reason: `O crossOperationWitness de '${fieldKey}' deve conter >= 2 operações distintas da sequência, branchRef válido, expectedOutcome não vazio e valores concretos compatíveis com o tipo ${field.type}.`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  let needsStringKeyWitness = false;
+  for (const entity of stateModel.entities ?? []) {
+    for (const field of entity.fields ?? []) {
+      const isPartitionKey = entity.containerPolicy?.partitionKey === field.name
+        || entity.containerPolicy?.partitionKey === `${entity.name}.${field.name}`;
+      const isKeyTriggered = field.type === 'STRING'
+        && (field.usedInLookup === true || field.usedInDeduplication === true || field.usedInPartition === true || isPartitionKey);
+      if (isKeyTriggered) {
+        needsStringKeyWitness = true;
+        const policyRule = field.keyNormalizationPolicy
+          ?? operations.find((op) => (field.readBy ?? []).includes(op.name) || (field.mutations ?? []).some((m) => m.operation === op.name))?.keyNormalizationPolicy;
+        if (!CLOSED_KEY_NORMALIZATION_RULES.has(policyRule)) {
+          issues.push({
+            slotId: `state/${entity.name}.${field.name}/keyNormalizationPolicy`,
+            kind: 'INVALID_KEY_NORMALIZATION_OR_WITNESS',
+            reason: `A chave textual '${entity.name}.${field.name}' exige keyNormalizationPolicy em enum fechado.`,
+          });
+        }
+      }
+    }
+  }
+  for (const op of operations) {
+    for (const param of op.parameters ?? []) {
+      if (param.type === 'STRING' && (param.usedInLookup === true || param.usedInDeduplication === true || param.usedInPartition === true)) {
+        needsStringKeyWitness = true;
+        if (!CLOSED_KEY_NORMALIZATION_RULES.has(op.keyNormalizationPolicy)) {
+          issues.push({
+            slotId: `operation/${op.name}/parameter/${param.name}/keyNormalizationPolicy`,
+            kind: 'INVALID_KEY_NORMALIZATION_OR_WITNESS',
+            reason: `O parâmetro chave '${param.name}' na operação '${op.name}' exige op.keyNormalizationPolicy em enum fechado.`,
+          });
+        }
+      }
+    }
+  }
+
+  validateStandaloneKeyWitnesses(requirements, needsStringKeyWitness, issues);
+}
+
+function validateStandaloneKeyWitnesses(requirements, needsStringKeyWitness, issues) {
+  const allAcceptanceCases = (requirements ?? []).flatMap((r) => r.acceptanceCases ?? []);
+  const keyCases = allAcceptanceCases.filter((ac) => ac.keyComparisonWitness != null);
+  if (needsStringKeyWitness && Array.isArray(requirements) && requirements.length > 0 && keyCases.length === 0) {
+    issues.push({
+      slotId: 'acceptanceCases/keyComparisonWitness',
+      kind: 'INVALID_KEY_NORMALIZATION_OR_WITNESS',
+      reason: 'Chave textual usada em lookup/deduplicação/partição exige acceptanceCase com keyComparisonWitness estruturado.',
+    });
+  }
+  for (const ac of keyCases) {
+    const w = ac.keyComparisonWitness;
+    if (!CLOSED_KEY_NORMALIZATION_RULES.has(w.comparisonRule) || w.baselineKey === w.variationKey) {
+      issues.push({
+        slotId: `acceptanceCase/${ac.id ?? 'case'}/keyComparisonWitness`,
+        kind: 'INVALID_KEY_NORMALIZATION_OR_WITNESS',
+        reason: `O keyComparisonWitness em '${ac.id ?? 'case'}' exige baselineKey !== variationKey e comparisonRule em enum fechado.`,
+      });
+      continue;
+    }
+    const actualMatch = normalizeKey(w.baselineKey, w.comparisonRule) === normalizeKey(w.variationKey, w.comparisonRule)
+      ? 'MATCH'
+      : 'DISTINCT';
+    if (w.expectedMatchResult !== actualMatch) {
+      issues.push({
+        slotId: `acceptanceCase/${ac.id ?? 'case'}/keyComparisonWitness`,
+        kind: 'INVALID_KEY_NORMALIZATION_OR_WITNESS',
+        reason: `Contradição matemática em keyComparisonWitness: normalizeKey('${w.baselineKey}', '${w.comparisonRule}') vs '${w.variationKey}' produz '${actualMatch}', não '${w.expectedMatchResult}'.`,
+      });
+    }
+  }
+}
+
 export function validateFieldLifecycle({
   stateModel = null,
   architectureContexts = [],
@@ -461,6 +772,9 @@ export function validateFieldLifecycle({
   boundaryRules = [],
   pathReferences = [],
   resolvedDecisionIds = [],
+  unknowns = [],
+  workspaceSkeleton = null,
+  payloadSchemas = null,
 } = {}) {
   const isStateful = architectureContexts.some((ctx) => (
     (typeof ctx === 'string' ? ctx : ctx.tag) === 'stateful-operation'
@@ -478,7 +792,8 @@ export function validateFieldLifecycle({
   }
 
   if (!stateModel || !Array.isArray(stateModel.entities)) {
-    return { valid: true, issues: [] };
+    validateStandaloneKeyWitnesses(requirements, false, issues);
+    return { valid: issues.length === 0, issues };
   }
 
   const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
@@ -520,8 +835,18 @@ export function validateFieldLifecycle({
   ));
   if (isIntegrityHash) validateCanonicalSerializations(stateModel, entityFieldKeys, issues);
 
-  const totalityResult = validateOperationTotality({ stateModel, architectureContexts });
+  const totalityResult = validateOperationTotality({
+    stateModel,
+    requirements,
+    unknowns,
+    decisions,
+    workspaceSkeleton,
+    payloadSchemas,
+  });
   issues.push(...totalityResult.issues);
+
+  validateProducerConsumerSymmetry(stateModel, workspaceSkeleton, issues);
+  validateStatusPartitionsAndWitnesses({ stateModel, requirements, issues });
 
   const contradictionResult = validateContradictionDetection({ stateModel, invariants, requirements });
   issues.push(...contradictionResult.issues);

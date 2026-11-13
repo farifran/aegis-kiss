@@ -3,16 +3,18 @@ import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_authority.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 
-function effectiveDeterminismStatus(specification, humanResolutions, {
+function specificationWithEvidence(specification, {
   intentEvidence = null,
   literalFacts = [],
   workspaceEvidence = [],
+  workspaceSkeleton = null,
 } = {}) {
   const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
   const effectiveWorkspace = (workspaceEvidence && workspaceEvidence.length > 0)
     ? workspaceEvidence
     : (specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? []);
-  const specWithEvidence = {
+  const effectiveSkeleton = workspaceSkeleton ?? specification.workspaceSkeleton ?? null;
+  return {
     ...specification,
     ...(effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts
       ? { literalFacts: effectiveFacts, intentEvidence }
@@ -20,8 +22,34 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
     ...(effectiveWorkspace.length > 0 && !specification.workspaceEvidence
       ? { workspaceEvidence: effectiveWorkspace }
       : {}),
+    ...(effectiveSkeleton !== null && !specification.workspaceSkeleton
+      ? { workspaceSkeleton: effectiveSkeleton }
+      : {}),
   };
-  const certificate = generateClosureCertificate({ specification: specWithEvidence, humanResolutions });
+}
+
+function closureCertificateFor(specification, humanResolutions, options = {}) {
+  return generateClosureCertificate({
+    specification: specificationWithEvidence(specification, options),
+    humanResolutions,
+    semanticReviewAcknowledged: options.semanticReviewAcknowledged ?? false,
+  });
+}
+
+function effectiveDeterminismStatus(specification, humanResolutions, {
+  intentEvidence = null,
+  literalFacts = [],
+  workspaceEvidence = [],
+  workspaceSkeleton = null,
+  semanticReviewAcknowledged = false,
+} = {}) {
+  const certificate = closureCertificateFor(specification, humanResolutions, {
+    intentEvidence,
+    literalFacts,
+    workspaceEvidence,
+    workspaceSkeleton,
+    semanticReviewAcknowledged,
+  });
   if (certificate.status !== 'CERTIFIED_CLOSED') {
     const nonDecisionGaps = certificate.unresolvedInventorySlots
       + certificate.unresolvedDependencies
@@ -31,7 +59,13 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
       + certificate.unresolvedAuthorities
       + certificate.contradictoryRules
       + (specification.determinismReview?.dimensions ?? []).filter(({ status }) => status === 'GAP_FOUND').length;
-    if (nonDecisionGaps === 0 && (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0)) {
+    const hasOnlySemanticReview = certificate.closureAudit?.counts?.SEMANTIC_REVIEW_REQUIRED > 0
+      && nonDecisionGaps === 0
+      && certificate.unresolvedDeterminismDimensions === 0
+      && certificate.orphanHumanDecisions === 0;
+    if (hasOnlySemanticReview) return 'PENDING_HUMAN_DECISIONS';
+    if (certificate.status === 'AWAITING_HUMAN_DECISION'
+      || (nonDecisionGaps === 0 && (certificate.unresolvedDeterminismDimensions > 0 || certificate.orphanHumanDecisions > 0))) {
       return 'PENDING_HUMAN_DECISIONS';
     }
     return 'BLOCKED_BY_GAP';
@@ -79,7 +113,11 @@ export function buildHumanResolutionRecords(contract, resolution) {
   });
 }
 
-export function assertContractApprovalEvidence(contract, { required = false } = {}) {
+export function assertContractApprovalEvidence(contract, {
+  required = false,
+  workspaceEvidence = [],
+  workspaceSkeleton = null,
+} = {}) {
   const resolutions = new Map();
   for (const resolution of contract.humanResolutions) {
     if (resolutions.has(resolution.questionId)) {
@@ -120,13 +158,27 @@ export function assertContractApprovalEvidence(contract, { required = false } = 
   const pendingIds = new Set(decisions.keys());
   const retainedResolutions = contract.humanResolutions
     .filter(({ questionId }) => !pendingIds.has(questionId));
+  const evidenceOptions = {
+    intentEvidence: contract.intentEvidence,
+    workspaceEvidence,
+    workspaceSkeleton,
+  };
+  const draftSpecification = {
+    ...contract.specification,
+    closureCertificate: closureCertificateFor(
+      contract.specification,
+      retainedResolutions,
+      evidenceOptions,
+    ),
+  };
   const draft = {
     ...contract,
     effectiveDeterminismStatus: effectiveDeterminismStatus(
-      contract.specification,
+      draftSpecification,
       retainedResolutions,
-      { intentEvidence: contract.intentEvidence },
+      evidenceOptions,
     ),
+    specification: draftSpecification,
     humanResolutions: retainedResolutions,
     approval: null,
   };
@@ -329,7 +381,13 @@ export function resolutionRequiresRecompilation({ contract, request, resolution 
   return decisions.size > 0;
 }
 
-export function finalizeContractApproval({ contract, request, resolution }) {
+export function finalizeContractApproval({
+  contract,
+  request,
+  resolution,
+  workspaceEvidence = [],
+  workspaceSkeleton = null,
+}) {
   if (resolutionRequiresRecompilation({ contract, request, resolution })) {
     throw new Error('semantic_recompilation_required');
   }
@@ -340,15 +398,25 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     ...contract.humanResolutions,
     ...buildHumanResolutionRecords(contract, resolution),
   ];
+  const evidenceOptions = {
+    intentEvidence: contract.intentEvidence,
+    workspaceEvidence: workspaceEvidence.length > 0
+      ? workspaceEvidence
+      : (request?.workspace?.sourceEvidence ?? []),
+    workspaceSkeleton,
+    semanticReviewAcknowledged: resolution.attestation === 'CONTRACT_REVIEWED_AND_APPROVED',
+  };
+  const approvedSpecification = {
+    ...contract.specification,
+    closureCertificate: closureCertificateFor(contract.specification, humanResolutions, evidenceOptions),
+  };
   const finalContract = {
     ...contract,
+    specification: approvedSpecification,
     effectiveDeterminismStatus: effectiveDeterminismStatus(
-      contract.specification,
+      approvedSpecification,
       humanResolutions,
-      {
-        intentEvidence: contract.intentEvidence,
-        workspaceEvidence: request?.workspace?.sourceEvidence ?? [],
-      },
+      evidenceOptions,
     ),
     humanResolutions,
     approval: {
@@ -363,7 +431,13 @@ export function finalizeContractApproval({ contract, request, resolution }) {
     throw new Error('contract_has_unresolved_determinism');
   }
   assertSchema('aegis.issue_contract.v14', finalContract);
-  assertContractApprovalEvidence(finalContract, { required: true });
+  assertContractApprovalEvidence(finalContract, {
+    required: true,
+    workspaceEvidence: workspaceEvidence.length > 0
+      ? workspaceEvidence
+      : (request?.workspace?.sourceEvidence ?? []),
+    workspaceSkeleton,
+  });
   return finalContract;
 }
 

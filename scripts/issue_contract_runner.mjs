@@ -196,7 +196,9 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     writes.push(rm(paths.semanticExecutionPath, { force: true }));
   }
   await Promise.all(writes);
-  const confirmation = buildConfirmationRequest(contract);
+  const confirmation = buildConfirmationRequest(contract, {
+    workspaceSkeleton: preflight.discovery?.workspaceSkeleton ?? request.workspace?.workspaceSkeleton ?? null,
+  });
   await writeFileAtomic(paths.userConfirmationPath, `${canonicalJson(confirmation)}\n`);
   process.stdout.write(`${canonicalJson(confirmation)}\n`);
   if (preparedDraft === null && process.env.AEGIS_TEST_AUTOMATION !== '1') {
@@ -282,12 +284,8 @@ async function applyAdaptiveSemanticScout(context, role, assertSemanticSuperviso
         explicitTargetPaths: scoutResult.relevantPaths,
       });
     }
-    if (scoutResult.inferredAliases && Object.keys(scoutResult.inferredAliases).length > 0) {
-      const { persistInferredAliases } = await import('./lib/semantic_scout.mjs');
-      await persistInferredAliases(root, scoutResult.inferredAliases);
-    }
   } catch {
-    // Fallback gracioso: prossegue com o contexto original determinístico
+    throw rejection('SEMANTIC_SCOUT_UNAVAILABLE', 'Repository scope could not be expanded; semantic contract generation stopped. Retry or provide explicit source evidence.');
   }
 }
 
@@ -362,6 +360,7 @@ async function compilePreparedRevision(context) {
     humanResolutions,
     context.request.intentEvidence,
     context.request.workspace?.sourceEvidence,
+    context.request.workspace?.workspaceSkeleton ?? null,
   );
   draft.sourceContextDigest = context.request.contextDigest;
   draft.sourceEvidenceDigest = context.request.intentEvidence.evidenceDigest;
@@ -370,8 +369,9 @@ async function compilePreparedRevision(context) {
 }
 
 async function emitIdeBriefing() {
-  const [{ canonicalJson }, { isFallbackOnlyEvidence }, { request, preflight }] = await Promise.all([
+  const [{ canonicalJson }, { semanticSupervisorInstructions }, { isFallbackOnlyEvidence }, { request, preflight }] = await Promise.all([
     import('./lib/canonical_json.mjs'),
+    import('./lib/semantic_gateway.mjs'),
     import('./lib/source_evidence.mjs'),
     buildCurrentSemanticRequest(),
   ]);
@@ -402,7 +402,9 @@ async function emitIdeBriefing() {
         name: s.name,
         kind: s.kind,
         path: s.path,
-        line: s.line,
+        startLine: s.startLine,
+        endLine: s.endLine,
+        signature: s.signature,
       })),
       sourceExcerpts: request.workspace.sourceEvidence.map(({ path, startLine, endLine, content }) => ({
         path,
@@ -412,9 +414,10 @@ async function emitIdeBriefing() {
       })),
     },
     availableContextTags: request.policy.contexts.map((c) => c.tag),
+    supervisionInstructions: semanticSupervisorInstructions(request),
     aiTask: [
       '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION.',
-      '2. architectureContexts: declare as tags aplicáveis (policyAssessments COMPLIANT e determinismReview.coverage NO_DIMENSION_APPLICABLE são preenchidos mecanicamente pelo Harness; declare apenas conflitos reais ou dimensões específicas).',
+      '2. architectureContexts: declare tags e bases; avalie cada regra aplicável. Declare coverage e rationale de determinismo para cada claim material; o Harness não preenche conclusões semânticas ausentes.',
       '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
       '4. stateModel / decisions: inclua stateModel apenas se houver estado mutável, e decisions apenas se houver ambiguidade material.',
     ],
@@ -522,6 +525,8 @@ async function handleApprove() {
     contract: draftContract,
     request,
     resolution,
+    workspaceEvidence: workspaceObservation?.sourceEvidence ?? [],
+    workspaceSkeleton: workspaceObservation?.workspaceSkeleton ?? preflight.discovery?.workspaceSkeleton ?? null,
   });
   assertContractDocument({
     repositoryRoot: root,

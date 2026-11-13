@@ -1,4 +1,5 @@
 import { canonicalDigest } from './canonical_json.mjs';
+import { computeDeterminismReviewStatus } from './closure/v7_rules.mjs';
 import { assertSchema, standaloneSchemaDocument } from './schema_validator.mjs';
 import { omitOptionalNulls } from './semantic_output_schema.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
@@ -64,12 +65,6 @@ function normalizeTargetRef(target, request) {
 function normalizeIntentClaimsAndContexts(opinion, request) {
   if (Array.isArray(opinion.intentClaims)) {
     for (const claim of opinion.intentClaims) {
-      if (claim.fragmentIndexes === undefined && request.intentEvidence.fragments.length === 1) {
-        claim.fragmentIndexes = [0];
-      }
-      if (claim.disposition === 'NORMATIVE' && (!Array.isArray(claim.targets) || claim.targets.length === 0) && opinion.requirements?.length === 1) {
-        claim.targets = [{ kind: 'REQUIREMENT', index: 0 }];
-      }
       if (claim.disposition !== 'NORMATIVE' && claim.contractEffect === undefined) {
         claim.contractEffect = null;
       }
@@ -79,14 +74,9 @@ function normalizeIntentClaimsAndContexts(opinion, request) {
     }
   }
 
-  // 1. architectureContexts: aceita contextTag ou tag além de contextIndex e preenche default
+  // A ausência de contexto é uma lacuna de análise, não autorização para inferir o primeiro contexto.
   if (!Array.isArray(opinion.architectureContexts) || opinion.architectureContexts.length === 0) {
-    opinion.architectureContexts = [{
-      contextIndex: 0,
-      rationale: 'Demanda funcional de produto.',
-      basis: [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }],
-    }];
-    return;
+    throw new Error('semantic_review_required:missing_architecture_contexts');
   }
   for (const item of opinion.architectureContexts) {
     if (item.contextIndex === undefined && (item.contextTag || item.tag)) {
@@ -94,15 +84,19 @@ function normalizeIntentClaimsAndContexts(opinion, request) {
       const index = request.policy.contexts.findIndex((c) => c.tag === tag);
       if (index !== -1) item.contextIndex = index;
     }
-    item.basis ??= [{ source: 'USER_INTENT', reference: request.intentEvidence.fragments[0]?.anchor ?? request.intent }];
+    if (!Array.isArray(item.basis) || item.basis.length === 0) {
+      throw new Error(`semantic_review_required:missing_context_basis:${item.contextIndex ?? 'unknown'}`);
+    }
     delete item.contextTag;
     delete item.tag;
   }
 }
 
 function normalizePolicyAssessments(opinion, request) {
-  // 2. policyAssessments: aceita ruleId/id, normaliza CONFLICT->AMENDED e auto-preenche regras COMPLIANT
-  opinion.policyAssessments ??= [];
+  // 2. policyAssessments: normaliza identificadores; a análise de conformidade pertence ao parecer.
+  if (!Array.isArray(opinion.policyAssessments)) {
+    throw new Error('semantic_review_required:missing_policy_assessments');
+  }
   for (const assessment of opinion.policyAssessments) {
     if (assessment.ruleIndex === undefined && (assessment.ruleId || assessment.id)) {
       const id = assessment.ruleId || assessment.id;
@@ -114,10 +108,9 @@ function normalizePolicyAssessments(opinion, request) {
     if (assessment.recommendedStatus === 'CONFLICT') {
       assessment.recommendedStatus = 'AMENDED';
     }
-    assessment.recommendedStatus ??= 'COMPLIANT';
-    assessment.demandStatus ??= assessment.recommendedStatus === 'AMENDED' ? 'CONFLICT' : (assessment.recommendedStatus ?? 'COMPLIANT');
-    assessment.decisionIndex ??= null;
-    assessment.amendmentIndex ??= null;
+    if (assessment.recommendedStatus === undefined || assessment.demandStatus === undefined) {
+      throw new Error(`semantic_review_required:incomplete_policy_assessment:${assessment.ruleIndex ?? 'unknown'}`);
+    }
   }
   const activeContextTags = new Set(
     opinion.architectureContexts.map((c) => request.policy.contexts[c.contextIndex]?.tag).filter(Boolean),
@@ -130,69 +123,45 @@ function normalizePolicyAssessments(opinion, request) {
       : rule.appliesWhen.some((tag) => activeContextTags.has(tag));
     if (applies) applicableRuleIndexes.push(idx);
   });
-  if (!applicableRuleIndexes.some((idx) => !existingByRuleIndex.has(idx))) return;
-
-  const mergedAssessments = [];
-  for (const idx of applicableRuleIndexes) {
-    if (existingByRuleIndex.has(idx)) {
-      mergedAssessments.push(existingByRuleIndex.get(idx));
-      existingByRuleIndex.delete(idx);
-    } else {
-      mergedAssessments.push({
-        ruleIndex: idx,
-        demandStatus: 'COMPLIANT',
-        recommendedStatus: 'COMPLIANT',
-        rationale: `Conformidade verificada mecanicamente para ${request.policy.rules[idx].id}.`,
-        decisionIndex: null,
-        amendmentIndex: null,
-      });
-    }
+  const missingRuleIds = applicableRuleIndexes
+    .filter((idx) => !existingByRuleIndex.has(idx))
+    .map((idx) => request.policy.rules[idx].id);
+  if (missingRuleIds.length > 0) {
+    throw new Error(`semantic_review_required:missing_policy_assessments:${missingRuleIds.join(',')}`);
   }
-  for (const extra of existingByRuleIndex.values()) {
-    mergedAssessments.push(extra);
-  }
-  opinion.policyAssessments = mergedAssessments;
+  const applicableAssessments = applicableRuleIndexes.map((idx) => existingByRuleIndex.get(idx));
+  const applicableIndexes = new Set(applicableRuleIndexes);
+  opinion.policyAssessments = [
+    ...applicableAssessments,
+    ...[...existingByRuleIndex.entries()]
+      .filter(([idx]) => !applicableIndexes.has(idx))
+      .map(([, assessment]) => assessment),
+  ];
 }
 
 function normalizeDeterminismReview(opinion, request) {
-  // 3. determinismReview: aceita claimId além de claimIndex, e preenche cobertura default
-  opinion.determinismReview ??= {
-    rationale: 'A demanda não promete determinismo adicional além do contrato público.',
-    dimensions: [],
-    coverage: [],
-  };
+  // 3. determinismReview: aceita claimId além de claimIndex; cobertura ausente exige nova análise.
+  if (!opinion.determinismReview || typeof opinion.determinismReview !== 'object') {
+    throw new Error('semantic_review_required:missing_determinism_review');
+  }
   delete opinion.determinismReview.promiseInDemand;
   delete opinion.determinismReview.status;
   delete opinion.determinismReview.sourceFragmentIds;
-  opinion.determinismReview.dimensions ??= [];
+  if (!Array.isArray(opinion.determinismReview.dimensions)) {
+    throw new Error('semantic_review_required:missing_determinism_dimensions');
+  }
   for (const dim of opinion.determinismReview.dimensions) {
-    dim.status ??= 'SPECIFIED';
-    if (dim.subject === undefined && opinion.requirements?.length === 1) {
-      dim.subject = { kind: 'REQUIREMENT', index: 0 };
-    }
-    if (dim.targets === undefined && opinion.requirements?.length === 1) {
-      dim.targets = [{ kind: 'REQUIREMENT', index: 0 }];
-    }
     if (dim.subject && typeof dim.subject === 'object') normalizeTargetRef(dim.subject, request);
     if (Array.isArray(dim.targets)) {
       for (const target of dim.targets) normalizeTargetRef(target, request);
     }
-    dim.inapplicabilityProof ??= null;
-    if (dim.proofObligation && typeof dim.proofObligation === 'object') {
-      dim.proofObligation.boundaryInclusivity ??= null;
-    }
   }
-  const materialFragmentIndexes = Array.isArray(opinion.intentClaims)
-    ? [...new Set(
-      opinion.intentClaims
-        .filter((c) => c.disposition === 'NORMATIVE' || c.disposition === 'DECISION')
-        .flatMap((c) => c.fragmentIndexes ?? [0]),
-    )]
-    : [];
-  opinion.determinismReview.fragmentIndexes ??= materialFragmentIndexes.length > 0
-    ? materialFragmentIndexes
-    : request.intentEvidence.fragments.map((_, i) => i);
-  opinion.determinismReview.coverage ??= [];
+  if (!Array.isArray(opinion.determinismReview.fragmentIndexes)) {
+    throw new Error('semantic_review_required:missing_determinism_source_fragments');
+  }
+  if (!Array.isArray(opinion.determinismReview.coverage)) {
+    throw new Error('semantic_review_required:missing_determinism_coverage');
+  }
   for (const coverage of opinion.determinismReview.coverage) {
     if (coverage.claimIndex === undefined && coverage.claimId) {
       const parsed = parseInt(String(coverage.claimId).replace(/\D/g, ''), 10) - 1;
@@ -200,9 +169,8 @@ function normalizeDeterminismReview(opinion, request) {
     }
     delete coverage.claimId;
     delete coverage.dimensionAssessments;
-    coverage.dimensionIndexes ??= [];
-    if (coverage.disposition === undefined) {
-      coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
+    if (!Array.isArray(coverage.dimensionIndexes) || coverage.disposition === undefined) {
+      throw new Error(`semantic_review_required:incomplete_determinism_coverage:${coverage.claimIndex ?? 'unknown'}`);
     }
   }
   if (!Array.isArray(opinion.intentClaims)) return;
@@ -214,208 +182,61 @@ function normalizeDeterminismReview(opinion, request) {
     return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
   });
   const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
-  let inserted = false;
+  const missingCoverage = [];
   opinion.intentClaims.forEach((claim, claimIndex) => {
     const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
     if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
-      opinion.determinismReview.coverage.push({
-        claimIndex,
-        disposition: 'NO_DIMENSION_APPLICABLE',
-        dimensionIndexes: [],
-        rationale: 'Afirmação funcional sem fonte adicional de indeterminismo.',
-      });
-      inserted = true;
+      missingCoverage.push(claimIndex);
     }
   });
-  if (inserted) {
-    opinion.determinismReview.coverage.sort((a, b) => a.claimIndex - b.claimIndex);
+  if (missingCoverage.length > 0) {
+    throw new Error(`semantic_review_required:missing_determinism_claim_coverage:${missingCoverage.join(',')}`);
   }
-}
-
-function collectEntityFieldKeys(entities) {
-  const keys = [];
-  for (const entity of entities ?? []) {
-    for (const field of entity.fields ?? []) {
-      keys.push(`${entity.name}.${field.name}`);
-    }
-  }
-  return keys;
-}
-
-function deriveFieldMutations(stateModel, fieldKey, fieldName) {
-  const mutations = [];
-  for (const op of stateModel.operations ?? []) {
-    for (const branch of op.branches ?? []) {
-      for (const eff of branch.stateEffects ?? []) {
-        if ((eff.field === fieldKey || eff.field === fieldName) && eff.effect && eff.effect !== 'PRESERVE') {
-          mutations.push({
-            operation: op.name,
-            condition: branch.condition ?? branch.branchId,
-            effect: eff.effect === 'SET' ? 'SET_VALUE' : eff.effect,
-            targetValue: eff.value ?? null,
-          });
-        }
-      }
-    }
-  }
-  return mutations;
-}
-
-function deriveFieldReaders(stateModel, fieldKey, fieldName) {
-  const readers = new Set();
-  for (const op of stateModel.operations ?? []) {
-    const touches = (op.branches ?? []).some((b) => (
-      (typeof b.condition === 'string' && (b.condition.includes(fieldKey) || b.condition.includes(fieldName)))
-      || (b.stateEffects ?? []).some((eff) => eff.field === fieldKey || eff.field === fieldName)
-    ));
-    if (touches || (op.branches ?? []).every((b) => b.defaultPreservation === true)) {
-      readers.add(op.name);
-    }
-  }
-  for (const obs of stateModel.observables ?? []) {
-    if ((obs.derivedFrom ?? []).some((d) => d === fieldKey || d === fieldName || d === '*')) {
-      readers.add(obs.name);
-    }
-  }
-  return [...readers];
 }
 
 function normalizeStateModel(stateModel) {
   if (!stateModel) return;
-  const allEntityFieldKeys = collectEntityFieldKeys(stateModel.entities);
-
   for (const op of stateModel.operations ?? []) {
-    op.parameters ??= [];
-    op.guardPrecedence ??= [];
-    for (const param of op.parameters) {
+    for (const param of op.parameters ?? []) {
       if (param.nullability === 'NON_NULLABLE') param.nullability = 'NOT_NULL';
     }
     for (const branch of op.branches ?? []) {
-      branch.stateEffects ??= [];
-      for (const eff of branch.stateEffects) {
+      for (const eff of branch.stateEffects ?? []) {
         if (eff.effect === 'SET_VALUE') eff.effect = 'SET';
       }
-      branch.defaultPreservation ??= branch.outcomeKind === 'REJECTION' || branch.stateEffects.length === 0;
-      if (branch.defaultPreservation === false && allEntityFieldKeys.length > 0) {
-        const covered = new Set(branch.stateEffects.map((e) => e.field));
-        for (const fieldKey of allEntityFieldKeys) {
-          const shortName = fieldKey.split('.').slice(1).join('.');
-          if (!covered.has(fieldKey) && !covered.has(shortName)) {
-            branch.stateEffects.push({ field: fieldKey, effect: 'PRESERVE' });
-          }
-        }
-      }
     }
   }
-
   for (const entity of stateModel.entities ?? []) {
-    if (entity.isCollection === true && entity.capacityPolicy) {
-      entity.admissionPolicy ??= 'ON_FIRST_REQUEST';
-      if (
-        entity.containerPolicy === undefined
-        && ['FIFO_EVICTION', 'LRU_EVICTION', 'SLIDING_WINDOW_EVICTION'].includes(entity.capacityPolicy.overflowPolicy)
-      ) {
-        entity.containerPolicy = {
-          partitionKey: 'id',
-          retentionPolicy: entity.capacityPolicy.overflowPolicy,
-        };
-      }
-    }
     for (const field of entity.fields ?? []) {
-      const fieldKey = `${entity.name}.${field.name}`;
-      if (
-        field.bounds === undefined
-        && entity.isCollection === true
-        && entity.capacityPolicy?.maxEntries != null
-        && (field.type === 'COLLECTION' || field.isCounter === true)
-      ) {
-        field.bounds = {
-          lowerBound: '0',
-          upperBound: String(entity.capacityPolicy.maxEntries),
-          boundaryBehavior: 'SATURATE',
-          ...(entity.capacityPolicy.provenance
-            ? { provenance: globalThis.structuredClone(entity.capacityPolicy.provenance) }
-            : {}),
-        };
-      }
-      if (Array.isArray(field.mutations)) {
-        for (const mut of field.mutations) {
-          if (mut.effect === 'SET') mut.effect = 'SET_VALUE';
-          mut.targetValue ??= null;
-        }
-      } else {
-        field.mutations = deriveFieldMutations(stateModel, fieldKey, field.name);
-      }
-      if (field.reset) {
-        field.reset.trigger ??= null;
-        field.reset.resetValue ??= null;
-      } else {
-        field.reset = { allowed: false, trigger: null, resetValue: null };
-      }
-      field.preservation ??= ['*'];
-      if (!Array.isArray(field.readBy) || field.readBy.length === 0) {
-        field.readBy = deriveFieldReaders(stateModel, fieldKey, field.name);
+      for (const mutation of field.mutations ?? []) {
+        if (mutation.effect === 'SET') mutation.effect = 'SET_VALUE';
       }
     }
   }
 }
 
-function normalizeRequirementItem(req, defaultFragmentIndexes) {
+function normalizeRequirementItem(req) {
   if (!req || typeof req !== 'object') return;
-  req.kind ??= 'FUNCTIONAL';
-  req.measurement ??= null;
-  req.fragmentIndexes ??= defaultFragmentIndexes;
   for (const ac of req.acceptanceCases ?? []) {
     if (ac.kind === 'STATE_CHANGE') {
-      ac.outcomeKind ??= 'STATE_CHANGE';
+      if (ac.outcomeKind === undefined) {
+        throw new Error('semantic_review_required:missing_acceptance_outcome_kind');
+      }
       ac.kind = 'BOUNDARY';
     }
-    ac.decisionBinding ??= null;
-    ac.boundaryBinding ??= null;
   }
 }
 
-function normalizeDecisionsAndInventory(opinion, request) {
-  const defaultFragmentIndexes = request.intentEvidence.fragments.map((_, i) => i);
+function normalizeDecisionsAndInventory(opinion) {
   if (Array.isArray(opinion.decisions)) {
     for (const dec of opinion.decisions) {
-      dec.recommendedAnswerIndex ??= 0;
-      dec.requirementIndexes ??= [0];
-      dec.invariantIndexes ??= [];
-      dec.riskIndexes ??= [];
-      if (dec.presentation && typeof dec.presentation === 'object') {
-        dec.presentation.glossary ??= [];
-      }
       for (const ans of dec.answers ?? []) {
         if (ans.preparedEffect && typeof ans.preparedEffect === 'object') {
-          ans.preparedEffect.requirements ??= [];
-          ans.preparedEffect.invariants ??= [];
-          ans.preparedEffect.risks ??= [];
-          ans.preparedEffect.boundaryRules ??= [];
-          ans.preparedEffect.dimensions ??= [];
-          for (const entry of ans.preparedEffect.requirements) {
-            if (entry.value) normalizeRequirementItem(entry.value, defaultFragmentIndexes);
+          for (const entry of ans.preparedEffect.requirements ?? []) {
+            if (entry.value) normalizeRequirementItem(entry.value);
           }
         }
       }
-    }
-    if (opinion.unknowns === undefined && opinion.decisions.length > 0 && Array.isArray(opinion.intentClaims)) {
-      opinion.unknowns = [];
-      opinion.intentClaims.forEach((claim) => {
-        if (claim.disposition === 'DECISION') {
-          const decTargets = (claim.targets ?? []).filter((t) => t.kind === 'DECISION');
-          const indexes = decTargets.length > 0 ? decTargets.map((t) => t.index ?? 0) : [0];
-          for (const decisionIndex of indexes) {
-            opinion.unknowns.push({
-              statement: claim.rationale || claim.quote,
-              material: true,
-              decisionIndex,
-              fragmentIndexes: claim.fragmentIndexes ?? [0],
-              basis: [{ source: 'USER_INTENT', reference: claim.quote }],
-            });
-          }
-        }
-      });
     }
   }
   for (const inv of opinion.invariants ?? []) {
@@ -423,28 +244,13 @@ function normalizeDecisionsAndInventory(opinion, request) {
       inv.requirementIndexes = inv.targetRequirementIndexes;
     }
     delete inv.targetRequirementIndexes;
-    inv.requirementIndexes ??= [0];
   }
-  opinion.adversarialReview ??= { rationale: 'Revisão semântica residual sem achados adicionais.', findings: [] };
-  delete opinion.adversarialReview.status;
-  opinion.adversarialReview.findings ??= [];
+  if (opinion.adversarialReview && typeof opinion.adversarialReview === 'object') {
+    delete opinion.adversarialReview.status;
+  }
   for (const req of opinion.requirements ?? []) {
-    normalizeRequirementItem(req, defaultFragmentIndexes);
+    normalizeRequirementItem(req);
   }
-
-  opinion.riskReview ??= { certainty: 'ASSESSED', rationale: 'Nenhum risco material adicional identificado.' };
-  opinion.unknowns ??= [];
-  opinion.decisions ??= [];
-  opinion.boundaryRules ??= [];
-  opinion.nonNormativeItems ??= [];
-  opinion.pathReferences ??= [];
-  opinion.risks ??= [];
-  opinion.complexityReview ??= {
-    status: 'NO_EXCESS',
-    rationale: 'A especificação adota a menor solução suficiente sem abstrações especulativas.',
-    alternatives: [],
-  };
-  opinion.complexityReview.alternatives ??= [];
 }
 
 function normalizeSemanticOpinion(opinion, request) {
@@ -453,7 +259,7 @@ function normalizeSemanticOpinion(opinion, request) {
   normalizePolicyAssessments(cloned, request);
   normalizeDeterminismReview(cloned, request);
   normalizeStateModel(cloned.stateModel);
-  normalizeDecisionsAndInventory(cloned, request);
+  normalizeDecisionsAndInventory(cloned);
   return cloned;
 }
 
@@ -581,6 +387,10 @@ function compileRequirementsSection(opinion, request, ctx) {
       when: acceptanceCase.when,
       then: acceptanceCase.then,
       outcomeKind: acceptanceCase.outcomeKind,
+      ...(acceptanceCase.branchRef != null ? { branchRef: acceptanceCase.branchRef } : {}),
+      ...(acceptanceCase.batchWitness != null ? { batchWitness: acceptanceCase.batchWitness } : {}),
+      ...(acceptanceCase.crossOperationWitness != null ? { crossOperationWitness: acceptanceCase.crossOperationWitness } : {}),
+      ...(acceptanceCase.keyComparisonWitness != null ? { keyComparisonWitness: acceptanceCase.keyComparisonWitness } : {}),
       decisionBinding: ctx.compileDecisionBinding(acceptanceCase.decisionBinding),
       boundaryBinding: acceptanceCase.boundaryBinding === null
         ? null
@@ -601,14 +411,13 @@ function compileRequirementsSection(opinion, request, ctx) {
 function compileDeterminismReviewSection(opinion, request, ctx) {
   const { dimensions } = ctx;
   const claimIds = opinion.intentClaims.map((_, index) => generatedId('CLAIM', index));
+  const arithmetic = opinion.determinismReview.arithmetic ?? null;
+  const architectureContexts = opinion.architectureContexts.map((item) => ({
+    tag: indexedValue(request.policy.contexts, item.contextIndex, 'architecture_context').tag,
+  }));
   return {
-    status: dimensions.length === 0
-      ? 'NOT_APPLICABLE'
-      : dimensions.some(({ status }) => (
-        status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
-      ))
-        ? 'GAPS_FOUND'
-        : 'SEMANTICALLY_CLOSED',
+    status: computeDeterminismReviewStatus(dimensions, { arithmetic, architectureContexts }),
+    ...(arithmetic !== null ? { arithmetic } : {}),
     rationale: opinion.determinismReview.rationale,
     sourceFragmentIds: ctx.compileFragmentIndexes(opinion.determinismReview.fragmentIndexes),
     coverage: opinion.determinismReview.coverage.map((item) => ({
@@ -741,6 +550,9 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       const claimIds = opinion.intentClaims.flatMap((claim, claimIndex) => (
         claim.fragmentIndexes.includes(fragmentIndex) ? [generatedId('CLAIM', claimIndex)] : []
       ));
+      if (claimIds.length === 0) {
+        throw new Error(`semantic_review_required:unclassified_intent_fragment:${fragmentIndex}`);
+      }
       return {
         fragmentId,
         status: claimIds.length > 0 ? 'CLAIMS_EXTRACTED' : 'CONTEXT_ONLY',
@@ -805,6 +617,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       id: ctx.invariantIds[index],
       statement: item.statement,
       falsification: item.falsification,
+      ...(item.falsificationSpec != null ? { falsificationSpec: item.falsificationSpec } : {}),
       requirementIds: ctx.compileIndexes(item.requirementIndexes, ctx.requirementIds, 'requirement'),
     })),
     risks: opinion.risks.map((item, index) => ({
@@ -877,6 +690,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       literalFacts: request.intentEvidence?.literalFacts ?? [],
       intentEvidence: request.intentEvidence,
       workspaceEvidence: request.workspace?.sourceEvidence ?? [],
+      workspaceSkeleton: request.workspace?.workspaceSkeleton ?? null,
     },
     humanResolutions: [],
   });

@@ -240,6 +240,43 @@
                     "OBSERVABLE_EFFECT"
                   ]
                 },
+                "branchRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "batchWitness": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "aegis.contract_components.v1#/$defs/acceptance_batch_witness"
+                    }
+                  ]
+                },
+                "crossOperationWitness": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "aegis.contract_components.v1#/$defs/acceptance_cross_operation_witness"
+                    }
+                  ]
+                },
+                "keyComparisonWitness": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "aegis.contract_components.v1#/$defs/acceptance_key_comparison_witness"
+                    }
+                  ]
+                },
                 "decisionBinding": {
                   "oneOf": [
                     {
@@ -392,6 +429,16 @@
         },
         "dimensions": {
           "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_determinismReview_properties_dimensions"
+        },
+        "arithmetic": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/arithmetic_policy_opinion"
+            }
+          ]
         }
       }
     },
@@ -690,6 +737,47 @@
                         "ISO8601_UTC",
                         null
                       ]
+                    },
+                    "temporalRole": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "COMPUTATION_OR_COMPARISON",
+                        "PROJECTION_ONLY",
+                        null
+                      ]
+                    },
+                    "usedInLookup": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "usedInDeduplication": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "usedInPartition": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "allowedValues": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "uniqueItems": true
                     },
                     "isCounter": {
                       "type": "boolean"

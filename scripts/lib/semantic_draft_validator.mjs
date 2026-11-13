@@ -3,6 +3,12 @@ import { assertUniqueIds } from './semantic_authority.mjs';
 import { assertIntentEvidence } from './intent_evidence.mjs';
 import { validateDecisionsWitness } from './semantic_closure.mjs';
 import {
+  collectSymbolicProvenanceIssues,
+  computeDeterminismReviewStatus,
+  findIntegerArithmeticCompileError,
+  findTemporalOrContextFloorError,
+} from './closure/v7_rules.mjs';
+import {
   compileCounterexampleWitness,
 } from './semantic_authority.mjs';
 
@@ -394,11 +400,10 @@ function validateDeterminism(draft, context) {
       }
     }
   }
-  const expectedStatus = draft.determinismReview.dimensions.length === 0
-    ? 'NOT_APPLICABLE'
-    : draft.determinismReview.dimensions.some(({ status }) => (
-      status === 'DECISION_REQUIRED' || status === 'GAP_FOUND'
-    )) ? 'GAPS_FOUND' : 'SEMANTICALLY_CLOSED';
+  const expectedStatus = computeDeterminismReviewStatus(draft.determinismReview.dimensions, {
+    arithmetic: draft.determinismReview.arithmetic ?? null,
+    architectureContexts: draft.architectureContexts ?? [],
+  });
   if (draft.determinismReview.status !== expectedStatus) {
     throw new Error('determinism_review_status_mismatch');
   }
@@ -729,4 +734,15 @@ export function assertSemanticDraft(draft, policy, {
   validateDeterminismCoverage(draft);
   validateFragmentCoverage(draft, context);
   validateReviews(draft, context);
+  const temporalOrContextError = findTemporalOrContextFloorError(draft);
+  if (temporalOrContextError) throw new Error(temporalOrContextError);
+  const arithmeticError = findIntegerArithmeticCompileError(draft, knownResolved);
+  if (arithmeticError) throw new Error(arithmeticError);
+  const symbolicIssues = collectSymbolicProvenanceIssues({
+    stateModel: draft.stateModel,
+    boundaryRules: draft.boundaryRules,
+  });
+  if (symbolicIssues.length > 0) {
+    throw new Error(`unauthorized_symbolic_comparison:${symbolicIssues[0].slotId}`);
+  }
 }

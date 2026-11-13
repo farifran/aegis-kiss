@@ -397,7 +397,7 @@ function renderStateModelSection(specification) {
   return lines;
 }
 
-function renderInvariantsAndReviews(specification, hasStateModel) {
+function renderInvariantsAndReviews(specification, hasStateModel, governed) {
   const invSectionNum = hasStateModel ? '7' : '6';
   const riskSectionNum = hasStateModel ? '8' : '7';
   const advSectionNum = hasStateModel ? '9' : '8';
@@ -429,6 +429,16 @@ function renderInvariantsAndReviews(specification, hasStateModel) {
     lines.push(`  - Resposta incorporada: ${finding.response}`);
     lines.push(`  - Afeta: ${finding.targetIds.join(', ')}.`);
     lines.push(`  - Base: ${renderBasis(finding.basis)}`);
+  }
+  const semanticReviews = specification.closureCertificate?.closureAudit?.items
+    ?.filter(({ classification }) => classification === 'SEMANTIC_REVIEW_REQUIRED') ?? [];
+  if (semanticReviews.length > 0) {
+    lines.push('', governed
+      ? '### Revisões semânticas reconhecidas na aprovação'
+      : '### Revisões semânticas pendentes — leia antes de aprovar');
+    for (const item of semanticReviews) {
+      lines.push(`- **${item.itemId} — ${item.category}:** ${item.summary}`);
+    }
   }
   return lines;
 }
@@ -550,7 +560,7 @@ export function renderSemanticContractMarkdown(contract, {
     ...renderGovernanceAndComplexity(contract, { specification, rules }),
     ...renderRequirementsAndDeterminism(specification, selections),
     ...(hasStateModel ? renderStateModelSection(specification) : []),
-    ...renderInvariantsAndReviews(specification, hasStateModel),
+    ...renderInvariantsAndReviews(specification, hasStateModel, governed),
     ...renderDecisionsAndResolutions(contract, { specification, governed, selections, decSectionNum }),
   ];
 

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { collectSymbolicProvenanceIssues } from './v7_rules.mjs';
 
 /**
  * Validador Mecânico de Provenance Obrigatório (validateProvenanceEnforcement).
@@ -16,12 +17,13 @@ export function validateProvenanceEnforcement({
   requirements = [],
   invariants = [],
   decisions = [],
+  boundaryRules = [],
 } = {}) {
   void requirements;
   void invariants;
   void decisions;
-  const issues = [];
-  if (!stateModel) return { valid: true, issues: [] };
+  const issues = collectSymbolicProvenanceIssues({ stateModel, boundaryRules });
+  if (!stateModel) return { valid: issues.length === 0, issues };
 
   const hasProvenanceContext = literalFacts.length > 0 || fragments.length > 0 || (
     stateModel.entities?.some((e) => (

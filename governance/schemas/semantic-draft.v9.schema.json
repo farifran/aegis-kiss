@@ -368,6 +368,16 @@
         },
         "dimensions": {
           "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_determinismReview_properties_dimensions"
+        },
+        "arithmetic": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "aegis.contract_components.v1#/$defs/arithmetic_policy_draft"
+            }
+          ]
         }
       }
     },
@@ -673,6 +683,47 @@
                         null
                       ]
                     },
+                    "temporalRole": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "COMPUTATION_OR_COMPARISON",
+                        "PROJECTION_ONLY",
+                        null
+                      ]
+                    },
+                    "usedInLookup": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "usedInDeduplication": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "usedInPartition": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "allowedValues": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "uniqueItems": true
+                    },
                     "isCounter": {
                       "type": "boolean"
                     },
@@ -938,6 +989,80 @@
               }
             }
           }
+        },
+        "closureAudit": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "counts",
+                "items"
+              ],
+              "properties": {
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "MECHANICALLY_VERIFIED",
+                    "AWAITING_HUMAN_DECISION",
+                    "SEMANTIC_REVIEW_REQUIRED"
+                  ],
+                  "properties": {
+                    "MECHANICALLY_VERIFIED": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "AWAITING_HUMAN_DECISION": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "SEMANTIC_REVIEW_REQUIRED": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "itemId",
+                      "classification",
+                      "category",
+                      "summary"
+                    ],
+                    "properties": {
+                      "itemId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "classification": {
+                        "enum": [
+                          "MECHANICALLY_VERIFIED",
+                          "AWAITING_HUMAN_DECISION",
+                          "SEMANTIC_REVIEW_REQUIRED"
+                        ]
+                      },
+                      "category": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "summary": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     }

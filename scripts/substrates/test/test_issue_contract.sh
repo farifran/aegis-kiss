@@ -896,6 +896,9 @@ make_opinion yes "${automatic_evidence_digest}" | jq '
   del(.schema, .sourceEvidenceDigest)
   | .policyAssessments |= map(del(.amendmentIndex))
   | .determinismReview.coverage |= map(del(.disposition))
+  | .determinismReview.arithmetic = null
+  | .invariants |= map(.falsificationSpec = null)
+  | .requirements |= map(.acceptanceCases |= map(.branchRef = null | .batchWitness = null | .crossOperationWitness = null | .keyComparisonWitness = null))
   | .stateModel = null
   | .decisions |= map(.semanticKey = null | .answers |= map(.preparedEffect = null))
 ' > "${WORK_DIR}/fake-codex-opinion.json"

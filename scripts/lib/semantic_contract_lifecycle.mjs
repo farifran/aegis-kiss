@@ -5,7 +5,11 @@ import {
   effectiveDeterminismStatus,
   assertRevisionApplied,
 } from './semantic_approval.mjs';
-import { applyPreparedAnswers } from './prepared_effects.mjs';
+import {
+  applyPreparedAnswers,
+  assertPreparedEffectsDisjoint,
+  cartesianProduct,
+} from './prepared_effects.mjs';
 import { assertSemanticDraft } from './semantic_draft_validator.mjs';
 import { buildSemanticRequest } from './semantic_request.mjs';
 
@@ -45,25 +49,43 @@ export function compileSemanticContract({
     humanResolutions,
     workspaceEvidence: effectiveSemanticRequest.workspace.sourceEvidence,
   };
+  const workspaceSkeleton = workspaceObservation?.workspaceSkeleton
+    ?? preflight.discovery?.workspaceSkeleton
+    ?? effectiveSemanticRequest.workspace?.workspaceSkeleton
+    ?? null;
   assertSemanticDraft(draft, policy, validationContext);
-  // Preview every prepared branch before exposing it to a human. This creates no consent.
-  for (const decision of draft.decisions) {
-    for (const answer of decision.answers) {
-      if (answer.preparedEffect == null) continue;
-      const choices = [{ questionId: decision.questionId, answerId: answer.id, contractEffect: answer.contractEffect }];
-      try {
-        const preview = applyPreparedAnswers(draft, choices, humanResolutions, effectiveSemanticRequest.intentEvidence, effectiveSemanticRequest.workspace?.sourceEvidence);
-        assertRevisionApplied(preview, { answers: choices }, draft);
-        assertSemanticDraft(preview, policy, {
-          ...validationContext,
-          resolvedDecisionIds: [...validationContext.resolvedDecisionIds, decision.questionId],
-        });
-      } catch (error) {
-        if (error instanceof Error) {
-          error.message = `${error.message}:preparedEffect(${decision.questionId}/${answer.id})`;
-        }
-        throw error;
+  assertPreparedEffectsDisjoint(draft.decisions);
+  // Preview every prepared combination (full Cartesian product) without mutating disk.
+  const preparedBranchesPerDecision = draft.decisions
+    .map((decision) => decision.answers
+      .filter((answer) => answer.preparedEffect != null)
+      .map((answer) => ({
+        questionId: decision.questionId,
+        answerId: answer.id,
+        contractEffect: answer.contractEffect,
+      })))
+    .filter((branches) => branches.length > 0);
+  for (const choices of cartesianProduct(preparedBranchesPerDecision)) {
+    try {
+      const preview = applyPreparedAnswers(
+        draft,
+        choices,
+        humanResolutions,
+        effectiveSemanticRequest.intentEvidence,
+        effectiveSemanticRequest.workspace?.sourceEvidence,
+        workspaceSkeleton,
+      );
+      assertRevisionApplied(preview, { answers: choices }, draft);
+      assertSemanticDraft(preview, policy, {
+        ...validationContext,
+        resolvedDecisionIds: [...validationContext.resolvedDecisionIds, ...choices.map((c) => c.questionId)],
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        const label = choices.map((c) => `${c.questionId}/${c.answerId}`).join(',');
+        error.message = `${error.message}:preparedEffect(${label})`;
       }
+      throw error;
     }
   }
   if (draft.sourceContextDigest !== effectiveSemanticRequest.contextDigest) {
@@ -88,13 +110,17 @@ export function compileSemanticContract({
       {
         intentEvidence: effectiveSemanticRequest.intentEvidence,
         workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
+        workspaceSkeleton,
       },
     ),
     humanResolutions,
     approval: null,
   };
   assertSchema('aegis.issue_contract.v14', contract);
-  assertContractApprovalEvidence(contract);
+  assertContractApprovalEvidence(contract, {
+    workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
+    workspaceSkeleton,
+  });
   return contract;
 }
 
@@ -137,6 +163,10 @@ export function assertContractDocument({
   if (contract.sourceSnapshotDigest !== preflight.discovery.sourceSnapshotDigest) throw new Error('contract_snapshot_mismatch');
   if (contract.policyDigest !== policyDigest) throw new Error('contract_policy_mismatch');
   if (contract.constitutionDigest !== constitutionDigest) throw new Error('contract_constitution_mismatch');
+  const workspaceSkeleton = workspaceObservation?.workspaceSkeleton
+    ?? preflight.discovery?.workspaceSkeleton
+    ?? semanticRequest.workspace?.workspaceSkeleton
+    ?? null;
   if (contract.effectiveDeterminismStatus
     !== effectiveDeterminismStatus(
       contract.specification,
@@ -144,6 +174,8 @@ export function assertContractDocument({
       {
         intentEvidence: contract.intentEvidence,
         workspaceEvidence: semanticRequest.workspace?.sourceEvidence ?? [],
+        workspaceSkeleton,
+        semanticReviewAcknowledged: contract.approval?.attestation === 'CONTRACT_REVIEWED_AND_APPROVED',
       },
     )) {
     throw new Error('contract_effective_determinism_status_mismatch');
@@ -156,5 +188,8 @@ export function assertContractDocument({
     !== canonicalDigest(semanticRequest.intentEvidence)) {
     throw new Error('contract_intent_evidence_mismatch');
   }
-  assertContractApprovalEvidence(contract);
+  assertContractApprovalEvidence(contract, {
+    workspaceEvidence: semanticRequest.workspace?.sourceEvidence ?? [],
+    workspaceSkeleton,
+  });
 }

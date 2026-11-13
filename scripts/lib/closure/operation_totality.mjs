@@ -1,3 +1,5 @@
+import { LOGICAL_EXTERNAL_ACTIONS, isCompletePayloadDescriptor } from './v7_rules.mjs';
+
 /**
  * Utilitário relacional genérico de integridade de referências.
  * Valida se referências de uma coleção existem no conjunto-alvo de chaves autorizadas.
@@ -20,6 +22,128 @@ export function checkReferenceIntegrity({
   }
 }
 
+function branchMatchesOutcome(branch, outcome) {
+  if (!branch || typeof branch.branchId !== 'string') return false;
+  const bUp = branch.branchId.toUpperCase();
+  const oUp = String(outcome).toUpperCase();
+  return bUp === oUp
+    || bUp.endsWith(`_${oUp}`)
+    || bUp.endsWith(`:${oUp}`)
+    || bUp.includes(oUp)
+    || branch.externalOutcome === outcome;
+}
+
+function validateLogicalExternalEffect({
+  eff,
+  op,
+  slotPrefix,
+  workspaceSkeleton,
+  unknowns,
+  decisions,
+  payloadSchemas,
+  issues,
+}) {
+  if (typeof eff.executionOrder !== 'string' || eff.executionOrder.trim().length === 0) {
+    issues.push({
+      slotId: `${slotPrefix}/executionOrder`,
+      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' não declara executionOrder explícito relativo ao estado local.`,
+    });
+  }
+  const possibleOutcomes = Array.isArray(eff.possibleOutcomes) ? eff.possibleOutcomes : null;
+  if (!possibleOutcomes || possibleOutcomes.length === 0 || new Set(possibleOutcomes).size !== possibleOutcomes.length) {
+    issues.push({
+      slotId: `${slotPrefix}/possibleOutcomes`,
+      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' deve declarar possibleOutcomes fechado e sem duplicatas.`,
+    });
+  } else {
+    const usedBranchIds = new Set();
+    for (const outcome of possibleOutcomes) {
+      const matched = (op.branches ?? []).find((b) => !usedBranchIds.has(b.branchId) && branchMatchesOutcome(b, outcome));
+      if (!matched) {
+        issues.push({
+          slotId: `${slotPrefix}/outcomeBranch/${outcome}`,
+          kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+          reason: `O resultado '${outcome}' de '${eff.action}' na operação '${op.name}' não possui ramo 1-para-1 correspondente em branches.`,
+        });
+      } else {
+        usedBranchIds.add(matched.branchId);
+      }
+    }
+  }
+
+  const reqPayload = eff.requestPayload;
+  const reqValid = Array.isArray(reqPayload)
+    ? reqPayload.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
+    : (reqPayload && typeof reqPayload === 'object' && typeof reqPayload.schemaRef === 'string'
+      ? isCompletePayloadDescriptor(reqPayload, payloadSchemas)
+      : false);
+  if (!reqValid) {
+    issues.push({
+      slotId: `${slotPrefix}/requestPayload`,
+      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' possui requestPayload ausente ou incompleto (exige { field, type, required, nullable, constraints } ou schemaRef).`,
+    });
+  }
+
+  const rawOut = eff.outcomePayloads;
+  const outcomeMap = new Map();
+  let outStructValid = true;
+  if (Array.isArray(rawOut)) {
+    for (const entry of rawOut) {
+      if (!entry || typeof entry.outcome !== 'string' || !entry.outcome.trim() || outcomeMap.has(entry.outcome)) {
+        outStructValid = false;
+        break;
+      }
+      const entryOk = typeof entry.schemaRef === 'string' && entry.schemaRef.trim().length > 0
+        ? isCompletePayloadDescriptor({ schemaRef: entry.schemaRef }, payloadSchemas)
+        : (Array.isArray(entry.fields) && entry.fields.every((d) => isCompletePayloadDescriptor(d, payloadSchemas)));
+      if (!entryOk) {
+        outStructValid = false;
+        break;
+      }
+      outcomeMap.set(entry.outcome, entry);
+    }
+  } else if (rawOut && typeof rawOut === 'object') {
+    for (const [outcome, val] of Object.entries(rawOut)) {
+      const entryOk = Array.isArray(val)
+        ? val.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
+        : isCompletePayloadDescriptor(val, payloadSchemas);
+      if (!entryOk) {
+        outStructValid = false;
+        break;
+      }
+      outcomeMap.set(outcome, val);
+    }
+  } else {
+    outStructValid = false;
+  }
+
+  if (!outStructValid
+    || (possibleOutcomes && (!possibleOutcomes.every((o) => outcomeMap.has(o)) || outcomeMap.size !== possibleOutcomes.length))) {
+    issues.push({
+      slotId: `${slotPrefix}/outcomePayloads`,
+      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' exige outcomePayloads completo mapeado 1-para-1 a possibleOutcomes.`,
+    });
+  }
+
+  if (workspaceSkeleton && (Array.isArray(workspaceSkeleton.files) || Array.isArray(workspaceSkeleton.symbols))) {
+    const srcFiles = (workspaceSkeleton.files ?? []).filter((f) => typeof f === 'string' && f.startsWith('src/'));
+    const srcSymbols = (workspaceSkeleton.symbols ?? []).filter((s) => typeof s.path === 'string' && s.path.startsWith('src/'));
+    const hasSrcAdapter = srcFiles.some((f) => (eff.targetPath && f === eff.targetPath) || (eff.targetSurface && f.includes(eff.targetSurface)))
+      || srcSymbols.some((s) => s.name === op.name || (eff.targetPath && s.path === eff.targetPath) || (eff.targetSurface && s.path.includes(eff.targetSurface)));
+    if (!hasSrcAdapter && (unknowns?.length ?? 0) === 0 && (decisions?.length ?? 0) === 0) {
+      issues.push({
+        slotId: `${slotPrefix}/missingSrcAdapter`,
+        kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+        reason: `Nenhum adaptador correspondente em src/ foi encontrado em workspaceSkeleton para '${eff.action}' (${op.name}), exigindo registro explícito em unknowns ou decisão de fronteira.`,
+      });
+    }
+  }
+}
+
 /**
  * Validador Mecânico de Totalidade de Operações e Branches (validateOperationTotality).
  *
@@ -27,9 +151,16 @@ export function checkReferenceIntegrity({
  * 1. Cada guarda em guardPrecedence possui branch de rejeição correspondente (se branches definidos).
  * 2. Cada branch cobre todos os campos de entidade (via stateEffects explícito ou defaultPreservation: true).
  * 3. Existe ao menos um branch de execução bem-sucedida (não-rejeição).
+ * 4. REQ-0005: evaluatedInputs, additionalPropertiesPolicy (somente entradas OBJECT) e branchRef.
+ * 5. REQ-0003: externalEffects lógicos completos (executionOrder, possibleOutcomes, requestPayload, outcomePayloads).
  */
 export function validateOperationTotality({
   stateModel = null,
+  requirements = null,
+  unknowns = [],
+  decisions = [],
+  workspaceSkeleton = null,
+  payloadSchemas = null,
 } = {}) {
   const issues = [];
 
@@ -154,6 +285,85 @@ export function validateOperationTotality({
           slotId: `operation/${op.name}/parameter/${param.name}/domain`,
           kind: 'UNRESOLVED_FIELD_BOUNDS',
           reason: `O parâmetro '${param.name}' da operação '${op.name}' é do tipo ${param.type} mas não define limites nem domínio numérico fechado (bounds).`,
+        });
+      }
+    }
+
+    const params = op.parameters ?? [];
+    if (!Array.isArray(op.evaluatedInputs)) {
+      issues.push({
+        slotId: `operation/${op.name}/evaluatedInputs`,
+        kind: 'MISSING_EVALUATED_INPUTS',
+        reason: `A operação '${op.name}' deve declarar explicitamente evaluatedInputs (array com entradas avaliadas).`,
+      });
+    } else {
+      const evaluatedSet = new Set(op.evaluatedInputs);
+      for (const param of params) {
+        if (!evaluatedSet.has(param.name)) {
+          issues.push({
+            slotId: `operation/${op.name}/evaluatedInputs/${param.name}`,
+            kind: 'MISSING_EVALUATED_INPUTS',
+            reason: `O parâmetro '${param.name}' da operação '${op.name}' não consta em evaluatedInputs.`,
+          });
+        }
+      }
+    }
+
+    const hasObjectParam = params.some((p) => /^(?:OBJECT|RECORD|STRUCT|MAP)\b/i.test(String(p.type ?? '')));
+    if (hasObjectParam && op.additionalPropertiesPolicy !== 'REJECT_UNKNOWN' && op.additionalPropertiesPolicy !== 'IGNORE_UNKNOWN') {
+      issues.push({
+        slotId: `operation/${op.name}/additionalPropertiesPolicy`,
+        kind: 'MISSING_ADDITIONAL_PROPERTIES_POLICY',
+        reason: `A operação '${op.name}' recebe parâmetro OBJECT e deve declarar additionalPropertiesPolicy ('REJECT_UNKNOWN' | 'IGNORE_UNKNOWN').`,
+      });
+    }
+
+    for (const branch of (op.branches ?? [])) {
+      for (const eff of (branch.externalEffects ?? [])) {
+        if (LOGICAL_EXTERNAL_ACTIONS.has(eff.action)) {
+          const target = eff.targetPath || eff.targetSurface || op.name;
+          validateLogicalExternalEffect({
+            eff,
+            op,
+            slotPrefix: `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}`,
+            workspaceSkeleton,
+            unknowns,
+            decisions,
+            payloadSchemas,
+            issues,
+          });
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(requirements) && requirements.length > 0) {
+    const allAcceptanceCases = requirements.flatMap((r) => r.acceptanceCases ?? []);
+    const allBranchKeys = new Set();
+    for (const op of stateModel.operations) {
+      for (const branch of (op.branches ?? [])) {
+        const directKey = branch.branchId;
+        const qualifiedKey = `${op.name}.${branch.branchId}`;
+        allBranchKeys.add(directKey);
+        allBranchKeys.add(qualifiedKey);
+        const hasCaseRef = allAcceptanceCases.some((ac) => (
+          ac.branchRef === directKey || ac.branchRef === qualifiedKey
+        ));
+        if (!hasCaseRef) {
+          issues.push({
+            slotId: `operation/${op.name}/branch/${branch.branchId}/branchRef`,
+            kind: 'MISSING_BRANCH_ACCEPTANCE_REF',
+            reason: `O branch '${branch.branchId}' da operação '${op.name}' não possui acceptanceCase ligado via branchRef.`,
+          });
+        }
+      }
+    }
+    for (const ac of allAcceptanceCases) {
+      if (ac.branchRef != null && !allBranchKeys.has(ac.branchRef)) {
+        issues.push({
+          slotId: `acceptanceCase/${ac.id ?? 'unnamed'}/branchRef`,
+          kind: 'MISSING_BRANCH_ACCEPTANCE_REF',
+          reason: `O acceptanceCase '${ac.id ?? ''}' referencia branchRef inexistente '${ac.branchRef}'.`,
         });
       }
     }
@@ -454,6 +664,7 @@ export function validateOpenTermDependencies({
     for (const op of operations) {
       for (const branch of (op.branches ?? [])) {
         for (const eff of (branch.externalEffects ?? [])) {
+          if (LOGICAL_EXTERNAL_ACTIONS.has(eff.action)) continue;
           const target = eff.targetPath || eff.targetSurface || op.name;
           const action = eff.action || 'UNKNOWN_ACTION';
           const slotPrefix = `operations/${op.name}/branches/${branch.branchId}/externalEffects/${target}`;

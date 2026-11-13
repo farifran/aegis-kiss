@@ -317,6 +317,61 @@ const diagnostics = new Map([
     message: 'O comando --issue aceita no máximo um identificador ou caminho de issue.',
     remediation: 'Execute ./aegis --issue ou ./aegis --issue <id|arquivo>.',
   }],
+  ['MISSING_TEMPORAL_ROLE', {
+    message: 'Campo ou parâmetro TIMESTAMP / com unidade temporal omitiu temporalRole obrigatório.',
+    remediation: 'Declare temporalRole como "COMPUTATION_OR_COMPARISON" ou "PROJECTION_ONLY".',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_REQUIRED_ARCHITECTURE_CONTEXT', {
+    message: 'O rascunho omitiu uma tag obrigatória em architectureContexts exigida pelo modelo de estado/operação.',
+    remediation: 'Inclua o contexto indicado em "detail" (ex.: time-dependent, stateful-operation ou external-effect) em architectureContexts.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
+  ['SHARED_PREPARED_EFFECT_TARGET', {
+    message: 'Duas decisões humanas distintas compartilham o mesmo índice-alvo em preparedEffect.',
+    remediation: 'Torne os índices-alvo em todas as coleções de effectCollections (inclusive dimensions) estritamente disjuntos entre decisões.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['INVALID_OR_MISSING_QUOTIENT_OR_ZERO_DIVISOR_POLICY', {
+    message: 'A política de divisão inteira (quotientPolicy fechado ou zeroDivisorPolicy=REJECT) está ausente ou inválida.',
+    remediation: 'Declare zeroDivisorPolicy: "REJECT", remainderPolicy fechado e quotientPolicy inteiro ("TRUNC_ZERO" | "FLOOR" | "CEIL" | "EXACT_DIVISIBLE_OR_REJECT") sem DECIMAL_BOUNDED.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_NUMERIC_REPRESENTATION', {
+    message: 'Contexto integer-arithmetic requer numericRepresentation explícito em determinismReview.arithmetic.',
+    remediation: 'Declare numericRepresentation como "BIGINT_EXACT" ou "SAFE_INTEGER_BOUNDED" (ou abra decisão pendente DECISION_REQUIRED).',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INVALID_NUMERIC_REPRESENTATION', {
+    message: 'O valor de numericRepresentation em determinismReview.arithmetic é inválido.',
+    remediation: 'Use "BIGINT_EXACT" ou "SAFE_INTEGER_BOUNDED".',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_OR_UNBOUNDED_SAFE_INTEGER_BOUNDS', {
+    message: 'SAFE_INTEGER_BOUNDED exige limites finitos declarados dentro de ±Number.MAX_SAFE_INTEGER.',
+    remediation: 'Declare operandBoundsDeclared: true com operandMin/operandMax finitos em ±Number.MAX_SAFE_INTEGER ou boundaryRules limitadas.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_ARITHMETIC_ORDER_POLICY', {
+    message: 'Aritmética composta ou multiplicação/rateio exige orderPolicy explícito.',
+    remediation: 'Declare determinismReview.arithmetic.orderPolicy.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['MISSING_REMAINDER_POLICY', {
+    message: 'Operação de divisão, módulo ou rateio exige remainderPolicy explícito em enum fechado.',
+    remediation: 'Declare remainderPolicy ("DISCARD" | "CARRY" | "ALLOCATE_FIRST_ITEM" | "ALLOCATE_LAST_ITEM" | "REJECT_NONZERO_REMAINDER").',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['INVALID_REMAINDER_POLICY', {
+    message: 'O valor de remainderPolicy não pertence ao enum fechado autorizado.',
+    remediation: 'Use "DISCARD", "CARRY", "ALLOCATE_FIRST_ITEM", "ALLOCATE_LAST_ITEM" ou "REJECT_NONZERO_REMAINDER".',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['UNAUTHORIZED_SYMBOLIC_COMPARISON', {
+    message: 'Comparação simbólica entre campos citada apenas com ARCHITECTURE_POLICY sem respaldo de intenção ou evidência.',
+    remediation: 'Informe provenance/basis com USER_INTENT, WORKSPACE_EVIDENCE verificada ou USER_DECISION.',
+    ruleId: 'CONST-EVIDENCE',
+  }],
 ]);
 
 function diagnosticFamily(reason) {

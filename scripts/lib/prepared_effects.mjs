@@ -1,4 +1,5 @@
 import { canonicalDigest } from './canonical_json.mjs';
+import { computeDeterminismReviewStatus } from './closure/v7_rules.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 
 export const effectCollections = ['requirements', 'invariants', 'risks', 'boundaryRules', 'dimensions'];
@@ -98,7 +99,50 @@ function assertPreparedEffectScope(specification, decision, effect) {
   }
 }
 
-export function applyPreparedAnswers(specification, answers, humanResolutions, intentEvidence, workspaceEvidence = []) {
+export function cartesianProduct(lists) {
+  if (lists.length === 0) return [];
+  let acc = [[]];
+  for (const list of lists) {
+    const next = [];
+    for (const prefix of acc) {
+      for (const item of list) {
+        next.push([...prefix, item]);
+      }
+    }
+    acc = next;
+  }
+  return acc;
+}
+
+export function assertPreparedEffectsDisjoint(decisions = []) {
+  const owners = new Map();
+  for (const decision of decisions) {
+    const seenInDecision = new Set();
+    for (const answer of (decision.answers ?? [])) {
+      if (!answer.preparedEffect) continue;
+      for (const key of effectCollections) {
+        for (const entry of (answer.preparedEffect[key] ?? [])) {
+          const target = `${key}:${entry.index}`;
+          const priorOwner = owners.get(target);
+          if (priorOwner && priorOwner !== decision.questionId) {
+            throw new Error(`shared_prepared_effect_target:${key}:${entry.index}:${priorOwner}:${decision.questionId}`);
+          }
+          seenInDecision.add(target);
+        }
+      }
+    }
+    for (const target of seenInDecision) owners.set(target, decision.questionId);
+  }
+}
+
+export function applyPreparedAnswers(
+  specification,
+  answers,
+  humanResolutions,
+  intentEvidence,
+  workspaceEvidence = [],
+  workspaceSkeleton = null,
+) {
   if (!hasPreparedAnswers(specification, answers)) throw new Error('prepared_effect_unavailable');
   const draft = globalThis.structuredClone(specification);
   const touched = new Map();
@@ -152,11 +196,18 @@ export function applyPreparedAnswers(specification, answers, humanResolutions, i
     }
   }
   const dimensions = draft.determinismReview.dimensions;
-  draft.determinismReview.status = dimensions.length === 0 ? 'NOT_APPLICABLE'
-    : dimensions.some(({ status }) => ['DECISION_REQUIRED', 'GAP_FOUND'].includes(status))
-      ? 'GAPS_FOUND' : 'SEMANTICALLY_CLOSED';
+  draft.determinismReview.status = computeDeterminismReviewStatus(dimensions, {
+    arithmetic: draft.determinismReview.arithmetic ?? null,
+    architectureContexts: draft.architectureContexts ?? [],
+  });
   draft.closureCertificate = generateClosureCertificate({
-    specification: { ...draft, intentEvidence, workspaceEvidence }, humanResolutions,
+    specification: {
+      ...draft,
+      intentEvidence,
+      workspaceEvidence,
+      workspaceSkeleton: workspaceSkeleton ?? specification.workspaceSkeleton ?? null,
+    },
+    humanResolutions,
   });
   return draft;
 }
