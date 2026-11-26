@@ -4,9 +4,10 @@ import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { compareCodeUnits, sha256 } from './canonical_json.mjs';
 import { isProductTestPath, splitRootRelativePath } from './workspace_observer.mjs';
-export const sourceEvidenceByteLimit = 98_304;
-const sourceEvidenceFileByteLimit = 8_192;
-const sourceEvidenceExplicitFileByteLimit = 24_576;
+export const sourceEvidenceByteLimit = 28_672;
+const sourceEvidenceFileByteLimit = 4_096;
+const sourceEvidenceExplicitFileByteLimit = 10_240;
+const maxLargeWorkspaceFiles = 6;
 
 const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|py|sh)$/iu;
 
@@ -674,10 +675,9 @@ export function buildSourceEvidence(
 
     const injectSelection = (p) => {
       if (filesByPath.has(p) && !selectionsByPath.has(p)) {
-        const symbolSpans = (discovery.workspaceSkeleton?.symbols ?? [])
-          .filter((s) => s.path === p && typeof s.startLine === 'number')
-          .map((s) => ({ startLine: s.startLine, endLine: s.endLine ?? s.startLine }));
-        selectionsByPath.set(p, { path: p, lines: symbolSpans });
+        // Inicia com lines vazias para que os símbolos realmente ranqueados por matchSkeletonSymbols
+        // assumam prioridade como âncoras AST (sem serem ofuscados pelos primeiros símbolos do arquivo).
+        selectionsByPath.set(p, { path: p, lines: [] });
       }
     };
 
@@ -760,14 +760,17 @@ export function buildSourceEvidence(
         if (!isTopForTargetDir) {
           if (underBudgetPressure) {
             const dirTop = (dir && targetDirs.has(dir) && topScoreByDir.get(dir)) ? topScoreByDir.get(dir) : topScore;
-            const residualThreshold = dirTop >= 6.0 ? Math.max(3.0, dirTop * 0.4) : 1.0;
+            const residualThreshold = dirTop >= 6.0 ? Math.max(3.5, dirTop * 0.45) : 2.5;
             if (score < residualThreshold) continue;
-          } else if (score < 2.0) {
+          } else if (score < 2.5) {
             continue;
           }
         }
 
         if (!selectionsByPath.has(path)) {
+          if (selectionsByPath.size >= maxLargeWorkspaceFiles && !explicitCandidateSet.has(path)) {
+            continue;
+          }
           selectionsByPath.set(path, { path, lines: [] });
         }
         selectionsByPath.get(path).lines.push({ startLine: line, endLine: endLine ?? line });
@@ -796,6 +799,7 @@ export function buildSourceEvidence(
 
       const addedPerDir = new Map();
       for (const file of candidateFiles) {
+        if (selectionsByPath.size >= maxLargeWorkspaceFiles) break;
         if (!/\.(?:ts|tsx|js|jsx|mjs|cjs|py|sh)$/u.test(file.path)) continue;
         if (selectionsByPath.has(file.path)) continue;
         const dir = dirOfPath(file.path);
@@ -806,15 +810,18 @@ export function buildSourceEvidence(
         // Se o diretório já tem hits AST relevantes, não despeja todos os demais arquivos sem ranqueamento
         if (!inDeepPrefix && dir && alreadyHitDirs.has(dir)) continue;
         const count = addedPerDir.get(dir) ?? 0;
-        if (!inDeepPrefix && count >= 4) continue;
+        if (!inDeepPrefix && count >= 3) continue;
         addedPerDir.set(dir, count + 1);
         selectionsByPath.set(file.path, { path: file.path, lines: [] });
       }
     }
 
-    for (const entrypoint of rootOrTargetEntrypoints) {
-      if (!selectionsByPath.has(entrypoint)) {
-        selectionsByPath.set(entrypoint, { path: entrypoint, lines: [] });
+    if (selectionsByPath.size < 3) {
+      for (const entrypoint of rootOrTargetEntrypoints) {
+        if (selectionsByPath.size >= maxLargeWorkspaceFiles) break;
+        if (!selectionsByPath.has(entrypoint)) {
+          selectionsByPath.set(entrypoint, { path: entrypoint, lines: [] });
+        }
       }
     }
     if (selectionsByPath.size === 0 && textFiles[0] !== undefined) {

@@ -399,7 +399,10 @@ export function renderBriefMarkdown(brief) {
   if (archRules.length > 0) {
     lines.push('## Arquitetura do projeto (`ARCHITECTURE.md` — `hard`: obrigatório/expor conflito · `default`: deliberar exceção)');
     for (const rule of archRules) {
-      lines.push(`- \`${rule.id}\` [${rule.level}]: ${rule.statement}`);
+      const forbidTag = Array.isArray(rule.forbid) && rule.forbid.length > 0
+        ? ` [forbid: ${rule.forbid.join(', ')}]`
+        : '';
+      lines.push(`- \`${rule.id}\` [${rule.level}]${forbidTag}: ${rule.statement}`);
     }
     lines.push('');
   }

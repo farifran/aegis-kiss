@@ -119,8 +119,9 @@ function createFixtureRepo() {
   const rootArchRules = loadArchitectureRules(rootDir);
   assert.ok(rootArchRules.some((r) => r.id === 'PRODUCT-BOUNDARY' && r.level === 'hard'));
   assert.ok(rootArchRules.some((r) => r.id === 'LOCAL-FIRST-E2E' && r.level === 'hard'));
-  assert.ok(rootArchRules.some((r) => r.id === 'NO-UNSAFE-HTML' && r.level === 'hard'));
-  assert.ok(rootArchRules.some((r) => r.id === 'DETERMINISTIC-TIME' && r.level === 'hard'));
+  const noHtmlRule = rootArchRules.find((r) => r.id === 'NO-UNSAFE-HTML' && r.level === 'hard');
+  assert.ok(noHtmlRule && noHtmlRule.forbid.includes('innerHTML'));
+  assert.ok(rootArchRules.some((r) => r.id === 'DETERMINISTIC-TIME' && r.level === 'hard' && r.forbid.includes('Date.now()')));
   process.stdout.write('  PASS: Root repo hygiene (versionable lexicon.json/project.json and Askesis ARCHITECTURE.md) verified\n');
 }
 
@@ -292,7 +293,7 @@ try {
         '# Arquitetura do Produto',
         '## Regras',
         '- `NO-FRAMEWORK` [hard]: Servidor HTTP nativo (`node:http`), sem Express ou Fastify.',
-        '- `SQLITE-ONLY` [hard]: Persistência exclusivamente em SQLite local.',
+        '- `NO-UNSAFE-HTML` [hard] [forbid: innerHTML, insertAdjacentHTML]: Proibido injetar HTML cru.',
         '- `BITMASK-FLAGS` [default]: Flags de estado codificadas em bitmask de 32 bits.',
         '- `DETERMINISTIC-TIME` [hard]: Tempo por parâmetro explícito; proibido `Date.now()`/`new Date()`.',
       ].join('\n'));
@@ -304,7 +305,36 @@ try {
         workspaceObservation: obs,
       });
       const ruleIds = brief.architectureRules.map((r) => r.id);
-      assert.deepEqual(ruleIds, ['NO-FRAMEWORK', 'SQLITE-ONLY', 'BITMASK-FLAGS', 'DETERMINISTIC-TIME']);
+      assert.deepEqual(ruleIds, ['NO-FRAMEWORK', 'NO-UNSAFE-HTML', 'BITMASK-FLAGS', 'DETERMINISTIC-TIME']);
+
+      const htmlBad = resolve(archTemp, 'bad-html.md');
+      writeFileSync(htmlBad, [
+        '# Contrato',
+        '## Escopo',
+        '- Atribuir `el.innerHTML = text` para evitar criar nós DOM.',
+        '## Arquivos',
+        '- `src/view.ts` [novo]',
+        '## Casos de prova',
+        '- Dado: a\n- Quando: b\n- Então: c',
+        '- Dado: d\n- Quando: e\n- Então: f',
+      ].join('\n'));
+      const badHtmlRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: htmlBad });
+      assert.equal(badHtmlRes.ok, false);
+      assert.ok(badHtmlRes.errors.some((e) => e.includes('NO-UNSAFE-HTML') && e.includes('innerHTML')));
+
+      const htmlGood = resolve(archTemp, 'good-html.md');
+      writeFileSync(htmlGood, [
+        '# Contrato',
+        '## Escopo',
+        '- Rejeitar `innerHTML` e renderizar texto seguro via `replaceChildren`; fora do escopo: `insertAdjacentHTML`.',
+        '## Arquivos',
+        '- `src/view.ts` [novo]',
+        '## Casos de prova',
+        '- Dado: a\n- Quando: b\n- Então: c',
+        '- Dado: d\n- Quando: e\n- Então: f',
+      ].join('\n'));
+      const goodHtmlRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: htmlGood });
+      assert.equal(goodHtmlRes.ok, true, `Expected negated innerHTML contract to pass, got: ${goodHtmlRes.errors.join('; ')}`);
 
       const clockBad = resolve(archTemp, 'bad-clock.md');
       writeFileSync(clockBad, [
@@ -340,10 +370,13 @@ try {
       cpSync(resolve(rootDir, 'eslint.config.js'), resolve(archTemp, 'eslint.config.js'));
       symlinkSync(resolve(rootDir, 'node_modules'), resolve(archTemp, 'node_modules'), 'dir');
 
-      // Fora de git sem --skip-diff DEVE falhar fechado
+      // Fora de git sem --skip-diff DEVE falhar fechado com fail-fast (sem rodar typecheck/eslint/testes)
       const noGitCheck = runProductCheck({ repositoryRoot: archTemp, contractPath: resolve(archTemp, '.harness/runtime/contract.md'), skipDiff: false });
       assert.equal(noGitCheck.ok, false);
-      assert.ok(noGitCheck.results.find((r) => r.name === 'scope')?.details.some((d) => d.includes('Repositório git ausente')));
+      assert.equal(noGitCheck.results.length, 1, 'Expected fail-fast to stop right after scope failure');
+      assert.equal(noGitCheck.results[0].name, 'scope');
+      assert.ok(noGitCheck.warnings.some((w) => w.includes('fail-fast')));
+      assert.ok(noGitCheck.results[0].details.some((d) => d.includes('Repositório git ausente')));
 
       writeFileSync(resolve(archTemp, 'src/valid_map.ts'), 'export function countKeys(items: readonly string[]): number { const s = new Set(items); return s.size; }\n');
       writeFileSync(resolve(archTemp, 'src/clock.test.ts'), "import test from 'node:test';\ntest('clock ok in test', () => { const t = Date.now(); if (t < 0) throw new Error('x'); });\n");

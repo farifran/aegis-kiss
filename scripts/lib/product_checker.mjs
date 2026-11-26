@@ -412,6 +412,10 @@ export function runProductCheck({
           : `${scope.violations.length} violação(ões) de escopo/fronteira`,
         details: scope.violations,
       });
+      if (!scope.ok) {
+        warnings.push('Demais etapas (typecheck, lint, guardrails, testes) foram puladas por fail-fast devido à violação de fronteira/escopo.');
+        return { ok: false, results, warnings };
+      }
     }
   }
 
