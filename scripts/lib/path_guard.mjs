@@ -1,19 +1,59 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { extractAuthorizedPaths } from './contract_verifier.mjs';
 import { resolveSourceRoots } from './workspace_observer.mjs';
+
+function resolveNearestRealPath(targetPath) {
+  const abs = resolve(targetPath);
+  const missingSegments = [];
+  let current = abs;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) break;
+    missingSegments.unshift(current.slice(parent.endsWith(sep) ? parent.length : parent.length + 1));
+    current = parent;
+  }
+  const base = existsSync(current) ? realpathSync(current) : current;
+  return missingSegments.length > 0 ? resolve(base, ...missingSegments) : base;
+}
+
+export function hasSymlinkComponent(repositoryRoot, relPath) {
+  const parts = relPath.split('/').filter(Boolean);
+  let current = resolve(repositoryRoot);
+  for (const part of parts) {
+    current = resolve(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      break;
+    }
+  }
+  return false;
+}
 
 export function normalizeRepoRelativePath(repositoryRoot, rawPath) {
   if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
   const trimmed = rawPath.trim();
-  const abs = isAbsolute(trimmed) ? resolve(trimmed) : resolve(repositoryRoot, trimmed);
-  const rootPrefix = repositoryRoot.endsWith(sep) ? repositoryRoot : `${repositoryRoot}${sep}`;
-  if (abs !== repositoryRoot && !abs.startsWith(rootPrefix)) {
+  const realRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
+  const rootPrefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+
+  const rawAbs = isAbsolute(trimmed) ? resolve(trimmed) : resolve(repositoryRoot, trimmed);
+  try {
+    if (lstatSync(rawAbs).isSymbolicLink()) return null;
+  } catch {
+    // Arquivo novo ainda inexistente no disco: continua validação nos ancestrais.
+  }
+
+  const realAbs = resolveNearestRealPath(rawAbs);
+  if (realAbs !== realRoot && !realAbs.startsWith(rootPrefix)) {
     return null;
   }
-  const rel = relative(repositoryRoot, abs);
-  const portable = sep === '\\' ? rel.replaceAll('\\', '/') : rel;
-  return portable.replace(/^\.\//u, '');
+  const rel = relative(realRoot, realAbs);
+  const portable = (sep === '\\' ? rel.replaceAll('\\', '/') : rel).replace(/^\.\//u, '');
+  if (!portable || hasSymlinkComponent(realRoot, portable)) {
+    return null;
+  }
+  return portable;
 }
 
 export function isInsideProductRoots(relPath, sourceRoots) {
@@ -25,7 +65,7 @@ export function isProductTestPath(relPath) {
 }
 
 export function isPathCovered(relPath, authorizedPaths) {
-  if (authorizedPaths.length === 0) return true;
+  if (!Array.isArray(authorizedPaths) || authorizedPaths.length === 0) return false;
   if (isProductTestPath(relPath)) return true;
   return authorizedPaths.some((allowed) => (
     relPath === allowed
@@ -35,9 +75,9 @@ export function isPathCovered(relPath, authorizedPaths) {
 
 /**
  * Avalia se um caminho pode ser editado pela IA em modo produto (para hooks de IDE).
- * Permite apenas:
+ * Falha fechado (fail-closed): permite apenas
  *  - .harness/runtime/contract.md (para redigir o contrato)
- *  - arquivos dentro de src/ (ou AEGIS_SRC_DIRS) cobertos por --allow ou contract.md
+ *  - arquivos dentro de src/ (ou AEGIS_SRC_DIRS) explicitamente cobertos por --allow ou contract.md
  */
 export function evaluateGuardPath({
   repositoryRoot,
@@ -51,7 +91,7 @@ export function evaluateGuardPath({
     return {
       allowed: false,
       path: String(targetPath ?? ''),
-      reason: 'Caminho fora do repositório ou inválido.',
+      reason: 'Caminho fora do repositório, symlink ou inválido.',
     };
   }
 
@@ -73,9 +113,18 @@ export function evaluateGuardPath({
   }
 
   if (Array.isArray(allowPaths) && allowPaths.length > 0) {
-    const normalizedAllow = allowPaths
-      .map((p) => normalizeRepoRelativePath(repositoryRoot, p))
-      .filter((p) => p && isInsideProductRoots(p, roots));
+    const normalizedAllow = [];
+    for (const raw of allowPaths) {
+      const normalized = normalizeRepoRelativePath(repositoryRoot, raw);
+      if (!normalized || !isInsideProductRoots(normalized, roots)) {
+        return {
+          allowed: false,
+          path: relPath,
+          reason: `--allow inválido fora da fronteira (${roots.join(', ')}/): ${raw}`,
+        };
+      }
+      normalizedAllow.push(normalized);
+    }
     if (!isPathCovered(relPath, normalizedAllow)) {
       return {
         allowed: false,
@@ -86,16 +135,29 @@ export function evaluateGuardPath({
     return { allowed: true, path: relPath, reason: 'Autorizado via --allow.' };
   }
 
-  if (contractPath && existsSync(contractPath)) {
-    const { authorizedPaths } = extractAuthorizedPaths(readFileSync(contractPath, 'utf8'));
-    if (authorizedPaths.length > 0 && !isPathCovered(relPath, authorizedPaths)) {
-      return {
-        allowed: false,
-        path: relPath,
-        reason: `Arquivo fora dos caminhos autorizados em contract.md (${authorizedPaths.join(', ')}).`,
-      };
-    }
+  if (!contractPath || !existsSync(contractPath)) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: 'Sem contract.md ativo nem --allow; crie .harness/runtime/contract.md ou informe --allow antes de editar.',
+    };
   }
 
-  return { allowed: true, path: relPath, reason: 'Dentro da fronteira de produto.' };
+  const { authorizedPaths } = extractAuthorizedPaths(readFileSync(contractPath, 'utf8'), roots);
+  if (authorizedPaths.length === 0) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: 'contract.md não declara caminhos autorizados dentro da fronteira de produto.',
+    };
+  }
+  if (!isPathCovered(relPath, authorizedPaths)) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: `Arquivo fora dos caminhos autorizados em contract.md (${authorizedPaths.join(', ')}).`,
+    };
+  }
+
+  return { allowed: true, path: relPath, reason: 'Autorizado via contract.md.' };
 }

@@ -19,8 +19,9 @@
  *    falsificabilidade e pureza sem inflar a complexidade do Harness.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { extname, posix, resolve } from 'node:path';
 import ts from 'typescript';
-import { extname } from 'node:path';
 import { canonicalDigest, compareCodeUnits } from './canonical_json.mjs';
 
 const tsExtensions = new Set([
@@ -361,8 +362,41 @@ export function extractFileSymbols(path, text) {
 }
 
 /**
- * Extrai declarações de import/re-export reais via AST TypeScript (sem regex
- * sobre comentários/strings). Retorna [{ specifier, names }].
+ * Lê compilerOptions.paths + baseUrl de tsconfig.json usando o parser JSONC oficial do TypeScript.
+ */
+export function loadTsconfigPathAliases(repositoryRoot) {
+  if (!repositoryRoot) return [];
+  const tsconfigPath = resolve(repositoryRoot, 'tsconfig.json');
+  if (!existsSync(tsconfigPath)) return [];
+  try {
+    const parsed = ts.readConfigFile(tsconfigPath, (p) => readFileSync(p, 'utf8'));
+    if (parsed.error || !parsed.config?.compilerOptions?.paths) return [];
+    const baseUrl = String(parsed.config.compilerOptions.baseUrl ?? '.').replace(/^\.\//u, '').replace(/\/+$/u, '');
+    const aliases = [];
+    for (const [pattern, targets] of Object.entries(parsed.config.compilerOptions.paths)) {
+      if (!Array.isArray(targets) || targets.length === 0) continue;
+      const starIdx = pattern.indexOf('*');
+      const prefix = starIdx >= 0 ? pattern.slice(0, starIdx) : pattern;
+      const suffix = starIdx >= 0 ? pattern.slice(starIdx + 1) : '';
+      const mappedTargets = targets
+        .filter((t) => typeof t === 'string')
+        .map((t) => {
+          const clean = t.replace(/^\.\//u, '');
+          return baseUrl && baseUrl !== '.' ? posix.join(baseUrl, clean) : clean;
+        });
+      if (mappedTargets.length > 0) {
+        aliases.push({ prefix, suffix, hasWildcard: starIdx >= 0, targets: mappedTargets });
+      }
+    }
+    return aliases;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extrai declarações de import/re-export estáticos e import()/require() reais via AST TypeScript
+ * (sem regex sobre comentários/strings). Retorna [{ specifier, names }].
  */
 export function extractAstImports(path, text) {
   const ext = extname(path).toLowerCase();
@@ -393,7 +427,49 @@ export function extractAstImports(path, text) {
       imports.push({ specifier, names });
     }
   }
+
+  function visitDynamic(node) {
+    if (ts.isCallExpression(node) && node.arguments.length >= 1) {
+      const firstArg = node.arguments[0];
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequireCall = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+      if ((isDynamicImport || isRequireCall) && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))) {
+        imports.push({ specifier: firstArg.text, names: [] });
+      }
+    }
+    ts.forEachChild(node, visitDynamic);
+  }
+  visitDynamic(sourceFile);
+
   return imports;
+}
+
+/**
+ * Extrai casos de teste ativos (`test('...')` / `it('...')`) e títulos de `describe('...')`
+ * via AST TypeScript, ignorando comentários e chamadas `.skip`/`.todo`.
+ */
+export function extractActiveTestCases(path, text) {
+  const ext = extname(path).toLowerCase();
+  if (!tsExtensions.has(ext)) return { caseCount: 0, titles: [] };
+  const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  let caseCount = 0;
+  const titles = [];
+
+  function visit(node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const callee = node.expression.text;
+      if (callee === 'test' || callee === 'it' || callee === 'describe') {
+        if (callee === 'test' || callee === 'it') caseCount += 1;
+        const firstArg = node.arguments[0];
+        if (firstArg && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))) {
+          titles.push(firstArg.text);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return { caseCount, titles };
 }
 
 /**

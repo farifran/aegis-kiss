@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -228,6 +228,9 @@ function handleStatus(paths) {
 }
 
 async function handleClean(paths) {
+  if (existsSync(paths.runtimeDir) && lstatSync(paths.runtimeDir).isSymbolicLink()) {
+    throw new Error('unsafe_runtime_symlink');
+  }
   await rm(paths.runtimeDir, { recursive: true, force: true });
   process.stdout.write('[AEGIS] clean=PASS runtime_reset=1 product_preserved=1\n');
 }
@@ -245,6 +248,9 @@ async function main() {
   switch (command) {
     case 'brief':
       await handleBrief(paths, rest);
+      break;
+    case '--issue':
+      await handleBrief(paths, ['--issue', ...rest]);
       break;
     case 'verify-contract':
     case '--verify-contract':
@@ -268,7 +274,11 @@ async function main() {
       await handleClean(paths);
       break;
     default:
-      throw new Error(`unknown_command:${command}`);
+      if (command.startsWith('--')) {
+        throw new Error(`unknown_command:${command}`);
+      }
+      await handleBrief(paths, [command, ...rest]);
+      break;
   }
 }
 

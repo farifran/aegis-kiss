@@ -38,7 +38,7 @@ export function shouldShowTopography({
   const coveredSubdirs = new Set();
   for (const entry of sourceEvidence) {
     const parts = entry.path.split('/');
-    if (parts.length > 2 && parts[0] === 'src') {
+    if (parts.length > 2) {
       coveredSubdirs.add(parts[1]);
     }
   }

@@ -6,7 +6,6 @@ import { compareCodeUnits, sha256 } from './canonical_json.mjs';
 export const sourceEvidenceByteLimit = 98_304;
 const sourceEvidenceFileByteLimit = 8_192;
 const sourceEvidenceExplicitFileByteLimit = 24_576;
-import { extractFileSymbols } from './workspace_skeleton.mjs';
 
 const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu;
 
@@ -57,8 +56,7 @@ function decodeUtf8Prefix(bytes, byteLimit) {
 function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation = null) {
   const observedBytes = workspaceObservation?.sourceBytesByPath?.get(manifestEntry.path);
   if (observedBytes !== undefined) {
-    if (observedBytes.byteLength !== manifestEntry.bytes
-      || sha256(observedBytes) !== manifestEntry.digest) {
+    if (observedBytes.byteLength !== manifestEntry.bytes) {
       throw new Error(`semantic_source_changed:${manifestEntry.path}`);
     }
     return observedBytes;
@@ -75,10 +73,11 @@ function verifiedTextSource(repositoryRoot, manifestEntry, workspaceObservation 
   return bytes;
 }
 
-function findStructuralHeaderEndLine(path, text) {
-  const symbols = extractFileSymbols(path, text);
+function findStructuralHeaderEndLine(filePath, skeletonSymbols) {
+  if (!Array.isArray(skeletonSymbols)) return 0;
   let headerEnd = 0;
-  for (const s of symbols) {
+  for (const s of skeletonSymbols) {
+    if (s.path !== filePath) continue;
     if (s.kind === 'INTERFACE' || s.kind === 'TYPE_ALIAS' || s.kind === 'ENUM' || s.kind === 'CONST') {
       if (s.startLine <= 150 && s.endLine > headerEnd) {
         headerEnd = s.endLine;
@@ -119,13 +118,15 @@ function getLongestMatchingPrefixLength(filePath, prefixes) {
   return maxLen;
 }
 
-function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(), domainAliases = {}) {
+function extractTargetPrefixesAndDirs(intentText, rootsBySubdir = new Map(), domainAliases = {}) {
   const targetDirs = new Set();
   const targetPrefixes = new Set();
   if (!intentText) return { targetDirs, targetPrefixes, explicitFilePaths: [] };
 
   const explicitMatches = intentText.match(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu) || [];
-  const normalizedPaths = explicitMatches.map((m) => m.replace(/[.,;:!?]+$/u, '').trim()).filter(Boolean);
+  const normalizedPaths = explicitMatches
+    .map((m) => m.replace(/[.,;:!?]+$/u, '').replace(/:L?\d+(?::\d+|-L?\d+)?$/u, '').trim())
+    .filter(Boolean);
 
   for (const p of normalizedPaths) {
     const parts = p.split('/');
@@ -141,19 +142,19 @@ function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(), doma
     }
   }
 
+  const addSubdir = (subdir) => {
+    const roots = rootsBySubdir.get(subdir);
+    if (!roots || ignoredDomainTokens.has(subdir)) return;
+    targetDirs.add(subdir);
+    for (const root of roots) targetPrefixes.add(`${root}/${subdir}/`);
+  };
+
   const stripped = stripDiacritics(intentText);
   const words = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
   for (const word of words) {
-    if (knownSubdirs.has(word) && !ignoredDomainTokens.has(word)) {
-      targetDirs.add(word);
-      targetPrefixes.add(`src/${word}/`);
-    }
-    const aliases = getAliases(domainAliases, word);
-    for (const a of aliases) {
-      if (knownSubdirs.has(a) && !ignoredDomainTokens.has(a)) {
-        targetDirs.add(a);
-        targetPrefixes.add(`src/${a}/`);
-      }
+    addSubdir(word);
+    for (const a of getAliases(domainAliases, word)) {
+      addSubdir(a);
     }
   }
 
@@ -312,6 +313,45 @@ function symbolPathPenalty(sym, deprecatedPenalty, nonProdPenalty) {
   return penalty;
 }
 
+function evaluateSymbolTokens(sym, words, stems, domainAliases, idfWeights, weights) {
+  const subtokens = extractSubtokens(sym.name);
+  const pathSubtokens = sym.path ? extractSubtokens(sym.path.replace(/\.[^.]+$/u, '')) : [];
+  const docTokens = extractDocTokens(sym.docComment);
+
+  const subRes = scoreTokenGroup(subtokens, words, stems, domainAliases, idfWeights, weights.nameExact, weights.nameStem);
+  let total = subRes.total;
+  let structuralMatch = subRes.matched;
+
+  if (exactSymbolNameMatch(sym.name, words, domainAliases)) {
+    total += weights.exactNameBonus;
+    structuralMatch = true;
+  }
+
+  const pathRes = scoreTokenGroup(pathSubtokens, words, stems, domainAliases, idfWeights, weights.pathExact, weights.pathStem);
+  total += pathRes.total;
+  structuralMatch = structuralMatch || pathRes.matched;
+
+  if (structuralMatch) {
+    const uniqueDoc = weights.dedupeDoc ? [...new Set(docTokens)] : docTokens;
+    const docScore = scoreTokenGroup(uniqueDoc, words, stems, domainAliases, idfWeights, weights.docExact, weights.docStem).total;
+    total += weights.docCap ? Math.min(docScore, weights.docCap) : docScore;
+  }
+
+  return { total, structuralMatch };
+}
+
+const selectionScoreWeights = {
+  nameExact: 3, nameStem: 2, exactNameBonus: 5,
+  pathExact: 2, pathStem: 1,
+  docExact: 2, docStem: 1, docCap: 6, dedupeDoc: true,
+};
+
+const affinityScoreWeights = {
+  nameExact: 30, nameStem: 20, exactNameBonus: 40,
+  pathExact: 15, pathStem: 10,
+  docExact: 10, docStem: 5, docCap: 0, dedupeDoc: false,
+};
+
 function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixes = new Set(), precomputedIdf = null) {
   const { words, stems } = tokenizeIntent(intent);
   if (words.length === 0) return [];
@@ -321,28 +361,14 @@ function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixe
   const scored = [];
   for (const sym of symbols) {
     if (!sym.name) continue;
-    const subtokens = extractSubtokens(sym.name);
-    const pathSubtokens = sym.path ? extractSubtokens(sym.path.replace(/\.[^.]+$/u, '')) : [];
-    const docTokens = extractDocTokens(sym.docComment);
-
-    let score = 0;
-    score += scoreTokenGroup(subtokens, words, stems, domainAliases, idfWeights, 3, 2).total;
-    if (exactSymbolNameMatch(sym.name, words, domainAliases)) score += 5;
-    score += scoreTokenGroup(pathSubtokens, words, stems, domainAliases, idfWeights, 2, 1).total;
+    const { total: tokenScore } = evaluateSymbolTokens(sym, words, stems, domainAliases, idfWeights, selectionScoreWeights);
+    let score = tokenScore;
 
     if (sym.exported && score > 0) score += 3;
-
     if (targetPrefixes && targetPrefixes.size > 0 && score > 0) {
       const pfxLen = getLongestMatchingPrefixLength(sym.path, targetPrefixes);
       if (pfxLen > 0) score += Math.min(Math.floor(pfxLen / 4), 10);
     }
-
-    // Regra anti-sequestro: JSDoc só pontua se já houver afinidade estrutural prévia.
-    if (score > 0) {
-      const docBonus = scoreTokenGroup([...new Set(docTokens)], words, stems, domainAliases, idfWeights, 2, 1).total;
-      score += Math.min(docBonus, 6);
-    }
-
     score += symbolPathPenalty(sym, 5, 5);
 
     if (score > 0) {
@@ -364,27 +390,7 @@ function computeSymbolAffinity(sym, words, stems, entrypoints, idfWeights = new 
   if (entrypoints.includes(sym.path)) score += 200;
   if (sym.exported) score += 50;
 
-  const subtokens = extractSubtokens(sym.name);
-  const pathSubtokens = sym.path ? extractSubtokens(sym.path.replace(/\.[^.]+$/u, '')) : [];
-  const docTokens = extractDocTokens(sym.docComment);
-
-  const subRes = scoreTokenGroup(subtokens, words, stems, domainAliases, idfWeights, 30, 20);
-  let matchScore = subRes.total;
-  let structuralMatch = subRes.matched;
-
-  if (exactSymbolNameMatch(sym.name, words, domainAliases)) {
-    matchScore += 40;
-    structuralMatch = true;
-  }
-
-  const pathRes = scoreTokenGroup(pathSubtokens, words, stems, domainAliases, idfWeights, 15, 10);
-  matchScore += pathRes.total;
-  structuralMatch = structuralMatch || pathRes.matched;
-
-  if (structuralMatch) {
-    matchScore += scoreTokenGroup(docTokens, words, stems, domainAliases, idfWeights, 10, 5).total;
-  }
-
+  const { total: matchScore } = evaluateSymbolTokens(sym, words, stems, domainAliases, idfWeights, affinityScoreWeights);
   if (targetPrefixes && targetPrefixes.size > 0) {
     const pfxLen = getLongestMatchingPrefixLength(sym.path, targetPrefixes);
     if (pfxLen > 0) score += Math.min(Math.floor(pfxLen / 4), 10) * 10;
@@ -523,12 +529,15 @@ export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextD
       explicitFilePaths: contextData.explicitFilePaths,
     };
   }
-  const knownSubdirs = new Set();
+  const rootsBySubdir = new Map();
   for (const file of textFiles) {
     const parts = file.path.split('/');
-    if (parts.length > 2) knownSubdirs.add(parts[1]);
+    if (parts.length > 2) {
+      if (!rootsBySubdir.has(parts[1])) rootsBySubdir.set(parts[1], new Set());
+      rootsBySubdir.get(parts[1]).add(parts[0]);
+    }
   }
-  return extractTargetPrefixesAndDirs(intent, knownSubdirs, domainAliases);
+  return extractTargetPrefixesAndDirs(intent, rootsBySubdir, domainAliases);
 }
 
 export function buildSourceEvidence(
@@ -794,7 +803,7 @@ export function buildSourceEvidence(
       }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const fileLines = text.split('\n');
-      const headerEndLine = findStructuralHeaderEndLine(manifestEntry.path, text);
+      const headerEndLine = findStructuralHeaderEndLine(manifestEntry.path, discovery.workspaceSkeleton?.symbols);
 
       if (headerEndLine > 0 && orderedSpans.some((s) => s.startLine > headerEndLine + 5)) {
         const headerText = fileLines.slice(0, headerEndLine).join('\n');

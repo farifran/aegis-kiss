@@ -1,13 +1,22 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { findContractArchitectureViolations, loadArchitectureRules } from './architecture_rules.mjs';
-import { inspectWorkspaceFreshness } from './workspace_observer.mjs';
+import { inspectWorkspaceFreshness, resolveSourceRoots } from './workspace_observer.mjs';
 
 const forbiddenPathPattern = /(?:\/etc\/|\/proc\/|\/sys\/|~\/|\.\.\/)/u;
+const governanceTargetPattern = /(?:^|[\s`'"(])(?:\.harness\/|scripts\/|\.github\/|AGENTS\.md|ARCHITECTURE\.md|eslint\.config\.[A-Za-z]+|tsconfig(?:\.[^/\s`'"()]+)?\.json|package(?:-lock)?\.json)(?:$|[\s`'"):,;.])/u;
+const outOfScopeLinePattern = /^\s*[-*]?\s*(?:\*\*)?(?:fora do escopo|out of scope)\b/iu;
 const pendingMarkerPattern = /(?:\[PENDENTE\]|\bPENDING_Q\d+\b|\bTBD\b|\bTODO\b)/u;
-const srcRefPattern = /\b((?:src|app|lib)\/[A-Za-z0-9_./-]+)(?::L?(\d+)(?:-L?(\d+))?)?/gu;
 const newFileHintPattern = /(?:\[novo\]|\(novo\)|\[new\]|\(new\)|novo arquivo|new file|criar\b|create\b)/iu;
 const symbolBeforeRefPattern = /`([A-Za-z_$][A-Za-z0-9_$]{2,})(?:[^`]*)`\s*\(\s*`?$/u;
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function buildRootPrefixAlternation(roots) {
+  return [...new Set(roots.filter(Boolean))].map(escapeRegex).join('|');
+}
 
 export function countContractScenarios(markdown) {
   const givenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Dado|Given)(?:\*\*)?:/giu) ?? []).length;
@@ -46,25 +55,26 @@ function extractTargetSection(sections) {
 }
 
 /**
- * Extrai os caminhos autorizados declarados na seção de arquivos do contract.md.
+ * Extrai os caminhos autorizados declarados na seção de arquivos do contract.md,
+ * respeitando as raízes de produto (src/, app/, lib/ ou AEGIS_SRC_DIRS).
  */
-export function extractAuthorizedPaths(markdown) {
+export function extractAuthorizedPaths(markdown, sourceRoots = ['src', 'app', 'lib']) {
   const sections = splitMarkdownSections(markdown);
   const targetSection = extractTargetSection(sections);
   const authorized = new Set();
   const newPaths = new Set();
-  let allowsPackageJson = false;
+
+  const rootAlt = buildRootPrefixAlternation([...sourceRoots, 'test', 'tests']);
+  const authPathPattern = new RegExp(`\\b((?:${rootAlt})\\/[A-Za-z0-9_./-]+)`, 'gu');
 
   const linesToScan = targetSection ? targetSection.lines : markdown.split('\n');
   for (const line of linesToScan) {
-    if (/\b(?:fora do escopo|out of scope|n[aã]o alterar|inalterado|read-only|somente leitura)\b/iu.test(line)) {
+    if (outOfScopeLinePattern.test(line)
+      || /\b(?:inalterad[oa]|read-only|somente leitura)\b/iu.test(line)) {
       continue;
     }
-    if (/\bpackage\.json\b/u.test(line)) {
-      allowsPackageJson = true;
-    }
     const isNewLine = newFileHintPattern.test(line);
-    for (const match of line.matchAll(/\b((?:src|test|tests)\/[A-Za-z0-9_./-]+)/gu)) {
+    for (const match of line.matchAll(authPathPattern)) {
       const cleaned = match[1].replace(/[.,;:!?)]+$/u, '');
       if (!cleaned) continue;
       authorized.add(cleaned);
@@ -75,27 +85,33 @@ export function extractAuthorizedPaths(markdown) {
   return {
     authorizedPaths: [...authorized].sort(),
     newPaths: [...newPaths].sort(),
-    allowsPackageJson,
   };
 }
 
 function assertInsideRepo(repositoryRoot, relPath) {
-  const abs = resolve(repositoryRoot, relPath);
-  const prefix = repositoryRoot.endsWith(sep) ? repositoryRoot : `${repositoryRoot}${sep}`;
-  return abs.startsWith(prefix) ? abs : null;
+  const realRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
+  const abs = resolve(realRoot, relPath);
+  const prefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+  if (!abs.startsWith(prefix)) return null;
+  if (existsSync(abs)) {
+    const realAbs = realpathSync(abs);
+    if (!realAbs.startsWith(prefix)) return null;
+  }
+  return abs;
 }
 
 /**
  * Verificação puramente mecânica do contract.md (0 tokens):
  * - seções mínimas obrigatórias + casos Dado/Quando/Então;
  * - zero marcadores pendentes ([PENDENTE], PENDING_Q*, TBD, TODO);
- * - fronteira de produto (sem /etc/, ../, .harness/, scripts/ como alvo);
- * - existência física de arquivos e faixas path:Ln-Lm em src/.
+ * - fronteira de produto (sem /etc/, ../, .harness/, scripts/, configs de governança como alvo);
+ * - existência física de arquivos e faixas path:Ln-Lm nas raízes de produto.
  */
 export function verifyContractMarkdown({
   repositoryRoot,
   contractPath,
   expectedSnapshotDigest = null,
+  sourceRoots = null,
 }) {
   const errors = [];
   const warnings = [];
@@ -104,6 +120,16 @@ export function verifyContractMarkdown({
     return {
       ok: false,
       errors: [`Contrato não encontrado em ${contractPath}`],
+      warnings,
+      authorizedPaths: [],
+      workspaceFreshness: 'NO_CONTRACT',
+    };
+  }
+
+  if (lstatSync(contractPath).isSymbolicLink()) {
+    return {
+      ok: false,
+      errors: ['Contrato não pode ser symlink.'],
       warnings,
       authorizedPaths: [],
       workspaceFreshness: 'NO_CONTRACT',
@@ -121,6 +147,7 @@ export function verifyContractMarkdown({
     };
   }
 
+  const effectiveRoots = resolveSourceRoots(repositoryRoot, sourceRoots);
   const sections = splitMarkdownSections(markdown);
   const headings = sections.map((s) => s.heading);
 
@@ -150,20 +177,23 @@ export function verifyContractMarkdown({
   const targetSection = extractTargetSection(sections);
   if (targetSection) {
     for (const line of targetSection.lines) {
-      if (/\b(?:fora do escopo|out of scope|n[aã]o alterar)\b/iu.test(line)) continue;
+      if (outOfScopeLinePattern.test(line)) continue;
       if (forbiddenPathPattern.test(line)) {
         errors.push(`Violação de fronteira na seção de arquivos: "${line.trim().slice(0, 80)}"`);
       }
-      if (/\b(?:\.harness\/|scripts\/)/u.test(line)) {
-        errors.push(`Arquivo fora da fronteira de produto (src/) na seção de arquivos: "${line.trim().slice(0, 80)}"`);
+      if (governanceTargetPattern.test(line)) {
+        errors.push(`Arquivo fora da fronteira de produto (${effectiveRoots.join(', ')}/) na seção de arquivos: "${line.trim().slice(0, 80)}"`);
       }
     }
   }
 
-  // Validação física de referências src/... e src/...:Ln-Lm
-  const { authorizedPaths, newPaths } = extractAuthorizedPaths(markdown);
+  // Validação física de referências de produto (src|app|lib|AEGIS_SRC_DIRS/...:Ln-Lm)
+  const { authorizedPaths, newPaths } = extractAuthorizedPaths(markdown, effectiveRoots);
   const newPathSet = new Set(newPaths);
   const lineCache = new Map();
+  const refRootAlt = buildRootPrefixAlternation([...effectiveRoots, 'src', 'app', 'lib']);
+  const srcRefPattern = new RegExp(`\\b((?:${refRootAlt})\\/[A-Za-z0-9_./-]+)(?::L?(\\d+)(?:-L?(\\d+))?)?`, 'gu');
+  const bareRootSet = new Set([...effectiveRoots, 'src', 'app', 'lib'].map((r) => `${r}/`));
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -173,7 +203,7 @@ export function verifyContractMarkdown({
       const startLine = match[2] ? Number.parseInt(match[2], 10) : null;
       const endLine = match[3] ? Number.parseInt(match[3], 10) : startLine;
 
-      if (!refPath || refPath === 'src/') continue;
+      if (!refPath || bareRootSet.has(refPath)) continue;
       if (refPath.endsWith('/')) {
         const absDir = assertInsideRepo(repositoryRoot, refPath);
         if (!absDir || (!existsSync(absDir) && !lineIsNew)) {
@@ -192,7 +222,7 @@ export function verifyContractMarkdown({
         if (startLine !== null) {
           errors.push(`Referência com linha para arquivo inexistente em contract.md:L${i + 1}: ${refPath}:L${startLine}`);
         } else if (!lineIsNew && !newPathSet.has(refPath)) {
-          errors.push(`Arquivo inexistente em src/ sem marcação [novo] em contract.md:L${i + 1}: ${refPath}`);
+          errors.push(`Arquivo inexistente sem marcação [novo] em contract.md:L${i + 1}: ${refPath}`);
         }
         continue;
       }
@@ -217,7 +247,7 @@ export function verifyContractMarkdown({
           if (symMatch) {
             const symbolName = symMatch[1];
             const sliceText = fileLines.slice(startLine - 1, endLine).join('\n');
-            const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escaped = escapeRegex(symbolName);
             const symRe = new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`, 'u');
             if (!symRe.test(sliceText)) {
               errors.push(`Símbolo '${symbolName}' não encontrado em ${refPath}:L${startLine}${match[3] ? `-L${endLine}` : ''} (contract.md:L${i + 1})`);
@@ -228,13 +258,13 @@ export function verifyContractMarkdown({
     }
   }
 
-  // Regras hard de ARCHITECTURE.md (ex.: Date.now() implícito sob ARCH-DETERMINISTIC-TIME)
+  // Regras hard de ARCHITECTURE.md (ex.: Date.now() implícito sob DETERMINISTIC-TIME)
   const archRules = loadArchitectureRules(repositoryRoot);
   errors.push(...findContractArchitectureViolations(archRules, markdown));
 
   const freshness = inspectWorkspaceFreshness(repositoryRoot, expectedSnapshotDigest);
   if (freshness.workspaceFreshness === 'CHANGED_SINCE_BASELINE') {
-    warnings.push('src/ foi alterado desde o último ./aegis brief; rode ./aegis brief novamente se o contexto ficou defasado.');
+    warnings.push('Código de produto foi alterado desde o último ./aegis brief; rode ./aegis brief novamente se o contexto ficou defasado.');
   }
 
   return {

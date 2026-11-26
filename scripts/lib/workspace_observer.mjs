@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
@@ -17,6 +17,9 @@ const discoveryByteLimit = 8_388_608;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const ignoredDirectories = new Set([
   'node_modules', '.git', 'dist', 'build', 'coverage', '.turbo', '.next',
+]);
+const forbiddenSourceRoots = new Set([
+  '.', '..', '.git', '.github', '.harness', 'scripts', 'node_modules',
 ]);
 const fallbackSourceRoots = ['app', 'lib'];
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
@@ -42,7 +45,14 @@ export function resolveSourceRoots(repositoryRoot, explicitRoots = null) {
       ? process.env.AEGIS_SRC_DIRS.split(',').map((s) => s.trim()).filter(Boolean)
       : null);
   if (configured && configured.length > 0) {
-    return [...new Set(configured.map((r) => r.replace(/\/+$/u, '')))].sort(compareCodeUnits);
+    const normalized = [...new Set(configured.map((r) => r.replace(/^\.\//u, '').replace(/\/+$/u, '')))].sort(compareCodeUnits);
+    for (const root of normalized) {
+      const topSegment = root.split('/')[0];
+      if (!root || forbiddenSourceRoots.has(topSegment) || root.includes('..') || root.startsWith('/')) {
+        throw new Error(`invalid_source_root:${root}`);
+      }
+    }
+    return normalized;
   }
   if (existsSync(resolve(repositoryRoot, 'src'))) return ['src'];
   const detected = fallbackSourceRoots.filter((dir) => existsSync(resolve(repositoryRoot, dir)));
@@ -218,6 +228,9 @@ export function observeWorkspace(repositoryRoot, {
     }
   }
 
+  const realRepoRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
+  const realRepoPrefix = realRepoRoot.endsWith(sep) ? realRepoRoot : `${realRepoRoot}${sep}`;
+
   for (const relRoot of effectiveRoots) {
     const absRoot = resolve(repositoryRoot, relRoot);
     const repoPrefix = repositoryRoot.endsWith(sep) ? repositoryRoot : `${repositoryRoot}${sep}`;
@@ -231,6 +244,10 @@ export function observeWorkspace(repositoryRoot, {
     }
     if (!rootMetadata.isDirectory()) {
       throw new Error('invalid_source_root');
+    }
+    const realAbsRoot = realpathSync(absRoot);
+    if (!realAbsRoot.startsWith(realRepoPrefix)) {
+      throw new Error('discovery_source_root_symlink');
     }
     inspectDirectory(absRoot);
   }
