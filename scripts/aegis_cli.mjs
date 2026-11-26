@@ -5,6 +5,7 @@ import process from 'node:process';
 import { buildDemandBrief, renderBriefMarkdown } from './lib/brief_renderer.mjs';
 import { verifyContractMarkdown } from './lib/contract_verifier.mjs';
 import { resolveIssueDemand } from './lib/issue_intake.mjs';
+import { evaluateGuardPath } from './lib/path_guard.mjs';
 import { formatCheckReport, runProductCheck } from './lib/product_checker.mjs';
 import {
   captureDemand,
@@ -23,7 +24,8 @@ function printHelp() {
     '  ./aegis "<demanda>"                   Atalho direto para ./aegis brief "<demanda>"',
     '  ./aegis --issue [id|arquivo]          Atalho direto para ./aegis brief --issue [ref]',
     '  ./aegis verify-contract [caminho]     Valida caminhos, linhas, fronteira e cenários do contract.md',
-    '  ./aegis check [--skip-diff]           Valida escopo git, tsc, eslint, static_gate e testes de src/',
+    '  ./aegis check [opções]                Valida fronteira src/, escopo, tsc, eslint, static_gate e testes',
+    '  ./aegis guard-path <caminho>          Retorna exit 0 só se a IA puder editar o caminho (hooks de IDE)',
     '  ./aegis status                        Exibe estado atual do brief, contrato e frescor de src/',
     '  ./aegis clean                         Limpa .harness/runtime/ (preserva src/ e lexicon.json)',
     '  ./aegis help                          Exibe esta ajuda',
@@ -31,6 +33,11 @@ function printHelp() {
     'Opções de brief:',
     '  --json                                Também imprime o JSON estruturado do brief no stdout',
     '  --files src/a.ts,src/b.ts             Prioriza caminhos específicos no Discovery',
+    '',
+    'Opções de check / guard-path:',
+    '  --allow src/a.ts,src/b.ts             Modo rápido (bug trivial) sem exigir contract.md',
+    '  --allow-outside arquivo               Exceção humana explícita fora de src/ (somente no check)',
+    '  --skip-diff                           Pula checagem de escopo git no check',
   ].join('\n') + '\n');
 }
 
@@ -148,12 +155,29 @@ function handleVerifyContract(paths, args) {
   process.exitCode = 1;
 }
 
+function parseCsvFlag(args, flagName) {
+  const values = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === flagName) {
+      const next = args[i + 1];
+      if (!next) throw new Error(`missing_argument_for:${flagName}`);
+      values.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
+      i += 1;
+    }
+  }
+  return values;
+}
+
 function handleCheck(paths, args) {
   const skipDiff = args.includes('--skip-diff');
+  const allowPaths = parseCsvFlag(args, '--allow');
+  const allowOutsidePaths = parseCsvFlag(args, '--allow-outside');
   const report = runProductCheck({
     repositoryRoot: paths.root,
     contractPath: paths.contractMdPath,
     skipDiff,
+    allowPaths,
+    allowOutsidePaths,
   });
   const formatted = formatCheckReport(report);
   if (report.ok) {
@@ -162,6 +186,31 @@ function handleCheck(paths, args) {
     process.stderr.write(formatted);
     process.exitCode = 1;
   }
+}
+
+function handleGuardPath(paths, args) {
+  const allowPaths = parseCsvFlag(args, '--allow');
+  let targetPath = null;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--allow') {
+      i += 1;
+      continue;
+    }
+    if (!targetPath) targetPath = args[i];
+  }
+  if (!targetPath) throw new Error('missing_target_path');
+  const decision = evaluateGuardPath({
+    repositoryRoot: paths.root,
+    targetPath,
+    contractPath: paths.contractMdPath,
+    allowPaths,
+  });
+  if (decision.allowed) {
+    process.stdout.write(`[AEGIS][GUARD] ALLOW ${decision.path}\n`);
+    return;
+  }
+  process.stderr.write(`[AEGIS][GUARD] DENY ${decision.path} — ${decision.reason}\n`);
+  process.exitCode = 1;
 }
 
 function handleStatus(paths) {
@@ -207,6 +256,10 @@ async function main() {
     case 'check':
     case '--check':
       handleCheck(paths, rest);
+      break;
+    case 'guard-path':
+    case '--guard-path':
+      handleGuardPath(paths, rest);
       break;
     case 'status':
     case '--status':

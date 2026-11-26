@@ -13,7 +13,7 @@ main() {
   fi
 
   case "${1}" in
-    brief|verify-contract|--verify-contract|--verify|check|--check|status|--status|clean|--clean|help|--help|-h)
+    brief|verify-contract|--verify-contract|--verify|check|--check|guard-path|--guard-path|status|--status|clean|--clean|help|--help|-h)
       exec node "${ROOT_DIR}/scripts/aegis_cli.mjs" "$@"
       ;;
     --issue)

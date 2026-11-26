@@ -195,11 +195,11 @@ try {
     '- `src/ledger/streak_guard.ts` [novo]',
     '',
     '## Casos de prova',
-    '- **Sucesso**',
+    '- **AC-1 — Sucesso**',
     '  - Dado: `consecutiveBatchRejections = 4`',
     '  - Quando: `processSettlementBatch` liquida lote válido',
     '  - Então: zera contador para `0`',
-    '- **Falha / Limite**',
+    '- **AC-2 — Falha / Limite**',
     '  - Dado: `consecutiveBatchRejections = 5`',
     '  - Quando: `processSettlementBatch` é chamado novamente',
     '  - Então: rejeita com erro determinístico sem mutar estado',
@@ -256,12 +256,30 @@ try {
   });
   assert.ok(verifyOut.includes('[AEGIS][CONTRACT] PASS'));
 
-  // Inicializa git no tempDir para testar checagem real de escopo no `./aegis check`
+  // Inicializa git no tempDir para testar checagem real de escopo, fronteira e testes no `./aegis check`
   execFileSync('git', ['init', '-q'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.email', 'test@aegis.local'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Aegis Test'], { cwd: tempDir });
-  execFileSync('git', ['add', 'src', 'package.json', 'tsconfig.json', 'eslint.config.js'], { cwd: tempDir });
+  execFileSync('git', ['add', 'src', 'package.json', 'tsconfig.json', 'eslint.config.js', 'aegis', 'scripts'], { cwd: tempDir });
   execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: tempDir });
+  writeFileSync(resolve(tempDir, '.gitignore'), '.harness/\nnode_modules\n');
+  execFileSync('git', ['add', '.gitignore'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-q', '-m', 'gitignore'], { cwd: tempDir });
+
+  // guard-path: permite arquivo autorizado em src/ e .harness/runtime/contract.md; bloqueia fora de src/ ou fora do contrato
+  const guardAllowSrc = execFileSync('bash', ['./aegis', 'guard-path', 'src/risk/velocity_guard.ts'], { cwd: tempDir, encoding: 'utf8', env });
+  assert.ok(guardAllowSrc.includes('[AEGIS][GUARD] ALLOW'));
+  const guardAllowContract = execFileSync('bash', ['./aegis', 'guard-path', '.harness/runtime/contract.md'], { cwd: tempDir, encoding: 'utf8', env });
+  assert.ok(guardAllowContract.includes('[AEGIS][GUARD] ALLOW'));
+  for (const denied of ['eslint.config.js', 'package.json', 'src/reporting/audit_csv_exporter.ts', '../escape.ts']) {
+    let blocked = false;
+    try {
+      execFileSync('bash', ['./aegis', 'guard-path', denied], { cwd: tempDir, encoding: 'utf8', env, stdio: 'pipe' });
+    } catch {
+      blocked = true;
+    }
+    assert.equal(blocked, true, `Expected guard-path to deny ${denied}`);
+  }
 
   const checkPassOut = execFileSync('bash', ['./aegis', 'check'], {
     cwd: tempDir,
@@ -270,22 +288,90 @@ try {
   });
   assert.ok(checkPassOut.includes('[AEGIS][CHECK] PASS'));
 
-  // Melhoria #6: aviso quando há menos casos de teste do que cenários no contract.md
-  writeFileSync(resolve(tempDir, 'src/sample.test.ts'), [
-    "import test from 'node:test';",
-    "import assert from 'node:assert/strict';",
-    "test('only one case', () => { assert.equal(1 + 1, 2); });",
-  ].join('\n'));
-  const checkWarnOut = execFileSync('bash', ['./aegis', 'check'], {
+  // Anti-sabotagem: alterar arquivo fora de src/ (eslint.config.js) DEVE falhar, mesmo passando --allow
+  const origEslint = readFileSync(resolve(tempDir, 'eslint.config.js'), 'utf8');
+  writeFileSync(resolve(tempDir, 'eslint.config.js'), `${origEslint}\n// tampered\n`);
+  let outsideBlocked = false;
+  try {
+    execFileSync('bash', ['./aegis', 'check'], { cwd: tempDir, encoding: 'utf8', env, stdio: 'pipe' });
+  } catch (err) {
+    outsideBlocked = true;
+    assert.ok(String(err.stderr).includes('FORA DA FRONTEIRA'));
+    assert.ok(String(err.stderr).includes('eslint.config.js'));
+  }
+  assert.equal(outsideBlocked, true);
+
+  let invalidAllowBlocked = false;
+  try {
+    execFileSync('bash', ['./aegis', 'check', '--allow', 'eslint.config.js'], { cwd: tempDir, encoding: 'utf8', env, stdio: 'pipe' });
+  } catch (err) {
+    invalidAllowBlocked = true;
+    assert.ok(String(err.stderr).includes('--allow inválido fora da fronteira'));
+  }
+  assert.equal(invalidAllowBlocked, true);
+
+  // Exceção humana explícita (--allow-outside) permite quando intencional
+  const allowOutsideOut = execFileSync('bash', ['./aegis', 'check', '--allow-outside', 'eslint.config.js'], {
     cwd: tempDir,
     encoding: 'utf8',
     env,
   });
-  assert.ok(checkWarnOut.includes('product_tests: PASS'));
-  assert.ok(checkWarnOut.includes('AVISO: Cobertura de cenários'));
-  rmSync(resolve(tempDir, 'src/sample.test.ts'));
+  assert.ok(allowOutsideOut.includes('[AEGIS][CHECK] PASS'));
+  writeFileSync(resolve(tempDir, 'eslint.config.js'), origEslint);
 
-  // Alterar arquivo fora do contrato deve falhar o `./aegis check`
+  // Amarração Contrato <-> Testes: editar arquivo autorizado em src/ SEM teste deve FALHAR
+  const origGuard = readFileSync(resolve(tempDir, 'src/risk/velocity_guard.ts'), 'utf8');
+  writeFileSync(resolve(tempDir, 'src/risk/velocity_guard.ts'), `${origGuard}\n// authorized product edit\n`);
+  let missingTestsFailed = false;
+  try {
+    execFileSync('bash', ['./aegis', 'check'], { cwd: tempDir, encoding: 'utf8', env, stdio: 'pipe' });
+  } catch (err) {
+    missingTestsFailed = true;
+    assert.ok(String(err.stderr).includes('nenhum arquivo *.test.* foi encontrado'));
+  }
+  assert.equal(missingTestsFailed, true);
+
+  // Modo rápido (--allow src/risk/velocity_guard.ts) funciona sem exigir testes do contract.md
+  const fastModeOut = execFileSync('bash', ['./aegis', 'check', '--allow', 'src/risk/velocity_guard.ts'], {
+    cwd: tempDir,
+    encoding: 'utf8',
+    env,
+  });
+  assert.ok(fastModeOut.includes('[AEGIS][CHECK] PASS'));
+
+  // Teste incompleto (só AC-1, faltando AC-2) deve FALHAR com contract.md ativo
+  writeFileSync(resolve(tempDir, 'src/sample.test.ts'), [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('AC-1: only first scenario', () => { assert.equal(1 + 1, 2); });",
+  ].join('\n'));
+  let partialCoverageFailed = false;
+  try {
+    execFileSync('bash', ['./aegis', 'check'], { cwd: tempDir, encoding: 'utf8', env, stdio: 'pipe' });
+  } catch (err) {
+    partialCoverageFailed = true;
+    assert.ok(String(err.stderr).includes('AC-2'));
+  }
+  assert.equal(partialCoverageFailed, true);
+
+  // Teste completo cobrindo AC-1 e AC-2 deve PASSAR
+  writeFileSync(resolve(tempDir, 'src/sample.test.ts'), [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('AC-1: happy path', () => { assert.equal(1 + 1, 2); });",
+    "test('AC-2: boundary lock', () => { assert.equal(2 + 2, 4); });",
+  ].join('\n'));
+  const fullCoverageOut = execFileSync('bash', ['./aegis', 'check'], {
+    cwd: tempDir,
+    encoding: 'utf8',
+    env,
+  });
+  assert.ok(fullCoverageOut.includes('[AEGIS][CHECK] PASS'));
+  assert.ok(fullCoverageOut.includes('2 caso(s) PASS'));
+  rmSync(resolve(tempDir, 'src/sample.test.ts'));
+  writeFileSync(resolve(tempDir, 'src/risk/velocity_guard.ts'), origGuard);
+
+  // Alterar arquivo fora do contrato dentro de src/ deve falhar o `./aegis check`
   writeFileSync(
     resolve(tempDir, 'src/reporting/audit_csv_exporter.ts'),
     `${readFileSync(resolve(tempDir, 'src/reporting/audit_csv_exporter.ts'), 'utf8')}\n// out-of-scope edit\n`,

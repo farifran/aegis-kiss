@@ -15,6 +15,14 @@ export function countContractScenarios(markdown) {
   return Math.min(givenCount, whenCount, thenCount);
 }
 
+export function extractScenarioIds(markdown) {
+  const ids = [];
+  for (const match of markdown.matchAll(/\b(AC-\d+(?:-\d+)?)\b/gu)) {
+    ids.push(match[1]);
+  }
+  return [...new Set(ids)];
+}
+
 export function parseWorkspaceReference(reference) {
   if (typeof reference !== 'string' || reference.trim().length === 0) {
     return { refPath: '', startLine: null, endLine: null };

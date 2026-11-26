@@ -27,12 +27,24 @@ Ferramenta **local-first para IDEs com agentes de IA** que reduz desperdício de
 ./aegis check
 ```
 
-### Outros comandos
+### Outros comandos e modo rápido
 
 ```bash
+# Modo rápido para bugs triviais (trava de escopo em src/ sem precisar de contract.md)
+./aegis check --allow src/risk/velocity_guard.ts
+
+# Hook de pré-edição para IDEs (exit 0 só se o caminho estiver em src/ e autorizado)
+./aegis guard-path src/risk/velocity_guard.ts
+
 ./aegis status          # Estado atual de brief, contract.md e frescor de src/
 ./aegis clean           # Limpa .harness/runtime/ (preserva src/ e lexicon.json)
-./aegis help            # Lista opções (--json, --files, --skip-diff)
+./aegis help            # Lista opções (--json, --files, --allow, --allow-outside, --skip-diff)
+```
+
+*(Opcional — `git pre-commit` hook automático apenas quando houver contrato ativo:)*
+```bash
+# em .git/hooks/pre-commit:
+[ -f .harness/runtime/contract.md ] && ./aegis check
 ```
 
 ---
