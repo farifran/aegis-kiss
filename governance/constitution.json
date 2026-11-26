@@ -1,8 +1,0 @@
-{
-  "schema": "aegis.constitution.v1",
-  "constitutionVersion": 20,
-  "origin": {
-    "sourcePath": "AGENTS.md",
-    "sourceDigest": "69d8fef7cac7f170a7176e74adf94cc2891494f4a35dc87d74b0d5493bcc09fc"
-  }
-}

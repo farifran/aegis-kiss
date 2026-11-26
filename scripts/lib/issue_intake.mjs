@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { basename, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { maxDemandBytes, maxIssueDemandBytes } from './issue_contract_core.mjs';
+import { maxDemandBytes, maxIssueDemandBytes } from './workspace_observer.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,12 +49,13 @@ export function stripNoisyIssueSections(body = '') {
  * Formata título e corpo integral da issue como demanda única. O texto capturado
  * não é filtrado por heurísticas que possam remover conteúdo normativo.
  */
-export function formatIssueDemand({ number = null, title, body = '' }) {
+export function formatIssueDemand({ number = null, title, body = '', stripNoise = true }) {
   const cleanTitle = String(title ?? '').replace(/\r\n?/gu, '\n').trim();
   if (cleanTitle.length === 0) {
     throw new Error('invalid_issue_title');
   }
-  const normalizedBody = String(body ?? '').replace(/\r\n?/gu, '\n');
+  const rawBody = String(body ?? '').replace(/\r\n?/gu, '\n');
+  const normalizedBody = stripNoise ? stripNoisyIssueSections(rawBody) : rawBody;
   const cleanBody = normalizedBody.trim().length > 0 ? normalizedBody.trim() : '';
   const header = number !== null ? `# Issue #${number}: ${cleanTitle}` : `# Issue: ${cleanTitle}`;
   const demandText = cleanBody.length > 0 ? `${header}\n\n${cleanBody}` : header;

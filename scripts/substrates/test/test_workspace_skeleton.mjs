@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import process from 'node:process';
 import { buildWorkspaceSkeleton, extractFileSymbols } from '../../lib/workspace_skeleton.mjs';
-import { assertSchema } from '../../lib/schema_validator.mjs';
 import { canonicalDigest } from '../../lib/canonical_json.mjs';
 
 function log(msg) {
@@ -253,38 +252,7 @@ function deploy_ledger() {
     symbols: skeleton.symbols,
   }));
 
-  // Validate that the skeleton fits into aegis.preflight_handoff.v3 schema
-  const preflightV3 = {
-    schema: 'aegis.preflight_handoff.v3',
-    phase: 'DISCOVERED',
-    status: 'SEMANTIC_DELIBERATION_REQUIRED',
-    intent: 'Test skeleton integration',
-    preflightDigest: '0'.repeat(64),
-    capture: {
-      provenance: 'USER',
-      transport: 'ARGV_STRING',
-      unicodeNormalization: 'NFC',
-      lineEndings: 'LF',
-      byteLength: 25,
-    },
-    discovery: {
-      sourceRoot: 'src',
-      status: 'SOURCE_OBSERVED',
-      files: [
-        { path: 'src/a_types.ts', bytes: 50, digest: '0'.repeat(64), kind: 'UTF8_TEXT' },
-        { path: 'src/b_ledger.ts', bytes: 60, digest: '0'.repeat(64), kind: 'UTF8_TEXT' },
-      ],
-      ignoredEntries: [],
-      visitedEntries: 2,
-      scannedBytes: 110,
-      sourceSnapshotDigest: '0'.repeat(64),
-      workspaceSkeleton: skeleton,
-    },
-  };
-
-  assertSchema('aegis.preflight_handoff.v3', preflightV3);
-
-  log('  PASS: Full Workspace Skeleton construction, deterministic sort and v3 schema validation verified');
+  log('  PASS: Full Workspace Skeleton construction and deterministic sort verified');
 }
 
 log('[CTDD TEST] All Workspace Skeleton AST Extractor tests passed successfully!');

@@ -3,11 +3,9 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
-import {
-  sourceEvidenceByteLimit,
-  sourceEvidenceFileByteLimit,
-  sourceEvidenceExplicitFileByteLimit,
-} from './semantic_authority.mjs';
+export const sourceEvidenceByteLimit = 98_304;
+export const sourceEvidenceFileByteLimit = 8_192;
+export const sourceEvidenceExplicitFileByteLimit = 24_576;
 import { extractFileSymbols } from './workspace_skeleton.mjs';
 
 export const ignoredDomainTokens = new Set([

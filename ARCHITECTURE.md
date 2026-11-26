@@ -1,205 +1,33 @@
-# Arquitetura técnica do projeto
+# Arquitetura Técnica do Projeto
 
-Este documento define a arquitetura técnica permitida para o código e para os
-artefatos persistentes deste repositório. Ele não é um prompt de modelo, manual
-do fluxo operacional nem contrato de uma demanda: o preflight recebe somente a
-projeção estruturada em `governance/architecture.policy.json`.
+Este documento define as fronteiras e regras técnicas ativas para o produto em `src/` e para o harness local do Aegis.
 
-## Fronteiras permitidas
+## Fronteiras do Repositório
 
-- O produto reside em `src/`; uma demanda `PRODUCT` não altera o harness.
-- O estado semântico persistente, quando necessário, reside unicamente em
-  `.harness/state/semantic-state.json`.
-- O runtime do harness é transitório em `.harness/runtime/`; não é fonte de
-  verdade nem artefato de produto.
-- Ao processar e assinar uma demanda, o harness pode observar e citar caminhos
-  de produto no contrato, mas não pode criar, editar ou apagar esses caminhos.
-  Assinar um contrato não autoriza sua implementação.
-- O core usa execução local, determinística e sem dependência de rede ou de
-  provedores de modelo. Compiladores, linters e provas são adaptadores locais.
-- A atribuição local de adaptadores humanos/IA reside em
-  `.harness/config/roles.json`, é ignorada pelo Git e nunca contém segredos.
-  Chaves de API pertencem exclusivamente a variáveis de ambiente ou ao
-  chaveiro do sistema. Essa atribuição não autoriza implementação.
+- **Produto (`src/`):** todo o código de produto reside em `src/`. Uma demanda de produto não altera o harness (`.harness/`, `scripts/`).
+- **Runtime transitório (`.harness/runtime/`):** armazena apenas artefatos temporários de trabalho (`brief.md`, `brief-meta.json`, `contract.md`, `workspace_skeleton.json`). Não é fonte de verdade do produto.
+- **Configuração local (`.harness/config/lexicon.json`):** léxico opcional de termos de domínio (`termo_negócio -> termo_código`) para descoberta determinística.
+- **Core 100% local e determinístico:** o harness opera offline, sem rede nem provedores de LLM externos. A cognição ocorre no agente da própria IDE; a mecânica (AST, ranking, validação física, lint, typecheck, `ast-grep` e testes) roda localmente a custo zero de tokens.
 
-## Forma técnica preferida
+## Regras Arquiteturais Ativas
 
-- TypeScript estrito, módulos pequenos e APIs explícitas.
-- Dependências mínimas; não introduzir persistência, concorrência, camadas ou
-  extensibilidade sem requisito, invariante ou prova que as justifique.
-- Todo comportamento observável deve possuir estado e resultado explícitos;
-  detalhes internos continuam livres para evoluir enquanto preservarem o
-  contrato e as provas.
+### 1. Fronteira de Produto (`ARCH-PRODUCT-BOUNDARY` — hard)
+Demandas de produto observam e citam exclusivamente `src/` (e seus testes). Caminhos externos ou sensíveis (`/etc/`, `../`, `.harness/`, `scripts/`) são proibidos como alvos de produto.
 
-## Regras arquiteturais ativas
+### 2. Parcimônia (`ARCH-PARSIMONY` — default)
+Dependências externas, persistência, concorrência, factories, builders ou camadas extras só são admitidos quando um requisito observável justificar seu custo. A recomendação padrão é sempre a menor arquitetura suficiente.
 
-As cláusulas abaixo são a fonte humana das regras estruturadas. Alterar uma
-delas exige atualizar a política estruturada no mesmo commit; divergência
-entre ambos bloqueia o preflight.
+### 3. Tipagem Estrita e Módulos Pequenos (`ARCH-STRICT-EXPLICIT-MODULES` — default)
+Código TypeScript em `src/` usa tipagem estrita, funções com retorno explícito e APIs claras, sem `as any`, `@ts-ignore` ou supressões permissivas que escondam defeitos (verificado por `tsc`, `eslint` e `static_gate.sh`).
 
-### ARCH-PRODUCT-BOUNDARY — hard
+### 4. Falhas Explícitas (`ARCH-FAILURE-EXPLICIT` — hard)
+Nenhuma falha relevante pode desaparecer silenciosamente (`catch` vazio, descarte silencioso ou truncamento implícito). Operações com estado ou efeito externo devem expor resultado, erro explícito, estado preservado ou rollback verificável.
 
-Uma demanda de produto observa e cita exclusivamente `src/` como fonte do
-produto, e requisitos de produto não podem alterar o harness.
+### 5. Tempo Determinístico (`ARCH-DETERMINISTIC-TIME` — hard)
+Comportamentos dependentes de tempo devem receber referência temporal explícita ou fonte reproduzível. Não acoplar lógica de domínio a `Date.now()` implícito sem autorização explícita.
 
-Aplica-se a demandas de produto e a referências a caminhos do produto.
+### 6. Interface Pública e Transições Claras (`ARCH-PUBLIC-INTERFACE` — hard)
+Funções públicas devem definir entradas, saídas, precedência de guardas e falhas observáveis. Detalhes internos continuam livres enquanto preservarem o contrato e os testes.
 
-### ARCH-HARNESS-STATE — hard
-
-O estado semântico persistente do harness reside em
-`.harness/state/semantic-state.json`; dados transitórios residem em
-`.harness/runtime/`. A atribuição local de adaptadores reside em
-`.harness/config/roles.json`, não contém segredos e nunca é fonte de verdade
-do produto.
-
-Aplica-se a mudanças ou decisões sobre estado e runtime do harness.
-
-### ARCH-LOCAL-DETERMINISTIC-CORE — hard
-
-O core mecânico opera localmente, de forma determinística e sem dependência de
-rede ou de um provedor de modelo. Integrações externas pertencem a adaptadores.
-
-Aplica-se a mudanças no core do harness e a integrações com provedores.
-
-### ARCH-STRICT-EXPLICIT-MODULES — default
-
-Código TypeScript usa tipagem estrita, módulos pequenos e APIs explícitas, sem
-supressões permissivas que escondam falhas ou contratos públicos.
-
-Aplica-se a demandas que imponham forma técnica TypeScript.
-
-### ARCH-PARSIMONY — default
-
-Dependências, persistência, concorrência, camadas e pontos de extensão só são
-admitidos quando um requisito observável justificar seu custo. A alternativa
-recomendada deve ser a menor arquitetura suficiente.
-
-Aplica-se quando a demanda solicita dependências ou complexidade estrutural.
-
-### ARCH-FAILURE-EXPLICIT — hard
-
-Nenhuma falha relevante pode desaparecer silenciosamente; a operação deve
-expor resultado, erro explícito, estado preservado ou rollback verificável.
-
-Aplica-se a operações com estado ou efeito externo.
-
-### ARCH-DETERMINISTIC-TIME — hard
-
-Comportamento que depende de tempo deve receber uma referência temporal
-explícita ou usar uma fonte reproduzível. O relógio do sistema não pode alterar
-o resultado de forma implícita; uma exceção requer emenda arquitetural
-aprovada.
-
-Aplica-se a comportamento dependente de tempo. `Date.now()` é uma referência
-proibida enquanto não houver emenda aprovada.
-
-### ARCH-BIGINT-ARITHMETIC — hard
-
-Quando uma demanda TypeScript ou JavaScript usa a divisão nativa de `BigInt`
-sem exigir outra política, o resultado trunca em direção a zero e divisor zero
-produz rejeição explícita. Esses comportamentos são fatos mecânicos da
-plataforma e não criam decisões para o Wizard.
-
-Divisão inteira não define, por si só, o destino de restos nem autoriza
-redistribuição, descarte ou rejeição da operação. Quando esse efeito altera o
-resultado público, ele precisa estar explícito na intenção, em decisão humana
-ou em política aplicável.
-
-Aplica-se a contratos que exponham aritmética inteira `BigInt`.
-
-### ARCH-OBSERVABILITY-COUNTERS — default
-
-Campos públicos de contagem sem sinal usados somente para observabilidade
-rejeitam valores negativos e saturam no maior valor representável quando a
-demanda não define outra política. Wrap ou truncamento silencioso são
-proibidos porque falseiam a telemetria.
-
-Aplica-se a contadores limitados em bitmasks ou telemetria pública.
-
-### ARCH-HASH-SECURITY-LABEL — hard
-
-Um fingerprint determinístico não criptográfico não pode ser apresentado como
-garantia criptográfica. Quando a propriedade de segurança exigida for
-incompatível com a primitiva, a largura ou uma projeção solicitada, o preflight
-deve reabrir esses pontos em vez de aplicar a escolha silenciosamente. Enquanto
-houver decisão pendente, requisitos e riscos usam terminologia neutra de
-integridade.
-
-Aplica-se a hashes, fingerprints e raízes de integridade públicas.
-
-### ARCH-PUBLIC-INTERFACE — hard
-
-Toda função pública exigida pelo contrato possui entradas, saídas e falhas
-observáveis definidas. Quando a intenção não fornece uma assinatura ou modelo
-de dados suficiente, a ausência permanece uma lacuna bloqueante; o modelo não
-inventa uma API nem transfere uma opção imatura ao Wizard.
-
-Aplica-se a funções, APIs e exports públicos.
-
-### ARCH-CONTRACT-CONSISTENCY — hard
-
-Um contrato não pode declarar a mesma propriedade simultaneamente fechada e
-dependente de decisão humana. Invariantes, casos de aceitação, limites, riscos
-e alternativas devem ser mutuamente compatíveis, e um risco não pode substituir
-a resolução de uma contradição semântica. Texto normativo permanece neutro
-enquanto uma decisão puder alterar a propriedade. Alternativas que mudam apenas
-um detalhe interno sem alterar resultados observáveis não formam decisão;
-opções incompatíveis reabrem o preflight. Decisões dependentes são avaliadas em
-conjunto, e nenhuma recomendação pode descartar entrada silenciosamente.
-
-Uma função pública declarada pura exige caso metamórfico que demonstre que
-chamadas de observação não alteram o comportamento de uma operação posterior.
-
-Aplica-se à compilação e à promoção de todo contrato semântico.
-
-### ARCH-STATE-TRANSITION-TOTALITY — hard
-
-Operações que leem ou alteram estado devem definir a transição total: precedência determinística de guards (curto-circuito sem efeitos posteriores), valor inicial no primeiro uso, gatilhos de mutação e condições de reset. Nenhuma implementação pode escolher a ordem de verificação de erros ou inferir valores iniciais não contratados.
-
-Aplica-se a operações que alteram estado.
-
-### ARCH-TEMPORAL-INVARIANCE — hard
-
-Comportamento que acumula grandezas com base em tempo decorrido deve preservar frações residuais de tempo (carry/remainder). O resultado de N chamadas com intervalos menores deve ser algebricamente equivalente a uma única chamada com o intervalo acumulado, vedando perda de precisão ou descarte dependente da taxa de amostragem.
-
-Aplica-se a operações que dependem de tempo ou relógio.
-
-### ARCH-CANONICAL-DIGEST-REPRESENTATION — hard
-
-Todo cálculo de hash, digest ou fingerprint de integridade sobre estruturas de memória deve definir o payload canônico exato: campos incluídos, ordem, encoding binário/length-prefixed e o valor canônico do estado vazio (respeitando o offset basis da primitiva ou sentinela contratado). Duas ordens ou serializações diferentes não podem ser permitidas.
-
-Aplica-se a requisitos de hash ou integridade pública.
-
-### ARCH-MINIMAL-SUFFICIENT-CLOSURE — hard
-
-O contrato deve possuir somente as estruturas, modelos e decisões necessários para tornar todos os observáveis demandados computáveis e falsificáveis. Não deve exigir State Model, Transaction Model, Identity Graph ou decisão humana quando a propriedade não se aplica à demanda ou pode ser derivada mecanicamente a partir de premissas autorizadas. Ausência de estado, de transações ou de efeitos externos em computações puras não constitui lacuna. Propriedades deriváveis fecham citando a premissa autorizada sem criar decisões redundantes. Decisões humanas reservam-se exclusivamente a lacunas materiais com alternativas públicas divergentes compatíveis com as fontes autorizadas.
-
-Aplica-se à especificação e governança de fechamento semântico.
-
-## Evolução da política
-
-O Contract IR calcula localmente quais regras são aplicáveis e exige avaliação
-semântica somente dessas regras. Conflitos com regras `hard` são correções
-obrigatórias e nunca viram opções do Wizard. Regras `default` só podem pedir
-confirmação quando uma exigência observável e explícita do usuário deixar uma
-escolha material; complexidade apenas sugerida é podada automaticamente.
-Preferências não criam perguntas. Regras de negócio, invariantes e provas de
-uma demanda pertencem ao contrato dela, não a este documento.
-
-## Sinais mecânicos conservadores
-
-Referências explícitas na própria demanda também ativam a regra correspondente,
-mesmo se o modelo omitir um contexto. A política distingue sinais comuns de
-revisão (`reviewReferences`) de sinais de possível conflito
-(`forbiddenReferences`). A ocorrência literal não decide o veredito — ela pode
-estar negada ou citada como exemplo —, mas não pode desaparecer do contrato e
-exige avaliação explícita da regra em `policyAssessments`.
-
-Os sinais se limitam a fronteiras e construções técnicas genéricas, como
-caminhos, tipos, efeitos, tempo, representação limitada, segurança declarada e
-abstrações estruturais. Nomes de domínio, algoritmos concretos e exemplos de
-demandas anteriores não pertencem ao detector mecânico. Todo sinal exige
-avaliação explícita da regra correspondente; a revisão adversarial residual não
-repete uma correção já resolvida pela política. A lista é deliberadamente curta:
-protege cláusulas universais sem tentar substituir interpretação semântica por
-um dicionário de domínio.
+### 7. Verificação Real Pós-Implementação (`ARCH-EXECUTABLE-PROOF` — hard)
+Contrato aprovado não comprova código correto. Toda implementação autorizada só fecha após passar no `./aegis check` (escopo no `git diff` + `tsc` + `eslint` + `static_gate.sh` + testes executáveis dos cenários `Dado / Quando / Então`).
