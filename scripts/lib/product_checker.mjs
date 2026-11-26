@@ -6,6 +6,7 @@ import {
   countContractScenarios,
   extractAuthorizedPaths,
   extractScenarioIds,
+  readSafeContractText,
 } from './contract_verifier.mjs';
 import {
   hasSymlinkComponent,
@@ -24,13 +25,16 @@ import {
 const stepTimeoutMs = 60_000;
 const stepMaxBufferBytes = 10 * 1024 * 1024;
 const secretPatterns = [
-  /\bghp_[A-Za-z0-9_]{30,}\b/u,
+  /\b(?:ghp|gho|ghs)_[A-Za-z0-9_]{30,}\b/u,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/u,
   /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/u,
   /\bAKIA[0-9A-Z]{16}\b/u,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/u,
+  /\bAIza[0-9A-Za-z_-]{35}\b/u,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u,
 ];
 
-function runStep(command, args, cwd) {
+function runStep(command, args, cwd, { trimOutput = true } = {}) {
   try {
     const stdout = execFileSync(command, args, {
       cwd,
@@ -39,7 +43,7 @@ function runStep(command, args, cwd) {
       timeout: stepTimeoutMs,
       maxBuffer: stepMaxBufferBytes,
     });
-    return { ok: true, output: stdout.trimEnd() };
+    return { ok: true, output: trimOutput ? stdout.trimEnd() : stdout };
   } catch (error) {
     const combined = [error?.stdout, error?.stderr, error?.message]
       .filter((part) => typeof part === 'string' && part.trim().length > 0)
@@ -152,23 +156,31 @@ function runStaticChecks({ repositoryRoot, existingRoots }) {
   return { ok: violations.length === 0, violations };
 }
 
-function parseGitChangedPaths(porcelainOutput) {
+function parseGitPorcelainZ(porcelainZOutput) {
+  const tokens = porcelainZOutput.split('\0');
   const paths = [];
-  for (const rawLine of porcelainOutput.split('\n')) {
-    if (!rawLine || rawLine.length < 4) continue;
-    const rawPath = rawLine.slice(3).trim();
-    const relPath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop().trim() : rawPath;
-    if (relPath) paths.push(relPath.replace(/^"|"$/gu, ''));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i];
+    if (!entry || entry.length < 4) continue;
+    const status = entry.slice(0, 2);
+    const firstPath = entry.slice(3);
+    if (firstPath) paths.push(firstPath);
+    if (status.includes('R') || status.includes('C')) {
+      const origPath = tokens[i + 1];
+      if (origPath) paths.push(origPath);
+      i += 1;
+    }
   }
-  return paths;
+  return [...new Set(paths)];
 }
 
 /**
- * Vigia TODO o git status do repositório:
+ * Vigia TODO o git status do repositório (`--porcelain -z -uall`):
  * - Ignora apenas .harness/runtime/ (artefatos transitórios do Aegis).
+ * - Valida tanto origem quanto destino em renames/cópias (`R`/`C`).
  * - Qualquer arquivo fora das raízes de produto (padrão: src/) FALHA, salvo
  *   se explicitamente listado pelo humano em --allow-outside.
- * - Dentro das raízes de produto, bloqueia symlinks e exige aderência a --allow ou contract.md.
+ * - Dentro das raízes de produto, bloqueia symlinks e exige aderência a --allow ou contract.md (fail-closed).
  */
 function checkGitScope({
   repositoryRoot,
@@ -206,8 +218,9 @@ function checkGitScope({
 
   const statusRes = runStep(
     'git',
-    ['-c', 'core.quotepath=false', 'status', '--porcelain', '-uall'],
+    ['-c', 'core.quotepath=false', 'status', '--porcelain', '-z', '-uall'],
     repositoryRoot,
+    { trimOutput: false },
   );
   if (!statusRes.ok) {
     return {
@@ -218,13 +231,18 @@ function checkGitScope({
     };
   }
 
-  const hasContract = existsSync(contractPath);
+  const contractRead = readSafeContractText(contractPath);
+  if (contractRead.status === 'SYMLINK_OR_INVALID') {
+    violations.push('contract.md não pode ser symlink ou não-arquivo.');
+  }
+  const hasContract = contractRead.status === 'OK';
   const authorizedPaths = normalizedAllow.length > 0
     ? normalizedAllow
-    : (hasContract ? extractAuthorizedPaths(readFileSync(contractPath, 'utf8'), sourceRoots).authorizedPaths : []);
+    : (hasContract ? extractAuthorizedPaths(contractRead.text, sourceRoots).authorizedPaths : []);
 
   const changedProductFiles = [];
-  const changedAll = parseGitChangedPaths(statusRes.output);
+  const changedInProductRoots = [];
+  const changedAll = parseGitPorcelainZ(statusRes.output);
 
   for (const relPath of changedAll) {
     if (relPath === '.harness/runtime' || relPath.startsWith('.harness/runtime/')) {
@@ -240,6 +258,7 @@ function checkGitScope({
       violations.push(`SYMLINK proibido na fronteira de produto: ${relPath}`);
       continue;
     }
+    changedInProductRoots.push(relPath);
     if (!isProductTestPath(relPath)) {
       changedProductFiles.push(relPath);
     }
@@ -247,6 +266,14 @@ function checkGitScope({
       const sourceLabel = normalizedAllow.length > 0 ? '--allow' : 'contract.md';
       violations.push(`${relPath} alterado fora dos arquivos autorizados em ${sourceLabel}`);
     }
+  }
+
+  if (changedInProductRoots.length > 0 && authorizedPaths.length === 0 && violations.length === 0) {
+    violations.push(
+      hasContract
+        ? `contract.md ativo não declara caminhos autorizados em ${sourceRoots.join(', ')}/ para: ${changedInProductRoots.join(', ')}`
+        : `Alterações em ${sourceRoots.join(', ')}/ sem contract.md ativo nem --allow (${changedInProductRoots.join(', ')})`,
+    );
   }
 
   return {
@@ -311,12 +338,14 @@ export function runProductCheck({
     }
   }
 
-  // Coleta arquivos TS e testes nas raízes de produto
+  // Coleta arquivos TS/JS e testes nas raízes de produto
   const tsFiles = [];
+  const lintableFiles = [];
   const productTests = [];
   for (const rootRel of existingRoots) {
     const absRoot = resolve(repositoryRoot, rootRel);
     collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx)$/u.test(f) && !isProductTestPath(f), tsFiles);
+    collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/u.test(f) && !isProductTestPath(f), lintableFiles);
     collectFilesMatching(absRoot, (f) => isProductTestPath(f), productTests);
   }
 
@@ -333,8 +362,8 @@ export function runProductCheck({
     });
   }
 
-  // 3. ESLint sobre raízes de produto
-  if (tsFiles.length > 0 && existingRoots.length > 0) {
+  // 3. ESLint sobre raízes de produto (TS e JS)
+  if (lintableFiles.length > 0 && existingRoots.length > 0) {
     const eslintBin = resolve(repositoryRoot, 'node_modules/.bin/eslint');
     const cmd = existsSync(eslintBin) ? eslintBin : 'eslint';
     const res = runStep(cmd, existingRoots, repositoryRoot);
@@ -358,7 +387,8 @@ export function runProductCheck({
   }
 
   // 5. Testes reais de produto + amarração AST com cenários do contract.md
-  const hasContract = existsSync(contractPath);
+  const contractRead = readSafeContractText(contractPath);
+  const hasContract = contractRead.status === 'OK';
   const enforceContractTests = hasContract && allowPaths.length === 0 && changedProductFiles.length > 0;
   if (skipDiff && hasContract && allowPaths.length === 0) {
     warnings.push('--skip-diff ativo com contract.md presente: escopo git e obrigatoriedade de testes do contrato não foram cobrados.');
@@ -393,7 +423,7 @@ export function runProductCheck({
 
     const coverageFailures = [];
     if (hasContract && allowPaths.length === 0) {
-      const contractMd = readFileSync(contractPath, 'utf8');
+      const contractMd = contractRead.text;
       const scenarios = countContractScenarios(contractMd);
       const scenarioIds = extractScenarioIds(contractMd);
 

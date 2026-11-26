@@ -1,6 +1,13 @@
 // Aegis KISS — Mechanical ESLint Config (type-aware structural checks for product code)
+import process from 'node:process';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+
+const srcDirs = (process.env.AEGIS_SRC_DIRS || 'src,app,lib')
+  .split(',')
+  .map((s) => s.trim().replace(/^\.\//u, '').replace(/\/+$/u, ''))
+  .filter(Boolean);
+const tsProductFiles = srcDirs.map((dir) => `${dir}/**/*.{ts,tsx}`);
 
 export default [
   {
@@ -21,7 +28,7 @@ export default [
   js.configs.recommended,
 
   {
-    files: ['{src,app,lib}/**/*.{ts,tsx}'],
+    files: tsProductFiles,
 
     languageOptions: {
       parser: tseslint.parser,

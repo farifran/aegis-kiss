@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { maxDemandBytes, maxIssueDemandBytes } from './workspace_observer.mjs';
@@ -74,14 +74,22 @@ export function formatIssueDemand({ number = null, title, body = '', stripNoise 
 }
 
 function readLocalIssueFile(fileRef, repositoryRoot) {
-  const resolved = resolve(repositoryRoot, fileRef);
-  const rootPrefix = repositoryRoot.endsWith(sep) ? repositoryRoot : `${repositoryRoot}${sep}`;
+  const realRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
+  const resolved = resolve(realRoot, fileRef);
+  const rootPrefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
   if (!resolved.startsWith(rootPrefix) || !existsSync(resolved)) {
     throw new Error(`invalid_issue_reference:${fileRef}`);
   }
   const stats = lstatSync(resolved);
   if (stats.isSymbolicLink() || !stats.isFile()) {
     throw new Error(`invalid_issue_reference:${fileRef}`);
+  }
+  const realResolved = realpathSync(resolved);
+  if (!realResolved.startsWith(rootPrefix)) {
+    throw new Error(`invalid_issue_reference:${fileRef}`);
+  }
+  if (stats.size > maxIssueDemandBytes * 4) {
+    throw new Error('input_too_large');
   }
   const raw = readFileSync(resolved, 'utf8').replace(/\r\n?/gu, '\n');
   const lines = raw.split('\n');

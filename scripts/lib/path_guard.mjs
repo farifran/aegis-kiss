@@ -1,6 +1,6 @@
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { extractAuthorizedPaths } from './contract_verifier.mjs';
+import { extractAuthorizedPaths, readSafeContractText } from './contract_verifier.mjs';
 import { resolveSourceRoots } from './workspace_observer.mjs';
 
 function resolveNearestRealPath(targetPath) {
@@ -135,7 +135,7 @@ export function evaluateGuardPath({
     return { allowed: true, path: relPath, reason: 'Autorizado via --allow.' };
   }
 
-  if (!contractPath || !existsSync(contractPath)) {
+  if (!contractPath) {
     return {
       allowed: false,
       path: relPath,
@@ -143,7 +143,23 @@ export function evaluateGuardPath({
     };
   }
 
-  const { authorizedPaths } = extractAuthorizedPaths(readFileSync(contractPath, 'utf8'), roots);
+  const contractRead = readSafeContractText(contractPath);
+  if (contractRead.status === 'MISSING') {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: 'Sem contract.md ativo nem --allow; crie .harness/runtime/contract.md ou informe --allow antes de editar.',
+    };
+  }
+  if (contractRead.status !== 'OK' || !normalizeRepoRelativePath(repositoryRoot, contractPath)) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: 'contract.md inválido, symlink ou fora do repositório.',
+    };
+  }
+
+  const { authorizedPaths } = extractAuthorizedPaths(contractRead.text, roots);
   if (authorizedPaths.length === 0) {
     return {
       allowed: false,

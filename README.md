@@ -4,7 +4,7 @@
 
 1. **Antes da IA pensar (`./aegis brief`):** analisa o código via TypeScript Compiler API, injeta integralmente as regras compactas de [`ARCHITECTURE.md`](ARCHITECTURE.md) (1 linha por regra: ex. sem framework, SQLite, bitmask, centavos inteiros, tempo determinístico), ranqueia símbolos/arquivos relevantes (léxico bilíngue, *Directory Anchor Fallback*, janelas por bloco AST inteiro, imports diretos de 1 salto incluindo `paths` do `tsconfig.json`, e chamadores via AST real) e gera `.harness/runtime/brief.md` compacto, numerado por linha e com isolamento de fences Markdown — evitando 5–10 buscas cegas no chat.
 2. **Antes de codar (`./aegis verify-contract`):** valida mecanicamente o contrato curto `.harness/runtime/contract.md` (seções obrigatórias, fronteira de produto sem configs/governança, regras `hard` de `ARCHITECTURE.md` como `DETERMINISTIC-TIME`, zero `[PENDENTE]`, cenários `Dado / Quando / Então`, existência física de `path:Ln-Lm` e presença do símbolo citado na linha).
-3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** (`-uall`, anti-symlink) garantindo fronteira estrita nas raízes de produto (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*`), roda `tsc --noEmit`, `eslint` type-aware (incluindo `DETERMINISTIC-TIME`, `only-throw-error`, `no-duplicate-imports`, `no-eval`, `no-explicit-any`), verificações estáticas puras em Node/AST (imports não declarados respeitando `tsconfig.json` `paths` + scanner de segredos hardcoded) e **exige testes reais ativos (`test()`/`it()`) em `src/**/*.test.*`** cobrindo os cenários (`AC-*`) do contrato, devolvendo saída ultra-compacta para o chat.
+3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** (`--porcelain -z -uall`, anti-symlink, origem e destino em renames e *fail-closed* sem `contract.md` nem `--allow`) garantindo fronteira estrita nas raízes de produto (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*`), roda `tsc --noEmit`, `eslint` type-aware (incluindo `DETERMINISTIC-TIME`, `only-throw-error`, `no-duplicate-imports`, `no-eval`, `no-explicit-any`), verificações estáticas puras em Node/AST (imports não declarados respeitando `tsconfig.json` `paths` + scanner de segredos hardcoded) e **exige testes reais ativos (`test()`/`it()`/`t.test()`, imune a comentários, `.skip` e `{ skip/todo: true }`) em `src/**/*.test.*`** cobrindo os cenários (`AC-*`) do contrato, devolvendo saída ultra-compacta para o chat.
 
 ---
 
@@ -20,7 +20,7 @@ Em vez de misturar postura do agente, regras de arquitetura do software e comand
 
 ### Por que essa separação funciona melhor na IDE
 
-- **Prompts menores e melhor aproveitamento de KV-Cache:** [`AGENTS.md`](AGENTS.md) permanece curto (~28 linhas) e invariante entre tarefas, maximizando cache de prefixo na IDE; o contexto específico de `src/` e as regras pertinentes de [`ARCHITECTURE.md`](ARCHITECTURE.md) entram sob demanda no `brief.md`.
+- **Prompts menores e melhor aproveitamento de KV-Cache:** [`AGENTS.md`](AGENTS.md) permanece curto (23 linhas) e invariante entre tarefas, maximizando cache de prefixo na IDE; o contexto específico de `src/` e as regras pertinentes de [`ARCHITECTURE.md`](ARCHITECTURE.md) entram sob demanda no `brief.md`.
 - **Regras do projeto compactas e sempre presentes:** [`ARCHITECTURE.md`](ARCHITECTURE.md) usa formato telegráfico de 1 linha por regra (`- \`ID\` [hard|default]: ...`), pesando ~180 tokens no total para injetar **100%** das restrições do software no `brief.md` sem heurística nem falsos negativos. Regras `hard` impedem violações silenciosas; regras `default` abrem deliberação explícita com o humano quando a demanda pede exceção.
 - **Fim da auto-regulação cega:** diretrizes como *Karpathy* e *PonyTail* melhoram muito o raciocínio do modelo, mas em prompt puro continuam probabilísticas. O harness fecha o ciclo cobrando mecanicamente escopo (`git status`), análise estática (`tsc` + `eslint` + AST) e provas executáveis (`src/**/*.test.*`).
 - **Workflow objetivo para o desenvolvedor:** além de impor limites à IA, o fluxo (`brief` → contrato curto → `check`) estrutura como o dev conduz o agente — trocando tentativa e erro (*vibe coding*) por deliberação explícita de ambiguidades antes do código e liberando a revisão humana do trabalho mecânico para focar apenas em design e lógica de negócio.
@@ -71,7 +71,7 @@ Em vez de misturar postura do agente, regras de arquitetura do software e comand
 [ -f .harness/runtime/contract.md ] && ./aegis check
 ```
 
-*(Opcional — repositórios cuja raiz de código não seja `src/`: o Aegis autodetecta `app/` e `lib/` quando `src/` não existe, ou aceita `AEGIS_SRC_DIRS=src,packages/core/src`.)*
+*(Opcional — repositórios cuja raiz de código não seja `src/`: o Aegis autodetecta `app/` e `lib/` quando `src/` não existe, ou aceita `AEGIS_SRC_DIRS=src,packages/core/src`, propagando as mesmas raízes para [`eslint.config.js`](eslint.config.js).)*
 
 ---
 
@@ -96,7 +96,7 @@ Um contrato enxuto de ~1 página contendo:
 - [`scripts/lib/brief_renderer.mjs`](scripts/lib/brief_renderer.mjs): cobertura de evidência, lente arquitetural, 1-hop imports (incluindo `tsconfig.json` `paths`), chamadores via AST e renderização numerada de `brief.md` com cercas Markdown dinâmicas.
 - [`scripts/lib/contract_verifier.mjs`](scripts/lib/contract_verifier.mjs): verificação mecânica de `contract.md`, referências `path:Ln-Lm`, símbolos nas linhas citadas, fronteira de governança, regras `hard` e extração de `AC-*`.
 - [`scripts/lib/path_guard.mjs`](scripts/lib/path_guard.mjs): validador *fail-closed* e anti-symlink para hooks de pré-edição de IDEs (`./aegis guard-path`).
-- [`scripts/lib/product_checker.mjs`](scripts/lib/product_checker.mjs) + [`eslint.config.js`](eslint.config.js): verificação pós-implementação (fronteira estrita sobre todo o `git status -uall`, `tsc`, `eslint` type-aware, checagem AST de imports/segredos, testes ativos obrigatórios e cobertura `AC-*`).
+- [`scripts/lib/product_checker.mjs`](scripts/lib/product_checker.mjs) + [`eslint.config.js`](eslint.config.js): verificação pós-implementação (fronteira estrita *fail-closed* sobre todo o `git status -z -uall` incluindo renames, `tsc`, `eslint` type-aware, checagem AST de imports/segredos, testes ativos obrigatórios e cobertura `AC-*`).
 
 ## Scripts NPM
 
@@ -106,6 +106,11 @@ npm run aegis:verify-structure  # tsc + eslint + verificações estáticas AST s
 npm run aegis:check             # Atalho para ./aegis check
 npm run aegis:bench             # Mede tamanho e latência do brief.md em cenários de referência
 ```
+
+## Notas de Manutenção (Backlog Futuro)
+
+- **Onde não mexer sem evidência real (`source_evidence.mjs`):** [`scripts/lib/source_evidence.mjs`](scripts/lib/source_evidence.mjs) (~860 LOC) concentra a lógica de ranking e janelas AST e passa em todos os testes e benchmarks (`2.8–35.4 ms`). Reescrevê-lo ou recalibrar pesos no escuro traz risco maior que o ganho — só vale revisar após coletar casos reais de falha em um repositório maior (50–300 arquivos).
+- **Novos ajustes de intake/discovery:** manter o harness congelado até o uso em projeto real apontar fricção concreta (ex.: extração de frames de stacktrace em `--issue` ou leitura via `stdin`).
 
 ---
 

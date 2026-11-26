@@ -52,7 +52,13 @@ export function resolveSourceRoots(repositoryRoot, explicitRoots = null) {
         throw new Error(`invalid_source_root:${root}`);
       }
     }
-    return normalized;
+    const collapsed = [];
+    for (const root of normalized) {
+      if (!collapsed.some((parent) => root.startsWith(`${parent}/`))) {
+        collapsed.push(root);
+      }
+    }
+    return collapsed;
   }
   if (existsSync(resolve(repositoryRoot, 'src'))) return ['src'];
   const detected = fallbackSourceRoots.filter((dir) => existsSync(resolve(repositoryRoot, dir)));

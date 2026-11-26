@@ -99,177 +99,77 @@ function extractTypeScriptSymbols(path, text) {
   const symbols = [];
   const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
 
+  function pushSymbol(node, kind, name, signature, {
+    exported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0,
+    docNode = node,
+  } = {}) {
+    const docComment = docNode ? extractLeadingDocComment(docNode, sourceFile) : undefined;
+    symbols.push({
+      path,
+      name: name.slice(0, 128),
+      kind,
+      startLine: getLine(sourceFile, node.getStart(sourceFile)),
+      endLine: getLine(sourceFile, node.getEnd()),
+      exported,
+      signature: signature.slice(0, maxSignatureLength),
+      ...(docComment ? { docComment } : {}),
+    });
+  }
+
   function visit(node) {
     if (ts.isFunctionDeclaration(node)) {
-      const name = node.name?.text ?? 'default';
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
-      const startLine = getLine(sourceFile, node.getStart(sourceFile));
-      const endLine = getLine(sourceFile, node.getEnd());
       const bodyStart = node.body ? node.body.getStart(sourceFile) : node.getEnd();
-      const signature = text.slice(node.getStart(sourceFile), bodyStart).trim().slice(0, maxSignatureLength);
-      const docComment = extractLeadingDocComment(node, sourceFile);
-
-      symbols.push({
-        path,
-        name: name.slice(0, 128),
-        kind: 'FUNCTION',
-        startLine,
-        endLine,
-        exported: isExported,
-        signature,
-        ...(docComment ? { docComment } : {}),
-      });
+      const sig = text.slice(node.getStart(sourceFile), bodyStart).trim();
+      pushSymbol(node, 'FUNCTION', node.name?.text ?? 'default', sig);
       return;
     }
 
     if (ts.isInterfaceDeclaration(node)) {
-      const name = node.name.text;
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
-      const startLine = getLine(sourceFile, node.getStart(sourceFile));
-      const endLine = getLine(sourceFile, node.getEnd());
-      const signature = node.getText(sourceFile).trim().slice(0, maxSignatureLength);
-      const docComment = extractLeadingDocComment(node, sourceFile);
-
-      symbols.push({
-        path,
-        name: name.slice(0, 128),
-        kind: 'INTERFACE',
-        startLine,
-        endLine,
-        exported: isExported,
-        signature,
-        ...(docComment ? { docComment } : {}),
-      });
+      pushSymbol(node, 'INTERFACE', node.name.text, node.getText(sourceFile).trim());
       return;
     }
 
     if (ts.isTypeAliasDeclaration(node)) {
-      const name = node.name.text;
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
-      const startLine = getLine(sourceFile, node.getStart(sourceFile));
-      const endLine = getLine(sourceFile, node.getEnd());
-      const signature = node.getText(sourceFile).trim().slice(0, maxSignatureLength);
-      const docComment = extractLeadingDocComment(node, sourceFile);
-
-      symbols.push({
-        path,
-        name: name.slice(0, 128),
-        kind: 'TYPE_ALIAS',
-        startLine,
-        endLine,
-        exported: isExported,
-        signature,
-        ...(docComment ? { docComment } : {}),
-      });
+      pushSymbol(node, 'TYPE_ALIAS', node.name.text, node.getText(sourceFile).trim());
       return;
     }
 
     if (ts.isEnumDeclaration(node)) {
-      const name = node.name.text;
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
-      const startLine = getLine(sourceFile, node.getStart(sourceFile));
-      const endLine = getLine(sourceFile, node.getEnd());
-      const signature = node.getText(sourceFile).trim().slice(0, maxSignatureLength);
-      const docComment = extractLeadingDocComment(node, sourceFile);
-
-      symbols.push({
-        path,
-        name: name.slice(0, 128),
-        kind: 'ENUM',
-        startLine,
-        endLine,
-        exported: isExported,
-        signature,
-        ...(docComment ? { docComment } : {}),
-      });
+      pushSymbol(node, 'ENUM', node.name.text, node.getText(sourceFile).trim());
       return;
     }
 
     if (ts.isClassDeclaration(node)) {
-      const name = node.name?.text ?? 'default';
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
-      const startLine = getLine(sourceFile, node.getStart(sourceFile));
-      const endLine = getLine(sourceFile, node.getEnd());
-      const signature = extractClassSignature(node, sourceFile);
-      const docComment = extractLeadingDocComment(node, sourceFile);
-
-      symbols.push({
-        path,
-        name: name.slice(0, 128),
-        kind: 'CLASS',
-        startLine,
-        endLine,
-        exported: isExported,
-        signature,
-        ...(docComment ? { docComment } : {}),
-      });
+      pushSymbol(node, 'CLASS', node.name?.text ?? 'default', extractClassSignature(node, sourceFile));
       return;
     }
 
     if (ts.isVariableStatement(node)) {
-      const isExported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
+      const exported = (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
       const isConst = (node.declarationList.flags & ts.NodeFlags.Const) !== 0;
-      const docComment = extractLeadingDocComment(node, sourceFile);
+      const prefix = exported ? `export ${isConst ? 'const' : 'let'} ` : `${isConst ? 'const' : 'let'} `;
 
       for (const declaration of node.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name)) {
-          const name = declaration.name.text;
-          const startLine = getLine(sourceFile, declaration.getStart(sourceFile));
-          const endLine = getLine(sourceFile, declaration.getEnd());
-          const isArrowOrFn = declaration.initializer
-            && (ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer));
-
-          if (isArrowOrFn) {
-            const bodyStart = declaration.initializer.body ? declaration.initializer.body.getStart(sourceFile) : declaration.initializer.getEnd();
-            const fnSig = text.slice(declaration.getStart(sourceFile), bodyStart).trim();
-            const prefix = isExported ? `export ${isConst ? 'const' : 'let'} ` : `${isConst ? 'const' : 'let'} `;
-            symbols.push({
-              path,
-              name: name.slice(0, 128),
-              kind: 'FUNCTION',
-              startLine,
-              endLine,
-              exported: isExported,
-              signature: `${prefix}${fnSig}`.slice(0, maxSignatureLength),
-              ...(docComment ? { docComment } : {}),
-            });
-          } else {
-            const prefix = isExported ? `export ${isConst ? 'const' : 'let'} ` : `${isConst ? 'const' : 'let'} `;
-            const rawDecl = compactVariableDeclaration(declaration, sourceFile);
-            symbols.push({
-              path,
-              name: name.slice(0, 128),
-              kind: isConst ? 'CONST' : 'VARIABLE',
-              startLine,
-              endLine,
-              exported: isExported,
-              signature: `${prefix}${rawDecl}`.slice(0, maxSignatureLength),
-              ...(docComment ? { docComment } : {}),
-            });
-          }
+        if (!ts.isIdentifier(declaration.name)) continue;
+        const isArrowOrFn = declaration.initializer
+          && (ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer));
+        if (isArrowOrFn) {
+          const bodyStart = declaration.initializer.body ? declaration.initializer.body.getStart(sourceFile) : declaration.initializer.getEnd();
+          const fnSig = text.slice(declaration.getStart(sourceFile), bodyStart).trim();
+          pushSymbol(declaration, 'FUNCTION', declaration.name.text, `${prefix}${fnSig}`, { exported, docNode: node });
+        } else {
+          const rawDecl = compactVariableDeclaration(declaration, sourceFile);
+          pushSymbol(declaration, isConst ? 'CONST' : 'VARIABLE', declaration.name.text, `${prefix}${rawDecl}`, { exported, docNode: node });
         }
       }
       return;
     }
 
-    if (ts.isExportDeclaration(node)) {
-      if (node.exportClause && ts.isNamedExports(node.exportClause)) {
-        const startLine = getLine(sourceFile, node.getStart(sourceFile));
-        const endLine = getLine(sourceFile, node.getEnd());
-        const moduleSpec = node.moduleSpecifier ? node.moduleSpecifier.getText(sourceFile) : '';
-
-        for (const specifier of node.exportClause.elements) {
-          const exportedName = specifier.name.text;
-          symbols.push({
-            path,
-            name: exportedName.slice(0, 128),
-            kind: 'CONST',
-            startLine,
-            endLine,
-            exported: true,
-            signature: `export { ${specifier.getText(sourceFile)} }${moduleSpec ? ` from ${moduleSpec}` : ''}`.slice(0, maxSignatureLength),
-          });
-        }
+    if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+      const moduleSpec = node.moduleSpecifier ? node.moduleSpecifier.getText(sourceFile) : '';
+      for (const specifier of node.exportClause.elements) {
+        const sig = `export { ${specifier.getText(sourceFile)} }${moduleSpec ? ` from ${moduleSpec}` : ''}`;
+        pushSymbol(node, 'CONST', specifier.name.text, sig, { exported: true, docNode: null });
       }
     }
   }
@@ -444,9 +344,29 @@ export function extractAstImports(path, text) {
   return imports;
 }
 
+function hasDisabledTestOption(optionsArg) {
+  if (!optionsArg || !ts.isObjectLiteralExpression(optionsArg)) return false;
+  for (const prop of optionsArg.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    const key = ts.isIdentifier(prop.name) ? prop.name.text : (ts.isStringLiteral(prop.name) ? prop.name.text : '');
+    if (key !== 'skip' && key !== 'todo') continue;
+    const init = prop.initializer;
+    if (init.kind === ts.SyntaxKind.FalseKeyword
+      || init.kind === ts.SyntaxKind.NullKeyword
+      || (ts.isIdentifier(init) && init.text === 'undefined')
+      || (ts.isNumericLiteral(init) && init.text === '0')
+      || (ts.isStringLiteral(init) && init.text.length === 0)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 /**
- * Extrai casos de teste ativos (`test('...')` / `it('...')`) e títulos de `describe('...')`
- * via AST TypeScript, ignorando comentários e chamadas `.skip`/`.todo`.
+ * Extrai casos de teste ativos (`test('...', fn)`, `it('...', fn)`, `t.test('...', fn)`)
+ * e títulos de `describe('...', fn)` via AST TypeScript.
+ * Ignora comentários, `.skip`/`.todo`, opções `{ skip/todo: truthy }` e chamadas sem callback.
  */
 export function extractActiveTestCases(path, text) {
   const ext = extname(path).toLowerCase();
@@ -456,12 +376,32 @@ export function extractActiveTestCases(path, text) {
   const titles = [];
 
   function visit(node) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const callee = node.expression.text;
-      if (callee === 'test' || callee === 'it' || callee === 'describe') {
-        if (callee === 'test' || callee === 'it') caseCount += 1;
-        const firstArg = node.arguments[0];
-        if (firstArg && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))) {
+    if (ts.isCallExpression(node)) {
+      const expr = node.expression;
+      // Ignora subárvore inteira de describe.skip / test.skip / it.todo etc.
+      if (ts.isPropertyAccessExpression(expr) && (expr.name.text === 'skip' || expr.name.text === 'todo')) {
+        return;
+      }
+
+      const isDirectCallee = ts.isIdentifier(expr)
+        && (expr.text === 'test' || expr.text === 'it' || expr.text === 'describe');
+      const isSubtestCallee = ts.isPropertyAccessExpression(expr)
+        && ts.isIdentifier(expr.expression)
+        && expr.name.text === 'test';
+
+      if (isDirectCallee || isSubtestCallee) {
+        const args = node.arguments;
+        const firstArg = args[0];
+        const hasTitle = firstArg && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg));
+        const optionsArg = args.length >= 3 && ts.isObjectLiteralExpression(args[1]) ? args[1] : null;
+        const callbackArg = optionsArg ? args[2] : (args.length >= 2 && !ts.isObjectLiteralExpression(args[1]) ? args[1] : null);
+
+        if (hasDisabledTestOption(optionsArg) || !callbackArg) {
+          return;
+        }
+        if (hasTitle) {
+          const calleeName = isDirectCallee ? expr.text : 'test';
+          if (calleeName === 'test' || calleeName === 'it') caseCount += 1;
           titles.push(firstArg.text);
         }
       }

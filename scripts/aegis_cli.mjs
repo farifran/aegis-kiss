@@ -5,7 +5,7 @@ import process from 'node:process';
 import { buildDemandBrief, renderBriefMarkdown } from './lib/brief_renderer.mjs';
 import { verifyContractMarkdown } from './lib/contract_verifier.mjs';
 import { resolveIssueDemand } from './lib/issue_intake.mjs';
-import { evaluateGuardPath } from './lib/path_guard.mjs';
+import { evaluateGuardPath, normalizeRepoRelativePath } from './lib/path_guard.mjs';
 import { formatCheckReport, runProductCheck } from './lib/product_checker.mjs';
 import {
   captureDemand,
@@ -24,7 +24,7 @@ function printHelp() {
     '  ./aegis "<demanda>"                   Atalho direto para ./aegis brief "<demanda>"',
     '  ./aegis --issue [id|arquivo]          Atalho direto para ./aegis brief --issue [ref]',
     '  ./aegis verify-contract [caminho]     Valida caminhos, linhas, fronteira e cenários do contract.md',
-    '  ./aegis check [opções]                Valida fronteira src/, escopo, tsc, eslint, static_gate e testes',
+    '  ./aegis check [opções]                Valida fronteira, escopo, tsc, eslint, static_checks e testes',
     '  ./aegis guard-path <caminho>          Retorna exit 0 só se a IA puder editar o caminho (hooks de IDE)',
     '  ./aegis status                        Exibe estado atual do brief, contrato e frescor de src/',
     '  ./aegis clean                         Limpa .harness/runtime/ (preserva src/ e lexicon.json)',
@@ -67,6 +67,8 @@ async function handleBrief(paths, args) {
       if (!next) throw new Error('missing_files_argument');
       explicitFiles.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
       i += 1;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown_flag:${arg}`);
     } else {
       positional.push(arg);
     }
@@ -124,14 +126,21 @@ async function handleBrief(paths, args) {
   } else {
     process.stdout.write([
       `[AEGIS][BRIEF] OK -> .harness/runtime/brief.md (${markdown.length} bytes)`,
-      `- src/ snapshot: ${brief.sourceSnapshotDigest.slice(0, 12)} (${brief.coverage.observedTextFileCount} arquivos, ${brief.coverage.excerptedPaths.length} no brief)`,
+      `- ${brief.coverage.discoveryRoot}/ snapshot: ${brief.sourceSnapshotDigest.slice(0, 12)} (${brief.coverage.observedTextFileCount} arquivos, ${brief.coverage.excerptedPaths.length} no brief)`,
       `- símbolos AST: ${brief.skeletonSymbols.length}${brief.topography ? ` · mapa topográfico: ${Object.keys(brief.topography).length} arquivos` : ''}`,
     ].join('\n') + '\n');
   }
 }
 
 function handleVerifyContract(paths, args) {
-  const targetPath = args[0] ? resolve(paths.root, args[0]) : paths.contractMdPath;
+  if (args.length > 1) throw new Error('invalid_verify_contract_arity');
+  let targetPath = paths.contractMdPath;
+  if (args[0]) {
+    if (args[0].startsWith('--')) throw new Error(`unknown_flag:${args[0]}`);
+    const relContract = normalizeRepoRelativePath(paths.root, args[0]);
+    if (!relContract) throw new Error(`invalid_contract_path:${args[0]}`);
+    targetPath = resolve(paths.root, relContract);
+  }
   const meta = readBriefMeta(paths);
   const result = verifyContractMarkdown({
     repositoryRoot: paths.root,
@@ -141,7 +150,7 @@ function handleVerifyContract(paths, args) {
 
   if (result.ok) {
     process.stdout.write([
-      `[AEGIS][CONTRACT] PASS (${result.scenarioCount} cenários, ${result.authorizedPaths.length} arquivo(s) autorizado(s), src/: ${result.workspaceFreshness})`,
+      `[AEGIS][CONTRACT] PASS (${result.scenarioCount} cenários, ${result.authorizedPaths.length} arquivo(s) autorizado(s), workspace: ${result.workspaceFreshness})`,
       ...result.warnings.map((w) => `- AVISO: ${w}`),
     ].join('\n') + '\n');
     return;
@@ -155,23 +164,24 @@ function handleVerifyContract(paths, args) {
   process.exitCode = 1;
 }
 
-function parseCsvFlag(args, flagName) {
-  const values = [];
+function handleCheck(paths, args) {
+  let skipDiff = false;
+  const allowPaths = [];
+  const allowOutsidePaths = [];
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === flagName) {
+    const arg = args[i];
+    if (arg === '--skip-diff') {
+      skipDiff = true;
+    } else if (arg === '--allow' || arg === '--allow-outside') {
       const next = args[i + 1];
-      if (!next) throw new Error(`missing_argument_for:${flagName}`);
-      values.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
+      if (!next || next.startsWith('--')) throw new Error(`missing_argument_for:${arg}`);
+      const target = arg === '--allow' ? allowPaths : allowOutsidePaths;
+      target.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
       i += 1;
+    } else {
+      throw new Error(`unknown_argument:${arg}`);
     }
   }
-  return values;
-}
-
-function handleCheck(paths, args) {
-  const skipDiff = args.includes('--skip-diff');
-  const allowPaths = parseCsvFlag(args, '--allow');
-  const allowOutsidePaths = parseCsvFlag(args, '--allow-outside');
   const report = runProductCheck({
     repositoryRoot: paths.root,
     contractPath: paths.contractMdPath,
@@ -189,14 +199,22 @@ function handleCheck(paths, args) {
 }
 
 function handleGuardPath(paths, args) {
-  const allowPaths = parseCsvFlag(args, '--allow');
+  const allowPaths = [];
   let targetPath = null;
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === '--allow') {
+    const arg = args[i];
+    if (arg === '--allow') {
+      const next = args[i + 1];
+      if (!next || next.startsWith('--')) throw new Error('missing_argument_for:--allow');
+      allowPaths.push(...next.split(',').map((s) => s.trim()).filter(Boolean));
       i += 1;
-      continue;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown_flag:${arg}`);
+    } else if (!targetPath) {
+      targetPath = arg;
+    } else {
+      throw new Error(`unexpected_argument:${arg}`);
     }
-    if (!targetPath) targetPath = args[i];
   }
   if (!targetPath) throw new Error('missing_target_path');
   const decision = evaluateGuardPath({

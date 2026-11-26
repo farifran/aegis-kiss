@@ -100,6 +100,19 @@ function assertInsideRepo(repositoryRoot, relPath) {
   return abs;
 }
 
+export function readSafeContractText(contractPath) {
+  let stats;
+  try {
+    stats = lstatSync(contractPath);
+  } catch {
+    return { status: 'MISSING', text: null };
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    return { status: 'SYMLINK_OR_INVALID', text: null };
+  }
+  return { status: 'OK', text: readFileSync(contractPath, 'utf8').replace(/\r\n?/gu, '\n') };
+}
+
 /**
  * Verificação puramente mecânica do contract.md (0 tokens):
  * - seções mínimas obrigatórias + casos Dado/Quando/Então;
@@ -116,7 +129,8 @@ export function verifyContractMarkdown({
   const errors = [];
   const warnings = [];
 
-  if (!existsSync(contractPath)) {
+  const contractRead = readSafeContractText(contractPath);
+  if (contractRead.status === 'MISSING') {
     return {
       ok: false,
       errors: [`Contrato não encontrado em ${contractPath}`],
@@ -125,18 +139,17 @@ export function verifyContractMarkdown({
       workspaceFreshness: 'NO_CONTRACT',
     };
   }
-
-  if (lstatSync(contractPath).isSymbolicLink()) {
+  if (contractRead.status !== 'OK') {
     return {
       ok: false,
-      errors: ['Contrato não pode ser symlink.'],
+      errors: ['Contrato não pode ser symlink ou não-arquivo.'],
       warnings,
       authorizedPaths: [],
       workspaceFreshness: 'NO_CONTRACT',
     };
   }
 
-  const markdown = readFileSync(contractPath, 'utf8').replace(/\r\n?/gu, '\n');
+  const markdown = contractRead.text;
   if (markdown.trim().length === 0) {
     return {
       ok: false,
