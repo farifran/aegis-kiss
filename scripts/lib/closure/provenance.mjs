@@ -146,6 +146,15 @@ export function validateProvenanceEnforcement({
           // ignore non-integer comparison
         }
       }
+
+      // Standard JS numeric boundary constants cited on the referenced source line
+      const maxSafeTokens = new Set(['9007199254740991', 'Number.MAX_SAFE_INTEGER', 'MAX_SAFE_INTEGER']);
+      const minSafeTokens = new Set(['-9007199254740991', 'Number.MIN_SAFE_INTEGER', 'MIN_SAFE_INTEGER']);
+      if (textToCheck.includes('Number.isSafeInteger') && (maxSafeTokens.has(cleanVal) || minSafeTokens.has(cleanVal))) {
+        return true;
+      }
+      if (textToCheck.includes('Number.MAX_SAFE_INTEGER') && maxSafeTokens.has(cleanVal)) return true;
+      if (textToCheck.includes('Number.MIN_SAFE_INTEGER') && minSafeTokens.has(cleanVal)) return true;
     }
 
     return false;
@@ -167,7 +176,18 @@ export function validateProvenanceEnforcement({
 
     let hasValidFactRef = false;
     let anyFactSupportsBound = false;
-    let hasNonFactSupport = false;
+    let hasWorkspaceRef = false;
+    let anyWorkspaceSupportsBound = false;
+    let hasOtherSupport = false;
+
+    const resolveWorkspaceRefExists = (reference) => {
+      const { refPath } = parseWorkspaceReference(reference);
+      if (!refPath) return false;
+      const inEvidence = (workspaceEvidence || []).some((entry) => (
+        entry.path === refPath || entry.path.endsWith(`/${refPath}`) || refPath.endsWith(`/${entry.path}`)
+      ));
+      return inEvidence || existsSync(refPath);
+    };
 
     for (const p of provenance) {
       if (p.source === 'USER_INTENT') {
@@ -193,7 +213,7 @@ export function validateProvenanceEnforcement({
               reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita o fragmento '${p.reference}' que não existe na evidência da demanda.`,
             });
           } else {
-            hasNonFactSupport = true;
+            hasOtherSupport = true;
           }
         } else if (intent && intent.length > 0 && typeof p.reference === 'string' && !intent.includes(p.reference)) {
           issues.push({
@@ -202,17 +222,20 @@ export function validateProvenanceEnforcement({
             reason: `A referência '${p.reference}' citada em USER_INTENT para o limite '${valStr}' em '${slotPrefix}' não aparece no texto da demanda.`,
           });
         } else {
-          hasNonFactSupport = true;
+          hasOtherSupport = true;
         }
       } else if (p.source === 'WORKSPACE_EVIDENCE') {
-        if (!workspaceSupportsValue(p.reference, valStr)) {
+        if (!resolveWorkspaceRefExists(p.reference)) {
           issues.push({
             slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
             kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-            reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o valor não existe no trecho de código referenciado.`,
+            reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' cita '${p.reference}' em WORKSPACE_EVIDENCE, mas o caminho referenciado não existe.`,
           });
         } else {
-          hasNonFactSupport = true;
+          hasWorkspaceRef = true;
+          if (workspaceSupportsValue(p.reference, valStr)) {
+            anyWorkspaceSupportsBound = true;
+          }
         }
       } else if ((p.source === 'ARCHITECTURE_POLICY' || p.source === 'SAFE_MECHANICAL_DEFAULT') && !validPolicyRuleIds.has(p.reference)) {
         issues.push({
@@ -221,15 +244,18 @@ export function validateProvenanceEnforcement({
           reason: `A regra de política '${p.reference}' citada para o limite '${valStr}' em '${slotPrefix}' não existe na governança.`,
         });
       } else {
-        hasNonFactSupport = true;
+        hasOtherSupport = true;
       }
     }
 
-    if (hasValidFactRef && !anyFactSupportsBound && !hasNonFactSupport) {
+    const supported = anyFactSupportsBound || anyWorkspaceSupportsBound || hasOtherSupport;
+    if ((hasValidFactRef || hasWorkspaceRef) && !supported) {
       issues.push({
         slotId: `${slotPrefix}/bounds/${boundKind}/unauthorizedLiteral`,
         kind: 'UNAUTHORIZED_NUMERIC_LITERAL',
-        reason: `O limite ${boundKind} '${valStr}' em '${slotPrefix}' não é autorizado pelos fatos literais citados em provenance.`,
+        reason: hasWorkspaceRef && !anyWorkspaceSupportsBound
+          ? `O limite ${boundKind} '${valStr}' em '${slotPrefix}' não aparece em nenhum dos trechos de WORKSPACE_EVIDENCE citados.`
+          : `O limite ${boundKind} '${valStr}' em '${slotPrefix}' não é autorizado pelos fatos literais citados em provenance.`,
       });
     }
   };
@@ -325,20 +351,76 @@ export function validateProvenanceEnforcement({
       ...workspaceEvidence.map((w) => w.content ?? ''),
     ].join('\n').toLowerCase();
 
-    const standardGuardPrefixes = [
-      'guard_', 'err_', 'error_', 'invalid_', 'insufficient_', 'queue_',
-      'capacity_', 'limit_', 'timeout_', 'unauthorized_', 'not_found_', 'conflict_',
-    ];
+    const hasAuthorizedBasisEntry = (entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      if (entry.source === 'WORKSPACE_EVIDENCE') {
+        return typeof entry.reference === 'string' && workspaceEvidence.some((w) => {
+          const { refPath } = parseWorkspaceReference(entry.reference);
+          return refPath && (w.path === refPath || w.path.endsWith(`/${refPath}`));
+        });
+      }
+      if (entry.source === 'USER_INTENT') {
+        if (typeof entry.reference !== 'string' || entry.reference.trim().length === 0) return false;
+        if (entry.reference.startsWith('FRAG-')) {
+          return fragmentsById.size === 0 || fragmentsById.has(entry.reference);
+        }
+        if (entry.reference.startsWith('FACT-')) {
+          return factsById.has(entry.reference);
+        }
+        return intent.length === 0 || intent.includes(entry.reference);
+      }
+      return entry.source === 'USER_DECISION'
+        || entry.source === 'CONSTITUTION'
+        || (entry.source === 'ARCHITECTURE_POLICY' && validPolicyRuleIds.has(entry.reference));
+    };
+
+    const requirementsById = new Map();
+    const groundedRequirementIds = new Set();
+    const explicitlyGroundedCodes = new Set();
+
+    for (const req of (requirements ?? [])) {
+      if (!req?.id) continue;
+      requirementsById.set(req.id, req);
+      const hasFrag = Array.isArray(req.sourceFragmentIds) && req.sourceFragmentIds.some(
+        (fid) => fragmentsById.size === 0 || fragmentsById.has(fid),
+      );
+      const hasBasis = Array.isArray(req.basis) && req.basis.some(hasAuthorizedBasisEntry);
+      if (hasFrag || hasBasis) {
+        groundedRequirementIds.add(req.id);
+        for (const ac of (req.acceptanceCases ?? [])) {
+          if (typeof ac.branchRef === 'string' && ac.branchRef.trim().length > 0) {
+            explicitlyGroundedCodes.add(ac.branchRef.trim().toLowerCase());
+          }
+        }
+      }
+    }
+
+    const hasExplicitTrace = (basisList) => Array.isArray(basisList) && basisList.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      if (entry.source === 'REQUIREMENT' && typeof entry.reference === 'string') {
+        return groundedRequirementIds.has(entry.reference);
+      }
+      return hasAuthorizedBasisEntry(entry);
+    });
 
     const standardAllowedCodes = new Set([
       'queue_full_rejected', 'queue_full', 'capacity_exceeded', 'max_entries_exceeded',
       'batch_empty_noop', 'batch_settled', 'success', 'noop', 'rejected', 'default_rejection',
     ]);
 
-    const isCodeGrounded = (rawCode) => {
+    const standardGuardPrefixes = [
+      'guard_', 'err_', 'error_', 'invalid_', 'insufficient_', 'queue_',
+      'capacity_', 'limit_', 'timeout_', 'unauthorized_', 'not_found_', 'conflict_',
+    ];
+
+    const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const isCodeGrounded = (rawCode, explicitBasis = null) => {
       if (!rawCode || typeof rawCode !== 'string') return true;
       const code = rawCode.trim().toLowerCase();
       if (standardAllowedCodes.has(code)) return true;
+      if (explicitlyGroundedCodes.has(code)) return true;
+      if (hasExplicitTrace(explicitBasis)) return true;
       if (groundingCorpus.includes(code)) return true;
 
       let coreToken = code;
@@ -348,29 +430,33 @@ export function validateProvenanceEnforcement({
           break;
         }
       }
-      if (coreToken.length >= 3 && groundingCorpus.includes(coreToken)) {
-        return true;
+      if (coreToken.length >= 3) {
+        return new RegExp(`(?<![a-z0-9])${escapeRegExp(coreToken)}(?![a-z0-9])`, 'u').test(groundingCorpus);
       }
       return false;
     };
 
     for (const op of stateModel.operations) {
+      const branchesById = new Map((op.branches ?? []).map((b) => [b.branchId, b]));
       for (const guard of (op.guardPrecedence ?? [])) {
-        if (!isCodeGrounded(guard)) {
+        const branch = branchesById.get(guard);
+        if (!isCodeGrounded(guard, branch?.basis)) {
           issues.push({
             slotId: `operation/${op.name}/guard/${guard}/unauthorized`,
             kind: 'UNAUTHORIZED_GUARD_OR_ERROR_CODE',
-            reason: `A guarda ou código de rejeição '${guard}' na operação '${op.name}' não possui fundamentação no texto da demanda, evidências do repositório ou requisitos.`,
+            reason: `A guarda ou código de rejeição '${guard}' na operação '${op.name}' não possui fundamentação explícita (FRAG-*, REQ-*, WORKSPACE_EVIDENCE ou texto da demanda).`,
           });
         }
       }
       for (const param of (op.parameters ?? [])) {
-        const errCode = param.onInvalid?.error || param.bounds?.onInvalid?.error;
-        if (errCode && !isCodeGrounded(errCode)) {
+        const invalidSpec = param.onInvalid ?? param.bounds?.onInvalid;
+        const errCode = invalidSpec?.error;
+        const branch = errCode ? branchesById.get(errCode) : null;
+        if (errCode && !isCodeGrounded(errCode, invalidSpec?.basis ?? branch?.basis)) {
           issues.push({
             slotId: `operation/${op.name}/parameter/${param.name}/onInvalid/${errCode}`,
             kind: 'UNAUTHORIZED_GUARD_OR_ERROR_CODE',
-            reason: `O código de erro de parâmetro '${errCode}' na operação '${op.name}' não possui fundamentação no texto da demanda, evidências do repositório ou requisitos.`,
+            reason: `O código de erro de parâmetro '${errCode}' na operação '${op.name}' não possui fundamentação explícita (FRAG-*, REQ-*, WORKSPACE_EVIDENCE ou texto da demanda).`,
           });
         }
       }

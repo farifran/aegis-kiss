@@ -2,6 +2,7 @@ import { canonicalDigest } from './canonical_json.mjs';
 import { assertSchema } from './schema_validator.mjs';
 import {
   assertContractApprovalEvidence,
+  determinismStatusFromCertificate,
   effectiveDeterminismStatus,
   assertRevisionApplied,
 } from './semantic_approval.mjs';
@@ -53,9 +54,17 @@ export function compileSemanticContract({
     ?? preflight.discovery?.workspaceSkeleton
     ?? effectiveSemanticRequest.workspace?.workspaceSkeleton
     ?? null;
+  const closureEvidence = {
+    intent: preflight.intent,
+    intentEvidence: effectiveSemanticRequest.intentEvidence,
+    workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
+    workspaceSkeleton,
+  };
   assertSemanticDraft(draft, policy, validationContext);
   assertPreparedEffectsDisjoint(draft.decisions);
-  // Preview every prepared combination (full Cartesian product) without mutating disk.
+  const baselineStatus = effectiveDeterminismStatus(draft, humanResolutions, closureEvidence);
+  const MAX_PREPARED_CARTESIAN_COMBINATIONS = 32;
+  // Preview every prepared combination (bounded Cartesian product) reusing single-pass closureCertificate.
   const preparedBranchesPerDecision = draft.decisions
     .map((decision) => decision.answers
       .filter((answer) => answer.preparedEffect != null)
@@ -65,12 +74,19 @@ export function compileSemanticContract({
         contractEffect: answer.contractEffect,
       })))
     .filter((branches) => branches.length > 0);
+  if (preparedBranchesPerDecision.length > 0) {
+    const combinationCount = preparedBranchesPerDecision.reduce((acc, list) => acc * list.length, 1);
+    if (combinationCount > MAX_PREPARED_CARTESIAN_COMBINATIONS) {
+      throw new Error(`prepared_effect_combinatorial_explosion:${combinationCount}:${MAX_PREPARED_CARTESIAN_COMBINATIONS}`);
+    }
+  }
   for (const choices of cartesianProduct(preparedBranchesPerDecision)) {
     try {
+      const nextResolutions = [...humanResolutions, ...choices];
       const preview = applyPreparedAnswers(
         draft,
         choices,
-        humanResolutions,
+        nextResolutions,
         effectiveSemanticRequest.intentEvidence,
         effectiveSemanticRequest.workspace?.sourceEvidence,
         workspaceSkeleton,
@@ -79,7 +95,12 @@ export function compileSemanticContract({
       assertSemanticDraft(preview, policy, {
         ...validationContext,
         resolvedDecisionIds: [...validationContext.resolvedDecisionIds, ...choices.map((c) => c.questionId)],
+        skipImmutableChecks: true,
       });
+      const previewStatus = determinismStatusFromCertificate(preview.closureCertificate, preview);
+      if (previewStatus === 'BLOCKED_BY_GAP' && baselineStatus !== 'BLOCKED_BY_GAP') {
+        throw new Error('prepared_effect_blocked_by_gap');
+      }
     } catch (error) {
       if (error instanceof Error) {
         const label = choices.map((c) => `${c.questionId}/${c.answerId}`).join(',');
@@ -104,20 +125,13 @@ export function compileSemanticContract({
     observedPaths: observedPaths(preflight),
     intentEvidence: effectiveSemanticRequest.intentEvidence,
     specification: draft,
-    effectiveDeterminismStatus: effectiveDeterminismStatus(
-      draft,
-      humanResolutions,
-      {
-        intentEvidence: effectiveSemanticRequest.intentEvidence,
-        workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
-        workspaceSkeleton,
-      },
-    ),
+    effectiveDeterminismStatus: baselineStatus,
     humanResolutions,
     approval: null,
   };
   assertSchema('aegis.issue_contract.v14', contract);
   assertContractApprovalEvidence(contract, {
+    intent: preflight.intent,
     workspaceEvidence: effectiveSemanticRequest.workspace?.sourceEvidence ?? [],
     workspaceSkeleton,
   });
@@ -157,6 +171,7 @@ export function assertContractDocument({
     resolvedDecisionIds: contract.humanResolutions.map(({ questionId }) => questionId),
     humanResolutions: contract.humanResolutions,
     workspaceEvidence: semanticRequest.workspace.sourceEvidence,
+    skipSchema: true,
   });
   if (contract.implementationAuthorized !== false) throw new Error('implementation_authorized');
   if (contract.sourcePreflightDigest !== preflight.preflightDigest) throw new Error('contract_preflight_mismatch');

@@ -12,15 +12,15 @@ function renderHeaderAndScope(contract, { contractDigest, governed, specificatio
     '',
     `> **Status:** ${governed ? 'Selado & Governado' : 'Rascunho aguardando confirmação'}`,
     `> **Modo:** ${specification.changeKind}`,
-    `> **Estado efetivo de fechamento e revisão:** ${contract.effectiveDeterminismStatus}`,
+    `> **Verificação Mecânica (Estrutural & Custódia):** ${contract.effectiveDeterminismStatus} *(valida âncoras, fragmentos e consistência JSON — não prova verdade semântica nem correção de código)*`,
     ...(specification.closureCertificate ? [
-      `> **Certificado de Fechamento:** ${specification.closureCertificate.status} (inventário pendente: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, dependências abertas: ${specification.closureCertificate.unresolvedDependencies ?? 0}, campos não resolvidos: ${specification.closureCertificate.unresolvedStateFields}, transições abertas: ${specification.closureCertificate.unresolvedTransitions}, lacunas ativas: ${specification.closureCertificate.gapLedger?.length ?? 0})`,
+      `> **Auditoria Estrutural (\`${specification.closureCertificate.status}\`):** lacunas de grafo: ${specification.closureCertificate.gapLedger?.length ?? 0} (inventário: ${specification.closureCertificate.unresolvedInventorySlots ?? 0}, dependências: ${specification.closureCertificate.unresolvedDependencies ?? 0}, campos: ${specification.closureCertificate.unresolvedStateFields}, transições: ${specification.closureCertificate.unresolvedTransitions}) · verificados por código: ${specification.closureCertificate.closureAudit?.counts?.MECHANICALLY_VERIFIED ?? 0} · revisão humana obrigatória: ${specification.closureCertificate.closureAudit?.counts?.SEMANTIC_REVIEW_REQUIRED ?? 0} · decisões pendentes: ${specification.closureCertificate.closureAudit?.counts?.AWAITING_HUMAN_DECISION ?? 0}`,
     ] : []),
     '> **IMPLEMENTATION_AUTHORIZED:** `false`',
     ...(governed ? [`> **Digest do Contrato:** \`${contractDigest}\``] : []),
     ...(governed ? [
       `> **Rascunho aprovado:** \`${contract.approval.contractDraftDigest}\``,
-      `> **Confirmação humana:** ${contract.approval.attestation} via ${contract.approval.method}`,
+      `> **Aprovação final:** ${contract.approval.attestation} via ${contract.approval.method}`,
     ] : []),
     `> **Custódia (Preflight / Request / src):** \`${contract.sourcePreflightDigest.slice(0, 12)}\` / \`${contract.sourceSemanticRequestDigest.slice(0, 12)}\` / \`${contract.sourceSnapshotDigest.slice(0, 12)}\``,
     '',
@@ -436,6 +436,7 @@ function renderInvariantsAndReviews(specification, hasStateModel, governed) {
     lines.push('', governed
       ? '### Revisões semânticas reconhecidas na aprovação'
       : '### Revisões semânticas pendentes — leia antes de aprovar');
+    lines.push('> *Nota epistêmica:* o Harness valida apenas sintaxe e referências; a validade semântica dos itens abaixo exige julgamento humano e provas no produto.');
     for (const item of semanticReviews) {
       lines.push(`- **${item.itemId} — ${item.category}:** ${item.summary}`);
     }
@@ -510,6 +511,7 @@ function renderDecisionsAndResolutions(contract, { specification, governed, sele
     lines.push('', '### Esclarecimentos humanos necessários — aprovação bloqueada');
     for (const unknown of blockingUnknowns) {
       lines.push(`- **${unknown.id}:** ${unknown.statement}`);
+      lines.push(`  - Efeito público que torna a lacuna material: ${unknown.materialEffect}`);
       if (unknown.sourceFragmentIds.length > 0) {
         lines.push(`  - Trechos da demanda: ${unknown.sourceFragmentIds.join(', ')}.`);
       }
@@ -532,7 +534,7 @@ function renderDecisionsAndResolutions(contract, { specification, governed, sele
       } else {
         lines.push(`- **${resolution.questionId}: ${resolution.question}** → interpretação fornecida: ${resolution.correction}`);
       }
-      lines.push(`  - Evidência: ${resolution.attestation} via ${resolution.method}; rascunho \`${resolution.sourceContractDigest}\`.`);
+      lines.push(`  - Resolução da decisão: ${resolution.attestation} via ${resolution.method}; rascunho \`${resolution.sourceContractDigest}\`.`);
     }
   }
   lines.push('');

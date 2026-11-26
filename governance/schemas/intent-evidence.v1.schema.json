@@ -65,9 +65,7 @@
             ]
           },
           "anchor": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 240
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_05"
           }
         }
       }
@@ -111,9 +109,7 @@
             "minimum": 1
           },
           "reference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 240
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_05"
           },
           "fragmentIndex": {
             "type": "integer",

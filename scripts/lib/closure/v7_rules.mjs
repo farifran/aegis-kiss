@@ -363,5 +363,8 @@ export function isCompletePayloadDescriptor(desc, payloadSchemas = null) {
     && desc.type.trim().length > 0
     && typeof desc.required === 'boolean'
     && typeof desc.nullable === 'boolean'
-    && desc.constraints !== undefined;
+    && (desc.constraints === undefined
+      || desc.constraints === null
+      || typeof desc.constraints === 'object'
+      || (typeof desc.constraints === 'string' && desc.constraints.trim().length > 0));
 }

@@ -1,6 +1,9 @@
-import { canonicalDigest } from './canonical_json.mjs';
+import { Buffer } from 'node:buffer';
+import { canonicalDigest, canonicalJson } from './canonical_json.mjs';
 import { computeDeterminismReviewStatus } from './closure/v7_rules.mjs';
 import { assertSchema, standaloneSchemaDocument } from './schema_validator.mjs';
+import { buildQuestionRequest } from './semantic_approval.mjs';
+import { runCollected } from './semantic_draft_validator.mjs';
 import { omitOptionalNulls } from './semantic_output_schema.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 import { effectCollections, effectCollection, replacePreparedEntries } from './prepared_effects.mjs';
@@ -62,7 +65,27 @@ function normalizeTargetRef(target, request) {
   delete target.id;
 }
 
+function normalizeWorkspaceLineReference(reference) {
+  if (typeof reference !== 'string') return reference;
+  const match = /^(src\/[^:]+):L?([1-9]\d*)(?:-L?([1-9]\d*))?$/u.exec(reference.trim());
+  if (match === null) return reference;
+  return match[3] ? `${match[1]}:L${match[2]}-L${match[3]}` : `${match[1]}:L${match[2]}`;
+}
+
+function normalizeWorkspaceEvidenceReferences(node) {
+  if (Array.isArray(node)) {
+    node.forEach(normalizeWorkspaceEvidenceReferences);
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  if (node.source === 'WORKSPACE_EVIDENCE' && typeof node.reference === 'string') {
+    node.reference = normalizeWorkspaceLineReference(node.reference);
+  }
+  Object.values(node).forEach(normalizeWorkspaceEvidenceReferences);
+}
+
 function normalizeIntentClaimsAndContexts(opinion, request) {
+  normalizeWorkspaceEvidenceReferences(opinion);
   if (Array.isArray(opinion.intentClaims)) {
     for (const claim of opinion.intentClaims) {
       if (claim.disposition !== 'NORMATIVE' && claim.contractEffect === undefined) {
@@ -93,7 +116,10 @@ function normalizeIntentClaimsAndContexts(opinion, request) {
 }
 
 function normalizePolicyAssessments(opinion, request) {
-  // 2. policyAssessments: normaliza identificadores; a análise de conformidade pertence ao parecer.
+  // 2. policyAssessments: regras padrão COMPLIANT sem conflito declarado são derivadas pelo Harness.
+  if (opinion.policyAssessments === undefined || opinion.policyAssessments === null) {
+    opinion.policyAssessments = [];
+  }
   if (!Array.isArray(opinion.policyAssessments)) {
     throw new Error('semantic_review_required:missing_policy_assessments');
   }
@@ -105,6 +131,9 @@ function normalizePolicyAssessments(opinion, request) {
     }
     delete assessment.ruleId;
     delete assessment.id;
+    if (assessment.amendmentIndex === undefined) {
+      assessment.amendmentIndex = null;
+    }
     if (assessment.recommendedStatus === 'CONFLICT') {
       assessment.recommendedStatus = 'AMENDED';
     }
@@ -123,11 +152,17 @@ function normalizePolicyAssessments(opinion, request) {
       : rule.appliesWhen.some((tag) => activeContextTags.has(tag));
     if (applies) applicableRuleIndexes.push(idx);
   });
-  const missingRuleIds = applicableRuleIndexes
-    .filter((idx) => !existingByRuleIndex.has(idx))
-    .map((idx) => request.policy.rules[idx].id);
-  if (missingRuleIds.length > 0) {
-    throw new Error(`semantic_review_required:missing_policy_assessments:${missingRuleIds.join(',')}`);
+  for (const idx of applicableRuleIndexes) {
+    if (!existingByRuleIndex.has(idx)) {
+      existingByRuleIndex.set(idx, {
+        ruleIndex: idx,
+        demandStatus: 'COMPLIANT',
+        recommendedStatus: 'COMPLIANT',
+        rationale: 'Conformidade padrão derivada pelo compilador na ausência de conflito declarado.',
+        decisionIndex: null,
+        amendmentIndex: null,
+      });
+    }
   }
   const applicableAssessments = applicableRuleIndexes.map((idx) => existingByRuleIndex.get(idx));
   const applicableIndexes = new Set(applicableRuleIndexes);
@@ -140,7 +175,7 @@ function normalizePolicyAssessments(opinion, request) {
 }
 
 function normalizeDeterminismReview(opinion, request) {
-  // 3. determinismReview: aceita claimId além de claimIndex; cobertura ausente exige nova análise.
+  // 3. determinismReview: deriva fragmentIndexes materiais e cobertura default NO_DIMENSION_APPLICABLE quando seguro.
   if (!opinion.determinismReview || typeof opinion.determinismReview !== 'object') {
     throw new Error('semantic_review_required:missing_determinism_review');
   }
@@ -156,8 +191,21 @@ function normalizeDeterminismReview(opinion, request) {
       for (const target of dim.targets) normalizeTargetRef(target, request);
     }
   }
+  if (opinion.determinismReview.fragmentIndexes == null) {
+    const derivedFragments = new Set();
+    for (const claim of opinion.intentClaims ?? []) {
+      if ((claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION')
+        && Array.isArray(claim.fragmentIndexes)) {
+        for (const fragmentIndex of claim.fragmentIndexes) derivedFragments.add(fragmentIndex);
+      }
+    }
+    opinion.determinismReview.fragmentIndexes = [...derivedFragments].sort((a, b) => a - b);
+  }
   if (!Array.isArray(opinion.determinismReview.fragmentIndexes)) {
     throw new Error('semantic_review_required:missing_determinism_source_fragments');
+  }
+  if (opinion.determinismReview.coverage == null) {
+    opinion.determinismReview.coverage = [];
   }
   if (!Array.isArray(opinion.determinismReview.coverage)) {
     throw new Error('semantic_review_required:missing_determinism_coverage');
@@ -169,8 +217,11 @@ function normalizeDeterminismReview(opinion, request) {
     }
     delete coverage.claimId;
     delete coverage.dimensionAssessments;
-    if (!Array.isArray(coverage.dimensionIndexes) || coverage.disposition === undefined) {
+    if (!Array.isArray(coverage.dimensionIndexes)) {
       throw new Error(`semantic_review_required:incomplete_determinism_coverage:${coverage.claimIndex ?? 'unknown'}`);
+    }
+    if (coverage.disposition === undefined) {
+      coverage.disposition = coverage.dimensionIndexes.length > 0 ? 'DIMENSIONS_DECLARED' : 'NO_DIMENSION_APPLICABLE';
     }
   }
   if (!Array.isArray(opinion.intentClaims)) return;
@@ -182,34 +233,151 @@ function normalizeDeterminismReview(opinion, request) {
     return isMaterial || coverage.disposition !== 'NO_DIMENSION_APPLICABLE';
   });
   const coveredClaimIndexes = new Set(opinion.determinismReview.coverage.map((c) => c.claimIndex));
+  const coveredDimensionIndexes = new Set(opinion.determinismReview.coverage.flatMap((c) => c.dimensionIndexes ?? []));
+  const targetKey = (t) => (t && typeof t === 'object' ? `${t.kind}:${t.index}` : null);
   const missingCoverage = [];
   opinion.intentClaims.forEach((claim, claimIndex) => {
     const isMaterial = claim.disposition === 'NORMATIVE' || claim.disposition === 'DECISION';
-    if (isMaterial && !coveredClaimIndexes.has(claimIndex)) {
-      missingCoverage.push(claimIndex);
+    if (!isMaterial || coveredClaimIndexes.has(claimIndex)) return;
+    const mentionsDeterminism = /(?:determinis)/iu.test(`${claim.quote ?? ''}\n${claim.contractEffect ?? ''}`);
+    const claimTargetKeys = new Set((claim.targets ?? []).map(targetKey).filter(Boolean));
+    const touchesDeclaredDimension = opinion.determinismReview.dimensions.some((dim, dimIdx) => {
+      if (coveredDimensionIndexes.has(dimIdx)) return false;
+      const subj = targetKey(dim.subject);
+      if (subj && claimTargetKeys.has(subj)) return true;
+      return (dim.targets ?? []).some((t) => claimTargetKeys.has(targetKey(t)));
+    });
+    if (claim.disposition === 'NORMATIVE' && !mentionsDeterminism && !touchesDeclaredDimension) {
+      opinion.determinismReview.coverage.push({
+        claimIndex,
+        disposition: 'NO_DIMENSION_APPLICABLE',
+        dimensionIndexes: [],
+        rationale: 'Nenhuma dimensão de determinismo ativada para esta obrigação.',
+      });
+      return;
     }
+    missingCoverage.push(claimIndex);
   });
   if (missingCoverage.length > 0) {
     throw new Error(`semantic_review_required:missing_determinism_claim_coverage:${missingCoverage.join(',')}`);
   }
 }
 
+function resolveUniqueStateFieldName(fieldName, fieldEntitiesMap, defaultEntityName = null) {
+  if (typeof fieldName !== 'string' || !fieldName.trim()) return fieldName;
+  if (fieldName.includes('.')) return fieldName;
+  const owners = fieldEntitiesMap.get(fieldName);
+  if (owners?.length === 1) return `${owners[0]}.${fieldName}`;
+  if (defaultEntityName && owners?.includes(defaultEntityName)) return `${defaultEntityName}.${fieldName}`;
+  return fieldName;
+}
+
 function normalizeStateModel(stateModel) {
   if (!stateModel) return;
-  for (const op of stateModel.operations ?? []) {
+  const entities = Array.isArray(stateModel.entities) ? stateModel.entities : [];
+  const operations = Array.isArray(stateModel.operations) ? stateModel.operations : [];
+  const operationNames = new Set(operations.map((op) => op.name).filter(Boolean));
+  const fieldEntitiesMap = new Map();
+  for (const entity of entities) {
+    for (const field of entity.fields ?? []) {
+      if (!fieldEntitiesMap.has(field.name)) fieldEntitiesMap.set(field.name, []);
+      fieldEntitiesMap.get(field.name).push(entity.name);
+    }
+  }
+  const singleEntityName = entities.length === 1 ? entities[0].name : null;
+
+  for (const op of operations) {
     for (const param of op.parameters ?? []) {
       if (param.nullability === 'NON_NULLABLE') param.nullability = 'NOT_NULL';
     }
     for (const branch of op.branches ?? []) {
       for (const eff of branch.stateEffects ?? []) {
         if (eff.effect === 'SET_VALUE') eff.effect = 'SET';
+        eff.field = resolveUniqueStateFieldName(eff.field, fieldEntitiesMap, singleEntityName);
       }
     }
   }
-  for (const entity of stateModel.entities ?? []) {
+
+  const effectToMutation = new Map([
+    ['SET', 'SET_VALUE'],
+    ['INCREMENT', 'INCREMENT'],
+    ['DECREMENT', 'DECREMENT'],
+    ['MUTATE_COLLECTION', 'MUTATE_COLLECTION'],
+    ['CUSTOM', 'CUSTOM'],
+  ]);
+
+  for (const entity of entities) {
     for (const field of entity.fields ?? []) {
-      for (const mutation of field.mutations ?? []) {
-        if (mutation.effect === 'SET') mutation.effect = 'SET_VALUE';
+      const fullKey = `${entity.name}.${field.name}`;
+      if (Array.isArray(field.preservation)) {
+        field.preservation = [...new Set(field.preservation.map((entry) => {
+          if (typeof entry !== 'string' || entry === '*') return entry;
+          const prefix = entry.split(':')[0];
+          return operationNames.has(prefix) ? prefix : entry;
+        }))];
+      }
+
+      if (field.mutations == null || (Array.isArray(field.mutations) && field.mutations.length === 0)) {
+        const derivedMutations = [];
+        for (const op of operations) {
+          for (const branch of op.branches ?? []) {
+            for (const eff of branch.stateEffects ?? []) {
+              if (eff.field !== fullKey) continue;
+              const mappedEffect = effectToMutation.get(eff.effect);
+              if (!mappedEffect) continue;
+              derivedMutations.push({
+                operation: op.name,
+                condition: branch.branchId || branch.condition || 'BRANCH',
+                effect: mappedEffect,
+                targetValue: eff.value ?? null,
+              });
+            }
+          }
+        }
+        field.mutations = derivedMutations;
+      } else {
+        for (const mutation of field.mutations) {
+          if (mutation.effect === 'SET') mutation.effect = 'SET_VALUE';
+        }
+      }
+
+      if (field.preservation == null || (Array.isArray(field.preservation) && field.preservation.length === 0)) {
+        const mutatedOps = new Set((field.mutations ?? []).map((m) => m.operation));
+        const derivedPreservation = [];
+        for (const op of operations) {
+          if (mutatedOps.has(op.name)) continue;
+          const branches = op.branches ?? [];
+          if (branches.length === 0) continue;
+          const allPreserve = branches.every((branch) => {
+            const explicitPreserve = (branch.stateEffects ?? []).some(
+              (eff) => eff.field === fullKey && eff.effect === 'PRESERVE',
+            );
+            const mutatesHere = (branch.stateEffects ?? []).some(
+              (eff) => eff.field === fullKey && eff.effect !== 'PRESERVE',
+            );
+            return explicitPreserve || (!mutatesHere && branch.defaultPreservation === true);
+          });
+          if (allPreserve) derivedPreservation.push(op.name);
+        }
+        field.preservation = derivedPreservation;
+      }
+
+      if (field.readBy == null) {
+        const derivedReaders = new Set((field.mutations ?? []).map((m) => m.operation));
+        const fieldRegex = new RegExp(`\\b${field.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u');
+        for (const op of operations) {
+          if ((op.evaluatedInputs ?? []).includes(field.name)
+            || (op.branches ?? []).some((b) => typeof b.condition === 'string' && fieldRegex.test(b.condition))) {
+            derivedReaders.add(op.name);
+          }
+        }
+        for (const obs of (stateModel.observables ?? [])) {
+          if (Array.isArray(obs.derivedFrom)
+            && (obs.derivedFrom.includes(fullKey) || obs.derivedFrom.includes(field.name))) {
+            derivedReaders.add(obs.name);
+          }
+        }
+        field.readBy = [...derivedReaders];
       }
     }
   }
@@ -256,10 +424,12 @@ function normalizeDecisionsAndInventory(opinion) {
 function normalizeSemanticOpinion(opinion, request) {
   const cloned = globalThis.structuredClone(opinion);
   normalizeIntentClaimsAndContexts(cloned, request);
-  normalizePolicyAssessments(cloned, request);
-  normalizeDeterminismReview(cloned, request);
-  normalizeStateModel(cloned.stateModel);
-  normalizeDecisionsAndInventory(cloned);
+  runCollected([
+    () => normalizePolicyAssessments(cloned, request),
+    () => normalizeDeterminismReview(cloned, request),
+    () => normalizeStateModel(cloned.stateModel),
+    () => normalizeDecisionsAndInventory(cloned),
+  ]);
   return cloned;
 }
 
@@ -488,6 +658,36 @@ function compileDecisionsSection(opinion, ctx) {
   }));
 }
 
+function compilePreparedStateModelPatch(rawStateModel, compiledStateModel) {
+  if (!rawStateModel || typeof rawStateModel !== 'object') return undefined;
+  const pickPatch = (patch, target) => Object.fromEntries(
+    Object.entries(patch)
+      .filter(([, value]) => value !== undefined)
+      .map(([k, value]) => [k, target?.[k] !== undefined ? globalThis.structuredClone(target[k]) : value]),
+  );
+  const out = {};
+  if (Array.isArray(rawStateModel.operations)) {
+    out.operations = rawStateModel.operations.map(({ index, patch }) => ({
+      index,
+      patch: pickPatch(patch, compiledStateModel?.operations?.[index]),
+    }));
+  }
+  if (Array.isArray(rawStateModel.fields)) {
+    out.fields = rawStateModel.fields.map(({ entityIndex, fieldIndex, patch }) => ({
+      entityIndex,
+      fieldIndex,
+      patch: pickPatch(patch, compiledStateModel?.entities?.[entityIndex]?.fields?.[fieldIndex]),
+    }));
+  }
+  if (Array.isArray(rawStateModel.observables)) {
+    out.observables = rawStateModel.observables.map(({ index, patch }) => ({
+      index,
+      patch: pickPatch(patch, compiledStateModel?.observables?.[index]),
+    }));
+  }
+  return out;
+}
+
 function compilePreparedAnswerEffects(opinion, draft, request) {
   for (const [decisionIndex, decision] of opinion.decisions.entries()) {
     for (const [answerIndex, answer] of decision.answers.entries()) {
@@ -509,21 +709,53 @@ function compilePreparedAnswerEffects(opinion, draft, request) {
         }
       }
       const compiled = compileSemanticOpinion(variant, request, false);
-      draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = Object.fromEntries(
-        effectCollections.map((key) => [key, (answer.preparedEffect[key] ?? []).map((entry) => ({
-          index: entry.index,
-          value: effectCollection(compiled, key)[entry.index],
-        }))]),
+      const compiledPrepared = Object.fromEntries(
+        effectCollections.map((key) => [key, (answer.preparedEffect[key] ?? []).map((entry) => {
+          if (entry.patch === undefined) {
+            return { index: entry.index, value: effectCollection(compiled, key)[entry.index] };
+          }
+          const compiledItem = effectCollection(compiled, key)[entry.index];
+          const patch = globalThis.structuredClone(entry.patch);
+          if (key === 'requirements' && Array.isArray(patch.acceptanceCases)) {
+            patch.acceptanceCases = patch.acceptanceCases.map((acPatch) => ({
+              ...acPatch,
+              decisionBinding: compiledItem.acceptanceCases[acPatch.index]?.decisionBinding ?? null,
+            }));
+          }
+          if (key === 'dimensions' && patch.acceptanceCase !== undefined) {
+            patch.acceptanceCaseId = compiledItem.acceptanceCaseId;
+            delete patch.acceptanceCase;
+          }
+          return { index: entry.index, patch };
+        })]),
       );
+      if (answer.preparedEffect.interpretation !== undefined) {
+        compiledPrepared.interpretation = compiled.interpretation;
+      }
+      if (answer.preparedEffect.stateModel !== undefined) {
+        compiledPrepared.stateModel = compilePreparedStateModelPatch(answer.preparedEffect.stateModel, compiled.stateModel);
+      }
+      draft.decisions[decisionIndex].answers[answerIndex].preparedEffect = compiledPrepared;
     }
   }
 }
 
+let cachedOpinionSchema = null;
+
+function getOpinionSchema() {
+  if (cachedOpinionSchema === null) {
+    cachedOpinionSchema = standaloneSchemaDocument('aegis.semantic_opinion.v3');
+  }
+  return cachedOpinionSchema;
+}
+
 export function compileSemanticOpinion(opinion, request, compilePrepared = true) {
-  assertSchema('aegis.semantic_request.v10', request);
-  const { requestDigest, ...requestPayload } = request;
-  if (requestDigest !== canonicalDigest(requestPayload)) {
-    throw new Error('semantic_request_digest_mismatch');
+  if (compilePrepared) {
+    assertSchema('aegis.semantic_request.v10', request);
+    const { requestDigest, ...requestPayload } = request;
+    if (requestDigest !== canonicalDigest(requestPayload)) {
+      throw new Error('semantic_request_digest_mismatch');
+    }
   }
   // The transport binds the response to this request; the model need not echo custody fields.
   opinion = {
@@ -533,11 +765,29 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       ? request.intentEvidence.evidenceDigest : opinion.sourceEvidenceDigest,
   };
   opinion = normalizeSemanticOpinion(opinion, request);
-  omitOptionalNulls(opinion, standaloneSchemaDocument('aegis.semantic_opinion.v3'));
+  omitOptionalNulls(opinion, getOpinionSchema());
   assertSchema('aegis.semantic_opinion.v3', opinion);
   assertEvidenceCoverage(opinion, request);
 
   const ctx = buildOpinionCompileContext(opinion, request);
+  const unclassifiedFragments = [];
+  const fragmentDispositions = ctx.fragmentIds.map((fragmentId, fragmentIndex) => {
+    const claimIds = opinion.intentClaims.flatMap((claim, claimIndex) => (
+      claim.fragmentIndexes.includes(fragmentIndex) ? [generatedId('CLAIM', claimIndex)] : []
+    ));
+    if (claimIds.length === 0) unclassifiedFragments.push(fragmentIndex);
+    return {
+      fragmentId,
+      status: claimIds.length > 0 ? 'CLAIMS_EXTRACTED' : 'CONTEXT_ONLY',
+      claimIds,
+      rationale: claimIds.length > 0
+        ? 'Derivado mecanicamente das claims que referenciam o fragmento.'
+        : 'Nenhuma claim semântica referencia este fragmento.',
+    };
+  });
+  if (unclassifiedFragments.length > 0) {
+    throw new Error(`semantic_review_required:unclassified_intent_fragment:${unclassifiedFragments.join(',')}`);
+  }
   const draft = {
     schema: 'aegis.semantic_draft.v9',
     sourceContextDigest: request.contextDigest,
@@ -546,22 +796,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     interpretation: opinion.interpretation,
     changeKind: opinion.changeKind,
     scope: opinion.scope,
-    fragmentDispositions: ctx.fragmentIds.map((fragmentId, fragmentIndex) => {
-      const claimIds = opinion.intentClaims.flatMap((claim, claimIndex) => (
-        claim.fragmentIndexes.includes(fragmentIndex) ? [generatedId('CLAIM', claimIndex)] : []
-      ));
-      if (claimIds.length === 0) {
-        throw new Error(`semantic_review_required:unclassified_intent_fragment:${fragmentIndex}`);
-      }
-      return {
-        fragmentId,
-        status: claimIds.length > 0 ? 'CLAIMS_EXTRACTED' : 'CONTEXT_ONLY',
-        claimIds,
-        rationale: claimIds.length > 0
-          ? 'Derivado mecanicamente das claims que referenciam o fragmento.'
-          : 'Nenhuma claim semântica referencia este fragmento.',
-      };
-    }),
+    fragmentDispositions,
     intentClaims: opinion.intentClaims.map((claim, index) => ({
       id: generatedId('CLAIM', index),
       quote: claim.quote,
@@ -671,6 +906,7 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
       id: generatedId('UNKNOWN', index),
       statement: item.statement,
       material: item.material,
+      ...(item.materialEffect === undefined ? {} : { materialEffect: item.materialEffect }),
       decisionId: item.decisionIndex === null
         ? null
         : indexedValue(ctx.decisionIds, item.decisionIndex, 'unknown_decision'),
@@ -680,16 +916,98 @@ export function compileSemanticOpinion(opinion, request, compilePrepared = true)
     decisions: compileDecisionsSection(opinion, ctx),
     stateModel: opinion.stateModel,
   };
-  draft.closureCertificate = generateClosureCertificate({
-    specification: {
-      ...draft,
-      literalFacts: request.intentEvidence?.literalFacts ?? [],
+  if (compilePrepared) {
+    draft.closureCertificate = generateClosureCertificate({
+      specification: draft,
+      intent: request.intent,
       intentEvidence: request.intentEvidence,
       workspaceEvidence: request.workspace?.sourceEvidence ?? [],
       workspaceSkeleton: request.workspace?.workspaceSkeleton ?? null,
-    },
-    humanResolutions: [],
-  });
-  if (compilePrepared) compilePreparedAnswerEffects(opinion, draft, request);
+      humanResolutions: [],
+    });
+    compilePreparedAnswerEffects(opinion, draft, request);
+  }
   return draft;
+}
+
+const earlyClarificationByteLimit = 5120;
+
+export function compileEarlyClarification(opinion, request, rawBytes = null) {
+  assertSchema('aegis.semantic_request.v10', request);
+  const { requestDigest, ...requestPayload } = request;
+  if (requestDigest !== canonicalDigest(requestPayload)) {
+    throw new Error('semantic_request_digest_mismatch');
+  }
+  if (!opinion || typeof opinion !== 'object' || opinion.schema !== 'aegis.early_clarification_opinion.v1') {
+    throw new Error('invalid_early_clarification_schema');
+  }
+  const byteSize = typeof rawBytes === 'number' ? rawBytes : Buffer.byteLength(canonicalJson(opinion), 'utf8');
+  if (byteSize > earlyClarificationByteLimit) {
+    throw new Error(`early_clarification_too_large:${byteSize}:${earlyClarificationByteLimit}`);
+  }
+  if (opinion.sourceEvidenceDigest !== undefined && opinion.sourceEvidenceDigest !== request.intentEvidence.evidenceDigest) {
+    throw new Error('semantic_opinion_evidence_mismatch');
+  }
+  const summary = typeof opinion.summary === 'string' ? opinion.summary.trim() : '';
+  if (summary.length === 0) throw new Error('incomplete_early_clarification:missing_summary');
+  if (!Array.isArray(opinion.questions) || opinion.questions.length === 0) {
+    throw new Error('incomplete_early_clarification:missing_questions');
+  }
+
+  const fragments = request.intentEvidence?.fragments ?? [];
+  const observedPaths = new Set(request.workspace?.observedTextPaths ?? []);
+  const compiledQuestions = [];
+  runCollected(opinion.questions.map((item, idx) => () => {
+    const q = typeof item?.question === 'string' ? item.question.trim() : '';
+    const effect = typeof item?.materialEffect === 'string' ? item.materialEffect.trim() : '';
+    if (!q || !effect) throw new Error(`incomplete_early_clarification:question:${idx}`);
+    if (!Array.isArray(item.fragmentIndexes) || item.fragmentIndexes.length === 0) {
+      throw new Error(`incomplete_early_clarification:fragmentIndexes:${idx}`);
+    }
+    const sourceFragmentIds = [];
+    const sourceFragments = [];
+    for (const fragIdx of item.fragmentIndexes) {
+      const fragment = fragments[fragIdx];
+      if (!fragment) throw new Error(`semantic_opinion_fragment_out_of_range:${fragIdx}`);
+      sourceFragmentIds.push(fragment.id);
+      sourceFragments.push({ id: fragment.id, text: request.intent.slice(fragment.startOffset, fragment.endOffset) });
+    }
+    const sourcePaths = Array.isArray(item.sourcePaths) ? item.sourcePaths : [];
+    for (const p of sourcePaths) {
+      if (typeof p !== 'string' || !observedPaths.has(p)) {
+        throw new Error(`invalid_early_clarification_path:${p}`);
+      }
+    }
+    const options = Array.isArray(item.options) && item.options.length > 0
+      ? item.options.map((opt, optIdx) => {
+        const label = typeof opt?.label === 'string' ? opt.label.trim() : '';
+        const optEff = typeof opt?.effect === 'string' ? opt.effect.trim() : '';
+        if (!label || !optEff) throw new Error(`incomplete_early_clarification:option:${idx}:${optIdx}`);
+        return { label, effect: optEff };
+      })
+      : null;
+    if (options && new Set(options.map((o) => o.effect.toLowerCase())).size !== options.length) {
+      throw new Error(`early_clarification_options_not_distinct:${idx}`);
+    }
+    compiledQuestions.push({
+      id: generatedId('ECQ', idx),
+      question: q,
+      materialEffect: effect,
+      sourceFragmentIds: [...new Set(sourceFragmentIds)],
+      ...(sourcePaths.length > 0 ? { sourcePaths: [...new Set(sourcePaths)] } : {}),
+      ...(options ? { options } : {}),
+      sourceFragments,
+    });
+  }));
+
+  const title = typeof opinion.title === 'string' && opinion.title.trim().length > 0
+    ? opinion.title.trim()
+    : summary.slice(0, 120);
+  return buildQuestionRequest({
+    digestSeed: { sourceRequestDigest: requestDigest, summary, questions: compiledQuestions },
+    title,
+    summary,
+    sourceRequestDigest: requestDigest,
+    questions: compiledQuestions,
+  }, { mode: 'EARLY_CLARIFICATION' });
 }

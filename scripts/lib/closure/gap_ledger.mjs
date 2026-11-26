@@ -357,9 +357,27 @@ function classifyGapIssue(issue, index) {
  */
 export function generateClosureCertificate({
   specification,
+  intent = null,
+  intentEvidence = null,
+  literalFacts = [],
+  workspaceEvidence = [],
+  workspaceSkeleton = null,
   humanResolutions = [],
   semanticReviewAcknowledged = false,
 } = {}) {
+  const effectiveIntentEvidence = intentEvidence ?? specification.intentEvidence ?? null;
+  const effectiveFacts = effectiveIntentEvidence?.literalFacts
+    ?? (literalFacts.length > 0 ? literalFacts : specification.literalFacts ?? []);
+  const effectiveFragments = effectiveIntentEvidence?.fragments ?? specification.fragments ?? [];
+  const effectiveWorkspace = workspaceEvidence.length > 0
+    ? workspaceEvidence
+    : (specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? []);
+  const effectiveSkeleton = workspaceSkeleton ?? specification.workspaceSkeleton ?? null;
+  const effectiveIntent = intent
+    ?? specification.intent
+    ?? effectiveFragments.map(({ anchor }) => anchor).filter(Boolean).join('\n')
+    ?? '';
+
   const inventoryResult = validateSemanticInventoryCoverage({
     stateModel: specification.stateModel,
     architectureContexts: specification.architectureContexts ?? [],
@@ -380,17 +398,17 @@ export function generateClosureCertificate({
     pathReferences: specification.pathReferences ?? [],
     resolvedDecisionIds: resolvedIdsList,
     unknowns: specification.unknowns ?? [],
-    workspaceSkeleton: specification.workspaceSkeleton ?? null,
+    workspaceSkeleton: effectiveSkeleton,
     payloadSchemas: specification.payloadSchemas ?? null,
   });
 
   const provenanceResult = validateProvenanceEnforcement({
     stateModel: specification.stateModel,
     architecturePolicy: specification.policy,
-    literalFacts: specification.intentEvidence?.literalFacts ?? specification.literalFacts ?? [],
-    fragments: specification.intentEvidence?.fragments ?? specification.fragments ?? [],
-    intent: specification.intent ?? '',
-    workspaceEvidence: specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? [],
+    literalFacts: effectiveFacts,
+    fragments: effectiveFragments,
+    intent: effectiveIntent,
+    workspaceEvidence: effectiveWorkspace,
     requirements: specification.requirements ?? [],
     invariants: specification.invariants ?? [],
     decisions: specification.decisions ?? [],

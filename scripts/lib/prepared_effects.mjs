@@ -24,6 +24,7 @@ function applyPatch(target, patch) {
       }
     } else if (prop === 'proofObligation' && patchVal && typeof patchVal === 'object') {
       target.proofObligation = {
+        ...(target.counterexampleWitness?.id ? { witnessId: target.counterexampleWitness.id } : {}),
         resolutionParameter: null,
         observables: [],
         ...(target.proofObligation ?? {}),
@@ -38,8 +39,90 @@ function applyPatch(target, patch) {
   }
 }
 
+function entryPatchSlots(key, entry) {
+  const base = `${key}:${entry.index}`;
+  if (entry.patch === undefined) return [{ slot: base, wholeObject: true }];
+  const slots = [];
+  for (const [prop, val] of Object.entries(entry.patch)) {
+    if (prop === 'acceptanceCases' && Array.isArray(val)) {
+      for (const casePatch of val) {
+        for (const cProp of Object.keys(casePatch)) {
+          if (cProp !== 'index') slots.push({ slot: `${base}.acceptanceCases:${casePatch.index}.${cProp}`, wholeObject: false });
+        }
+      }
+    } else {
+      slots.push({ slot: `${base}.${prop}`, wholeObject: false });
+    }
+  }
+  return slots.length > 0 ? slots : [{ slot: base, wholeObject: true }];
+}
+
+function recordSlotConflict(touched, slot, digest, base, wholeObject = false) {
+  if (wholeObject) {
+    for (const existing of touched.keys()) {
+      if ((existing === base || existing.startsWith(`${base}.`)) && touched.get(existing) !== digest) {
+        throw new Error(`prepared_effect_conflict:${base}`);
+      }
+    }
+  } else if ((touched.has(base) && touched.get(base) !== digest)
+    || (touched.has(slot) && touched.get(slot) !== digest)) {
+    throw new Error(`prepared_effect_conflict:${base}`);
+  }
+  touched.set(slot, digest);
+}
+
+function collectStateModelPatchSpecs(specification, stateModelEffect) {
+  if (!stateModelEffect || typeof stateModelEffect !== 'object') return [];
+  const specs = [];
+  const sm = specification?.stateModel ?? {};
+  for (const entry of (stateModelEffect.operations ?? [])) {
+    const target = sm.operations?.[entry.index];
+    specs.push({
+      key: 'stateModel.operations',
+      base: `stateModel.operations:${entry.index}`,
+      target,
+      patch: entry.patch,
+      missingCode: `prepared_effect_index_out_of_range:stateModel.operations:${entry.index}`,
+    });
+  }
+  for (const entry of (stateModelEffect.fields ?? [])) {
+    const target = sm.entities?.[entry.entityIndex]?.fields?.[entry.fieldIndex];
+    specs.push({
+      key: 'stateModel.fields',
+      base: `stateModel.entities:${entry.entityIndex}.fields:${entry.fieldIndex}`,
+      target,
+      patch: entry.patch,
+      missingCode: `prepared_effect_index_out_of_range:stateModel.fields:${entry.entityIndex}:${entry.fieldIndex}`,
+    });
+  }
+  for (const entry of (stateModelEffect.observables ?? [])) {
+    const target = sm.observables?.[entry.index];
+    specs.push({
+      key: 'stateModel.observables',
+      base: `stateModel.observables:${entry.index}`,
+      target,
+      patch: entry.patch,
+      missingCode: `prepared_effect_index_out_of_range:stateModel.observables:${entry.index}`,
+    });
+  }
+  return specs;
+}
+
 // Replace or patch existing typed entries: no arbitrary paths, identifiers or envelope writes.
 export function replacePreparedEntries(specification, effect, touched = new Map()) {
+  if (effect.interpretation !== undefined) {
+    const digest = canonicalDigest({ interpretation: effect.interpretation });
+    recordSlotConflict(touched, 'interpretation', digest, 'interpretation');
+    specification.interpretation = effect.interpretation;
+  }
+  for (const spec of collectStateModelPatchSpecs(specification, effect.stateModel)) {
+    if (spec.target === undefined) throw new Error(spec.missingCode);
+    const digest = canonicalDigest({ patch: spec.patch });
+    for (const prop of Object.keys(spec.patch)) {
+      recordSlotConflict(touched, `${spec.base}.${prop}`, digest, spec.base);
+    }
+    applyPatch(spec.target, spec.patch);
+  }
   for (const key of effectCollections) {
     const collection = effectCollection(specification, key);
     const seen = new Set();
@@ -48,14 +131,13 @@ export function replacePreparedEntries(specification, effect, touched = new Map(
       if (!Number.isInteger(index) || index < 0 || collection[index] === undefined) {
         throw new Error(`prepared_effect_index_out_of_range:${key}:${index}`);
       }
-      const target = `${key}:${index}`;
-      if (seen.has(target)) throw new Error(`prepared_effect_duplicate_target:${target}`);
-      seen.add(target);
+      const base = `${key}:${index}`;
+      if (seen.has(base)) throw new Error(`prepared_effect_duplicate_target:${base}`);
+      seen.add(base);
       const digest = canonicalDigest(patch !== undefined ? { patch } : value);
-      if (touched.has(target) && touched.get(target) !== digest) {
-        throw new Error(`prepared_effect_conflict:${target}`);
+      for (const { slot, wholeObject } of entryPatchSlots(key, entry)) {
+        recordSlotConflict(touched, slot, digest, base, wholeObject);
       }
-      touched.set(target, digest);
       if (patch !== undefined) {
         applyPatch(collection[index], patch);
       } else {
@@ -68,8 +150,8 @@ export function replacePreparedEntries(specification, effect, touched = new Map(
 export function hasPreparedAnswers(specification, answers) {
   return answers.length > 0 && answers.every((answer) => (
     !('correction' in answer)
-      && specification.decisions.find(({ questionId }) => questionId === answer.questionId)
-        ?.answers.find(({ id }) => id === answer.answerId)?.preparedEffect != null
+    && specification.decisions.find(({ questionId }) => questionId === answer.questionId)
+      ?.answers.find(({ id }) => id === answer.answerId)?.preparedEffect != null
   ));
 }
 
@@ -79,6 +161,9 @@ function assertPreparedEffectScope(specification, decision, effect) {
     invariants: decision.invariantIds,
     risks: decision.riskIds,
   };
+  for (const spec of collectStateModelPatchSpecs(specification, effect.stateModel)) {
+    if (spec.target === undefined) throw new Error(spec.missingCode);
+  }
   for (const key of effectCollections) {
     for (const entry of (effect[key] ?? [])) {
       const { index, value } = entry;
@@ -116,22 +201,48 @@ export function cartesianProduct(lists) {
 
 export function assertPreparedEffectsDisjoint(decisions = []) {
   const owners = new Map();
+  const baseOwners = new Map();
   for (const decision of decisions) {
-    const seenInDecision = new Set();
+    const seenSlots = new Set();
+    const seenBases = new Set();
     for (const answer of (decision.answers ?? [])) {
       if (!answer.preparedEffect) continue;
+      if (answer.preparedEffect.interpretation !== undefined) {
+        const owner = owners.get('interpretation');
+        if (owner && owner !== decision.questionId) {
+          throw new Error(`shared_prepared_effect_target:interpretation:0:${owner}:${decision.questionId}`);
+        }
+        seenSlots.add('interpretation');
+      }
+      for (const spec of collectStateModelPatchSpecs({ stateModel: {} }, answer.preparedEffect.stateModel)) {
+        seenBases.add(spec.base);
+        for (const prop of Object.keys(spec.patch)) {
+          const slot = `${spec.base}.${prop}`;
+          const conflictingOwner = owners.get(slot) ?? owners.get(spec.base);
+          if (conflictingOwner && conflictingOwner !== decision.questionId) {
+            throw new Error(`shared_prepared_effect_target:${spec.key}:${spec.base}:${conflictingOwner}:${decision.questionId}`);
+          }
+          seenSlots.add(slot);
+        }
+      }
       for (const key of effectCollections) {
         for (const entry of (answer.preparedEffect[key] ?? [])) {
-          const target = `${key}:${entry.index}`;
-          const priorOwner = owners.get(target);
-          if (priorOwner && priorOwner !== decision.questionId) {
-            throw new Error(`shared_prepared_effect_target:${key}:${entry.index}:${priorOwner}:${decision.questionId}`);
+          const base = `${key}:${entry.index}`;
+          seenBases.add(base);
+          for (const { slot, wholeObject } of entryPatchSlots(key, entry)) {
+            const conflictingOwner = wholeObject
+              ? (owners.get(slot) ?? baseOwners.get(base))
+              : (owners.get(slot) ?? owners.get(base));
+            if (conflictingOwner && conflictingOwner !== decision.questionId) {
+              throw new Error(`shared_prepared_effect_target:${key}:${entry.index}:${conflictingOwner}:${decision.questionId}`);
+            }
+            seenSlots.add(slot);
           }
-          seenInDecision.add(target);
         }
       }
     }
-    for (const target of seenInDecision) owners.set(target, decision.questionId);
+    for (const slot of seenSlots) owners.set(slot, decision.questionId);
+    for (const base of seenBases) baseOwners.set(base, decision.questionId);
   }
 }
 
@@ -203,6 +314,7 @@ export function applyPreparedAnswers(
   draft.closureCertificate = generateClosureCertificate({
     specification: {
       ...draft,
+      intent: specification.intent ?? '',
       intentEvidence,
       workspaceEvidence,
       workspaceSkeleton: workspaceSkeleton ?? specification.workspaceSkeleton ?? null,

@@ -30,6 +30,33 @@ function assertKnownReferences(items, knownIds, label) {
   }
 }
 
+export function runCollected(steps, limit = 10) {
+  const seen = new Set();
+  const errors = [];
+  for (const step of steps) {
+    try {
+      step();
+    } catch (error) {
+      const items = Array.isArray(error?.batchMessages)
+        ? error.batchMessages
+        : [error instanceof Error ? error.message : String(error)];
+      for (const message of items) {
+        if (!seen.has(message)) {
+          seen.add(message);
+          errors.push(message);
+        }
+      }
+    }
+  }
+  if (errors.length === 0) return;
+  if (errors.length === 1) throw new Error(errors[0]);
+  const shown = errors.slice(0, limit);
+  const overflow = errors.length - shown.length;
+  const err = new Error(overflow > 0 ? `${shown.join(' | ')} | (+${overflow}_more)` : shown.join(' | '));
+  err.batchMessages = errors;
+  throw err;
+}
+
 function hasIncompleteMarker(text) {
   return /(?<![\p{L}\p{N}_$])\(\s*\)(?!\s*=>)|(?<!`)``(?!`)/u.test(text);
 }
@@ -54,15 +81,16 @@ function applicablePolicyRuleIds(policy, architectureTags) {
     .map(({ id }) => id));
 }
 
+function hasUserIntentSupport(reference, context) {
+  if (context.intent.includes(reference)) return true;
+  if (context.intentEvidence?.literalFacts?.some((f) => f.id === reference || f.reference === reference)) return true;
+  return Boolean(context.intentEvidence?.fragments?.some((f) => f.id === reference || f.anchor === reference));
+}
+
 function validateBasis(basis, context, owner) {
   for (const item of basis) {
-    if (item.source === 'USER_INTENT') {
-      const isSubstring = context.intent.includes(item.reference);
-      const isFact = context.intentEvidence?.literalFacts?.some((f) => f.id === item.reference || f.reference === item.reference);
-      const isFragment = context.intentEvidence?.fragments?.some((f) => f.id === item.reference || f.anchor === item.reference);
-      if (!isSubstring && !isFact && !isFragment) {
-        throw new Error(`invalid_user_intent_basis:${owner}:${item.reference}`);
-      }
+    if (item.source === 'USER_INTENT' && !hasUserIntentSupport(item.reference, context)) {
+      throw new Error(`invalid_user_intent_basis:${owner}:${item.reference}`);
     }
     if (item.source === 'USER_DECISION' && !context.resolvedDecisionIds.has(item.reference)) {
       throw new Error(`invalid_user_decision_basis:${owner}:${item.reference}`);
@@ -112,7 +140,7 @@ function validateClaims(draft, context) {
     AMBIGUITY: new Set(['DECISION']),
   };
 
-  for (const claim of draft.intentClaims) {
+  runCollected(draft.intentClaims.map((claim) => () => {
     if (!context.intent.includes(claim.quote)) throw new Error(`intent_claim_not_literal:${claim.id}`);
     assertKnownReferences(claim.sourceFragmentIds, context.fragmentIds, `intent_claim:${claim.id}`);
     if (!claim.sourceFragmentIds.some((fragmentId) => {
@@ -139,7 +167,7 @@ function validateClaims(draft, context) {
     } else if (claim.contractEffect !== null) {
       throw new Error(`non_normative_claim_has_contract_effect:${claim.id}`);
     }
-  }
+  }));
 }
 
 function validateRequirements(draft, context) {
@@ -147,104 +175,100 @@ function validateRequirements(draft, context) {
   assertUniqueIds(acceptanceCases, 'id', 'acceptance_case');
   const acceptanceIds = new Set(acceptanceCases.map(({ id }) => id));
   const outcomes = new Map();
+  const boundCases = new Set();
 
-  for (const requirement of draft.requirements) {
-    validateBasis(requirement.basis, context, requirement.id);
-    if (!requirement.basis.some(({ source }) => authoritativeSources.has(source))) {
-      throw new Error(`requirement_without_authoritative_basis:${requirement.id}`);
-    }
-    const acceptanceKinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
-    if (!acceptanceKinds.has('HAPPY_PATH')
-      || (![...acceptanceKinds].some((kind) => kind !== 'HAPPY_PATH'))) {
-      throw new Error(`requirement_without_dual_acceptance:${requirement.id}`);
-    }
-    assertKnownReferences(requirement.sourceFragmentIds, context.fragmentIds, `requirement:${requirement.id}`);
-    if (hasIncompleteMarker(requirement.statement)) {
-      throw new Error(`unresolved_expression_in_normative_text:${requirement.id}`);
-    }
-    if (requirement.measurement !== null) {
-      const { target } = requirement.measurement;
-      if (target.source === 'USER_INTENT') {
-        const isSubstring = context.intent.includes(target.reference);
-        const isFact = context.intentEvidence?.literalFacts?.some((f) => f.id === target.reference || f.reference === target.reference);
-        const isFragment = context.intentEvidence?.fragments?.some((f) => f.id === target.reference || f.anchor === target.reference);
-        if (!isSubstring && !isFact && !isFragment) {
+  runCollected([
+    ...draft.requirements.map((requirement) => () => {
+      validateBasis(requirement.basis, context, requirement.id);
+      if (!requirement.basis.some(({ source }) => authoritativeSources.has(source))) {
+        throw new Error(`requirement_without_authoritative_basis:${requirement.id}`);
+      }
+      const acceptanceKinds = new Set(requirement.acceptanceCases.map(({ kind }) => kind));
+      if (!acceptanceKinds.has('HAPPY_PATH')
+        || (![...acceptanceKinds].some((kind) => kind !== 'HAPPY_PATH'))) {
+        throw new Error(`requirement_without_dual_acceptance:${requirement.id}`);
+      }
+      assertKnownReferences(requirement.sourceFragmentIds, context.fragmentIds, `requirement:${requirement.id}`);
+      if (hasIncompleteMarker(requirement.statement)) {
+        throw new Error(`unresolved_expression_in_normative_text:${requirement.id}`);
+      }
+      if (requirement.measurement !== null) {
+        const { target } = requirement.measurement;
+        if (target.source === 'USER_INTENT' && !hasUserIntentSupport(target.reference, context)) {
           throw new Error(`quality_target_not_supported_by_intent:${requirement.id}`);
         }
-      }
-      if (target.source === 'USER_DECISION'
-        && !context.resolvedDecisionIds.has(target.reference)) {
-        throw new Error(`quality_target_references_unknown_decision:${requirement.id}`);
-      }
-      if (target.source === 'WORKSPACE_EVIDENCE'
-        && !workspaceReferenceAvailable(target.reference, context.workspaceEvidence)) {
-        throw new Error(`quality_target_references_unavailable_evidence:${requirement.id}`);
-      }
-    }
-    for (const acceptanceCase of requirement.acceptanceCases) {
-      for (const [field, text] of Object.entries({
-        given: acceptanceCase.given,
-        when: acceptanceCase.when,
-        then: acceptanceCase.then,
-      })) {
-        if (hasIncompleteMarker(text)) {
-          throw new Error(`unresolved_expression_in_normative_text:${acceptanceCase.id}.${field}`);
+        if (target.source === 'USER_DECISION'
+          && !context.resolvedDecisionIds.has(target.reference)) {
+          throw new Error(`quality_target_references_unknown_decision:${requirement.id}`);
+        }
+        if (target.source === 'WORKSPACE_EVIDENCE'
+          && !workspaceReferenceAvailable(target.reference, context.workspaceEvidence)) {
+          throw new Error(`quality_target_references_unavailable_evidence:${requirement.id}`);
         }
       }
-      const branch = JSON.stringify({
-        given: normalized(acceptanceCase.given),
-        when: normalized(acceptanceCase.when),
-        decisionBinding: acceptanceCase.decisionBinding,
-      });
-      const result = `${acceptanceCase.outcomeKind}:${normalized(acceptanceCase.then)}`;
-      const previous = outcomes.get(branch);
-      if (previous !== undefined && previous.result !== result) {
-        throw new Error(`conflicting_observable_outcomes:${previous.id}:${acceptanceCase.id}`);
+      for (const acceptanceCase of requirement.acceptanceCases) {
+        for (const [field, text] of Object.entries({
+          given: acceptanceCase.given,
+          when: acceptanceCase.when,
+          then: acceptanceCase.then,
+        })) {
+          if (hasIncompleteMarker(text)) {
+            throw new Error(`unresolved_expression_in_normative_text:${acceptanceCase.id}.${field}`);
+          }
+        }
+        const branch = JSON.stringify({
+          given: normalized(acceptanceCase.given),
+          when: normalized(acceptanceCase.when),
+          decisionBinding: acceptanceCase.decisionBinding,
+        });
+        const result = `${acceptanceCase.outcomeKind}:${normalized(acceptanceCase.then)}`;
+        const previous = outcomes.get(branch);
+        if (previous !== undefined && previous.result !== result) {
+          throw new Error(`conflicting_observable_outcomes:${previous.id}:${acceptanceCase.id}`);
+        }
+        outcomes.set(branch, { id: acceptanceCase.id, result });
       }
-      outcomes.set(branch, { id: acceptanceCase.id, result });
-    }
-  }
-
-  const boundCases = new Set();
-  for (const boundary of draft.boundaryRules) {
-    validateBasis(boundary.basis, context, boundary.id);
-    assertKnownReferences(boundary.requirementIds, context.requirementIds, `boundary:${boundary.id}`);
-    assertKnownReferences(boundary.sourceFragmentIds, context.fragmentIds, `boundary:${boundary.id}`);
-    assertKnownReferences(boundary.acceptanceCaseIds, acceptanceIds, `boundary:${boundary.id}`);
-    if (boundary.decisionId !== null && !context.decisionIds.has(boundary.decisionId)) {
-      throw new Error(`boundary_rule_references_invalid_decision:${boundary.id}`);
-    }
-    for (const caseId of boundary.acceptanceCaseIds) {
-      if (boundCases.has(caseId)) throw new Error(`boundary_case_reused:${caseId}`);
-      boundCases.add(caseId);
-      const acceptanceCase = acceptanceCases.find(({ id }) => id === caseId);
-      if (acceptanceCase?.boundaryBinding?.ruleId !== boundary.id) {
-        throw new Error(`boundary_rule_without_exact_case_binding:${boundary.id}:${caseId}`);
+    }),
+    ...draft.boundaryRules.map((boundary) => () => {
+      validateBasis(boundary.basis, context, boundary.id);
+      assertKnownReferences(boundary.requirementIds, context.requirementIds, `boundary:${boundary.id}`);
+      assertKnownReferences(boundary.sourceFragmentIds, context.fragmentIds, `boundary:${boundary.id}`);
+      assertKnownReferences(boundary.acceptanceCaseIds, acceptanceIds, `boundary:${boundary.id}`);
+      if (boundary.decisionId !== null && !context.decisionIds.has(boundary.decisionId)) {
+        throw new Error(`boundary_rule_references_invalid_decision:${boundary.id}`);
       }
-    }
-    if ((boundary.underflowBehavior === 'WRAP' || boundary.overflowBehavior === 'WRAP')
-      && !boundary.basis.some(({ source }) => source === 'USER_INTENT' || source === 'USER_DECISION')) {
-      throw new Error(`silent_wrap_forbidden:${boundary.id}`);
-    }
-    if (boundary.representationKind === 'REPRESENTATION_WIDTH'
-      && (!/^[1-9][0-9]*$/u.test(boundary.lowerBound)
-        || boundary.lowerBound !== boundary.upperBound)) {
-      throw new Error(`invalid_representation_width_interval:${boundary.id}`);
-    }
-  }
-  for (const acceptanceCase of acceptanceCases) {
-    if (acceptanceCase.decisionBinding !== null) {
-      const decision = context.decisionsById.get(acceptanceCase.decisionBinding.questionId);
-      if (decision === undefined
-        || !decision.answers.some(({ id }) => id === acceptanceCase.decisionBinding.answerId)) {
-        throw new Error(`acceptance_case_references_unknown_decision:${acceptanceCase.id}`);
+      for (const caseId of boundary.acceptanceCaseIds) {
+        if (boundCases.has(caseId)) throw new Error(`boundary_case_reused:${caseId}`);
+        boundCases.add(caseId);
+        const acceptanceCase = acceptanceCases.find(({ id }) => id === caseId);
+        if (acceptanceCase?.boundaryBinding?.ruleId !== boundary.id) {
+          throw new Error(`boundary_rule_without_exact_case_binding:${boundary.id}:${caseId}`);
+        }
       }
-    }
-    if (acceptanceCase.boundaryBinding !== null
-      && !context.boundaryIds.has(acceptanceCase.boundaryBinding.ruleId)) {
-      throw new Error(`acceptance_case_references_unknown_boundary:${acceptanceCase.id}`);
-    }
-  }
+      if ((boundary.underflowBehavior === 'WRAP' || boundary.overflowBehavior === 'WRAP')
+        && !boundary.basis.some(({ source }) => source === 'USER_INTENT' || source === 'USER_DECISION')) {
+        throw new Error(`silent_wrap_forbidden:${boundary.id}`);
+      }
+      if (boundary.representationKind === 'REPRESENTATION_WIDTH'
+        && (!/^[1-9][0-9]*$/u.test(boundary.lowerBound)
+          || boundary.lowerBound !== boundary.upperBound)) {
+        throw new Error(`invalid_representation_width_interval:${boundary.id}`);
+      }
+    }),
+    ...acceptanceCases.map((acceptanceCase) => () => {
+      if (acceptanceCase.decisionBinding !== null) {
+        const decision = context.decisionsById.get(acceptanceCase.decisionBinding.questionId);
+        if (decision === undefined
+          || !decision.answers.some(({ id }) => id === acceptanceCase.decisionBinding.answerId)) {
+          throw new Error(`acceptance_case_references_unknown_decision:${acceptanceCase.id}`);
+        }
+      }
+      if (acceptanceCase.boundaryBinding !== null
+        && !context.boundaryIds.has(acceptanceCase.boundaryBinding.ruleId)) {
+        throw new Error(`acceptance_case_references_unknown_boundary:${acceptanceCase.id}`);
+      }
+    }),
+  ]);
 }
 
 function validateDecisions(draft, context) {
@@ -262,7 +286,7 @@ function validateDecisions(draft, context) {
     .filter((id) => id !== null));
   const acceptanceCases = draft.requirements.flatMap((requirement) => requirement.acceptanceCases);
 
-  for (const decision of draft.decisions) {
+  runCollected(draft.decisions.map((decision) => () => {
     if (!ambiguityTargets.has(decision.questionId) && !unknownTargets.has(decision.questionId)) {
       throw new Error(`decision_without_material_unknown:${decision.questionId}`);
     }
@@ -309,104 +333,108 @@ function validateDecisions(draft, context) {
         && decisionBinding.answerId === decision.recommendedAnswerId
     ));
     if (proofCases.length === 0) throw new Error(`decision_effect_not_proven:${decision.questionId}`);
-  }
+  }));
 }
 
 function validateDeterminism(draft, context) {
   const seen = new Set();
-  for (const dimension of draft.determinismReview.dimensions) {
-    const key = `${dimension.kind}:${dimension.subjectId}`;
-    if (seen.has(key)) throw new Error(`duplicate_determinism_dimension_subject:${key}`);
-    seen.add(key);
-    const witness = dimension.counterexampleWitness;
-    const expectedWitness = compileCounterexampleWitness(dimension.kind, dimension.subjectId, witness);
-    if (witness.id !== expectedWitness.id || witness.dimension !== dimension.kind) {
-      throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
-    }
-    if (!normalized(witness.baseline) || !normalized(witness.variation)
-      || normalized(witness.baseline) === normalized(witness.variation)) {
-      throw new Error(`determinism_witness_without_variation:${key}`);
-    }
-    validateBasis(dimension.basis, context, key);
-    assertKnownReferences(dimension.targetIds, context.semanticTargetIds, `determinism:${key}`);
-    if (dimension.subjectId !== 'PUBLIC_CONTRACT'
-      && !context.requirementIds.has(dimension.subjectId)
-      && !context.boundaryIds.has(dimension.subjectId)) {
-      throw new Error(`determinism_dimension_without_observable_subject:${key}`);
-    }
-    if (dimension.subjectId !== 'PUBLIC_CONTRACT'
-      && !dimension.targetIds.includes(dimension.subjectId)) {
-      throw new Error(`determinism_dimension_does_not_target_subject:${key}`);
-    }
-    if (dimension.status === 'SPECIFIED') {
-      if (dimension.closureAuthority === 'MODEL_ARGUMENT'
-        || dimension.acceptanceCaseId === null
-        || dimension.proofObligation === null
-        || dimension.inapplicabilityProof !== null) {
-        throw new Error(`specified_determinism_dimension_without_authority_or_proof:${key}`);
+  runCollected([
+    ...draft.determinismReview.dimensions.map((dimension) => () => {
+      const key = `${dimension.kind}:${dimension.subjectId}`;
+      if (seen.has(key)) throw new Error(`duplicate_determinism_dimension_subject:${key}`);
+      seen.add(key);
+      const witness = dimension.counterexampleWitness;
+      const expectedWitness = compileCounterexampleWitness(dimension.kind, dimension.subjectId, witness);
+      if (witness.id !== expectedWitness.id || witness.dimension !== dimension.kind) {
+        throw new Error(`determinism_dimension_witness_mismatch:${dimension.kind}`);
       }
-      if (!dimension.basis.some(({ source }) => (
-        source === 'USER_INTENT'
-          || source === 'USER_DECISION'
-          || source === 'ARCHITECTURE_POLICY'
-          || source === 'SAFE_MECHANICAL_DEFAULT'
-      ))) {
-        throw new Error(`specified_determinism_dimension_without_concrete_rule:${key}`);
+      if (!normalized(witness.baseline) || !normalized(witness.variation)
+        || normalized(witness.baseline) === normalized(witness.variation)) {
+        throw new Error(`determinism_witness_without_variation:${key}`);
       }
-      if (!context.acceptanceIds.has(dimension.acceptanceCaseId)) {
-        throw new Error(`specified_determinism_dimension_without_exact_proof:${key}`);
+      validateBasis(dimension.basis, context, key);
+      assertKnownReferences(dimension.targetIds, context.semanticTargetIds, `determinism:${key}`);
+      if (dimension.subjectId !== 'PUBLIC_CONTRACT'
+        && !context.requirementIds.has(dimension.subjectId)
+        && !context.boundaryIds.has(dimension.subjectId)) {
+        throw new Error(`determinism_dimension_without_observable_subject:${key}`);
       }
-      const proof = dimension.proofObligation;
-      if (proof.witnessId !== dimension.counterexampleWitness.id) {
-        throw new Error(`determinism_proof_witness_mismatch:${key}`);
+      if (dimension.subjectId !== 'PUBLIC_CONTRACT'
+        && !dimension.targetIds.includes(dimension.subjectId)) {
+        throw new Error(`determinism_dimension_does_not_target_subject:${key}`);
       }
-      const proofCase = context.acceptanceCasesById.get(dimension.acceptanceCaseId);
-      if (dimension.subjectId.startsWith('REQ-')
-        && proofCase?.requirementId !== dimension.subjectId) {
-        throw new Error(`determinism_proof_not_owned_by_subject:${key}`);
+      if (dimension.status === 'SPECIFIED') {
+        if (dimension.closureAuthority === 'MODEL_ARGUMENT'
+          || dimension.acceptanceCaseId === null
+          || dimension.proofObligation === null
+          || dimension.inapplicabilityProof !== null) {
+          throw new Error(`specified_determinism_dimension_without_authority_or_proof:${key}`);
+        }
+        if (!dimension.basis.some(({ source }) => (
+          source === 'USER_INTENT'
+            || source === 'USER_DECISION'
+            || source === 'ARCHITECTURE_POLICY'
+            || source === 'SAFE_MECHANICAL_DEFAULT'
+        ))) {
+          throw new Error(`specified_determinism_dimension_without_concrete_rule:${key}`);
+        }
+        if (!context.acceptanceIds.has(dimension.acceptanceCaseId)) {
+          throw new Error(`specified_determinism_dimension_without_exact_proof:${key}`);
+        }
+        const proof = dimension.proofObligation;
+        if (proof.witnessId !== dimension.counterexampleWitness.id) {
+          throw new Error(`determinism_proof_witness_mismatch:${key}`);
+        }
+        const proofCase = context.acceptanceCasesById.get(dimension.acceptanceCaseId);
+        if (dimension.subjectId.startsWith('REQ-')
+          && proofCase?.requirementId !== dimension.subjectId) {
+          throw new Error(`determinism_proof_not_owned_by_subject:${key}`);
+        }
+        if (dimension.subjectId.startsWith('BOUND-')
+          && !context.boundaryRulesById.get(dimension.subjectId)
+            ?.acceptanceCaseIds.includes(dimension.acceptanceCaseId)) {
+          throw new Error(`determinism_proof_not_owned_by_subject:${key}`);
+        }
+        if (!normalized(proof.baselineOutcome) || !normalized(proof.variationOutcome)) {
+          throw new Error(`determinism_proof_outcome_mismatch:${key}`);
+        }
+        const expectsRejection = proof.relation === 'EXPLICIT_REJECTION';
+        if ((proofCase?.acceptanceCase.outcomeKind === 'REJECTION') !== expectsRejection) {
+          throw new Error(`determinism_proof_outcome_kind_mismatch:${key}`);
+        }
+      } else if (dimension.status === 'NOT_APPLICABLE') {
+        if (dimension.closureAuthority === 'MODEL_ARGUMENT'
+          || dimension.inapplicabilityProof === null
+          || dimension.acceptanceCaseId !== null
+          || dimension.proofObligation !== null) {
+          throw new Error(`inapplicable_determinism_dimension_without_authority:${key}`);
+        }
+      } else {
+        if (dimension.closureAuthority !== 'MODEL_ARGUMENT'
+          || dimension.acceptanceCaseId !== null
+          || dimension.proofObligation !== null
+          || dimension.inapplicabilityProof !== null) {
+          throw new Error(`open_determinism_dimension_claims_closure:${key}`);
+        }
+        const decisionTargets = dimension.targetIds.filter((id) => id.startsWith('Q-'));
+        if (dimension.status === 'DECISION_REQUIRED' && decisionTargets.length !== 1) {
+          throw new Error(`determinism_gap_without_single_decision:${key}`);
+        }
+        if (dimension.status === 'GAP_FOUND' && decisionTargets.length !== 0) {
+          throw new Error(`unresolved_determinism_gap_has_decision:${key}`);
+        }
       }
-      if (dimension.subjectId.startsWith('BOUND-')
-        && !context.boundaryRulesById.get(dimension.subjectId)
-          ?.acceptanceCaseIds.includes(dimension.acceptanceCaseId)) {
-        throw new Error(`determinism_proof_not_owned_by_subject:${key}`);
+    }),
+    () => {
+      const expectedStatus = computeDeterminismReviewStatus(draft.determinismReview.dimensions, {
+        arithmetic: draft.determinismReview.arithmetic ?? null,
+        architectureContexts: draft.architectureContexts ?? [],
+      });
+      if (draft.determinismReview.status !== expectedStatus) {
+        throw new Error('determinism_review_status_mismatch');
       }
-      if (!normalized(proof.baselineOutcome) || !normalized(proof.variationOutcome)) {
-        throw new Error(`determinism_proof_outcome_mismatch:${key}`);
-      }
-      const expectsRejection = proof.relation === 'EXPLICIT_REJECTION';
-      if ((proofCase?.acceptanceCase.outcomeKind === 'REJECTION') !== expectsRejection) {
-        throw new Error(`determinism_proof_outcome_kind_mismatch:${key}`);
-      }
-    } else if (dimension.status === 'NOT_APPLICABLE') {
-      if (dimension.closureAuthority === 'MODEL_ARGUMENT'
-        || dimension.inapplicabilityProof === null
-        || dimension.acceptanceCaseId !== null
-        || dimension.proofObligation !== null) {
-        throw new Error(`inapplicable_determinism_dimension_without_authority:${key}`);
-      }
-    } else {
-      if (dimension.closureAuthority !== 'MODEL_ARGUMENT'
-        || dimension.acceptanceCaseId !== null
-        || dimension.proofObligation !== null
-        || dimension.inapplicabilityProof !== null) {
-        throw new Error(`open_determinism_dimension_claims_closure:${key}`);
-      }
-      const decisionTargets = dimension.targetIds.filter((id) => id.startsWith('Q-'));
-      if (dimension.status === 'DECISION_REQUIRED' && decisionTargets.length !== 1) {
-        throw new Error(`determinism_gap_without_single_decision:${key}`);
-      }
-      if (dimension.status === 'GAP_FOUND' && decisionTargets.length !== 0) {
-        throw new Error(`unresolved_determinism_gap_has_decision:${key}`);
-      }
-    }
-  }
-  const expectedStatus = computeDeterminismReviewStatus(draft.determinismReview.dimensions, {
-    arithmetic: draft.determinismReview.arithmetic ?? null,
-    architectureContexts: draft.architectureContexts ?? [],
-  });
-  if (draft.determinismReview.status !== expectedStatus) {
-    throw new Error('determinism_review_status_mismatch');
-  }
+    },
+  ]);
 }
 
 export function validateDeterminismCoverage(draft) {
@@ -639,10 +667,12 @@ export function assertSemanticDraft(draft, policy, {
   resolvedDecisionIds = [],
   humanResolutions = [],
   workspaceEvidence = [],
+  skipSchema = false,
+  skipImmutableChecks = false,
 } = {}) {
-  assertSchema('aegis.semantic_draft.v9', draft);
+  if (!skipSchema) assertSchema('aegis.semantic_draft.v9', draft);
   if (intentEvidence === null) throw new Error('semantic_draft_without_intent_evidence');
-  assertIntentEvidence(intentEvidence, intent);
+  if (!skipImmutableChecks) assertIntentEvidence(intentEvidence, intent);
   if (draft.sourceEvidenceDigest !== intentEvidence.evidenceDigest) {
     throw new Error('semantic_draft_evidence_mismatch');
   }
@@ -669,17 +699,32 @@ export function assertSemanticDraft(draft, policy, {
   ]);
   const policyRulesById = new Map(policy.rules.map((rule) => [rule.id, rule]));
   const policyAmendmentIds = new Set((policy.amendments ?? []).map(({ id }) => id));
-  const knownPolicyTags = assertUniqueIds(policy.contexts, 'tag', 'policy_context');
-  assertUniqueIds(policy.rules, 'id', 'policy_rule');
-  assertUniqueIds(policy.amendments ?? [], 'id', 'policy_amendment');
+  const knownPolicyTags = skipImmutableChecks
+    ? new Set(policy.contexts.map(({ tag }) => tag))
+    : assertUniqueIds(policy.contexts, 'tag', 'policy_context');
+  if (!skipImmutableChecks) {
+    assertUniqueIds(policy.rules, 'id', 'policy_rule');
+    assertUniqueIds(policy.amendments ?? [], 'id', 'policy_amendment');
+  }
   for (const tag of architectureTags) {
     if (!knownPolicyTags.has(tag)) throw new Error(`unknown_architecture_context:${tag}`);
   }
-  for (const rule of policy.rules) {
-    assertKnownReferences(rule.appliesWhen, knownPolicyTags, `policy_rule:${rule.id}`);
+  if (!skipImmutableChecks) {
+    for (const rule of policy.rules) {
+      assertKnownReferences(rule.appliesWhen, knownPolicyTags, `policy_rule:${rule.id}`);
+    }
   }
   const fragmentIds = new Set(intentEvidence.fragments.map(({ id }) => id));
   const applicableRuleIds = applicablePolicyRuleIds(policy, architectureTags);
+  const claimTargetIds = new Set([
+    ...requirementIds,
+    ...boundaryIds,
+    ...decisionIds,
+    ...noteIds,
+    ...pathIds,
+    ...policyRulesById.keys(),
+    ...knownResolved,
+  ]);
   const context = {
     policy,
     intent,
@@ -705,44 +750,36 @@ export function assertSemanticDraft(draft, policy, {
     applicablePolicyRuleIds: applicableRuleIds,
     assessedPolicyRuleIds: new Set(draft.policyAssessments.map((a) => a.ruleId)),
     policyAmendmentIds,
-    claimTargetIds: new Set([
-      ...requirementIds,
-      ...boundaryIds,
-      ...decisionIds,
-      ...noteIds,
-      ...pathIds,
-      ...policyRulesById.keys(),
-      ...knownResolved,
-    ]),
-    semanticTargetIds: new Set([
-      ...requirementIds,
-      ...invariantIds,
-      ...riskIds,
-      ...boundaryIds,
-      ...decisionIds,
-      ...noteIds,
-      ...pathIds,
-      ...policyRulesById.keys(),
-      ...knownResolved,
-    ]),
+    claimTargetIds,
+    semanticTargetIds: new Set([...claimTargetIds, ...invariantIds, ...riskIds]),
   };
 
-  validateClaims(draft, context);
-  validateRequirements(draft, context);
-  validateDecisions(draft, context);
-  validateDeterminism(draft, context);
-  validateDeterminismCoverage(draft);
-  validateFragmentCoverage(draft, context);
-  validateReviews(draft, context);
-  const temporalOrContextError = findTemporalOrContextFloorError(draft);
-  if (temporalOrContextError) throw new Error(temporalOrContextError);
-  const arithmeticError = findIntegerArithmeticCompileError(draft, knownResolved);
-  if (arithmeticError) throw new Error(arithmeticError);
-  const symbolicIssues = collectSymbolicProvenanceIssues({
-    stateModel: draft.stateModel,
-    boundaryRules: draft.boundaryRules,
-  });
-  if (symbolicIssues.length > 0) {
-    throw new Error(`unauthorized_symbolic_comparison:${symbolicIssues[0].slotId}`);
-  }
+  runCollected([
+    () => validateClaims(draft, context),
+    () => validateRequirements(draft, context),
+    () => validateDecisions(draft, context),
+    () => validateDeterminism(draft, context),
+    () => validateDeterminismCoverage(draft),
+    () => validateFragmentCoverage(draft, context),
+    () => validateReviews(draft, context),
+    () => {
+      const temporalOrContextError = findTemporalOrContextFloorError(draft);
+      if (temporalOrContextError) throw new Error(temporalOrContextError);
+    },
+    () => {
+      const arithmeticError = findIntegerArithmeticCompileError(draft, knownResolved);
+      if (arithmeticError) throw new Error(arithmeticError);
+    },
+    () => {
+      const symbolicIssues = collectSymbolicProvenanceIssues({
+        stateModel: draft.stateModel,
+        boundaryRules: draft.boundaryRules,
+      });
+      if (symbolicIssues.length > 0) {
+        runCollected(symbolicIssues.map((issue) => () => {
+          throw new Error(`unauthorized_symbolic_comparison:${issue.slotId}`);
+        }));
+      }
+    },
+  ]);
 }

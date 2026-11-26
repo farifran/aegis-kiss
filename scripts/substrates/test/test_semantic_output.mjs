@@ -121,7 +121,10 @@ for (const hasAmendments of [false, true]) {
   visit(schema);
   const validate = new Ajv2020({ strict: false }).compile(schema);
   assert.equal(validate({}), false, 'Mandatory semantic data must remain mandatory');
-  assert.equal(expanded.properties.stateModel.anyOf.at(-1).type, 'null');
+  assert.equal(expanded.properties.stateModel.type, 'object');
+  const cs = expanded.properties.stateModel.properties.canonicalSerializations;
+  assert.ok(cs.type?.includes('null') || cs.anyOf?.at(-1).type === 'null');
+  assert.equal(Object.hasOwn(expanded.properties.determinismReview.properties, 'fragmentIndexes'), false);
   const coverage = expanded.properties.determinismReview.properties.coverage.items;
   assert.equal(Object.hasOwn(coverage.properties, 'disposition'), false);
 }

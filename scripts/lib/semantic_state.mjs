@@ -13,7 +13,7 @@ export function semanticStatePath(root) {
  * Valida a integridade estrutural e criptográfica do estado semântico governado.
  * Lança erro explícito se houver qualquer adulteração em relação aos digests canônicos.
  */
-export function parseSemanticState(value) {
+export function parseSemanticState(value, evidenceOptions = {}) {
   const state = value;
   if (state === null || typeof state !== 'object') {
     throw new Error('invalid_semantic_state');
@@ -26,7 +26,7 @@ export function parseSemanticState(value) {
     throw new Error('invalid_semantic_state');
   }
   assertSchema(contractSchema, state.contract);
-  assertContractApprovalEvidence(state.contract, { required: true });
+  assertContractApprovalEvidence(state.contract, { required: true, ...evidenceOptions });
   if (state.contractDigest !== canonicalDigest(state.contract)) {
     throw new Error('semantic_state_digest_mismatch');
   }

@@ -377,6 +377,7 @@ const decisions = withDecision ? [{
 const unknowns = withDecision ? [{
   statement: 'O formato público ainda precisa de confirmação.',
   material: true,
+  materialEffect: 'Altera se o resultado inclui metadados adicionais observáveis pelo consumidor.',
   decisionIndex: 0,
   fragmentIndexes: [0],
   basis: [{ source: 'USER_INTENT', reference: 'saída ainda a escolher' }],
@@ -490,6 +491,11 @@ process.stdout.write(JSON.stringify({
   risks: [],
   unknowns,
   decisions,
+  stateModel: {
+    entities: [],
+    operations: [],
+    observables: [],
+  },
 }));
 NODE
 }
@@ -706,7 +712,7 @@ semantic_evidence_digest="$(printf '%s\n' "${recommended_revision_request}" | jq
 make_opinion resolved-simple "${semantic_evidence_digest}" | bash ./aegis --semantic-compile >/dev/null
 jq -e '
   .approval == null
-  and .effectiveDeterminismStatus == "NOT_APPLICABLE"
+  and .effectiveDeterminismStatus == "PENDING_HUMAN_DECISIONS"
   and (.specification.decisions | length) == 0
   and (.specification.determinismReview.dimensions | all(.status != "DECISION_REQUIRED"))
   and .humanResolutions[0].answerId == "ANS-0001-01"
@@ -895,11 +901,12 @@ automatic_evidence_digest="$(printf '%s\n' "${automatic_request}" | jq -r '.inte
 make_opinion yes "${automatic_evidence_digest}" | jq '
   del(.schema, .sourceEvidenceDigest)
   | .policyAssessments |= map(del(.amendmentIndex))
+  | del(.determinismReview.fragmentIndexes)
   | .determinismReview.coverage |= map(del(.disposition))
   | .determinismReview.arithmetic = null
+  | .stateModel.canonicalSerializations = null
   | .invariants |= map(.falsificationSpec = null)
   | .requirements |= map(.acceptanceCases |= map(.branchRef = null | .batchWitness = null | .crossOperationWitness = null | .keyComparisonWitness = null))
-  | .stateModel = null
   | .decisions |= map(.semanticKey = null | .answers |= map(.preparedEffect = null))
 ' > "${WORK_DIR}/fake-codex-opinion.json"
 chmod +x scripts/substrates/test/fake_codex.mjs

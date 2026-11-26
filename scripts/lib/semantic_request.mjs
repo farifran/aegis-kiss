@@ -10,8 +10,10 @@ import {
   extractTargetPrefixesAndDirs,
   getLongestMatchingPrefixLength,
   ignoredDomainTokens,
+  isFallbackOnlyEvidence,
   loadDomainLexicon,
   prioritizeWorkspaceSkeleton,
+  resolveDiscoveryScope,
   stripDiacritics,
 } from './source_evidence.mjs';
 
@@ -79,14 +81,9 @@ export function buildSemanticRequest({
   const entrypoints = textFiles.map(({ path }) => path)
     .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
   const domainAliases = loadDomainLexicon(repositoryRoot);
-  const knownSubdirs = new Set();
-  for (const file of textFiles) {
-    const parts = file.path.split('/');
-    if (parts.length > 2) knownSubdirs.add(parts[1]);
-  }
-  const { targetDirs, targetPrefixes, explicitFilePaths } = extractTargetPrefixesAndDirs(
+  const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
+    textFiles,
     preflight.intent,
-    knownSubdirs,
     domainAliases,
   );
 
@@ -104,17 +101,6 @@ export function buildSemanticRequest({
     );
   }
 
-  const prioritizedSkeleton = preflight.discovery.workspaceSkeleton
-    ? prioritizeWorkspaceSkeleton(
-      preflight.discovery.workspaceSkeleton,
-      preflight.intent,
-      entrypoints,
-      512,
-      domainAliases,
-      targetPrefixes,
-      precomputedIdf,
-    )
-    : undefined;
   const observedTextPaths = textFiles.map(({ path }) => path);
   const unavailablePaths = [
     ...preflight.discovery.files.filter(({ kind }) => kind !== 'UTF8_TEXT')
@@ -128,6 +114,24 @@ export function buildSemanticRequest({
     explicitTargetPaths,
     { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf },
   );
+  const hasGreenfieldOnlyEntrypoints = observedTextPaths.length > 1
+    && explicitFilePaths.length === 0
+    && explicitTargetPaths.length === 0
+    && targetDirs.size === 0
+    && targetPrefixes.size === 0
+    && isFallbackOnlyEvidence(sourceEvidence);
+  const prioritizedSkeleton = preflight.discovery.workspaceSkeleton
+    && !hasGreenfieldOnlyEntrypoints
+    ? prioritizeWorkspaceSkeleton(
+      preflight.discovery.workspaceSkeleton,
+      preflight.intent,
+      entrypoints,
+      30,
+      domainAliases,
+      targetPrefixes,
+      precomputedIdf,
+    )
+    : undefined;
   const excerptedPaths = [...new Set(sourceEvidence.map(({ path }) => path))].sort();
   const demandReferencedPaths = [...new Set(intentEvidence.literalFacts
     .filter(({ kind }) => kind === 'REPOSITORY_PATH')
@@ -157,7 +161,11 @@ export function buildSemanticRequest({
         discoveryRoot: 'src',
         observedTextFileCount: observedTextPaths.length,
         demandReferencedPaths,
-        referencedPathsNotDiscovered: demandReferencedPaths.filter((path) => !observedTextPaths.includes(path)),
+        referencedPathsNotDiscovered: demandReferencedPaths.filter((refPath) => {
+          if (observedTextPaths.includes(refPath)) return false;
+          const dirPrefix = refPath.endsWith('/') ? refPath : `${refPath}/`;
+          return !observedTextPaths.some((fp) => fp.startsWith(dirPrefix));
+        }),
         excerptedPaths,
         truncatedPaths,
         pathsWithoutExcerpt: observedTextPaths.filter((path) => !excerptedPathSet.has(path)),
@@ -196,4 +204,28 @@ export function buildSemanticRequest({
   const request = { ...requestWithoutDigest, requestDigest: canonicalDigest(requestWithoutDigest) };
   assertSchema('aegis.semantic_request.v10', request);
   return request;
+}
+
+/**
+ * Compact transport envelope for sessions/caches that already hold constitution,
+ * policy and the output schema keyed by their digests.
+ */
+export function buildCompactSemanticRequest(request) {
+  return {
+    schema: request.schema,
+    requestDigest: request.requestDigest,
+    contextDigest: request.contextDigest,
+    constitutionDigest: request.constitution?.digest ?? canonicalDigest(request.constitution),
+    policyDigest: canonicalDigest(request.policy),
+    revision: request.revision,
+    intent: request.intent,
+    intentEvidence: request.intentEvidence,
+    workspace: request.workspace,
+    outputSchema: {
+      id: request.outputSchema.id,
+      digest: request.outputSchema.digest,
+      strict: request.outputSchema.strict,
+    },
+    requestPath: '.harness/runtime/semantic-request.json',
+  };
 }

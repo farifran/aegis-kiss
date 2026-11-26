@@ -1,13 +1,52 @@
+import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import process from 'node:process';
 
 import { createRejectionError as rejection } from './rejection_report.mjs';
-import { readPreflight, validateContract } from './runner_runtime.mjs';
+import { readCachedSkeleton, readPreflight, validateContract } from './runner_runtime.mjs';
 
-async function readGovernedState(statePath) {
+async function governedEvidenceFor(paths, contract) {
+  let cachedWorkspaceSkeleton = null;
+  if (existsSync(paths.preflightJsonPath)) {
+    try {
+      const preflight = await readPreflight(paths);
+      if (preflight.preflightDigest === contract?.sourcePreflightDigest) {
+        cachedWorkspaceSkeleton = preflight.discovery?.workspaceSkeleton ?? null;
+      }
+    } catch {
+      // Fallback para observação direta quando preflight estiver ausente ou inválido
+    }
+  }
+  const { observeWorkspace } = await import('./issue_contract_core.mjs');
+  const observation = observeWorkspace(paths.root, contract?.intent ?? '', {
+    cachedWorkspaceSkeleton: cachedWorkspaceSkeleton ?? await readCachedSkeleton(paths),
+  });
+  const workspaceEvidence = (observation.discovery?.files ?? [])
+    .filter(({ kind }) => kind === 'UTF8_TEXT')
+    .map(({ path }) => ({
+      path,
+      content: Buffer.from(observation.sourceBytesByPath.get(path)).toString('utf8'),
+      startLine: 1,
+    }));
+  return {
+    workspaceEvidence,
+    workspaceSkeleton: observation.workspaceSkeleton ?? cachedWorkspaceSkeleton ?? null,
+  };
+}
+
+async function readGovernedState(paths, statePath) {
   const { parseSemanticState } = await import('./semantic_state.mjs');
-  return parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
+  const rawState = JSON.parse(await readFile(statePath, 'utf8'));
+  const evidenceOptions = await governedEvidenceFor(paths, rawState?.contract);
+  return parseSemanticState(rawState, evidenceOptions);
+}
+
+function epistemicVerificationMeta(contract) {
+  return {
+    verificationScope: 'STRUCTURAL_AND_CUSTODY_ONLY',
+    semanticReviewCount: contract?.specification?.closureCertificate?.closureAudit?.counts?.SEMANTIC_REVIEW_REQUIRED ?? 0,
+  };
 }
 
 function writeStatus(status) {
@@ -35,7 +74,7 @@ async function writeGovernedStatus(paths, statePath, runtimeContract = null) {
   try {
     const [{ canonicalDigest }, state] = await Promise.all([
       import('./canonical_json.mjs'),
-      readGovernedState(statePath),
+      readGovernedState(paths, statePath),
     ]);
     if (runtimeContract !== null && canonicalDigest(runtimeContract) !== state.contractDigest) {
       writeStatus({
@@ -60,6 +99,7 @@ async function writeGovernedStatus(paths, statePath, runtimeContract = null) {
       contractDigest: state.contractDigest,
       effectiveDeterminismStatus: state.contract.effectiveDeterminismStatus,
       contractIntegrity: 'VALID',
+      ...epistemicVerificationMeta(state.contract),
       governanceFreshness: requiresSemanticRevision ? 'REVISION_REQUIRED' : 'CURRENT',
       ...(requiresSemanticRevision ? { reason: 'SEMANTIC_DECISIONS_NOT_MATERIALIZED' } : {}),
       ...freshness,
@@ -175,10 +215,10 @@ export async function handleStatus(paths) {
 }
 
 export async function handleVerify(paths) {
-  const { semanticStatePath, parseSemanticState } = await import('./semantic_state.mjs');
+  const { semanticStatePath } = await import('./semantic_state.mjs');
   const statePath = semanticStatePath(paths.root);
   if (!existsSync(statePath)) throw rejection('NO_GOVERNED_CONTRACT');
-  const state = parseSemanticState(JSON.parse(await readFile(statePath, 'utf8')));
+  const state = await readGovernedState(paths, statePath);
   let activeContext = 'NOT_PRESENT';
   if (existsSync(paths.preflightJsonPath)) {
     try {
@@ -196,6 +236,7 @@ export async function handleVerify(paths) {
     status: 'VALID',
     contractDigest: state.contractDigest,
     contractIntegrity: 'VALID',
+    ...epistemicVerificationMeta(state.contract),
     ...freshness,
     implementationCompliance: 'NOT_EVALUATED',
     activeContext,

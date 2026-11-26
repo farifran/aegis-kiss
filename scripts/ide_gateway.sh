@@ -28,7 +28,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
   ./aegis --resolve Q=ANS  Aplica resolução de decisão diretamente (ex: Q-0001=ANS-0001) e sela
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
-  ./aegis --semantic-request  Entrega a Intent IR neutra à IA semântica
+  ./aegis --semantic-request [--compact]  Entrega a Intent IR neutra (ou envelope enxuto por digest) à IA
   ./aegis --semantic-run  Executa o supervisor configurado e compila o contrato
   ./aegis --semantic-compile  Recebe o parecer JSON da IDE pelo stdin e compila o contrato
   ./aegis --wizard    Responde esclarecimentos abertos e decisões pendentes no terminal
@@ -276,8 +276,8 @@ main() {
       exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" verify
       ;;
     --semantic-request)
-      require_command_arity "$@"
-      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-request
+      shift
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" semantic-request "$@"
       ;;
     --semantic-run)
       require_command_arity "$@"

@@ -3,7 +3,10 @@ export {
   loadSemanticConstitution,
 } from './semantic_request.mjs';
 export { assertSemanticDraft } from './semantic_draft_validator.mjs';
-export { compileSemanticOpinion } from './semantic_opinion.mjs';
+export {
+  compileEarlyClarification,
+  compileSemanticOpinion,
+} from './semantic_opinion.mjs';
 export {
   assertContractDocument,
   compileSemanticContract,
@@ -12,8 +15,10 @@ export {
   assertConfirmationRequest,
   assertContractApprovalEvidence,
   assertRevisionApplied,
+  buildClarificationRequest,
   buildConfirmationRequest,
   buildHumanResolutionRecords,
+  buildQuestionRequest,
   buildSemanticRevision,
   finalizeContractApproval,
   resolutionRequiresRecompilation,

@@ -332,6 +332,21 @@ const diagnostics = new Map([
     remediation: 'Torne os índices-alvo em todas as coleções de effectCollections (inclusive dimensions) estritamente disjuntos entre decisões.',
     ruleId: 'CONST-DECISIONS',
   }],
+  ['PREPARED_EFFECT_BLOCKED_BY_GAP', {
+    message: 'Uma variante pré-calculada em preparedEffect deixa o modelo de fechamento (closure/) com lacuna bloqueante (BLOCKED_BY_GAP).',
+    remediation: 'Garanta que cada patch em answers[].preparedEffect mantenha stateEffects, provenance e bounds fechados após a aplicação da escolha.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['PREPARED_EFFECT_COMBINATORIAL_EXPLOSION', {
+    message: 'A matriz de preparedEffect excede o limite seguro de combinações cartesianas (> 32 variantes).',
+    remediation: 'Quando houver decisões acopladas ou > 32 combinações, interrompa cedo com aegis.early_clarification_opinion.v1 (EARLY_CLARIFICATION, <= 5 KB) em vez de pré-computar todas as variantes.',
+    ruleId: 'CONST-KISS',
+  }],
+  ['UNRESOLVED_PLACEHOLDER_AFTER_DECISION', {
+    message: 'Uma variante pré-calculada em preparedEffect preservou placeholder PENDING_Q* ou texto condicional pendente após a resolução da decisão.',
+    remediation: 'Atualize os statusOrError/campos de stateModel via preparedEffect.stateModel e finalize os textos de requirements/invariants para o caso selado.',
+    ruleId: 'CONST-OBSERVABLE',
+  }],
   ['INVALID_OR_MISSING_QUOTIENT_OR_ZERO_DIVISOR_POLICY', {
     message: 'A política de divisão inteira (quotientPolicy fechado ou zeroDivisorPolicy=REJECT) está ausente ou inválida.',
     remediation: 'Declare zeroDivisorPolicy: "REJECT", remainderPolicy fechado e quotientPolicy inteiro ("TRUNC_ZERO" | "FLOOR" | "CEIL" | "EXACT_DIVISIBLE_OR_REJECT") sem DECIMAL_BOUNDED.',
@@ -349,8 +364,18 @@ const diagnostics = new Map([
   }],
   ['MISSING_OR_UNBOUNDED_SAFE_INTEGER_BOUNDS', {
     message: 'SAFE_INTEGER_BOUNDED exige limites finitos declarados dentro de ±Number.MAX_SAFE_INTEGER.',
-    remediation: 'Declare operandBoundsDeclared: true com operandMin/operandMax finitos em ±Number.MAX_SAFE_INTEGER ou boundaryRules limitadas.',
+    remediation: 'Declare operandBoundsDeclared: true com operandMin e operandMax finitos (ex.: "0" e "9007199254740991") ou boundaryRules limitadas.',
     ruleId: 'CONST-OBSERVABLE',
+  }],
+  ['NON_NORMATIVE_PATH_WITH_REQUIREMENT', {
+    message: 'Caminho não normativo (EVIDENCE_ONLY ou IMPLEMENTATION_SUGGESTION) não pode vincular requirementIndexes.',
+    remediation: 'Defina requirementIndexes: [] para caminhos EVIDENCE_ONLY ou IMPLEMENTATION_SUGGESTION.',
+    ruleId: 'CONST-KISS',
+  }],
+  ['NON_NORMATIVE_CLAIM_HAS_CONTRACT_EFFECT', {
+    message: 'Claim com disposition diferente de NORMATIVE (DECISION, POLICY_CORRECTION ou NON_NORMATIVE) recebeu contractEffect preenchido.',
+    remediation: 'Envie contractEffect: null quando disposition não for NORMATIVE.',
+    ruleId: 'CONST-EVIDENCE',
   }],
   ['MISSING_ARITHMETIC_ORDER_POLICY', {
     message: 'Aritmética composta ou multiplicação/rateio exige orderPolicy explícito.',
@@ -430,7 +455,7 @@ export function buildErrorRejectionReport(phase, error, fallbackReason) {
 
 export function buildRejectionReport({ phase, reason, detail = '' }) {
   const normalized = normalizedReason(reason);
-  const causeText = detail.split(':', 1)[0];
+  const causeText = detail.split(/[|:]/u, 1)[0].trim();
   const cause = causeText ? normalizedReason(causeText) : '';
   const causeDiagnostic = diagnostics.get(cause) ?? diagnosticFamily(cause);
   const diagnostic = causeDiagnostic ?? diagnostics.get(normalized) ?? diagnosticFamily(normalized);

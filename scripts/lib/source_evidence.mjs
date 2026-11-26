@@ -10,7 +10,15 @@ import {
 } from './semantic_authority.mjs';
 import { extractFileSymbols } from './workspace_skeleton.mjs';
 
-export const ignoredDomainTokens = new Set(['src', 'source', 'root', 'code', 'file', 'files']);
+export const ignoredDomainTokens = new Set([
+  'src', 'source', 'root', 'code', 'file', 'files',
+  'comportamento', 'comparaveis', 'compativeis', 'complexidade', 'consistencia',
+  'observavel', 'observaveis', 'rastreaveis', 'falsificaveis', 'pendentes',
+  'explicita', 'explicitas', 'explicitos', 'explicito', 'alternativas',
+  'recomendacao', 'justificada', 'autorizada', 'autorizadas', 'implemente',
+  'produto', 'examine', 'encontrar', 'existentes', 'provas', 'contrato',
+  'demanda', 'decisoes', 'efeitos', 'trecho', 'origem', 'evidencias', 'evidencia',
+]);
 
 export function stripDiacritics(text) {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -136,7 +144,11 @@ export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(
     }
   }
 
-  return { targetDirs, targetPrefixes, explicitFilePaths: normalizedPaths };
+  return {
+    targetDirs,
+    targetPrefixes,
+    explicitFilePaths: normalizedPaths.filter((p) => !/^(?:src|test|tests)\/?$/u.test(p)),
+  };
 }
 
 export function loadDomainLexicon(repositoryRoot) {
@@ -510,6 +522,26 @@ function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetLines, by
   return windows;
 }
 
+/**
+ * Resolve diretórios, prefixos e caminhos explícitos de src/ a partir da intenção,
+ * evitando recalcular subdiretórios conhecidos entre preflight/request e evidência.
+ */
+export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextData = null) {
+  if (contextData?.targetDirs && contextData?.targetPrefixes && contextData?.explicitFilePaths) {
+    return {
+      targetDirs: new Set(contextData.targetDirs),
+      targetPrefixes: new Set(contextData.targetPrefixes),
+      explicitFilePaths: contextData.explicitFilePaths,
+    };
+  }
+  const knownSubdirs = new Set();
+  for (const file of textFiles) {
+    const parts = file.path.split('/');
+    if (parts.length > 2) knownSubdirs.add(parts[1]);
+  }
+  return extractTargetPrefixesAndDirs(intent, knownSubdirs, domainAliases);
+}
+
 export function buildSourceEvidence(
   repositoryRoot,
   preflight,
@@ -526,34 +558,74 @@ export function buildSourceEvidence(
     .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
 
   const selectionsByPath = new Map();
-  let explicitFilePaths = [];
+  const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
+    textFiles,
+    preflight.intent,
+    domainAliases,
+    contextData,
+  );
   if (smallWorkspace) {
-    for (const { path } of textFiles) {
-      selectionsByPath.set(path, { path, lines: [] });
+    let selectivePaths = null;
+    if (textFiles.length > 1) {
+      const matched = preflight.discovery.workspaceSkeleton?.symbols
+        ? matchSkeletonSymbols(
+          preflight.discovery.workspaceSkeleton.symbols,
+          preflight.intent ?? '',
+          domainAliases,
+          targetPrefixes,
+          contextData?.precomputedIdf ?? null,
+        )
+        : [];
+      const topScore = matched.length > 0 ? matched[0].score : 0;
+      const intentRaw = preflight.intent ?? '';
+      const intentSubtokens = new Set(extractSubtokens(intentRaw));
+      const basenameHits = textFiles
+        .filter((file) => {
+          const base = file.path.split('/').pop();
+          return base && intentRaw.includes(base);
+        })
+        .map((file) => file.path);
+      const exactSymbolSubHits = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
+        .filter((sym) => sym.exported && extractSubtokens(sym.name).some((t) => intentSubtokens.has(t) && t.length >= 6))
+        .map((sym) => sym.path);
+      const hasExplicitScope = explicitFilePaths.length > 0
+        || (explicitTargetPaths?.length ?? 0) > 0
+        || targetDirs.size > 0
+        || targetPrefixes.size > 0;
+      if (!hasExplicitScope && basenameHits.length === 0 && exactSymbolSubHits.length === 0 && topScore < 6.0) {
+        selectivePaths = entrypoints.length > 0 ? entrypoints : [textFiles[0].path];
+      } else {
+        const dirPrefixPaths = hasExplicitScope
+          ? textFiles
+            .map((file) => file.path)
+            .filter((p) => {
+              const parts = p.split('/');
+              const dir = parts.length > 2 ? parts[1] : '';
+              return targetDirs.has(dir) || [...targetPrefixes].some((pref) => p.startsWith(pref));
+            })
+          : [];
+        const focused = new Set([
+          ...(entrypoints.length > 0 ? entrypoints : [textFiles[0].path]),
+          ...explicitFilePaths.filter((p) => filesByPath.has(p)),
+          ...(explicitTargetPaths ?? []).filter((p) => filesByPath.has(p)),
+          ...dirPrefixPaths,
+          ...basenameHits,
+          ...exactSymbolSubHits,
+        ]);
+        for (const item of matched) {
+          if (item.score >= 4.0) focused.add(item.path);
+        }
+        selectivePaths = [...focused];
+      }
+    }
+    if (selectivePaths) {
+      for (const path of selectivePaths) selectionsByPath.set(path, { path, lines: [] });
+    } else {
+      for (const { path } of textFiles) {
+        selectionsByPath.set(path, { path, lines: [] });
+      }
     }
   } else {
-    let targetDirs;
-    let targetPrefixes;
-
-    if (contextData?.targetDirs && contextData?.targetPrefixes && contextData?.explicitFilePaths) {
-      targetDirs = new Set(contextData.targetDirs);
-      targetPrefixes = new Set(contextData.targetPrefixes);
-      explicitFilePaths = contextData.explicitFilePaths;
-    } else {
-      const knownSubdirs = new Set();
-      for (const file of textFiles) {
-        const parts = file.path.split('/');
-        if (parts.length > 2) knownSubdirs.add(parts[1]);
-      }
-      const extracted = extractTargetPrefixesAndDirs(
-        preflight.intent,
-        knownSubdirs,
-        domainAliases,
-      );
-      targetDirs = extracted.targetDirs;
-      targetPrefixes = extracted.targetPrefixes;
-      explicitFilePaths = extracted.explicitFilePaths;
-    }
 
     const injectSelection = (p) => {
       if (filesByPath.has(p) && !selectionsByPath.has(p)) {

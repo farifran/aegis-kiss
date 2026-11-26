@@ -3,53 +3,20 @@ import { assertSchema } from './schema_validator.mjs';
 import { assertUniqueIds } from './semantic_authority.mjs';
 import { generateClosureCertificate } from './semantic_closure.mjs';
 
-function specificationWithEvidence(specification, {
-  intentEvidence = null,
-  literalFacts = [],
-  workspaceEvidence = [],
-  workspaceSkeleton = null,
-} = {}) {
-  const effectiveFacts = intentEvidence?.literalFacts ?? literalFacts;
-  const effectiveWorkspace = (workspaceEvidence && workspaceEvidence.length > 0)
-    ? workspaceEvidence
-    : (specification.workspaceEvidence ?? specification.workspace?.sourceEvidence ?? []);
-  const effectiveSkeleton = workspaceSkeleton ?? specification.workspaceSkeleton ?? null;
-  return {
-    ...specification,
-    ...(effectiveFacts.length > 0 && !specification.intentEvidence && !specification.literalFacts
-      ? { literalFacts: effectiveFacts, intentEvidence }
-      : {}),
-    ...(effectiveWorkspace.length > 0 && !specification.workspaceEvidence
-      ? { workspaceEvidence: effectiveWorkspace }
-      : {}),
-    ...(effectiveSkeleton !== null && !specification.workspaceSkeleton
-      ? { workspaceSkeleton: effectiveSkeleton }
-      : {}),
-  };
-}
-
 function closureCertificateFor(specification, humanResolutions, options = {}) {
   return generateClosureCertificate({
-    specification: specificationWithEvidence(specification, options),
+    specification,
+    intent: options.intent ?? null,
+    intentEvidence: options.intentEvidence ?? null,
+    literalFacts: options.literalFacts ?? [],
+    workspaceEvidence: options.workspaceEvidence ?? [],
+    workspaceSkeleton: options.workspaceSkeleton ?? null,
     humanResolutions,
     semanticReviewAcknowledged: options.semanticReviewAcknowledged ?? false,
   });
 }
 
-function effectiveDeterminismStatus(specification, humanResolutions, {
-  intentEvidence = null,
-  literalFacts = [],
-  workspaceEvidence = [],
-  workspaceSkeleton = null,
-  semanticReviewAcknowledged = false,
-} = {}) {
-  const certificate = closureCertificateFor(specification, humanResolutions, {
-    intentEvidence,
-    literalFacts,
-    workspaceEvidence,
-    workspaceSkeleton,
-    semanticReviewAcknowledged,
-  });
+function determinismStatusFromCertificate(certificate, specification) {
   if (certificate.status !== 'CERTIFIED_CLOSED'
     && certificate.status !== 'CLOSED_WITH_ACKNOWLEDGED_SEMANTIC_REVIEW') {
     const nonDecisionGaps = certificate.unresolvedInventorySlots
@@ -77,6 +44,11 @@ function effectiveDeterminismStatus(specification, humanResolutions, {
   return specification.determinismReview.status === 'NOT_APPLICABLE'
     ? 'NOT_APPLICABLE'
     : 'SEMANTICALLY_CLOSED';
+}
+
+function effectiveDeterminismStatus(specification, humanResolutions, options = {}) {
+  const certificate = closureCertificateFor(specification, humanResolutions, options);
+  return determinismStatusFromCertificate(certificate, specification);
 }
 
 function decisionMap(contract) {
@@ -163,25 +135,19 @@ export function assertContractApprovalEvidence(contract, {
   const retainedResolutions = contract.humanResolutions
     .filter(({ questionId }) => !pendingIds.has(questionId));
   const evidenceOptions = {
+    intent: contract.intent ?? null,
     intentEvidence: contract.intentEvidence,
     workspaceEvidence,
     workspaceSkeleton,
   };
+  const draftCert = closureCertificateFor(contract.specification, retainedResolutions, evidenceOptions);
   const draftSpecification = {
     ...contract.specification,
-    closureCertificate: closureCertificateFor(
-      contract.specification,
-      retainedResolutions,
-      evidenceOptions,
-    ),
+    closureCertificate: draftCert,
   };
   const draft = {
     ...contract,
-    effectiveDeterminismStatus: effectiveDeterminismStatus(
-      draftSpecification,
-      retainedResolutions,
-      evidenceOptions,
-    ),
+    effectiveDeterminismStatus: determinismStatusFromCertificate(draftCert, draftSpecification),
     specification: draftSpecification,
     humanResolutions: retainedResolutions,
     approval: null,
@@ -194,7 +160,7 @@ export function assertContractApprovalEvidence(contract, {
 }
 
 
-export function buildConfirmationRequest(contract) {
+function buildFiniteDecisionRequest(contract) {
   if (contract.approval !== null) throw new Error('contract_already_approved');
   const unresolvedGaps = [
     ...contract.specification.determinismReview.dimensions
@@ -250,6 +216,7 @@ export function buildConfirmationRequest(contract) {
   });
   const request = {
     schema: 'aegis.confirmation_request.v5',
+    mode: 'FINITE_DECISION',
     status: 'USER_CONFIRMATION_REQUIRED',
     executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
     contractDraftDigest,
@@ -269,40 +236,84 @@ export function buildConfirmationRequest(contract) {
   return request;
 }
 
-export function buildClarificationRequest(contract) {
-  if (contract.approval !== null) throw new Error('contract_already_approved');
-  const fragments = new Map((contract.intentEvidence?.fragments ?? []).map((fragment) => [fragment.id, fragment]));
-  const questions = contract.specification.unknowns
+function buildOpenClarificationPayload({
+  mode = 'OPEN_CLARIFICATION',
+  earlyStop = false,
+  digestSeed,
+  title,
+  summary = null,
+  sourceRequestDigest = null,
+  questions,
+  artifactPath = '.harness/runtime/contract.md',
+  responseInstructions = 'Responda com fatos ou intenção explícitos. A resposta será incorporada literalmente a uma nova captura da demanda; nenhuma interpretação ou recomendação do Aegis substitui a resposta humana.',
+}) {
+  if (!Array.isArray(questions) || questions.length === 0) return null;
+  const contractDraftDigest = canonicalDigest(digestSeed);
+  const request = {
+    schema: 'aegis.clarification_request.v1',
+    mode,
+    ...(earlyStop ? { earlyStop: true } : {}),
+    status: 'USER_CLARIFICATION_REQUIRED',
+    executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
+    contractDraftDigest,
+    ...(sourceRequestDigest ? { sourceRequestDigest } : {}),
+    title,
+    ...(summary ? { summary } : {}),
+    questionCount: questions.length,
+    questions,
+    artifactPath,
+    responseInstructions,
+  };
+  assertSchema('aegis.clarification_request.v1', request);
+  return request;
+}
+
+export function buildQuestionRequest(target, options = {}) {
+  const mode = options.mode ?? 'FINITE_DECISION';
+  if (mode === 'FINITE_DECISION') return buildFiniteDecisionRequest(target);
+  if (mode === 'EARLY_CLARIFICATION') {
+    return buildOpenClarificationPayload({
+      mode: 'EARLY_CLARIFICATION',
+      earlyStop: true,
+      digestSeed: target.digestSeed,
+      title: target.title,
+      summary: target.summary,
+      sourceRequestDigest: target.sourceRequestDigest,
+      questions: target.questions,
+      artifactPath: '.harness/runtime/semantic-request.json',
+      responseInstructions: 'Interpelação pré-compilação (Early-Stop): apresente a síntese e as perguntas ao usuário; incorpore literalmente os esclarecimentos à demanda e execute novamente antes de compilar o parecer completo.',
+    });
+  }
+  if (target.approval !== null) throw new Error('contract_already_approved');
+  const fragments = new Map((target.intentEvidence?.fragments ?? []).map((fragment) => [fragment.id, fragment]));
+  const questions = target.specification.unknowns
     .filter(({ material, decisionId }) => material && decisionId === null)
     .map((unknown) => ({
       id: unknown.id,
       question: unknown.statement,
+      materialEffect: unknown.materialEffect,
       sourceFragmentIds: unknown.sourceFragmentIds,
       sourceFragments: unknown.sourceFragmentIds.map((id) => {
         const fragment = fragments.get(id);
         return fragment === undefined
           ? { id, text: '' }
-          : {
-            id,
-            text: contract.intent.slice(fragment.startOffset, fragment.endOffset),
-          };
+          : { id, text: target.intent.slice(fragment.startOffset, fragment.endOffset) };
       }),
     }));
-  if (questions.length === 0) return null;
-  const contractDraftDigest = canonicalDigest(contract);
-  const request = {
-    schema: 'aegis.clarification_request.v1',
-    status: 'USER_CLARIFICATION_REQUIRED',
-    executionId: `draft-${contractDraftDigest.slice(0, 16)}`,
-    contractDraftDigest,
-    title: contract.specification.title,
-    questionCount: questions.length,
+  return buildOpenClarificationPayload({
+    mode: 'OPEN_CLARIFICATION',
+    digestSeed: target,
+    title: target.specification.title,
     questions,
-    artifactPath: '.harness/runtime/contract.md',
-    responseInstructions: 'Responda com fatos ou intenção explícitos. A resposta será incorporada literalmente a uma nova captura da demanda; nenhuma interpretação ou recomendação do Aegis substitui a resposta humana.',
-  };
-  assertSchema('aegis.clarification_request.v1', request);
-  return request;
+  });
+}
+
+export function buildConfirmationRequest(contract) {
+  return buildQuestionRequest(contract, { mode: 'FINITE_DECISION' });
+}
+
+export function buildClarificationRequest(contract) {
+  return buildQuestionRequest(contract, { mode: 'OPEN_CLARIFICATION' });
 }
 
 export function buildSemanticRevision(contract, resolution) {
@@ -346,6 +357,18 @@ export function assertRevisionApplied(draft, resolution, previousSpecification) 
     ]),
     ...draft.invariants.flatMap(({ statement, falsification }) => [statement, falsification]),
   ];
+  const hasDecisionAuthority = (questionId) => [
+    ...draft.requirements,
+    ...draft.invariants,
+    ...draft.risks,
+    ...draft.boundaryRules,
+    ...draft.determinismReview.dimensions,
+  ].some((item) => Array.isArray(item.basis) && item.basis.some(
+    ({ source, reference }) => source === 'USER_DECISION' && reference === questionId,
+  ));
+  const previousDecisions = new Map(
+    (previousSpecification.decisions ?? []).map((d) => [d.questionId, d]),
+  );
   for (const answer of resolution.answers) {
     const revisedDecision = decisions.get(answer.questionId);
     if ('correction' in answer) {
@@ -354,8 +377,15 @@ export function assertRevisionApplied(draft, resolution, previousSpecification) 
       if (revisedDecision !== undefined) {
         throw new Error(`revision_retains_resolved_decision:${answer.questionId}`);
       }
+      const prevDecision = previousDecisions.get(answer.questionId);
+      const prevOption = prevDecision?.answers.find(({ id }) => id === answer.answerId);
+      const usesStructuralPatch = prevOption?.preparedEffect != null
+        && Object.values(prevOption.preparedEffect).some(
+          (list) => Array.isArray(list) && list.some((entry) => entry?.patch !== undefined),
+        );
+      const hasPreparedBinding = usesStructuralPatch && hasDecisionAuthority(answer.questionId);
       const normEffect = answer.contractEffect.normalize('NFC').trim();
-      const isMaterialized = normativeText.some((text) => {
+      const isMaterialized = hasPreparedBinding || normativeText.some((text) => {
         const normText = text.normalize('NFC').trim();
         return normText === normEffect || normText.includes(normEffect);
       });
@@ -381,6 +411,49 @@ export function assertRevisionApplied(draft, resolution, previousSpecification) 
       }
     } else if (revised.status !== previous.status) {
       throw new Error(`semantic_dimension_status_regression:${key}:${previous.status}:${revised.status}`);
+    }
+  }
+
+  const checkResolvedPlaceholders = (text, owner) => {
+    if (typeof text !== 'string' || text.length === 0) return;
+    const pendingTag = text.match(/(?<![A-Za-z0-9])PENDING_(?:Q-\d{4}|Q\d+)(?![A-Za-z0-9])/u);
+    if (pendingTag) {
+      throw new Error(`unresolved_placeholder_after_decision:${owner}:${pendingTag[0]}`);
+    }
+    for (const qId of resolvedQuestionIds) {
+      const escaped = qId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pendingRef = new RegExp(
+        `(?:aguarda(?:m)?|sujeit[oa]s?\\s+[aà]|depende(?:m|nte)?\\s+d[ae]|em\\s+aberto)\\s+(?:[^.\\n]{0,45}?)${escaped}\\b`,
+        'iu',
+      );
+      if (pendingRef.test(text)) {
+        throw new Error(`unresolved_placeholder_after_decision:${owner}:${qId}`);
+      }
+    }
+  };
+  for (const requirement of draft.requirements ?? []) {
+    checkResolvedPlaceholders(requirement.statement, requirement.id);
+    for (const ac of requirement.acceptanceCases ?? []) {
+      checkResolvedPlaceholders(ac.then, ac.id);
+    }
+  }
+  for (const invariant of draft.invariants ?? []) {
+    checkResolvedPlaceholders(invariant.statement, invariant.id);
+    checkResolvedPlaceholders(invariant.falsification, `${invariant.id}.falsification`);
+  }
+  for (const op of draft.stateModel?.operations ?? []) {
+    checkResolvedPlaceholders(op.description, `operation:${op.name}`);
+    for (const br of op.branches ?? []) {
+      checkResolvedPlaceholders(br.statusOrError, `branch:${op.name}.${br.branchId}.statusOrError`);
+      checkResolvedPlaceholders(br.condition, `branch:${op.name}.${br.branchId}.condition`);
+    }
+  }
+  for (const entity of draft.stateModel?.entities ?? []) {
+    for (const field of entity.fields ?? []) {
+      checkResolvedPlaceholders(field.reset?.trigger, `field:${entity.name}.${field.name}.reset`);
+      for (const mut of field.mutations ?? []) {
+        checkResolvedPlaceholders(mut.condition, `field:${entity.name}.${field.name}.mutation`);
+      }
     }
   }
 }
@@ -439,6 +512,7 @@ export function finalizeContractApproval({
     ...buildHumanResolutionRecords(contract, resolution),
   ];
   const evidenceOptions = {
+    intent: contract.intent ?? null,
     intentEvidence: contract.intentEvidence,
     workspaceEvidence: workspaceEvidence.length > 0
       ? workspaceEvidence
@@ -446,18 +520,15 @@ export function finalizeContractApproval({
     workspaceSkeleton,
     semanticReviewAcknowledged: resolution.attestation === 'CONTRACT_REVIEWED_AND_APPROVED',
   };
+  const finalCert = closureCertificateFor(contract.specification, humanResolutions, evidenceOptions);
   const approvedSpecification = {
     ...contract.specification,
-    closureCertificate: closureCertificateFor(contract.specification, humanResolutions, evidenceOptions),
+    closureCertificate: finalCert,
   };
   const finalContract = {
     ...contract,
     specification: approvedSpecification,
-    effectiveDeterminismStatus: effectiveDeterminismStatus(
-      approvedSpecification,
-      humanResolutions,
-      evidenceOptions,
-    ),
+    effectiveDeterminismStatus: determinismStatusFromCertificate(finalCert, approvedSpecification),
     humanResolutions,
     approval: {
       method: resolution.method,
@@ -481,4 +552,4 @@ export function finalizeContractApproval({
   return finalContract;
 }
 
-export { effectiveDeterminismStatus };
+export { determinismStatusFromCertificate, effectiveDeterminismStatus };

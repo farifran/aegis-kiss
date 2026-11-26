@@ -65,45 +65,22 @@
         ],
         "properties": {
           "quote": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 240
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_05"
           },
           "fragmentIndexes": {
             "$ref": "#/$defs/fragmentIndexes"
           },
           "kind": {
-            "enum": [
-              "OBLIGATION",
-              "PROHIBITION",
-              "GOAL",
-              "OPTION",
-              "EXAMPLE",
-              "AMBIGUITY"
-            ]
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_29"
           },
           "disposition": {
-            "enum": [
-              "NORMATIVE",
-              "DECISION",
-              "POLICY_CORRECTION",
-              "NON_NORMATIVE"
-            ]
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_39"
           },
           "contractEffect": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "minLength": 1
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_02"
           },
           "targets": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_targetRef"
-            },
-            "uniqueItems": true
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_38"
           },
           "rationale": {
             "type": "string",
@@ -125,11 +102,7 @@
         ],
         "properties": {
           "kind": {
-            "enum": [
-              "GOAL",
-              "OPTION",
-              "EXAMPLE"
-            ]
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_48"
           },
           "statement": {
             "type": "string",
@@ -214,11 +187,7 @@
               ],
               "properties": {
                 "kind": {
-                  "enum": [
-                    "HAPPY_PATH",
-                    "FAILURE",
-                    "BOUNDARY"
-                  ]
+                  "$ref": "aegis.contract_components.v1#/$defs/shared_component_44"
                 },
                 "given": {
                   "type": "string",
@@ -233,20 +202,10 @@
                   "minLength": 1
                 },
                 "outcomeKind": {
-                  "enum": [
-                    "RETURN_VALUE",
-                    "REJECTION",
-                    "NO_OP",
-                    "STATE_CHANGE",
-                    "OBSERVABLE_EFFECT"
-                  ]
+                  "$ref": "aegis.contract_components.v1#/$defs/shared_component_13"
                 },
                 "branchRef": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "minLength": 1
+                  "$ref": "aegis.contract_components.v1#/$defs/shared_component_02"
                 },
                 "batchWitness": {
                   "oneOf": [
@@ -356,12 +315,7 @@
           "minLength": 1
         },
         "fragmentIndexes": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "uniqueItems": true
+          "$ref": "aegis.contract_components.v1#/$defs/shared_component_09"
         },
         "coverage": {
           "type": "array",
@@ -387,12 +341,7 @@
                 ]
               },
               "dimensionIndexes": {
-                "type": "array",
-                "items": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "uniqueItems": true
+                "$ref": "aegis.contract_components.v1#/$defs/shared_component_09"
               },
               "rationale": {
                 "type": "string",
@@ -487,20 +436,10 @@
             "$ref": "aegis.contract_components.v1#/$defs/semantic_draft_rangeBehavior"
           },
           "decisionIndex": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_18"
           },
           "requirementIndexes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "uniqueItems": true
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_10"
           },
           "acceptanceCases": {
             "type": "array",
@@ -540,19 +479,46 @@
           "material": {
             "type": "boolean"
           },
+          "materialEffect": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Para unknown material, descreva qual resultado público do contrato pode mudar conforme a resposta. Use uma diferença concreta e fundamentada; não invente cenário nem requisito."
+          },
           "decisionIndex": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
+            "$ref": "aegis.contract_components.v1#/$defs/shared_component_18"
           },
           "fragmentIndexes": {
             "$ref": "#/$defs/fragmentIndexes"
           },
           "basis": {
             "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
+          },
+          "materialEffect": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Para unknown material, descreva qual resultado público do contrato pode mudar conforme a resposta. Use uma diferença concreta e fundamentada; não invente cenário nem requisito."
           }
+        },
+        "if": {
+          "properties": {
+            "material": {
+              "const": true
+            }
+          },
+          "required": [
+            "material"
+          ]
+        },
+        "then": {
+          "properties": {
+            "materialEffect": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "materialEffect"
+          ]
         }
       }
     },
@@ -592,10 +558,7 @@
                 "type": "boolean"
               },
               "admissionPolicy": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "$ref": "aegis.contract_components.v1#/$defs/shared_component_01"
               },
               "capacityPolicy": {
                 "type": "object",
@@ -606,22 +569,10 @@
                 ],
                 "properties": {
                   "maxEntries": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "$ref": "aegis.contract_components.v1#/$defs/shared_component_01"
                   },
                   "overflowPolicy": {
-                    "enum": [
-                      "REJECT_NEW",
-                      "LRU_EVICTION",
-                      "FIFO_EVICTION",
-                      "SLIDING_WINDOW_EVICTION",
-                      "EXPIRATION_TTL",
-                      "FAIL_OPERATION",
-                      "STATIC_SINGLETON",
-                      "NO_CONTRACT_LIMIT"
-                    ]
+                    "$ref": "aegis.contract_components.v1#/$defs/shared_component_20"
                   },
                   "provenance": {
                     "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
@@ -658,44 +609,7 @@
                 ]
               },
               "containerPolicy": {
-                "type": [
-                  "object",
-                  "null"
-                ],
-                "additionalProperties": false,
-                "required": [
-                  "partitionKey",
-                  "retentionPolicy"
-                ],
-                "properties": {
-                  "partitionKey": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "retentionPolicy": {
-                    "enum": [
-                      "IDLE_TTL_EVICTION",
-                      "SLIDING_WINDOW_EVICTION",
-                      "FIFO_EVICTION",
-                      "LRU_EVICTION",
-                      "STATIC_BOUNDED",
-                      "MANUAL_PURGE",
-                      "UNBOUNDED_CONTAINER"
-                    ]
-                  },
-                  "idleRetentionDuration": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "unboundedRationale": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                }
+                "$ref": "aegis.contract_components.v1#/$defs/state_containerPolicy"
               },
               "fields": {
                 "type": "array",
@@ -706,10 +620,7 @@
                     "name",
                     "type",
                     "initialization",
-                    "mutations",
-                    "reset",
-                    "preservation",
-                    "readBy"
+                    "reset"
                   ],
                   "properties": {
                     "name": {
@@ -717,69 +628,25 @@
                       "minLength": 1
                     },
                     "type": {
-                      "enum": [
-                        "INTEGER",
-                        "BOOLEAN",
-                        "TIMESTAMP",
-                        "STRING",
-                        "MAP",
-                        "SET",
-                        "COLLECTION"
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_25"
                     },
                     "temporalUnit": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "enum": [
-                        "MILLISECONDS",
-                        "SECONDS",
-                        "MICROSECONDS",
-                        "ISO8601_UTC",
-                        null
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/state_field_temporalUnit"
                     },
                     "temporalRole": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "enum": [
-                        "COMPUTATION_OR_COMPARISON",
-                        "PROJECTION_ONLY",
-                        null
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/state_field_temporalRole"
                     },
                     "usedInLookup": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_03"
                     },
                     "usedInDeduplication": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_03"
                     },
                     "usedInPartition": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ]
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_03"
                     },
                     "allowedValues": {
-                      "type": [
-                        "array",
-                        "null"
-                      ],
-                      "minItems": 1,
-                      "items": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "uniqueItems": true
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_11"
                     },
                     "isCounter": {
                       "type": "boolean"
@@ -794,25 +661,13 @@
                       ],
                       "properties": {
                         "lowerBound": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "$ref": "aegis.contract_components.v1#/$defs/shared_component_01"
                         },
                         "upperBound": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "$ref": "aegis.contract_components.v1#/$defs/shared_component_01"
                         },
                         "boundaryBehavior": {
-                          "enum": [
-                            "SATURATE",
-                            "REJECT",
-                            "ROLLOVER_MODULO",
-                            "PRESERVE",
-                            "UNBOUNDED_ERROR"
-                          ]
+                          "$ref": "aegis.contract_components.v1#/$defs/shared_component_32"
                         },
                         "provenance": {
                           "$ref": "aegis.contract_components.v1#/$defs/semantic_opinion_basis"
@@ -820,111 +675,19 @@
                       }
                     },
                     "initialization": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "kind",
-                        "value",
-                        "rationale"
-                      ],
-                      "properties": {
-                        "kind": {
-                          "enum": [
-                            "EXPLICIT_VALUE",
-                            "CONFIGURED",
-                            "DERIVED",
-                            "UNRESOLVED"
-                          ]
-                        },
-                        "value": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "rationale": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
+                      "$ref": "aegis.contract_components.v1#/$defs/state_field_initialization"
                     },
                     "mutations": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "operation",
-                          "condition",
-                          "effect",
-                          "targetValue"
-                        ],
-                        "properties": {
-                          "operation": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "condition": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "effect": {
-                            "enum": [
-                              "INCREMENT",
-                              "DECREMENT",
-                              "SET_VALUE",
-                              "MUTATE_COLLECTION",
-                              "CUSTOM"
-                            ]
-                          },
-                          "targetValue": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        }
-                      }
+                      "$ref": "aegis.contract_components.v1#/$defs/state_field_mutations"
                     },
                     "reset": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "allowed",
-                        "trigger",
-                        "resetValue"
-                      ],
-                      "properties": {
-                        "allowed": {
-                          "type": "boolean"
-                        },
-                        "trigger": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "resetValue": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        }
-                      }
+                      "$ref": "aegis.contract_components.v1#/$defs/state_field_reset"
                     },
                     "preservation": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1
-                      }
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_06"
                     },
                     "readBy": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1
-                      }
+                      "$ref": "aegis.contract_components.v1#/$defs/shared_component_06"
                     }
                   }
                 }
@@ -946,13 +709,7 @@
   },
   "$defs": {
     "fragmentIndexes": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "integer",
-        "minimum": 0
-      },
-      "uniqueItems": true
+      "$ref": "aegis.contract_components.v1#/$defs/shared_component_10"
     }
   }
 }

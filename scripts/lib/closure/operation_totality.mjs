@@ -1,5 +1,9 @@
 import { LOGICAL_EXTERNAL_ACTIONS, isCompletePayloadDescriptor } from './v7_rules.mjs';
 
+export function addIssue(issues, slotId, kind, reason) {
+  issues.push({ slotId, kind, reason });
+}
+
 /**
  * Utilitário relacional genérico de integridade de referências.
  * Valida se referências de uma coleção existem no conjunto-alvo de chaves autorizadas.
@@ -24,13 +28,15 @@ export function checkReferenceIntegrity({
 
 function branchMatchesOutcome(branch, outcome) {
   if (!branch || typeof branch.branchId !== 'string') return false;
+  if (branch.externalOutcome === outcome || branch.statusOrError === outcome) return true;
   const bUp = branch.branchId.toUpperCase();
   const oUp = String(outcome).toUpperCase();
-  return bUp === oUp
-    || bUp.endsWith(`_${oUp}`)
+  if (bUp === oUp) return true;
+  const negatedPrefix = /^(?:NOT|NO|NON)[_:-]/u;
+  if (negatedPrefix.test(bUp) && !negatedPrefix.test(oUp)) return false;
+  return bUp.endsWith(`_${oUp}`)
     || bUp.endsWith(`:${oUp}`)
-    || bUp.includes(oUp)
-    || branch.externalOutcome === outcome;
+    || bUp.endsWith(`-${oUp}`);
 }
 
 function validateLogicalExternalEffect({
@@ -65,7 +71,7 @@ function validateLogicalExternalEffect({
         issues.push({
           slotId: `${slotPrefix}/outcomeBranch/${outcome}`,
           kind: 'INCOMPLETE_EXTERNAL_EFFECT',
-          reason: `O resultado '${outcome}' de '${eff.action}' na operação '${op.name}' não possui ramo 1-para-1 correspondente em branches.`,
+          reason: `O resultado '${outcome}' de '${eff.action}' na operação '${op.name}' não possui ramo 1-para-1 correspondente em branches (defina statusOrError: '${outcome}' ou branchId compatível).`,
         });
       } else {
         usedBranchIds.add(matched.branchId);
@@ -73,74 +79,79 @@ function validateLogicalExternalEffect({
     }
   }
 
-  const reqPayload = eff.requestPayload;
-  const reqValid = Array.isArray(reqPayload)
-    ? reqPayload.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
-    : (reqPayload && typeof reqPayload === 'object' && typeof reqPayload.schemaRef === 'string'
-      ? isCompletePayloadDescriptor(reqPayload, payloadSchemas)
-      : false);
-  if (!reqValid) {
-    issues.push({
-      slotId: `${slotPrefix}/requestPayload`,
-      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
-      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' possui requestPayload ausente ou incompleto (exige { field, type, required, nullable, constraints } ou schemaRef).`,
-    });
-  }
-
-  const rawOut = eff.outcomePayloads;
-  const outcomeMap = new Map();
-  let outStructValid = true;
-  if (Array.isArray(rawOut)) {
-    for (const entry of rawOut) {
-      if (!entry || typeof entry.outcome !== 'string' || !entry.outcome.trim() || outcomeMap.has(entry.outcome)) {
-        outStructValid = false;
-        break;
-      }
-      const entryOk = typeof entry.schemaRef === 'string' && entry.schemaRef.trim().length > 0
-        ? isCompletePayloadDescriptor({ schemaRef: entry.schemaRef }, payloadSchemas)
-        : (Array.isArray(entry.fields) && entry.fields.every((d) => isCompletePayloadDescriptor(d, payloadSchemas)));
-      if (!entryOk) {
-        outStructValid = false;
-        break;
-      }
-      outcomeMap.set(entry.outcome, entry);
-    }
-  } else if (rawOut && typeof rawOut === 'object') {
-    for (const [outcome, val] of Object.entries(rawOut)) {
-      const entryOk = Array.isArray(val)
-        ? val.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
-        : isCompletePayloadDescriptor(val, payloadSchemas);
-      if (!entryOk) {
-        outStructValid = false;
-        break;
-      }
-      outcomeMap.set(outcome, val);
-    }
-  } else {
-    outStructValid = false;
-  }
-
-  if (!outStructValid
-    || (possibleOutcomes && (!possibleOutcomes.every((o) => outcomeMap.has(o)) || outcomeMap.size !== possibleOutcomes.length))) {
-    issues.push({
-      slotId: `${slotPrefix}/outcomePayloads`,
-      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
-      reason: `O efeito lógico '${eff.action}' na operação '${op.name}' exige outcomePayloads completo mapeado 1-para-1 a possibleOutcomes.`,
-    });
-  }
-
+  let hasSrcAdapter = false;
   if (workspaceSkeleton && (Array.isArray(workspaceSkeleton.files) || Array.isArray(workspaceSkeleton.symbols))) {
     const srcFiles = (workspaceSkeleton.files ?? []).filter((f) => typeof f === 'string' && f.startsWith('src/'));
     const srcSymbols = (workspaceSkeleton.symbols ?? []).filter((s) => typeof s.path === 'string' && s.path.startsWith('src/'));
-    const hasSrcAdapter = srcFiles.some((f) => (eff.targetPath && f === eff.targetPath) || (eff.targetSurface && f.includes(eff.targetSurface)))
+    hasSrcAdapter = srcFiles.some((f) => (eff.targetPath && f === eff.targetPath) || (eff.targetSurface && f.includes(eff.targetSurface)))
       || srcSymbols.some((s) => s.name === op.name || (eff.targetPath && s.path === eff.targetPath) || (eff.targetSurface && s.path.includes(eff.targetSurface)));
-    if (!hasSrcAdapter && (unknowns?.length ?? 0) === 0 && (decisions?.length ?? 0) === 0) {
+  }
+
+  const isAbstractBoundary = eff.externalInterfaceStatus === 'UNBOUND_ABSTRACT_BOUNDARY';
+  if (isAbstractBoundary && hasSrcAdapter) {
+    issues.push({
+      slotId: `${slotPrefix}/externalInterfaceStatus`,
+      kind: 'INCOMPLETE_EXTERNAL_EFFECT',
+      reason: `A operação '${op.name}' declara UNBOUND_ABSTRACT_BOUNDARY para '${eff.action}', mas já existe adaptador correspondente em src/.`,
+    });
+  }
+
+  if (!isAbstractBoundary) {
+    const reqPayload = eff.requestPayload;
+    const reqValid = Array.isArray(reqPayload)
+      ? reqPayload.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
+      : (reqPayload && typeof reqPayload === 'object' && typeof reqPayload.schemaRef === 'string'
+        ? isCompletePayloadDescriptor(reqPayload, payloadSchemas)
+        : false);
+    if (!reqValid) {
       issues.push({
-        slotId: `${slotPrefix}/missingSrcAdapter`,
+        slotId: `${slotPrefix}/requestPayload`,
         kind: 'INCOMPLETE_EXTERNAL_EFFECT',
-        reason: `Nenhum adaptador correspondente em src/ foi encontrado em workspaceSkeleton para '${eff.action}' (${op.name}), exigindo registro explícito em unknowns ou decisão de fronteira.`,
+        reason: `O efeito lógico '${eff.action}' na operação '${op.name}' possui requestPayload ausente ou incompleto (exige { field, type, required, nullable, constraints } ou schemaRef).`,
       });
     }
+
+    const rawOut = eff.outcomePayloads;
+    const outcomeMap = new Map();
+    let outStructValid = true;
+    if (Array.isArray(rawOut)) {
+      for (const entry of rawOut) {
+        if (!entry || typeof entry.outcome !== 'string' || !entry.outcome.trim() || outcomeMap.has(entry.outcome)) {
+          outStructValid = false;
+          break;
+        }
+        const entryOk = typeof entry.schemaRef === 'string' && entry.schemaRef.trim().length > 0
+          ? isCompletePayloadDescriptor({ schemaRef: entry.schemaRef }, payloadSchemas)
+          : (Array.isArray(entry.fields) && entry.fields.every((d) => isCompletePayloadDescriptor(d, payloadSchemas)));
+        if (!entryOk) {
+          outStructValid = false;
+          break;
+        }
+        outcomeMap.set(entry.outcome, entry);
+      }
+    } else if (rawOut && typeof rawOut === 'object') {
+      for (const [outcome, val] of Object.entries(rawOut)) {
+        const entryOk = Array.isArray(val)
+          ? val.every((d) => isCompletePayloadDescriptor(d, payloadSchemas))
+          : isCompletePayloadDescriptor(val, payloadSchemas);
+        if (!entryOk) {
+          outStructValid = false;
+          break;
+        }
+        outcomeMap.set(outcome, val);
+      }
+    } else {
+      outStructValid = false;
+    }
+
+    if (!outStructValid
+      || (possibleOutcomes && (!possibleOutcomes.every((o) => outcomeMap.has(o)) || outcomeMap.size !== possibleOutcomes.length))) {
+      addIssue(issues, `${slotPrefix}/outcomePayloads`, 'INCOMPLETE_EXTERNAL_EFFECT', `O efeito lógico '${eff.action}' na operação '${op.name}' exige outcomePayloads completo mapeado 1-para-1 a possibleOutcomes.`);
+    }
+  }
+
+  if (workspaceSkeleton && !hasSrcAdapter && (unknowns?.length ?? 0) === 0 && (decisions?.length ?? 0) === 0) {
+    addIssue(issues, `${slotPrefix}/missingSrcAdapter`, 'INCOMPLETE_EXTERNAL_EFFECT', `Nenhum adaptador correspondente em src/ foi encontrado em workspaceSkeleton para '${eff.action}' (${op.name}), exigindo registro explícito em unknowns ou decisão de fronteira.`);
   }
 }
 
@@ -184,11 +195,7 @@ export function validateOperationTotality({
   for (const op of stateModel.operations) {
     if (op.returnContract) {
       if (!op.returnContract.successType || !op.returnContract.errorProtocol) {
-        issues.push({
-          slotId: `operation/${op.name}/returnContract`,
-          kind: 'UNRESOLVED_RETURN_CONTRACT',
-          reason: `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`,
-        });
+        addIssue(issues, `operation/${op.name}/returnContract`, 'UNRESOLVED_RETURN_CONTRACT', `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`);
       }
     }
 
@@ -196,11 +203,7 @@ export function validateOperationTotality({
     const branchIds = (op.branches ?? []).map((branch) => branch.branchId);
     if (new Set(branchIds).size !== branchIds.length
       || new Set(guardPrecedence).size !== guardPrecedence.length) {
-      issues.push({
-        slotId: `operation/${op.name}/identities`,
-        kind: 'CONFLICTING_STATE_DECLARATIONS',
-        reason: `A operação '${op.name}' repete identificadores de branches ou guardas.`,
-      });
+      addIssue(issues, `operation/${op.name}/identities`, 'CONFLICTING_STATE_DECLARATIONS', `A operação '${op.name}' repete identificadores de branches ou guardas.`);
     }
 
     if (Array.isArray(op.branches) && op.branches.length > 0) {
@@ -210,24 +213,14 @@ export function validateOperationTotality({
       checkReferenceIntegrity({
         items: guardPrecedence,
         targetSet: rejectionBranchIds,
-        onMissing: (guard) => {
-          issues.push({
-            slotId: `operation/${op.name}/guard/${guard}/rejection`,
-            kind: 'MISSING_GUARD_REJECTION_BRANCH',
-            reason: `A operação '${op.name}' define o guard '${guard}' em guardPrecedence, mas não possui branch de rejeição correspondente.`,
-          });
-        },
+        onMissing: (guard) => addIssue(issues, `operation/${op.name}/guard/${guard}/rejection`, 'MISSING_GUARD_REJECTION_BRANCH', `A operação '${op.name}' define o guard '${guard}' em guardPrecedence, mas não possui branch de rejeição correspondente.`),
       });
 
       for (const branch of op.branches) {
         const explicitFields = new Set();
         for (const effect of branch.stateEffects ?? []) {
           if (!allEntityFields.has(effect.field) || explicitFields.has(effect.field)) {
-            issues.push({
-              slotId: `operation/${op.name}/branch/${branch.branchId}/effect/${effect.field}`,
-              kind: 'CONFLICTING_STATE_DECLARATIONS',
-              reason: `O efeito referencia campo inexistente ou repetido: '${effect.field}'.`,
-            });
+            addIssue(issues, `operation/${op.name}/branch/${branch.branchId}/effect/${effect.field}`, 'CONFLICTING_STATE_DECLARATIONS', `O efeito referencia campo inexistente ou repetido: '${effect.field}'.`);
           }
           explicitFields.add(effect.field);
         }
@@ -238,24 +231,14 @@ export function validateOperationTotality({
           checkReferenceIntegrity({
             items: allEntityFields,
             targetSet: coveredFields,
-            onMissing: (fieldKey) => {
-              issues.push({
-                slotId: `operation/${op.name}/branch/${branch.branchId}/missingField/${fieldKey}`,
-                kind: 'UNDETERMINED_BRANCH_NEXT_STATE',
-                reason: `O branch '${branch.branchId}' da operação '${op.name}' não determina o próximo estado para o campo '${fieldKey}' (ausente em stateEffects sem defaultPreservation: true).`,
-              });
-            },
+            onMissing: (fieldKey) => addIssue(issues, `operation/${op.name}/branch/${branch.branchId}/missingField/${fieldKey}`, 'UNDETERMINED_BRANCH_NEXT_STATE', `O branch '${branch.branchId}' da operação '${op.name}' não determina o próximo estado para o campo '${fieldKey}' (ausente em stateEffects sem defaultPreservation: true).`),
           });
         }
       }
 
       const hasSuccessBranch = op.branches.some((branch) => branch.outcomeKind !== 'REJECTION');
       if (!hasSuccessBranch) {
-        issues.push({
-          slotId: `operation/${op.name}/successBranch`,
-          kind: 'MISSING_SUCCESS_BRANCH',
-          reason: `A operação '${op.name}' define apenas branches de rejeição, sem nenhum branch de avanço normal de fluxo ou sucesso.`,
-        });
+        addIssue(issues, `operation/${op.name}/successBranch`, 'MISSING_SUCCESS_BRANCH', `A operação '${op.name}' define apenas branches de rejeição, sem nenhum branch de avanço normal de fluxo ou sucesso.`);
       }
 
       for (const entity of (stateModel.entities ?? [])) {
@@ -268,11 +251,7 @@ export function validateOperationTotality({
               || b.branchId === m.condition
             ));
             if (!hasBranchEffect) {
-              issues.push({
-                slotId: `operation/${op.name}/mutationCoverage/${fieldKey}/${m.condition}`,
-                kind: 'UNRESOLVED_TRANSITION',
-                reason: `O campo '${fieldKey}' declara mutação na operação '${op.name}' sob condição '${m.condition}', mas nenhum branch da operação especifica stateEffects nem branchId correspondente.`,
-              });
+              addIssue(issues, `operation/${op.name}/mutationCoverage/${fieldKey}/${m.condition}`, 'UNRESOLVED_TRANSITION', `O campo '${fieldKey}' declara mutação na operação '${op.name}' sob condição '${m.condition}', mas nenhum branch da operação especifica stateEffects nem branchId correspondente.`);
             }
           }
         }
@@ -281,30 +260,18 @@ export function validateOperationTotality({
 
     for (const param of (op.parameters ?? [])) {
       if ((param.type === 'INTEGER' || param.type === 'NUMBER') && !param.bounds && !param.domain) {
-        issues.push({
-          slotId: `operation/${op.name}/parameter/${param.name}/domain`,
-          kind: 'UNRESOLVED_FIELD_BOUNDS',
-          reason: `O parâmetro '${param.name}' da operação '${op.name}' é do tipo ${param.type} mas não define limites nem domínio numérico fechado (bounds).`,
-        });
+        addIssue(issues, `operation/${op.name}/parameter/${param.name}/domain`, 'UNRESOLVED_FIELD_BOUNDS', `O parâmetro '${param.name}' da operação '${op.name}' é do tipo ${param.type} mas não define limites nem domínio numérico fechado (bounds).`);
       }
     }
 
     const params = op.parameters ?? [];
     if (!Array.isArray(op.evaluatedInputs)) {
-      issues.push({
-        slotId: `operation/${op.name}/evaluatedInputs`,
-        kind: 'MISSING_EVALUATED_INPUTS',
-        reason: `A operação '${op.name}' deve declarar explicitamente evaluatedInputs (array com entradas avaliadas).`,
-      });
+      addIssue(issues, `operation/${op.name}/evaluatedInputs`, 'MISSING_EVALUATED_INPUTS', `A operação '${op.name}' deve declarar explicitamente evaluatedInputs (array com entradas avaliadas).`);
     } else {
       const evaluatedSet = new Set(op.evaluatedInputs);
       for (const param of params) {
         if (!evaluatedSet.has(param.name)) {
-          issues.push({
-            slotId: `operation/${op.name}/evaluatedInputs/${param.name}`,
-            kind: 'MISSING_EVALUATED_INPUTS',
-            reason: `O parâmetro '${param.name}' da operação '${op.name}' não consta em evaluatedInputs.`,
-          });
+          addIssue(issues, `operation/${op.name}/evaluatedInputs/${param.name}`, 'MISSING_EVALUATED_INPUTS', `O parâmetro '${param.name}' da operação '${op.name}' não consta em evaluatedInputs.`);
         }
       }
     }
@@ -350,21 +317,13 @@ export function validateOperationTotality({
           ac.branchRef === directKey || ac.branchRef === qualifiedKey
         ));
         if (!hasCaseRef) {
-          issues.push({
-            slotId: `operation/${op.name}/branch/${branch.branchId}/branchRef`,
-            kind: 'MISSING_BRANCH_ACCEPTANCE_REF',
-            reason: `O branch '${branch.branchId}' da operação '${op.name}' não possui acceptanceCase ligado via branchRef.`,
-          });
+          addIssue(issues, `operation/${op.name}/branch/${branch.branchId}/branchRef`, 'MISSING_BRANCH_ACCEPTANCE_REF', `O branch '${branch.branchId}' da operação '${op.name}' não possui acceptanceCase ligado via branchRef.`);
         }
       }
     }
     for (const ac of allAcceptanceCases) {
       if (ac.branchRef != null && !allBranchKeys.has(ac.branchRef)) {
-        issues.push({
-          slotId: `acceptanceCase/${ac.id ?? 'unnamed'}/branchRef`,
-          kind: 'MISSING_BRANCH_ACCEPTANCE_REF',
-          reason: `O acceptanceCase '${ac.id ?? ''}' referencia branchRef inexistente '${ac.branchRef}'.`,
-        });
+        addIssue(issues, `acceptanceCase/${ac.id ?? 'unnamed'}/branchRef`, 'MISSING_BRANCH_ACCEPTANCE_REF', `O acceptanceCase '${ac.id ?? ''}' referencia branchRef inexistente '${ac.branchRef}'.`);
       }
     }
   }
@@ -417,31 +376,19 @@ export function validateContradictionDetection({
             if (hasDecrement) {
               if (op.returnContract) {
                 if (!op.returnContract.successType || !op.returnContract.errorProtocol) {
-                  issues.push({
-                    slotId: `operation/${op.name}/returnContract`,
-                    kind: 'UNRESOLVED_RETURN_CONTRACT',
-                    reason: `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`,
-                  });
+                  addIssue(issues, `operation/${op.name}/returnContract`, 'UNRESOLVED_RETURN_CONTRACT', `A operação '${op.name}' declara returnContract incompleto (exige successType e errorProtocol).`);
                 }
               }
 
               const guardPrecedence = Array.isArray(op.guardPrecedence) ? op.guardPrecedence : [];
               if (guardPrecedence.length === 0) {
                 const invIds = protectingInvariants.map((inv) => inv.id).join(', ');
-                issues.push({
-                  slotId: `operation/${op.name}/contradiction/${fieldKey}`,
-                  kind: 'CONTRADICTORY_RULE_DETECTED',
-                  reason: `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' sem nenhum guard de verificação de saldo/limite, contradizendo o invariante (${invIds}).`,
-                });
+                addIssue(issues, `operation/${op.name}/contradiction/${fieldKey}`, 'CONTRADICTORY_RULE_DETECTED', `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' sem nenhum guard de verificação de saldo/limite, contradizendo o invariante (${invIds}).`);
               } else {
                 const rejectionBranches = branches.filter((b) => b.outcomeKind === 'REJECTION');
                 if (rejectionBranches.length === 0) {
                   const invIds = protectingInvariants.map((inv) => inv.id).join(', ');
-                  issues.push({
-                    slotId: `operation/${op.name}/contradiction/${fieldKey}`,
-                    kind: 'CONTRADICTORY_RULE_DETECTED',
-                    reason: `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' mas não define nenhum branch de rejeição para impedir violação do invariante (${invIds}).`,
-                  });
+                  addIssue(issues, `operation/${op.name}/contradiction/${fieldKey}`, 'CONTRADICTORY_RULE_DETECTED', `A operação '${op.name}' executa DECREMENT no campo protegido '${fieldKey}' mas não define nenhum branch de rejeição para impedir violação do invariante (${invIds}).`);
                 }
               }
             }
@@ -459,11 +406,7 @@ export function validateContradictionDetection({
       (op.branches ?? []).some((b) => b.outcomeKind === 'REJECTION'),
     );
     if (!hasAnyRejectionBranch) {
-      issues.push({
-        slotId: 'operations/rejectionContradiction',
-        kind: 'CONTRADICTORY_RULE_DETECTED',
-        reason: 'Os critérios de aceitação (acceptanceCases) exigem desfecho de rejeição (REJECTION), mas nenhuma operação declara ramos de rejeição.',
-      });
+      addIssue(issues, 'operations/rejectionContradiction', 'CONTRADICTORY_RULE_DETECTED', 'Os critérios de aceitação (acceptanceCases) exigem desfecho de rejeição (REJECTION), mas nenhuma operação declara ramos de rejeição.');
     }
   }
 
@@ -481,11 +424,7 @@ export function validateContradictionDetection({
     );
     const hasMutableFields = entities.some((e) => (e.fields ?? []).some((f) => !f.isReadOnly));
     if (hasMutableFields && !hasAnyMutatingBranch) {
-      issues.push({
-        slotId: 'operations/stateChangeContradiction',
-        kind: 'CONTRADICTORY_RULE_DETECTED',
-        reason: 'Os critérios de aceitação (acceptanceCases) exigem mudança de estado (STATE_CHANGE), mas nenhuma operação declara ramo de mutação efetivo.',
-      });
+      addIssue(issues, 'operations/stateChangeContradiction', 'CONTRADICTORY_RULE_DETECTED', 'Os critérios de aceitação (acceptanceCases) exigem mudança de estado (STATE_CHANGE), mas nenhuma operação declara ramo de mutação efetivo.');
     }
   }
 
@@ -495,11 +434,7 @@ export function validateContradictionDetection({
         const effects = branch.stateEffects ?? [];
         const mutatingEffects = effects.filter((e) => e.effect !== 'PRESERVE');
         if (mutatingEffects.length === 0 && branch.defaultPreservation === true) {
-          issues.push({
-            slotId: `operation/${op.name}/branch/${branch.branchId}/contradiction`,
-            kind: 'CONTRADICTORY_RULE_DETECTED',
-            reason: `O branch '${branch.branchId}' da operação '${op.name}' declara outcomeKind 'STATE_CHANGE', mas possui defaultPreservation: true e nenhum efeito de mutação (stateEffects).`,
-          });
+          addIssue(issues, `operation/${op.name}/branch/${branch.branchId}/contradiction`, 'CONTRADICTORY_RULE_DETECTED', `O branch '${branch.branchId}' da operação '${op.name}' declara outcomeKind 'STATE_CHANGE', mas possui defaultPreservation: true e nenhum efeito de mutação (stateEffects).`);
         }
       }
     }
@@ -509,11 +444,7 @@ export function validateContradictionDetection({
     if (entity.isCollection && entity.admissionPolicy === 'ON_FIRST_REQUEST') {
       for (const obs of stateModel.observables ?? []) {
         if (typeof obs.emptyBehavior === 'string' && /reject.*(?:unregistered|empty|unknown)/iu.test(obs.emptyBehavior)) {
-          issues.push({
-            slotId: `observable/${obs.name}/admissionContradiction`,
-            kind: 'CONTRADICTORY_RULE_DETECTED',
-            reason: `A entidade '${entity.name}' possui admissionPolicy 'ON_FIRST_REQUEST' (criação automática), mas o observável '${obs.name}' declara emptyBehavior de rejeição ('${obs.emptyBehavior}'). Essa contradição interna impede fechamento determinístico.`,
-          });
+          addIssue(issues, `observable/${obs.name}/admissionContradiction`, 'CONTRADICTORY_RULE_DETECTED', `A entidade '${entity.name}' possui admissionPolicy 'ON_FIRST_REQUEST' (criação automática), mas o observável '${obs.name}' declara emptyBehavior de rejeição ('${obs.emptyBehavior}'). Essa contradição interna impede fechamento determinístico.`);
         }
       }
     }
@@ -529,11 +460,7 @@ export function validateContradictionDetection({
         for (const item of bitAllocation) {
           const canon = serializations.find((cs) => cs.target === item.field || (typeof item.mapping === 'string' && item.mapping.includes(cs.target)));
           if (canon && canon.emptyStateDigest && canon.emptyStateDigest !== '0' && canon.emptyStateDigest !== '0x0') {
-            issues.push({
-              slotId: `observable/${obs.name}/bitmaskEmptyDigestContradiction`,
-              kind: 'CONTRADICTORY_RULE_DETECTED',
-              reason: `O observável bitmask '${obs.name}' declara emptyBehavior = '0', mas a fatia '${item.slice}' codifica digest canônico com emptyStateDigest '${canon.emptyStateDigest}' (não-nulo). Declarar zero na coleção vazia contradiz a quádrupla canônica.`,
-            });
+            addIssue(issues, `observable/${obs.name}/bitmaskEmptyDigestContradiction`, 'CONTRADICTORY_RULE_DETECTED', `O observável bitmask '${obs.name}' declara emptyBehavior = '0', mas a fatia '${item.slice}' codifica digest canônico com emptyStateDigest '${canon.emptyStateDigest}' (não-nulo). Declarar zero na coleção vazia contradiz a quádrupla canônica.`);
           }
         }
       }
@@ -563,10 +490,14 @@ export function validateOpenTermDependencies({
 
   const entityFields = new Set();
   const rawFieldNames = new Set();
+  const allowedFieldValues = new Set();
   for (const entity of (stateModel.entities ?? [])) {
     for (const field of (entity.fields ?? [])) {
       entityFields.add(`${entity.name}.${field.name}`);
       rawFieldNames.add(field.name);
+      for (const allowedVal of (field.allowedValues ?? [])) {
+        if (typeof allowedVal === 'string' && allowedVal.trim()) allowedFieldValues.add(allowedVal.trim());
+      }
     }
     if (entity.isCollection) {
       entityFields.add(`${entity.name}.id`);
@@ -596,6 +527,7 @@ export function validateOpenTermDependencies({
       || entityFields.has(token)
       || configKeys.has(token) || configKeys.has(tokenRoot)
       || decisionIds.has(token) || decisionIds.has(tokenRoot)
+      || allowedFieldValues.has(token)
       || (stateModel.observables ?? []).some((o) => o.name === token);
   }
 
@@ -649,10 +581,18 @@ export function validateOpenTermDependencies({
     }
   }
 
-  const hasExternalEffectContext = (architectureContexts ?? []).some((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag) === 'external-effect')
-    || (pathReferences ?? []).some((p) => p.role === 'PUBLIC_SURFACE');
+  const isPhysicalPublicSurface = (p) => (
+    p.role === 'PERSISTENT_STORAGE'
+    || (p.role === 'PUBLIC_SURFACE' && !/^src\/.+\.(?:[mc]?[jt]sx?|py|go|rs|java|rb)$/iu.test(String(p.path ?? '')))
+  );
+  const hasExplicitExternalTag = (architectureContexts ?? []).some((ctx) => (typeof ctx === 'string' ? ctx : ctx.tag) === 'external-effect');
+  const hasExternalEffectContext = hasExplicitExternalTag
+    || (pathReferences ?? []).some(isPhysicalPublicSurface);
   if (hasExternalEffectContext) {
-    const publicSurfaces = (Array.isArray(pathReferences) ? pathReferences : []).filter((p) => p.role === 'PUBLIC_SURFACE' || p.role === 'PERSISTENT_STORAGE');
+    const publicSurfaces = (Array.isArray(pathReferences) ? pathReferences : []).filter((p) => (
+      p.role === 'PERSISTENT_STORAGE'
+      || (p.role === 'PUBLIC_SURFACE' && (hasExplicitExternalTag || isPhysicalPublicSurface(p)))
+    ));
     for (const pub of publicSurfaces) {
       const pubPath = pub.path;
       const covered = operations.some((op) => (op.branches ?? []).some((b) => (b.externalEffects ?? []).some((eff) => eff.targetPath === pubPath || pubPath.includes(eff.targetPath) || eff.targetPath?.includes(pubPath))));

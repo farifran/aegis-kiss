@@ -35,6 +35,7 @@ import { parseSemanticState } from './scripts/lib/semantic_state.mjs';
 
 const currentSchemas = [
   'architecture-policy.v3.schema.json',
+  'clarification-request.v1.schema.json',
   'confirmation-request.v5.schema.json',
   'constitution.v1.schema.json',
   'intent-evidence.v1.schema.json',
@@ -235,6 +236,7 @@ const draft = {
     id: 'UNKNOWN-FORMAT',
     statement: 'O formato final do resultado não foi definido.',
     material: true,
+    materialEffect: 'Altera os campos adicionais expostos no resultado público.',
     decisionId: 'Q-FORMAT',
     sourceFragmentIds: ['FRAG-0001'],
     basis: [{ source: 'USER_INTENT', reference: 'saída ainda a escolher' }],

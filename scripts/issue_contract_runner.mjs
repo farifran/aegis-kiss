@@ -115,19 +115,75 @@ async function buildCurrentSemanticRequest() {
   };
 }
 
-async function handleSemanticRequest() {
-  const { canonicalJson } = await import('./lib/canonical_json.mjs');
-  const { request } = await buildCurrentSemanticRequest();
-  process.stdout.write(`${canonicalJson(request)}\n`);
+async function handleSemanticRequest(args = []) {
+  const isCompact = args.length === 1 && args[0] === '--compact';
+  if (args.length > 0 && !isCompact) {
+    throw rejection('INVALID_COMMAND_ARITY', args.join(' '));
+  }
+  const [{ canonicalJson }, { buildCompactSemanticRequest }, { request }] = await Promise.all([
+    import('./lib/canonical_json.mjs'),
+    import('./lib/semantic_request.mjs'),
+    buildCurrentSemanticRequest(),
+  ]);
+  const payload = isCompact ? buildCompactSemanticRequest(request) : request;
+  process.stdout.write(`${canonicalJson(payload)}\n`);
 }
 
-async function compileAndPersistSemanticOpinion(opinion, context, execution = null, preparedDraft = null) {
+async function emitQuestionProtocol(canonicalJson, questionRequest, { isPreparedDraft = false } = {}) {
+  const isClarification = questionRequest.schema === 'aegis.clarification_request.v1';
+  if (isClarification) {
+    await Promise.all([
+      rm(paths.userConfirmationPath, { force: true }),
+      writeFileAtomic(paths.userClarificationPath, `${canonicalJson(questionRequest)}\n`),
+    ]);
+    process.stdout.write(`${canonicalJson(questionRequest)}\n`);
+    if (process.env.AEGIS_TEST_AUTOMATION !== '1') {
+      const header = questionRequest.earlyStop
+        ? `INTERPELACAO_PRE_COMPILACAO (${questionRequest.questionCount} pergunta(s))`
+        : `ESCLARECIMENTO_HUMANO_OBRIGATORIO (${questionRequest.questionCount} pergunta(s))`;
+      const hasOptions = questionRequest.questions.some((q) => Array.isArray(q.options) && q.options.length > 0);
+      process.stderr.write(
+        `\n[AEGIS][PROTOCOL] ${header}\n`
+        + `[AEGIS][PROTOCOL] Apresente cada pergunta aberta com seu efeito público material e o trecho de origem${hasOptions ? ' (pode usar ask_question com as opções comparáveis de options[])' : ''}. Não sugira respostas nem aprove o rascunho.\n`
+        + '[AEGIS][PROTOCOL] Após a resposta, preserve o texto original e acrescente literalmente os esclarecimentos à demanda; execute novamente o fluxo.\n',
+      );
+    }
+    return;
+  }
+  await Promise.all([
+    rm(paths.userClarificationPath, { force: true }),
+    writeFileAtomic(paths.userConfirmationPath, `${canonicalJson(questionRequest)}\n`),
+  ]);
+  process.stdout.write(`${canonicalJson(questionRequest)}\n`);
+  if (!isPreparedDraft && process.env.AEGIS_TEST_AUTOMATION !== '1') {
+    if (questionRequest.questionCount > 0) {
+      const qSummary = questionRequest.questions
+        .map((q) => `${q.id} (recomendado: ${q.recommendedAnswerId})`)
+        .join(', ');
+      process.stderr.write(
+        `\n[AEGIS][PROTOCOL] DELIBERACAO_HUMANA_OBRIGATORIA (${questionRequest.questionCount} decisão(ões): ${qSummary})\n`
+        + '[AEGIS][PROTOCOL] 1. Apresente as perguntas ao usuário via ferramenta ask_question no chat destacando a recomendação KISS.\n'
+        + '[AEGIS][PROTOCOL] 2. PARE e aguarde a resposta humana explícita (NUNCA responda pelo usuário — CONST-DECISIONS).\n'
+        + '[AEGIS][PROTOCOL] 3. Após a escolha do usuário, execute apenas: ./aegis --resolve <questionId>=<answerId> (aplica preparedEffect e sela o contrato automaticamente).\n',
+      );
+    } else {
+      process.stderr.write(
+        '\n[AEGIS][PROTOCOL] APROVACAO_HUMANA_OBRIGATORIA (0 decisões pendentes)\n'
+        + '[AEGIS][PROTOCOL] 1. Apresente o resumo do contrato (.harness/runtime/contract.md) ao usuário e solicite confirmação via ask_question ou resposta direta.\n'
+        + '[AEGIS][PROTOCOL] 2. PARE e aguarde o consentimento humano explícito (CONST-DECISIONS).\n'
+        + '[AEGIS][PROTOCOL] 3. Após a confirmação do usuário, execute: ./aegis --approve\n',
+      );
+    }
+  }
+}
+
+async function compileAndPersistSemanticOpinion(opinion, context, execution = null, preparedDraft = null, rawBytes = null) {
   const [
     { canonicalDigest, canonicalJson },
     {
       assertRevisionApplied,
-      buildClarificationRequest,
-      buildConfirmationRequest,
+      buildQuestionRequest,
+      compileEarlyClarification,
       compileSemanticContract,
       compileSemanticOpinion,
       renderSemanticContractMarkdown,
@@ -143,6 +199,20 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     constitution,
     revision,
   } = context;
+  if (preparedDraft === null && opinion?.schema === 'aegis.early_clarification_opinion.v1') {
+    let earlyRequest;
+    try {
+      earlyRequest = compileEarlyClarification(opinion, request, rawBytes);
+    } catch (error) {
+      if (error.message === 'semantic_opinion_evidence_mismatch') {
+        throw rejection('SEMANTIC_CONTEXT_MISMATCH');
+      }
+      throw rejection('INVALID_SEMANTIC_OPINION', error.message);
+    }
+    await mkdir(paths.runtimeDir, { recursive: true });
+    await emitQuestionProtocol(canonicalJson, earlyRequest);
+    return;
+  }
   let draft;
   try {
     draft = preparedDraft ?? compileSemanticOpinion(opinion, request);
@@ -197,54 +267,24 @@ async function compileAndPersistSemanticOpinion(opinion, context, execution = nu
     writes.push(rm(paths.semanticExecutionPath, { force: true }));
   }
   await Promise.all(writes);
-  const clarification = buildClarificationRequest(contract);
+  const clarification = buildQuestionRequest(contract, { mode: 'OPEN_CLARIFICATION' });
   if (clarification?.questionCount > 0) {
-    await rm(paths.userConfirmationPath, { force: true });
-    await writeFileAtomic(paths.userClarificationPath, `${canonicalJson(clarification)}\n`);
-    process.stdout.write(`${canonicalJson(clarification)}\n`);
-    if (process.env.AEGIS_TEST_AUTOMATION !== '1') {
-      process.stderr.write(
-        `\n[AEGIS][PROTOCOL] ESCLARECIMENTO_HUMANO_OBRIGATORIO (${clarification.questionCount} pergunta(s))\n`
-        + '[AEGIS][PROTOCOL] Apresente as perguntas abertas ao usuário, incluindo o trecho de origem. Não sugira respostas nem aprove o rascunho.\n'
-        + '[AEGIS][PROTOCOL] Após a resposta, preserve o texto original e acrescente literalmente os esclarecimentos à demanda; execute novamente o fluxo.\n',
-      );
-    }
+    await emitQuestionProtocol(canonicalJson, clarification);
     return;
   }
-  await rm(paths.userClarificationPath, { force: true });
-  const confirmation = buildConfirmationRequest(contract, {
+  const confirmation = buildQuestionRequest(contract, {
+    mode: 'FINITE_DECISION',
     workspaceSkeleton: preflight.discovery?.workspaceSkeleton ?? request.workspace?.workspaceSkeleton ?? null,
   });
-  await writeFileAtomic(paths.userConfirmationPath, `${canonicalJson(confirmation)}\n`);
-  process.stdout.write(`${canonicalJson(confirmation)}\n`);
-  if (preparedDraft === null && process.env.AEGIS_TEST_AUTOMATION !== '1') {
-    if (confirmation.questionCount > 0) {
-      const qSummary = confirmation.questions
-        .map((q) => `${q.id} (recomendado: ${q.recommendedAnswerId})`)
-        .join(', ');
-      process.stderr.write(
-        `\n[AEGIS][PROTOCOL] DELIBERACAO_HUMANA_OBRIGATORIA (${confirmation.questionCount} decisão(ões): ${qSummary})\n`
-        + '[AEGIS][PROTOCOL] 1. Apresente as perguntas ao usuário via ferramenta ask_question no chat destacando a recomendação KISS.\n'
-        + '[AEGIS][PROTOCOL] 2. PARE e aguarde a resposta humana explícita (NUNCA responda pelo usuário — CONST-DECISIONS).\n'
-        + '[AEGIS][PROTOCOL] 3. Após a escolha do usuário, execute apenas: ./aegis --resolve <questionId>=<answerId> (aplica preparedEffect e sela o contrato automaticamente).\n',
-      );
-    } else {
-      process.stderr.write(
-        '\n[AEGIS][PROTOCOL] APROVACAO_HUMANA_OBRIGATORIA (0 decisões pendentes)\n'
-        + '[AEGIS][PROTOCOL] 1. Apresente o resumo do contrato (.harness/runtime/contract.md) ao usuário e solicite confirmação via ask_question ou resposta direta.\n'
-        + '[AEGIS][PROTOCOL] 2. PARE e aguarde o consentimento humano explícito (CONST-DECISIONS).\n'
-        + '[AEGIS][PROTOCOL] 3. Após a confirmação do usuário, execute: ./aegis --approve\n',
-      );
-    }
-  }
+  await emitQuestionProtocol(canonicalJson, confirmation, { isPreparedDraft: preparedDraft !== null });
 }
 
 async function handleSemanticCompile(args) {
   if (args.length !== 0) throw rejection('INVALID_SEMANTIC_COMPILE_ARITY');
   let opinion;
+  let receivedBytes = 0;
   try {
     let serializedDraft = '';
-    let receivedBytes = 0;
     for await (const chunk of process.stdin) {
       receivedBytes += Buffer.byteLength(chunk);
       if (receivedBytes > semanticOpinionByteLimit) throw new Error('semantic_opinion_too_large');
@@ -265,7 +305,7 @@ async function handleSemanticCompile(args) {
   } else if (opinion.sourceEvidenceDigest === undefined) {
     throw rejection('SEMANTIC_CONTEXT_MISMATCH', 'external_opinion_requires_request_binding');
   }
-  await compileAndPersistSemanticOpinion(opinion, context);
+  await compileAndPersistSemanticOpinion(opinion, context, null, null, receivedBytes);
 }
 
 // Adaptive Semantic Scout (Arbiter): acionado exclusivamente sob Silêncio Léxico em repositórios > 96KB
@@ -433,11 +473,11 @@ async function emitIdeBriefing() {
     availableContextTags: request.policy.contexts.map((c) => c.tag),
     supervisionInstructions: semanticSupervisorInstructions(request),
     aiTask: [
-      '0. checkpoint de compreensão: resuma o resultado público pretendido; identifique requisitos independentes, pressupostos e lacunas materiais. Pergunte sobre qualquer domínio material da demanda, não só variáveis, quando respostas conformes mudariam o resultado público.',
+      '0. checkpoint de compreensão e roteamento EARLY_CLARIFICATION: resuma o resultado público pretendido; identifique requisitos independentes, pressupostos e lacunas materiais. Quando houver >= 2 decisões materiais acopladas sobre operação/estado compartilhado ou risco de > 32 combinações em preparedEffect, PARE CEDO enviando aegis.early_clarification_opinion.v1 (<= 5 KB, com options comparáveis opcionais) para ./aegis --semantic-compile antes de modelar stateModel.',
       '1. intentClaims: classifique cada fragmento em OBLIGATION/NORMATIVE, OPTION/POLICY_CORRECTION ou AMBIGUITY/DECISION; separe obrigações independentes no mesmo fragmento.',
-      '2. architectureContexts: declare tags e bases; avalie cada regra aplicável. Declare coverage e rationale de determinismo para cada claim material; o Harness não preenche conclusões semânticas ausentes.',
+      '2. architectureContexts: declare tags e bases; avalie cada regra aplicável. Declare coverage e rationale para cada claim material; o Harness verifica apenas estrutura JSON, evidências em disco e custódia (não prova verdade semântica).',
       '3. requirements + invariants: defina requisitos e casos falsificáveis Dado/Quando/Então (HAPPY_PATH, BOUNDARY, FAILURE).',
-      '4. stateModel / decisions / unknowns: stateModel sempre explícito (listas vazias quando sem estado pertinente); use decisions para alternativas materiais e unknowns materiais em forma de pergunta quando faltar informação para definir alternativas. Lacunas materiais bloqueiam aprovação e geram solicitação aberta de esclarecimento.',
+      '4. stateModel / decisions / unknowns: stateModel sempre explícito (listas vazias quando sem estado pertinente); use decisions para poucas alternativas independentes/de delta restrito com preparedEffect (<= 32 combinações no produto cartesiano) ou unknowns materiais com materialEffect concreto quando faltar informação para definir alternativas. Não fabrique impacto; lacunas materiais bloqueiam aprovação e geram esclarecimento.',
     ],
     dataPath: '.harness/runtime/preflight.json',
     requestPath: '.harness/runtime/semantic-request.json',
@@ -576,16 +616,24 @@ async function handleApprove() {
     rm(paths.userConfirmationPath, { force: true }),
     rm(paths.resolutionPath, { force: true }),
   ]);
+  const acknowledgedSemanticReviews = (contract.specification.closureCertificate?.closureAudit?.items ?? [])
+    .filter((item) => item.classification === 'SEMANTIC_REVIEW_REQUIRED')
+    .map((item) => item.itemId);
+  if (acknowledgedSemanticReviews.length > 0) {
+    process.stderr.write(`[AEGIS][AUDIT] ${acknowledgedSemanticReviews.length} revisão(ões) semântica(s) reconhecida(s) na aprovação: ${acknowledgedSemanticReviews.join(', ')}\n`);
+  }
   process.stdout.write(`${JSON.stringify({
     schema: 'aegis.preflight_finalization.v14',
     status: 'FINALIZED',
     contractDigest,
     evidenceState: 'GOVERNED',
     contractIntegrity: 'VALID',
+    verificationScope: 'STRUCTURAL_AND_CUSTODY_ONLY',
     workspaceFreshness: 'MATCHES_BASELINE',
     implementationCompliance: 'NOT_EVALUATED',
     approvalMethod: contract.approval.method,
     humanDecisionCount: contract.humanResolutions.length,
+    acknowledgedSemanticReviews,
     implementationAuthorized: false,
   })}\n`);
 }
@@ -605,7 +653,7 @@ try {
   else if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'confirmation-request') await handleConfirmationRequest();
   else if (command === 'status') await handleStatus(paths);
-  else if (command === 'semantic-request') await handleSemanticRequest();
+  else if (command === 'semantic-request') await handleSemanticRequest(remainingArgs);
   else if (command === 'semantic-run') await handleSemanticRun(remainingArgs);
   else if (command === 'semantic-compile') await handleSemanticCompile(remainingArgs);
   else if (command === 'approve') await handleApprove();

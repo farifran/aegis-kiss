@@ -21,6 +21,9 @@
     "schema": {
       "const": "aegis.confirmation_request.v5"
     },
+    "mode": {
+      "const": "FINITE_DECISION"
+    },
     "status": {
       "const": "USER_CONFIRMATION_REQUIRED"
     },

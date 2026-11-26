@@ -24,16 +24,10 @@
       "$ref": "aegis.contract_components.v1#/$defs/sha256_digest"
     },
     "method": {
-      "enum": [
-        "INTERACTIVE_WIZARD",
-        "DIRECT_COMMAND"
-      ]
+      "$ref": "aegis.contract_components.v1#/$defs/shared_component_14"
     },
     "attestation": {
-      "enum": [
-        "DECISIONS_REVIEWED_AND_CONFIRMED",
-        "CONTRACT_REVIEWED_AND_APPROVED"
-      ]
+      "$ref": "aegis.contract_components.v1#/$defs/shared_component_22"
     },
     "answers": {
       "type": "array",
