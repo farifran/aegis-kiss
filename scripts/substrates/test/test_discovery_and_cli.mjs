@@ -193,48 +193,34 @@ function createTempRepo() {
   process.stdout.write('  PASS: Topographical map verified\n');
 }
 
-// 4b. Lente dinâmica de ARCHITECTURE.md (regras customizadas: sem framework, SQLite, bitmask) + enforcement Date.now()
+// 4b. Regras compactas de ARCHITECTURE.md (sem framework, SQLite, bitmask, tempo) + enforcement Date.now()
 {
   const archTemp = mkdtempSync(resolve(tmpdir(), 'aegis-arch-test-'));
   try {
     mkdirSync(resolve(archTemp, 'src'), { recursive: true });
     writeFileSync(resolve(archTemp, 'src/index.ts'), 'export const VERSION = 1;\n');
     writeFileSync(resolve(archTemp, 'ARCHITECTURE.md'), [
-      '# Arquitetura',
-      '## Regras Arquiteturais Ativas',
-      '### 1. Sem framework web (`ARCH-NO-FRAMEWORK` — hard)',
-      'O servidor HTTP usa apenas `node:http` nativo, sem Express ou Fastify.',
-      '### 2. Persistência SQLite (`ARCH-SQLITE-ONLY` — hard)',
-      'Toda persistência de dados usa exclusivamente SQLite local, sem Postgres ou Redis.',
-      '### 3. Flags em bitmask (`ARCH-BITMASK-FLAGS` — default)',
-      'Flags de estado são representadas em bitmask de 32 bits.',
-      '### 4. Tempo determinístico (`ARCH-DETERMINISTIC-TIME` — hard)',
-      'Não acoplar lógica de domínio a `Date.now()` implícito.',
+      '# Arquitetura do Produto',
+      '## Regras',
+      '- `NO-FRAMEWORK` [hard]: Servidor HTTP nativo (`node:http`), sem Express ou Fastify.',
+      '- `SQLITE-ONLY` [hard]: Persistência exclusivamente em SQLite local.',
+      '- `BITMASK-FLAGS` [default]: Flags de estado codificadas em bitmask de 32 bits.',
+      '- `DETERMINISTIC-TIME` [hard]: Tempo por parâmetro explícito; proibido `Date.now()`/`new Date()`.',
     ].join('\n'));
 
     const obs = observeWorkspace(archTemp);
-    const conflictBrief = buildDemandBrief({
+    const brief = buildDemandBrief({
       repositoryRoot: archTemp,
-      intent: 'Criar endpoint em Express salvando sessão no Redis com flags de bitmask e expiração em 60 segundos.',
+      intent: 'Criar endpoint de cadastro de usuários.',
       workspaceObservation: obs,
     });
-    const matchedIds = conflictBrief.architectureRules.matched.map((r) => r.id);
-    assert.ok(matchedIds.includes('ARCH-NO-FRAMEWORK'));
-    assert.ok(matchedIds.includes('ARCH-SQLITE-ONLY'));
-    assert.ok(matchedIds.includes('ARCH-BITMASK-FLAGS'));
-    assert.ok(matchedIds.includes('ARCH-DETERMINISTIC-TIME'));
+    const ruleIds = brief.architectureRules.map((r) => r.id);
+    assert.deepEqual(ruleIds, ['NO-FRAMEWORK', 'SQLITE-ONLY', 'BITMASK-FLAGS', 'DETERMINISTIC-TIME']);
+    const md = renderBriefMarkdown(brief);
+    assert.ok(md.includes('`NO-FRAMEWORK` [hard]'));
+    assert.ok(md.includes('`SQLITE-ONLY` [hard]'));
 
-    // Demanda neutra ainda recebe índice compacto das regras ativas do projeto
-    const neutralBrief = buildDemandBrief({
-      repositoryRoot: archTemp,
-      intent: 'Calcular subtotal de itens do carrinho.',
-      workspaceObservation: obs,
-    });
-    const neutralMd = renderBriefMarkdown(neutralBrief);
-    assert.ok(neutralMd.includes('ARCH-NO-FRAMEWORK'));
-    assert.ok(neutralMd.includes('ARCH-SQLITE-ONLY'));
-
-    // verify-contract bloqueia Date.now() implícito sob ARCH-DETERMINISTIC-TIME, mas aceita quando explicitamente excluído
+    // verify-contract bloqueia Date.now() implícito sob DETERMINISTIC-TIME, mas aceita quando explicitamente excluído
     const clockBad = resolve(archTemp, 'bad-clock.md');
     writeFileSync(clockBad, [
       '# Contrato',
@@ -248,7 +234,7 @@ function createTempRepo() {
     ].join('\n'));
     const badClockRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockBad });
     assert.equal(badClockRes.ok, false);
-    assert.ok(badClockRes.errors.some((e) => e.includes('ARCH-DETERMINISTIC-TIME')));
+    assert.ok(badClockRes.errors.some((e) => e.includes('DETERMINISTIC-TIME')));
 
     const clockGood = resolve(archTemp, 'good-clock.md');
     writeFileSync(clockGood, [
@@ -264,8 +250,9 @@ function createTempRepo() {
     const goodClockRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockGood });
     assert.equal(goodClockRes.ok, true);
 
-    // static_gate.sh (no-implicit-clock.yml) bloqueia Date.now() real em src/
+    // static_gate.sh (no-implicit-clock.yml) bloqueia Date.now() em src/ mas ignora *.test.ts
     writeFileSync(resolve(archTemp, 'src/clock_bad.ts'), 'export function now(): number { return Date.now(); }\n');
+    writeFileSync(resolve(archTemp, 'src/clock.test.ts'), 'export const fixed = Date.now();\n');
     let gateBlockedClock = false;
     try {
       execFileSync('bash', [resolve(rootDir, 'scripts/substrates/static_gate.sh'), resolve(archTemp, 'src/clock_bad.ts')], {
@@ -278,7 +265,12 @@ function createTempRepo() {
       assert.ok(String(err.stderr).includes('no-implicit-clock'));
     }
     assert.equal(gateBlockedClock, true);
-    process.stdout.write('  PASS: Dynamic ARCHITECTURE.md lens (custom rules) and Date.now() gate verified\n');
+    execFileSync('bash', [resolve(rootDir, 'scripts/substrates/static_gate.sh'), resolve(archTemp, 'src/clock.test.ts')], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    process.stdout.write('  PASS: Compact ARCHITECTURE.md rules and Date.now() gate (ignoring *.test.ts) verified\n');
   } finally {
     rmSync(archTemp, { recursive: true, force: true });
   }

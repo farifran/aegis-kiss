@@ -2,10 +2,7 @@ import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, posix, resolve } from 'node:path';
 import ts from 'typescript';
-import {
-  loadArchitectureRules,
-  selectArchitectureRulesForDemand,
-} from './architecture_rules.mjs';
+import { loadArchitectureRules } from './architecture_rules.mjs';
 import {
   buildSourceEvidence,
   computeSymbolIdfWeights,
@@ -345,10 +342,7 @@ export function buildDemandBrief({
   });
   const pathsWithoutExcerpt = observedTextPaths.filter((p) => !excerptedSet.has(p));
 
-  const architectureRules = selectArchitectureRulesForDemand(
-    loadArchitectureRules(repositoryRoot),
-    intent,
-  );
+  const architectureRules = loadArchitectureRules(repositoryRoot);
 
   return {
     schema: 'aegis.brief.v1',
@@ -413,16 +407,11 @@ export function renderBriefMarkdown(brief) {
     lines.push('');
   }
 
-  const arch = brief.architectureRules ?? { matched: [], others: [] };
-  if (arch.matched.length > 0 || arch.others.length > 0) {
-    lines.push('## Restrições arquiteturais do projeto (`ARCHITECTURE.md`)');
-    lines.push('> Regras `hard` são limites do sistema (respeitar ou expor conflito ao humano); regras `default` podem ser questionadas ao humano se a demanda exigir exceção.');
-    for (const rule of arch.matched) {
-      lines.push(`- **${rule.title}** (\`${rule.id}\` — ${rule.level}): ${rule.statement}`);
-    }
-    if (arch.others.length > 0) {
-      const indexList = arch.others.map((r) => `${r.title} (\`${r.id}\`, ${r.level})`).join(' · ');
-      lines.push(`- **Outras regras ativas:** ${indexList}`);
+  const archRules = brief.architectureRules ?? [];
+  if (archRules.length > 0) {
+    lines.push('## Arquitetura do projeto (`ARCHITECTURE.md` — `hard`: obrigatório/expor conflito · `default`: deliberar exceção)');
+    for (const rule of archRules) {
+      lines.push(`- \`${rule.id}\` [${rule.level}]: ${rule.statement}`);
     }
     lines.push('');
   }
