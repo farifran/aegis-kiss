@@ -109,7 +109,7 @@ export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(
   const targetPrefixes = new Set();
   if (!intentText) return { targetDirs, targetPrefixes, explicitFilePaths: [] };
 
-  const explicitMatches = intentText.match(/\b(?:src|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu) || [];
+  const explicitMatches = intentText.match(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu) || [];
   const normalizedPaths = explicitMatches.map((m) => m.replace(/[.,;:!?]+$/u, '').trim()).filter(Boolean);
 
   for (const p of normalizedPaths) {
@@ -118,10 +118,10 @@ export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(
       if (parts.length > 2) targetDirs.add(parts[1]);
       if (/\.[a-zA-Z0-9]+$/u.test(p)) {
         const parentDir = p.slice(0, p.lastIndexOf('/') + 1);
-        if (parentDir && parentDir !== 'src/') targetPrefixes.add(parentDir);
+        if (parentDir && !/^(?:src|app|lib)\/$/u.test(parentDir)) targetPrefixes.add(parentDir);
       } else {
         const dirPfx = p.endsWith('/') ? p : `${p}/`;
-        if (dirPfx !== 'src/') targetPrefixes.add(dirPfx);
+        if (!/^(?:src|app|lib)\/$/u.test(dirPfx)) targetPrefixes.add(dirPfx);
       }
     }
   }
@@ -145,7 +145,7 @@ export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(
   return {
     targetDirs,
     targetPrefixes,
-    explicitFilePaths: normalizedPaths.filter((p) => !/^(?:src|test|tests)\/?$/u.test(p)),
+    explicitFilePaths: normalizedPaths.filter((p) => !/^(?:src|app|lib|test|tests)\/?$/u.test(p)),
   };
 }
 
@@ -355,7 +355,14 @@ function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixe
 
     score += symbolPathPenalty(sym, 5, 5);
 
-    if (score > 0) scored.push({ path: sym.path, line: sym.startLine, score });
+    if (score > 0) {
+      scored.push({
+        path: sym.path,
+        line: sym.startLine,
+        endLine: sym.endLine ?? sym.startLine,
+        score,
+      });
+    }
   }
 
   scored.sort((a, b) => b.score - a.score);
@@ -447,29 +454,52 @@ function lineWindow(bytes, targetLine, byteLimit) {
   return { content, startLine: start + 1, endLine: end };
 }
 
-function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetLines, byteLimit) {
+function normalizeSpan(item) {
+  if (typeof item === 'number') return { startLine: item, endLine: item };
+  return {
+    startLine: item.startLine ?? item.line ?? 1,
+    endLine: Math.max(item.startLine ?? item.line ?? 1, item.endLine ?? item.startLine ?? item.line ?? 1),
+  };
+}
+
+function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetSpans, byteLimit) {
   if (byteLimit <= 0 || fileLines.length === 0) return [];
   const minLine = headerEndLine > 0 ? headerEndLine + 1 : 1;
+  const normalizedSpans = orderedTargetSpans.map(normalizeSpan);
 
   const anchors = [];
-  for (const line of orderedTargetLines) {
-    if (line < minLine) continue;
-    if (anchors.some((a) => Math.abs(a - line) < 25)) continue;
-    anchors.push(line);
+  for (const span of normalizedSpans) {
+    if (span.endLine < minLine) continue;
+    const clampedStart = Math.max(minLine, span.startLine);
+    if (anchors.some((a) => clampedStart <= a.endLine + 10 && span.endLine >= a.startLine - 10)) {
+      continue;
+    }
+    anchors.push({ startLine: clampedStart, endLine: Math.max(clampedStart, span.endLine) });
     if (anchors.length >= 3) break;
   }
-  if (anchors.length === 0 && orderedTargetLines.length > 0) {
-    anchors.push(Math.max(minLine, orderedTargetLines[0]));
+  if (anchors.length === 0 && normalizedSpans.length > 0) {
+    const first = normalizedSpans[0];
+    const clampedStart = Math.max(minLine, first.startLine);
+    anchors.push({ startLine: clampedStart, endLine: Math.max(clampedStart, first.endLine) });
   }
   if (anchors.length === 0) return [];
 
   const sliceBudget = Math.floor(byteLimit / anchors.length);
   const rawIntervals = [];
   for (const anchor of anchors) {
-    const target = Math.min(Math.max(anchor - 1, minLine - 1), fileLines.length - 1);
-    let start = target;
-    let end = target + 1;
-    let content = fileLines[target];
+    const startIdx = Math.min(Math.max(anchor.startLine - 1, minLine - 1), fileLines.length - 1);
+    let endIdx = Math.min(Math.max(anchor.endLine, startIdx + 1), fileLines.length);
+
+    // 1. Prioriza o bloco inteiro do símbolo AST [startLine..endLine].
+    let content = fileLines.slice(startIdx, endIdx).join('\n');
+    while (endIdx > startIdx + 1 && Buffer.byteLength(content, 'utf8') > sliceBudget) {
+      endIdx -= 1;
+      content = fileLines.slice(startIdx, endIdx).join('\n');
+    }
+
+    // 2. Se ainda sobra orçamento, expande suavemente em torno do símbolo para contexto imediato.
+    let start = startIdx;
+    let end = endIdx;
     while (start > minLine - 1 || end < fileLines.length) {
       const nextStart = start > minLine - 1 ? start - 1 : start;
       const nextEnd = end < fileLines.length ? end + 1 : end;
@@ -482,7 +512,7 @@ function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetLines, by
     if (Buffer.byteLength(content, 'utf8') <= sliceBudget) {
       rawIntervals.push({ start, end });
     } else {
-      rawIntervals.push({ start: target, end: target + 1 });
+      rawIntervals.push({ start: startIdx, end: startIdx + 1 });
     }
   }
 
@@ -627,10 +657,10 @@ export function buildSourceEvidence(
 
     const injectSelection = (p) => {
       if (filesByPath.has(p) && !selectionsByPath.has(p)) {
-        const symbolLines = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
+        const symbolSpans = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
           .filter((s) => s.path === p && typeof s.startLine === 'number')
-          .map((s) => s.startLine);
-        selectionsByPath.set(p, { path: p, lines: symbolLines });
+          .map((s) => ({ startLine: s.startLine, endLine: s.endLine ?? s.startLine }));
+        selectionsByPath.set(p, { path: p, lines: symbolSpans });
       }
     };
 
@@ -701,7 +731,7 @@ export function buildSourceEvidence(
       }
       const underBudgetPressure = estimatedCandidateBytes > sourceEvidenceByteLimit;
 
-      for (const { path, line, score } of matched) {
+      for (const { path, line, endLine, score } of matched) {
         const parts = path.split('/');
         const dir = parts.length > 2 ? parts[1] : '';
 
@@ -725,7 +755,7 @@ export function buildSourceEvidence(
         if (!selectionsByPath.has(path)) {
           selectionsByPath.set(path, { path, lines: [] });
         }
-        selectionsByPath.get(path).lines.push(line);
+        selectionsByPath.get(path).lines.push({ startLine: line, endLine: endLine ?? line });
       }
     }
 
@@ -793,12 +823,21 @@ export function buildSourceEvidence(
         trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
       });
     } else {
-      const orderedLines = [...new Set(lines)];
+      const seenSpanKeys = new Set();
+      const orderedSpans = [];
+      for (const rawSpan of lines) {
+        const span = normalizeSpan(rawSpan);
+        const key = `${span.startLine}:${span.endLine}`;
+        if (!seenSpanKeys.has(key)) {
+          seenSpanKeys.add(key);
+          orderedSpans.push(span);
+        }
+      }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const fileLines = text.split('\n');
       const headerEndLine = findStructuralHeaderEndLine(manifestEntry.path, text);
 
-      if (headerEndLine > 0 && orderedLines.some((l) => l > headerEndLine + 5)) {
+      if (headerEndLine > 0 && orderedSpans.some((s) => s.startLine > headerEndLine + 5)) {
         const headerText = fileLines.slice(0, headerEndLine).join('\n');
         const headerBytes = Buffer.byteLength(headerText, 'utf8');
         const maxHeaderBudget = Math.min(headerBytes, Math.max(512, Math.floor(limit * 0.4)));
@@ -823,7 +862,7 @@ export function buildSourceEvidence(
 
         const windowBudget = Math.min(limit - consumedHeader, remainingBytes);
         if (windowBudget > 0) {
-          const windows = extractAnchoredWindows(fileLines, headerEndLine, orderedLines, windowBudget);
+          const windows = extractAnchoredWindows(fileLines, headerEndLine, orderedSpans, windowBudget);
           for (const windowExcerpt of windows) {
             const consumedWindow = Buffer.byteLength(windowExcerpt.content, 'utf8');
             remainingBytes -= consumedWindow;
@@ -837,7 +876,7 @@ export function buildSourceEvidence(
           }
         }
       } else {
-        const windows = extractAnchoredWindows(fileLines, 0, orderedLines, limit);
+        const windows = extractAnchoredWindows(fileLines, 0, orderedSpans, limit);
         if (windows.length > 0) {
           for (const windowExcerpt of windows) {
             const consumedBytes = Buffer.byteLength(windowExcerpt.content, 'utf8');
@@ -851,7 +890,7 @@ export function buildSourceEvidence(
             });
           }
         } else {
-          const excerpt = lineWindow(bytes, orderedLines[0], limit);
+          const excerpt = lineWindow(bytes, orderedSpans[0].startLine, limit);
           const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
           remainingBytes -= consumedBytes;
           evidence.push({

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { extractAuthorizedPaths } from './contract_verifier.mjs';
+import { countContractScenarios, extractAuthorizedPaths } from './contract_verifier.mjs';
 
 function runStep(command, args, cwd) {
   try {
@@ -169,24 +169,38 @@ export function runProductCheck({
     });
   }
 
-  // 5. Testes reais de produto (src/**/*.test.*)
+  // 5. Testes reais de produto (src/**/*.test.*) + checagem de cobertura vs cenários do contrato
   const productTests = collectFilesMatching(srcDir, (f) => isProductTestPath(f));
+  const warnings = [];
   if (productTests.length > 0) {
     const hasTsTests = productTests.some((f) => /\.tsx?$/u.test(f));
     const args = hasTsTests
       ? ['--import', 'tsx', '--test', ...productTests]
       : ['--test', ...productTests];
     const res = runStep('node', args, repositoryRoot);
+    let declaredTestCases = 0;
+    for (const testFile of productTests) {
+      const content = readFileSync(testFile, 'utf8');
+      declaredTestCases += (content.match(/(?:^|\n)\s*(?:test|it)\s*\(/gu) ?? []).length;
+    }
+    if (existsSync(contractPath)) {
+      const scenarios = countContractScenarios(readFileSync(contractPath, 'utf8'));
+      if (scenarios > 0 && declaredTestCases < scenarios) {
+        warnings.push(`Cobertura de cenários: contract.md define ${scenarios} cenário(s), mas foram encontrados ${declaredTestCases} caso(s) test()/it() em src/**/*.test.*`);
+      }
+    }
     results.push({
       name: 'product_tests',
       ok: res.ok,
-      summary: res.ok ? `${productTests.length} arquivo(s) PASS` : 'falha nos testes de produto',
+      summary: res.ok
+        ? `${productTests.length} arquivo(s), ${declaredTestCases} caso(s) PASS`
+        : 'falha nos testes de produto',
       details: res.ok ? [] : compactErrorLines(res.output, 20),
     });
   }
 
   const allPassed = results.every((r) => r.ok);
-  return { ok: allPassed, results };
+  return { ok: allPassed, results, warnings };
 }
 
 export function formatCheckReport(report) {
@@ -199,6 +213,9 @@ export function formatCheckReport(report) {
         lines.push(`  ${detail}`);
       }
     }
+  }
+  for (const warning of report.warnings ?? []) {
+    lines.push(`- AVISO: ${warning}`);
   }
   return `${lines.join('\n')}\n`;
 }

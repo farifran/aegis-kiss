@@ -4,8 +4,16 @@ import { inspectWorkspaceFreshness } from './workspace_observer.mjs';
 
 const forbiddenPathPattern = /(?:\/etc\/|\/proc\/|\/sys\/|~\/|\.\.\/)/u;
 const pendingMarkerPattern = /(?:\[PENDENTE\]|\bPENDING_Q\d+\b|\bTBD\b|\bTODO\b)/u;
-const srcRefPattern = /\b(src\/[A-Za-z0-9_./-]+)(?::L?(\d+)(?:-L?(\d+))?)?/gu;
+const srcRefPattern = /\b((?:src|app|lib)\/[A-Za-z0-9_./-]+)(?::L?(\d+)(?:-L?(\d+))?)?/gu;
 const newFileHintPattern = /(?:\[novo\]|\(novo\)|\[new\]|\(new\)|novo arquivo|new file|criar\b|create\b)/iu;
+const symbolBeforeRefPattern = /`([A-Za-z_$][A-Za-z0-9_$]{2,})(?:[^`]*)`\s*\(\s*`?$/u;
+
+export function countContractScenarios(markdown) {
+  const givenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Dado|Given)(?:\*\*)?:/giu) ?? []).length;
+  const whenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Quando|When)(?:\*\*)?:/giu) ?? []).length;
+  const thenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Ent[aã]o|Then)(?:\*\*)?:/giu) ?? []).length;
+  return Math.min(givenCount, whenCount, thenCount);
+}
 
 export function parseWorkspaceReference(reference) {
   if (typeof reference !== 'string' || reference.trim().length === 0) {
@@ -135,10 +143,7 @@ export function verifyContractMarkdown({
   if (!hasCasesHeading) errors.push('Seção obrigatória ausente: Casos de prova (Dado / Quando / Então).');
 
   // Casos falsificáveis Dado / Quando / Então (ou Given / When / Then)
-  const givenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Dado|Given)(?:\*\*)?:/giu) ?? []).length;
-  const whenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Quando|When)(?:\*\*)?:/giu) ?? []).length;
-  const thenCount = (markdown.match(/(?:^|\n)\s*[-*]?\s*(?:\*\*)?(?:Ent[aã]o|Then)(?:\*\*)?:/giu) ?? []).length;
-  const completeScenarios = Math.min(givenCount, whenCount, thenCount);
+  const completeScenarios = countContractScenarios(markdown);
   if (completeScenarios < 2) {
     errors.push(`Exige ao menos 2 cenários completos Dado/Quando/Então (sucesso e falha/limite); encontrados: ${completeScenarios}.`);
   }
@@ -210,11 +215,24 @@ export function verifyContractMarkdown({
 
       if (startLine !== null) {
         if (!lineCache.has(refPath)) {
-          lineCache.set(refPath, readFileSync(absPath, 'utf8').split('\n').length);
+          lineCache.set(refPath, readFileSync(absPath, 'utf8').split('\n'));
         }
-        const totalLines = lineCache.get(refPath);
+        const fileLines = lineCache.get(refPath);
+        const totalLines = fileLines.length;
         if (startLine < 1 || endLine < startLine || endLine > totalLines) {
           errors.push(`Faixa de linhas inválida em contract.md:L${i + 1}: ${refPath}:L${startLine}${match[3] ? `-L${endLine}` : ''} (arquivo tem ${totalLines} linhas)`);
+        } else {
+          const beforeRef = line.slice(0, match.index);
+          const symMatch = beforeRef.match(symbolBeforeRefPattern);
+          if (symMatch) {
+            const symbolName = symMatch[1];
+            const sliceText = fileLines.slice(startLine - 1, endLine).join('\n');
+            const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const symRe = new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`, 'u');
+            if (!symRe.test(sliceText)) {
+              errors.push(`Símbolo '${symbolName}' não encontrado em ${refPath}:L${startLine}${match[3] ? `-L${endLine}` : ''} (contract.md:L${i + 1})`);
+            }
+          }
         }
       }
     }

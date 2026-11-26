@@ -2,12 +2,14 @@ import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
+import process from 'node:process';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
 import { buildWorkspaceSkeleton } from './workspace_skeleton.mjs';
 
 export const maxDemandBytes = 65_536;
 export const maxIssueDemandBytes = 262_144;
+export const maxSingleFileBytes = 262_144;
 
 const discoveryFileLimit = 1024;
 const discoveryEntryLimit = 4096;
@@ -16,6 +18,7 @@ const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u20
 const ignoredDirectories = new Set([
   'node_modules', '.git', 'dist', 'build', 'coverage', '.turbo', '.next',
 ]);
+const fallbackSourceRoots = ['app', 'lib'];
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export function resolveRuntimePaths(root) {
@@ -30,6 +33,20 @@ export function resolveRuntimePaths(root) {
     contractMdPath: resolve(runtimeDir, 'contract.md'),
     skeletonJsonPath: resolve(runtimeDir, 'workspace_skeleton.json'),
   };
+}
+
+export function resolveSourceRoots(repositoryRoot, explicitRoots = null) {
+  const configured = Array.isArray(explicitRoots) && explicitRoots.length > 0
+    ? explicitRoots
+    : (process.env.AEGIS_SRC_DIRS
+      ? process.env.AEGIS_SRC_DIRS.split(',').map((s) => s.trim()).filter(Boolean)
+      : null);
+  if (configured && configured.length > 0) {
+    return [...new Set(configured.map((r) => r.replace(/\/+$/u, '')))].sort(compareCodeUnits);
+  }
+  if (existsSync(resolve(repositoryRoot, 'src'))) return ['src'];
+  const detected = fallbackSourceRoots.filter((dir) => existsSync(resolve(repositoryRoot, dir)));
+  return detected.length > 0 ? detected : ['src'];
 }
 
 export async function writeFileAtomic(target, content) {
@@ -93,9 +110,9 @@ function portableRelativePath(repositoryRoot, absolutePath) {
   return sep === '\\' ? nativePath.replaceAll('\\', '/') : nativePath;
 }
 
-export function computeSourceSnapshotDigest(files, ignoredEntries) {
+export function computeSourceSnapshotDigest(files, ignoredEntries, sourceRoots = ['src']) {
   return canonicalDigest({
-    sourceRoot: 'src',
+    sourceRoot: sourceRoots.length === 1 ? sourceRoots[0] : sourceRoots,
     files,
     ignoredEntries,
   });
@@ -109,14 +126,17 @@ function isReusableWorkspaceSkeleton(cachedSkeleton) {
 }
 
 /**
- * Varredura local segura e determinística de src/ com proteção anti-symlink,
- * anti-Trojan-Source e cache de AST Skeleton.
+ * Varredura local segura e determinística sobre as raízes de código (padrão: src/,
+ * configurável via AEGIS_SRC_DIRS ou autodetect app/lib), pulando arquivos gigantes
+ * individuais (> 256 KB) sem abortar a descoberta do restante do projeto.
  */
 export function observeWorkspace(repositoryRoot, {
   cachedWorkspaceSkeleton = null,
   cachedSnapshotDigest = null,
+  sourceRoots = null,
+  singleFileByteLimit = maxSingleFileBytes,
 } = {}) {
-  const sourceRoot = resolve(repositoryRoot, 'src');
+  const effectiveRoots = resolveSourceRoots(repositoryRoot, sourceRoots);
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
   const files = [];
@@ -130,7 +150,8 @@ export function observeWorkspace(repositoryRoot, {
     for (const entry of entries) {
       visitedEntries += 1;
       if (visitedEntries > discoveryEntryLimit) {
-        throw new Error('discovery_entry_limit_exceeded');
+        ignoredEntries.push({ path: portableRelativePath(repositoryRoot, directory), reason: 'ENTRY_LIMIT_REACHED' });
+        return;
       }
       const absolutePath = resolve(directory, entry.name);
       const relativePath = portableRelativePath(repositoryRoot, absolutePath);
@@ -148,17 +169,28 @@ export function observeWorkspace(repositoryRoot, {
       }
       if (!entry.isFile()) continue;
       if (files.length >= discoveryFileLimit) {
-        throw new Error('discovery_file_limit_exceeded');
+        ignoredEntries.push({ path: relativePath, reason: 'FILE_LIMIT_REACHED' });
+        continue;
       }
 
       const metadata = statSync(absolutePath);
+      if (metadata.size > singleFileByteLimit) {
+        ignoredEntries.push({ path: relativePath, reason: 'TOO_LARGE' });
+        continue;
+      }
       if (scannedBytes + metadata.size > discoveryByteLimit) {
-        throw new Error('discovery_byte_limit_exceeded');
+        ignoredEntries.push({ path: relativePath, reason: 'BYTE_BUDGET_EXCEEDED' });
+        continue;
       }
 
       const sourceBytes = readFileSync(absolutePath);
+      if (sourceBytes.byteLength > singleFileByteLimit) {
+        ignoredEntries.push({ path: relativePath, reason: 'TOO_LARGE' });
+        continue;
+      }
       if (scannedBytes + sourceBytes.byteLength > discoveryByteLimit) {
-        throw new Error('discovery_byte_limit_exceeded');
+        ignoredEntries.push({ path: relativePath, reason: 'BYTE_BUDGET_EXCEEDED' });
+        continue;
       }
       scannedBytes += sourceBytes.byteLength;
       sourceBytesByPath.set(relativePath, sourceBytes);
@@ -186,21 +218,28 @@ export function observeWorkspace(repositoryRoot, {
     }
   }
 
-  if (existsSync(sourceRoot)) {
-    const sourceRootMetadata = lstatSync(sourceRoot);
-    if (sourceRootMetadata.isSymbolicLink()) {
+  for (const relRoot of effectiveRoots) {
+    const absRoot = resolve(repositoryRoot, relRoot);
+    const repoPrefix = repositoryRoot.endsWith(sep) ? repositoryRoot : `${repositoryRoot}${sep}`;
+    if (!absRoot.startsWith(repoPrefix)) {
+      throw new Error(`invalid_source_root:${relRoot}`);
+    }
+    if (!existsSync(absRoot)) continue;
+    const rootMetadata = lstatSync(absRoot);
+    if (rootMetadata.isSymbolicLink()) {
       throw new Error('discovery_source_root_symlink');
     }
-    if (!sourceRootMetadata.isDirectory()) {
+    if (!rootMetadata.isDirectory()) {
       throw new Error('invalid_source_root');
     }
-    inspectDirectory(sourceRoot);
+    inspectDirectory(absRoot);
   }
+
   files.sort((left, right) => compareCodeUnits(left.path, right.path));
   ignoredEntries.sort((left, right) => compareCodeUnits(left.path, right.path));
   sourceRecords.sort((left, right) => compareCodeUnits(left.path, right.path));
 
-  const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries);
+  const sourceSnapshotDigest = computeSourceSnapshotDigest(files, ignoredEntries, effectiveRoots);
   const canReuseCache = isReusableWorkspaceSkeleton(cachedWorkspaceSkeleton)
     && (cachedSnapshotDigest === null || cachedSnapshotDigest === sourceSnapshotDigest);
   const workspaceSkeleton = canReuseCache
@@ -209,7 +248,8 @@ export function observeWorkspace(repositoryRoot, {
   const hasTextSource = files.some(({ kind }) => kind === 'UTF8_TEXT');
 
   const discovery = {
-    sourceRoot: 'src',
+    sourceRoot: effectiveRoots.length === 1 ? effectiveRoots[0] : effectiveRoots.join(','),
+    sourceRoots: effectiveRoots,
     status: hasTextSource
       ? 'SOURCE_OBSERVED'
       : (files.length > 0 || ignoredEntries.length > 0 ? 'NO_TEXT_SOURCE' : 'EMPTY_SOURCE'),
@@ -223,16 +263,16 @@ export function observeWorkspace(repositoryRoot, {
   return { discovery, sourceBytesByPath, workspaceSkeleton };
 }
 
-export function discoverWorkspace(repositoryRoot) {
-  return observeWorkspace(repositoryRoot).discovery;
+export function discoverWorkspace(repositoryRoot, options = {}) {
+  return observeWorkspace(repositoryRoot, options).discovery;
 }
 
-export function inspectWorkspaceFreshness(repositoryRoot, expectedSnapshotDigest) {
+export function inspectWorkspaceFreshness(repositoryRoot, expectedSnapshotDigest, options = {}) {
   if (!expectedSnapshotDigest) {
     return { workspaceFreshness: 'NO_BASELINE' };
   }
   try {
-    const currentSnapshotDigest = discoverWorkspace(repositoryRoot).sourceSnapshotDigest;
+    const currentSnapshotDigest = discoverWorkspace(repositoryRoot, options).sourceSnapshotDigest;
     return {
       workspaceFreshness: currentSnapshotDigest === expectedSnapshotDigest
         ? 'MATCHES_BASELINE'

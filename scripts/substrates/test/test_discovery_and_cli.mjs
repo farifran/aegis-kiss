@@ -37,9 +37,80 @@ function createTempRepo() {
   assert.ok(brief.coverage.excerptedPaths.includes('src/risk/velocity_guard.ts'));
   assert.equal(brief.coverage.excerptedPaths.includes('src/reporting/audit_csv_exporter.ts'), false);
   assert.equal(brief.coverage.referencedPathsNotDiscovered.length, 0);
+  // Melhoria #1: nenhum símbolo de arquivo já incluído inteiro é duplicado em skeletonSymbols
+  const fullPaths = new Set(brief.sourceEvidence.filter((e) => !e.truncated).map((e) => e.path));
+  assert.equal(brief.skeletonSymbols.some((s) => fullPaths.has(s.path)), false);
+  // Melhoria #2: linhas numeradas dentro dos blocos de código
+  assert.ok(md.includes('6 | export const MAX_BATCH_REJECTIONS = 5;'));
+  // Melhoria #4: chamadores detectados em src/
+  assert.ok(brief.directCallers.some((c) => c.symbol === 'evaluateSettlementGuards'
+    && c.locations.some((loc) => loc.startsWith('src/ledger/settlement_engine.ts:L'))));
+  assert.ok(md.includes('## Chamadores / referências observadas'));
   assert.ok(md.includes('## 1. Demanda'));
   assert.ok(md.includes('## 4. Trechos de código observados'));
-  process.stdout.write('  PASS: Discovery isolates target modules without leaking unrelated files\n');
+  process.stdout.write('  PASS: Discovery isolates target modules, avoids AST duplication, numbers lines, and finds callers\n');
+}
+
+// 1b. Melhorias #3, #4 (1-hop import) e #5 (arquivo > 256 KB pulado + autodetect lib/)
+{
+  const bigTemp = mkdtempSync(resolve(tmpdir(), 'aegis-improvements-'));
+  try {
+    mkdirSync(resolve(bigTemp, 'lib/core'), { recursive: true });
+    mkdirSync(resolve(bigTemp, 'lib/risk'), { recursive: true });
+    // Autodetect lib/ (sem src/) + arquivo gigante (> 256 KB) pulado sem quebrar o scan
+    writeFileSync(resolve(bigTemp, 'lib/huge_dump.json'), 'x'.repeat(270_000));
+    writeFileSync(resolve(bigTemp, 'lib/risk/helper.ts'), [
+      'export interface RiskLimit {',
+      '  readonly maxAttempts: number;',
+      '}',
+      'export function checkRiskLimit(attempts: number, limit: RiskLimit): boolean {',
+      '  return attempts < limit.maxAttempts;',
+      '}',
+    ].join('\n'));
+    // Arquivo grande (> 8 KB) com função alvo multi-linha no meio para provar janela de bloco AST inteiro
+    const paddingBlock = Array.from({ length: 180 }, (_, i) => `export function fillerFn_${i}(v: number): number { return v + ${i}; }`).join('\n');
+    const targetFn = [
+      'export function computeSpecialRebate(grossCents: number, tier: number): number {',
+      '  const base = grossCents * tier;',
+      '  const capped = Math.min(base, 50000);',
+      '  const adjusted = capped - 10;',
+      '  return Math.max(0, adjusted);',
+      '}',
+    ].join('\n');
+    writeFileSync(resolve(bigTemp, 'lib/core/engine.ts'), [
+      "import { checkRiskLimit, type RiskLimit } from '../risk/helper.js';",
+      paddingBlock,
+      targetFn,
+      paddingBlock,
+      'export function runCheck(a: number, l: RiskLimit): boolean { return checkRiskLimit(a, l); }',
+    ].join('\n'));
+    // Outro arquivo > 90 KB para forçar modo largeWorkspace (> 96 KB total)
+    writeFileSync(
+      resolve(bigTemp, 'lib/risk/archive.ts'),
+      Array.from({ length: 1600 }, (_, i) => `export const ARCHIVE_${i} = ${i}; // padding line for large workspace mode`).join('\n'),
+    );
+
+    const obs = observeWorkspace(bigTemp);
+    assert.deepEqual(obs.discovery.sourceRoots, ['lib']);
+    assert.ok(obs.discovery.ignoredEntries.some((e) => e.path === 'lib/huge_dump.json' && e.reason === 'TOO_LARGE'));
+
+    const brief = buildDemandBrief({
+      repositoryRoot: bigTemp,
+      intent: 'Ajustar computeSpecialRebate em lib/core/engine.ts',
+      workspaceObservation: obs,
+    });
+    // Janela AST em arquivo grande deve conter a função computeSpecialRebate inteira (início ao fim)
+    const engineExcerpts = brief.sourceEvidence.filter((e) => e.path === 'lib/core/engine.ts');
+    const joinedEngine = engineExcerpts.map((e) => e.content).join('\n');
+    assert.ok(joinedEngine.includes('export function computeSpecialRebate'));
+    assert.ok(joinedEngine.includes('return Math.max(0, adjusted);'));
+
+    // 1-hop import: lib/risk/helper.ts não veio inteiro, mas sua assinatura importada (checkRiskLimit) aparece em directImports
+    assert.ok(brief.directImports.some((s) => s.path === 'lib/risk/helper.ts' && s.name === 'checkRiskLimit'));
+    process.stdout.write('  PASS: AST-span windows, 1-hop imports, huge-file skip, and lib/ autodetect verified\n');
+  } finally {
+    rmSync(bigTemp, { recursive: true, force: true });
+  }
 }
 
 // 2. Demanda greenfield mantém brief compacto sem arrastar src/ inteiro
@@ -115,7 +186,7 @@ try {
     '# Contrato: Trava de rejeições consecutivas',
     '',
     '## Escopo',
-    '- Incluído: bloquear liquidação após 5 rejeições (`src/risk/velocity_guard.ts:L6`).',
+    '- Incluído: bloquear liquidação após `MAX_BATCH_REJECTIONS = 5` (`src/risk/velocity_guard.ts:L6`).',
     '- Fora do escopo: alterações em `src/ledger/fee_calculator.ts`.',
     '',
     '## Arquivos',
@@ -143,12 +214,12 @@ try {
     'src/risk/velocity_guard.ts',
   ]);
 
-  // Contrato inválido: linha fora do arquivo + caminho fantasma + [PENDENTE] + /etc/passwd
+  // Contrato inválido: linha fora do arquivo + símbolo errado na linha + caminho fantasma + [PENDENTE] + /etc/passwd
   const badContractPath = resolve(tempDir, '.harness/runtime/bad-contract.md');
   writeFileSync(badContractPath, [
     '# Contrato ruim',
     '## Escopo',
-    '- Ler `/etc/passwd` e aguardar [PENDENTE]',
+    '- Ler `/etc/passwd`, usar `SIMBOLO_INEXISTENTE` (`src/risk/velocity_guard.ts:L6`) e aguardar [PENDENTE]',
     '## Arquivos',
     '- `/etc/passwd`',
     '- `src/risk/velocity_guard.ts:L9999`',
@@ -163,9 +234,10 @@ try {
   assert.ok(badRes.errors.some((e) => e.includes('Marcador pendente')));
   assert.ok(badRes.errors.some((e) => e.includes('Violação de fronteira')));
   assert.ok(badRes.errors.some((e) => e.includes('Faixa de linhas inválida')));
+  assert.ok(badRes.errors.some((e) => e.includes("Símbolo 'SIMBOLO_INEXISTENTE' não encontrado")));
   assert.ok(badRes.errors.some((e) => e.includes('Arquivo inexistente')));
   assert.ok(badRes.errors.some((e) => e.includes('ao menos 2 cenários')));
-  process.stdout.write('  PASS: verify-contract validates lines, paths, boundaries, and scenarios\n');
+  process.stdout.write('  PASS: verify-contract validates lines, symbols, paths, boundaries, and scenarios\n');
 
   // 6. Fluxo CLI ponta a ponta: brief -> verify-contract -> check -> status -> clean
   const env = { ...process.env, AEGIS_ROOT: tempDir };
@@ -197,6 +269,21 @@ try {
     env,
   });
   assert.ok(checkPassOut.includes('[AEGIS][CHECK] PASS'));
+
+  // Melhoria #6: aviso quando há menos casos de teste do que cenários no contract.md
+  writeFileSync(resolve(tempDir, 'src/sample.test.ts'), [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('only one case', () => { assert.equal(1 + 1, 2); });",
+  ].join('\n'));
+  const checkWarnOut = execFileSync('bash', ['./aegis', 'check'], {
+    cwd: tempDir,
+    encoding: 'utf8',
+    env,
+  });
+  assert.ok(checkWarnOut.includes('product_tests: PASS'));
+  assert.ok(checkWarnOut.includes('AVISO: Cobertura de cenários'));
+  rmSync(resolve(tempDir, 'src/sample.test.ts'));
 
   // Alterar arquivo fora do contrato deve falhar o `./aegis check`
   writeFileSync(

@@ -28,8 +28,23 @@ const tsExtensions = new Set([
 ]);
 
 const maxSignatureLength = 4096;
+const maxConstDeclLength = 200;
 const maxDocCommentLength = 1024;
 const skeletonSchema = 'aegis.workspace_skeleton.v1';
+
+function compactVariableDeclaration(declaration, sourceFile) {
+  const rawDecl = declaration.getText(sourceFile).trim();
+  if (rawDecl.length <= maxConstDeclLength) return rawDecl;
+  const nameText = declaration.name.getText(sourceFile);
+  const typeText = declaration.type ? `: ${declaration.type.getText(sourceFile)}` : '';
+  const initText = declaration.initializer ? declaration.initializer.getText(sourceFile).trim() : '';
+  const compactInit = initText.replace(/\s+/gu, ' ');
+  const previewBudget = Math.max(40, maxConstDeclLength - nameText.length - typeText.length - 24);
+  const preview = compactInit.length > previewBudget
+    ? `${compactInit.slice(0, previewBudget)}… /* ${initText.length} chars */`
+    : compactInit;
+  return `${nameText}${typeText} = ${preview}`;
+}
 
 function getLine(sourceFile, pos) {
   return sourceFile.getLineAndCharacterOfPosition(pos).line + 1;
@@ -219,7 +234,7 @@ function extractTypeScriptSymbols(path, text) {
             });
           } else {
             const prefix = isExported ? `export ${isConst ? 'const' : 'let'} ` : `${isConst ? 'const' : 'let'} `;
-            const rawDecl = declaration.getText(sourceFile).trim();
+            const rawDecl = compactVariableDeclaration(declaration, sourceFile);
             symbols.push({
               path,
               name: name.slice(0, 128),

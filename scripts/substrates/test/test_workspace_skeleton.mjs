@@ -134,7 +134,15 @@ export let currentStreak = 0;
   assert.equal(streak.kind, 'VARIABLE');
   assert.equal(streak.exported, true);
 
-  log('  PASS: Arrow functions, constants and variables verified');
+  // Huge const initializer must be compacted instead of dumping 4 KB into skeleton
+  const bigTable = `export const HUGE_LOOKUP: readonly string[] = [${Array.from({ length: 80 }, (_, i) => `'ITEM_${i}'`).join(', ')}];\n`;
+  const bigSyms = extractFileSymbols('src/big.ts', bigTable);
+  assert.equal(bigSyms.length, 1);
+  assert.ok(bigSyms[0].signature.length <= 240, `Expected compacted const signature <= 240 chars, got ${bigSyms[0].signature.length}`);
+  assert.ok(bigSyms[0].signature.includes('HUGE_LOOKUP: readonly string[]'));
+  assert.ok(bigSyms[0].signature.includes('chars */'));
+
+  log('  PASS: Arrow functions, constants, variables and huge-const compaction verified');
 }
 
 // 5. Classes with Constructor, Properties and Public Methods
