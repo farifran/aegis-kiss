@@ -1,4 +1,5 @@
 import { isFallbackOnlyEvidence, sourceEvidenceByteLimit, stripDiacritics } from './source_evidence.mjs';
+import { splitRootRelativePath } from './workspace_observer.mjs';
 
 const silenceStopwords = new Set([
   'para', 'com', 'sem', 'sob', 'sobre', 'entre', 'como', 'onde', 'quando',
@@ -35,11 +36,13 @@ export function shouldShowTopography({
   const domainWords = intentWords.filter((w) => !silenceStopwords.has(w));
   if (domainWords.length < 3) return false;
 
+  const sourceRoots = discovery.sourceRoots ?? (discovery.sourceRoot ? discovery.sourceRoot.split(',') : ['src']);
   const coveredSubdirs = new Set();
   for (const entry of sourceEvidence) {
-    const parts = entry.path.split('/');
-    if (parts.length > 2) {
-      coveredSubdirs.add(parts[1]);
+    const { rel } = splitRootRelativePath(entry.path, sourceRoots);
+    const relParts = rel.split('/').filter(Boolean);
+    if (relParts.length > 1) {
+      coveredSubdirs.add(relParts[0]);
     }
   }
   if (coveredSubdirs.size > 1) return false;

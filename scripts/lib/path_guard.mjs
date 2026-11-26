@@ -7,18 +7,23 @@ import {
 } from './contract_verifier.mjs';
 import {
   hasSymlinkComponent,
+  isEditableProductPath,
   isInsideProductRoots,
   isPathCovered,
   isProductTestPath,
+  isProtectedPath,
+  loadProjectConfig,
   normalizeRepoRelativePath,
   resolveSourceRoots,
 } from './workspace_observer.mjs';
 
 export {
   hasSymlinkComponent,
+  isEditableProductPath,
   isInsideProductRoots,
   isPathCovered,
   isProductTestPath,
+  isProtectedPath,
   normalizeRepoRelativePath,
 };
 
@@ -62,11 +67,14 @@ export function evaluateGuardPath({
   }
 
   const roots = resolveSourceRoots(repositoryRoot, sourceRoots);
-  if (!isInsideProductRoots(relPath, roots)) {
+  const protectedPaths = loadProjectConfig(repositoryRoot).protectedPaths;
+  if (!isEditableProductPath(relPath, roots, protectedPaths)) {
     return {
       allowed: false,
       path: relPath,
-      reason: `Fora da fronteira de produto (${roots.join(', ')}/): IA só pode editar código em ${roots.join(', ')}/.`,
+      reason: isProtectedPath(relPath, protectedPaths)
+        ? `Arquivo protegido na fronteira do projeto: ${relPath} (não editável pela IA sem exceção humana).`
+        : `Fora da fronteira de produto (${roots.join(', ')}/): IA só pode editar código em ${roots.join(', ')}/.`,
     };
   }
 
@@ -74,7 +82,7 @@ export function evaluateGuardPath({
     const normalizedAllow = [];
     for (const raw of allowPaths) {
       const normalized = normalizeRepoRelativePath(repositoryRoot, raw);
-      if (!normalized || !isInsideProductRoots(normalized, roots) || roots.includes(normalized)) {
+      if (!normalized || !isEditableProductPath(normalized, roots, protectedPaths) || roots.includes(normalized)) {
         return {
           allowed: false,
           path: relPath,

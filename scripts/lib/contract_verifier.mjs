@@ -4,7 +4,8 @@ import { findContractArchitectureViolations, loadArchitectureRules } from './arc
 import { sha256 } from './canonical_json.mjs';
 import {
   inspectWorkspaceFreshness,
-  isInsideProductRoots,
+  isEditableProductPath,
+  loadProjectConfig,
   normalizeRepoRelativePath,
   resolveSourceRoots,
   writeFileAtomic,
@@ -166,11 +167,12 @@ function extractTargetSectionCandidates(line, repositoryRoot) {
  * Extrai os caminhos autorizados declarados na seção de arquivos do contract.md,
  * usando estritamente as mesmas raízes de produto de guard-path e check.
  */
-export function extractAuthorizedPaths(markdown, sourceRoots = ['src', 'app', 'lib'], repositoryRoot = null) {
+export function extractAuthorizedPaths(markdown, sourceRoots = ['src', 'app', 'lib'], repositoryRoot = null, protectedPaths = null) {
   const sections = splitMarkdownSections(markdown);
   const targetSection = extractTargetSection(sections);
   const authorized = new Set();
   const newPaths = new Set();
+  const effectiveProtected = protectedPaths ?? (repositoryRoot ? loadProjectConfig(repositoryRoot).protectedPaths : []);
 
   const rootAlt = buildRootPrefixAlternation(sourceRoots);
   if (!rootAlt) return { authorizedPaths: [], newPaths: [] };
@@ -188,7 +190,7 @@ export function extractAuthorizedPaths(markdown, sourceRoots = ['src', 'app', 'l
       const resolvedPath = repositoryRoot
         ? normalizeRepoRelativePath(repositoryRoot, cleaned)
         : cleaned.replace(/^\.\//u, '');
-      if (!resolvedPath || !isInsideProductRoots(resolvedPath, sourceRoots)) continue;
+      if (!resolvedPath || !isEditableProductPath(resolvedPath, sourceRoots, effectiveProtected)) continue;
       if (sourceRoots.includes(resolvedPath)) continue;
       authorized.add(resolvedPath);
       if (isNewLine) newPaths.add(resolvedPath);
@@ -275,6 +277,7 @@ export function verifyContractMarkdown({
   }
 
   const effectiveRoots = resolveSourceRoots(repositoryRoot, sourceRoots);
+  const protectedPaths = loadProjectConfig(repositoryRoot).protectedPaths;
   const sections = splitMarkdownSections(markdown);
   const headings = sections.map((s) => s.heading);
 
@@ -312,7 +315,7 @@ export function verifyContractMarkdown({
       for (const candidate of extractTargetSectionCandidates(line, repositoryRoot)) {
         if (candidate.endsWith('/')) {
           const normalizedDir = normalizeRepoRelativePath(repositoryRoot, candidate.slice(0, -1));
-          if (!normalizedDir || !isInsideProductRoots(normalizedDir, effectiveRoots)) {
+          if (!normalizedDir || !isEditableProductPath(normalizedDir, effectiveRoots, protectedPaths)) {
             errors.push(`Arquivo fora da fronteira de produto (${effectiveRoots.join(', ')}/) na seção de arquivos: "${candidate}"`);
           } else {
             errors.push(`Diretório genérico não permitido na seção de arquivos (liste arquivos específicos em ${effectiveRoots.join(', ')}/): "${candidate}"`);
@@ -320,14 +323,14 @@ export function verifyContractMarkdown({
           continue;
         }
         const normalized = normalizeRepoRelativePath(repositoryRoot, candidate);
-        if (!normalized || !isInsideProductRoots(normalized, effectiveRoots) || effectiveRoots.includes(normalized)) {
+        if (!normalized || !isEditableProductPath(normalized, effectiveRoots, protectedPaths) || effectiveRoots.includes(normalized)) {
           errors.push(`Arquivo fora da fronteira de produto (${effectiveRoots.join(', ')}/) na seção de arquivos: "${candidate}"`);
         }
       }
     }
   }
 
-  const { authorizedPaths, newPaths } = extractAuthorizedPaths(markdown, effectiveRoots, repositoryRoot);
+  const { authorizedPaths, newPaths } = extractAuthorizedPaths(markdown, effectiveRoots, repositoryRoot, protectedPaths);
   if (hasFiles && authorizedPaths.length === 0) {
     errors.push(`Seção de arquivos não declara nenhum caminho autorizado dentro da fronteira (${effectiveRoots.join(', ')}/).`);
   }

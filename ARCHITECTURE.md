@@ -1,25 +1,17 @@
-# Arquitetura do Produto
+# Arquitetura do Produto — Askesis (`src/askesis/`)
 
-Decisões e restrições técnicas deste software (`src/`), lidas automaticamente pelo `./aegis brief` e validadas pelo `./aegis verify-contract` / `./aegis check`.
+Decisões e restrições técnicas reais do Askesis, lidas automaticamente pelo `./aegis brief` e validadas pelo `./aegis verify-contract` / `./aegis check`.
 
-> **Como preencher:** mantenha 1 linha por regra ativa no formato `- \`ID\` [hard|default]: descrição objetiva`.
-> - `hard`: obrigatório — respeitar ou expor conflito explicitamente ao humano.
-> - `default`: padrão do projeto — deliberar com o humano caso a demanda exija exceção.
+> **Formato:** `- \`ID\` [hard|default]: regra objetiva` (`hard` = obrigatório/expor conflito · `default` = padrão/deliberar exceção).
 
-## Regras Base
+## Regras
 
-- `PRODUCT-BOUNDARY` [hard]: Código e testes apenas nas raízes de produto (`src/`); proibido alterar arquivos fora da fronteira sem autorização explícita.
-- `STRICT-TYPES` [hard]: Tipagem estrita, retorno explícito em APIs públicas e dados `readonly`; sem `any` nem `@ts-ignore`.
-- `FAILURE-EXPLICIT` [hard]: Sem `catch` vazio ou descarte silencioso; erros, limites e efeitos de falha devem ser explícitos.
-- `DETERMINISTIC-TIME` [hard]: Tempo sempre por parâmetro explícito na lógica de domínio; proibido `Date.now()` ou `new Date()` sem argumentos.
-- `PARSIMONY` [default]: Sem factories, builders, event buses, singletons ou camadas extras quando função simples basta.
-
-## Regras do Domínio e Stack *(preencher para o novo projeto)*
-
-<!--
-Exemplos (descomente, adapte ou adicione suas regras reais quando iniciar o projeto):
-- `NO-FRAMEWORK` [default]: Runtime/stdlib nativa (`node:http`, `fetch`); sem frameworks pesados sem aprovação humana.
-- `STORAGE-ENGINE` [hard]: Persistência exclusivamente em SQLite local via driver nativo; sem ORM.
-- `MONEY-REPRESENTATION` [hard]: Valores monetários apenas em centavos inteiros seguros (`Number.isSafeInteger`), sem float.
-- `AUTH-BOUNDARY` [hard]: Autenticação/autorização centralizada no módulo de sessão; proibido ler segredos fora de env explícita.
--->
+- `PRODUCT-BOUNDARY` [hard]: Alterar apenas código/testes de produto em `src/askesis/`; proibido editar arquivos protegidos (`package.json`, `vercel.json`, `eslint.config.mjs`, `vitest.config.ts`, `tsconfig*.json`, `scripts/*`) ou o harness sem exceção humana.
+- `VANILLA-TS` [default]: Vanilla TypeScript e Web APIs nativas (DOM, IndexedDB, Web Worker, Web Crypto); sem frameworks UI nem novas dependências sem aprovação humana.
+- `LOCAL-FIRST-E2E` [hard]: Dados do usuário residem no dispositivo (IndexedDB); sync em nuvem é opt-in com criptografia E2E (AES-GCM no Web Worker) e zero envio de texto plano, PII ou telemetria de hábitos/notas.
+- `NO-UNSAFE-HTML` [hard]: Proibido atribuir `innerHTML`, `insertAdjacentHTML` ou `createContextualFragment` em sinks sensíveis (`ui.aiResponse`, `ui.confirmModalText`, `ui.syncWarningText`); usar DOMPurify + `replaceChildren` ou `textContent`.
+- `BITMASK-SPLIT-STATE` [default]: Preservar estado centralizado em `state.ts` com modelo bitmask-first e persistência split (core + logs); evitar re-renderizações globais e manter tarefas CPU-bound (crypto/merge) no Web Worker.
+- `DETERMINISTIC-TIME` [hard]: Lógica pura de domínio/merge/streaks deve aceitar timestamp/data por parâmetro explícito; evitar dependência implícita de `Date.now()` / `new Date()` sem argumentos em regras testáveis.
+- `STRICT-TYPES` [hard]: Tipagem estrita (`tsconfig.app.json` + `tsconfig.test.json`), sem `any` nem `@ts-ignore` injustificado; falhas e conflitos explícitos sem `catch` vazio.
+- `GUARDRAILS-AND-LOCALES` [hard]: Manter paridade estrita entre `locales/{pt,en,es}.json` (chaves, plurais e placeholders), manter `__WB_MANIFEST`/`precacheAndRoute` em `sw.js`, e não desabilitar guardrails.
+- `PARSIMONY` [default]: Reusar módulos existentes (`services/habitActions/*`, `services/dataMerge/*`, `selectors.ts`); rejeitar factories, builders, singletons ou abstrações especulativas.

@@ -1,0 +1,26 @@
+{
+  "projectRoot": "src/askesis",
+  "sourceRoots": ["src/askesis"],
+  "protectedPaths": [
+    "src/askesis/package.json",
+    "src/askesis/package-lock.json",
+    "src/askesis/vercel.json",
+    "src/askesis/eslint.config.mjs",
+    "src/askesis/vitest.config.ts",
+    "src/askesis/vitest.setup.ts",
+    "src/askesis/tsconfig.json",
+    "src/askesis/tsconfig.app.json",
+    "src/askesis/tsconfig.test.json",
+    "src/askesis/build.js",
+    "src/askesis/scripts/",
+    "src/askesis/.github/"
+  ],
+  "typecheckCommand": ["npm", "run", "typecheck"],
+  "lintCommand": ["npx", "eslint", "--config", "eslint.config.mjs", "."],
+  "testCommand": ["npx", "vitest", "run"],
+  "extraChecks": [
+    { "name": "guardrail:security-html", "command": ["node", "scripts/guardrail-security-html.js"] },
+    { "name": "guardrail:locales", "command": ["node", "scripts/guardrail-locales-parity.js"] },
+    { "name": "guardrail:sw-manifest", "command": ["node", "scripts/check-sw-manifest.js"] }
+  ]
+}

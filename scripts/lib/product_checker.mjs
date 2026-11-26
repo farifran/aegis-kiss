@@ -11,12 +11,13 @@ import {
 } from './contract_verifier.mjs';
 import {
   hasSymlinkComponent,
-  isInsideProductRoots,
+  isEditableProductPath,
   isPathCovered,
   isProductTestPath,
+  isProtectedPath,
   normalizeRepoRelativePath,
 } from './path_guard.mjs';
-import { resolveSourceRoots } from './workspace_observer.mjs';
+import { loadProjectConfig, resolveSourceRoots } from './workspace_observer.mjs';
 import {
   extractActiveTestCases,
   extractAstImports,
@@ -121,10 +122,10 @@ function loadDeclaredPackages(repositoryRoot) {
  *  - imports bare não declarados em package.json (respeitando node builtins e paths do tsconfig.json)
  *  - segredos hardcoded (chaves API / private keys) em código de produto
  */
-function runStaticChecks({ repositoryRoot, existingRoots }) {
+function runStaticChecks({ repositoryRoot, existingRoots, projectDir = repositoryRoot, protectedPaths = [] }) {
   const violations = [];
-  const declared = loadDeclaredPackages(repositoryRoot);
-  const pathAliases = loadTsconfigPathAliases(repositoryRoot);
+  const declared = loadDeclaredPackages(projectDir) ?? loadDeclaredPackages(repositoryRoot);
+  const pathAliases = loadTsconfigPathAliases(projectDir);
   const codeFiles = [];
 
   for (const rootRel of existingRoots) {
@@ -137,6 +138,7 @@ function runStaticChecks({ repositoryRoot, existingRoots }) {
 
   for (const absFile of codeFiles) {
     const relPath = relative(repositoryRoot, absFile).replaceAll(sep, '/');
+    if (isProtectedPath(relPath, protectedPaths)) continue;
     const content = readFileSync(absFile, 'utf8');
 
     if (declared && declared.size > 0) {
@@ -208,6 +210,7 @@ function checkGitScope({
   repositoryRoot,
   contractPath,
   sourceRoots,
+  protectedPaths = [],
   allowPaths = [],
   allowOutsidePaths = [],
 }) {
@@ -215,7 +218,7 @@ function checkGitScope({
   const normalizedAllow = [];
   for (const raw of allowPaths) {
     const rel = normalizeRepoRelativePath(repositoryRoot, raw);
-    if (!rel || !isInsideProductRoots(rel, sourceRoots) || sourceRoots.includes(rel)) {
+    if (!rel || !isEditableProductPath(rel, sourceRoots, protectedPaths) || sourceRoots.includes(rel)) {
       violations.push(`--allow inválido fora da fronteira (${sourceRoots.join(', ')}/): ${raw}`);
     } else {
       normalizedAllow.push(rel);
@@ -264,7 +267,7 @@ function checkGitScope({
   const hasContract = contractRead.status === 'OK';
   const authorizedPaths = normalizedAllow.length > 0
     ? normalizedAllow
-    : (hasContract ? extractAuthorizedPaths(contractRead.text, sourceRoots, repositoryRoot).authorizedPaths : []);
+    : (hasContract ? extractAuthorizedPaths(contractRead.text, sourceRoots, repositoryRoot, protectedPaths).authorizedPaths : []);
 
   const changedProductFiles = [];
   const changedTestFiles = [];
@@ -275,7 +278,7 @@ function checkGitScope({
     if (relPath === '.harness/runtime' || relPath.startsWith('.harness/runtime/')) {
       continue;
     }
-    if (!isInsideProductRoots(relPath, sourceRoots)) {
+    if (!isEditableProductPath(relPath, sourceRoots, protectedPaths)) {
       if (!normalizedOutside.has(relPath)) {
         violations.push(`FORA DA FRONTEIRA (${sourceRoots.join(', ')}/): ${relPath} alterado sem permissão`);
       }
@@ -377,6 +380,9 @@ export function runProductCheck({
 }) {
   const results = [];
   const warnings = [];
+  const projectConfig = loadProjectConfig(repositoryRoot);
+  const protectedPaths = projectConfig.protectedPaths;
+  const projectDir = projectConfig.projectRoot ? resolve(repositoryRoot, projectConfig.projectRoot) : repositoryRoot;
   const effectiveRoots = resolveSourceRoots(repositoryRoot, sourceRoots);
   const existingRoots = effectiveRoots.filter((r) => existsSync(resolve(repositoryRoot, r)));
 
@@ -388,6 +394,7 @@ export function runProductCheck({
       repositoryRoot,
       contractPath,
       sourceRoots: effectiveRoots,
+      protectedPaths,
       allowPaths,
       allowOutsidePaths,
     });
@@ -405,46 +412,79 @@ export function runProductCheck({
     }
   }
 
-  // Coleta arquivos TS/JS e testes nas raízes de produto
+  // Coleta arquivos TS/JS e testes nas raízes de produto (excluindo protectedPaths)
   const tsFiles = [];
   const lintableFiles = [];
   const productTests = [];
   for (const rootRel of existingRoots) {
     const absRoot = resolve(repositoryRoot, rootRel);
-    collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx|mts|cts)$/u.test(f) && !isProductTestPath(f), tsFiles);
-    collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/u.test(f) && !isProductTestPath(f), lintableFiles);
-    collectFilesMatching(absRoot, (f) => isProductTestPath(f), productTests);
+    const notProtected = (absPath) => !isProtectedPath(relative(repositoryRoot, absPath).replaceAll(sep, '/'), protectedPaths);
+    collectFilesMatching(absRoot, (f) => notProtected(f) && /\.(?:ts|tsx|mts|cts)$/u.test(f) && !isProductTestPath(f), tsFiles);
+    collectFilesMatching(absRoot, (f) => notProtected(f) && /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/u.test(f) && !isProductTestPath(f), lintableFiles);
+    collectFilesMatching(absRoot, (f) => notProtected(f) && isProductTestPath(f), productTests);
   }
 
-  // 2. TypeScript typecheck
-  if (tsFiles.length > 0 && existsSync(resolve(repositoryRoot, 'tsconfig.json'))) {
-    const tscBin = resolve(repositoryRoot, 'node_modules/.bin/tsc');
-    const cmd = existsSync(tscBin) ? tscBin : 'tsc';
-    const res = runStep(cmd, ['--noEmit'], repositoryRoot);
-    results.push({
-      name: 'typecheck',
-      ok: res.ok,
-      summary: res.ok ? '0 erros de tipo' : 'erros de tipo',
-      details: res.ok ? [] : compactErrorLines(res.output),
-    });
+  // 2. TypeScript typecheck (comando configurado em project.json ou padrão tsc --noEmit)
+  if (projectConfig.typecheckCommand !== null) {
+    if (Array.isArray(projectConfig.typecheckCommand)) {
+      const res = runStep(projectConfig.typecheckCommand[0], projectConfig.typecheckCommand.slice(1), projectDir);
+      results.push({
+        name: 'typecheck',
+        ok: res.ok,
+        summary: res.ok ? '0 erros de tipo' : 'erros de tipo',
+        details: res.ok ? [] : compactErrorLines(res.output),
+      });
+    } else if (tsFiles.length > 0 && existsSync(resolve(projectDir, 'tsconfig.json'))) {
+      const tscBin = resolve(projectDir, 'node_modules/.bin/tsc');
+      const rootTscBin = resolve(repositoryRoot, 'node_modules/.bin/tsc');
+      const cmd = existsSync(tscBin) ? tscBin : (existsSync(rootTscBin) ? rootTscBin : 'tsc');
+      const res = runStep(cmd, ['--noEmit'], projectDir);
+      results.push({
+        name: 'typecheck',
+        ok: res.ok,
+        summary: res.ok ? '0 erros de tipo' : 'erros de tipo',
+        details: res.ok ? [] : compactErrorLines(res.output),
+      });
+    }
   }
 
-  // 3. ESLint sobre raízes de produto (TS e JS)
-  if (lintableFiles.length > 0 && existingRoots.length > 0) {
-    const eslintBin = resolve(repositoryRoot, 'node_modules/.bin/eslint');
-    const cmd = existsSync(eslintBin) ? eslintBin : 'eslint';
-    const res = runStep(cmd, existingRoots, repositoryRoot);
+  // 3. ESLint / lint (comando configurado em project.json ou padrão eslint nas raízes)
+  if (projectConfig.lintCommand !== null) {
+    if (Array.isArray(projectConfig.lintCommand)) {
+      const res = runStep(projectConfig.lintCommand[0], projectConfig.lintCommand.slice(1), projectDir);
+      results.push({
+        name: 'eslint',
+        ok: res.ok,
+        summary: res.ok ? 'limpo' : 'violações de lint',
+        details: res.ok ? [] : compactErrorLines(res.output),
+      });
+    } else if (lintableFiles.length > 0 && existingRoots.length > 0) {
+      const eslintBin = resolve(repositoryRoot, 'node_modules/.bin/eslint');
+      const cmd = existsSync(eslintBin) ? eslintBin : 'eslint';
+      const res = runStep(cmd, existingRoots, repositoryRoot);
+      results.push({
+        name: 'eslint',
+        ok: res.ok,
+        summary: res.ok ? 'limpo' : 'violações de lint',
+        details: res.ok ? [] : compactErrorLines(res.output),
+      });
+    }
+  }
+
+  // 3b. Guardrails extras configurados em project.json (ex.: segurança HTML, paridade de locales, SW manifest)
+  for (const extra of projectConfig.extraChecks) {
+    const res = runStep(extra.command[0], extra.command.slice(1), projectDir);
     results.push({
-      name: 'eslint',
+      name: extra.name,
       ok: res.ok,
-      summary: res.ok ? 'limpo' : 'violações de lint',
+      summary: res.ok ? 'limpo' : 'violação detectada',
       details: res.ok ? [] : compactErrorLines(res.output),
     });
   }
 
   // 4. Verificações estáticas puras em Node/AST (imports não declarados + segredos hardcoded)
   if (existingRoots.length > 0) {
-    const staticRes = runStaticChecks({ repositoryRoot, existingRoots });
+    const staticRes = runStaticChecks({ repositoryRoot, existingRoots, projectDir, protectedPaths });
     results.push({
       name: 'static_checks',
       ok: staticRes.ok,
@@ -472,12 +512,16 @@ export function runProductCheck({
         ],
       });
     }
-  } else {
-    const hasTsTests = productTests.some((f) => /\.(?:ts|tsx|mts|cts)$/u.test(f));
-    const args = hasTsTests
-      ? ['--import', 'tsx', '--test', ...productTests]
-      : ['--test', ...productTests];
-    const res = runStep('node', args, repositoryRoot);
+  } else if (projectConfig.testCommand !== null) {
+    const res = Array.isArray(projectConfig.testCommand)
+      ? runStep(projectConfig.testCommand[0], projectConfig.testCommand.slice(1), projectDir)
+      : (() => {
+        const hasTsTests = productTests.some((f) => /\.(?:ts|tsx|mts|cts)$/u.test(f));
+        const args = hasTsTests
+          ? ['--import', 'tsx', '--test', ...productTests]
+          : ['--test', ...productTests];
+        return runStep('node', args, repositoryRoot);
+      })();
 
     const allSuiteStats = inspectTestFiles(productTests);
     const coverageFailures = [];

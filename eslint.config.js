@@ -1,4 +1,6 @@
 // Aegis KISS — Mechanical ESLint Config (type-aware structural checks for product code)
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import process from 'node:process';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
@@ -8,6 +10,20 @@ const srcDirs = (process.env.AEGIS_SRC_DIRS || 'src,app,lib')
   .map((s) => s.trim().replace(/^\.\//u, '').replace(/\/+$/u, ''))
   .filter(Boolean);
 const tsProductFiles = srcDirs.map((dir) => `${dir}/**/*.{ts,tsx}`);
+
+const delegatedProjectIgnores = [];
+try {
+  const cfgPath = resolve(process.cwd(), '.harness/config/project.json');
+  if (existsSync(cfgPath)) {
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    if (typeof cfg?.projectRoot === 'string' && cfg.projectRoot.trim() && cfg.lintCommand !== undefined) {
+      const clean = cfg.projectRoot.trim().replace(/^\.\//u, '').replace(/\/+$/u, '');
+      if (clean && clean !== '.') delegatedProjectIgnores.push(`${clean}/**`);
+    }
+  }
+} catch {
+  // Ignora config inválida aqui; product_checker validará explicitamente.
+}
 
 export default [
   {
@@ -21,6 +37,7 @@ export default [
       'scratch/**',
       '.harness/runtime/**',
       '**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}',
+      ...delegatedProjectIgnores,
     ],
   },
 

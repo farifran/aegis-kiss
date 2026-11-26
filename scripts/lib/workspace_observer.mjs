@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
@@ -16,13 +16,113 @@ const discoveryEntryLimit = 4096;
 const discoveryByteLimit = 8_388_608;
 const bidirectionalControlPattern = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 const ignoredDirectories = new Set([
-  'node_modules', '.git', 'dist', 'build', 'coverage', '.turbo', '.next',
+  'node_modules', '.git', '.github', '.vite', 'dist', 'build', 'coverage', '.turbo', '.next',
+]);
+const ignoredFilenames = new Set([
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
+  'LICENSE', 'LICENSE.md', 'CHANGELOG', 'CHANGELOG.md', 'NOTICE',
+]);
+const nonCodeExtensions = new Set([
+  '.md', '.mdx', '.rst', '.txt',
+  '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.avif',
+  '.woff', '.woff2', '.ttf', '.eot', '.otf',
+  '.mp4', '.webm', '.mp3', '.wav', '.ogg', '.pdf', '.map', '.zip', '.gz',
 ]);
 const forbiddenSourceRoots = new Set([
   '.', '..', '.git', '.github', '.harness', 'scripts', 'node_modules',
 ]);
 const fallbackSourceRoots = ['app', 'lib'];
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
+function validateCommandArgv(raw, fieldName) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (!Array.isArray(raw) || raw.length === 0 || !raw.every((part) => typeof part === 'string' && part.length > 0)) {
+    throw new Error(`invalid_project_config:${fieldName}`);
+  }
+  return [...raw];
+}
+
+function normalizeProtectedEntry(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/^\.\//u, '');
+  if (!trimmed || trimmed.includes('..') || trimmed.startsWith('/')) return null;
+  return trimmed.endsWith('/') ? `${trimmed.replace(/\/+$/u, '')}/` : trimmed.replace(/\/+$/u, '');
+}
+
+/**
+ * Lê configuração opcional do projeto em `.harness/config/project.json` (fora de `src/`).
+ * Permite definir `projectRoot`, `sourceRoots`, `protectedPaths` e comandos customizados
+ * (ex.: Vitest, `tsconfig.app.json`, ESLint próprio e guardrails) sem alterar código do harness.
+ */
+export function loadProjectConfig(repositoryRoot) {
+  const empty = {
+    projectRoot: null,
+    sourceRoots: null,
+    protectedPaths: [],
+    typecheckCommand: undefined,
+    lintCommand: undefined,
+    testCommand: undefined,
+    extraChecks: [],
+  };
+  if (!repositoryRoot) return empty;
+  const configPath = resolve(repositoryRoot, '.harness/config/project.json');
+  let stats;
+  try {
+    stats = lstatSync(configPath);
+  } catch {
+    return empty;
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error('unsafe_project_config_symlink');
+  }
+  const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('invalid_project_config');
+  }
+
+  let projectRoot = null;
+  if (typeof parsed.projectRoot === 'string' && parsed.projectRoot.trim().length > 0) {
+    const cleanRoot = parsed.projectRoot.trim().replace(/^\.\//u, '').replace(/\/+$/u, '');
+    if (cleanRoot && cleanRoot !== '.') {
+      const topSegment = cleanRoot.split('/')[0];
+      if (forbiddenSourceRoots.has(topSegment) || cleanRoot.includes('..') || cleanRoot.startsWith('/')) {
+        throw new Error(`invalid_project_config:projectRoot:${parsed.projectRoot}`);
+      }
+      projectRoot = cleanRoot;
+    }
+  }
+
+  const sourceRoots = Array.isArray(parsed.sourceRoots) && parsed.sourceRoots.length > 0
+    ? parsed.sourceRoots.filter((s) => typeof s === 'string' && s.trim().length > 0)
+    : null;
+
+  const protectedPaths = Array.isArray(parsed.protectedPaths)
+    ? [...new Set(parsed.protectedPaths.map(normalizeProtectedEntry).filter(Boolean))]
+    : [];
+
+  const extraChecks = [];
+  if (Array.isArray(parsed.extraChecks)) {
+    for (const item of parsed.extraChecks) {
+      if (!item || typeof item !== 'object' || typeof item.name !== 'string' || !item.name.trim()) {
+        throw new Error('invalid_project_config:extraChecks');
+      }
+      const command = validateCommandArgv(item.command, `extraChecks.${item.name}`);
+      if (!command) throw new Error(`invalid_project_config:extraChecks.${item.name}`);
+      extraChecks.push({ name: item.name.trim(), command });
+    }
+  }
+
+  return {
+    projectRoot,
+    sourceRoots,
+    protectedPaths,
+    typecheckCommand: validateCommandArgv(parsed.typecheckCommand, 'typecheckCommand'),
+    lintCommand: validateCommandArgv(parsed.lintCommand, 'lintCommand'),
+    testCommand: validateCommandArgv(parsed.testCommand, 'testCommand'),
+    extraChecks,
+  };
+}
 
 export function resolveRuntimePaths(root) {
   const harnessDir = resolve(root, '.harness');
@@ -40,11 +140,14 @@ export function resolveRuntimePaths(root) {
 }
 
 export function resolveSourceRoots(repositoryRoot, explicitRoots = null) {
+  const projectConfig = (!Array.isArray(explicitRoots) || explicitRoots.length === 0) && !process.env.AEGIS_SRC_DIRS
+    ? loadProjectConfig(repositoryRoot)
+    : null;
   const configured = Array.isArray(explicitRoots) && explicitRoots.length > 0
     ? explicitRoots
     : (process.env.AEGIS_SRC_DIRS
       ? process.env.AEGIS_SRC_DIRS.split(',').map((s) => s.trim()).filter(Boolean)
-      : null);
+      : (projectConfig?.sourceRoots ?? null));
   if (configured && configured.length > 0) {
     const normalized = [...new Set(configured.map((r) => r.replace(/^\.\//u, '').replace(/\/+$/u, '')))].sort(compareCodeUnits);
     for (const root of normalized) {
@@ -121,6 +224,32 @@ export function normalizeRepoRelativePath(repositoryRoot, rawPath) {
 
 export function isInsideProductRoots(relPath, sourceRoots) {
   return sourceRoots.some((root) => relPath === root || relPath.startsWith(`${root}/`));
+}
+
+export function isProtectedPath(relPath, protectedPaths = []) {
+  if (!Array.isArray(protectedPaths) || protectedPaths.length === 0) return false;
+  return protectedPaths.some((entry) => (
+    entry.endsWith('/')
+      ? (relPath === entry.slice(0, -1) || relPath.startsWith(entry))
+      : relPath === entry
+  ));
+}
+
+export function isEditableProductPath(relPath, sourceRoots, protectedPaths = []) {
+  return isInsideProductRoots(relPath, sourceRoots) && !isProtectedPath(relPath, protectedPaths);
+}
+
+export function splitRootRelativePath(filePath, sourceRoots = ['src', 'app', 'lib']) {
+  const sorted = [...(sourceRoots ?? ['src', 'app', 'lib'])].sort((a, b) => b.length - a.length);
+  for (const root of sorted) {
+    if (filePath.startsWith(`${root}/`)) {
+      return { root, rel: filePath.slice(root.length + 1) };
+    }
+  }
+  const idx = filePath.indexOf('/');
+  return idx >= 0
+    ? { root: filePath.slice(0, idx), rel: filePath.slice(idx + 1) }
+    : { root: '', rel: filePath };
 }
 
 const productTestSuffixPattern = /\.(?:test|spec)\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
@@ -249,6 +378,8 @@ export function observeWorkspace(repositoryRoot, {
   singleFileByteLimit = maxSingleFileBytes,
 } = {}) {
   const effectiveRoots = resolveSourceRoots(repositoryRoot, sourceRoots);
+  const projectConfig = loadProjectConfig(repositoryRoot);
+  const protectedPaths = projectConfig.protectedPaths;
   const sourceRecords = [];
   const sourceBytesByPath = new Map();
   const files = [];
@@ -276,10 +407,23 @@ export function observeWorkspace(repositoryRoot, {
       }
       if (entry.isDirectory()) {
         if (ignoredDirectories.has(entry.name)) continue;
+        if (isProtectedPath(relativePath, protectedPaths)) {
+          ignoredEntries.push({ path: relativePath, reason: 'PROTECTED_PATH' });
+          continue;
+        }
         inspectDirectory(absolutePath);
         continue;
       }
       if (!entry.isFile()) continue;
+      if (isProtectedPath(relativePath, protectedPaths)) {
+        ignoredEntries.push({ path: relativePath, reason: 'PROTECTED_PATH' });
+        continue;
+      }
+      const ext = extname(entry.name).toLowerCase();
+      if (ignoredFilenames.has(entry.name) || nonCodeExtensions.has(ext)) {
+        ignoredEntries.push({ path: relativePath, reason: 'NON_CODE_ASSET' });
+        continue;
+      }
       if (files.length >= discoveryFileLimit) {
         ignoredEntries.push({ path: relativePath, reason: 'FILE_LIMIT_REACHED' });
         continue;

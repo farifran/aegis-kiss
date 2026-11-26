@@ -3,11 +3,12 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { compareCodeUnits, sha256 } from './canonical_json.mjs';
+import { isProductTestPath, splitRootRelativePath } from './workspace_observer.mjs';
 export const sourceEvidenceByteLimit = 98_304;
 const sourceEvidenceFileByteLimit = 8_192;
 const sourceEvidenceExplicitFileByteLimit = 24_576;
 
-const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu;
+const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|py|sh)$/iu;
 
 export function isEntrypointPath(filePath) {
   return entrypointPattern.test(filePath);
@@ -118,27 +119,54 @@ function getLongestMatchingPrefixLength(filePath, prefixes) {
   return maxLen;
 }
 
-function extractTargetPrefixesAndDirs(intentText, rootsBySubdir = new Map(), domainAliases = {}) {
+function extractTargetPrefixesAndDirs(intentText, rootsBySubdir = new Map(), domainAliases = {}, {
+  sourceRoots = ['src', 'app', 'lib'],
+  filesByRel = new Map(),
+  filesByRelNoExt = new Map(),
+} = {}) {
   const targetDirs = new Set();
   const targetPrefixes = new Set();
   if (!intentText) return { targetDirs, targetPrefixes, explicitFilePaths: [] };
 
-  const explicitMatches = intentText.match(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu) || [];
-  const normalizedPaths = explicitMatches
-    .map((m) => m.replace(/[.,;:!?]+$/u, '').replace(/:L?\d+(?::\d+|-L?\d+)?$/u, '').trim())
-    .filter(Boolean);
+  const rootAlt = [...new Set([...sourceRoots, 'src', 'app', 'lib', 'test', 'tests'])]
+    .map((r) => r.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    .join('|');
+  const explicitFullPattern = new RegExp(`\\b(?:${rootAlt})\\/(?!\\.\\.(?:\\/|$))[^\\s\`'"<>()\\[\\]{}]+`, 'gu');
+  const explicitMatches = intentText.match(explicitFullPattern) || [];
+  const normalizedPaths = new Set(
+    explicitMatches
+      .map((m) => m.replace(/[.,;:!?]+$/u, '').replace(/:L?\d+(?::\d+|-L?\d+)?$/u, '').trim())
+      .filter(Boolean),
+  );
 
+  // Também reconhece caminhos relativos à raiz do projeto (ex.: services/migration.ts ou /api/sync)
+  const relMatches = intentText.match(/(?:^|[\s`'"(])\/?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)(?=$|[\s`'"):,;!?])/gu) || [];
+  for (const rawMatch of relMatches) {
+    const cleaned = rawMatch
+      .trim()
+      .replace(/^['"`(/]+/u, '')
+      .replace(/[.,;:!?)'"`]+$/u, '')
+      .replace(/:L?\d+(?::\d+|-L?\d+)?$/u, '');
+    if (!cleaned || cleaned.includes('..')) continue;
+    const exactMatch = filesByRel.get(cleaned) ?? filesByRelNoExt.get(cleaned);
+    if (exactMatch) {
+      normalizedPaths.add(exactMatch);
+    }
+  }
+
+  const rootBareSet = new Set([...sourceRoots, 'src', 'app', 'lib', 'test', 'tests'].flatMap((r) => [r, `${r}/`]));
   for (const p of normalizedPaths) {
-    const parts = p.split('/');
-    if (parts.length > 1) {
-      if (parts.length > 2) targetDirs.add(parts[1]);
-      if (/\.[a-zA-Z0-9]+$/u.test(p)) {
-        const parentDir = p.slice(0, p.lastIndexOf('/') + 1);
-        if (parentDir && !/^(?:src|app|lib)\/$/u.test(parentDir)) targetPrefixes.add(parentDir);
-      } else {
-        const dirPfx = p.endsWith('/') ? p : `${p}/`;
-        if (!/^(?:src|app|lib)\/$/u.test(dirPfx)) targetPrefixes.add(dirPfx);
-      }
+    const { root, rel } = splitRootRelativePath(p, sourceRoots);
+    const relParts = rel.split('/').filter(Boolean);
+    if (relParts.length > 1) {
+      targetDirs.add(relParts[0]);
+    }
+    if (/\.[a-zA-Z0-9]+$/u.test(p)) {
+      const parentDir = p.slice(0, p.lastIndexOf('/') + 1);
+      if (parentDir && !rootBareSet.has(parentDir)) targetPrefixes.add(parentDir);
+    } else if (root && relParts.length >= 1) {
+      const dirPfx = p.endsWith('/') ? p : `${p}/`;
+      if (!rootBareSet.has(dirPfx)) targetPrefixes.add(dirPfx);
     }
   }
 
@@ -161,7 +189,7 @@ function extractTargetPrefixesAndDirs(intentText, rootsBySubdir = new Map(), dom
   return {
     targetDirs,
     targetPrefixes,
-    explicitFilePaths: normalizedPaths.filter((p) => !/^(?:src|app|lib|test|tests)\/?$/u.test(p)),
+    explicitFilePaths: [...normalizedPaths].filter((p) => !rootBareSet.has(p)),
   };
 }
 
@@ -303,7 +331,7 @@ function extractDocTokens(docComment) {
 function symbolPathPenalty(sym, deprecatedPenalty, nonProdPenalty) {
   let penalty = 0;
   if (sym.docComment && sym.docComment.includes('@deprecated')) penalty -= deprecatedPenalty;
-  if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_') || sym.path.includes('trap')) {
+  if (sym.path.includes('/legacy/') || sym.path.includes('deprecated_')) {
     penalty -= nonProdPenalty;
   }
   if (sym.path.includes('/tests/') || sym.path.includes('.test.') || sym.path.includes('.spec.')) {
@@ -521,7 +549,7 @@ function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetSpans, by
  * Resolve diretórios, prefixos e caminhos explícitos a partir da intenção,
  * evitando recalcular subdiretórios conhecidos entre descoberta e evidência.
  */
-export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextData = null) {
+export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextData = null, sourceRoots = ['src', 'app', 'lib']) {
   if (contextData?.targetDirs && contextData?.targetPrefixes && contextData?.explicitFilePaths) {
     return {
       targetDirs: new Set(contextData.targetDirs),
@@ -530,14 +558,27 @@ export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextD
     };
   }
   const rootsBySubdir = new Map();
+  const filesByRel = new Map();
+  const filesByRelNoExt = new Map();
   for (const file of textFiles) {
-    const parts = file.path.split('/');
-    if (parts.length > 2) {
-      if (!rootsBySubdir.has(parts[1])) rootsBySubdir.set(parts[1], new Set());
-      rootsBySubdir.get(parts[1]).add(parts[0]);
+    const { root, rel } = splitRootRelativePath(file.path, sourceRoots);
+    if (rel && !filesByRel.has(rel)) filesByRel.set(rel, file.path);
+    const relNoExt = rel.replace(/\.[^/.]+$/u, '');
+    if (relNoExt && !isProductTestPath(file.path) && !filesByRelNoExt.has(relNoExt)) {
+      filesByRelNoExt.set(relNoExt, file.path);
+    }
+    const relParts = rel.split('/').filter(Boolean);
+    if (root && relParts.length > 1) {
+      const subdir = relParts[0];
+      if (!rootsBySubdir.has(subdir)) rootsBySubdir.set(subdir, new Set());
+      rootsBySubdir.get(subdir).add(root);
     }
   }
-  return extractTargetPrefixesAndDirs(intent, rootsBySubdir, domainAliases);
+  return extractTargetPrefixesAndDirs(intent, rootsBySubdir, domainAliases, {
+    sourceRoots,
+    filesByRel,
+    filesByRelNoExt,
+  });
 }
 
 export function buildSourceEvidence(
@@ -554,12 +595,20 @@ export function buildSourceEvidence(
     <= sourceEvidenceByteLimit;
   const entrypoints = textFiles.map(({ path }) => path).filter(isEntrypointPath);
 
+  const sourceRoots = discovery.sourceRoots ?? (discovery.sourceRoot ? discovery.sourceRoot.split(',') : ['src']);
+  const dirOfPath = (filePath) => {
+    const { rel } = splitRootRelativePath(filePath, sourceRoots);
+    const relParts = rel.split('/').filter(Boolean);
+    return relParts.length > 1 ? relParts[0] : '';
+  };
+
   const selectionsByPath = new Map();
   const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
     textFiles,
     intent,
     domainAliases,
     contextData,
+    sourceRoots,
   );
   if (smallWorkspace) {
     let selectivePaths = null;
@@ -596,8 +645,7 @@ export function buildSourceEvidence(
           ? textFiles
             .map((file) => file.path)
             .filter((p) => {
-              const parts = p.split('/');
-              const dir = parts.length > 2 ? parts[1] : '';
+              const dir = dirOfPath(p);
               return targetDirs.has(dir) || [...targetPrefixes].some((pref) => p.startsWith(pref));
             })
           : [];
@@ -641,20 +689,20 @@ export function buildSourceEvidence(
       for (const p of explicitTargetPaths) {
         injectSelection(p);
         if (filesByPath.has(p)) {
-          const parts = p.split('/');
-          if (parts.length > 2) {
-            targetDirs.add(parts[1]);
+          const dir = dirOfPath(p);
+          if (dir) {
+            targetDirs.add(dir);
             const parentDir = p.slice(0, p.lastIndexOf('/') + 1);
-            if (parentDir && !/^(?:src|app|lib)\/$/u.test(parentDir)) targetPrefixes.add(parentDir);
+            if (parentDir && !sourceRoots.some((r) => parentDir === `${r}/`)) targetPrefixes.add(parentDir);
           }
         }
       }
     }
 
     const rootOrTargetEntrypoints = entrypoints.filter((path) => {
-      const parts = path.split('/');
-      if (parts.length <= 2) return true;
-      if (targetDirs.size > 0 && targetDirs.has(parts[1])) return true;
+      const dir = dirOfPath(path);
+      if (!dir) return true;
+      if (targetDirs.size > 0 && targetDirs.has(dir)) return true;
       return false;
     });
 
@@ -671,8 +719,7 @@ export function buildSourceEvidence(
       const topScoreByDir = new Map();
       const bestSymbolByDir = new Map();
       for (const item of matched) {
-        const parts = item.path.split('/');
-        const dir = parts.length > 2 ? parts[1] : '';
+        const dir = dirOfPath(item.path);
         if (dir) {
           if (!topScoreByDir.has(dir) || item.score > topScoreByDir.get(dir)) {
             topScoreByDir.set(dir, item.score);
@@ -701,8 +748,7 @@ export function buildSourceEvidence(
       const underBudgetPressure = estimatedCandidateBytes > sourceEvidenceByteLimit;
 
       for (const { path, line, endLine, score } of matched) {
-        const parts = path.split('/');
-        const dir = parts.length > 2 ? parts[1] : '';
+        const dir = dirOfPath(path);
 
         if (targetDirs.size > 0) {
           const inTarget = dir ? targetDirs.has(dir) : true;
@@ -729,9 +775,12 @@ export function buildSourceEvidence(
     }
 
     if (targetDirs.size > 0 || targetPrefixes.size > 0) {
+      const mentionsTests = /\b(?:test|tests|teste|testes|spec|vitest|property)\b/iu.test(intent);
+      const alreadyHitDirs = new Set([...selectionsByPath.keys()].map(dirOfPath).filter(Boolean));
       const candidateFiles = textFiles.filter((file) => {
-        const parts = file.path.split('/');
-        const inTargetDir = parts.length > 2 && targetDirs.has(parts[1]);
+        if (!mentionsTests && isProductTestPath(file.path)) return false;
+        const dir = dirOfPath(file.path);
+        const inTargetDir = Boolean(dir) && targetDirs.has(dir);
         const inTargetPrefix = targetPrefixes.size > 0 && [...targetPrefixes].some((pfx) => file.path.startsWith(pfx));
         return inTargetDir || inTargetPrefix;
       }).sort((a, b) => {
@@ -745,12 +794,21 @@ export function buildSourceEvidence(
         return compareCodeUnits(a.path, b.path);
       });
 
+      const addedPerDir = new Map();
       for (const file of candidateFiles) {
-        if (/\.(?:ts|tsx|js|jsx|mjs|cjs|py|sh)$/u.test(file.path)) {
-          if (!selectionsByPath.has(file.path)) {
-            selectionsByPath.set(file.path, { path: file.path, lines: [] });
-          }
-        }
+        if (!/\.(?:ts|tsx|js|jsx|mjs|cjs|py|sh)$/u.test(file.path)) continue;
+        if (selectionsByPath.has(file.path)) continue;
+        const dir = dirOfPath(file.path);
+        const inDeepPrefix = [...targetPrefixes].some((pfx) => {
+          const relPfx = splitRootRelativePath(pfx, sourceRoots).rel;
+          return relPfx.split('/').filter(Boolean).length >= 2 && file.path.startsWith(pfx);
+        });
+        // Se o diretório já tem hits AST relevantes, não despeja todos os demais arquivos sem ranqueamento
+        if (!inDeepPrefix && dir && alreadyHitDirs.has(dir)) continue;
+        const count = addedPerDir.get(dir) ?? 0;
+        if (!inDeepPrefix && count >= 4) continue;
+        addedPerDir.set(dir, count + 1);
+        selectionsByPath.set(file.path, { path: file.path, lines: [] });
       }
     }
 

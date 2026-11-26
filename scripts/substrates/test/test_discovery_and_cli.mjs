@@ -99,25 +99,29 @@ function createFixtureRepo() {
   return dir;
 }
 
-// 0. Repositório raiz: lexicon.json versionável (não ignorado pelo .gitignore) e ARCHITECTURE.md ignora comentários HTML
+// 0. Repositório raiz: lexicon.json e project.json versionáveis e ARCHITECTURE.md carregado corretamente
 {
   assert.ok(existsSync(resolve(rootDir, '.harness/config/lexicon.json')), 'Expected .harness/config/lexicon.json in repository root');
+  assert.ok(existsSync(resolve(rootDir, '.harness/config/project.json')), 'Expected .harness/config/project.json in repository root');
   const parsedLexicon = JSON.parse(readFileSync(resolve(rootDir, '.harness/config/lexicon.json'), 'utf8'));
   assert.equal(typeof parsedLexicon, 'object');
 
-  let ignoredByGit = true;
-  try {
-    execFileSync('git', ['check-ignore', '-q', '.harness/config/lexicon.json'], { cwd: rootDir, stdio: 'pipe' });
-  } catch {
-    ignoredByGit = false;
+  for (const trackedCfg of ['.harness/config/lexicon.json', '.harness/config/project.json']) {
+    let ignoredByGit = true;
+    try {
+      execFileSync('git', ['check-ignore', '-q', trackedCfg], { cwd: rootDir, stdio: 'pipe' });
+    } catch {
+      ignoredByGit = false;
+    }
+    assert.equal(ignoredByGit, false, `${trackedCfg} must NOT be ignored by .gitignore`);
   }
-  assert.equal(ignoredByGit, false, '.harness/config/lexicon.json must NOT be ignored by .gitignore');
 
   const rootArchRules = loadArchitectureRules(rootDir);
   assert.ok(rootArchRules.some((r) => r.id === 'PRODUCT-BOUNDARY' && r.level === 'hard'));
+  assert.ok(rootArchRules.some((r) => r.id === 'LOCAL-FIRST-E2E' && r.level === 'hard'));
+  assert.ok(rootArchRules.some((r) => r.id === 'NO-UNSAFE-HTML' && r.level === 'hard'));
   assert.ok(rootArchRules.some((r) => r.id === 'DETERMINISTIC-TIME' && r.level === 'hard'));
-  assert.equal(rootArchRules.some((r) => r.id === 'STORAGE-ENGINE'), false, 'HTML-commented example rules in ARCHITECTURE.md must not be loaded');
-  process.stdout.write('  PASS: Root repo hygiene (versionable lexicon.json and comment-safe ARCHITECTURE.md) verified\n');
+  process.stdout.write('  PASS: Root repo hygiene (versionable lexicon.json/project.json and Askesis ARCHITECTURE.md) verified\n');
 }
 
 const fixtureDir = createFixtureRepo();
@@ -659,6 +663,96 @@ try {
     assert.equal(existsSync(resolve(fixtureDir, '.harness/runtime/contract-verified.json')), false);
     assert.ok(existsSync(resolve(fixtureDir, 'src/ledger/settlement_engine.ts')));
     process.stdout.write('  PASS: End-to-end CLI flow (stamped guard-path, scoped AC-* tests, anti-delete, rename guard, status, clean) verified\n');
+  }
+
+  // 7. project.json: non-code asset filter (README.md/svg/lockfile), nested sourceRoots, protectedPaths e runner customizado
+  {
+    const nestedTemp = mkdtempSync(resolve(tmpdir(), 'aegis-project-cfg-'));
+    try {
+      mkdirSync(resolve(nestedTemp, '.harness/config'), { recursive: true });
+      mkdirSync(resolve(nestedTemp, 'src/myapp/api'), { recursive: true });
+      mkdirSync(resolve(nestedTemp, 'src/myapp/services'), { recursive: true });
+      mkdirSync(resolve(nestedTemp, 'src/myapp/scripts'), { recursive: true });
+
+      writeFileSync(resolve(nestedTemp, '.harness/config/project.json'), `${JSON.stringify({
+        projectRoot: 'src/myapp',
+        sourceRoots: ['src/myapp'],
+        protectedPaths: ['src/myapp/package.json', 'src/myapp/scripts/'],
+        typecheckCommand: ['node', '-e', 'process.exit(0)'],
+        lintCommand: ['node', '-e', 'process.exit(0)'],
+        testCommand: ['node', '-e', 'process.exit(0)'],
+        extraChecks: [
+          { name: 'custom-guardrail', command: ['node', 'scripts/guard.js'] },
+        ],
+      }, null, 2)}\n`);
+
+      writeFileSync(resolve(nestedTemp, 'src/myapp/package.json'), JSON.stringify({ name: 'myapp', dependencies: { 'custom-lib': '^1.0.0' } }));
+      writeFileSync(resolve(nestedTemp, 'src/myapp/package-lock.json'), '{}');
+      writeFileSync(resolve(nestedTemp, 'src/myapp/README.md'), '# MyApp\nSYNC_SECRET=fake\nsync payload crypto api\n'.repeat(100));
+      writeFileSync(resolve(nestedTemp, 'src/myapp/logo.svg'), '<svg></svg>');
+      writeFileSync(resolve(nestedTemp, 'src/myapp/scripts/guard.js'), 'process.exit(0);\n');
+      writeFileSync(resolve(nestedTemp, 'src/myapp/api/sync.ts'), "import lib from 'custom-lib';\nexport function syncPayload(x: string): string { return String(lib) + x; }\n");
+      writeFileSync(resolve(nestedTemp, 'src/myapp/services/crypto.ts'), 'export function encryptData(raw: string): string { return raw; }\n');
+      writeFileSync(resolve(nestedTemp, 'src/myapp/api/sync.test.ts'), "import test from 'node:test';\ntest('AC-1: sync', () => { if (!'a') throw new Error(); });\ntest('AC-2: fail', () => { if (!'b') throw new Error(); });\n");
+
+      const obs = observeWorkspace(nestedTemp);
+      assert.deepEqual(obs.discovery.sourceRoots, ['src/myapp']);
+      const observedPaths = obs.discovery.files.map((f) => f.path);
+      assert.equal(observedPaths.includes('src/myapp/README.md'), false, 'README.md must be skipped as NON_CODE_ASSET');
+      assert.equal(observedPaths.includes('src/myapp/package-lock.json'), false, 'package-lock.json must be skipped');
+      assert.equal(observedPaths.includes('src/myapp/logo.svg'), false, 'svg must be skipped');
+      assert.equal(observedPaths.includes('src/myapp/package.json'), false, 'protectedPath must be skipped in discovery');
+      assert.equal(observedPaths.includes('src/myapp/scripts/guard.js'), false, 'protected dir must be skipped in discovery');
+
+      const brief = buildDemandBrief({
+        repositoryRoot: nestedTemp,
+        intent: 'Validar payload em /api/sync com encryptData',
+        workspaceObservation: obs,
+      });
+      assert.ok(brief.coverage.excerptedPaths.includes('src/myapp/api/sync.ts'));
+      assert.ok(brief.coverage.excerptedPaths.includes('src/myapp/services/crypto.ts'));
+      assert.equal(brief.coverage.excerptedPaths.includes('src/myapp/README.md'), false);
+
+      // protectedPaths bloqueados no verify-contract e no guard-path
+      mkdirSync(resolve(nestedTemp, '.harness/runtime'), { recursive: true });
+      const badProtectedContract = resolve(nestedTemp, '.harness/runtime/bad-protected.md');
+      writeFileSync(badProtectedContract, [
+        '# Contrato ilegal',
+        '## Escopo',
+        '- Alterar guardrail',
+        '## Arquivos',
+        '- `src/myapp/scripts/guard.js`',
+        '- `src/myapp/package.json`',
+        '## Casos de prova',
+        '- Dado: a\n- Quando: b\n- Então: c',
+        '- Dado: d\n- Quando: e\n- Então: f',
+      ].join('\n'));
+      const badProtRes = verifyContractMarkdown({ repositoryRoot: nestedTemp, contractPath: badProtectedContract });
+      assert.equal(badProtRes.ok, false);
+      assert.ok(badProtRes.errors.some((e) => e.includes('src/myapp/scripts/guard.js')));
+      assert.ok(badProtRes.errors.some((e) => e.includes('src/myapp/package.json')));
+
+      const guardProt = evaluateGuardPath({
+        repositoryRoot: nestedTemp,
+        targetPath: 'src/myapp/package.json',
+        contractPath: badProtectedContract,
+        allowPaths: ['src/myapp/package.json'],
+      });
+      assert.equal(guardProt.allowed, false);
+
+      // runProductCheck executa custom typecheck/lint/test/extraChecks e lê deps de src/myapp/package.json
+      const checkRes = runProductCheck({
+        repositoryRoot: nestedTemp,
+        contractPath: resolve(nestedTemp, '.harness/runtime/contract.md'),
+        skipDiff: true,
+      });
+      assert.equal(checkRes.ok, true, `Expected custom project.json check to pass, got: ${JSON.stringify(checkRes.results)}`);
+      assert.ok(checkRes.results.some((r) => r.name === 'custom-guardrail' && r.ok));
+      assert.ok(checkRes.results.some((r) => r.name === 'static_checks' && r.ok));
+      process.stdout.write('  PASS: project.json (non-code filtering, nested sourceRoots, protectedPaths, custom runners & extraChecks) verified\n');
+    } finally {
+      rmSync(nestedTemp, { recursive: true, force: true });
+    }
   }
 } finally {
   rmSync(fixtureDir, { recursive: true, force: true });

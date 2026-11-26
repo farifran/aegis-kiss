@@ -9,7 +9,7 @@
     "aegis:cleanup": "bash aegis clean",
     "aegis:typecheck": "if [ -n \"$(find src -type f \\( -name '*.ts' -o -name '*.tsx' \\) -print -quit 2>/dev/null)\" ]; then tsc --noEmit; fi",
     "aegis:lint": "eslint .",
-    "aegis:verify-structure": "npm run aegis:typecheck && npm run aegis:lint && node scripts/aegis_cli.mjs check --skip-diff",
+    "aegis:verify-structure": "npm run aegis:lint && node scripts/aegis_cli.mjs check --skip-diff",
     "aegis:check": "bash aegis check",
     "aegis:test:workspace-skeleton": "node scripts/substrates/test/test_workspace_skeleton.mjs",
     "aegis:test:issue-intake": "node scripts/substrates/test/test_issue_intake.mjs",

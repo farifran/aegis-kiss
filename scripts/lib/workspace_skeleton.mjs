@@ -20,12 +20,15 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { extname, posix, resolve } from 'node:path';
+import { dirname, extname, posix, resolve } from 'node:path';
 import ts from 'typescript';
 import { canonicalDigest, compareCodeUnits } from './canonical_json.mjs';
 
 const tsExtensions = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts',
+]);
+const genericCodeExtensions = new Set([
+  '.py', '.sh', '.bash',
 ]);
 
 const maxSignatureLength = 4096;
@@ -258,22 +261,50 @@ export function extractFileSymbols(path, text) {
   if (tsExtensions.has(ext)) {
     return extractTypeScriptSymbols(path, text);
   }
-  return extractGenericSymbols(path, text);
+  if (genericCodeExtensions.has(ext)) {
+    return extractGenericSymbols(path, text);
+  }
+  return [];
+}
+
+function readTsconfigWithExtends(tsconfigPath, visited = new Set(), depth = 0) {
+  if (depth > 5 || visited.has(tsconfigPath) || !existsSync(tsconfigPath)) return null;
+  visited.add(tsconfigPath);
+  const parsed = ts.readConfigFile(tsconfigPath, (p) => readFileSync(p, 'utf8'));
+  if (parsed.error || !parsed.config) return null;
+  const config = parsed.config;
+  let inherited = {};
+  if (typeof config.extends === 'string' && config.extends.startsWith('.')) {
+    const rawExt = resolve(dirname(tsconfigPath), config.extends);
+    const extPath = existsSync(rawExt) ? rawExt : `${rawExt}.json`;
+    const parent = readTsconfigWithExtends(extPath, visited, depth + 1);
+    if (parent?.compilerOptions) inherited = parent.compilerOptions;
+  }
+  return {
+    compilerOptions: {
+      ...inherited,
+      ...(config.compilerOptions ?? {}),
+      ...(inherited.paths || config.compilerOptions?.paths
+        ? { paths: { ...(inherited.paths ?? {}), ...(config.compilerOptions?.paths ?? {}) } }
+        : {}),
+    },
+  };
 }
 
 /**
- * Lê compilerOptions.paths + baseUrl de tsconfig.json usando o parser JSONC oficial do TypeScript.
+ * Lê compilerOptions.paths + baseUrl de tsconfig.json (incluindo `extends` relativos)
+ * usando o parser JSONC oficial do TypeScript.
  */
-export function loadTsconfigPathAliases(repositoryRoot) {
-  if (!repositoryRoot) return [];
-  const tsconfigPath = resolve(repositoryRoot, 'tsconfig.json');
+export function loadTsconfigPathAliases(tsconfigDir) {
+  if (!tsconfigDir) return [];
+  const tsconfigPath = resolve(tsconfigDir, 'tsconfig.json');
   if (!existsSync(tsconfigPath)) return [];
   try {
-    const parsed = ts.readConfigFile(tsconfigPath, (p) => readFileSync(p, 'utf8'));
-    if (parsed.error || !parsed.config?.compilerOptions?.paths) return [];
-    const baseUrl = String(parsed.config.compilerOptions.baseUrl ?? '.').replace(/^\.\//u, '').replace(/\/+$/u, '');
+    const merged = readTsconfigWithExtends(tsconfigPath);
+    if (!merged?.compilerOptions?.paths) return [];
+    const baseUrl = String(merged.compilerOptions.baseUrl ?? '.').replace(/^\.\//u, '').replace(/\/+$/u, '');
     const aliases = [];
-    for (const [pattern, targets] of Object.entries(parsed.config.compilerOptions.paths)) {
+    for (const [pattern, targets] of Object.entries(merged.compilerOptions.paths)) {
       if (!Array.isArray(targets) || targets.length === 0) continue;
       const starIdx = pattern.indexOf('*');
       const prefix = starIdx >= 0 ? pattern.slice(0, starIdx) : pattern;

@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
-import { dirname, extname, posix } from 'node:path';
+import { dirname, extname, posix, resolve } from 'node:path';
 import { loadArchitectureRules } from './architecture_rules.mjs';
+import { loadProjectConfig } from './workspace_observer.mjs';
 import {
   buildSourceEvidence,
   computeSymbolIdfWeights,
@@ -120,7 +121,11 @@ function collectOneHopImportSignatures({
 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const observedSet = new Set(observedTextPaths);
-  const pathAliases = loadTsconfigPathAliases(repositoryRoot);
+  const projectConfig = loadProjectConfig(repositoryRoot);
+  const tsconfigDir = repositoryRoot && projectConfig.projectRoot
+    ? resolve(repositoryRoot, projectConfig.projectRoot)
+    : repositoryRoot;
+  const pathAliases = loadTsconfigPathAliases(tsconfigDir);
   const symbolsByPath = new Map();
   for (const sym of workspaceSkeleton.symbols) {
     if (!symbolsByPath.has(sym.path)) symbolsByPath.set(sym.path, []);
@@ -231,10 +236,13 @@ export function buildDemandBrief({
   const observedTextPaths = textFiles.map(({ path }) => path);
   const entrypoints = observedTextPaths.filter(isEntrypointPath);
   const domainAliases = loadDomainLexicon(repositoryRoot);
+  const sourceRoots = discovery.sourceRoots ?? (discovery.sourceRoot ? discovery.sourceRoot.split(',') : ['src']);
   const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
     textFiles,
     intent,
     domainAliases,
+    null,
+    sourceRoots,
   );
 
   let precomputedIdf = null;
