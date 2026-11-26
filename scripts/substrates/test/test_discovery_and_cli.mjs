@@ -193,6 +193,97 @@ function createTempRepo() {
   process.stdout.write('  PASS: Topographical map verified\n');
 }
 
+// 4b. Lente dinâmica de ARCHITECTURE.md (regras customizadas: sem framework, SQLite, bitmask) + enforcement Date.now()
+{
+  const archTemp = mkdtempSync(resolve(tmpdir(), 'aegis-arch-test-'));
+  try {
+    mkdirSync(resolve(archTemp, 'src'), { recursive: true });
+    writeFileSync(resolve(archTemp, 'src/index.ts'), 'export const VERSION = 1;\n');
+    writeFileSync(resolve(archTemp, 'ARCHITECTURE.md'), [
+      '# Arquitetura',
+      '## Regras Arquiteturais Ativas',
+      '### 1. Sem framework web (`ARCH-NO-FRAMEWORK` — hard)',
+      'O servidor HTTP usa apenas `node:http` nativo, sem Express ou Fastify.',
+      '### 2. Persistência SQLite (`ARCH-SQLITE-ONLY` — hard)',
+      'Toda persistência de dados usa exclusivamente SQLite local, sem Postgres ou Redis.',
+      '### 3. Flags em bitmask (`ARCH-BITMASK-FLAGS` — default)',
+      'Flags de estado são representadas em bitmask de 32 bits.',
+      '### 4. Tempo determinístico (`ARCH-DETERMINISTIC-TIME` — hard)',
+      'Não acoplar lógica de domínio a `Date.now()` implícito.',
+    ].join('\n'));
+
+    const obs = observeWorkspace(archTemp);
+    const conflictBrief = buildDemandBrief({
+      repositoryRoot: archTemp,
+      intent: 'Criar endpoint em Express salvando sessão no Redis com flags de bitmask e expiração em 60 segundos.',
+      workspaceObservation: obs,
+    });
+    const matchedIds = conflictBrief.architectureRules.matched.map((r) => r.id);
+    assert.ok(matchedIds.includes('ARCH-NO-FRAMEWORK'));
+    assert.ok(matchedIds.includes('ARCH-SQLITE-ONLY'));
+    assert.ok(matchedIds.includes('ARCH-BITMASK-FLAGS'));
+    assert.ok(matchedIds.includes('ARCH-DETERMINISTIC-TIME'));
+
+    // Demanda neutra ainda recebe índice compacto das regras ativas do projeto
+    const neutralBrief = buildDemandBrief({
+      repositoryRoot: archTemp,
+      intent: 'Calcular subtotal de itens do carrinho.',
+      workspaceObservation: obs,
+    });
+    const neutralMd = renderBriefMarkdown(neutralBrief);
+    assert.ok(neutralMd.includes('ARCH-NO-FRAMEWORK'));
+    assert.ok(neutralMd.includes('ARCH-SQLITE-ONLY'));
+
+    // verify-contract bloqueia Date.now() implícito sob ARCH-DETERMINISTIC-TIME, mas aceita quando explicitamente excluído
+    const clockBad = resolve(archTemp, 'bad-clock.md');
+    writeFileSync(clockBad, [
+      '# Contrato',
+      '## Escopo',
+      '- Usar `Date.now()` para expirar itens após 60s.',
+      '## Arquivos',
+      '- `src/clock.ts` [novo]',
+      '## Casos de prova',
+      '- Dado: a\n- Quando: b\n- Então: c',
+      '- Dado: d\n- Quando: e\n- Então: f',
+    ].join('\n'));
+    const badClockRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockBad });
+    assert.equal(badClockRes.ok, false);
+    assert.ok(badClockRes.errors.some((e) => e.includes('ARCH-DETERMINISTIC-TIME')));
+
+    const clockGood = resolve(archTemp, 'good-clock.md');
+    writeFileSync(clockGood, [
+      '# Contrato',
+      '## Escopo',
+      '- Receber `nowMs` explícito; fora do escopo: `Date.now()` implícito.',
+      '## Arquivos',
+      '- `src/clock.ts` [novo]',
+      '## Casos de prova',
+      '- Dado: a\n- Quando: b\n- Então: c',
+      '- Dado: d\n- Quando: e\n- Então: f',
+    ].join('\n'));
+    const goodClockRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockGood });
+    assert.equal(goodClockRes.ok, true);
+
+    // static_gate.sh (no-implicit-clock.yml) bloqueia Date.now() real em src/
+    writeFileSync(resolve(archTemp, 'src/clock_bad.ts'), 'export function now(): number { return Date.now(); }\n');
+    let gateBlockedClock = false;
+    try {
+      execFileSync('bash', [resolve(rootDir, 'scripts/substrates/static_gate.sh'), resolve(archTemp, 'src/clock_bad.ts')], {
+        cwd: rootDir,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      gateBlockedClock = true;
+      assert.ok(String(err.stderr).includes('no-implicit-clock'));
+    }
+    assert.equal(gateBlockedClock, true);
+    process.stdout.write('  PASS: Dynamic ARCHITECTURE.md lens (custom rules) and Date.now() gate verified\n');
+  } finally {
+    rmSync(archTemp, { recursive: true, force: true });
+  }
+}
+
 // 5. verify-contract: aceita contrato válido e bloqueia violações mecânicas reais
 const tempDir = createTempRepo();
 try {

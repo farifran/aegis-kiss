@@ -1,0 +1,19 @@
+# =========================================================
+# AEGIS — Deterministic Time Rule (ARCH-DETERMINISTIC-TIME)
+# Implicit system clock reads break deterministic tests and replay.
+# Pass an explicit timestamp/clock parameter instead of Date.now() / new Date().
+# =========================================================
+
+id: no-implicit-clock
+
+language: TypeScript
+
+severity: error
+
+message: >
+  Implicit system clock (Date.now() / new Date()) violates ARCH-DETERMINISTIC-TIME. Pass an explicit timestamp or clock source instead.
+
+rule:
+  any:
+    - pattern: Date.now()
+    - pattern: new Date()

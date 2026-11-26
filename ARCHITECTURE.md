@@ -1,33 +1,31 @@
-# Arquitetura Técnica do Projeto
+# Arquitetura do Produto
 
-Este documento define as fronteiras e regras técnicas ativas para o produto em `src/` e para o harness local do Aegis.
+Este documento define as **escolhas e restrições técnicas deste software** (`src/`). Ele é lido automaticamente pelo `./aegis brief` para limitar, orientar ou levantar conflitos diante de cada demanda — sem precisar de espelho JSON.
 
-## Fronteiras do Repositório
-
-- **Produto (`src/`):** todo o código de produto reside em `src/`. Uma demanda de produto não altera o harness (`.harness/`, `scripts/`).
-- **Runtime transitório (`.harness/runtime/`):** armazena apenas artefatos temporários de trabalho (`brief.md`, `brief-meta.json`, `contract.md`, `workspace_skeleton.json`). Não é fonte de verdade do produto.
-- **Configuração local (`.harness/config/lexicon.json`):** léxico opcional de termos de domínio (`termo_negócio -> termo_código`) para descoberta determinística.
-- **Core 100% local e determinístico:** o harness opera offline, sem rede nem provedores de LLM externos. A cognição ocorre no agente da própria IDE; a mecânica (AST, ranking, validação física, lint, typecheck, `ast-grep` e testes) roda localmente a custo zero de tokens.
+> **Como definir regras aqui (cada `###` vira uma regra ativa):**
+> - **`hard`:** restrição obrigatória do projeto. A IA deve respeitar ou expor explicitamente o conflito ao humano (nunca contornar em silêncio).
+> - **`default`:** padrão preferido do projeto. A IA segue por padrão, mas pode questionar/deliberar com o humano caso a demanda exija uma exceção.
+> - *Ao adaptar o Aegis para outro projeto, edite as regras abaixo para refletir a arquitetura real daquele sistema (ex.: sem framework, SQLite, bitmask, HTTP nativo, etc.).*
 
 ## Regras Arquiteturais Ativas
 
 ### 1. Fronteira de Produto (`ARCH-PRODUCT-BOUNDARY` — hard)
-Demandas de produto observam e citam exclusivamente `src/` (e seus testes). Caminhos externos ou sensíveis (`/etc/`, `../`, `.harness/`, `scripts/`) são proibidos como alvos de produto.
+Todo o código e testes do produto residem exclusivamente em `src/`. Demandas de produto não podem ler nem alterar arquivos fora de `src/` (como configurações, scripts de build ou caminhos do sistema operacional).
 
-### 2. Parcimônia (`ARCH-PARSIMONY` — default)
-Dependências externas, persistência, concorrência, factories, builders ou camadas extras só são admitidos quando um requisito observável justificar seu custo. A recomendação padrão é sempre a menor arquitetura suficiente.
+### 2. Sem Frameworks nem Dependências de Runtime (`ARCH-NO-FRAMEWORK` — default)
+O produto opera como módulos TypeScript puros em memória, sem frameworks externos, bancos de dados ou bibliotecas de runtime. Qualquer nova dependência externa ou persistência exige justificativa observável e aprovação humana explícita.
 
-### 3. Tipagem Estrita e Módulos Pequenos (`ARCH-STRICT-EXPLICIT-MODULES` — default)
-Código TypeScript em `src/` usa tipagem estrita, funções com retorno explícito e APIs claras, sem `as any`, `@ts-ignore` ou supressões permissivas que escondam defeitos (verificado por `tsc`, `eslint` e `static_gate.sh`).
+### 3. Tipagem Estrita e Contratos Públicos Explícitos (`ARCH-STRICT-TYPES` — hard)
+Código TypeScript usa tipagem estrita, funções públicas com assinatura e retorno explícitos e dados `readonly`, vedando `as any`, `@ts-ignore` ou supressões que escondam falhas. Detalhes internos continuam livres enquanto preservarem a interface pública e os testes.
 
-### 4. Falhas Explícitas (`ARCH-FAILURE-EXPLICIT` — hard)
-Nenhuma falha relevante pode desaparecer silenciosamente (`catch` vazio, descarte silencioso ou truncamento implícito). Operações com estado ou efeito externo devem expor resultado, erro explícito, estado preservado ou rollback verificável.
+### 4. Valores Monetários em Centavos Inteiros (`ARCH-INTEGER-CENTS` — hard)
+Cálculos financeiros operam exclusivamente em centavos inteiros seguros (`Number.isSafeInteger`), sem aritmética de ponto flutuante para dinheiro.
 
-### 5. Tempo Determinístico (`ARCH-DETERMINISTIC-TIME` — hard)
-Comportamentos dependentes de tempo devem receber referência temporal explícita ou fonte reproduzível. Não acoplar lógica de domínio a `Date.now()` implícito sem autorização explícita.
+### 5. Falhas Explícitas e Estado Preservado (`ARCH-FAILURE-EXPLICIT` — hard)
+Nenhuma falha relevante pode desaparecer silenciosamente (`catch` vazio, erro engolido ou descarte implícito). Operações com estado ou efeito externo devem expor resultado/erro explícito, precedência clara de guardas, estado preservado ou rollback verificável.
 
-### 6. Interface Pública e Transições Claras (`ARCH-PUBLIC-INTERFACE` — hard)
-Funções públicas devem definir entradas, saídas, precedência de guardas e falhas observáveis. Detalhes internos continuam livres enquanto preservarem o contrato e os testes.
+### 6. Tempo Determinístico (`ARCH-DETERMINISTIC-TIME` — hard)
+Comportamento dependente de tempo deve receber referência temporal explícita (ex.: `nowMs` ou relógio injetado). Uso implícito de `Date.now()` ou `new Date()` sem argumentos é proibido na lógica de domínio.
 
-### 7. Verificação Real Pós-Implementação (`ARCH-EXECUTABLE-PROOF` — hard)
-Contrato aprovado não comprova código correto. Toda implementação autorizada só fecha após passar no `./aegis check` (escopo no `git diff` + `tsc` + `eslint` + `static_gate.sh` + testes executáveis dos cenários `Dado / Quando / Então`).
+### 7. Parcimônia Estrutural (`ARCH-PARSIMONY` — default)
+Não introduzir factories, builders, event buses, singletons, concorrência ou camadas abstratas extras quando funções e módulos diretos entregam o mesmo resultado observável.

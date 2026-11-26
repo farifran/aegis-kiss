@@ -3,6 +3,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, posix, resolve } from 'node:path';
 import ts from 'typescript';
 import {
+  loadArchitectureRules,
+  selectArchitectureRulesForDemand,
+} from './architecture_rules.mjs';
+import {
   buildSourceEvidence,
   computeSymbolIdfWeights,
   isEntrypointPath,
@@ -341,6 +345,11 @@ export function buildDemandBrief({
   });
   const pathsWithoutExcerpt = observedTextPaths.filter((p) => !excerptedSet.has(p));
 
+  const architectureRules = selectArchitectureRulesForDemand(
+    loadArchitectureRules(repositoryRoot),
+    intent,
+  );
+
   return {
     schema: 'aegis.brief.v1',
     intent,
@@ -351,6 +360,7 @@ export function buildDemandBrief({
       referencedPaths,
       referencedNumbers,
     },
+    architectureRules,
     coverage: {
       discoveryRoot: discovery.sourceRoot ?? 'src',
       observedTextFileCount: observedTextPaths.length,
@@ -399,6 +409,20 @@ export function renderBriefMarkdown(brief) {
     }
     if (referencedNumbers.length > 0) {
       lines.push(`- **Números/limites citados:** ${referencedNumbers.map((n) => `\`${n}\``).join(', ')}`);
+    }
+    lines.push('');
+  }
+
+  const arch = brief.architectureRules ?? { matched: [], others: [] };
+  if (arch.matched.length > 0 || arch.others.length > 0) {
+    lines.push('## Restrições arquiteturais do projeto (`ARCHITECTURE.md`)');
+    lines.push('> Regras `hard` são limites do sistema (respeitar ou expor conflito ao humano); regras `default` podem ser questionadas ao humano se a demanda exigir exceção.');
+    for (const rule of arch.matched) {
+      lines.push(`- **${rule.title}** (\`${rule.id}\` — ${rule.level}): ${rule.statement}`);
+    }
+    if (arch.others.length > 0) {
+      const indexList = arch.others.map((r) => `${r.title} (\`${r.id}\`, ${r.level})`).join(' · ');
+      lines.push(`- **Outras regras ativas:** ${indexList}`);
     }
     lines.push('');
   }

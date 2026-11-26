@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import { findContractArchitectureViolations, loadArchitectureRules } from './architecture_rules.mjs';
 import { inspectWorkspaceFreshness } from './workspace_observer.mjs';
 
 const forbiddenPathPattern = /(?:\/etc\/|\/proc\/|\/sys\/|~\/|\.\.\/)/u;
@@ -226,6 +227,10 @@ export function verifyContractMarkdown({
       }
     }
   }
+
+  // Regras hard de ARCHITECTURE.md (ex.: Date.now() implícito sob ARCH-DETERMINISTIC-TIME)
+  const archRules = loadArchitectureRules(repositoryRoot);
+  errors.push(...findContractArchitectureViolations(archRules, markdown));
 
   const freshness = inspectWorkspaceFreshness(repositoryRoot, expectedSnapshotDigest);
   if (freshness.workspaceFreshness === 'CHANGED_SINCE_BASELINE') {

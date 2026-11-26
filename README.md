@@ -2,23 +2,42 @@
 
 Ferramenta **local-first para IDEs com agentes de IA** que reduz desperdício de tokens e bloqueia alucinação, deriva de escopo e sobre-engenharia executando localmente tudo o que é mecânico (0 tokens, milissegundos):
 
-1. **Antes da IA pensar (`./aegis brief`):** analisa o código via TypeScript Compiler API, ranqueia símbolos/arquivos relevantes (léxico bilíngue, *Directory Anchor Fallback*, janelas por bloco AST inteiro, imports diretos de 1 salto incluindo `paths` do `tsconfig.json`, e chamadores via AST real sem falsos positivos em comentários/strings) e gera `.harness/runtime/brief.md` compacto e numerado por linha — evitando 5–10 buscas cegas no chat.
-2. **Antes de codar (`./aegis verify-contract`):** valida mecanicamente o contrato curto `.harness/runtime/contract.md` (seções obrigatórias, fronteira `src/`, zero `[PENDENTE]`, cenários `Dado / Quando / Então`, existência física de `src/arquivo.ts:Ln-Lm` e presença do símbolo citado na linha).
-3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** garantindo fronteira estrita em `src/` (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*`), roda `tsc --noEmit`, `eslint`, 20 regras `ast-grep` ([static_gate.sh](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/static_gate.sh)) e **exige testes reais em `src/**/*.test.*`** cobrindo os cenários (`AC-*`) do contrato, devolvendo saída ultra-compacta para o chat.
+1. **Antes da IA pensar (`./aegis brief`):** analisa o código via TypeScript Compiler API, projeta dinamicamente as restrições do projeto definidas em [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) (ex.: sem framework, SQLite, bitmask, tempo determinístico), ranqueia símbolos/arquivos relevantes (léxico bilíngue, *Directory Anchor Fallback*, janelas por bloco AST inteiro, imports diretos de 1 salto incluindo `paths` do `tsconfig.json`, e chamadores via AST real) e gera `.harness/runtime/brief.md` compacto e numerado por linha — evitando 5–10 buscas cegas no chat.
+2. **Antes de codar (`./aegis verify-contract`):** valida mecanicamente o contrato curto `.harness/runtime/contract.md` (seções obrigatórias, fronteira `src/`, regras `hard` de `ARCHITECTURE.md` como `ARCH-DETERMINISTIC-TIME`, zero `[PENDENTE]`, cenários `Dado / Quando / Então`, existência física de `src/arquivo.ts:Ln-Lm` e presença do símbolo citado na linha).
+3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** garantindo fronteira estrita em `src/` (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*`), roda `tsc --noEmit`, `eslint`, 21 regras `ast-grep` ([static_gate.sh](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/static_gate.sh), incluindo `no-implicit-clock` para `Date.now()`/`new Date()`) e **exige testes reais em `src/**/*.test.*`** cobrindo os cenários (`AC-*`) do contrato, devolvendo saída ultra-compacta para o chat.
+
+---
+
+## Governança em 3 Camadas (`AGENTS.md` + `ARCHITECTURE.md` + Harness)
+
+Em vez de misturar postura do agente, regras de arquitetura do software e comandos de build em um único arquivo gigante (`.cursorrules` / `CLAUDE.md`) e torcer para o modelo se auto-regular, o Aegis separa a governança em **3 camadas complementares**:
+
+| Camada | Arquivo / Superfície | Papel no Sistema | Inspiração |
+| :--- | :--- | :--- | :--- |
+| **1. Disciplina Cognitiva** | [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) | Governa *como* a IA pensa e age: pensar antes de codar, evidência sobre suposição, simplicidade (KISS), perguntar só lacunas materiais e exigir provas `Dado / Quando / Então` antes de tocar `src/`. | `andrej-karpathy-skills` (*Think Before Coding*, *Simplicity First*, *Surgical Changes*, *Goal-Driven Execution*) |
+| **2. Restrições do Software** | [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) | Define *o que este projeto específico permite, exige ou proíbe* (`hard` vs. `default`): ex. sem framework / native-first, SQLite, bitmask, centavos inteiros, imutabilidade, tempo determinístico. Lido dinamicamente pelo `./aegis brief` sem espelho JSON. | [DietrichGebert/ponytail](https://github.com/dietrichgebert/ponytail) (*native-first*, reuso, zero sobre-engenharia, código mínimo suficiente) |
+| **3. Verificação Mecânica** | `./aegis` + `.harness/enforcement/rules/` | Impõe de forma determinística (0 tokens) o que texto de prompt sozinho não garante: contexto AST exato, bloqueio de edição fora de `src/`, 21 regras `ast-grep`, `tsc`, `eslint` e vínculo obrigatório contrato $\leftrightarrow$ testes (`AC-*`). | Análise estática local + fronteira de execução |
+
+### Por que essa separação funciona melhor na IDE
+
+- **Prompts menores e melhor aproveitamento de KV-Cache:** [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) permanece curto (~28 linhas) e invariante entre tarefas, maximizando cache de prefixo na IDE; o contexto específico de `src/` e as regras pertinentes de [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) entram sob demanda no `brief.md`.
+- **Regras do projeto realmente respeitadas ou deliberadas:** cada regra `###` em [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) é selecionada automaticamente conforme a demanda (texto completo para regras pertinentes + índice compacto de 1 linha das demais). Regras `hard` impedem violações silenciosas; regras `default` abrem deliberação explícita com o humano quando a demanda pede exceção.
+- **Fim da auto-regulação cega:** diretrizes como *Karpathy* e *PonyTail* melhoram muito o raciocínio do modelo, mas em prompt puro continuam probabilísticas. O harness fecha o ciclo cobrando mecanicamente escopo (`git status`), qualidade AST (`static_gate.sh`) e provas executáveis (`src/**/*.test.*`).
+- **Portabilidade entre projetos e IDEs:** [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e o CLI funcionam igual em qualquer IDE; para adaptar o Aegis a outro software, basta atualizar as regras do produto em [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) (e opcionalmente [`.harness/config/lexicon.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/.harness/config/lexicon.json)).
 
 ---
 
 ## Fluxo na IDE (4 Passos)
 
 ```bash
-# 1. Gerar briefing compacto e numerado do código local (0 tokens)
+# 1. Gerar briefing compacto e numerado do código local + lente de ARCHITECTURE.md (0 tokens)
 ./aegis brief "Sua demanda em linguagem natural"
 # ou a partir de uma issue do GitHub / arquivo local:
 ./aegis --issue 42
 ./aegis --issue caminho/para/issue.md
 
 # 2. Na IDE: o agente lê .harness/runtime/brief.md, pergunta apenas lacunas
-#    materiais (se houver) e escreve .harness/runtime/contract.md (~1 página).
+#    materiais ou conflitos arquiteturais (se houver) e escreve .harness/runtime/contract.md (~1 página).
 
 # 3. Validar o contrato mecanicamente (0 tokens)
 ./aegis verify-contract
@@ -60,7 +79,7 @@ Ferramenta **local-first para IDEs com agentes de IA** que reduz desperdício de
 Um contrato enxuto de ~1 página contendo:
 - `## Escopo` (o que entra, o que fica de fora e o que foi podado por KISS)
 - `## Arquivos` (caminhos em `src/` autorizados; marque arquivos novos com `[novo]`)
-- `## Decisões` (escolhas humanas tomadas, se houve ambiguidade)
+- `## Decisões` (escolhas humanas tomadas, se houve ambiguidade ou exceção arquitetural)
 - `## Casos de prova` (ao menos 2 cenários `Dado / Quando / Então` cobrindo sucesso e falha/limite; IDs como `AC-1`, `AC-2` passam a ser cobrados automaticamente nos testes pelo `./aegis check`)
 
 ---
@@ -68,14 +87,15 @@ Um contrato enxuto de ~1 página contendo:
 ## Estrutura do Projeto
 
 - [`aegis`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/aegis) / [`scripts/ide_gateway.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/ide_gateway.sh) / [`scripts/aegis_cli.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/aegis_cli.mjs): entrada CLI enxuta.
+- [`scripts/lib/architecture_rules.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/architecture_rules.mjs): parser dinâmico de `ARCHITECTURE.md` que seleciona regras pertinentes à demanda e lista as demais como índice compacto no `brief.md`.
 - [`scripts/lib/workspace_skeleton.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_skeleton.mjs): extrator AST TypeScript oficial (assinaturas públicas, compactação de `const` gigantes, imports reais e linhas de identificadores via AST).
 - [`scripts/lib/workspace_observer.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/workspace_observer.mjs): varredura segura (anti-symlink, skip de arquivos `> 256 KB`, multi-raiz `src`/`app`/`lib`), cache de skeleton e frescor por digest.
 - [`scripts/lib/source_evidence.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/source_evidence.mjs) + [`.harness/config/lexicon.json`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/.harness/config/lexicon.json): ranking por afinidade AST + léxico bilíngue + preservação de cabeçalhos e janelas por bloco AST inteiro.
 - [`scripts/lib/topography.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/topography.mjs): mapa topográfico panorâmico (`< 4 KB`) sob silêncio léxico em repositórios grandes.
-- [`scripts/lib/brief_renderer.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/brief_renderer.mjs): cobertura de evidência, 1-hop imports (incluindo `tsconfig.json` `paths`), chamadores via AST e renderização numerada de `brief.md`.
-- [`scripts/lib/contract_verifier.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/contract_verifier.mjs): verificação mecânica de `contract.md`, referências `path:Ln-Lm`, símbolos nas linhas citadas e extração de `AC-*`.
+- [`scripts/lib/brief_renderer.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/brief_renderer.mjs): cobertura de evidência, lente arquitetural, 1-hop imports (incluindo `tsconfig.json` `paths`), chamadores via AST e renderização numerada de `brief.md`.
+- [`scripts/lib/contract_verifier.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/contract_verifier.mjs): verificação mecânica de `contract.md`, referências `path:Ln-Lm`, símbolos nas linhas citadas, regras `hard` e extração de `AC-*`.
 - [`scripts/lib/path_guard.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/path_guard.mjs): validador de permissão de caminho para hooks de pré-edição de IDEs (`./aegis guard-path`).
-- [`scripts/lib/product_checker.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/product_checker.mjs) + [`scripts/substrates/static_gate.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/static_gate.sh): verificação pós-implementação (fronteira estrita `src/` sobre todo o `git status`, `tsc`, `eslint`, 20 regras `ast-grep`, testes obrigatórios e cobertura `AC-*`).
+- [`scripts/lib/product_checker.mjs`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/lib/product_checker.mjs) + [`scripts/substrates/static_gate.sh`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/scripts/substrates/static_gate.sh): verificação pós-implementação (fronteira estrita `src/` sobre todo o `git status`, `tsc`, `eslint`, 21 regras `ast-grep`, testes obrigatórios e cobertura `AC-*`).
 
 ## Scripts NPM
 
@@ -85,3 +105,10 @@ npm run aegis:verify-structure  # tsc + eslint + static_gate.sh sobre src/
 npm run aegis:check             # Atalho para ./aegis check
 npm run aegis:bench             # Mede tamanho e latência do brief.md em cenários de referência
 ```
+
+---
+
+## Referências e Inspirações
+
+- **[DietrichGebert/ponytail](https://github.com/dietrichgebert/ponytail):** disciplina *native-first*, reuso do código/stdlib existente e código mínimo suficiente refletida em [`ARCHITECTURE.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/ARCHITECTURE.md) e nas regras AST.
+- **`andrej-karpathy-skills`:** princípios pragmáticos de engenharia com LLMs (*Think Before Coding*, *Simplicity First*, *Surgical Changes* e *Goal-Driven Execution*) refletidos em [`AGENTS.md`](file:///Users/rafaelfarias/Documents/IDE/aegis%20kiss/AGENTS.md) e verificados mecanicamente pelo harness.
