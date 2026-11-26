@@ -17,7 +17,7 @@
   ],
   "typecheckCommand": ["npm", "run", "typecheck"],
   "lintCommand": ["npx", "eslint", "--config", "eslint.config.mjs", "."],
-  "testCommand": ["npx", "vitest", "run"],
+  "testCommand": ["npx", "vitest", "run", "--reporter=dot", "--silent"],
   "extraChecks": [
     { "name": "guardrail:security-html", "command": ["node", "scripts/guardrail-security-html.js"] },
     { "name": "guardrail:locales", "command": ["node", "scripts/guardrail-locales-parity.js"] },

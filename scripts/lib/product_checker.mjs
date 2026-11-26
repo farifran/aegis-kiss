@@ -340,12 +340,15 @@ function checkGitScope({
   };
 }
 
-function compactErrorLines(rawOutput, maxLines = 15) {
+function compactErrorLines(rawOutput, maxLines = 15, { fromTail = false } = {}) {
   const lines = rawOutput
     .split('\n')
     .map((l) => l.trimEnd())
     .filter((l) => l.trim().length > 0);
   if (lines.length <= maxLines) return lines;
+  if (fromTail) {
+    return [`... (+${lines.length - maxLines} linhas anteriores omitidas)`, ...lines.slice(-maxLines)];
+  }
   return [...lines.slice(0, maxLines), `... (+${lines.length - maxLines} linhas omitidas)`];
 }
 
@@ -577,7 +580,7 @@ export function runProductCheck({
         ? `${productTests.length} arquivo(s), ${allSuiteStats.declaredTestCases} caso(s) PASS`
         : (res.ok ? 'cobertura de contrato incompleta' : 'falha nos testes de produto'),
       details: [
-        ...(res.ok ? [] : compactErrorLines(res.output, 20)),
+        ...(res.ok ? [] : compactErrorLines(res.output, 20, { fromTail: true })),
         ...coverageFailures,
       ],
     });
