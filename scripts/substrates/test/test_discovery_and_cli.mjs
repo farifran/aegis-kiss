@@ -324,7 +324,7 @@ try {
 
       const htmlGood = resolve(archTemp, 'good-html.md');
       writeFileSync(htmlGood, [
-        '# Contrato',
+        '# Contrato — Modal sem innerHTML',
         '## Escopo',
         '- Rejeitar `innerHTML` e renderizar texto seguro via `replaceChildren`; fora do escopo: `insertAdjacentHTML`.',
         '## Arquivos',
