@@ -1,0 +1,14 @@
+{
+  // Test-only project: enables Vitest/Node/Vite type globals.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["vitest", "node", "vite/client"]
+  },
+  "include": [
+    "**/*.test.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "types/**/*.d.ts"
+  ]
+}

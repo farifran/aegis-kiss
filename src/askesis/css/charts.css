@@ -1,0 +1,267 @@
+
+/* --- COMPONENTES: GRÁFICO DE EVOLUÇÃO (AUTO FOOTER) --- */
+.chart-container {
+    padding: var(--space-lg);
+    background-color: var(--bg-color); /* TESTE: Alterado para preto puro a pedido do usuário */
+    border-radius: var(--border-radius-large);
+    
+    /* BUGFIX [2025-05-04]: Removido 'content-visibility: auto'.
+       Esta propriedade aplicava 'Paint Containment' implícito, cortando os tooltips 
+       que flutuam para fora da caixa do gráfico.
+       Mantemos apenas 'layout style' que isola o reflow mas permite overflow visual. */
+    contain: layout style;
+    
+    /* FIX: FLEX ITEM */
+    flex-shrink: 0; /* Nunca encolhe, sempre visível */
+    max-height: none;
+    overflow: visible; /* CRÍTICO: Permite que o tooltip saia da caixa */
+    
+    /* SYMMETRY FIX: iguala as margens superior e inferior do gráfico para 13px */
+    margin-top: 13px;
+    margin-inline: var(--space-lg); 
+     
+    /* Margem inferior igualada para simetria vertical */
+    margin-bottom: 13px;
+    
+    /* Estilos visuais normais */
+    z-index: var(--z-index-footer);
+    box-shadow: none;
+}
+
+/* 
+   🛡️ LANDSCAPE GUARD [2025-05-04]: 
+   Em telas baixas (orientação paisagem em celulares), o gráfico consome espaço vertical crítico,
+   tornando a lista de hábitos inutilizável devido ao teclado virtual ou chrome do navegador.
+*/
+@media (max-height: 500px) and (orientation: landscape) {
+    .chart-container {
+        display: none !important;
+    }
+}
+
+.chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    flex-wrap: nowrap; /* keep left and right parts on the same line */
+    margin-bottom: 0;
+    z-index: 20;
+    pointer-events: none;
+    text-shadow: 0 1px 2px var(--bg-color);
+    margin-top: -6px;
+    user-select: none;
+}
+
+.chart-header > .app-subtitle {
+    flex: 1 1 0%;
+    min-width: 0; /* allow proper truncation/wrapping */
+    max-width: 50%;
+    margin: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.chart-header > .chart-title-row {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+.app-subtitle, .chart-title {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.chart-title {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.chart-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 30px;
+    white-space: nowrap;
+}
+.app-subtitle {
+    font-size: 13px;
+    font-style: italic;
+    color: var(--text-secondary);
+    margin: 0; /* remove extra vertical gap so right column aligns on same line */
+    line-height: 1.4;
+}
+
+/* TYPOGRAPHY TWEAK [2025-05-02]: Reduz fonte para 12px em mobile */
+@media (max-width: 480px) {
+    .app-subtitle {
+        font-size: 12px;
+    }
+}
+    
+    /* On narrow screens keep left text and right title on the same flex line.
+       Left column should shrink and wrap its text internally; right column
+       stays intrisically-sized (Askesis + %) and remains on the same line. */
+    .chart-header {
+        flex-wrap: nowrap;
+        gap: var(--space-sm);
+    }
+
+    .chart-header > .app-subtitle {
+        flex: 1 1 0%;
+        min-width: 0;
+        max-width: 50%;
+        font-size: 12px; /* keep smaller type on mobile */
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .chart-header > .chart-title-row {
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-xs);
+    }
+
+    .chart-evolution-indicator {
+        position: static;
+        transform: none;
+        margin-left: var(--space-xs);
+        display: inline-block;
+    }
+
+.chart-title strong {
+    color: var(--accent-green);
+}
+.chart-data-view, .chart-empty-state {
+    display: none;
+}
+.chart-container:not(.is-empty) .chart-data-view {
+    display: block;
+    margin-top: -40px; /* Reduzida a sobreposição para aumentar o espaçamento visual */
+    position: relative;
+    /* Z-Index removido (auto) para permitir o entrelaçamento de camadas (SVG < Header < Tooltip) */
+    z-index: auto;
+}
+.chart-container.is-empty .chart-empty-state {
+    display: flex;
+}
+.chart-wrapper { 
+    position: relative; 
+    height: 75px; 
+    touch-action: pan-y; 
+    user-select: none; 
+}
+.chart-svg { 
+    width: 100%; 
+        margin: 0;
+        display: inline-block;
+    /* Permite que o stroke ultrapasse levemente a área de visualização */
+    overflow: visible;
+    /* LAYER BOTTOM: Linha abaixo do texto */
+    position: relative;
+    z-index: 10;
+}
+.chart-area { fill: url(#chart-gradient); }
+.chart-line { 
+    fill: none; 
+    stroke: var(--accent-blue); 
+    stroke-width: 2.5; 
+    stroke-linecap: round; 
+    stroke-linejoin: round;
+    filter: drop-shadow(0 0 3px var(--accent-blue));
+}
+.chart-axis-labels {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-block-start: var(--space-xs);
+}
+.chart-tooltip {
+    position: absolute; 
+    top: 0; left: 0; 
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-base);
+    padding: var(--space-sm) var(--space-md); font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    pointer-events: none; opacity: 0;
+    transition: opacity var(--transition-duration);
+    will-change: transform, opacity;
+    z-index: var(--z-index-tooltip); min-width: 150px;
+}
+.chart-tooltip.visible { opacity: 1; }
+.tooltip-date { font-weight: 600; margin-block-end: var(--space-sm); color: var(--text-primary); }
+.tooltip-score { margin-block-end: var(--space-sm); color: var(--text-secondary); }
+.tooltip-score-value { color: var(--accent-blue); font-weight: 700; }
+.tooltip-habits { list-style: none; padding: 0; margin: 0; font-size: 11px; color: var(--text-secondary); }
+.tooltip-habits li { white-space: nowrap; }
+.chart-indicator {
+    position: absolute; top: 0; height: 100%; width: 1px;
+    background-color: var(--accent-blue); pointer-events: none; opacity: 0;
+    /* LAYER OVER TEXT: O indicador de toque deve passar por cima do texto */
+    z-index: 25;
+}
+.chart-indicator-dot {
+    position: absolute; width: 9px; height: 9px;
+    border-radius: var(--border-radius-pill); background-color: var(--accent-blue);
+    border: 2px solid var(--bg-color); transform: translate(-50%, -50%);
+}
+.chart-empty-state {
+    display: flex; align-items: center; justify-content: center;
+    height: 42px; color: var(--text-tertiary); font-style: italic; text-align: center;
+}
+.chart-evolution-indicator {
+    font-size: 16px;
+    font-weight: 700;
+    background-color: transparent;
+    border: none;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    white-space: nowrap;
+    transition: color var(--transition-duration-slow);
+    margin-left: var(--space-sm);
+}
+
+@media (max-width: 480px) {
+    .chart-header { 
+        flex-wrap: nowrap;
+        gap: var(--space-sm);
+    }
+    .chart-header > .app-subtitle {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 60%;
+        font-size: 12px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .chart-header > .chart-title-row {
+        flex: 0 1 auto;
+        min-width: 0;
+        gap: var(--space-xs);
+        justify-content: flex-end;
+    }
+    .chart-evolution-indicator {
+        position: static;
+        transform: none;
+        margin-left: var(--space-xs);
+        display: inline-block;
+    }
+}
+.chart-evolution-indicator.positive { 
+    color: var(--accent-green);
+}
+.chart-evolution-indicator.negative { 
+    color: var(--color-red);
+}
+.chart-evolution-indicator.positive::before { content: ''; }
+.chart-evolution-indicator.negative::before { content: ''; }
