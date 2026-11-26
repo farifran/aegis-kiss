@@ -3,7 +3,14 @@ import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { buildDemandBrief, renderBriefMarkdown } from './lib/brief_renderer.mjs';
-import { verifyContractMarkdown } from './lib/contract_verifier.mjs';
+import {
+  clearContractVerificationStamp,
+  computeContractDigest,
+  readContractVerificationStamp,
+  readSafeContractText,
+  verifyContractMarkdown,
+  writeContractVerificationStamp,
+} from './lib/contract_verifier.mjs';
 import { resolveIssueDemand } from './lib/issue_intake.mjs';
 import { evaluateGuardPath, normalizeRepoRelativePath } from './lib/path_guard.mjs';
 import { formatCheckReport, runProductCheck } from './lib/product_checker.mjs';
@@ -132,7 +139,7 @@ async function handleBrief(paths, args) {
   }
 }
 
-function handleVerifyContract(paths, args) {
+async function handleVerifyContract(paths, args) {
   if (args.length > 1) throw new Error('invalid_verify_contract_arity');
   let targetPath = paths.contractMdPath;
   if (args[0]) {
@@ -148,7 +155,16 @@ function handleVerifyContract(paths, args) {
     expectedSnapshotDigest: meta?.sourceSnapshotDigest ?? null,
   });
 
+  const isActiveContract = targetPath === paths.contractMdPath;
   if (result.ok) {
+    if (isActiveContract) {
+      await writeContractVerificationStamp({
+        stampPath: paths.contractVerifiedPath,
+        contractText: result.contractText,
+        sourceRoots: result.sourceRoots,
+        authorizedPaths: result.authorizedPaths,
+      });
+    }
     process.stdout.write([
       `[AEGIS][CONTRACT] PASS (${result.scenarioCount} cenários, ${result.authorizedPaths.length} arquivo(s) autorizado(s), workspace: ${result.workspaceFreshness})`,
       ...result.warnings.map((w) => `- AVISO: ${w}`),
@@ -156,6 +172,9 @@ function handleVerifyContract(paths, args) {
     return;
   }
 
+  if (isActiveContract) {
+    clearContractVerificationStamp(paths.contractVerifiedPath);
+  }
   process.stderr.write([
     `[AEGIS][CONTRACT] FAIL (${result.errors.length} erro(s))`,
     ...result.errors.map((e) => `- ${e}`),
@@ -221,6 +240,7 @@ function handleGuardPath(paths, args) {
     repositoryRoot: paths.root,
     targetPath,
     contractPath: paths.contractMdPath,
+    contractVerifiedPath: paths.contractVerifiedPath,
     allowPaths,
   });
   if (decision.allowed) {
@@ -234,12 +254,16 @@ function handleGuardPath(paths, args) {
 function handleStatus(paths) {
   const meta = readBriefMeta(paths);
   const hasBrief = existsSync(paths.briefMdPath);
-  const hasContract = existsSync(paths.contractMdPath);
+  const contractRead = readSafeContractText(paths.contractMdPath);
+  const hasContract = contractRead.status === 'OK';
+  const stamp = hasContract ? readContractVerificationStamp(paths.contractVerifiedPath) : null;
+  const contractVerified = Boolean(stamp && stamp.contractDigest === computeContractDigest(contractRead.text));
   const freshness = inspectWorkspaceFreshness(paths.root, meta?.sourceSnapshotDigest ?? null);
   process.stdout.write(`${JSON.stringify({
-    status: hasContract ? 'CONTRACT_PRESENT' : (hasBrief ? 'BRIEF_READY' : 'IDLE'),
+    status: hasContract ? (contractVerified ? 'CONTRACT_VERIFIED' : 'CONTRACT_PRESENT') : (hasBrief ? 'BRIEF_READY' : 'IDLE'),
     briefPath: hasBrief ? '.harness/runtime/brief.md' : null,
     contractPath: hasContract ? '.harness/runtime/contract.md' : null,
+    contractVerified,
     workspaceFreshness: freshness.workspaceFreshness,
     observedTextFileCount: meta?.observedTextFileCount ?? null,
   }, null, 2)}\n`);
@@ -273,7 +297,7 @@ async function main() {
     case 'verify-contract':
     case '--verify-contract':
     case '--verify':
-      handleVerifyContract(paths, rest);
+      await handleVerifyContract(paths, rest);
       break;
     case 'check':
     case '--check':

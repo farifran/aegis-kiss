@@ -4,7 +4,8 @@
 
 .harness/runtime/
 .harness/local.env
-.harness/config/
+.harness/config/*
+!.harness/config/lexicon.json
 
 # =========================================================
 # TRANSIENT OUTPUTS

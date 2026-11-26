@@ -3,8 +3,8 @@
 **Harness local-first para IDEs com agentes de IA.** Ele realiza uma busca local, determinística e enxuta do repositório para facilitar o trabalho da IA e reduzir alucinações; combina disciplina de execução ([`AGENTS.md`](AGENTS.md)) e restrições técnicas do software ([`ARCHITECTURE.md`](ARCHITECTURE.md)) mantendo o contexto limpo e com menor degradação (*context rot*); e impõe verificações e limites mecânicos locais (0 tokens, milissegundos) para estruturar a colaboração humano–IA em torno de escopo, arquitetura e provas executáveis — preservando a revisão humana como juiz final da lógica.
 
 1. **Antes da IA pensar (`./aegis brief`):** analisa o código via TypeScript Compiler API, injeta integralmente as regras compactas de [`ARCHITECTURE.md`](ARCHITECTURE.md) (1 linha por regra: ex. sem framework, SQLite, bitmask, centavos inteiros, tempo determinístico), ranqueia símbolos/arquivos relevantes (léxico bilíngue, *Directory Anchor Fallback*, janelas por bloco AST inteiro, imports diretos de 1 salto incluindo `paths` do `tsconfig.json`, e chamadores via AST real) e gera `.harness/runtime/brief.md` compacto, numerado por linha e com isolamento de fences Markdown — evitando 5–10 buscas cegas no chat.
-2. **Antes de codar (`./aegis verify-contract`):** valida mecanicamente o contrato curto `.harness/runtime/contract.md` (seções obrigatórias, fronteira de produto sem configs/governança, regras `hard` de `ARCHITECTURE.md` como `DETERMINISTIC-TIME`, zero `[PENDENTE]`, cenários `Dado / Quando / Então`, existência física de `path:Ln-Lm` e presença do símbolo citado na linha).
-3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** (`--porcelain -z -uall`, anti-symlink, origem e destino em renames e *fail-closed* sem `contract.md` nem `--allow`) garantindo fronteira estrita nas raízes de produto (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*`), roda `tsc --noEmit`, `eslint` type-aware (incluindo `DETERMINISTIC-TIME`, `only-throw-error`, `no-duplicate-imports`, `no-eval`, `no-explicit-any`), verificações estáticas puras em Node/AST (imports não declarados respeitando `tsconfig.json` `paths` + scanner de segredos hardcoded) e **exige testes reais ativos (`test()`/`it()`/`t.test()`, imune a comentários, `.skip` e `{ skip/todo: true }`) em `src/**/*.test.*`** cobrindo os cenários (`AC-*`) do contrato, devolvendo saída ultra-compacta para o chat.
+2. **Antes de codar (`./aegis verify-contract`):** valida mecanicamente o contrato curto `.harness/runtime/contract.md` (seções obrigatórias, fronteira unificada sobre as raízes de produto sem arquivos fora de `src/` nem diretórios genéricos, regras `hard` de `ARCHITECTURE.md` como `DETERMINISTIC-TIME`, zero `[PENDENTE]`, cenários `Dado / Quando / Então`, existência física de `path:Ln-Lm` e presença do símbolo citado na linha) e grava o selo de integridade `.harness/runtime/contract-verified.json` exigido pelo `./aegis guard-path`.
+3. **Depois da implementação autorizada (`./aegis check`):** vigia **todo o `git status`** (`--porcelain -z -uall`, anti-symlink, origem e destino em renames e *fail-closed* sem git, `contract.md` ou `--allow`) garantindo fronteira estrita nas raízes de produto (bloqueando alterações não autorizadas inclusive em `eslint.config.js`, `tsconfig.json`, `package.json`, `scripts/*` e edição/exclusão de testes alheios), roda `tsc --noEmit`, `eslint` type-aware (incluindo `DETERMINISTIC-TIME`, `only-throw-error`, `no-duplicate-imports`, `no-eval`, `no-explicit-any`), verificações estáticas puras em Node/AST (imports não declarados respeitando `tsconfig.json` `paths` + scanner de segredos hardcoded), executa toda a suíte em `src/**/*.test.*` e **exige casos ativos (`test()`/`it()`/`t.test()`, sem callbacks ou `describe` vazios, comentários, `.skip` nem `{ skip/todo: true }`) nos arquivos de teste adicionados/modificados** cobrindo os cenários (`AC-*` com *word-boundary*) do contrato, devolvendo saída ultra-compacta para o chat.
 
 ---
 
@@ -24,7 +24,7 @@ Em vez de misturar postura do agente, regras de arquitetura do software e comand
 - **Regras do projeto compactas e sempre presentes:** [`ARCHITECTURE.md`](ARCHITECTURE.md) usa formato telegráfico de 1 linha por regra (`- \`ID\` [hard|default]: ...`), pesando ~180 tokens no total para injetar **100%** das restrições do software no `brief.md` sem heurística nem falsos negativos. Regras `hard` impedem violações silenciosas; regras `default` abrem deliberação explícita com o humano quando a demanda pede exceção.
 - **Fim da auto-regulação cega:** diretrizes como *Karpathy* e *PonyTail* melhoram muito o raciocínio do modelo, mas em prompt puro continuam probabilísticas. O harness fecha o ciclo cobrando mecanicamente escopo (`git status`), análise estática (`tsc` + `eslint` + AST) e provas executáveis (`src/**/*.test.*`).
 - **Workflow objetivo para o desenvolvedor:** além de impor limites à IA, o fluxo (`brief` → contrato curto → `check`) estrutura como o dev conduz o agente — trocando tentativa e erro (*vibe coding*) por deliberação explícita de ambiguidades antes do código e liberando a revisão humana do trabalho mecânico para focar apenas em design e lógica de negócio.
-- **Portabilidade entre projetos e IDEs:** [`AGENTS.md`](AGENTS.md) e o CLI funcionam igual em qualquer IDE; para adaptar o Aegis a outro software, basta atualizar as regras do produto em [`ARCHITECTURE.md`](ARCHITECTURE.md) (e opcionalmente [`.harness/config/lexicon.json`](.harness/config/lexicon.json)).
+- **Portabilidade entre projetos e IDEs (em evolução):** [`AGENTS.md`](AGENTS.md) e o CLI operam de forma agnóstica à IDE, separando as regras específicas do produto em [`ARCHITECTURE.md`](ARCHITECTURE.md) (e opcionalmente [`.harness/config/lexicon.json`](.harness/config/lexicon.json)). Hoje o harness ainda roda acoplado ao repositório; a meta de distribuição é empacotá-lo como ferramenta instalável (CLI reutilizável entre repositórios sem copiar `scripts/`).
 
 ---
 
@@ -51,13 +51,13 @@ Em vez de misturar postura do agente, regras de arquitetura do software e comand
 
 ```bash
 # Modo rápido para bugs triviais (trava de escopo em src/ sem precisar de contract.md)
-./aegis check --allow src/risk/velocity_guard.ts
+./aegis check --allow src/meu_modulo.ts
 
 # Exceção humana explícita para arquivo fora de src/ (ex.: migration ou package.json)
 ./aegis check --allow-outside package.json
 
-# Hook de pré-edição para IDEs (exit 0 só se o caminho estiver em src/ e autorizado, ou for contract.md)
-./aegis guard-path src/risk/velocity_guard.ts
+# Hook de pré-edição para IDEs (exit 0 só para contract.md ou caminho em src/ autorizado via --allow ou contract.md já validado por verify-contract)
+./aegis guard-path src/meu_modulo.ts
 
 # Estado, limpeza e ajuda
 ./aegis status          # Estado atual de brief, contract.md e frescor de src/
@@ -101,16 +101,19 @@ Um contrato enxuto de ~1 página contendo:
 ## Scripts NPM
 
 ```bash
-npm test                        # Suíte de testes do Aegis (skeleton, intake, discovery, guard e CLI)
+npm test                        # Suíte de testes isolados do harness (skeleton, intake, discovery, guard e CLI)
 npm run aegis:verify-structure  # tsc + eslint + verificações estáticas AST sobre src/
 npm run aegis:check             # Atalho para ./aegis check
-npm run aegis:bench             # Mede tamanho e latência do brief.md em cenários de referência
 ```
 
-## Notas de Manutenção (Backlog Futuro)
+## Notas de Manutenção e Simplificação Futura (Backlog)
 
-- **Onde não mexer sem evidência real (`source_evidence.mjs`):** [`scripts/lib/source_evidence.mjs`](scripts/lib/source_evidence.mjs) (~860 LOC) concentra a lógica de ranking e janelas AST e passa em todos os testes e benchmarks (`2.8–35.4 ms`). Reescrevê-lo ou recalibrar pesos no escuro traz risco maior que o ganho — só vale revisar após coletar casos reais de falha em um repositório maior (50–300 arquivos).
-- **Novos ajustes de intake/discovery:** manter o harness congelado até o uso em projeto real apontar fricção concreta (ex.: extração de frames de stacktrace em `--issue` ou leitura via `stdin`).
+- **Distribuição instalável (portabilidade):** empacotar o Aegis como CLI instalável (ex.: pacote `npm`/`npx` com `aegis init` e configuração por projeto para runner de testes e raízes de código), eliminando a necessidade de copiar `scripts/`, `aegis` e fundir manualmente `eslint.config.js` em cada repositório.
+- **Poda potencial do motor de ranking (`source_evidence.mjs`, ~860 LOC):** [`scripts/lib/source_evidence.mjs`](scripts/lib/source_evidence.mjs) é o maior arquivo do harness e concentra heurísticas de IDF, stemmer de 4 letras e janelas AST. Após coletar dados reais em um projeto de 50–300 arquivos, avaliar se o ganho de tokens/precisão sobre busca nativa da IDE compensa sua complexidade; se não compensar, substituir por um `brief` muito menor (regras de `ARCHITECTURE.md` + índice/skeleton enxuto) ou manter apenas o núcleo de governança (`verify-contract` + `guard-path` + `check`).
+- **Enxugar `collectDirectCallers` (`brief_renderer.mjs`):** hoje re-parseia via TypeScript AST todos os arquivos observados a cada `./aegis brief` (contornando o cache de `workspace_skeleton.json`). Em repositórios maiores, ou passa a ser cacheado/incremental ou pode ser removido se a IDE/LSP já cobrir navegação de chamadores melhor.
+- **Reavaliar `.harness/config/lexicon.json` e `topography.mjs`:** se o projeto real operar em um único idioma ou sem silêncio léxico recorrente, o léxico manual e o mapa topográfico podem ser removidos sem perda funcional.
+- **Desacoplar runner de testes e `ARCHITECTURE.md`:** permitir configurar o comando de testes do produto (Vitest, Jest, Bun, etc., em vez de fixar `node --import tsx --test`) e, se surgir necessidade real, adicionar diretivas declarativas curtas em `ARCHITECTURE.md` (ex.: `forbid-import`) + regras ESLint nativas (`explicit-module-boundary-types`, bloqueio de `Date()`/`performance.now()`).
+- **Novos ajustes de intake/discovery:** manter o harness congelado até o uso no projeto real apontar fricção concreta (ex.: `tsconfig.json` com `"extends"`, extração de frames de stacktrace em `--issue` ou leitura via `stdin`).
 
 ---
 

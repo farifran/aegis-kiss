@@ -11,7 +11,6 @@
     "aegis:lint": "eslint .",
     "aegis:verify-structure": "npm run aegis:typecheck && npm run aegis:lint && node scripts/aegis_cli.mjs check --skip-diff",
     "aegis:check": "bash aegis check",
-    "aegis:bench": "node scripts/substrates/bench_demands.mjs",
     "aegis:test:workspace-skeleton": "node scripts/substrates/test/test_workspace_skeleton.mjs",
     "aegis:test:issue-intake": "node scripts/substrates/test/test_issue_intake.mjs",
     "aegis:test:discovery-and-cli": "node scripts/substrates/test/test_discovery_and_cli.mjs",

@@ -20,8 +20,7 @@ export default [
       'build/**',
       'scratch/**',
       '.harness/runtime/**',
-      '**/*.test.ts',
-      '**/*.spec.ts',
+      '**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}',
     ],
   },
 

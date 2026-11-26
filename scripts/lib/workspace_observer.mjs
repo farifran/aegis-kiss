@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { TextDecoder } from 'node:util';
 import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
@@ -34,6 +34,7 @@ export function resolveRuntimePaths(root) {
     briefMdPath: resolve(runtimeDir, 'brief.md'),
     briefMetaPath: resolve(runtimeDir, 'brief-meta.json'),
     contractMdPath: resolve(runtimeDir, 'contract.md'),
+    contractVerifiedPath: resolve(runtimeDir, 'contract-verified.json'),
     skeletonJsonPath: resolve(runtimeDir, 'workspace_skeleton.json'),
   };
 }
@@ -63,6 +64,101 @@ export function resolveSourceRoots(repositoryRoot, explicitRoots = null) {
   if (existsSync(resolve(repositoryRoot, 'src'))) return ['src'];
   const detected = fallbackSourceRoots.filter((dir) => existsSync(resolve(repositoryRoot, dir)));
   return detected.length > 0 ? detected : ['src'];
+}
+
+function resolveNearestRealPath(targetPath) {
+  const abs = resolve(targetPath);
+  const missingSegments = [];
+  let current = abs;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) break;
+    missingSegments.unshift(current.slice(parent.endsWith(sep) ? parent.length : parent.length + 1));
+    current = parent;
+  }
+  const base = existsSync(current) ? realpathSync(current) : current;
+  return missingSegments.length > 0 ? resolve(base, ...missingSegments) : base;
+}
+
+export function hasSymlinkComponent(repositoryRoot, relPath) {
+  const parts = relPath.split('/').filter(Boolean);
+  let current = resolve(repositoryRoot);
+  for (const part of parts) {
+    current = resolve(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      break;
+    }
+  }
+  return false;
+}
+
+export function normalizeRepoRelativePath(repositoryRoot, rawPath) {
+  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
+  const trimmed = rawPath.trim();
+  const realRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
+  const rootPrefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+
+  const rawAbs = isAbsolute(trimmed) ? resolve(trimmed) : resolve(repositoryRoot, trimmed);
+  try {
+    if (lstatSync(rawAbs).isSymbolicLink()) return null;
+  } catch {
+    // Arquivo novo ainda inexistente no disco: continua validação nos ancestrais.
+  }
+
+  const realAbs = resolveNearestRealPath(rawAbs);
+  if (realAbs !== realRoot && !realAbs.startsWith(rootPrefix)) {
+    return null;
+  }
+  const rel = relative(realRoot, realAbs);
+  const portable = (sep === '\\' ? rel.replaceAll('\\', '/') : rel).replace(/^\.\//u, '');
+  if (!portable || hasSymlinkComponent(realRoot, portable)) {
+    return null;
+  }
+  return portable;
+}
+
+export function isInsideProductRoots(relPath, sourceRoots) {
+  return sourceRoots.some((root) => relPath === root || relPath.startsWith(`${root}/`));
+}
+
+const productTestSuffixPattern = /\.(?:test|spec)\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
+const productCodeExtensionPattern = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
+
+export function isProductTestPath(relPath) {
+  return productTestSuffixPattern.test(relPath);
+}
+
+function companionProductStem(relPath) {
+  if (!productTestSuffixPattern.test(relPath)) return null;
+  return relPath.replace(productTestSuffixPattern, '');
+}
+
+function productFileStem(relPath) {
+  return relPath.replace(productCodeExtensionPattern, '');
+}
+
+/**
+ * Fonte única de autorização de caminho dentro das raízes de produto:
+ * - match exato com caminho listado em authorizedPaths; ou
+ * - arquivo de teste companheiro (*.test.* / *.spec.*) com mesmo stem de um arquivo de produto autorizado.
+ * Não concede passe-livre para editar/apagar testes alheios.
+ */
+export function isPathCovered(relPath, authorizedPaths) {
+  if (!Array.isArray(authorizedPaths) || authorizedPaths.length === 0) return false;
+  const directMatch = authorizedPaths.some((allowed) => (
+    relPath === allowed
+    || (allowed.endsWith('/') && relPath.startsWith(allowed))
+  ));
+  if (directMatch) return true;
+  const testStem = companionProductStem(relPath);
+  if (!testStem) return false;
+  return authorizedPaths.some((allowed) => (
+    !allowed.endsWith('/')
+    && !isProductTestPath(allowed)
+    && productFileStem(allowed) === testStem
+  ));
 }
 
 export async function writeFileAtomic(target, content) {

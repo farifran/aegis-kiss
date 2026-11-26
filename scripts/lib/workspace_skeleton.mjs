@@ -363,10 +363,18 @@ function hasDisabledTestOption(optionsArg) {
   return false;
 }
 
+function isEmptyCallbackBody(callbackArg) {
+  if (!callbackArg) return true;
+  if (ts.isArrowFunction(callbackArg) || ts.isFunctionExpression(callbackArg)) {
+    return ts.isBlock(callbackArg.body) && callbackArg.body.statements.length === 0;
+  }
+  return false;
+}
+
 /**
  * Extrai casos de teste ativos (`test('...', fn)`, `it('...', fn)`, `t.test('...', fn)`)
- * e títulos de `describe('...', fn)` via AST TypeScript.
- * Ignora comentários, `.skip`/`.todo`, opções `{ skip/todo: truthy }` e chamadas sem callback.
+ * herdando títulos de `describe('...', fn)` apenas quando houver casos ativos dentro.
+ * Ignora comentários, `.skip`/`.todo`, opções `{ skip/todo: truthy }`, callbacks vazios e chamadas sem callback.
  */
 export function extractActiveTestCases(path, text) {
   const ext = extname(path).toLowerCase();
@@ -374,6 +382,7 @@ export function extractActiveTestCases(path, text) {
   const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   let caseCount = 0;
   const titles = [];
+  const describeStack = [];
 
   function visit(node) {
     if (ts.isCallExpression(node)) {
@@ -396,13 +405,22 @@ export function extractActiveTestCases(path, text) {
         const optionsArg = args.length >= 3 && ts.isObjectLiteralExpression(args[1]) ? args[1] : null;
         const callbackArg = optionsArg ? args[2] : (args.length >= 2 && !ts.isObjectLiteralExpression(args[1]) ? args[1] : null);
 
-        if (hasDisabledTestOption(optionsArg) || !callbackArg) {
+        if (hasDisabledTestOption(optionsArg) || !callbackArg || isEmptyCallbackBody(callbackArg)) {
+          return;
+        }
+        const calleeName = isDirectCallee ? expr.text : 'test';
+        if (calleeName === 'describe') {
+          if (hasTitle) describeStack.push(firstArg.text);
+          ts.forEachChild(callbackArg, visit);
+          if (hasTitle) describeStack.pop();
           return;
         }
         if (hasTitle) {
-          const calleeName = isDirectCallee ? expr.text : 'test';
-          if (calleeName === 'test' || calleeName === 'it') caseCount += 1;
-          titles.push(firstArg.text);
+          caseCount += 1;
+          const fullTitle = describeStack.length > 0
+            ? `${describeStack.join(' > ')} > ${firstArg.text}`
+            : firstArg.text;
+          titles.push(fullTitle);
         }
       }
     }

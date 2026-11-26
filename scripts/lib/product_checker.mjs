@@ -7,6 +7,7 @@ import {
   extractAuthorizedPaths,
   extractScenarioIds,
   readSafeContractText,
+  verifyContractMarkdown,
 } from './contract_verifier.mjs';
 import {
   hasSymlinkComponent,
@@ -33,6 +34,14 @@ const secretPatterns = [
   /\bAIza[0-9A-Za-z_-]{35}\b/u,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u,
 ];
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function matchesScenarioId(title, id) {
+  return new RegExp(`(?<![A-Za-z0-9-])${escapeRegex(id)}(?![A-Za-z0-9-])`, 'u').test(title);
+}
 
 function runStep(command, args, cwd, { trimOutput = true } = {}) {
   try {
@@ -158,29 +167,42 @@ function runStaticChecks({ repositoryRoot, existingRoots }) {
 
 function parseGitPorcelainZ(porcelainZOutput) {
   const tokens = porcelainZOutput.split('\0');
-  const paths = [];
+  const entriesByPath = new Map();
+  const upsert = (path, { deleted }) => {
+    const prev = entriesByPath.get(path);
+    entriesByPath.set(path, {
+      path,
+      deleted: prev ? (prev.deleted && deleted) : deleted,
+    });
+  };
+
   for (let i = 0; i < tokens.length; i += 1) {
     const entry = tokens[i];
     if (!entry || entry.length < 4) continue;
     const status = entry.slice(0, 2);
     const firstPath = entry.slice(3);
-    if (firstPath) paths.push(firstPath);
+    if (firstPath) {
+      upsert(firstPath, { deleted: status.includes('D') });
+    }
     if (status.includes('R') || status.includes('C')) {
       const origPath = tokens[i + 1];
-      if (origPath) paths.push(origPath);
+      if (origPath) {
+        upsert(origPath, { deleted: status.includes('R') });
+      }
       i += 1;
     }
   }
-  return [...new Set(paths)];
+  return [...entriesByPath.values()];
 }
 
 /**
- * Vigia TODO o git status do repositório (`--porcelain -z -uall`):
+ * Vigia TODO o git status do repositório (`--porcelain -z -uall`, fail-closed):
  * - Ignora apenas .harness/runtime/ (artefatos transitórios do Aegis).
  * - Valida tanto origem quanto destino em renames/cópias (`R`/`C`).
  * - Qualquer arquivo fora das raízes de produto (padrão: src/) FALHA, salvo
  *   se explicitamente listado pelo humano em --allow-outside.
- * - Dentro das raízes de produto, bloqueia symlinks e exige aderência a --allow ou contract.md (fail-closed).
+ * - Dentro das raízes de produto, bloqueia symlinks, exige aderência a --allow ou contract.md,
+ *   impede edição/exclusão de testes alheios e valida estrutura do contrato quando ativo.
  */
 function checkGitScope({
   repositoryRoot,
@@ -193,7 +215,7 @@ function checkGitScope({
   const normalizedAllow = [];
   for (const raw of allowPaths) {
     const rel = normalizeRepoRelativePath(repositoryRoot, raw);
-    if (!rel || !isInsideProductRoots(rel, sourceRoots)) {
+    if (!rel || !isInsideProductRoots(rel, sourceRoots) || sourceRoots.includes(rel)) {
       violations.push(`--allow inválido fora da fronteira (${sourceRoots.join(', ')}/): ${raw}`);
     } else {
       normalizedAllow.push(rel);
@@ -208,10 +230,12 @@ function checkGitScope({
 
   const gitCheck = runStep('git', ['rev-parse', '--is-inside-work-tree'], repositoryRoot);
   if (!gitCheck.ok) {
+    violations.push('Repositório git ausente ou inacessível; não é possível validar fronteira de escopo (use --skip-diff se intencional).');
     return {
-      skipped: violations.length === 0,
-      ok: violations.length === 0,
+      skipped: false,
+      ok: false,
       changedProductFiles: [],
+      changedTestFiles: [],
       violations,
     };
   }
@@ -223,10 +247,12 @@ function checkGitScope({
     { trimOutput: false },
   );
   if (!statusRes.ok) {
+    violations.push('Falha ao executar git status; não é possível validar fronteira de escopo.');
     return {
-      skipped: violations.length === 0,
-      ok: violations.length === 0,
+      skipped: false,
+      ok: false,
       changedProductFiles: [],
+      changedTestFiles: [],
       violations,
     };
   }
@@ -238,13 +264,14 @@ function checkGitScope({
   const hasContract = contractRead.status === 'OK';
   const authorizedPaths = normalizedAllow.length > 0
     ? normalizedAllow
-    : (hasContract ? extractAuthorizedPaths(contractRead.text, sourceRoots).authorizedPaths : []);
+    : (hasContract ? extractAuthorizedPaths(contractRead.text, sourceRoots, repositoryRoot).authorizedPaths : []);
 
   const changedProductFiles = [];
+  const changedTestFiles = [];
   const changedInProductRoots = [];
-  const changedAll = parseGitPorcelainZ(statusRes.output);
+  const changedEntries = parseGitPorcelainZ(statusRes.output);
 
-  for (const relPath of changedAll) {
+  for (const { path: relPath, deleted } of changedEntries) {
     if (relPath === '.harness/runtime' || relPath.startsWith('.harness/runtime/')) {
       continue;
     }
@@ -259,12 +286,23 @@ function checkGitScope({
       continue;
     }
     changedInProductRoots.push(relPath);
-    if (!isProductTestPath(relPath)) {
+    const absPath = resolve(repositoryRoot, relPath);
+    const isTest = isProductTestPath(relPath);
+    const isDeleted = deleted || !existsSync(absPath);
+
+    if (isTest) {
+      if (!isDeleted) changedTestFiles.push(absPath);
+    } else {
       changedProductFiles.push(relPath);
     }
-    if (authorizedPaths.length > 0 && !isPathCovered(relPath, authorizedPaths)) {
+
+    if (authorizedPaths.length > 0) {
       const sourceLabel = normalizedAllow.length > 0 ? '--allow' : 'contract.md';
-      violations.push(`${relPath} alterado fora dos arquivos autorizados em ${sourceLabel}`);
+      if (!isPathCovered(relPath, authorizedPaths)) {
+        violations.push(`${relPath} alterado fora dos arquivos autorizados em ${sourceLabel}`);
+      } else if (isTest && isDeleted && !authorizedPaths.includes(relPath)) {
+        violations.push(`Exclusão de arquivo de teste não autorizada explicitamente em ${sourceLabel}: ${relPath}`);
+      }
     }
   }
 
@@ -276,10 +314,25 @@ function checkGitScope({
     );
   }
 
+  if (hasContract && normalizedAllow.length === 0 && changedInProductRoots.length > 0) {
+    const structural = verifyContractMarkdown({
+      repositoryRoot,
+      contractPath,
+      sourceRoots,
+      skipFileLineChecks: true,
+    });
+    if (!structural.ok) {
+      for (const err of structural.errors) {
+        violations.push(`Contrato inválido: ${err}`);
+      }
+    }
+  }
+
   return {
     skipped: false,
     ok: violations.length === 0,
     changedProductFiles,
+    changedTestFiles,
     violations,
   };
 }
@@ -293,14 +346,26 @@ function compactErrorLines(rawOutput, maxLines = 15) {
   return [...lines.slice(0, maxLines), `... (+${lines.length - maxLines} linhas omitidas)`];
 }
 
+function inspectTestFiles(testPaths) {
+  let declaredTestCases = 0;
+  const activeTestTitles = [];
+  for (const testFile of testPaths) {
+    const content = readFileSync(testFile, 'utf8');
+    const extracted = extractActiveTestCases(testFile, content);
+    declaredTestCases += extracted.caseCount;
+    activeTestTitles.push(...extracted.titles);
+  }
+  return { declaredTestCases, activeTestTitles };
+}
+
 /**
  * Executa a verificação mecânica pós-implementação (0 tokens):
- * 1. Escopo git completo (bloqueia symlinks e qualquer alteração fora de src/ + fora do contrato/--allow)
+ * 1. Escopo git completo (fail-closed, bloqueia symlinks, fora da fronteira, testes alheios e contrato inválido)
  * 2. tsc --noEmit (se houver TS em raízes de produto)
  * 3. eslint sobre raízes de produto (inclui regras estruturais e DETERMINISTIC-TIME)
  * 4. static_checks (AST undeclared imports respeitando tsconfig paths + segredos hardcoded)
- * 5. Testes reais de produto (obrigatórios quando há contract.md + edição em produto,
- *    com checagem AST de casos ativos e IDs AC-*)
+ * 5. Testes reais de produto (executa toda a suíte e exige cobertura AST + AC-* com word-boundary
+ *    nos arquivos de teste adicionados/modificados nesta tarefa)
  */
 export function runProductCheck({
   repositoryRoot,
@@ -317,6 +382,7 @@ export function runProductCheck({
 
   // 1. Escopo git completo
   let changedProductFiles = [];
+  let changedTestFiles = [];
   if (!skipDiff) {
     const scope = checkGitScope({
       repositoryRoot,
@@ -326,6 +392,7 @@ export function runProductCheck({
       allowOutsidePaths,
     });
     changedProductFiles = scope.changedProductFiles;
+    changedTestFiles = scope.changedTestFiles;
     if (!scope.skipped) {
       results.push({
         name: 'scope',
@@ -344,7 +411,7 @@ export function runProductCheck({
   const productTests = [];
   for (const rootRel of existingRoots) {
     const absRoot = resolve(repositoryRoot, rootRel);
-    collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx)$/u.test(f) && !isProductTestPath(f), tsFiles);
+    collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx|mts|cts)$/u.test(f) && !isProductTestPath(f), tsFiles);
     collectFilesMatching(absRoot, (f) => /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/u.test(f) && !isProductTestPath(f), lintableFiles);
     collectFilesMatching(absRoot, (f) => isProductTestPath(f), productTests);
   }
@@ -386,7 +453,7 @@ export function runProductCheck({
     });
   }
 
-  // 5. Testes reais de produto + amarração AST com cenários do contract.md
+  // 5. Testes reais de produto + amarração AST escopada aos testes modificados
   const contractRead = readSafeContractText(contractPath);
   const hasContract = contractRead.status === 'OK';
   const enforceContractTests = hasContract && allowPaths.length === 0 && changedProductFiles.length > 0;
@@ -406,38 +473,55 @@ export function runProductCheck({
       });
     }
   } else {
-    const hasTsTests = productTests.some((f) => /\.tsx?$/u.test(f));
+    const hasTsTests = productTests.some((f) => /\.(?:ts|tsx|mts|cts)$/u.test(f));
     const args = hasTsTests
       ? ['--import', 'tsx', '--test', ...productTests]
       : ['--test', ...productTests];
     const res = runStep('node', args, repositoryRoot);
 
-    let declaredTestCases = 0;
-    const activeTestTitles = [];
-    for (const testFile of productTests) {
-      const content = readFileSync(testFile, 'utf8');
-      const extracted = extractActiveTestCases(testFile, content);
-      declaredTestCases += extracted.caseCount;
-      activeTestTitles.push(...extracted.titles);
-    }
-
+    const allSuiteStats = inspectTestFiles(productTests);
     const coverageFailures = [];
+
     if (hasContract && allowPaths.length === 0) {
       const contractMd = contractRead.text;
       const scenarios = countContractScenarios(contractMd);
       const scenarioIds = extractScenarioIds(contractMd);
 
-      if (scenarios > 0 && declaredTestCases < scenarios) {
-        const msg = `contract.md define ${scenarios} cenário(s), mas apenas ${declaredTestCases} caso(s) ativos test()/it() foram encontrados`;
-        if (enforceContractTests) coverageFailures.push(msg);
-        else warnings.push(`Cobertura de cenários: ${msg}`);
-      }
-
-      const missingIds = scenarioIds.filter((id) => !activeTestTitles.some((title) => title.includes(id)));
-      if (missingIds.length > 0) {
-        const msg = `Cenários do contract.md ausentes nos títulos de test()/it()/describe() ativos: ${missingIds.join(', ')}`;
-        if (enforceContractTests) coverageFailures.push(msg);
-        else warnings.push(msg);
+      if (enforceContractTests) {
+        if (changedTestFiles.length === 0) {
+          coverageFailures.push(
+            `contract.md ativo com ${changedProductFiles.length} arquivo(s) de produto alterado(s), mas nenhum arquivo de teste (*.test.*/*.spec.*) foi adicionado ou modificado nesta alteração.`,
+          );
+        } else {
+          const changedStats = inspectTestFiles(changedTestFiles);
+          if (scenarios > 0 && changedStats.declaredTestCases < scenarios) {
+            coverageFailures.push(
+              `contract.md define ${scenarios} cenário(s), mas apenas ${changedStats.declaredTestCases} caso(s) ativos test()/it() foram encontrados nos arquivos de teste modificados`,
+            );
+          }
+          const missingIds = scenarioIds.filter(
+            (id) => !changedStats.activeTestTitles.some((title) => matchesScenarioId(title, id)),
+          );
+          if (missingIds.length > 0) {
+            coverageFailures.push(
+              `Cenários do contract.md ausentes nos títulos de test()/it() ativos dos testes modificados: ${missingIds.join(', ')}`,
+            );
+          }
+        }
+      } else {
+        if (scenarios > 0 && allSuiteStats.declaredTestCases < scenarios) {
+          warnings.push(
+            `Cobertura de cenários: contract.md define ${scenarios} cenário(s), mas apenas ${allSuiteStats.declaredTestCases} caso(s) ativos test()/it() foram encontrados`,
+          );
+        }
+        const missingIds = scenarioIds.filter(
+          (id) => !allSuiteStats.activeTestTitles.some((title) => matchesScenarioId(title, id)),
+        );
+        if (missingIds.length > 0) {
+          warnings.push(
+            `Cenários do contract.md ausentes nos títulos de test()/it() ativos: ${missingIds.join(', ')}`,
+          );
+        }
       }
     }
 
@@ -446,7 +530,7 @@ export function runProductCheck({
       name: 'product_tests',
       ok,
       summary: ok
-        ? `${productTests.length} arquivo(s), ${declaredTestCases} caso(s) PASS`
+        ? `${productTests.length} arquivo(s), ${allSuiteStats.declaredTestCases} caso(s) PASS`
         : (res.ok ? 'cobertura de contrato incompleta' : 'falha nos testes de produto'),
       details: [
         ...(res.ok ? [] : compactErrorLines(res.output, 20)),

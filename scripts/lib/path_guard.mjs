@@ -1,88 +1,46 @@
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { extractAuthorizedPaths, readSafeContractText } from './contract_verifier.mjs';
-import { resolveSourceRoots } from './workspace_observer.mjs';
+import { dirname, resolve } from 'node:path';
+import {
+  computeContractDigest,
+  readContractVerificationStamp,
+  readSafeContractText,
+  verifyContractMarkdown,
+} from './contract_verifier.mjs';
+import {
+  hasSymlinkComponent,
+  isInsideProductRoots,
+  isPathCovered,
+  isProductTestPath,
+  normalizeRepoRelativePath,
+  resolveSourceRoots,
+} from './workspace_observer.mjs';
 
-function resolveNearestRealPath(targetPath) {
-  const abs = resolve(targetPath);
-  const missingSegments = [];
-  let current = abs;
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) break;
-    missingSegments.unshift(current.slice(parent.endsWith(sep) ? parent.length : parent.length + 1));
-    current = parent;
-  }
-  const base = existsSync(current) ? realpathSync(current) : current;
-  return missingSegments.length > 0 ? resolve(base, ...missingSegments) : base;
-}
+export {
+  hasSymlinkComponent,
+  isInsideProductRoots,
+  isPathCovered,
+  isProductTestPath,
+  normalizeRepoRelativePath,
+};
 
-export function hasSymlinkComponent(repositoryRoot, relPath) {
-  const parts = relPath.split('/').filter(Boolean);
-  let current = resolve(repositoryRoot);
-  for (const part of parts) {
-    current = resolve(current, part);
-    try {
-      if (lstatSync(current).isSymbolicLink()) return true;
-    } catch {
-      break;
-    }
-  }
-  return false;
-}
-
-export function normalizeRepoRelativePath(repositoryRoot, rawPath) {
-  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
-  const trimmed = rawPath.trim();
-  const realRoot = existsSync(repositoryRoot) ? realpathSync(repositoryRoot) : resolve(repositoryRoot);
-  const rootPrefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
-
-  const rawAbs = isAbsolute(trimmed) ? resolve(trimmed) : resolve(repositoryRoot, trimmed);
-  try {
-    if (lstatSync(rawAbs).isSymbolicLink()) return null;
-  } catch {
-    // Arquivo novo ainda inexistente no disco: continua validação nos ancestrais.
-  }
-
-  const realAbs = resolveNearestRealPath(rawAbs);
-  if (realAbs !== realRoot && !realAbs.startsWith(rootPrefix)) {
-    return null;
-  }
-  const rel = relative(realRoot, realAbs);
-  const portable = (sep === '\\' ? rel.replaceAll('\\', '/') : rel).replace(/^\.\//u, '');
-  if (!portable || hasSymlinkComponent(realRoot, portable)) {
-    return null;
-  }
-  return portable;
-}
-
-export function isInsideProductRoots(relPath, sourceRoots) {
-  return sourceRoots.some((root) => relPath === root || relPath.startsWith(`${root}/`));
-}
-
-export function isProductTestPath(relPath) {
-  return /\.(?:test|spec)\.(?:ts|tsx|mts|cts|js|mjs)$/u.test(relPath);
-}
-
-export function isPathCovered(relPath, authorizedPaths) {
-  if (!Array.isArray(authorizedPaths) || authorizedPaths.length === 0) return false;
-  if (isProductTestPath(relPath)) return true;
-  return authorizedPaths.some((allowed) => (
-    relPath === allowed
-    || (allowed.endsWith('/') && relPath.startsWith(allowed))
-  ));
+function sameRoots(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((item, idx) => item === right[idx]);
 }
 
 /**
  * Avalia se um caminho pode ser editado pela IA em modo produto (para hooks de IDE).
  * Falha fechado (fail-closed): permite apenas
  *  - .harness/runtime/contract.md (para redigir o contrato)
- *  - arquivos dentro de src/ (ou AEGIS_SRC_DIRS) explicitamente cobertos por --allow ou contract.md
+ *  - arquivos dentro de src/ (ou AEGIS_SRC_DIRS) explicitamente cobertos por --allow ou
+ *    por um contract.md validado via ./aegis verify-contract (selo de digest válido + fronteira íntegra).
  */
 export function evaluateGuardPath({
   repositoryRoot,
   targetPath,
   contractPath,
+  contractVerifiedPath = null,
   allowPaths = [],
   sourceRoots = null,
 }) {
@@ -116,7 +74,7 @@ export function evaluateGuardPath({
     const normalizedAllow = [];
     for (const raw of allowPaths) {
       const normalized = normalizeRepoRelativePath(repositoryRoot, raw);
-      if (!normalized || !isInsideProductRoots(normalized, roots)) {
+      if (!normalized || !isInsideProductRoots(normalized, roots) || roots.includes(normalized)) {
         return {
           allowed: false,
           path: relPath,
@@ -159,7 +117,33 @@ export function evaluateGuardPath({
     };
   }
 
-  const { authorizedPaths } = extractAuthorizedPaths(contractRead.text, roots);
+  const stampPath = contractVerifiedPath ?? resolve(dirname(contractPath), 'contract-verified.json');
+  const stamp = readContractVerificationStamp(stampPath);
+  const currentDigest = computeContractDigest(contractRead.text);
+  if (!stamp || stamp.contractDigest !== currentDigest || !sameRoots(stamp.sourceRoots, roots)) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: 'contract.md ainda não foi validado (ou foi alterado após validação); rode ./aegis verify-contract antes de editar arquivos de produto.',
+    };
+  }
+
+  // Revalidação estrutural sem depender de números de linha (que podem deslocar durante a edição de src/)
+  const structural = verifyContractMarkdown({
+    repositoryRoot,
+    contractPath,
+    sourceRoots: roots,
+    skipFileLineChecks: true,
+  });
+  if (!structural.ok) {
+    return {
+      allowed: false,
+      path: relPath,
+      reason: `contract.md inválido: ${structural.errors[0]}`,
+    };
+  }
+
+  const { authorizedPaths } = structural;
   if (authorizedPaths.length === 0) {
     return {
       allowed: false,
@@ -175,5 +159,5 @@ export function evaluateGuardPath({
     };
   }
 
-  return { allowed: true, path: relPath, reason: 'Autorizado via contract.md.' };
+  return { allowed: true, path: relPath, reason: 'Autorizado via contract.md validado.' };
 }

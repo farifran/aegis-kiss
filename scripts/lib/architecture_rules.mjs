@@ -14,8 +14,23 @@ export function loadArchitectureRules(repositoryRoot) {
   if (!existsSync(archPath)) return [];
 
   const rules = [];
-  const lines = readFileSync(archPath, 'utf8').replace(/\r\n?/gu, '\n').split('\n');
+  const withoutComments = readFileSync(archPath, 'utf8')
+    .replace(/\r\n?/gu, '\n')
+    .replace(/<!--[\s\S]*?-->/gu, '');
+  const lines = withoutComments.split('\n');
+  let activeFence = null;
   for (const line of lines) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/u);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!activeFence) {
+        activeFence = { marker, length: fenceMatch[1].length };
+      } else if (marker === activeFence.marker && fenceMatch[1].length >= activeFence.length) {
+        activeFence = null;
+      }
+      continue;
+    }
+    if (activeFence) continue;
     const match = line.match(bulletRulePattern);
     if (!match) continue;
     rules.push({
