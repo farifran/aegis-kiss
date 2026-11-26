@@ -223,6 +223,78 @@ try {
     }
   }
 
+  // 1c. Nome de arquivo nu (sem /), remoção de comentários no ranking, nextCandidates e supressão de topografia (>= 4 arquivos)
+  {
+    const rankTemp = mkdtempSync(resolve(tmpdir(), 'aegis-rank-test-'));
+    try {
+      mkdirSync(resolve(rankTemp, 'src/core'), { recursive: true });
+      mkdirSync(resolve(rankTemp, 'src/aux'), { recursive: true });
+      writeFileSync(resolve(rankTemp, 'src/core/decoy_comment.ts'), [
+        '// quantumFluxReconciler apenas comentado em prosa',
+        '/* quantumFluxReconciler também só em bloco de comentário */',
+        'export const DECOY_VALUE = 1;',
+      ].join('\n'));
+      writeFileSync(resolve(rankTemp, 'src/core/reconciler.ts'), [
+        'export function quantumFluxReconciler(amount: number): number {',
+        '  return amount * 2;',
+        '}',
+      ].join('\n'));
+      for (let i = 1; i <= 8; i += 1) {
+        writeFileSync(
+          resolve(rankTemp, `src/aux/peer_${i}.ts`),
+          `export function auxBatchWorker_${i}(v: number): number { return v + ${i}; }\n`,
+        );
+      }
+      writeFileSync(
+        resolve(rankTemp, 'src/aux/archive_pad.ts'),
+        Array.from({ length: 1400 }, (_, i) => `export const ARCHIVE_PAD_${i} = ${i};`).join('\n'),
+      );
+
+      const obs = observeWorkspace(rankTemp);
+      const briefComment = buildDemandBrief({
+        repositoryRoot: rankTemp,
+        intent: 'Corrigir quantumFluxReconciler na reconciliação',
+        workspaceObservation: obs,
+      });
+      assert.equal(briefComment.sourceEvidence[0]?.path, 'src/core/reconciler.ts');
+      assert.equal(briefComment.coverage.excerptedPaths.includes('src/core/decoy_comment.ts'), false);
+
+      const briefBareFile = buildDemandBrief({
+        repositoryRoot: rankTemp,
+        intent: 'Revisar comportamento de reconciler.ts para valores negativos',
+        workspaceObservation: obs,
+      });
+      assert.ok(briefBareFile.coverage.excerptedPaths.includes('src/core/reconciler.ts'));
+      assert.ok(Array.isArray(briefBareFile.coverage.nextCandidates));
+
+      const bigMultiFileDiscovery = {
+        status: 'SOURCE_OBSERVED',
+        files: Array.from({ length: 6 }, (_, i) => ({ path: `src/aux/peer_${i + 1}.ts`, bytes: 20_000, kind: 'UTF8_TEXT' })),
+        workspaceSkeleton: {
+          symbolCount: 6,
+          symbols: Array.from({ length: 6 }, (_, i) => ({ path: `src/aux/peer_${i + 1}.ts`, name: `auxBatchWorker_${i + 1}` })),
+        },
+      };
+      assert.equal(
+        shouldShowTopography({
+          intent: 'Ajustar comportamento obscuro sem match léxico direto no texto',
+          discovery: bigMultiFileDiscovery,
+          sourceEvidence: [
+            { path: 'src/aux/peer_1.ts', selection: 'FULL_FILE', content: 'export const a = 1;' },
+            { path: 'src/aux/peer_2.ts', selection: 'FULL_FILE', content: 'export const b = 2;' },
+            { path: 'src/aux/peer_3.ts', selection: 'FULL_FILE', content: 'export const c = 3;' },
+            { path: 'src/aux/peer_4.ts', selection: 'FULL_FILE', content: 'export const d = 4;' },
+          ],
+        }),
+        false,
+        'Topography must be suppressed when >= 4 distinct non-fallback files are excerpted',
+      );
+      process.stdout.write('  PASS: Bare filename detection, comment stripping, and >=4-file topography suppression verified\n');
+    } finally {
+      rmSync(rankTemp, { recursive: true, force: true });
+    }
+  }
+
   // 2. Demanda greenfield mantém brief compacto sem arrastar src/ inteiro
   {
     const observation = observeWorkspace(fixtureDir);
@@ -364,6 +436,53 @@ try {
       ].join('\n'));
       const goodClockRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockGood });
       assert.equal(goodClockRes.ok, true, `Expected good contract to pass, got: ${goodClockRes.errors.join('; ')}`);
+
+      // Regressão A/B C3-B: verbos de remoção ("eliminar", "eliminando", "nunca") contam como negação
+      const clockEliminate = resolve(archTemp, 'eliminate-clock.md');
+      writeFileSync(clockEliminate, [
+        '# Contrato',
+        '## Escopo',
+        '- Receber `targetDate` explícito e eliminar `new Date()` sem argumentos em `calc`.',
+        '- Nunca chamar `Date.now()` dentro da regra pura.',
+        '## Arquivos',
+        '- `src/clock.ts` [novo]',
+        '## Casos de prova',
+        '- Dado: a\n- Quando: b\n- Então: c',
+        '- Dado: d\n- Quando: e\n- Então: f',
+      ].join('\n'));
+      const eliminateRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockEliminate });
+      assert.equal(eliminateRes.ok, true, `Expected 'eliminar'/'nunca' negation to pass, got: ${eliminateRes.errors.join('; ')}`);
+
+      // Regressão A/B C2-A: rótulos Dado/Quando/Então entre crases ou negrito são cenários válidos
+      const backtickCases = resolve(archTemp, 'backtick-cases.md');
+      writeFileSync(backtickCases, [
+        '# Contrato',
+        '## Escopo',
+        '- Receber `nowMs` explícito.',
+        '## Arquivos',
+        '- `src/clock.ts` [novo]',
+        '## Casos de prova',
+        '- **AC-1:**\n  - `Dado:` a\n  - `Quando:` b\n  - `Então:` c',
+        '- **AC-2:**\n  - **Dado**: d\n  - **Quando**: e\n  - **Então**: f',
+      ].join('\n'));
+      const backtickRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: backtickCases });
+      assert.equal(backtickRes.ok, true, `Expected backticked/bold scenario labels to pass, got: ${backtickRes.errors.join('; ')}`);
+      assert.equal(backtickRes.scenarioCount, 2);
+
+      // A negação continua restrita ao trecho anterior: uso afirmativo segue bloqueado
+      const clockStillBad = resolve(archTemp, 'still-bad-clock.md');
+      writeFileSync(clockStillBad, [
+        '# Contrato',
+        '## Escopo',
+        '- Calcular expiração com `Date.now()`; eliminar cache antigo depois.',
+        '## Arquivos',
+        '- `src/clock.ts` [novo]',
+        '## Casos de prova',
+        '- Dado: a\n- Quando: b\n- Então: c',
+        '- Dado: d\n- Quando: e\n- Então: f',
+      ].join('\n'));
+      const stillBadRes = verifyContractMarkdown({ repositoryRoot: archTemp, contractPath: clockStillBad });
+      assert.equal(stillBadRes.ok, false, 'Expected affirmative Date.now() usage to keep failing');
 
       cpSync(resolve(rootDir, 'package.json'), resolve(archTemp, 'package.json'));
       cpSync(resolve(rootDir, 'tsconfig.json'), resolve(archTemp, 'tsconfig.json'));
@@ -509,7 +628,38 @@ try {
     const emptyFilesRes = verifyContractMarkdown({ repositoryRoot: fixtureDir, contractPath: emptyFilesContract });
     assert.equal(emptyFilesRes.ok, false);
     assert.ok(emptyFilesRes.errors.some((e) => e.includes('não declara nenhum caminho autorizado')));
-    process.stdout.write('  PASS: verify-contract enforces unified boundary, lines, symbols, non-empty targets, and scenarios\n');
+
+    // Regressão A/B (C1-B/C2-B/C5-A): sub-faixa dentro do corpo AST do símbolo é aceita; fora do span AST falha
+    const astSubRangeGood = resolve(fixtureDir, '.harness/runtime/ast-subrange-good.md');
+    writeFileSync(astSubRangeGood, [
+      '# Contrato com sub-faixa AST válida',
+      '## Escopo',
+      '- Ajustar verificação de limite em `evaluateSettlementGuards` (`src/risk/velocity_guard.ts:L14-L16`).',
+      '## Arquivos',
+      '- `src/risk/velocity_guard.ts`',
+      '## Casos de prova',
+      '- Dado: conta congelada\n- Quando: avalia\n- Então: rejeita',
+      '- Dado: valor acima do limite\n- Quando: avalia\n- Então: rejeita',
+    ].join('\n'));
+    const astGoodRes = verifyContractMarkdown({ repositoryRoot: fixtureDir, contractPath: astSubRangeGood });
+    assert.equal(astGoodRes.ok, true, `Expected AST sub-range inside symbol body to pass, got: ${astGoodRes.errors.join('; ')}`);
+
+    const astSubRangeBad = resolve(fixtureDir, '.harness/runtime/ast-subrange-bad.md');
+    writeFileSync(astSubRangeBad, [
+      '# Contrato com sub-faixa fora do corpo AST',
+      '## Escopo',
+      '- Referência errada em `evaluateSettlementGuards` (`src/risk/velocity_guard.ts:L3-L5`).',
+      '## Arquivos',
+      '- `src/risk/velocity_guard.ts`',
+      '## Casos de prova',
+      '- Dado: a\n- Quando: b\n- Então: c',
+      '- Dado: d\n- Quando: e\n- Então: f',
+    ].join('\n'));
+    const astBadRes = verifyContractMarkdown({ repositoryRoot: fixtureDir, contractPath: astSubRangeBad });
+    assert.equal(astBadRes.ok, false, 'Expected symbol citation outside its AST span to fail');
+    assert.ok(astBadRes.errors.some((e) => e.includes("Símbolo 'evaluateSettlementGuards' não encontrado")));
+
+    process.stdout.write('  PASS: verify-contract enforces unified boundary, lines, AST symbol sub-ranges, non-empty targets, and scenarios\n');
   }
 
   // 6. Fluxo CLI ponta a ponta: stamp obrigatório no guard-path, testes escopados + anti-exclusão + word-boundary AC-*

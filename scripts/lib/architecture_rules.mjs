@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const bulletRulePattern = /^\s*[-*]\s+(?:`|\*\*)?([A-Z][A-Z0-9_-]+)(?:`|\*\*)?\s*[([]\s*(hard|default)\s*[)\]]\s*(?:\[\s*forbid\s*:\s*([^\]]+)\])?\s*:\s*(.+)$/iu;
 const outOfScopePrefixPattern = /\b(?:fora do escopo|out of scope|podad[oa]\s+por\s+kiss|exce[cç][aã]o aprovada)\b/iu;
-const negationBeforeTokenPattern = /\b(?:proibid[oa]|proibi[cç][aã]o|vedad[oa]|n[aã]o\s+usar|n[aã]o\s+acoplar|sem|rejeitar|rejeitad[oa]s?|remover|evitar|substituir)\b/iu;
+const negationBeforeTokenPattern = /\b(?:proibid[oa]s?|proibi[cç][aã]o|vedad[oa]s?|n[aã]o\s+(?:usar|acoplar|chamar|introduzir)|nunca|sem|rejeitar|rejeitad[oa]s?|remov(?:er|endo|id[oa]s?)|elimin(?:ar|ando|ad[oa]s?)|evitar|evitando|substitu(?:ir|indo|id[oa]s?))\b/iu;
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');

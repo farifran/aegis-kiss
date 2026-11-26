@@ -10,6 +10,7 @@ import {
   resolveSourceRoots,
   writeFileAtomic,
 } from './workspace_observer.mjs';
+import { extractFileSymbols } from './workspace_skeleton.mjs';
 
 const forbiddenPathPattern = /(?:\/etc\/|\/proc\/|\/sys\/|~\/|\.\.\/)/u;
 const outOfScopeLinePattern = /^\s*[-*]?\s*(?:\*\*)?(?:fora do escopo|out of scope)\b/iu;
@@ -80,10 +81,21 @@ export function readContractVerificationStamp(stampPath) {
   }
 }
 
+// Aceita rótulos em texto puro, negrito ou código: `Dado:`, **Dado:**, **Dado**:, `Dado`:.
+function scenarioLabelPattern(labels, allowQue = false) {
+  const wrap = '(?:\\*\\*|`)?';
+  const tail = allowQue ? `(?:${wrap}:${wrap}|\\s+que\\b)` : `${wrap}:${wrap}`;
+  return new RegExp(`(?:^|\\n)\\s*(?:[-*]|\\d+\\.)?\\s*${wrap}(?:${labels})${tail}`, 'giu');
+}
+
+const givenLabelPattern = scenarioLabelPattern('Dado|Given', true);
+const whenLabelPattern = scenarioLabelPattern('Quando|When');
+const thenLabelPattern = scenarioLabelPattern('Ent[aã]o|Then');
+
 export function countContractScenarios(markdown) {
-  const givenCount = (markdown.match(/(?:^|\n)\s*(?:[-*]|\d+\.)?\s*(?:\*\*)?(?:Dado|Given)(?:\*\*)?(?::|\s+que\b)/giu) ?? []).length;
-  const whenCount = (markdown.match(/(?:^|\n)\s*(?:[-*]|\d+\.)?\s*(?:\*\*)?(?:Quando|When)(?:\*\*)?:/giu) ?? []).length;
-  const thenCount = (markdown.match(/(?:^|\n)\s*(?:[-*]|\d+\.)?\s*(?:\*\*)?(?:Ent[aã]o|Then)(?:\*\*)?:/giu) ?? []).length;
+  const givenCount = (markdown.match(givenLabelPattern) ?? []).length;
+  const whenCount = (markdown.match(whenLabelPattern) ?? []).length;
+  const thenCount = (markdown.match(thenLabelPattern) ?? []).length;
   return Math.min(givenCount, whenCount, thenCount);
 }
 
@@ -339,6 +351,7 @@ export function verifyContractMarkdown({
   if (!skipFileLineChecks) {
     const newPathSet = new Set(newPaths);
     const lineCache = new Map();
+    const symbolCache = new Map();
     const refRootAlt = buildRootPrefixAlternation([...effectiveRoots, 'src', 'app', 'lib']);
     const srcRefPattern = new RegExp(`\\b((?:${refRootAlt})\\/[A-Za-z0-9_./-]+)(?::L?(\\d+)(?:-L?(\\d+))?)?`, 'gu');
     const bareRootSet = new Set([...effectiveRoots, 'src', 'app', 'lib'].map((r) => `${r}/`));
@@ -398,7 +411,15 @@ export function verifyContractMarkdown({
               const escaped = escapeRegex(symbolName);
               const symRe = new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`, 'u');
               if (!symRe.test(sliceText)) {
-                errors.push(`Símbolo '${symbolName}' não encontrado em ${refPath}:L${startLine}${match[3] ? `-L${endLine}` : ''} (contract.md:L${i + 1})`);
+                if (!symbolCache.has(refPath)) {
+                  symbolCache.set(refPath, extractFileSymbols(refPath, fileLines.join('\n')));
+                }
+                const insideAstSpan = symbolCache.get(refPath).some((s) =>
+                  s.name === symbolName && s.startLine <= startLine && endLine <= (s.endLine ?? s.startLine),
+                );
+                if (!insideAstSpan) {
+                  errors.push(`Símbolo '${symbolName}' não encontrado em ${refPath}:L${startLine}${match[3] ? `-L${endLine}` : ''} (contract.md:L${i + 1})`);
+                }
               }
             }
           }

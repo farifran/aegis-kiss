@@ -117,7 +117,7 @@ function collectOneHopImportSignatures({
   sourceBytesByPath,
   workspaceSkeleton,
   fullSourcePaths,
-  maxSignatures = 20,
+  maxSignatures = 12,
 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const observedSet = new Set(observedTextPaths);
@@ -173,8 +173,8 @@ function collectDirectCallers({
   observedTextPaths,
   sourceBytesByPath,
   workspaceSkeleton,
-  maxSymbols = 20,
-  maxLocationsPerSymbol = 5,
+  maxSymbols = 12,
+  maxLocationsPerSymbol = 4,
 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const selectedNonEntry = new Set(
@@ -247,21 +247,21 @@ export function buildDemandBrief({
 
   let precomputedIdf = null;
   if (discovery.workspaceSkeleton?.symbols) {
-    const { words, stems } = tokenizeIntent(intent);
+    const { words } = tokenizeIntent(intent);
     precomputedIdf = computeSymbolIdfWeights(
       discovery.workspaceSkeleton.symbols,
       words,
-      stems,
       domainAliases,
     );
   }
 
+  const rankedCandidatesOut = [];
   const sourceEvidence = buildSourceEvidence(
     repositoryRoot,
     { intent, discovery },
     workspaceObservation,
     explicitTargetPaths,
-    { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf },
+    { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf, rankedCandidatesOut },
   );
 
   const fullSourcePaths = new Set(
@@ -275,13 +275,13 @@ export function buildDemandBrief({
     && targetPrefixes.size === 0
     && isFallbackOnlyEvidence(sourceEvidence);
 
-  // Melhoria #1: não duplicar na Seção 3 símbolos de arquivos já incluídos inteiros na Seção 4.
+  // Melhoria #1: não duplicar na Seção 3 símbolos de arquivos já incluídos inteiros na Seção 4 (enxuto: até 12 símbolos).
   const prioritizedSkeleton = discovery.workspaceSkeleton && !hasGreenfieldOnlyEntrypoints
     ? prioritizeWorkspaceSkeleton(
       discovery.workspaceSkeleton,
       intent,
       entrypoints,
-      30,
+      12,
       domainAliases,
       targetPrefixes,
       precomputedIdf,
@@ -348,6 +348,7 @@ export function buildDemandBrief({
       truncatedPaths,
       referencedPathsNotDiscovered,
       pathsWithoutExcerpt,
+      nextCandidates: rankedCandidatesOut,
       ignoredCount: (discovery.ignoredEntries ?? []).length,
     },
     skeletonSymbols: externalOrTruncatedSymbols,
@@ -415,10 +416,12 @@ export function renderBriefMarkdown(brief) {
   if (brief.coverage.referencedPathsNotDiscovered.length > 0) {
     lines.push(`- **Citados na demanda mas ausentes no código:** ${brief.coverage.referencedPathsNotDiscovered.map((p) => `\`${p}\``).join(', ')} *(arquivo novo ou caminho inexistente)*`);
   }
-  if (brief.coverage.pathsWithoutExcerpt.length > 0) {
-    const shown = brief.coverage.pathsWithoutExcerpt.slice(0, 20).map((p) => `\`${p}\``).join(', ');
-    const extra = brief.coverage.pathsWithoutExcerpt.length > 20
-      ? ` (+${brief.coverage.pathsWithoutExcerpt.length - 20})`
+  if (brief.coverage.nextCandidates?.length > 0) {
+    lines.push(`- **Candidatos próximos fora dos trechos (${brief.coverage.nextCandidates.length}):** ${brief.coverage.nextCandidates.map((p) => `\`${p}\``).join(', ')}`);
+  } else if (brief.coverage.pathsWithoutExcerpt.length > 0) {
+    const shown = brief.coverage.pathsWithoutExcerpt.slice(0, 12).map((p) => `\`${p}\``).join(', ');
+    const extra = brief.coverage.pathsWithoutExcerpt.length > 12
+      ? ` (+${brief.coverage.pathsWithoutExcerpt.length - 12})`
       : '';
     lines.push(`- **Fora deste brief (${brief.coverage.pathsWithoutExcerpt.length}):** ${shown}${extra}`);
   }
@@ -427,7 +430,7 @@ export function renderBriefMarkdown(brief) {
   if (brief.directImports.length > 0) {
     lines.push(`## Dependências diretas (1 salto — ${brief.directImports.length})`);
     for (const sym of brief.directImports) {
-      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 180);
+      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 130);
       lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${sym.kind}] \`${compactSig}\``);
     }
     lines.push('');
@@ -445,7 +448,7 @@ export function renderBriefMarkdown(brief) {
     lines.push(`## 3. Símbolos AST fora do código integral (${brief.skeletonSymbols.length})`);
     for (const sym of brief.skeletonSymbols) {
       const exp = sym.exported ? 'export ' : '';
-      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 180);
+      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 130);
       lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${exp}${sym.kind}] \`${compactSig}\``);
     }
     lines.push('');

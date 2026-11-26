@@ -30,6 +30,10 @@ export function shouldShowTopography({
 
   if (isFallbackOnlyEvidence(sourceEvidence)) return true;
 
+  // Se o discovery já selecionou >= 4 arquivos distintos relevantes, não há silêncio léxico.
+  const distinctEvidenceFiles = new Set(sourceEvidence.map((e) => e.path)).size;
+  if (distinctEvidenceFiles >= 4) return false;
+
   const intentWords = stripDiacritics(intent)
     .split(/[^a-z0-9_$-]+/i)
     .filter((w) => w.length >= 4);
