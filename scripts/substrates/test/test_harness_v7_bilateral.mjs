@@ -2654,4 +2654,104 @@ console.log('[AEGIS][TEST] Starting HARNESS v7 & Six-Hats Bilateral test suite..
   }
 }
 
+// 23. Fase 10 KISS: --clarify ergonomics for EARLY_CLARIFICATION (bilateral positive + negative + canonical ordering)
+{
+  const { dir } = makeTempWorkspace('Proteger processamento de lotes em src/ledger.js com retomada explicita.');
+  try {
+    mkdirSync(resolve(dir, '.harness/runtime'), { recursive: true });
+    mkdirSync(resolve(dir, 'src'), { recursive: true });
+    writeFileSync(resolve(dir, 'src/ledger.js'), 'export const MAX_REJECTIONS = 5;\nexport function processBatch(state) { return state; }\n');
+    cpSync(resolve(repositoryRoot, 'ARCHITECTURE.md'), resolve(dir, 'ARCHITECTURE.md'));
+    const cli = (cmd, args = [], input = null) => execFileSync(
+      process.execPath,
+      [runnerPath, cmd, ...args],
+      {
+        cwd: dir,
+        env: { ...process.env, AEGIS_ROOT: dir, AEGIS_TEST_AUTOMATION: '1' },
+        input: input === null ? undefined : JSON.stringify(input),
+        encoding: 'utf8',
+      },
+    );
+
+    // 23.1 Rejects --clarify when no clarification request exists
+    assert.throws(() => cli('clarify', ['ECQ-0001=teste']), /MISSING_USER_CLARIFICATION/);
+
+    cli('draft', ['Proteger processamento de lotes em src/ledger.js com retomada explicita.']);
+    const req1 = JSON.parse(cli('semantic-request'));
+    const earlyOpinion = {
+      schema: 'aegis.early_clarification_opinion.v1',
+      sourceEvidenceDigest: req1.intentEvidence.evidenceDigest,
+      summary: 'Duas decisoes acopladas exigem esclarecimento antes da modelagem completa.',
+      questions: [
+        {
+          question: 'O que acontece ao atingir MAX_REJECTIONS = 5?',
+          materialEffect: 'Altera status publico e se novas entradas sao barradas.',
+          fragmentIndexes: [0],
+          sourcePaths: ['src/ledger.js'],
+          options: [
+            { label: 'Bloqueio dedicado por sequencia', effect: 'Mantem accountFrozen inalterado e bloqueia chamadas.' },
+            { label: 'Congelar conta automaticamente', effect: 'Define accountFrozen = true.' },
+          ],
+        },
+        {
+          question: 'Qual condicao explicita encerra o bloqueio?',
+          materialEffect: 'Define assinatura publica e condicao de retomada.',
+          fragmentIndexes: [0],
+          sourcePaths: ['src/ledger.js'],
+          options: [
+            { label: 'Operacao explicita condicionada', effect: 'Exige accountFrozen === false antes de zerar contador.' },
+            { label: 'Reset administrativo incondicional', effect: 'Zera contador independente da flag de conta.' },
+          ],
+        },
+      ],
+    };
+    const earlyOut = JSON.parse(cli('semantic-compile', [], {
+      sourceSemanticRequestDigest: req1.requestDigest,
+      opinion: earlyOpinion,
+    }));
+    assert.equal(earlyOut.mode, 'EARLY_CLARIFICATION');
+    assert.equal(earlyOut.questionCount, 2);
+    assert.equal(existsSync(resolve(dir, '.harness/runtime/user_clarification_request.json')), true);
+
+    // 23.2 Bilateral rejects: unknown ID, duplicate ID, empty response, incomplete set
+    assert.throws(() => cli('clarify', ['ECQ-9999=invalido']), /UNKNOWN_CLARIFICATION_QUESTION/);
+    assert.throws(() => cli('clarify', ['ECQ-0001=um', 'ECQ-0001=dois']), /DUPLICATE_CLARIFICATION_ANSWER/);
+    assert.throws(() => cli('clarify', ['ECQ-0001=   ', 'ECQ-0002=ok']), /EMPTY_CLARIFICATION_RESPONSE/);
+    assert.throws(() => cli('clarify', ['ECQ-0001=so uma resposta']), /INCOMPLETE_CLARIFICATION/);
+
+    // 23.3 Positive out-of-order clarify with '=' inside answer preserves canonical order & refreshes preflight
+    cli('clarify', [
+      'ECQ-0002=Operacao explicita exigindo accountFrozen === false',
+      'ECQ-0001=Bloqueio dedicado mantendo accountFrozen = false',
+    ]);
+    assert.equal(existsSync(resolve(dir, '.harness/runtime/user_clarification_request.json')), false);
+    const req2 = JSON.parse(cli('semantic-request'));
+    assert.notEqual(req2.requestDigest, req1.requestDigest);
+    assert.ok(req2.intent.startsWith('Proteger processamento de lotes em src/ledger.js com retomada explicita.'));
+    const idx1 = req2.intent.indexOf('- ECQ-0001: Bloqueio dedicado mantendo accountFrozen = false');
+    const idx2 = req2.intent.indexOf('- ECQ-0002: Operacao explicita exigindo accountFrozen === false');
+    assert.ok(idx1 > 0 && idx2 > idx1, 'Clarifications must be appended in canonical question order');
+
+    // 23.4 Flat early_clarification envelope & malformed envelope rejection + --json clarify mode
+    assert.throws(
+      () => cli('semantic-compile', [], { sourceSemanticRequestDigest: req2.requestDigest }),
+      /missing_opinion_envelope_field/,
+    );
+    const early2 = {
+      ...earlyOpinion,
+      sourceSemanticRequestDigest: req2.requestDigest,
+      sourceEvidenceDigest: req2.intentEvidence.evidenceDigest,
+      questions: [earlyOpinion.questions[0]],
+    };
+    cli('semantic-compile', [], early2);
+    cli('clarify', ['--json', JSON.stringify([{ id: 'ECQ-0001', response: 'Confirmado via JSON' }])]);
+    const req3 = JSON.parse(cli('semantic-request'));
+    assert.ok(req3.intent.includes('- ECQ-0001: Confirmado via JSON'));
+
+    pass('Fase 10 --clarify ergonomics (EARLY_CLARIFICATION bilateral validation, flat envelope, = preservation, canonical ordering & --json) verified');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 console.log('[AEGIS][TEST] HARNESS v7 & Six-Hats Bilateral tests passed!');

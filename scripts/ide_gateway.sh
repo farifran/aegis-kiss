@@ -26,6 +26,7 @@ Aegis — Fluxo Simbiótico Demanda até o Contrato:
   ./aegis --new "<demanda>" Inicia contexto independente substituindo estado do Harness (preserva src/)
   ./aegis --new --issue [id|arquivo] Reinicia estado do Harness e captura issue como demanda
   ./aegis --approve   Confirma e sela o contrato com o Hash Raiz Único (contractDigest)
+  ./aegis --clarify ID="resp"  Incorpora esclarecimentos de EARLY/OPEN_CLARIFICATION e reexecuta a captura
   ./aegis --resolve Q=ANS  Aplica resolução de decisão diretamente (ex: Q-0001=ANS-0001) e sela
   ./aegis --verify    Verifica a integridade criptográfica do contrato assinado
   ./aegis --semantic-request [--compact]  Entrega a Intent IR neutra (ou envelope enxuto por digest) à IA
@@ -82,7 +83,7 @@ resolve_preflight_wizard() {
       "A resposta será anexada literalmente à demanda e analisada novamente. Nenhuma recomendação será escolhida por você."
     ' <<< "${clarification}" >&2
     for ((index = 0; index < count; index++)); do
-      jq -r --argjson i "${index}" '.questions[$i] | "\n[" + .id + "] " + .question + "\nTrecho original: " + ([.sourceFragments[].text] | join(" | "))' <<< "${clarification}" >&2
+      jq -r --argjson i "${index}" '.questions[$i] | "\n[" + .id + "] " + .question + "\nTrecho original: " + ([.sourceFragments[].text] | join(" | ")) + (if (.options | length) > 0 then "\nOpções comparáveis:\n" + (.options | to_entries | map("  " + ((.key + 1) | tostring) + ") " + .value.label + " — " + .value.effect) | join("\n")) else "" end)' <<< "${clarification}" >&2
       while true; do
         read -r -p 'Sua resposta (ou q para cancelar): ' response
         if [[ "${response}" == 'q' || "${response}" == 'Q' ]]; then
@@ -290,6 +291,10 @@ main() {
     --wizard)
       require_command_arity "$@"
       resolve_preflight_wizard
+      ;;
+    --clarify)
+      shift
+      exec node "${ROOT_DIR}/scripts/issue_contract_runner.mjs" clarify "$@"
       ;;
     --resolve)
       shift

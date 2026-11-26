@@ -145,7 +145,7 @@ async function emitQuestionProtocol(canonicalJson, questionRequest, { isPrepared
       process.stderr.write(
         `\n[AEGIS][PROTOCOL] ${header}\n`
         + `[AEGIS][PROTOCOL] Apresente cada pergunta aberta com seu efeito público material e o trecho de origem${hasOptions ? ' (pode usar ask_question com as opções comparáveis de options[])' : ''}. Não sugira respostas nem aprove o rascunho.\n`
-        + '[AEGIS][PROTOCOL] Após a resposta, preserve o texto original e acrescente literalmente os esclarecimentos à demanda; execute novamente o fluxo.\n',
+        + '[AEGIS][PROTOCOL] Após a resposta humana explícita, execute: ./aegis --clarify <id>="<resposta literal>" (ou ./aegis --wizard no terminal).\n',
       );
     }
     return;
@@ -301,7 +301,11 @@ async function handleSemanticCompile(args) {
     if (opinion.sourceSemanticRequestDigest !== context.request.requestDigest) {
       throw rejection('SEMANTIC_CONTEXT_MISMATCH');
     }
-    opinion = opinion.opinion;
+    if (opinion.opinion !== undefined) {
+      opinion = opinion.opinion;
+    } else if (opinion.schema !== 'aegis.early_clarification_opinion.v1') {
+      throw rejection('INVALID_SEMANTIC_OPINION', 'missing_opinion_envelope_field');
+    }
   } else if (opinion.sourceEvidenceDigest === undefined) {
     throw rejection('SEMANTIC_CONTEXT_MISMATCH', 'external_opinion_requires_request_binding');
   }
@@ -644,12 +648,69 @@ async function handleIssue(args) {
   await handleDemand([resolved.demandText], { maxBytes: resolved.maxBytes });
 }
 
+function parseClarifyArgs(args) {
+  if (!Array.isArray(args) || args.length === 0) throw rejection('MISSING_ARGUMENT');
+  if (args[0] === '--json') {
+    if (args.length !== 2 || !args[1]) throw rejection('INVALID_CLARIFICATION_ARGUMENT', 'missing_json_payload');
+    let parsed;
+    try {
+      parsed = JSON.parse(args[1]);
+    } catch {
+      throw rejection('INVALID_CLARIFICATION_ARGUMENT', 'invalid_json');
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw rejection('INVALID_CLARIFICATION_ARGUMENT', 'expected_non_empty_array');
+    }
+    return parsed.map((entry) => ({
+      id: typeof entry?.id === 'string' ? entry.id.trim() : '',
+      response: typeof entry?.response === 'string' ? entry.response.trim() : '',
+    }));
+  }
+  return args.map((arg) => {
+    const eqIndex = arg.indexOf('=');
+    if (eqIndex <= 0) throw rejection('INVALID_CLARIFICATION_ARGUMENT', arg);
+    return {
+      id: arg.slice(0, eqIndex).trim(),
+      response: arg.slice(eqIndex + 1).trim(),
+    };
+  });
+}
+
+async function handleClarify(args) {
+  if (!existsSync(paths.userClarificationPath)) throw rejection('MISSING_USER_CLARIFICATION');
+  const [{ assertSchema }, clarification, preflight] = await Promise.all([
+    import('./lib/schema_validator.mjs'),
+    readFile(paths.userClarificationPath, 'utf8').then(JSON.parse),
+    readPreflight(paths),
+  ]);
+  assertSchema('aegis.clarification_request.v1', clarification);
+  const parsed = parseClarifyArgs(args);
+  const validQuestionIds = new Set(clarification.questions.map((q) => q.id));
+  const answersById = new Map();
+  for (const { id, response } of parsed) {
+    if (!id || !validQuestionIds.has(id)) throw rejection('UNKNOWN_CLARIFICATION_QUESTION', id || 'empty');
+    if (answersById.has(id)) throw rejection('DUPLICATE_CLARIFICATION_ANSWER', id);
+    if (!response) throw rejection('EMPTY_CLARIFICATION_RESPONSE', id);
+    answersById.set(id, response);
+  }
+  const missingIds = clarification.questions.map((q) => q.id).filter((id) => !answersById.has(id));
+  if (missingIds.length > 0) throw rejection('INCOMPLETE_CLARIFICATION', missingIds.join(','));
+  const combined = `${preflight.intent}\n\nEsclarecimentos explícitos do usuário (preserve a demanda acima):\n${
+    clarification.questions.map((q) => `- ${q.id}: ${answersById.get(q.id)}`).join('\n')
+  }`;
+  if (process.env.AEGIS_TEST_AUTOMATION !== '1') {
+    process.stderr.write(`[AEGIS][CLARIFY] Esclarecimentos incorporados para ${clarification.questions.length} pergunta(s); reexecutando captura...\n`);
+  }
+  await handleDemand([combined]);
+}
+
 const command = process.argv[2];
 const remainingArgs = process.argv.slice(3);
 
 try {
   if (command === 'run') await handleDemand(remainingArgs);
   else if (command === 'issue') await handleIssue(remainingArgs);
+  else if (command === 'clarify') await handleClarify(remainingArgs);
   else if (command === 'draft') await handleDraft(remainingArgs);
   else if (command === 'confirmation-request') await handleConfirmationRequest();
   else if (command === 'status') await handleStatus(paths);
@@ -662,7 +723,7 @@ try {
 } catch (error) {
   const phase = command === 'draft'
     ? 'PREFLIGHT'
-    : command === 'run' || command === 'issue' || command === 'semantic-request'
+    : command === 'run' || command === 'issue' || command === 'clarify' || command === 'semantic-request'
       || command === 'semantic-run' || command === 'semantic-compile'
       ? 'SEMANTIC'
       : command === 'approve' ? 'APPROVAL' : command === 'verify' ? 'VERIFICATION' : 'COMMAND';

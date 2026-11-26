@@ -342,6 +342,36 @@ const diagnostics = new Map([
     remediation: 'Quando houver decisões acopladas ou > 32 combinações, interrompa cedo com aegis.early_clarification_opinion.v1 (EARLY_CLARIFICATION, <= 5 KB) em vez de pré-computar todas as variantes.',
     ruleId: 'CONST-KISS',
   }],
+  ['MISSING_USER_CLARIFICATION', {
+    message: 'Nenhum pedido ativo de esclarecimento humano (user_clarification_request.json) foi encontrado.',
+    remediation: 'Use --clarify somente após o Aegis emitir USER_CLARIFICATION_REQUIRED (EARLY_CLARIFICATION ou OPEN_CLARIFICATION).',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['INVALID_CLARIFICATION_ARGUMENT', {
+    message: 'Argumento de esclarecimento inválido para --clarify.',
+    remediation: 'Informe pares <id>="<resposta literal>" para cada pergunta aberta ou --json \'[{"id":"ECQ-0001","response":"..."}]\'.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['UNKNOWN_CLARIFICATION_QUESTION', {
+    message: 'Identificador de pergunta inexistente no pedido ativo de esclarecimento.',
+    remediation: 'Use exatamente os IDs listados em user_clarification_request.json (ex.: ECQ-0001 ou UNKNOWN-0001).',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['DUPLICATE_CLARIFICATION_ANSWER', {
+    message: 'A mesma pergunta de esclarecimento foi respondida mais de uma vez.',
+    remediation: 'Envie exatamente uma resposta literal por identificador de pergunta.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['EMPTY_CLARIFICATION_RESPONSE', {
+    message: 'A resposta de esclarecimento não pode ficar vazia.',
+    remediation: 'Forneça a resposta explícita do usuário para cada pergunta antes de continuar.',
+    ruleId: 'CONST-DECISIONS',
+  }],
+  ['INCOMPLETE_CLARIFICATION', {
+    message: 'Faltam respostas para uma ou mais perguntas do pedido ativo de esclarecimento.',
+    remediation: 'Responda todos os IDs listados em "detail" via ./aegis --clarify <id>="<resposta>".',
+    ruleId: 'CONST-DECISIONS',
+  }],
   ['UNRESOLVED_PLACEHOLDER_AFTER_DECISION', {
     message: 'Uma variante pré-calculada em preparedEffect preservou placeholder PENDING_Q* ou texto condicional pendente após a resolução da decisão.',
     remediation: 'Atualize os statusOrError/campos de stateModel via preparedEffect.stateModel e finalize os textos de requirements/invariants para o caso selado.',
