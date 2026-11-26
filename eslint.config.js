@@ -38,12 +38,7 @@ export default [
       "coverage/**",
       "build/**",
       "scratch/**",
-      "benchmarks/**",
-      "scripts/generated/**",
-
       ".harness/runtime/**",
-      ".harness/artifacts/**",
-      ".harness/worktrees/**",
 
       // Product unit tests (node:test + tsx); excluded from tsconfig project.
       "src/**/*.test.ts"

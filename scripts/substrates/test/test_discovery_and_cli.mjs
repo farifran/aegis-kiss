@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { buildDemandBrief, renderBriefMarkdown } from '../../lib/brief_renderer.mjs';
 import { verifyContractMarkdown } from '../../lib/contract_verifier.mjs';
-import { buildTopographicalMap, filterPhysicalPaths, shouldShowTopography } from '../../lib/topography.mjs';
+import { buildTopographicalMap, shouldShowTopography } from '../../lib/topography.mjs';
 import { observeWorkspace } from '../../lib/workspace_observer.mjs';
 
 const rootDir = resolve(import.meta.dirname, '../../..');
@@ -57,6 +57,18 @@ function createTempRepo() {
   try {
     mkdirSync(resolve(bigTemp, 'lib/core'), { recursive: true });
     mkdirSync(resolve(bigTemp, 'lib/risk'), { recursive: true });
+    // tsconfig.json com comentários JSONC e alias "@/*": ["lib/*"]
+    writeFileSync(resolve(bigTemp, 'tsconfig.json'), [
+      '{',
+      '  // JSONC comment should be parsed by ts.readConfigFile',
+      '  "compilerOptions": {',
+      '    "baseUrl": ".",',
+      '    "paths": {',
+      '      "@/*": ["lib/*"],',
+      '    },',
+      '  },',
+      '}',
+    ].join('\n'));
     // Autodetect lib/ (sem src/) + arquivo gigante (> 256 KB) pulado sem quebrar o scan
     writeFileSync(resolve(bigTemp, 'lib/huge_dump.json'), 'x'.repeat(270_000));
     writeFileSync(resolve(bigTemp, 'lib/risk/helper.ts'), [
@@ -66,6 +78,11 @@ function createTempRepo() {
       'export function checkRiskLimit(attempts: number, limit: RiskLimit): boolean {',
       '  return attempts < limit.maxAttempts;',
       '}',
+    ].join('\n'));
+    // Arquivo com menção APENAS em comentário/string NÃO pode gerar falso positivo em directCallers
+    writeFileSync(resolve(bigTemp, 'lib/risk/noise.ts'), [
+      '// computeSpecialRebate mencionada só em comentário',
+      'export const DOC_NOTE = "computeSpecialRebate em string literal";',
     ].join('\n'));
     // Arquivo grande (> 8 KB) com função alvo multi-linha no meio para provar janela de bloco AST inteiro
     const paddingBlock = Array.from({ length: 180 }, (_, i) => `export function fillerFn_${i}(v: number): number { return v + ${i}; }`).join('\n');
@@ -78,7 +95,7 @@ function createTempRepo() {
       '}',
     ].join('\n');
     writeFileSync(resolve(bigTemp, 'lib/core/engine.ts'), [
-      "import { checkRiskLimit, type RiskLimit } from '../risk/helper.js';",
+      "import { checkRiskLimit, type RiskLimit } from '@/risk/helper.js';",
       paddingBlock,
       targetFn,
       paddingBlock,
@@ -105,9 +122,12 @@ function createTempRepo() {
     assert.ok(joinedEngine.includes('export function computeSpecialRebate'));
     assert.ok(joinedEngine.includes('return Math.max(0, adjusted);'));
 
-    // 1-hop import: lib/risk/helper.ts não veio inteiro, mas sua assinatura importada (checkRiskLimit) aparece em directImports
+    // 1-hop import via alias tsconfig "@/*": lib/risk/helper.ts traz assinatura de checkRiskLimit
     assert.ok(brief.directImports.some((s) => s.path === 'lib/risk/helper.ts' && s.name === 'checkRiskLimit'));
-    process.stdout.write('  PASS: AST-span windows, 1-hop imports, huge-file skip, and lib/ autodetect verified\n');
+    // AST callers ignora comentários e strings em lib/risk/noise.ts
+    const rebateCallers = brief.directCallers.find((c) => c.symbol === 'computeSpecialRebate');
+    assert.equal(rebateCallers?.locations.some((loc) => loc.startsWith('lib/risk/noise.ts')) ?? false, false);
+    process.stdout.write('  PASS: AST-span windows, tsconfig @/* 1-hop imports, AST callers (no comment/string noise), huge-file skip, and lib/ autodetect verified\n');
   } finally {
     rmSync(bigTemp, { recursive: true, force: true });
   }
@@ -170,11 +190,7 @@ function createTempRepo() {
   const topo = buildTopographicalMap(bigDiscovery.workspaceSkeleton, 2, 400);
   assert.deepEqual(topo['src/alpha/a.ts'], ['reconcileBatch', 'BatchState']);
   assert.deepEqual(topo['src/beta/b.ts'], ['emitAudit']);
-  assert.deepEqual(
-    filterPhysicalPaths(['src/alpha/a.ts', 'src/invented/fake.ts'], ['src/alpha/a.ts', 'src/beta/b.ts']),
-    ['src/alpha/a.ts'],
-  );
-  process.stdout.write('  PASS: Topographical map and fail-closed physical path filter verified\n');
+  process.stdout.write('  PASS: Topographical map verified\n');
 }
 
 // 5. verify-contract: aceita contrato válido e bloqueia violações mecânicas reais

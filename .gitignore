@@ -1,33 +1,13 @@
 # =========================================================
-# AEGIS RUNTIME
-# =========================================================
-
-.harness/execution_surfaces/
-.harness/micros*/
-
-# =========================================================
-# RUNTIME TRANSIENT STATE
+# AEGIS RUNTIME & LOCAL CONFIG
 # =========================================================
 
 .harness/runtime/
-.harness/domain-lexicon.json
-
-# Governed state for the current local demand
-.harness/state/
-
-# Local machine secrets/config
 .harness/local.env
-.harness/supervisor.json
 .harness/config/
 
 # =========================================================
-# EXECUTION ARTIFACTS
-# =========================================================
-
-*_artifact.json
-
-# =========================================================
-# TRANSIENT EXECUTION OUTPUTS
+# TRANSIENT OUTPUTS
 # =========================================================
 
 tmp/
@@ -35,14 +15,6 @@ temp/
 sandbox/
 scratch/*
 !scratch/.gitkeep
-
-# =========================================================
-# EXECUTOR MATERIALIZATION
-# =========================================================
-
-.skills/**/artifacts/
-.skills/**/output/
-.skills/**/reports/
 
 # =========================================================
 # NODE / JAVASCRIPT

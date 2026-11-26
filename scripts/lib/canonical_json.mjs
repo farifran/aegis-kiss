@@ -18,7 +18,7 @@ function sortValue(value) {
   return value;
 }
 
-export function canonicalJson(value) {
+function canonicalJson(value) {
   return JSON.stringify(sortValue(value));
 }
 

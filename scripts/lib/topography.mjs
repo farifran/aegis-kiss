@@ -75,9 +75,3 @@ export function buildTopographicalMap(workspaceSkeleton, maxSymbolsPerFile = 2, 
   }
   return topography;
 }
-
-export function filterPhysicalPaths(suggestedPaths, observedTextPaths) {
-  if (!Array.isArray(suggestedPaths)) return [];
-  const validSet = new Set(observedTextPaths);
-  return [...new Set(suggestedPaths.filter((p) => typeof p === 'string' && validSet.has(p)))];
-}

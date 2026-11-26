@@ -2,13 +2,19 @@ import { Buffer } from 'node:buffer';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
-import { canonicalDigest, compareCodeUnits, sha256 } from './canonical_json.mjs';
+import { compareCodeUnits, sha256 } from './canonical_json.mjs';
 export const sourceEvidenceByteLimit = 98_304;
-export const sourceEvidenceFileByteLimit = 8_192;
-export const sourceEvidenceExplicitFileByteLimit = 24_576;
+const sourceEvidenceFileByteLimit = 8_192;
+const sourceEvidenceExplicitFileByteLimit = 24_576;
 import { extractFileSymbols } from './workspace_skeleton.mjs';
 
-export const ignoredDomainTokens = new Set([
+const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu;
+
+export function isEntrypointPath(filePath) {
+  return entrypointPattern.test(filePath);
+}
+
+const ignoredDomainTokens = new Set([
   'src', 'source', 'root', 'code', 'file', 'files',
   'comportamento', 'comparaveis', 'compativeis', 'complexidade', 'consistencia',
   'observavel', 'observaveis', 'rastreaveis', 'falsificaveis', 'pendentes',
@@ -20,6 +26,15 @@ export const ignoredDomainTokens = new Set([
 
 export function stripDiacritics(text) {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+export function tokenizeIntent(intent) {
+  const stripped = stripDiacritics(intent ?? '');
+  const words = stripped
+    .split(/[^a-z0-9_$-]+/i)
+    .filter((w) => w.length >= 3 && !ignoredDomainTokens.has(w));
+  const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
+  return { words, stems };
 }
 
 export function isFallbackOnlyEvidence(sourceEvidence) {
@@ -93,7 +108,7 @@ function getAliases(domainAliases, word) {
   return [stripDiacritics(String(val))];
 }
 
-export function getLongestMatchingPrefixLength(filePath, prefixes) {
+function getLongestMatchingPrefixLength(filePath, prefixes) {
   if (!filePath || !prefixes || prefixes.size === 0) return 0;
   let maxLen = 0;
   for (const pfx of prefixes) {
@@ -104,7 +119,7 @@ export function getLongestMatchingPrefixLength(filePath, prefixes) {
   return maxLen;
 }
 
-export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(), domainAliases = {}) {
+function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(), domainAliases = {}) {
   const targetDirs = new Set();
   const targetPrefixes = new Set();
   if (!intentText) return { targetDirs, targetPrefixes, explicitFilePaths: [] };
@@ -151,45 +166,23 @@ export function extractTargetPrefixesAndDirs(intentText, knownSubdirs = new Set(
 
 export function loadDomainLexicon(repositoryRoot) {
   if (!repositoryRoot) return {};
-  const candidatePaths = [
-    resolve(repositoryRoot, '.harness/config/lexicon.json'),
-    resolve(repositoryRoot, '.harness/domain-lexicon.json'),
-  ];
+  const lexiconPath = resolve(repositoryRoot, '.harness/config/lexicon.json');
   const merged = {};
-  for (const p of candidatePaths) {
-    if (existsSync(p)) {
-      try {
-        const raw = readFileSync(p, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          for (const [k, v] of Object.entries(parsed)) {
-            const key = stripDiacritics(k);
-            if (Array.isArray(v)) {
-              const existing = merged[key];
-              const normV = v.map((item) => stripDiacritics(String(item)));
-              if (Array.isArray(existing)) {
-                merged[key] = [...new Set([...existing, ...normV])];
-              } else if (existing) {
-                merged[key] = [...new Set([existing, ...normV])];
-              } else {
-                merged[key] = normV;
-              }
-            } else if (typeof v === 'string') {
-              const normV = stripDiacritics(v);
-              const existing = merged[key];
-              if (Array.isArray(existing)) {
-                if (!existing.includes(normV)) existing.push(normV);
-              } else if (existing && existing !== normV) {
-                merged[key] = [existing, normV];
-              } else {
-                merged[key] = normV;
-              }
-            }
+  if (existsSync(lexiconPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(lexiconPath, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed)) {
+          const key = stripDiacritics(k);
+          if (Array.isArray(v)) {
+            merged[key] = [...new Set(v.map((item) => stripDiacritics(String(item))))];
+          } else if (typeof v === 'string') {
+            merged[key] = stripDiacritics(v);
           }
         }
-      } catch {
-        // Ignora erros de leitura/parsing e preserva determinismo
       }
+    } catch {
+      // Ignora erros de leitura/parsing e preserva determinismo
     }
   }
   return merged;
@@ -320,11 +313,8 @@ function symbolPathPenalty(sym, deprecatedPenalty, nonProdPenalty) {
 }
 
 function matchSkeletonSymbols(symbols, intent, domainAliases = {}, targetPrefixes = new Set(), precomputedIdf = null) {
-  const stripped = stripDiacritics(intent);
-  const rawWords = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
-  const words = rawWords.filter((w) => !ignoredDomainTokens.has(w));
+  const { words, stems } = tokenizeIntent(intent);
   if (words.length === 0) return [];
-  const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
 
   const idfWeights = precomputedIdf ?? computeSymbolIdfWeights(symbols, words, stems, domainAliases);
 
@@ -404,10 +394,7 @@ function computeSymbolAffinity(sym, words, stems, entrypoints, idfWeights = new 
 
 export function prioritizeWorkspaceSkeleton(skeleton, intent, entrypoints = [], maxPromptSymbols = 512, domainAliases = {}, targetPrefixes = new Set(), precomputedIdf = null) {
   if (!skeleton || !Array.isArray(skeleton.symbols)) return skeleton;
-  const stripped = stripDiacritics(intent ?? '');
-  const rawWords = stripped.split(/[^a-z0-9_$-]+/i).filter((w) => w.length >= 3);
-  const words = rawWords.filter((w) => !ignoredDomainTokens.has(w));
-  const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
+  const { words, stems } = tokenizeIntent(intent);
 
   const idfWeights = precomputedIdf ?? computeSymbolIdfWeights(skeleton.symbols, words, stems, domainAliases);
 
@@ -421,37 +408,11 @@ export function prioritizeWorkspaceSkeleton(skeleton, intent, entrypoints = [], 
   });
 
   const pruned = sorted.slice(0, maxPromptSymbols);
-  const unsigned = {
+  return {
     schema: skeleton.schema,
     symbolCount: pruned.length,
     symbols: pruned,
   };
-  return {
-    ...unsigned,
-    digest: canonicalDigest(unsigned),
-  };
-}
-
-function lineWindow(bytes, targetLine, byteLimit) {
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  const lines = text.split('\n');
-  const target = Math.min(Math.max(targetLine - 1, 0), lines.length - 1);
-  let start = target;
-  let end = target + 1;
-  let content = lines[target];
-  while (start > 0 || end < lines.length) {
-    const nextStart = start > 0 ? start - 1 : start;
-    const nextEnd = end < lines.length ? end + 1 : end;
-    const candidate = lines.slice(nextStart, nextEnd).join('\n');
-    if (Buffer.byteLength(candidate, 'utf8') > byteLimit) break;
-    start = nextStart;
-    end = nextEnd;
-    content = candidate;
-  }
-  if (Buffer.byteLength(content, 'utf8') > byteLimit) {
-    content = decodeUtf8Prefix(Buffer.from(content), byteLimit);
-  }
-  return { content, startLine: start + 1, endLine: end };
 }
 
 function normalizeSpan(item) {
@@ -551,8 +512,8 @@ function extractAnchoredWindows(fileLines, headerEndLine, orderedTargetSpans, by
 }
 
 /**
- * Resolve diretórios, prefixos e caminhos explícitos de src/ a partir da intenção,
- * evitando recalcular subdiretórios conhecidos entre preflight/request e evidência.
+ * Resolve diretórios, prefixos e caminhos explícitos a partir da intenção,
+ * evitando recalcular subdiretórios conhecidos entre descoberta e evidência.
  */
 export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextData = null) {
   if (contextData?.targetDirs && contextData?.targetPrefixes && contextData?.explicitFilePaths) {
@@ -572,40 +533,39 @@ export function resolveDiscoveryScope(textFiles, intent, domainAliases, contextD
 
 export function buildSourceEvidence(
   repositoryRoot,
-  preflight,
+  { intent = '', discovery },
   workspaceObservation = null,
   explicitTargetPaths = [],
   contextData = null,
 ) {
   const domainAliases = contextData?.domainAliases ?? loadDomainLexicon(repositoryRoot);
-  const textFiles = preflight.discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
+  const textFiles = discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
   const filesByPath = new Map(textFiles.map((file) => [file.path, file]));
   const smallWorkspace = textFiles.reduce((total, { bytes }) => total + bytes, 0)
     <= sourceEvidenceByteLimit;
-  const entrypoints = textFiles.map(({ path }) => path)
-    .filter((path) => /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu.test(path));
+  const entrypoints = textFiles.map(({ path }) => path).filter(isEntrypointPath);
 
   const selectionsByPath = new Map();
   const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
     textFiles,
-    preflight.intent,
+    intent,
     domainAliases,
     contextData,
   );
   if (smallWorkspace) {
     let selectivePaths = null;
     if (textFiles.length > 1) {
-      const matched = preflight.discovery.workspaceSkeleton?.symbols
+      const matched = discovery.workspaceSkeleton?.symbols
         ? matchSkeletonSymbols(
-          preflight.discovery.workspaceSkeleton.symbols,
-          preflight.intent ?? '',
+          discovery.workspaceSkeleton.symbols,
+          intent,
           domainAliases,
           targetPrefixes,
           contextData?.precomputedIdf ?? null,
         )
         : [];
       const topScore = matched.length > 0 ? matched[0].score : 0;
-      const intentRaw = preflight.intent ?? '';
+      const intentRaw = intent;
       const intentSubtokens = new Set(extractSubtokens(intentRaw));
       const basenameHits = textFiles
         .filter((file) => {
@@ -613,7 +573,7 @@ export function buildSourceEvidence(
           return base && intentRaw.includes(base);
         })
         .map((file) => file.path);
-      const exactSymbolSubHits = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
+      const exactSymbolSubHits = (discovery.workspaceSkeleton?.symbols ?? [])
         .filter((sym) => sym.exported && extractSubtokens(sym.name).some((t) => intentSubtokens.has(t) && t.length >= 6))
         .map((sym) => sym.path);
       const hasExplicitScope = explicitFilePaths.length > 0
@@ -657,7 +617,7 @@ export function buildSourceEvidence(
 
     const injectSelection = (p) => {
       if (filesByPath.has(p) && !selectionsByPath.has(p)) {
-        const symbolSpans = (preflight.discovery.workspaceSkeleton?.symbols ?? [])
+        const symbolSpans = (discovery.workspaceSkeleton?.symbols ?? [])
           .filter((s) => s.path === p && typeof s.startLine === 'number')
           .map((s) => ({ startLine: s.startLine, endLine: s.endLine ?? s.startLine }));
         selectionsByPath.set(p, { path: p, lines: symbolSpans });
@@ -676,7 +636,7 @@ export function buildSourceEvidence(
           if (parts.length > 2) {
             targetDirs.add(parts[1]);
             const parentDir = p.slice(0, p.lastIndexOf('/') + 1);
-            if (parentDir && parentDir !== 'src/') targetPrefixes.add(parentDir);
+            if (parentDir && !/^(?:src|app|lib)\/$/u.test(parentDir)) targetPrefixes.add(parentDir);
           }
         }
       }
@@ -689,10 +649,10 @@ export function buildSourceEvidence(
       return false;
     });
 
-    if (preflight.discovery.workspaceSkeleton?.symbols) {
+    if (discovery.workspaceSkeleton?.symbols) {
       const matched = matchSkeletonSymbols(
-        preflight.discovery.workspaceSkeleton.symbols,
-        preflight.intent ?? '',
+        discovery.workspaceSkeleton.symbols,
+        intent,
         domainAliases,
         targetPrefixes,
         contextData?.precomputedIdf ?? null,
@@ -820,7 +780,6 @@ export function buildSourceEvidence(
         ...excerpt,
         truncated: consumedBytes < bytes.byteLength,
         selection,
-        trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
       });
     } else {
       const seenSpanKeys = new Set();
@@ -857,7 +816,6 @@ export function buildSourceEvidence(
           ...headerExcerpt,
           truncated: true,
           selection: 'LEXICAL_WINDOW',
-          trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
         });
 
         const windowBudget = Math.min(limit - consumedHeader, remainingBytes);
@@ -871,34 +829,19 @@ export function buildSourceEvidence(
               ...windowExcerpt,
               truncated: true,
               selection: 'LEXICAL_WINDOW',
-              trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
             });
           }
         }
       } else {
         const windows = extractAnchoredWindows(fileLines, 0, orderedSpans, limit);
-        if (windows.length > 0) {
-          for (const windowExcerpt of windows) {
-            const consumedBytes = Buffer.byteLength(windowExcerpt.content, 'utf8');
-            remainingBytes -= consumedBytes;
-            evidence.push({
-              path,
-              ...windowExcerpt,
-              truncated: consumedBytes < bytes.byteLength,
-              selection: 'LEXICAL_WINDOW',
-              trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
-            });
-          }
-        } else {
-          const excerpt = lineWindow(bytes, orderedSpans[0].startLine, limit);
-          const consumedBytes = Buffer.byteLength(excerpt.content, 'utf8');
+        for (const windowExcerpt of windows) {
+          const consumedBytes = Buffer.byteLength(windowExcerpt.content, 'utf8');
           remainingBytes -= consumedBytes;
           evidence.push({
             path,
-            ...excerpt,
+            ...windowExcerpt,
             truncated: consumedBytes < bytes.byteLength,
             selection: 'LEXICAL_WINDOW',
-            trust: 'UNTRUSTED_EVIDENCE_NOT_INSTRUCTIONS',
           });
         }
       }

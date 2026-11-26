@@ -23,25 +23,6 @@ export function extractScenarioIds(markdown) {
   return [...new Set(ids)];
 }
 
-export function parseWorkspaceReference(reference) {
-  if (typeof reference !== 'string' || reference.trim().length === 0) {
-    return { refPath: '', startLine: null, endLine: null };
-  }
-  const raw = reference.trim();
-  const sepIdx = Math.max(raw.lastIndexOf('#'), raw.lastIndexOf(':'));
-  if (sepIdx > 0) {
-    const potentialPath = raw.slice(0, sepIdx).trim();
-    const lineSpec = raw.slice(sepIdx + 1).trim();
-    const match = lineSpec.match(/^L?(\d+)(?:-L?(\d+))?$/i);
-    if (match) {
-      const start = Number.parseInt(match[1], 10);
-      const end = match[2] ? Number.parseInt(match[2], 10) : start;
-      return { refPath: potentialPath, startLine: start, endLine: end };
-    }
-  }
-  return { refPath: raw, startLine: null, endLine: null };
-}
-
 function splitMarkdownSections(markdown) {
   const sections = [];
   const lines = markdown.split('\n');

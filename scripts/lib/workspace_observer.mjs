@@ -9,7 +9,7 @@ import { buildWorkspaceSkeleton } from './workspace_skeleton.mjs';
 
 export const maxDemandBytes = 65_536;
 export const maxIssueDemandBytes = 262_144;
-export const maxSingleFileBytes = 262_144;
+const maxSingleFileBytes = 262_144;
 
 const discoveryFileLimit = 1024;
 const discoveryEntryLimit = 4096;
@@ -110,7 +110,7 @@ function portableRelativePath(repositoryRoot, absolutePath) {
   return sep === '\\' ? nativePath.replaceAll('\\', '/') : nativePath;
 }
 
-export function computeSourceSnapshotDigest(files, ignoredEntries, sourceRoots = ['src']) {
+function computeSourceSnapshotDigest(files, ignoredEntries, sourceRoots = ['src']) {
   return canonicalDigest({
     sourceRoot: sourceRoots.length === 1 ? sourceRoots[0] : sourceRoots,
     files,

@@ -229,8 +229,6 @@ function handleStatus(paths) {
 
 async function handleClean(paths) {
   await rm(paths.runtimeDir, { recursive: true, force: true });
-  await rm(resolve(paths.harnessDir, 'state'), { recursive: true, force: true });
-  await rm(resolve(paths.harnessDir, 'domain-lexicon.json'), { force: true });
   process.stdout.write('[AEGIS] clean=PASS runtime_reset=1 product_preserved=1\n');
 }
 

@@ -360,6 +360,78 @@ export function extractFileSymbols(path, text) {
   return extractGenericSymbols(path, text);
 }
 
+/**
+ * Extrai declarações de import/re-export reais via AST TypeScript (sem regex
+ * sobre comentários/strings). Retorna [{ specifier, names }].
+ */
+export function extractAstImports(path, text) {
+  const ext = extname(path).toLowerCase();
+  if (!tsExtensions.has(ext)) return [];
+  const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  const imports = [];
+
+  for (const stmt of sourceFile.statements) {
+    if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      const specifier = stmt.moduleSpecifier.text;
+      const names = [];
+      const clause = stmt.importClause;
+      if (clause?.name) names.push(clause.name.text);
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const el of clause.namedBindings.elements) {
+          names.push((el.propertyName ?? el.name).text);
+        }
+      }
+      imports.push({ specifier, names });
+    } else if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      const specifier = stmt.moduleSpecifier.text;
+      const names = [];
+      if (stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+        for (const el of stmt.exportClause.elements) {
+          names.push((el.propertyName ?? el.name).text);
+        }
+      }
+      imports.push({ specifier, names });
+    }
+  }
+  return imports;
+}
+
+/**
+ * Coleta linhas onde cada identificador aparece como nó Identifier real na AST
+ * (ignora comentários e strings literais).
+ */
+export function extractAstIdentifierLines(path, text) {
+  const byName = new Map();
+  const ext = extname(path).toLowerCase();
+  if (!tsExtensions.has(ext)) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+      for (const m of lines[i].matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]{3,})\b/gu)) {
+        const name = m[1];
+        if (!byName.has(name)) byName.set(name, []);
+        const list = byName.get(name);
+        if (list[list.length - 1] !== i + 1) list.push(i + 1);
+      }
+    }
+    return byName;
+  }
+
+  const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  function visit(node) {
+    if (ts.isIdentifier(node) && node.text.length >= 4) {
+      const line = getLine(sourceFile, node.getStart(sourceFile));
+      if (!byName.has(node.text)) byName.set(node.text, []);
+      const list = byName.get(node.text);
+      if (list[list.length - 1] !== line) list.push(line);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return byName;
+}
+
 export function buildWorkspaceSkeleton(sourceRecords) {
   const allSymbols = [];
 

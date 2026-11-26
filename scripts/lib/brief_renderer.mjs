@@ -1,21 +1,21 @@
 import { Buffer } from 'node:buffer';
-import { dirname, extname, posix } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, extname, posix, resolve } from 'node:path';
+import ts from 'typescript';
 import {
   buildSourceEvidence,
   computeSymbolIdfWeights,
-  ignoredDomainTokens,
+  isEntrypointPath,
   isFallbackOnlyEvidence,
   loadDomainLexicon,
   prioritizeWorkspaceSkeleton,
   resolveDiscoveryScope,
-  stripDiacritics,
+  tokenizeIntent,
 } from './source_evidence.mjs';
 import { buildTopographicalMap, shouldShowTopography } from './topography.mjs';
+import { extractAstIdentifierLines, extractAstImports } from './workspace_skeleton.mjs';
 
-const entrypointPattern = /(?:^|\/)(?:index|main|__main__|mod|entrypoint|run|app)\.[^/]+$/iu;
-const relativeImportPattern = /import\s+(?:type\s+)?(?:(?:\{([^}]+)\}|([A-Za-z_$][\w$]*)|\*\s+as\s+[A-Za-z_$][\w$]*)\s+from\s+)?['"](\.\.?\/[^'"]+)['"]/gu;
-
-export function extractIntentHighlights(intent) {
+function extractIntentHighlights(intent) {
   const paths = [];
   for (const match of intent.matchAll(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu)) {
     const cleaned = match[0].replace(/[.,;:!?]+$/u, '');
@@ -50,9 +50,40 @@ function formatNumberedContent(content, startLine = 1) {
     .join('\n');
 }
 
-function resolveRelativeImportPath(fromFile, specifier, observedSet) {
-  const baseDir = dirname(fromFile);
-  const rawTarget = posix.normalize(posix.join(baseDir, specifier));
+/**
+ * Lê compilerOptions.paths + baseUrl de tsconfig.json usando o parser JSONC oficial do TypeScript.
+ */
+function loadTsconfigPathAliases(repositoryRoot) {
+  if (!repositoryRoot) return [];
+  const tsconfigPath = resolve(repositoryRoot, 'tsconfig.json');
+  if (!existsSync(tsconfigPath)) return [];
+  try {
+    const parsed = ts.readConfigFile(tsconfigPath, (p) => readFileSync(p, 'utf8'));
+    if (parsed.error || !parsed.config?.compilerOptions?.paths) return [];
+    const baseUrl = String(parsed.config.compilerOptions.baseUrl ?? '.').replace(/^\.\//u, '').replace(/\/+$/u, '');
+    const aliases = [];
+    for (const [pattern, targets] of Object.entries(parsed.config.compilerOptions.paths)) {
+      if (!Array.isArray(targets) || targets.length === 0) continue;
+      const starIdx = pattern.indexOf('*');
+      const prefix = starIdx >= 0 ? pattern.slice(0, starIdx) : pattern;
+      const suffix = starIdx >= 0 ? pattern.slice(starIdx + 1) : '';
+      const mappedTargets = targets
+        .filter((t) => typeof t === 'string')
+        .map((t) => {
+          const clean = t.replace(/^\.\//u, '');
+          return baseUrl && baseUrl !== '.' ? posix.join(baseUrl, clean) : clean;
+        });
+      if (mappedTargets.length > 0) {
+        aliases.push({ prefix, suffix, hasWildcard: starIdx >= 0, targets: mappedTargets });
+      }
+    }
+    return aliases;
+  } catch {
+    return [];
+  }
+}
+
+function candidatePathsForBase(rawTarget) {
   const candidates = [rawTarget];
   const ext = extname(rawTarget);
   if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
@@ -61,20 +92,47 @@ function resolveRelativeImportPath(fromFile, specifier, observedSet) {
   } else if (!ext) {
     candidates.push(`${rawTarget}.ts`, `${rawTarget}.tsx`, `${rawTarget}.js`, `${rawTarget}.mjs`);
   }
-  for (const candidate of candidates) {
-    if (observedSet.has(candidate) && !entrypointPattern.test(candidate)) {
-      return candidate;
+  return candidates;
+}
+
+function resolveImportTargetPath(fromFile, specifier, observedSet, pathAliases = []) {
+  const rawTargets = [];
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    rawTargets.push(posix.normalize(posix.join(dirname(fromFile), specifier)));
+  } else {
+    for (const alias of pathAliases) {
+      if (alias.hasWildcard) {
+        if (specifier.startsWith(alias.prefix) && specifier.endsWith(alias.suffix)) {
+          const captured = specifier.slice(alias.prefix.length, specifier.length - alias.suffix.length);
+          for (const target of alias.targets) {
+            rawTargets.push(posix.normalize(target.replace('*', captured)));
+          }
+        }
+      } else if (specifier === alias.prefix) {
+        for (const target of alias.targets) {
+          rawTargets.push(posix.normalize(target));
+        }
+      }
+    }
+  }
+
+  for (const rawTarget of rawTargets) {
+    for (const candidate of candidatePathsForBase(rawTarget)) {
+      if (observedSet.has(candidate) && !isEntrypointPath(candidate)) {
+        return candidate;
+      }
     }
   }
   return null;
 }
 
 /**
- * Segue imports relativos em 1 único salto (ignorando barrels index.*) para arquivos
- * selecionados, coletando somente as assinaturas AST dos símbolos importados que ainda
- * não vieram inteiros no brief.
+ * Segue imports relativos e aliases do tsconfig.json em 1 único salto (via AST real,
+ * ignorando barrels index.*) para coletar somente as assinaturas AST dos símbolos
+ * importados que ainda não vieram inteiros no brief.
  */
-export function collectOneHopImportSignatures({
+function collectOneHopImportSignatures({
+  repositoryRoot = null,
   sourceEvidence,
   observedTextPaths,
   sourceBytesByPath,
@@ -84,6 +142,7 @@ export function collectOneHopImportSignatures({
 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const observedSet = new Set(observedTextPaths);
+  const pathAliases = loadTsconfigPathAliases(repositoryRoot);
   const symbolsByPath = new Map();
   for (const sym of workspaceSkeleton.symbols) {
     if (!symbolsByPath.has(sym.path)) symbolsByPath.set(sym.path, []);
@@ -93,24 +152,17 @@ export function collectOneHopImportSignatures({
   const wantedByTarget = new Map();
   const seenSourceFiles = new Set();
   for (const entry of sourceEvidence) {
-    if (seenSourceFiles.has(entry.path) || entrypointPattern.test(entry.path)) continue;
+    if (seenSourceFiles.has(entry.path) || isEntrypointPath(entry.path)) continue;
     seenSourceFiles.add(entry.path);
     const bytes = sourceBytesByPath.get(entry.path);
     if (!bytes) continue;
     const text = Buffer.from(bytes).toString('utf8');
-    for (const match of text.matchAll(relativeImportPattern)) {
-      const namedBlock = match[1] ?? '';
-      const defaultName = match[2] ?? '';
-      const specifier = match[3];
-      const targetPath = resolveRelativeImportPath(entry.path, specifier, observedSet);
+    for (const imp of extractAstImports(entry.path, text)) {
+      const targetPath = resolveImportTargetPath(entry.path, imp.specifier, observedSet, pathAliases);
       if (!targetPath || fullSourcePaths.has(targetPath)) continue;
       if (!wantedByTarget.has(targetPath)) wantedByTarget.set(targetPath, new Set());
       const set = wantedByTarget.get(targetPath);
-      if (defaultName) set.add(defaultName);
-      for (const part of namedBlock.split(',')) {
-        const clean = part.replace(/\btype\s+/u, '').split(/\s+as\s+/u)[0]?.trim();
-        if (clean) set.add(clean);
-      }
+      for (const name of imp.names) set.add(name);
     }
   }
 
@@ -130,10 +182,10 @@ export function collectOneHopImportSignatures({
 }
 
 /**
- * Localiza chamadores/referências de 1 nível nos demais arquivos observados para os
- * símbolos exportados declarados nos arquivos selecionados (evita quebrar callers).
+ * Localiza chamadores/referências reais de 1 nível nos demais arquivos observados via
+ * nós Identifier da AST (ignora comentários e strings literais).
  */
-export function collectDirectCallers({
+function collectDirectCallers({
   sourceEvidence,
   observedTextPaths,
   sourceBytesByPath,
@@ -143,7 +195,7 @@ export function collectDirectCallers({
 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const selectedNonEntry = new Set(
-    sourceEvidence.map((e) => e.path).filter((p) => !entrypointPattern.test(p)),
+    sourceEvidence.map((e) => e.path).filter((p) => !isEntrypointPath(p)),
   );
   if (selectedNonEntry.size === 0) return [];
 
@@ -153,11 +205,11 @@ export function collectDirectCallers({
     .sort((a, b) => (kindPriority[a.kind] ?? 9) - (kindPriority[b.kind] ?? 9));
   if (targetSymbols.length === 0) return [];
 
-  const fileLinesByPath = new Map();
+  const identifiersByPath = new Map();
   for (const p of observedTextPaths) {
     const bytes = sourceBytesByPath.get(p);
     if (!bytes) continue;
-    fileLinesByPath.set(p, Buffer.from(bytes).toString('utf8').split('\n'));
+    identifiersByPath.set(p, extractAstIdentifierLines(p, Buffer.from(bytes).toString('utf8')));
   }
 
   const callers = [];
@@ -167,17 +219,14 @@ export function collectDirectCallers({
     if (seenNames.has(sym.name)) continue;
     seenNames.add(sym.name);
 
-    const escaped = sym.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`, 'u');
     const locations = [];
-
-    for (const [otherPath, lines] of fileLinesByPath.entries()) {
+    for (const [otherPath, idMap] of identifiersByPath.entries()) {
       if (otherPath === sym.path) continue;
-      for (let i = 0; i < lines.length; i += 1) {
-        if (pattern.test(lines[i])) {
-          locations.push(`${otherPath}:L${i + 1}`);
-          if (locations.length >= maxLocationsPerSymbol) break;
-        }
+      const lines = idMap.get(sym.name);
+      if (!lines) continue;
+      for (const line of lines) {
+        locations.push(`${otherPath}:L${line}`);
+        if (locations.length >= maxLocationsPerSymbol) break;
       }
       if (locations.length >= maxLocationsPerSymbol) break;
     }
@@ -202,7 +251,7 @@ export function buildDemandBrief({
   const { discovery, sourceBytesByPath } = workspaceObservation;
   const textFiles = discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
   const observedTextPaths = textFiles.map(({ path }) => path);
-  const entrypoints = observedTextPaths.filter((p) => entrypointPattern.test(p));
+  const entrypoints = observedTextPaths.filter(isEntrypointPath);
   const domainAliases = loadDomainLexicon(repositoryRoot);
   const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
     textFiles,
@@ -212,11 +261,7 @@ export function buildDemandBrief({
 
   let precomputedIdf = null;
   if (discovery.workspaceSkeleton?.symbols) {
-    const stripped = stripDiacritics(intent);
-    const words = stripped
-      .split(/[^a-z0-9_$-]+/i)
-      .filter((w) => w.length >= 3 && !ignoredDomainTokens.has(w));
-    const stems = words.map((w) => (w.length >= 4 ? w.slice(0, 4) : w));
+    const { words, stems } = tokenizeIntent(intent);
     precomputedIdf = computeSymbolIdfWeights(
       discovery.workspaceSkeleton.symbols,
       words,
@@ -225,10 +270,9 @@ export function buildDemandBrief({
     );
   }
 
-  const pseudoPreflight = { intent, discovery };
   const sourceEvidence = buildSourceEvidence(
     repositoryRoot,
-    pseudoPreflight,
+    { intent, discovery },
     workspaceObservation,
     explicitTargetPaths,
     { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf },
@@ -260,8 +304,9 @@ export function buildDemandBrief({
   const externalOrTruncatedSymbols = (prioritizedSkeleton?.symbols ?? [])
     .filter((sym) => !fullSourcePaths.has(sym.path));
 
-  // Melhoria #4: assinaturas de imports diretos (1 salto) e chamadores observados.
+  // Melhoria #4: assinaturas de imports diretos (1 salto, incl. tsconfig paths) e chamadores via AST.
   const directImports = collectOneHopImportSignatures({
+    repositoryRoot,
     sourceEvidence,
     observedTextPaths,
     sourceBytesByPath,
