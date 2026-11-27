@@ -141,7 +141,7 @@ const knownDirPrefixPattern = /^(?:\.{1,2}\/|\/|(?:src|app|lib|test|tests|script
 function looksLikePathCandidate(token, repositoryRoot, { quoted = false } = {}) {
   if (!token || token.includes(' ') || /^https?:\/\//iu.test(token)) return false;
   if (/^\.{2,}$/u.test(token)) return token === '..';
-  if (/^\.[A-Za-z0-9_-]/u.test(token)) return true;
+  if (/^\.[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/u.test(token)) return true;
   if (knownFileExtensionPattern.test(token) || knownRootFilenamePattern.test(token)) return true;
   if (token.includes('/')) {
     if (quoted) return true;

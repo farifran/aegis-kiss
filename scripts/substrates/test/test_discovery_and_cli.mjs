@@ -295,6 +295,91 @@ try {
     }
   }
 
+  // 1d. Full-File-First (sem truncamento falso por imports), directCallers prod-first, deduplicação AST e sub-módulo exclusivo
+  {
+    const effTemp = mkdtempSync(resolve(tmpdir(), 'aegis-eff-test-'));
+    try {
+      mkdirSync(resolve(effTemp, 'src/core'), { recursive: true });
+      mkdirSync(resolve(effTemp, 'src/aux'), { recursive: true });
+      writeFileSync(resolve(effTemp, 'src/core/private_helper.ts'), [
+        'export function internalTaxAdjuster(v: number): number {',
+        '  return Math.max(0, v - 1);',
+        '}',
+      ].join('\n'));
+      writeFileSync(resolve(effTemp, 'src/core/shared_dep.ts'), [
+        'export function sharedFormatter(v: number): string {',
+        '  return String(v);',
+        '}',
+      ].join('\n'));
+      const mediumBody = Array.from({ length: 140 }, (_, i) => `export function stepFn_${i}(x: number): number { return x + ${i}; }`).join('\n');
+      writeFileSync(resolve(effTemp, 'src/core/ledger_engine.ts'), [
+        "import { internalTaxAdjuster } from './private_helper.js';",
+        "import { sharedFormatter } from './shared_dep.js';",
+        '// Header comment before executable code',
+        'export function processLedgerRefund(amount: number): string {',
+        '  return sharedFormatter(internalTaxAdjuster(amount));',
+        '}',
+        mediumBody,
+      ].join('\n'));
+      // Teste alfabeticamente ANTES do consumidor de produção — não deve sequestrar directCallers
+      writeFileSync(resolve(effTemp, 'src/aux/a_refund.test.ts'), [
+        "import { processLedgerRefund } from '../core/ledger_engine.js';",
+        'export const t1 = processLedgerRefund(10);',
+        'export const t2 = processLedgerRefund(20);',
+        'export const t3 = processLedgerRefund(30);',
+        'export const t4 = processLedgerRefund(40);',
+      ].join('\n'));
+      writeFileSync(resolve(effTemp, 'src/aux/z_prod_consumer.ts'), [
+        "import { processLedgerRefund } from '../core/ledger_engine.js';",
+        'export function runRefundJob(): string { return processLedgerRefund(99); }',
+      ].join('\n'));
+      writeFileSync(
+        resolve(effTemp, 'src/aux/big_pad.ts'),
+        Array.from({ length: 1600 }, (_, i) => `export const BIG_PAD_${i} = ${i};`).join('\n'),
+      );
+
+      const obs = observeWorkspace(effTemp);
+      const brief = buildDemandBrief({
+        repositoryRoot: effTemp,
+        intent: 'Corrigir processLedgerRefund no motor de ledger',
+        workspaceObservation: obs,
+      });
+
+      const ledgerEntries = brief.sourceEvidence.filter((e) => e.path === 'src/core/ledger_engine.ts');
+      assert.equal(ledgerEntries.length, 1, 'Medium file (~7.5 KB) must be delivered as a single FULL_FILE entry');
+      assert.equal(ledgerEntries[0].startLine, 1, 'FULL_FILE must start at line 1 without stripping imports');
+      assert.equal(ledgerEntries[0].truncated, false, 'Medium file must NOT be marked truncated');
+      assert.equal(ledgerEntries[0].selection, 'FULL_FILE');
+
+      assert.ok(
+        brief.coverage.excerptedPaths.includes('src/core/private_helper.ts'),
+        'Exclusive 1-hop submodule (inDegree === 1, <= 2.5 KB) of top pick must be included',
+      );
+
+      const refundCallers = brief.directCallers.find((c) => c.symbol === 'processLedgerRefund');
+      assert.ok(refundCallers, 'Expected directCallers entry for processLedgerRefund');
+      assert.ok(
+        refundCallers.locations.some((loc) => loc.startsWith('src/aux/z_prod_consumer.ts:L')),
+        `Expected production caller z_prod_consumer.ts before tests, got: ${refundCallers.locations.join(', ')}`,
+      );
+      assert.equal(
+        refundCallers.locations.some((loc) => loc.includes('.test.ts')),
+        false,
+        'Test files must not pollute directCallers when production callers exist',
+      );
+
+      const importKeys = new Set(brief.directImports.map((s) => `${s.path}:${s.name}`));
+      assert.equal(
+        brief.skeletonSymbols.some((s) => importKeys.has(`${s.path}:${s.name}`)),
+        false,
+        'skeletonSymbols must not duplicate symbols already listed in directImports',
+      );
+      process.stdout.write('  PASS: Full-File-First (no fake import-strip truncation), prod-first directCallers, AST deduplication, and exclusive submodule verified\n');
+    } finally {
+      rmSync(effTemp, { recursive: true, force: true });
+    }
+  }
+
   // 2. Demanda greenfield mantém brief compacto sem arrastar src/ inteiro
   {
     const observation = observeWorkspace(fixtureDir);
@@ -580,6 +665,21 @@ try {
       'src/ledger/streak_guard.ts',
       'src/risk/velocity_guard.ts',
     ]);
+
+    // Regressão A/B3 (U1-A3): método camelCase com ponto (`.toLocaleDateString`) na descrição de `## Arquivos` não é dotfile
+    const dotMethodContractPath = resolve(fixtureDir, '.harness/runtime/dot-method-contract.md');
+    writeFileSync(dotMethodContractPath, [
+      '# Contrato com método pontilhado na descrição',
+      '## Escopo',
+      '- Ajustar `evaluateSettlementGuards` (`src/risk/velocity_guard.ts:L14-L16`).',
+      '## Arquivos',
+      '- `src/risk/velocity_guard.ts` — substituir `.toLocaleDateString` por formatação determinística.',
+      '## Casos de prova',
+      '- Dado: a\n- Quando: b\n- Então: c',
+      '- Dado: d\n- Quando: e\n- Então: f',
+    ].join('\n'));
+    const dotMethodRes = verifyContractMarkdown({ repositoryRoot: fixtureDir, contractPath: dotMethodContractPath });
+    assert.equal(dotMethodRes.ok, true, `Expected camelCase .methodName not to trigger dotfile error, got: ${dotMethodRes.errors.join('; ')}`);
 
     const badContractPath = resolve(fixtureDir, '.harness/runtime/bad-contract.md');
     writeFileSync(badContractPath, [

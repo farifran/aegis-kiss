@@ -1,77 +1,31 @@
 import { Buffer } from 'node:buffer';
 import { dirname, extname, posix, resolve } from 'node:path';
 import { loadArchitectureRules } from './architecture_rules.mjs';
-import { loadProjectConfig } from './workspace_observer.mjs';
+import { isProductTestPath, loadProjectConfig } from './workspace_observer.mjs';
 import {
   buildSourceEvidence,
-  computeSymbolIdfWeights,
   isEntrypointPath,
   isFallbackOnlyEvidence,
   loadDomainLexicon,
   prioritizeWorkspaceSkeleton,
   resolveDiscoveryScope,
-  tokenizeIntent,
 } from './source_evidence.mjs';
 import { buildTopographicalMap, shouldShowTopography } from './topography.mjs';
-import {
-  extractAstIdentifierLines,
-  extractAstImports,
-  loadTsconfigPathAliases,
-} from './workspace_skeleton.mjs';
+import { extractAstIdentifierLines, extractAstImports, loadTsconfigPathAliases } from './workspace_skeleton.mjs';
+
+const codeLangByExt = { '.ts': 'ts', '.tsx': 'ts', '.mts': 'ts', '.cts': 'ts', '.js': 'js', '.jsx': 'js', '.mjs': 'js', '.cjs': 'js', '.py': 'python', '.sh': 'bash', '.bash': 'bash', '.json': 'json' };
+const codeFenceLang = (fp) => codeLangByExt[extname(fp).toLowerCase()] ?? '';
+const markdownFenceFor = (content) => '`'.repeat(Math.max(3, [...String(content ?? '').matchAll(/`+/gu)].reduce((m, x) => Math.max(m, x[0].length), 0) + 1));
 
 function extractIntentHighlights(intent) {
-  const paths = [];
-  for (const match of intent.matchAll(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu)) {
-    const cleaned = match[0].replace(/[.,;:!?]+$/u, '');
-    if (cleaned) paths.push(cleaned);
-  }
-  const numbers = [];
-  for (const match of intent.matchAll(/(?<![\p{L}\p{N}_])\d+(?:[.,]\d+)?n?(?![\p{L}\p{N}_])/gu)) {
-    numbers.push(match[0]);
-  }
-  return {
-    referencedPaths: [...new Set(paths)].sort(),
-    referencedNumbers: [...new Set(numbers)],
-  };
-}
-
-function codeFenceLang(filePath) {
-  const ext = extname(filePath).toLowerCase();
-  if (ext === '.ts' || ext === '.tsx' || ext === '.mts' || ext === '.cts') return 'ts';
-  if (ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') return 'js';
-  if (ext === '.py') return 'python';
-  if (ext === '.sh' || ext === '.bash') return 'bash';
-  if (ext === '.json') return 'json';
-  return '';
+  const paths = [...intent.matchAll(/\b(?:src|app|lib|test|tests)\/(?!\.\.(?:\/|$))[^\s`'"<>()[\]{}]+/gu)]
+    .map((m) => m[0].replace(/[.,;:!?]+$/u, '')).filter(Boolean);
+  const numbers = [...intent.matchAll(/(?<![\p{L}\p{N}_])\d+(?:[.,]\d+)?n?(?![\p{L}\p{N}_])/gu)].map((m) => m[0]);
+  return { referencedPaths: [...new Set(paths)].sort(), referencedNumbers: [...new Set(numbers)] };
 }
 
 function formatNumberedContent(content, startLine = 1) {
-  const lines = content.split('\n');
-  const maxLineNum = startLine + lines.length - 1;
-  const width = String(maxLineNum).length;
-  return lines
-    .map((line, idx) => `${String(startLine + idx).padStart(width, ' ')} | ${line}`)
-    .join('\n');
-}
-
-function markdownFenceFor(content) {
-  let maxRun = 0;
-  for (const match of String(content ?? '').matchAll(/`+/gu)) {
-    if (match[0].length > maxRun) maxRun = match[0].length;
-  }
-  return '`'.repeat(Math.max(3, maxRun + 1));
-}
-
-function candidatePathsForBase(rawTarget) {
-  const candidates = [rawTarget];
-  const ext = extname(rawTarget);
-  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
-    const stem = rawTarget.slice(0, -ext.length);
-    candidates.push(`${stem}.ts`, `${stem}.tsx`, `${stem}.mts`, `${stem}.cts`, `${stem}.js`, `${stem}.mjs`);
-  } else if (!ext) {
-    candidates.push(`${rawTarget}.ts`, `${rawTarget}.tsx`, `${rawTarget}.js`, `${rawTarget}.mjs`);
-  }
-  return candidates;
+  return content.split('\n').map((line, idx) => `${startLine + idx} | ${line}`).join('\n');
 }
 
 function resolveImportTargetPath(fromFile, specifier, observedSet, pathAliases = []) {
@@ -79,84 +33,55 @@ function resolveImportTargetPath(fromFile, specifier, observedSet, pathAliases =
   if (specifier.startsWith('./') || specifier.startsWith('../')) {
     rawTargets.push(posix.normalize(posix.join(dirname(fromFile), specifier)));
   } else {
-    for (const alias of pathAliases) {
-      if (alias.hasWildcard) {
-        if (specifier.startsWith(alias.prefix) && specifier.endsWith(alias.suffix)) {
-          const captured = specifier.slice(alias.prefix.length, specifier.length - alias.suffix.length);
-          for (const target of alias.targets) {
-            rawTargets.push(posix.normalize(target.replace('*', captured)));
-          }
-        }
-      } else if (specifier === alias.prefix) {
-        for (const target of alias.targets) {
-          rawTargets.push(posix.normalize(target));
-        }
+    for (const a of pathAliases) {
+      if (a.hasWildcard && specifier.startsWith(a.prefix) && specifier.endsWith(a.suffix)) {
+        const cap = specifier.slice(a.prefix.length, specifier.length - a.suffix.length);
+        for (const t of a.targets) rawTargets.push(posix.normalize(t.replace('*', cap)));
+      } else if (!a.hasWildcard && specifier === a.prefix) {
+        for (const t of a.targets) rawTargets.push(posix.normalize(t));
       }
     }
   }
-
-  for (const rawTarget of rawTargets) {
-    for (const candidate of candidatePathsForBase(rawTarget)) {
-      if (observedSet.has(candidate) && !isEntrypointPath(candidate)) {
-        return candidate;
-      }
-    }
+  for (const raw of rawTargets) {
+    const ext = extname(raw);
+    const stem = (ext === '.js' || ext === '.mjs' || ext === '.cjs') ? raw.slice(0, -ext.length) : raw;
+    const cands = ext
+      ? [raw, `${stem}.ts`, `${stem}.tsx`, `${stem}.mts`, `${stem}.cts`, `${stem}.js`, `${stem}.mjs`]
+      : [raw, `${raw}.ts`, `${raw}.tsx`, `${raw}.js`, `${raw}.mjs`];
+    const hit = cands.find((c) => observedSet.has(c) && !isEntrypointPath(c));
+    if (hit) return hit;
   }
   return null;
 }
 
-/**
- * Segue imports relativos e aliases do tsconfig.json em 1 único salto (via AST real,
- * ignorando barrels index.*) para coletar somente as assinaturas AST dos símbolos
- * importados que ainda não vieram inteiros no brief.
- */
-function collectOneHopImportSignatures({
-  repositoryRoot = null,
-  sourceEvidence,
-  observedTextPaths,
-  sourceBytesByPath,
-  workspaceSkeleton,
-  fullSourcePaths,
-  maxSignatures = 12,
-}) {
+function collectOneHopImportSignatures({ repositoryRoot = null, sourceEvidence, observedTextPaths, sourceBytesByPath, workspaceSkeleton, fullSourcePaths, maxSignatures = 8 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
   const observedSet = new Set(observedTextPaths);
-  const projectConfig = loadProjectConfig(repositoryRoot);
-  const tsconfigDir = repositoryRoot && projectConfig.projectRoot
-    ? resolve(repositoryRoot, projectConfig.projectRoot)
-    : repositoryRoot;
-  const pathAliases = loadTsconfigPathAliases(tsconfigDir);
+  const { projectRoot } = loadProjectConfig(repositoryRoot);
+  const pathAliases = loadTsconfigPathAliases(repositoryRoot && projectRoot ? resolve(repositoryRoot, projectRoot) : repositoryRoot);
   const symbolsByPath = new Map();
-  for (const sym of workspaceSkeleton.symbols) {
-    if (!symbolsByPath.has(sym.path)) symbolsByPath.set(sym.path, []);
-    symbolsByPath.get(sym.path).push(sym);
-  }
+  for (const sym of workspaceSkeleton.symbols) symbolsByPath.set(sym.path, [...(symbolsByPath.get(sym.path) ?? []), sym]);
 
   const wantedByTarget = new Map();
-  const seenSourceFiles = new Set();
-  for (const entry of sourceEvidence) {
-    if (seenSourceFiles.has(entry.path) || isEntrypointPath(entry.path)) continue;
-    seenSourceFiles.add(entry.path);
-    const bytes = sourceBytesByPath.get(entry.path);
+  const seen = new Set();
+  for (const { path: p } of sourceEvidence) {
+    if (seen.has(p) || isEntrypointPath(p)) continue;
+    seen.add(p);
+    const bytes = sourceBytesByPath.get(p);
     if (!bytes) continue;
-    const text = Buffer.from(bytes).toString('utf8');
-    for (const imp of extractAstImports(entry.path, text)) {
-      const targetPath = resolveImportTargetPath(entry.path, imp.specifier, observedSet, pathAliases);
-      if (!targetPath || fullSourcePaths.has(targetPath)) continue;
-      if (!wantedByTarget.has(targetPath)) wantedByTarget.set(targetPath, new Set());
-      const set = wantedByTarget.get(targetPath);
-      for (const name of imp.names) set.add(name);
+    for (const imp of extractAstImports(p, Buffer.from(bytes).toString('utf8'))) {
+      const target = resolveImportTargetPath(p, imp.specifier, observedSet, pathAliases);
+      if (!target || fullSourcePaths.has(target)) continue;
+      if (!wantedByTarget.has(target)) wantedByTarget.set(target, new Set());
+      for (const n of imp.names) wantedByTarget.get(target).add(n);
     }
   }
 
   const collected = [];
-  for (const [targetPath, wantedNames] of wantedByTarget.entries()) {
-    const fileSymbols = symbolsByPath.get(targetPath) ?? [];
-    const prioritized = wantedNames.size > 0
-      ? fileSymbols.filter((s) => wantedNames.has(s.name))
-      : fileSymbols.filter((s) => s.exported);
-    const chosen = prioritized.length > 0 ? prioritized : fileSymbols.filter((s) => s.exported);
-    for (const sym of chosen) {
+  for (const [target, wanted] of wantedByTarget.entries()) {
+    const fileSyms = symbolsByPath.get(target) ?? [];
+    const prio = wanted.size > 0 ? fileSyms.filter((s) => wanted.has(s.name)) : fileSyms.filter((s) => s.exported);
+    for (const sym of (prio.length > 0 ? prio : fileSyms.filter((s) => s.exported))) {
       if (collected.length >= maxSignatures) return collected;
       collected.push(sym);
     }
@@ -164,170 +89,128 @@ function collectOneHopImportSignatures({
   return collected;
 }
 
-/**
- * Localiza chamadores/referências reais de 1 nível nos demais arquivos observados via
- * nós Identifier da AST (ignora comentários e strings literais).
- */
-function collectDirectCallers({
-  sourceEvidence,
-  observedTextPaths,
-  sourceBytesByPath,
-  workspaceSkeleton,
-  maxSymbols = 12,
-  maxLocationsPerSymbol = 4,
-}) {
+// Localiza chamadores/referências reais de 1 nível via AST, priorizando produção sobre testes.
+function collectDirectCallers({ sourceEvidence, observedTextPaths, sourceBytesByPath, workspaceSkeleton, maxSymbols = 8, maxLocationsPerSymbol = 3 }) {
   if (!workspaceSkeleton?.symbols || !sourceBytesByPath) return [];
-  const selectedNonEntry = new Set(
-    sourceEvidence.map((e) => e.path).filter((p) => !isEntrypointPath(p)),
-  );
-  if (selectedNonEntry.size === 0) return [];
+  const pathOrder = new Map();
+  for (const { path: p } of sourceEvidence) if (!isEntrypointPath(p) && !pathOrder.has(p)) pathOrder.set(p, pathOrder.size);
+  if (pathOrder.size === 0) return [];
 
-  const kindPriority = { FUNCTION: 0, CLASS: 1, CONST: 2, INTERFACE: 3, TYPE_ALIAS: 4, ENUM: 5, VARIABLE: 6 };
+  const kindPrio = { FUNCTION: 0, CLASS: 1, CONST: 2, INTERFACE: 3, TYPE_ALIAS: 4, ENUM: 5, VARIABLE: 6 };
   const targetSymbols = workspaceSkeleton.symbols
-    .filter((s) => s.exported && selectedNonEntry.has(s.path) && s.name.length >= 4)
-    .sort((a, b) => (kindPriority[a.kind] ?? 9) - (kindPriority[b.kind] ?? 9));
+    .filter((s) => s.exported && pathOrder.has(s.path) && s.name.length >= 4)
+    .sort((a, b) => (pathOrder.get(a.path) - pathOrder.get(b.path)) || ((kindPrio[a.kind] ?? 9) - (kindPrio[b.kind] ?? 9)));
   if (targetSymbols.length === 0) return [];
 
-  const identifiersByPath = new Map();
+  const prodIds = [];
+  const testIds = [];
   for (const p of observedTextPaths) {
     const bytes = sourceBytesByPath.get(p);
     if (!bytes) continue;
-    identifiersByPath.set(p, extractAstIdentifierLines(p, Buffer.from(bytes).toString('utf8')));
+    (isProductTestPath(p) ? testIds : prodIds).push([p, extractAstIdentifierLines(p, Buffer.from(bytes).toString('utf8'))]);
   }
 
-  const callers = [];
-  const seenNames = new Set();
-  for (const sym of targetSymbols) {
-    if (callers.length >= maxSymbols) break;
-    if (seenNames.has(sym.name)) continue;
-    seenNames.add(sym.name);
-
-    const locations = [];
-    for (const [otherPath, idMap] of identifiersByPath.entries()) {
+  const collectFrom = (pool, sym) => {
+    const locs = [];
+    for (const [otherPath, idMap] of pool) {
       if (otherPath === sym.path) continue;
       const lines = idMap.get(sym.name);
       if (!lines) continue;
+      let perFile = 0;
       for (const line of lines) {
-        locations.push(`${otherPath}:L${line}`);
-        if (locations.length >= maxLocationsPerSymbol) break;
+        locs.push(`${otherPath}:L${line}`);
+        perFile += 1;
+        if (locs.length >= maxLocationsPerSymbol || perFile >= 2) break;
       }
-      if (locations.length >= maxLocationsPerSymbol) break;
+      if (locs.length >= maxLocationsPerSymbol) break;
     }
+    return locs;
+  };
 
-    if (locations.length > 0) {
-      callers.push({ symbol: sym.name, definedIn: sym.path, locations });
-    }
+  const callers = [];
+  const seen = new Set();
+  for (const sym of targetSymbols) {
+    if (callers.length >= maxSymbols) break;
+    if (seen.has(sym.name)) continue;
+    seen.add(sym.name);
+    let locations = collectFrom(prodIds, sym);
+    if (locations.length === 0) locations = collectFrom(testIds, sym);
+    if (locations.length > 0) callers.push({ symbol: sym.name, definedIn: sym.path, locations });
   }
   return callers;
 }
 
-/**
- * Executa o Discovery determinístico sobre o workspace e devolve o brief estruturado.
- */
-export function buildDemandBrief({
-  repositoryRoot,
-  intent,
-  workspaceObservation,
-  explicitTargetPaths = [],
-  sourceRef = null,
-}) {
+export function buildDemandBrief({ repositoryRoot, intent, workspaceObservation, explicitTargetPaths = [], sourceRef = null }) {
   const { discovery, sourceBytesByPath } = workspaceObservation;
   const textFiles = discovery.files.filter(({ kind }) => kind === 'UTF8_TEXT');
   const observedTextPaths = textFiles.map(({ path }) => path);
   const entrypoints = observedTextPaths.filter(isEntrypointPath);
   const domainAliases = loadDomainLexicon(repositoryRoot);
   const sourceRoots = discovery.sourceRoots ?? (discovery.sourceRoot ? discovery.sourceRoot.split(',') : ['src']);
-  const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(
-    textFiles,
-    intent,
-    domainAliases,
-    null,
-    sourceRoots,
-  );
-
-  let precomputedIdf = null;
-  if (discovery.workspaceSkeleton?.symbols) {
-    const { words } = tokenizeIntent(intent);
-    precomputedIdf = computeSymbolIdfWeights(
-      discovery.workspaceSkeleton.symbols,
-      words,
-      domainAliases,
-    );
-  }
+  const { targetDirs, targetPrefixes, explicitFilePaths } = resolveDiscoveryScope(textFiles, intent, domainAliases, null, sourceRoots);
 
   const rankedCandidatesOut = [];
   const sourceEvidence = buildSourceEvidence(
-    repositoryRoot,
-    { intent, discovery },
-    workspaceObservation,
-    explicitTargetPaths,
-    { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, precomputedIdf, rankedCandidatesOut },
+    repositoryRoot, { intent, discovery }, workspaceObservation, explicitTargetPaths,
+    { targetDirs, targetPrefixes, explicitFilePaths, domainAliases, rankedCandidatesOut },
   );
 
-  const fullSourcePaths = new Set(
-    sourceEvidence.filter((e) => !e.truncated).map((e) => e.path),
-  );
+  const fullSourcePaths = new Set(sourceEvidence.filter((e) => !e.truncated).map((e) => e.path));
+  const truncatedPaths = [...new Set(sourceEvidence.filter(({ truncated }) => truncated).map(({ path }) => path))].sort();
+  const truncatedSet = new Set(truncatedPaths);
+  const greenfieldFallback = observedTextPaths.length > 1 && explicitFilePaths.length === 0 && explicitTargetPaths.length === 0
+    && targetDirs.size === 0 && targetPrefixes.size === 0 && isFallbackOnlyEvidence(sourceEvidence);
 
-  const hasGreenfieldOnlyEntrypoints = observedTextPaths.length > 1
-    && explicitFilePaths.length === 0
-    && explicitTargetPaths.length === 0
-    && targetDirs.size === 0
-    && targetPrefixes.size === 0
-    && isFallbackOnlyEvidence(sourceEvidence);
-
-  // Melhoria #1: não duplicar na Seção 3 símbolos de arquivos já incluídos inteiros na Seção 4 (enxuto: até 12 símbolos).
-  const prioritizedSkeleton = discovery.workspaceSkeleton && !hasGreenfieldOnlyEntrypoints
-    ? prioritizeWorkspaceSkeleton(
-      discovery.workspaceSkeleton,
-      intent,
-      entrypoints,
-      12,
-      domainAliases,
-      targetPrefixes,
-      precomputedIdf,
-    )
-    : null;
-  const externalOrTruncatedSymbols = (prioritizedSkeleton?.symbols ?? [])
-    .filter((sym) => !fullSourcePaths.has(sym.path));
-
-  // Melhoria #4: assinaturas de imports diretos (1 salto, incl. tsconfig paths) e chamadores via AST.
   const directImports = collectOneHopImportSignatures({
-    repositoryRoot,
-    sourceEvidence,
-    observedTextPaths,
-    sourceBytesByPath,
-    workspaceSkeleton: discovery.workspaceSkeleton,
-    fullSourcePaths,
+    repositoryRoot, sourceEvidence, observedTextPaths, sourceBytesByPath, workspaceSkeleton: discovery.workspaceSkeleton, fullSourcePaths,
   });
   const directCallers = collectDirectCallers({
-    sourceEvidence,
-    observedTextPaths,
-    sourceBytesByPath,
-    workspaceSkeleton: discovery.workspaceSkeleton,
+    sourceEvidence, observedTextPaths, sourceBytesByPath, workspaceSkeleton: discovery.workspaceSkeleton,
   });
 
-  const showTopography = shouldShowTopography({
-    intent,
-    discovery,
-    sourceEvidence,
-    explicitTargetPaths,
-  });
-  const topography = showTopography
+  // Seção 3 deduplicada contra integrais e directImports; inclui mapa de funções ocultas de mega-arquivos truncados.
+  const importSymKeys = new Set(directImports.map((s) => `${s.path}:${s.name}`));
+  const prioritizedSkeleton = discovery.workspaceSkeleton && !greenfieldFallback
+    ? prioritizeWorkspaceSkeleton(discovery.workspaceSkeleton, intent, entrypoints, 24, domainAliases, targetPrefixes)
+    : null;
+  const shownRanges = new Map();
+  for (const e of sourceEvidence) shownRanges.set(e.path, [...(shownRanges.get(e.path) ?? []), [e.startLine, e.endLine]]);
+  const isShown = (sym) => (shownRanges.get(sym.path) ?? []).some(([s, e]) => sym.startLine >= s && sym.startLine <= e);
+
+  const skeletonSymbols = [];
+  const seenSk = new Set();
+  const pushSym = (sym) => {
+    const key = `${sym.path}:${sym.name}:${sym.startLine}`;
+    if (seenSk.has(key) || fullSourcePaths.has(sym.path) || importSymKeys.has(`${sym.path}:${sym.name}`)) return false;
+    seenSk.add(key);
+    skeletonSymbols.push(sym);
+    return true;
+  };
+  const maxSkeleton = truncatedSet.size > 0 ? 8 : 5;
+  if (truncatedSet.size > 0 && discovery.workspaceSkeleton?.symbols) {
+    for (const p of truncatedPaths) {
+      let added = 0;
+      for (const sym of discovery.workspaceSkeleton.symbols) {
+        if (sym.path !== p || !sym.exported || isShown(sym)) continue;
+        if (pushSym(sym)) added += 1;
+        if (added >= 4 || skeletonSymbols.length >= maxSkeleton) break;
+      }
+    }
+  }
+  for (const sym of prioritizedSkeleton?.symbols ?? []) {
+    if (skeletonSymbols.length >= maxSkeleton) break;
+    if (truncatedSet.has(sym.path) && isShown(sym)) continue;
+    pushSym(sym);
+  }
+
+  const topography = shouldShowTopography({ intent, discovery, sourceEvidence, explicitTargetPaths })
     ? buildTopographicalMap(discovery.workspaceSkeleton)
     : null;
-
   const { referencedPaths, referencedNumbers } = extractIntentHighlights(intent);
   const excerptedPaths = [...new Set(sourceEvidence.map(({ path }) => path))].sort();
   const excerptedSet = new Set(excerptedPaths);
-  const truncatedPaths = [...new Set(sourceEvidence.filter(({ truncated }) => truncated).map(({ path }) => path))].sort();
-  const referencedPathsNotDiscovered = referencedPaths.filter((refPath) => {
-    if (observedTextPaths.includes(refPath)) return false;
-    const dirPrefix = refPath.endsWith('/') ? refPath : `${refPath}/`;
-    return !observedTextPaths.some((fp) => fp.startsWith(dirPrefix));
-  });
-  const pathsWithoutExcerpt = observedTextPaths.filter((p) => !excerptedSet.has(p));
-
-  const architectureRules = loadArchitectureRules(repositoryRoot);
+  const referencedPathsNotDiscovered = referencedPaths.filter((ref) => !observedTextPaths.includes(ref)
+    && !observedTextPaths.some((fp) => fp.startsWith(ref.endsWith('/') ? ref : `${ref}/`)));
 
   return {
     schema: 'aegis.brief.v1',
@@ -335,11 +218,8 @@ export function buildDemandBrief({
     sourceRef,
     sourceSnapshotDigest: discovery.sourceSnapshotDigest,
     workspaceStatus: discovery.status,
-    highlights: {
-      referencedPaths,
-      referencedNumbers,
-    },
-    architectureRules,
+    highlights: { referencedPaths, referencedNumbers },
+    architectureRules: loadArchitectureRules(repositoryRoot),
     coverage: {
       discoveryRoot: discovery.sourceRoot ?? 'src',
       observedTextFileCount: observedTextPaths.length,
@@ -347,28 +227,20 @@ export function buildDemandBrief({
       excerptedPaths,
       truncatedPaths,
       referencedPathsNotDiscovered,
-      pathsWithoutExcerpt,
+      pathsWithoutExcerpt: observedTextPaths.filter((p) => !excerptedSet.has(p)),
       nextCandidates: rankedCandidatesOut,
       ignoredCount: (discovery.ignoredEntries ?? []).length,
     },
-    skeletonSymbols: externalOrTruncatedSymbols,
+    skeletonSymbols,
     directImports,
     directCallers,
     topography,
     sourceEvidence: sourceEvidence.map(({ path, startLine, endLine, truncated, selection, content }) => ({
-      path,
-      startLine,
-      endLine,
-      truncated,
-      selection,
-      content,
+      path, startLine, endLine, truncated, selection, content,
     })),
   };
 }
 
-/**
- * Renderiza o brief em Markdown compacto e legível para o agente da IDE (0 escape JSON).
- */
 export function renderBriefMarkdown(brief) {
   const demandFence = markdownFenceFor(brief.intent);
   const lines = [
@@ -387,31 +259,25 @@ export function renderBriefMarkdown(brief) {
   const { referencedPaths, referencedNumbers } = brief.highlights;
   if (referencedPaths.length > 0 || referencedNumbers.length > 0) {
     lines.push('### Destaques literais citados');
-    if (referencedPaths.length > 0) {
-      lines.push(`- **Caminhos citados:** ${referencedPaths.map((p) => `\`${p}\``).join(', ')}`);
-    }
-    if (referencedNumbers.length > 0) {
-      lines.push(`- **Números/limites citados:** ${referencedNumbers.map((n) => `\`${n}\``).join(', ')}`);
-    }
+    if (referencedPaths.length > 0) lines.push(`- **Caminhos citados:** ${referencedPaths.map((p) => `\`${p}\``).join(', ')}`);
+    if (referencedNumbers.length > 0) lines.push(`- **Números/limites citados:** ${referencedNumbers.map((n) => `\`${n}\``).join(', ')}`);
     lines.push('');
   }
 
-  const archRules = brief.architectureRules ?? [];
-  if (archRules.length > 0) {
+  if ((brief.architectureRules ?? []).length > 0) {
     lines.push('## Arquitetura do projeto (`ARCHITECTURE.md` — `hard`: obrigatório/expor conflito · `default`: deliberar exceção)');
-    for (const rule of archRules) {
-      const forbidTag = Array.isArray(rule.forbid) && rule.forbid.length > 0
-        ? ` [forbid: ${rule.forbid.join(', ')}]`
-        : '';
-      lines.push(`- \`${rule.id}\` [${rule.level}]${forbidTag}: ${rule.statement}`);
+    for (const r of brief.architectureRules) {
+      const forbidTag = Array.isArray(r.forbid) && r.forbid.length > 0 ? ` [forbid: ${r.forbid.join(', ')}]` : '';
+      lines.push(`- \`${r.id}\` [${r.level}]${forbidTag}: ${r.statement}`);
     }
     lines.push('');
   }
 
+  const allFull = brief.coverage.excerptedPaths.length > 0 && brief.coverage.truncatedPaths.length === 0;
   lines.push(`## 2. Cobertura de \`${brief.coverage.discoveryRoot}/\``);
-  lines.push(`- **Incluídos abaixo (${brief.coverage.excerptedPaths.length}):** ${brief.coverage.excerptedPaths.length > 0 ? brief.coverage.excerptedPaths.map((p) => `\`${p}\``).join(', ') : 'nenhum'}`);
+  lines.push(`- **Incluídos abaixo (${brief.coverage.excerptedPaths.length}${allFull ? ', todos integrais' : ''}):** ${brief.coverage.excerptedPaths.length > 0 ? brief.coverage.excerptedPaths.map((p) => `\`${p}\``).join(', ') : 'nenhum'}`);
   if (brief.coverage.truncatedPaths.length > 0) {
-    lines.push(`- **Truncados / janelas parciais:** ${brief.coverage.truncatedPaths.map((p) => `\`${p}\``).join(', ')} *(leia o restante se necessário)*`);
+    lines.push(`- **Truncados / janelas parciais:** ${brief.coverage.truncatedPaths.map((p) => `\`${p}\``).join(', ')} *(leia apenas o intervalo faltante se necessário; demais arquivos acima estão integrais)*`);
   }
   if (brief.coverage.referencedPathsNotDiscovered.length > 0) {
     lines.push(`- **Citados na demanda mas ausentes no código:** ${brief.coverage.referencedPathsNotDiscovered.map((p) => `\`${p}\``).join(', ')} *(arquivo novo ou caminho inexistente)*`);
@@ -420,64 +286,43 @@ export function renderBriefMarkdown(brief) {
     lines.push(`- **Candidatos próximos fora dos trechos (${brief.coverage.nextCandidates.length}):** ${brief.coverage.nextCandidates.map((p) => `\`${p}\``).join(', ')}`);
   } else if (brief.coverage.pathsWithoutExcerpt.length > 0) {
     const shown = brief.coverage.pathsWithoutExcerpt.slice(0, 12).map((p) => `\`${p}\``).join(', ');
-    const extra = brief.coverage.pathsWithoutExcerpt.length > 12
-      ? ` (+${brief.coverage.pathsWithoutExcerpt.length - 12})`
-      : '';
+    const extra = brief.coverage.pathsWithoutExcerpt.length > 12 ? ` (+${brief.coverage.pathsWithoutExcerpt.length - 12})` : '';
     lines.push(`- **Fora deste brief (${brief.coverage.pathsWithoutExcerpt.length}):** ${shown}${extra}`);
   }
   lines.push('');
 
   if (brief.directImports.length > 0) {
     lines.push(`## Dependências diretas (1 salto — ${brief.directImports.length})`);
-    for (const sym of brief.directImports) {
-      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 130);
-      lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${sym.kind}] \`${compactSig}\``);
-    }
+    for (const sym of brief.directImports) lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${sym.kind}] \`${sym.signature.replace(/\s+/gu, ' ').slice(0, 130)}\``);
     lines.push('');
   }
-
   if (brief.directCallers.length > 0) {
     lines.push(`## Chamadores / referências observadas (${brief.directCallers.length})`);
-    for (const item of brief.directCallers) {
-      lines.push(`- \`${item.symbol}\` ← ${item.locations.map((loc) => `\`${loc}\``).join(', ')}`);
-    }
+    for (const item of brief.directCallers) lines.push(`- \`${item.symbol}\` ← ${item.locations.map((loc) => `\`${loc}\``).join(', ')}`);
     lines.push('');
   }
-
   if (brief.skeletonSymbols.length > 0) {
     lines.push(`## 3. Símbolos AST fora do código integral (${brief.skeletonSymbols.length})`);
     for (const sym of brief.skeletonSymbols) {
-      const exp = sym.exported ? 'export ' : '';
-      const compactSig = sym.signature.replace(/\s+/gu, ' ').slice(0, 130);
-      lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${exp}${sym.kind}] \`${compactSig}\``);
+      lines.push(`- \`${sym.path}:L${sym.startLine}-L${sym.endLine}\` [${sym.exported ? 'export ' : ''}${sym.kind}] \`${sym.signature.replace(/\s+/gu, ' ').slice(0, 130)}\``);
     }
     lines.push('');
   }
-
   if (brief.topography && Object.keys(brief.topography).length > 0) {
     lines.push('## Mapa topográfico panorâmico (silêncio léxico)');
-    for (const [filePath, symNames] of Object.entries(brief.topography)) {
-      lines.push(`- \`${filePath}\`: ${symNames.join(', ')}`);
-    }
+    for (const [fp, names] of Object.entries(brief.topography)) lines.push(`- \`${fp}\`: ${names.join(', ')}`);
     lines.push('');
   }
-
   if (brief.sourceEvidence.length > 0) {
     lines.push('## 4. Trechos de código observados');
     for (const entry of brief.sourceEvidence) {
-      const tag = entry.truncated ? `${entry.selection}, parcial` : entry.selection;
       const numbered = formatNumberedContent(entry.content, entry.startLine);
       const fence = markdownFenceFor(numbered);
-      lines.push('');
-      lines.push(`### \`${entry.path}:L${entry.startLine}-L${entry.endLine}\` (${tag})`);
-      lines.push(`${fence}${codeFenceLang(entry.path)}`);
-      lines.push(numbered);
-      lines.push(fence);
+      lines.push('', `### \`${entry.path}:L${entry.startLine}-L${entry.endLine}\` (${entry.selection}, ${entry.truncated ? 'parcial' : 'integral'})`, `${fence}${codeFenceLang(entry.path)}`, numbered, fence);
     }
     lines.push('');
   }
 
-  lines.push('---');
-  lines.push('**Próximo passo:** se houver lacuna material com efeitos públicos distintos, pergunte antes de fechar o contrato. Caso contrário, escreva `.harness/runtime/contract.md` enxuto e valide com `./aegis verify-contract`.');
+  lines.push('---', '**Próximo passo:** se houver lacuna material com efeitos públicos distintos, pergunte antes de fechar o contrato. Caso contrário, escreva `.harness/runtime/contract.md` enxuto e valide com `./aegis verify-contract`.');
   return `${lines.join('\n')}\n`;
 }
