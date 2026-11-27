@@ -102,19 +102,49 @@ function collectDirectCallers({ sourceEvidence, observedTextPaths, sourceBytesBy
     .sort((a, b) => (pathOrder.get(a.path) - pathOrder.get(b.path)) || ((kindPrio[a.kind] ?? 9) - (kindPrio[b.kind] ?? 9)));
   if (targetSymbols.length === 0) return [];
 
-  const prodIds = [];
-  const testIds = [];
+  const prodPaths = [];
+  const testPaths = [];
   for (const p of observedTextPaths) {
-    const bytes = sourceBytesByPath.get(p);
-    if (!bytes) continue;
-    (isProductTestPath(p) ? testIds : prodIds).push([p, extractAstIdentifierLines(p, Buffer.from(bytes).toString('utf8'))]);
+    if (!sourceBytesByPath.has(p)) continue;
+    (isProductTestPath(p) ? testPaths : prodPaths).push(p);
   }
 
-  const collectFrom = (pool, sym) => {
+  const targetNameSet = new Set(targetSymbols.map((s) => s.name));
+  const textCache = new Map();
+  const astCache = new Map();
+  const getText = (p) => {
+    let txt = textCache.get(p);
+    if (txt === undefined) { txt = Buffer.from(sourceBytesByPath.get(p)).toString('utf8'); textCache.set(p, txt); }
+    return txt;
+  };
+  const getAstIds = (p) => {
+    let ids = astCache.get(p);
+    if (ids === undefined) { ids = extractAstIdentifierLines(p, getText(p)); astCache.set(p, ids); }
+    return ids;
+  };
+
+  // Pré-índice lexical em 1 única passada O(bytes) para evitar O(símbolos * arquivos * bytes) e parsear AST sob demanda.
+  const prodByName = new Map();
+  const testByName = new Map();
+  const indexPool = (paths, bucket) => {
+    for (const p of paths) {
+      for (const m of getText(p).matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]{3,}\b/gu)) {
+        const name = m[0];
+        if (!targetNameSet.has(name)) continue;
+        let list = bucket.get(name);
+        if (!list) { list = []; bucket.set(name, list); }
+        if (list[list.length - 1] !== p) list.push(p);
+      }
+    }
+  };
+  indexPool(prodPaths, prodByName);
+
+  let testsIndexed = false;
+  const collectFrom = (bucket, sym) => {
     const locs = [];
-    for (const [otherPath, idMap] of pool) {
+    for (const otherPath of bucket.get(sym.name) ?? []) {
       if (otherPath === sym.path) continue;
-      const lines = idMap.get(sym.name);
+      const lines = getAstIds(otherPath).get(sym.name);
       if (!lines) continue;
       let perFile = 0;
       for (const line of lines) {
@@ -133,8 +163,11 @@ function collectDirectCallers({ sourceEvidence, observedTextPaths, sourceBytesBy
     if (callers.length >= maxSymbols) break;
     if (seen.has(sym.name)) continue;
     seen.add(sym.name);
-    let locations = collectFrom(prodIds, sym);
-    if (locations.length === 0) locations = collectFrom(testIds, sym);
+    let locations = collectFrom(prodByName, sym);
+    if (locations.length === 0 && testPaths.length > 0) {
+      if (!testsIndexed) { indexPool(testPaths, testByName); testsIndexed = true; }
+      locations = collectFrom(testByName, sym);
+    }
     if (locations.length > 0) callers.push({ symbol: sym.name, definedIn: sym.path, locations });
   }
   return callers;

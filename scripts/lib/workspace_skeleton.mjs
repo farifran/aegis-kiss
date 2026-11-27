@@ -331,7 +331,7 @@ export function loadTsconfigPathAliases(tsconfigDir) {
  */
 export function extractAstImports(path, text) {
   const ext = extname(path).toLowerCase();
-  if (!tsExtensions.has(ext)) return [];
+  if (!tsExtensions.has(ext) || !/(?:import|export|require)\b/u.test(text)) return [];
   const sourceFile = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const imports = [];
 

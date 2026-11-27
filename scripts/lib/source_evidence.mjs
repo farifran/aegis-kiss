@@ -95,14 +95,15 @@ function splitIdentifierParts(raw) {
     .replace(/[^A-Za-zÀ-ÿ0-9]+/gu, ' ').split(/\s+/u).map(stripDiacritics).filter((p) => p.length >= 2 && !stopwords.has(p));
 }
 
-function tokensMatch(codeToken, queryTerm) {
-  const a = normalizeMorph(codeToken);
+function normTokensMatch(a, queryTerm) {
   if (a === queryTerm) return 'exact';
   if ((a.length >= 4 && queryTerm.startsWith(a)) || (queryTerm.length >= 4 && a.startsWith(queryTerm))) return 'prefix';
   const rA = a.length >= 6 && a.endsWith('e') ? a.slice(0, -1) : a;
   const rB = queryTerm.length >= 6 && queryTerm.endsWith('e') ? queryTerm.slice(0, -1) : queryTerm;
   return ((rA.length >= 5 && rB.startsWith(rA)) || (rB.length >= 5 && rA.startsWith(rB))) ? 'prefix' : null;
 }
+
+const tokensMatch = (codeToken, queryTerm) => normTokensMatch(normalizeMorph(codeToken), queryTerm);
 
 const stripJsCommentsPreserveLines = (text) => text.replace(
   /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu,
@@ -183,30 +184,55 @@ export function loadDomainLexicon(repositoryRoot) {
 export function prioritizeWorkspaceSkeleton(skeleton, intent, entrypoints = [], maxPromptSymbols = 512, domainAliases = {}, targetPrefixes = new Set()) {
   if (!skeleton || !Array.isArray(skeleton.symbols)) return skeleton;
   const queryTerms = [...extractIntentQuery(intent, domainAliases).entries()];
-  const totalFiles = Math.max(new Set(skeleton.symbols.map((s) => s.path)).size, 1);
+  const entrySet = new Set(entrypoints);
   const dfByTerm = new Map(queryTerms.map(([t]) => [t, new Set()]));
-  const partsBySym = new Map();
+  const pathHitByPath = new Map();
+  const pathPfxBonus = new Map();
+  const normNamePartsBySym = new Map();
+
   for (const sym of skeleton.symbols) {
-    const np = splitIdentifierParts(sym.name);
-    const pp = splitIdentifierParts((sym.path ?? '').replace(/\.[^.]+$/u, ''));
-    partsBySym.set(sym, { np, pp });
-    for (const tok of [...np, ...pp]) for (const [t] of queryTerms) if (tokensMatch(tok, t)) dfByTerm.get(t).add(sym.path);
+    const p = sym.path ?? '';
+    if (!pathHitByPath.has(p)) {
+      const ppNorm = splitIdentifierParts(p.replace(/\.[^.]+$/u, '')).map(normalizeMorph);
+      const hits = new Map();
+      for (const [t, meta] of queryTerms) {
+        let best = 0;
+        for (const x of ppNorm) {
+          const m = normTokensMatch(x, t);
+          if (m) { dfByTerm.get(t).add(p); if (!meta.isCodeLit) best = Math.max(best, m === 'exact' ? 3 : 1.5); }
+        }
+        if (best > 0) hits.set(t, best);
+      }
+      pathHitByPath.set(p, hits);
+      pathPfxBonus.set(p, targetPrefixes?.size > 0 ? Math.min(Math.floor(longestPrefixLen(p, targetPrefixes) / 4), 10) : 0);
+    }
+    const npNorm = splitIdentifierParts(sym.name).map(normalizeMorph);
+    normNamePartsBySym.set(sym, npNorm);
+    for (const [t] of queryTerms) {
+      const dfSet = dfByTerm.get(t);
+      if (dfSet.has(p)) continue;
+      for (const x of npNorm) if (normTokensMatch(x, t)) { dfSet.add(p); break; }
+    }
   }
+  const totalFiles = Math.max(pathHitByPath.size, 1);
   const idf = new Map(queryTerms.map(([t]) => [t, Math.log((totalFiles + 1) / (dfByTerm.get(t).size + 1)) + 0.5]));
   const scoreSym = (sym) => {
-    let sc = (sym.docComment?.includes('@deprecated') ? -20 : 0) + (isAnyTestHelper(sym.path) || sym.path.includes('/scripts/') ? -15 : 0)
-      + (entrypoints.includes(sym.path) ? 4 : 0) + (sym.exported ? 3 : 0);
-    const { np, pp } = partsBySym.get(sym);
+    const p = sym.path ?? '';
+    let sc = (sym.docComment?.includes('@deprecated') ? -20 : 0) + (isAnyTestHelper(p) || p.includes('/scripts/') ? -15 : 0)
+      + (entrySet.has(p) ? 4 : 0) + (sym.exported ? 3 : 0);
+    const npNorm = normNamePartsBySym.get(sym);
+    const pHits = pathHitByPath.get(p);
+    const lowName = stripDiacritics(sym.name);
+    const morphName = normalizeMorph(sym.name);
     for (const [t, meta] of queryTerms) {
       const w = meta.boost * (idf.get(t) ?? 1.5);
-      if (stripDiacritics(sym.name) === t || normalizeMorph(sym.name) === t || meta.literals.has(sym.name)) { sc += 12 * w; continue; }
+      if (lowName === t || morphName === t || meta.literals.has(sym.name)) { sc += 12 * w; continue; }
       if (meta.isCodeLit) continue;
-      let hit = 0;
-      for (const x of np) { const m = tokensMatch(x, t); if (m) hit = Math.max(hit, m === 'exact' ? 6 : 3); }
-      for (const x of pp) { const m = tokensMatch(x, t); if (m) hit = Math.max(hit, m === 'exact' ? 3 : 1.5); }
+      let hit = pHits.get(t) ?? 0;
+      for (const x of npNorm) { const m = normTokensMatch(x, t); if (m) hit = Math.max(hit, m === 'exact' ? 6 : 3); }
       if (hit > 0) sc += hit * w;
     }
-    if (targetPrefixes?.size > 0 && sc > 0) sc += Math.min(Math.floor(longestPrefixLen(sym.path, targetPrefixes) / 4), 10);
+    if (sc > 0) sc += pathPfxBonus.get(p) ?? 0;
     return sc;
   };
   const sorted = [...skeleton.symbols].map((sym) => ({ sym, score: scoreSym(sym) }))
@@ -373,9 +399,9 @@ function indexFileHits(prodFiles, cleanLinesByPath, symbolsByPath, queryTerms, e
     const bodyText = bodyLines.map((b) => b.text).join('\n');
     const noExt = p.replace(/\.[^.]+$/u, '');
     const slash = noExt.lastIndexOf('/');
-    const baseToks = splitIdentifierParts(slash >= 0 ? noExt.slice(slash + 1) : noExt);
-    const dirToks = slash >= 0 ? splitIdentifierParts(noExt.slice(0, slash)) : [];
-    const symToks = new Map(syms.map((s) => [s, splitIdentifierParts(s.name)]));
+    const baseToks = splitIdentifierParts(slash >= 0 ? noExt.slice(slash + 1) : noExt).map(normalizeMorph);
+    const dirToks = slash >= 0 ? splitIdentifierParts(noExt.slice(0, slash)).map(normalizeMorph) : [];
+    const symToks = new Map(syms.map((s) => [s, splitIdentifierParts(s.name).map(normalizeMorph)]));
 
     const matched = new Map();
     for (const [term, meta] of queryTerms) {
@@ -384,15 +410,15 @@ function indexFileHits(prodFiles, cleanLinesByPath, symbolsByPath, queryTerms, e
       const hitLines = new Set();
       const hitSpans = [];
       if (!meta.isCodeLit) {
-        for (const bt of baseToks) { const m = tokensMatch(bt, term); if (m) { best = Math.max(best, (m === 'exact' ? 5.6 : 3.0) * meta.boost); isDef = true; } }
-        for (const dt of dirToks) { const m = tokensMatch(dt, term); if (m) best = Math.max(best, (m === 'exact' ? 2.0 : 1.1) * meta.boost); }
+        for (const bt of baseToks) { const m = normTokensMatch(bt, term); if (m) { best = Math.max(best, (m === 'exact' ? 5.6 : 3.0) * meta.boost); isDef = true; } }
+        for (const dt of dirToks) { const m = normTokensMatch(dt, term); if (m) best = Math.max(best, (m === 'exact' ? 2.0 : 1.1) * meta.boost); }
       }
       for (const s of syms) {
         if (stripDiacritics(s.name) === term || normalizeMorph(s.name) === term || meta.literals.has(s.name)) {
           best = Math.max(best, 6.0 * meta.boost); isDef = true; hitLines.add(s.startLine); hitSpans.push([s.startLine, s.endLine ?? s.startLine]); continue;
         }
         if (!meta.isCodeLit && symToks.get(s).some((st) => {
-          const m = tokensMatch(st, term);
+          const m = normTokensMatch(st, term);
           if (!m) return false;
           best = Math.max(best, (m === 'exact' ? 3.8 : 2.0) * meta.boost);
           isDef = true; hitLines.add(s.startLine); hitSpans.push([s.startLine, s.endLine ?? s.startLine]);
@@ -408,7 +434,7 @@ function indexFileHits(prodFiles, cleanLinesByPath, symbolsByPath, queryTerms, e
           for (const { ln, text: lt } of bodyLines) if (re.test(lt)) hitLines.add(ln);
         }
       } else {
-        const srcKeys = bodyTokLines.has(term) ? [term] : bodyTokList.filter((bt) => tokensMatch(bt, term));
+        const srcKeys = bodyTokLines.has(term) ? [term] : bodyTokList.filter((bt) => normTokensMatch(bt, term));
         for (const k of srcKeys) for (const ln of bodyTokLines.get(k)) hitLines.add(ln);
         if (srcKeys.length > 0) best = Math.max(best, 1.5 * meta.boost);
       }
